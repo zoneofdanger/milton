@@ -1409,6 +1409,87 @@ test("every rule reads as one bullet, whether stored with the compiler's leading
   }
 });
 
+test("edits and moves accept a quoted bullet for rules stored with or without the dash", async () => {
+  const local = await localStore();
+  try {
+    await local.pg.exec("INSERT INTO users(id) VALUES ('anchors')");
+    const store = compiledMemos(local.db, "anchors", {
+      issuer: "fixture",
+      clientId: "fixture",
+    });
+    const save = async (change: Partial<SaveMemoInput>) =>
+      store.saveMemo({
+        text: "Fictional change.",
+        request_id: crypto.randomUUID(),
+        expected_version: (await store.getTpsReport()).version,
+        ...change,
+      });
+    const bodies = async () =>
+      (
+        await local.pg.query(
+          `SELECT DISTINCT ON (card_id) report,body FROM instruction_card_versions
+          WHERE user_id='anchors' AND NOT archived ORDER BY card_id,version DESC`,
+        )
+      ).rows
+        .map((r) => r as { report: string; body: string })
+        .sort((a, b) => a.body.localeCompare(b.body));
+    expect(
+      await save({
+        rules: [
+          { report: "cover", text: "- Old rule here." },
+          { report: "cover", text: "New rule here." },
+          { report: "cover", text: "Shared phrase one." },
+          { report: "cover", text: "Shared phrase two." },
+        ],
+      }),
+    ).toMatchObject({ status: "saved" });
+    // Both quoted as printed: the old one matches verbatim, the new one without
+    // its printed dash, and a copied bullet in after is not doubled.
+    expect(
+      await save({
+        exact_edits: [
+          { before: "- Old rule here.", after: "- Old rule changed." },
+          { before: "- New rule here.", after: "- New rule changed." },
+        ],
+      }),
+    ).toMatchObject({ status: "saved" });
+    expect(
+      await save({
+        moves: [
+          { before: "- Old rule changed.", report: "email" },
+          { before: "- New rule changed.", report: "email" },
+        ],
+      }),
+    ).toMatchObject({ status: "saved" });
+    // The new-style rule still matches without the dash.
+    expect(
+      await save({
+        exact_edits: [
+          { before: "New rule changed.", after: "New rule edited." },
+        ],
+        moves: [{ before: "New rule changed.", report: "chat" }],
+      }),
+    ).toMatchObject({ status: "saved" });
+    expect(await bodies()).toEqual([
+      { report: "email", body: "- Old rule changed." },
+      { report: "chat", body: "New rule edited." },
+      { report: "cover", body: "Shared phrase one." },
+      { report: "cover", body: "Shared phrase two." },
+    ]);
+    // Ambiguity is unchanged: a bullet-stripped anchor in two rules conflicts.
+    const before = await bodies();
+    expect(
+      await save({ exact_edits: [{ before: "- Shared phrase", after: "x" }] }),
+    ).toMatchObject({ status: "failed", error: "edit_conflict" });
+    expect(
+      await save({ moves: [{ before: "- Shared phrase", report: "post" }] }),
+    ).toMatchObject({ status: "failed", error: "move_conflict" });
+    expect(await bodies()).toEqual(before);
+  } finally {
+    await local.dispose();
+  }
+});
+
 test("an exact duplicate rule is skipped as unchanged without a charge", async () => {
   const local = await localStore();
   try {

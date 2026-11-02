@@ -4,16 +4,30 @@ type Source = { id: string; description: string; text: string };
 type Edit = { before: string; after: string };
 
 /** The one card whose text contains `before` exactly once, across all cards;
- * undefined when it occurs nowhere or more than once. */
-function resolveAnchor(memos: Source[], before: string) {
+ * null when it occurs more than once, undefined when it occurs nowhere. */
+function findAnchor(memos: Source[], before: string) {
   let match: { id: string; start: number } | undefined;
   for (const memo of memos) {
     const start = memo.text.indexOf(before);
     if (start < 0) continue;
-    if (match || memo.text.indexOf(before, start + 1) >= 0) return undefined;
+    if (match || memo.text.indexOf(before, start + 1) >= 0) return null;
     match = { id: memo.id, start };
   }
   return match;
+}
+/** Assembly prints every rule as "- " plus its body, so a quote copied with
+ * that bullet which matches no rule verbatim is matched without it, under the
+ * same once-within-one-rule condition. `bulleted` marks that fallback. */
+function resolveAnchor(memos: Source[], before: string) {
+  const verbatim = findAnchor(memos, before);
+  if (verbatim) return { ...verbatim, length: before.length, bulleted: false };
+  if (verbatim === null || !before.startsWith("- ") || before === "- ")
+    return undefined;
+  const stripped = before.slice(2);
+  const match = findAnchor(memos, stripped);
+  return match
+    ? { ...match, length: stripped.length, bulleted: true }
+    : undefined;
 }
 /** Resolve caller-authored moves against the original snapshot. Each quote
  * identifies one card, and a card moves at most once per save. */
@@ -52,10 +66,14 @@ export function exactEditsProposal(memos: Source[], edits: Edit[]) {
     const match = resolveAnchor(memos, edit.before);
     if (!match) throw conflict();
     const spans = changes.get(match.id) ?? [];
+    // A bullet copied into after is dropped once, so it never doubles.
     spans.push({
       start: match.start,
-      end: match.start + edit.before.length,
-      after: edit.after,
+      end: match.start + match.length,
+      after:
+        match.bulleted && edit.after.startsWith("- ")
+          ? edit.after.slice(2)
+          : edit.after,
     });
     changes.set(match.id, spans);
   }

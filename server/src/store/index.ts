@@ -37,7 +37,6 @@ const positiveLimit = z.number().int().positive();
 const limitsSchema = z.object({
   memos: positiveLimit,
   body_bytes: positiveLimit,
-  name_bytes: positiveLimit, // Read only by scripts/import-memos.ts.
   description_bytes: positiveLimit,
   history_bytes: positiveLimit,
   report_body_bytes: positiveLimit,

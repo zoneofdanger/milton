@@ -37,12 +37,6 @@ import {
   storeForCurrentRequest,
   personStoreForCurrentRequest,
 } from "../src/store";
-import {
-  importMemos,
-  parseImportSource,
-  verifyImportedSource,
-  loadImportSources,
-} from "../scripts/import-memos";
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
@@ -2094,7 +2088,7 @@ test("Postgres enforces separate UTF-8 field and memo caps and counts recovery b
   }
 }, 30000);
 
-test("Postgres version conflicts and history-cap import refusals return typed errors", async () => {
+test("Postgres version conflicts and history-cap refusals return typed errors", async () => {
   const local = await localStore();
   const userId = "m_00000000-0000-4000-8000-000000000001";
   try {
@@ -2114,16 +2108,12 @@ test("Postgres version conflicts and history-cap import refusals return typed er
     await local.db.query(
       sql`UPDATE store_config SET limits_json=limits_json || '{"history_bytes":1}'::jsonb`,
     );
-    const source = parseImportSource(
-      "sample",
-      "---\nname: sample\ndescription: An import fixture.\n---\n# Imported\n",
-    );
-    const history = await importMemos(
-      local.db,
-      userId,
-      [source],
-      new Map([[source.name, 1]]),
-    ).catch(databaseFailure);
+    const history = await local.db
+      .query(
+        sql`INSERT INTO memo_versions (user_id,memo_id,version,description,body,reason,actor_json)
+      VALUES (${userId},'memo',2,'Sample.','# Imported','edit','{}')`,
+      )
+      .catch(databaseFailure);
     expect(conflict).toBeInstanceOf(StoreError);
     expect(history).toBeInstanceOf(StoreError);
     expect([conflict, history]).toMatchObject([
@@ -2569,140 +2559,6 @@ test("unfinished initialization creates only empty TPS at retained-history capac
         sql`SELECT templates_revision FROM users WHERE id='m_unfinished'`,
       ),
     ).toEqual([{ templates_revision: 1 }]);
-  } finally {
-    await local.dispose();
-  }
-}, 30000);
-
-test("one expected-version conflict rolls back every imported memo and byte increment", async () => {
-  const local = await localStore();
-  try {
-    await local.db.query(sql`UPDATE store_config SET signup_mode='open'`);
-    const account = await resolveIdentityAccount(local.env, {
-      provider: "neon",
-      subject: "fixture-import",
-    });
-    if (!account) throw new Error("Fixture admission failed");
-    await importMemos(
-      local.db,
-      account.miltonUserId,
-      [
-        parseImportSource(
-          "email-voice",
-          "---\nname: email-voice\ndescription: Existing ordinary fixture.\n---\n# Existing\n",
-        ),
-      ],
-      new Map([["email-voice", 0]]),
-    );
-    const sources = ["email-voice", "vibes"].map((name) =>
-      parseImportSource(
-        name,
-        `---\nname: ${name}\ndescription: An atomic import fixture.\n---\n# Imported\n`,
-      ),
-    );
-    const before = await local.db.query(
-      sql`SELECT retained_bytes FROM users WHERE id=${account.miltonUserId}`,
-    );
-    await expect(
-      importMemos(
-        local.db,
-        account.miltonUserId,
-        sources,
-        new Map([
-          ["email-voice", 1],
-          ["vibes", 999],
-        ]),
-      ),
-    ).rejects.toThrow("expected version conflicts");
-    expect(
-      await local.db.query(
-        sql`SELECT max(version) AS n FROM memo_versions WHERE user_id=${account.miltonUserId}`,
-      ),
-    ).toEqual([{ n: 1 }]);
-    expect(
-      await local.db.query(
-        sql`SELECT retained_bytes FROM users WHERE id=${account.miltonUserId}`,
-      ),
-    ).toEqual(before);
-  } finally {
-    await local.dispose();
-  }
-}, 30000);
-
-test("import verifies exact bytes, conflicts on retry and permits recreation after deletion", async () => {
-  const local = await localStore();
-  try {
-    await local.db.query(sql`UPDATE store_config SET signup_mode='open'`);
-    const account = await resolveIdentityAccount(local.env, {
-      provider: "neon",
-      subject: "opaque-better-auth-user",
-    });
-    await importMemos(
-      local.db,
-      account.miltonUserId,
-      [
-        parseImportSource(
-          "email-voice",
-          "---\nname: email-voice\ndescription: Existing ordinary fixture.\n---\n# Existing\n",
-        ),
-      ],
-      new Map([["email-voice", 0]]),
-    );
-    const source = parseImportSource(
-      "email-voice",
-      "---\r\nname: email-voice\r\ndescription: An imported fixture.\r\n---\r\n# Fixture\r\n\r\nKeep café exact.\r\n",
-    );
-    const created = parseImportSource(
-      "new-fixture",
-      "---\nname: new-fixture\ndescription: A new fixture.\n---\n# New\n",
-    );
-    await expect(
-      importMemos(local.db, account.miltonUserId, [source], new Map()),
-    ).rejects.toThrow("expected version");
-    const expected = new Map([
-      [source.name, 1],
-      [created.name, 0],
-    ]);
-    const first = await importMemos(
-      local.db,
-      account.miltonUserId,
-      [source, created],
-      expected,
-    );
-    expect(first.map((row) => [row.name, row.version])).toEqual([
-      ["email-voice", 2],
-      ["new-fixture", 1],
-    ]);
-    await expect(
-      importMemos(local.db, account.miltonUserId, [source, created], expected),
-    ).rejects.toThrow("conflicts");
-    await expect(
-      importMemos(
-        local.db,
-        account.miltonUserId,
-        [created],
-        new Map([[created.name, 0]]),
-      ),
-    ).rejects.toThrow("conflicts");
-    expect(() =>
-      verifyImportedSource(source, {
-        ...source,
-        description: "Wrong stored description.",
-      }),
-    ).toThrow("fields");
-    await local.db.query(
-      sql`DELETE FROM memos WHERE user_id=${account.miltonUserId} AND name=${created.name}`,
-    );
-    expect(
-      (
-        await importMemos(local.db, account.miltonUserId, [created], new Map())
-      ).map((row) => row.version),
-    ).toEqual([1]);
-    expect(
-      (
-        await loadImportSources(new URL("./fixtures/memos/", import.meta.url))
-      ).map((row) => row.name),
-    ).toEqual(["sample"]);
   } finally {
     await local.dispose();
   }

@@ -21,9 +21,9 @@ decommission on 2026-11-01. Hosting rollback now uses Cloud Run revisions.
 Project `milton-510506`, Cloud Run/Artifact Registry region `us-east4`, Scheduler
 region `us-east1`. Service manifests in this directory pin an immutable image and
 secret versions. They contain configuration and secret references, never values.
-The manifests pin what is serving now: app `milton-app-forms-92975ff`
-(`sha256:8dc1a5a8…`, env 1, key 1), MCP `milton-mcp-rules-env2-e3f2f67`
-(`sha256:14147524…`, env 2, key 1) and worker `milton-worker-filing-f505745`
+The manifests pin what is serving now: app `milton-app-cleanup1-c260d0f`
+(`sha256:832ec9d2…`, env 1, key 1), MCP `milton-mcp-cleanup1-c260d0f`
+(`sha256:832ec9d2…`, env 2, key 1) and worker `milton-worker-filing-f505745`
 (`sha256:a370b7c3…`, env 4, key 1); see the release records below. The app and MCP
 manifests still set `MILTON_GLOBAL_SPEND_POLICY=alerts_only`, which the runtime no
 longer reads; the SQL policy in `store_config` controls admission. Existing positive account safeguards
@@ -210,13 +210,40 @@ gcloud run services update-traffic milton-mcp --to-revisions=milton-mcp-derived-
 gcloud run services update-traffic milton-worker --to-revisions=milton-worker-env4-cba4f6c=100 --project=milton-510506 --region=us-east4
 ```
 
-Now serving (since 2026-11-02 22:29:13Z): MCP `milton-mcp-rules-env2-e3f2f67`, app
-`milton-app-forms-92975ff`, worker `milton-worker-filing-f505745`; each is recorded below.
+Now serving (since 2026-11-02 23:11:09Z): MCP `milton-mcp-cleanup1-c260d0f`, app
+`milton-app-cleanup1-c260d0f`, worker `milton-worker-filing-f505745`; each is recorded below.
+
+Current release cleanup1-c260d0f: app and MCP. Revisions `milton-app-cleanup1-c260d0f` and
+`milton-mcp-cleanup1-c260d0f`, staged with `--no-traffic`; at milton-lead's assignment under
+Peter's go, a release agent switched MCP at 2026-11-02 23:10:48Z and the app at 23:11:09Z,
+and each serves 100%. The worker stays on `milton-worker-filing-f505745`. Both run image
+`sha256:832ec9d28e90f511bd9acc55f27e53f46896806d559a3f1bf6bd2d7b50c32b68` (amd64
+`sha256:48b38305c682b149893611d8110760f094c75bbd7d9fd654ce1d66b99d1a45d0`; uid 1000, Node 26,
+no env, key or pem files; build stage `oven/bun:1.4.4`), built from main `c260d0f`.
+Configuration is identical to the previous serving revisions apart from the image (app
+`milton-app-env:1`, `milton-app-key:1`; MCP `milton-mcp-env:2`, `milton-mcp-key:1`). No
+migration. Change: every rule prints as one `- ` bullet (stored cards and the version are
+unchanged), `exact_edits` and `moves` anchors resolve against that printed form, one 64 KiB
+request bound replaces the store-level request guard, dead code is removed, and the web page
+shows rules the same way. After the switch, unauthenticated `/mcp` returned 401, discovery
+200, an authenticated `get_cover_sheet` 200 with an unchanged version and every rule line
+starting with `- `, and `get_report("email")` 200 with its sample unchanged and rules bulleted;
+the app and `/login` returned 200, `bun scripts/probe-forms.ts` printed `PASS`, and a
+70,000-byte unauthenticated `/mcp` POST returned 413. From 23:10Z to 23:21Z the two new
+revisions served 20 requests with no 5xx and no error logs, and 11 worker ticks returned 200.
+
+Rollback (image `sha256:8dc1a5a8…` for the app, `sha256:14147524…` for MCP; no schema change).
+Rules print without the added bullet again on the old runtime, and an anchor quoted with the
+printed `- ` may then fail to match:
+
+```sh
+gcloud run services update-traffic milton-mcp --to-revisions=milton-mcp-rules-env2-e3f2f67=100 --project=milton-510506 --region=us-east4
+gcloud run services update-traffic milton-app --to-revisions=milton-app-forms-92975ff=100 --project=milton-510506 --region=us-east4
+```
 
 Filing release: revisions `milton-app-filing-f505745`, `milton-mcp-filing-f505745`, and
-`milton-worker-filing-f505745`. The worker still serves them; since 22:00:35Z the app
-serves the forms-92975ff hotfix and since 22:29:13Z MCP serves rules-env2-e3f2f67, both
-below. They run image
+`milton-worker-filing-f505745`. The worker still serves them; the app moved to the forms-92975ff hotfix at 22:00:35Z and
+MCP to rules-env2-e3f2f67 at 22:29:13Z, both below, and both to cleanup1-c260d0f above. They run image
 `sha256:a370b7c3f414560141d345e31ca84c329c5ad51c692eb526af6d16329feddd62` (amd64
 `sha256:169ab9e4383e3c7a27b67e6da6b6e5ef2c3de75949f7e73fffba3a9a98b0b005`; uid 1000, Node 26,
 no env, key or pem files; build stage `oven/bun:1.4.4`), built from main `f505745`, which
@@ -254,7 +281,7 @@ gcloud run services update-traffic milton-worker --to-revisions=milton-worker-ac
 
 App hotfix forms-92975ff: app only. Revision `milton-app-forms-92975ff`; milton-product
 switched app traffic to it at 2026-11-02 22:00:35Z at milton-lead's relay of Peter's go,
-and it serves 100%. The worker stays on the filing-f505745 revision. It runs image
+and it served 100% until cleanup1-c260d0f. The worker stays on the filing-f505745 revision. It runs image
 `sha256:8dc1a5a818f099021e0ba1ff84f2ada4340cc138013782a880d4d0e35bbb33ef` (amd64
 `sha256:1c6d4ea5396b9f20e6b7a3c371ff6f6c7035311b6ece5bf5b40e810021beb6ae`; uid 1000, Node 26,
 no env, key or pem files), built from main `92975ff`, with configuration identical to
@@ -300,7 +327,7 @@ save that sent `rules` cannot replay on that older runtime:
 gcloud run services update-traffic milton-mcp --to-revisions=milton-mcp-filing-f505745=100 --project=milton-510506 --region=us-east4
 ```
 
-MCP secret follow-up rules-env2-e3f2f67: since 2026-11-02 22:29:13Z MCP serves
+MCP secret follow-up rules-env2-e3f2f67: from 2026-11-02 22:29:13Z until cleanup1-c260d0f MCP served
 `milton-mcp-rules-env2-e3f2f67` at 100% (same image as `milton-mcp-rules-e3f2f67`), switched
 by milton-product at milton-lead's word. It mounts `milton-mcp-env:2`, which is version 1
 without `MILTON_GEMINI_API_KEY`, `MILTON_GEMINI_PROJECT_ID`, `MILTON_MODEL_ACCOUNT_BUDGET_USD`

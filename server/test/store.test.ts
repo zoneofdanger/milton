@@ -770,8 +770,7 @@ test("saves anchor in every active memo, never archived or foreign text, and res
       INSERT INTO memo_versions(user_id,memo_id,version,description,body,archived,reason,actor_json)
         SELECT user_id,id,1,'Scoped instruction','Instruction '||id,id='m-52','Fixture','{}' FROM memos;
       INSERT INTO memos(user_id,id,name) VALUES ('other','foreign-id','other');
-      INSERT INTO memo_versions(user_id,memo_id,version,description,body,reason,actor_json) VALUES ('other','foreign-id',1,'Other','Never exposed','Fixture','{}');
-      UPDATE store_config SET limits_json=limits_json || '{"page_size":1}'::jsonb;`);
+      INSERT INTO memo_versions(user_id,memo_id,version,description,body,reason,actor_json) VALUES ('other','foreign-id',1,'Other','Never exposed','Fixture','{}');`);
     const actor = { issuer: "fixture", clientId: "fixture" };
     const store = compiledMemos(local.db, "collection", actor);
     // Legacy sources without a compiled snapshot assemble on first read.
@@ -786,8 +785,7 @@ test("saves anchor in every active memo, never archived or foreign text, and res
     // The read assembled the sources, so an edit that changes nothing is unchanged.
     expect((await send("Instruction m-51")).status).toBe("unchanged");
     base = (await store.getTpsReport()).version;
-    // Every active memo is in the snapshot despite page_size 1; archived and
-    // foreign text is not.
+    // Every active memo is in the snapshot; archived and foreign text is not.
     for (const anchor of ["Instruction m-52", "Never exposed"])
       expect((await send(anchor, "Changed")).error).toBe("edit_conflict");
     expect((await store.getTpsReport()).version).toBe(base);
@@ -2272,6 +2270,74 @@ test("identity lookup never admits or seeds an MCP caller", async () => {
         sql`SELECT count(*)::integer AS n FROM memo_versions`,
       ),
     ).toEqual([{ n: 3 }]);
+  } finally {
+    await local.dispose();
+  }
+}, 30000);
+
+test("the signup seed's empty legacy card changes no read or save", async () => {
+  const local = await localStore();
+  try {
+    await local.pg.exec(`UPDATE store_config SET signup_mode='open';
+      INSERT INTO users (id) VALUES ('m_bare');
+      INSERT INTO identities (provider,subject,user_id) VALUES ('neon','bare','m_bare');`);
+    const seeded = { provider: "neon", subject: "seeded" };
+    await resolveIdentityAccount(local.env, seeded);
+    const open = async (subject: string) =>
+      createStoreMemoTools(
+        await storeForCurrentRequest(
+          local.env,
+          await lookupIdentityAccount(local.env, { provider: "neon", subject }),
+          { issuer: "fixture", clientId: "seed" },
+        ),
+      );
+    const cards = (userId: string) =>
+      local.db.query(
+        sql`SELECT count(*)::integer AS n FROM instruction_cards WHERE user_id=${userId}`,
+      );
+    const seededId = (await lookupIdentityAccount(local.env, seeded)).userId;
+    // The seeded account holds one empty legacy card; the bare one holds none.
+    expect(await cards(seededId)).toEqual([{ n: 1 }]);
+    expect(await cards("m_bare")).toEqual([{ n: 0 }]);
+    const tools = { seeded: await open("seeded"), bare: await open("bare") };
+    const read = async (t: typeof tools.bare) => {
+      const sheet = JSON.parse((await t.get_cover_sheet({})).content[0].text);
+      const all = JSON.parse((await t.list_reports()).content[0].text);
+      return { sheet, all };
+    };
+    const withoutVersion = (value: unknown) =>
+      JSON.parse(
+        JSON.stringify(value, (key, item) =>
+          key === "version" ? undefined : item,
+        ),
+      );
+    expect(withoutVersion(await read(tools.seeded))).toEqual(
+      withoutVersion(await read(tools.bare)),
+    );
+    expect((await read(tools.bare)).sheet.is_empty).toBe(true);
+    for (const t of [tools.seeded, tools.bare]) {
+      const version = (await read(t)).sheet.version;
+      const saved = JSON.parse(
+        (
+          await t.create_memo({
+            text: "File two rules.",
+            rules: [
+              { report: "cover", text: "Fictional rule for all writing." },
+              { report: "email", text: "Fictional email rule." },
+            ],
+            request_id: crypto.randomUUID(),
+            expected_version: version,
+          })
+        ).content[0].text,
+      );
+      expect(saved.status).toBe("saved");
+    }
+    const after = {
+      seeded: await read(tools.seeded),
+      bare: await read(tools.bare),
+    };
+    expect(withoutVersion(after.seeded)).toEqual(withoutVersion(after.bare));
+    expect(after.bare.sheet.text).toContain("Fictional rule for all writing.");
   } finally {
     await local.dispose();
   }
@@ -4587,17 +4653,14 @@ test("account deletion removes every tenant row, keeps global spend and refusals
     };
     const gone = await open("leaving");
     const kept = await open("staying");
-    const legacy = await gone.store.createMemo({
-      name: "legacy",
-      description: "Fictional",
-      text: "A legacy rule.",
-    });
-    await gone.store.updateMemo({
-      name: "legacy",
-      text: "A legacy rule, revised.",
-      reason: "Fixture",
-      expected_version: legacy.version,
-    });
+    // A legacy memo with history, beside the signup seed.
+    await local.db.query(
+      sql`INSERT INTO memos (user_id,id,name) VALUES (${gone.auth.userId},'legacy','legacy')`,
+    );
+    await local.db
+      .query(sql`INSERT INTO memo_versions (user_id,memo_id,version,description,body,reason,actor_json)
+      VALUES (${gone.auth.userId},'legacy',1,'Fictional','A legacy rule.','Fixture','{}'),
+        (${gone.auth.userId},'legacy',2,'Fictional','A legacy rule, revised.','Fixture','{}')`);
     expect((await gone.save()).status).toBe("saved");
     // A kind, a sample replaced by another (lineage) and an active pair.
     const goneSamples = () =>

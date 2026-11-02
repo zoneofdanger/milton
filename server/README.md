@@ -153,8 +153,8 @@ count ceiling also bounds card identities, including archived ones.
 
 Legacy import/initialization writes synchronize only untouched one-card memos. Once
 cards are independently edited, legacy writes/deletion refuse with
-`card_legacy_conflict`; use the current `create_memo` path. Legacy internal history readers
-remain historical, not a card-management interface. No extra MCP tool or UI is added.
+`card_legacy_conflict`; use the current `create_memo` path. No MCP tool or UI reads or
+writes legacy memos.
 
 `drizzle/rollback/0008_instruction_cards.sql` is an offline **pre-write rollback**.
 It proves every card/history row is an unchanged legacy copy, refuses native card data,

@@ -61,7 +61,6 @@ const errorCodes = new Set([
   "account_unavailable",
   "subscription_required",
   "invalid_input",
-  "invalid_name",
   "request_too_large",
   "memo_body_limit",
   "memo_history_limit",

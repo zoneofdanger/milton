@@ -18,6 +18,9 @@ import {
 
 const createdAt = () =>
   timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
+// Changing this default needs a migration, so retired keys stay. Triggers still
+// read name_bytes (memos) and reason_bytes (memo and card versions); no code
+// reads page_size.
 const limits = {
   memos: 100,
   body_bytes: 32768,

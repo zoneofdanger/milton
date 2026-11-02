@@ -255,7 +255,7 @@ test("two authenticated clients isolate tenants, save once and reject retired to
     expect(saved.value.status).toBe("saved");
     expect(await call(0, "create_memo", input)).toEqual(saved);
     const filed = (await call(0, "get_cover_sheet")).value;
-    expect(filed.text).toBe(input.text);
+    expect(filed.text).toBe("- " + input.text);
     expect(filed.setup).toBeUndefined();
     const lifecycle = await call(0, "get_cover_sheet", {
       hook_event: "UserPromptSubmit",
@@ -335,7 +335,7 @@ test("two authenticated clients isolate tenants, save once and reject retired to
     expect(exactResult.value.status).toBe("saved");
     expect(await call(0, "create_memo", exact)).toEqual(exactResult);
     expect((await call(0, "get_cover_sheet")).value.text).toBe(
-      "Lead with the conclusion.",
+      "- Lead with the conclusion.",
     );
     expect((await call(1, "get_cover_sheet")).value.text).toBe("");
     const rejected = await handler(

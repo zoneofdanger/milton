@@ -1265,7 +1265,7 @@ test("web shows only current TPS and rejects all retired history and mutation ro
     expect(download.headers.get("Content-Disposition")).toBe(
       'attachment; filename="TPS.md"',
     );
-    expect(await download.text()).toBe(body);
+    expect(await download.text()).toBe("- " + body);
   } finally {
     await fixture.dispose();
   }

@@ -24,7 +24,11 @@ import {
   migratedThrough,
   migrationsThrough,
 } from "./local-store";
-import { createStoreMemoTools, reportEnvelope } from "../src/store/tools";
+import {
+  coverSheet,
+  createStoreMemoTools,
+  reportEnvelope,
+} from "../src/store/tools";
 import { createHash } from "node:crypto";
 import {
   deleteAccount,
@@ -405,8 +409,8 @@ test("compiled saves publish memos and TPS together and charge once with durable
     expect(saved.status).toBe("saved");
     const current = await store.getTpsReport();
     expect(current.text.split("\n\n").sort()).toEqual([
-      "Ask before sending.",
-      "Be concise.",
+      "- Ask before sending.",
+      "- Be concise.",
     ]);
     expect(current.version).not.toBe(empty.version);
     expect(await store.saveMemo(input)).toEqual(saved);
@@ -473,7 +477,8 @@ test("TPS preserves every active source body verbatim and refreshes only the der
     const source =
       "Where relevant, identify products by their full model names.\n\nKeep exceptions intact.\n";
     const companion = "  Keep units explicit: µm.\r\nDo not infer a model.  ";
-    const exact = companion + "\n\n" + source;
+    // Each rule prints as a bullet ahead of its exact stored bytes.
+    const exact = "- " + companion + "\n\n- " + source;
     await local.db.query(sql`INSERT INTO memos(user_id,id,name) VALUES
       ('fidelity','z','product-naming'),('fidelity','a','units'),('fidelity','retired','old');`);
     await local.db
@@ -675,7 +680,7 @@ test("stale and failed compiled saves preserve current memos, receipts and charg
     expect((await pending).status).toBe("conflict");
     expect(calls).toBe(2);
     const first = await store.getTpsReport();
-    expect(first.text).toBe("Be concise.");
+    expect(first.text).toBe("- Be concise.");
     // Throw after actual commit: receipt resolution must report the committed result.
     let dropped = false;
     const uncertain = {
@@ -705,7 +710,7 @@ test("stale and failed compiled saves preserve current memos, receipts and charg
     });
     expect(saved.status).toBe("saved");
     if (!saved.version) throw new Error("Saved revision missing");
-    expect((await store.getTpsReport()).text).toBe("Lead with the answer.");
+    expect((await store.getTpsReport()).text).toBe("- Lead with the answer.");
     expect((await store.saveMemo(fast)).version).toBe(first.version);
     expect((await store.getTpsReport()).version).toBe(saved.version);
     const before = await local.pg.query(
@@ -1071,7 +1076,7 @@ test("targeted saves preserve omitted memos and reject invalid changes atomicall
     expect(heads.filter((h) => !h.archived)).toHaveLength(3);
     // A new card appends after existing ones, whatever its random ID.
     expect(current.text).toBe(
-      "Change a only.\n\nPreserve b exactly.\n\nAdd d.",
+      "- Change a only.\n\n- Preserve b exactly.\n\n- Add d.",
     );
     const history = await local.pg.query(
       "SELECT * FROM instruction_card_versions WHERE user_id='targeted' ORDER BY card_id,version",
@@ -1182,7 +1187,9 @@ test("exact caller edits preserve conditions and scope without a model, with ato
           input.exact_edits[1]!.after,
         ),
         sources[2]!.body,
-      ].join("\n\n"),
+      ]
+        .map((body) => "- " + body)
+        .join("\n\n"),
     );
     const history = await local.pg.query(
       "SELECT * FROM instruction_card_versions WHERE user_id='exact' ORDER BY card_id,version",
@@ -1269,7 +1276,7 @@ test("exact caller edits preserve conditions and scope without a model, with ato
       "saved",
     );
     expect((await store.getTpsReport()).text).toBe(
-      report.text.slice(0, -(sources[2]!.body.length + 2)),
+      report.text.slice(0, -("\n\n- ".length + sources[2]!.body.length)),
     );
     expect(
       (
@@ -1353,6 +1360,50 @@ test("rules are stored byte for byte, one card each, with one charge", async () 
         )
       ).rows,
     ).toEqual([{ writes: 1 }]);
+  } finally {
+    await local.dispose();
+  }
+});
+
+test("every rule reads as one bullet, whether stored with the compiler's leading dash or as sent", async () => {
+  const local = await localStore();
+  try {
+    await local.pg.exec("INSERT INTO users(id) VALUES ('bullets')");
+    const store = compiledMemos(local.db, "bullets", {
+      issuer: "fixture",
+      clientId: "fixture",
+    });
+    // The retired compiler stored "- " before each rule; saves since store the rule as sent.
+    const rules = [
+      { report: "cover" as const, text: "- Never use em dashes." },
+      { report: "cover" as const, text: "Use the Oxford comma." },
+      { report: "email" as const, text: "- Sign off with Best." },
+      { report: "email" as const, text: "Open with Hi and a first name." },
+    ];
+    expect(
+      await store.saveMemo({
+        text: "Add four fictional rules.",
+        request_id: crypto.randomUUID(),
+        expected_version: (await store.getTpsReport()).version,
+        rules,
+      }),
+    ).toMatchObject({ status: "saved" });
+    const documents = await store.readDocuments();
+    expect(documents.cover).toBe(
+      "- Never use em dashes.\n\n- Use the Oxford comma.",
+    );
+    expect(
+      reportEnvelope(documents, "email").text.split("\n\n").slice(2),
+    ).toEqual(["- Sign off with Best.", "- Open with Hi and a first name."]);
+    expect(coverSheet(documents).text).toBe(documents.cover);
+    // Assembly is presentation only: the stored cards keep their exact bytes.
+    expect(
+      (
+        await local.pg.query(
+          "SELECT body FROM instruction_card_versions WHERE user_id='bullets' ORDER BY body",
+        )
+      ).rows.map((r) => (r as { body: string }).body),
+    ).toEqual(rules.map((r) => r.text).sort());
   } finally {
     await local.dispose();
   }
@@ -2402,7 +2453,7 @@ test("instruction cards edit independently inside a memo, keep write-once groupi
     expect(saved.status).toBe("saved");
     expect(await store.saveMemo(request)).toEqual(saved);
     expect((await store.getTpsReport()).text).toBe(
-      "When comparing products, include units.\n\nGet approval before sending.",
+      "- When comparing products, include units.\n\n- Get approval before sending.",
     );
     expect(
       (
@@ -3749,7 +3800,7 @@ test("memo-update holds fence last-slot dispatch, expired claims, activation and
     });
     expect(
       (await compiledMemos(local.db, "hold-commit").getTpsReport()).text,
-    ).toBe("committed request");
+    ).toBe("- committed request");
   } finally {
     await local.dispose();
   }

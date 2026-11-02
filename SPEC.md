@@ -19,7 +19,9 @@ rules true of all writing. Approved samples are stored exactly as sent in their 
 append-only table, newest per kind winning and at most two per kind staying active.
 Assembly is deterministic and runs on read: the cover sheet is its rules in
 write-once insertion order; each report prints its heading, its when line, its
-samples newest first, then its rules (0017). Card text cannot contain Markdown
+samples newest first, then its rules (0017). Every rule prints as one bullet, with
+one stored leading `- ` dropped first so rules filed by the retired compiler and rules
+stored as sent read alike. Card text cannot contain Markdown
 headings. The card fingerprint, extended by active sample IDs, fences every
 published version. The memo group tables (0016) remain as history only.
 

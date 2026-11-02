@@ -279,7 +279,8 @@ earlier entry in the request, is skipped; when nothing else changes the save ret
 picks the report and the wording; a wrong report is fixable with `moves`.
 
 Corrections and removals of existing rules use `exact_edits`, a nonempty array of
-`{before, after}`. Copy each nonempty `before` verbatim from a current rule; `after`
+`{before, after}`. Copy each nonempty `before` verbatim from a current rule, without
+the `- ` bullet that assembly prints before it; `after`
 is the exact replacement, including an empty string for removal. Each anchor must
 occur once across all active instruction cards and fit within one card. Missing, repeated
 or overlapping anchors return `failed` with `edit_conflict`, without partial edits;
@@ -482,12 +483,15 @@ only with their account. Filing a sample through `create_memo` with the `sample`
 makes no model call and reserves no budget. The newest sample per kind wins; at most
 two per kind stay active, and retirement is the only automatic change.
 
-Assembly is deterministic and runs on read. The cover sheet is the cover-sheet
-rules joined by blank lines; the fixed report index (one "when" line per report)
-travels beside it as data. Each report prints `# Title`, its when line, its active
-samples newest first (a context line with the date, then the body quoted with `>`),
-then its rules. `tps_reports` keeps the version fence and the full text (cover sheet
-plus every non-empty report) for the web page and TPS.md. The fence is the card
+Assembly is deterministic and runs on read. Every rule prints as one bullet: `- `
+followed by its stored body, with one stored leading `- ` (as the retired compiler
+filed rules) dropped first, so rules from either era read alike; stored cards are not
+edited. The cover sheet is the cover-sheet rules joined by blank lines; the fixed
+report index (one "when" line per report) travels beside it as data. Each report
+prints `# Title`, its when line, its active samples newest first (a context line with
+the date, then the body quoted with `>`), then its rules. `tps_reports` keeps the
+version fence and the full text (cover sheet plus every non-empty report) as last
+published; reads, the web page and TPS.md serve a fresh assembly at that version. The fence is the card
 fingerprint when no samples exist, so pre-0017 snapshots stay valid; with samples it also covers the active sample IDs. A read whose stored fence
 lags its sources rebuilds and publishes under the account lock instead of failing, so
 there is no refresh step and no `tps_report_unavailable` error. An empty account

@@ -42,92 +42,6 @@ const schemaCatalog = async (pg: PGlite) => {
   };
 };
 
-test("a failing migration changes no table, row or journal entry, empty or populated", async () => {
-  const bad = await mkdtemp(join(tmpdir(), "milton-migration-"));
-  const pg = new PGlite();
-  const failure = "\n--> statement-breakpoint\nSELECT 1/0;\n";
-  let populated: PGlite | undefined;
-  try {
-    await cp(new URL("../drizzle/", import.meta.url), bad, { recursive: true });
-    await appendFile(join(bad, "0001_store_invariants.sql"), failure);
-    await expect(
-      migrate(drizzle(pg), { migrationsFolder: bad }),
-    ).rejects.toMatchObject({ cause: { code: "22012" } });
-    expect(
-      (
-        await pg.query(
-          "SELECT tablename FROM pg_tables WHERE schemaname='public'",
-        )
-      ).rows,
-    ).toEqual([]);
-    expect(
-      (
-        await pg.query(
-          "SELECT count(*)::integer AS n FROM drizzle.__drizzle_migrations",
-        )
-      ).rows,
-    ).toEqual([{ n: 0 }]);
-    // Over populated data, the newest migration failing changes nothing; the
-    // fixed migration then applies.
-    await cp(
-      new URL("../drizzle/0001_store_invariants.sql", import.meta.url),
-      join(bad, "0001_store_invariants.sql"),
-    );
-    const { entries } = (await Bun.file(
-      join(bad, "meta/_journal.json"),
-    ).json()) as { entries: { idx: number; tag: string }[] };
-    const newest = entries.at(-1)!;
-    populated = await migratedThrough(newest.idx - 1);
-    const db = populated;
-    await db.exec(`INSERT INTO users(id) VALUES ('kept-a'),('kept-b');
-      INSERT INTO identities(provider,subject,user_id) VALUES ('neon','kept-a','kept-a');`);
-    const state = async () => {
-      const tables: Record<string, unknown> = {};
-      for (const table of await publicTables(db))
-        tables[table] = (
-          await db.query<{ rows: unknown }>(
-            `SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text),'[]') AS rows FROM ${table} t`,
-          )
-        ).rows[0]!.rows;
-      return {
-        tables,
-        catalog: await schemaCatalog(db),
-        journal: (
-          await db.query(
-            "SELECT * FROM drizzle.__drizzle_migrations ORDER BY id",
-          )
-        ).rows,
-      };
-    };
-    const before = await state();
-    await appendFile(join(bad, newest.tag + ".sql"), failure);
-    await expect(
-      migrate(drizzle(db), { migrationsFolder: bad }),
-    ).rejects.toMatchObject({ cause: { code: "22012" } });
-    expect(await state()).toEqual(before);
-    await cp(
-      new URL(`../drizzle/${newest.tag}.sql`, import.meta.url),
-      join(bad, newest.tag + ".sql"),
-    );
-    await migrate(drizzle(db), { migrationsFolder: bad });
-    expect(
-      (
-        await db.query(
-          "SELECT count(*)::integer AS n FROM drizzle.__drizzle_migrations",
-        )
-      ).rows,
-    ).toEqual([{ n: entries.length }]);
-    expect((await db.query("SELECT id FROM users ORDER BY id")).rows).toEqual([
-      { id: "kept-a" },
-      { id: "kept-b" },
-    ]);
-  } finally {
-    await pg.close();
-    await populated?.close();
-    await rm(bad, { recursive: true, force: true });
-  }
-});
-
 test("filing-kinds migration files every version and gives samples kinds; rollback restores the previous shape", async () => {
   const pg = await migratedThrough(19);
   try {
@@ -512,5 +426,91 @@ test("0019 rollback refuses while disconnects or deleted identities exist and re
   } finally {
     await pg.close();
     await base.close();
+  }
+});
+
+test("a failing migration changes no table, row or journal entry, empty or populated", async () => {
+  const bad = await mkdtemp(join(tmpdir(), "milton-migration-"));
+  const pg = new PGlite();
+  const failure = "\n--> statement-breakpoint\nSELECT 1/0;\n";
+  let populated: PGlite | undefined;
+  try {
+    await cp(new URL("../drizzle/", import.meta.url), bad, { recursive: true });
+    await appendFile(join(bad, "0001_store_invariants.sql"), failure);
+    await expect(
+      migrate(drizzle(pg), { migrationsFolder: bad }),
+    ).rejects.toMatchObject({ cause: { code: "22012" } });
+    expect(
+      (
+        await pg.query(
+          "SELECT tablename FROM pg_tables WHERE schemaname='public'",
+        )
+      ).rows,
+    ).toEqual([]);
+    expect(
+      (
+        await pg.query(
+          "SELECT count(*)::integer AS n FROM drizzle.__drizzle_migrations",
+        )
+      ).rows,
+    ).toEqual([{ n: 0 }]);
+    // Over populated data, the newest migration failing changes nothing; the
+    // fixed migration then applies.
+    await cp(
+      new URL("../drizzle/0001_store_invariants.sql", import.meta.url),
+      join(bad, "0001_store_invariants.sql"),
+    );
+    const { entries } = (await Bun.file(
+      join(bad, "meta/_journal.json"),
+    ).json()) as { entries: { idx: number; tag: string }[] };
+    const newest = entries.at(-1)!;
+    populated = await migratedThrough(newest.idx - 1);
+    const db = populated;
+    await db.exec(`INSERT INTO users(id) VALUES ('kept-a'),('kept-b');
+      INSERT INTO identities(provider,subject,user_id) VALUES ('neon','kept-a','kept-a');`);
+    const state = async () => {
+      const tables: Record<string, unknown> = {};
+      for (const table of await publicTables(db))
+        tables[table] = (
+          await db.query<{ rows: unknown }>(
+            `SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text),'[]') AS rows FROM ${table} t`,
+          )
+        ).rows[0]!.rows;
+      return {
+        tables,
+        catalog: await schemaCatalog(db),
+        journal: (
+          await db.query(
+            "SELECT * FROM drizzle.__drizzle_migrations ORDER BY id",
+          )
+        ).rows,
+      };
+    };
+    const before = await state();
+    await appendFile(join(bad, newest.tag + ".sql"), failure);
+    await expect(
+      migrate(drizzle(db), { migrationsFolder: bad }),
+    ).rejects.toMatchObject({ cause: { code: "22012" } });
+    expect(await state()).toEqual(before);
+    await cp(
+      new URL(`../drizzle/${newest.tag}.sql`, import.meta.url),
+      join(bad, newest.tag + ".sql"),
+    );
+    await migrate(drizzle(db), { migrationsFolder: bad });
+    expect(
+      (
+        await db.query(
+          "SELECT count(*)::integer AS n FROM drizzle.__drizzle_migrations",
+        )
+      ).rows,
+    ).toEqual([{ n: entries.length }]);
+    expect((await db.query("SELECT id FROM users ORDER BY id")).rows).toEqual([
+      { id: "kept-a" },
+      { id: "kept-b" },
+    ]);
+  } finally {
+    await pg.close();
+    await populated?.close();
+    await rm(bad, { recursive: true, force: true });
   }
 });

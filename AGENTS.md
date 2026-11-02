@@ -9,7 +9,7 @@ TPS Report to connected assistants through its MCP server. [SPEC.md](SPEC.md) is
 - **Memos are served to outside assistants.** Every memo is served to claude.ai,
   ChatGPT, Muse and others. Never put anything about employers, investors, customers, secrets or other people's private details in a memo, a fixture, a commit message or a
   log.
-- **Memos change only through Peter.** Assistants submit user-directed instructions through `save_memo`; Milton organizes
+- **Memos change only through Peter.** Assistants submit user-directed instructions through `create_memo`; Milton organizes
   internal memos and compiles TPS in one atomic save. Memo history stays internal;
   TPS has only a current snapshot and revision token. Never edit live memos on your own initiative.
 - **Peter's memos live on the server.** Claude Code, Codex and Pi read them from the Milton MCP

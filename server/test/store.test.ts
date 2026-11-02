@@ -37,12 +37,6 @@ import {
   storeForCurrentRequest,
   personStoreForCurrentRequest,
 } from "../src/store";
-import {
-  importMemos,
-  parseImportSource,
-  verifyImportedSource,
-  loadImportSources,
-} from "../scripts/import-memos";
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
@@ -770,8 +764,7 @@ test("saves anchor in every active memo, never archived or foreign text, and res
       INSERT INTO memo_versions(user_id,memo_id,version,description,body,archived,reason,actor_json)
         SELECT user_id,id,1,'Scoped instruction','Instruction '||id,id='m-52','Fixture','{}' FROM memos;
       INSERT INTO memos(user_id,id,name) VALUES ('other','foreign-id','other');
-      INSERT INTO memo_versions(user_id,memo_id,version,description,body,reason,actor_json) VALUES ('other','foreign-id',1,'Other','Never exposed','Fixture','{}');
-      UPDATE store_config SET limits_json=limits_json || '{"page_size":1}'::jsonb;`);
+      INSERT INTO memo_versions(user_id,memo_id,version,description,body,reason,actor_json) VALUES ('other','foreign-id',1,'Other','Never exposed','Fixture','{}');`);
     const actor = { issuer: "fixture", clientId: "fixture" };
     const store = compiledMemos(local.db, "collection", actor);
     // Legacy sources without a compiled snapshot assemble on first read.
@@ -786,8 +779,7 @@ test("saves anchor in every active memo, never archived or foreign text, and res
     // The read assembled the sources, so an edit that changes nothing is unchanged.
     expect((await send("Instruction m-51")).status).toBe("unchanged");
     base = (await store.getTpsReport()).version;
-    // Every active memo is in the snapshot despite page_size 1; archived and
-    // foreign text is not.
+    // Every active memo is in the snapshot; archived and foreign text is not.
     for (const anchor of ["Instruction m-52", "Never exposed"])
       expect((await send(anchor, "Changed")).error).toBe("edit_conflict");
     expect((await store.getTpsReport()).version).toBe(base);
@@ -1242,7 +1234,12 @@ test("exact caller edits preserve conditions and scope without a model, with ato
         { before: "new anchor", after: "cascade" },
       ],
     ])
-      expect((await send(edits)).error).toBe("edit_conflict");
+      expect(await send(edits)).toMatchObject({
+        error: "edit_conflict",
+        message: expect.stringContaining(
+          "Read the cover sheet and reports again",
+        ),
+      });
     for (const edits of [
       [],
       [{ before: "", after: "new" }],
@@ -2096,7 +2093,7 @@ test("Postgres enforces separate UTF-8 field and memo caps and counts recovery b
   }
 }, 30000);
 
-test("Postgres version conflicts and history-cap import refusals return typed errors", async () => {
+test("Postgres version conflicts and history-cap refusals return typed errors", async () => {
   const local = await localStore();
   const userId = "m_00000000-0000-4000-8000-000000000001";
   try {
@@ -2116,16 +2113,12 @@ test("Postgres version conflicts and history-cap import refusals return typed er
     await local.db.query(
       sql`UPDATE store_config SET limits_json=limits_json || '{"history_bytes":1}'::jsonb`,
     );
-    const source = parseImportSource(
-      "sample",
-      "---\nname: sample\ndescription: An import fixture.\n---\n# Imported\n",
-    );
-    const history = await importMemos(
-      local.db,
-      userId,
-      [source],
-      new Map([[source.name, 1]]),
-    ).catch(databaseFailure);
+    const history = await local.db
+      .query(
+        sql`INSERT INTO memo_versions (user_id,memo_id,version,description,body,reason,actor_json)
+      VALUES (${userId},'memo',2,'Sample.','# Imported','edit','{}')`,
+      )
+      .catch(databaseFailure);
     expect(conflict).toBeInstanceOf(StoreError);
     expect(history).toBeInstanceOf(StoreError);
     expect([conflict, history]).toMatchObject([
@@ -2272,6 +2265,74 @@ test("identity lookup never admits or seeds an MCP caller", async () => {
         sql`SELECT count(*)::integer AS n FROM memo_versions`,
       ),
     ).toEqual([{ n: 3 }]);
+  } finally {
+    await local.dispose();
+  }
+}, 30000);
+
+test("the signup seed's empty legacy card changes no read or save", async () => {
+  const local = await localStore();
+  try {
+    await local.pg.exec(`UPDATE store_config SET signup_mode='open';
+      INSERT INTO users (id) VALUES ('m_bare');
+      INSERT INTO identities (provider,subject,user_id) VALUES ('neon','bare','m_bare');`);
+    const seeded = { provider: "neon", subject: "seeded" };
+    await resolveIdentityAccount(local.env, seeded);
+    const open = async (subject: string) =>
+      createStoreMemoTools(
+        await storeForCurrentRequest(
+          local.env,
+          await lookupIdentityAccount(local.env, { provider: "neon", subject }),
+          { issuer: "fixture", clientId: "seed" },
+        ),
+      );
+    const cards = (userId: string) =>
+      local.db.query(
+        sql`SELECT count(*)::integer AS n FROM instruction_cards WHERE user_id=${userId}`,
+      );
+    const seededId = (await lookupIdentityAccount(local.env, seeded)).userId;
+    // The seeded account holds one empty legacy card; the bare one holds none.
+    expect(await cards(seededId)).toEqual([{ n: 1 }]);
+    expect(await cards("m_bare")).toEqual([{ n: 0 }]);
+    const tools = { seeded: await open("seeded"), bare: await open("bare") };
+    const read = async (t: typeof tools.bare) => {
+      const sheet = JSON.parse((await t.get_cover_sheet({})).content[0].text);
+      const all = JSON.parse((await t.list_reports()).content[0].text);
+      return { sheet, all };
+    };
+    const withoutVersion = (value: unknown) =>
+      JSON.parse(
+        JSON.stringify(value, (key, item) =>
+          key === "version" ? undefined : item,
+        ),
+      );
+    expect(withoutVersion(await read(tools.seeded))).toEqual(
+      withoutVersion(await read(tools.bare)),
+    );
+    expect((await read(tools.bare)).sheet.is_empty).toBe(true);
+    for (const t of [tools.seeded, tools.bare]) {
+      const version = (await read(t)).sheet.version;
+      const saved = JSON.parse(
+        (
+          await t.create_memo({
+            text: "File two rules.",
+            rules: [
+              { report: "cover", text: "Fictional rule for all writing." },
+              { report: "email", text: "Fictional email rule." },
+            ],
+            request_id: crypto.randomUUID(),
+            expected_version: version,
+          })
+        ).content[0].text,
+      );
+      expect(saved.status).toBe("saved");
+    }
+    const after = {
+      seeded: await read(tools.seeded),
+      bare: await read(tools.bare),
+    };
+    expect(withoutVersion(after.seeded)).toEqual(withoutVersion(after.bare));
+    expect(after.bare.sheet.text).toContain("Fictional rule for all writing.");
   } finally {
     await local.dispose();
   }
@@ -2503,140 +2564,6 @@ test("unfinished initialization creates only empty TPS at retained-history capac
         sql`SELECT templates_revision FROM users WHERE id='m_unfinished'`,
       ),
     ).toEqual([{ templates_revision: 1 }]);
-  } finally {
-    await local.dispose();
-  }
-}, 30000);
-
-test("one expected-version conflict rolls back every imported memo and byte increment", async () => {
-  const local = await localStore();
-  try {
-    await local.db.query(sql`UPDATE store_config SET signup_mode='open'`);
-    const account = await resolveIdentityAccount(local.env, {
-      provider: "neon",
-      subject: "fixture-import",
-    });
-    if (!account) throw new Error("Fixture admission failed");
-    await importMemos(
-      local.db,
-      account.miltonUserId,
-      [
-        parseImportSource(
-          "email-voice",
-          "---\nname: email-voice\ndescription: Existing ordinary fixture.\n---\n# Existing\n",
-        ),
-      ],
-      new Map([["email-voice", 0]]),
-    );
-    const sources = ["email-voice", "vibes"].map((name) =>
-      parseImportSource(
-        name,
-        `---\nname: ${name}\ndescription: An atomic import fixture.\n---\n# Imported\n`,
-      ),
-    );
-    const before = await local.db.query(
-      sql`SELECT retained_bytes FROM users WHERE id=${account.miltonUserId}`,
-    );
-    await expect(
-      importMemos(
-        local.db,
-        account.miltonUserId,
-        sources,
-        new Map([
-          ["email-voice", 1],
-          ["vibes", 999],
-        ]),
-      ),
-    ).rejects.toThrow("expected version conflicts");
-    expect(
-      await local.db.query(
-        sql`SELECT max(version) AS n FROM memo_versions WHERE user_id=${account.miltonUserId}`,
-      ),
-    ).toEqual([{ n: 1 }]);
-    expect(
-      await local.db.query(
-        sql`SELECT retained_bytes FROM users WHERE id=${account.miltonUserId}`,
-      ),
-    ).toEqual(before);
-  } finally {
-    await local.dispose();
-  }
-}, 30000);
-
-test("import verifies exact bytes, conflicts on retry and permits recreation after deletion", async () => {
-  const local = await localStore();
-  try {
-    await local.db.query(sql`UPDATE store_config SET signup_mode='open'`);
-    const account = await resolveIdentityAccount(local.env, {
-      provider: "neon",
-      subject: "opaque-better-auth-user",
-    });
-    await importMemos(
-      local.db,
-      account.miltonUserId,
-      [
-        parseImportSource(
-          "email-voice",
-          "---\nname: email-voice\ndescription: Existing ordinary fixture.\n---\n# Existing\n",
-        ),
-      ],
-      new Map([["email-voice", 0]]),
-    );
-    const source = parseImportSource(
-      "email-voice",
-      "---\r\nname: email-voice\r\ndescription: An imported fixture.\r\n---\r\n# Fixture\r\n\r\nKeep café exact.\r\n",
-    );
-    const created = parseImportSource(
-      "new-fixture",
-      "---\nname: new-fixture\ndescription: A new fixture.\n---\n# New\n",
-    );
-    await expect(
-      importMemos(local.db, account.miltonUserId, [source], new Map()),
-    ).rejects.toThrow("expected version");
-    const expected = new Map([
-      [source.name, 1],
-      [created.name, 0],
-    ]);
-    const first = await importMemos(
-      local.db,
-      account.miltonUserId,
-      [source, created],
-      expected,
-    );
-    expect(first.map((row) => [row.name, row.version])).toEqual([
-      ["email-voice", 2],
-      ["new-fixture", 1],
-    ]);
-    await expect(
-      importMemos(local.db, account.miltonUserId, [source, created], expected),
-    ).rejects.toThrow("conflicts");
-    await expect(
-      importMemos(
-        local.db,
-        account.miltonUserId,
-        [created],
-        new Map([[created.name, 0]]),
-      ),
-    ).rejects.toThrow("conflicts");
-    expect(() =>
-      verifyImportedSource(source, {
-        ...source,
-        description: "Wrong stored description.",
-      }),
-    ).toThrow("fields");
-    await local.db.query(
-      sql`DELETE FROM memos WHERE user_id=${account.miltonUserId} AND name=${created.name}`,
-    );
-    expect(
-      (
-        await importMemos(local.db, account.miltonUserId, [created], new Map())
-      ).map((row) => row.version),
-    ).toEqual([1]);
-    expect(
-      (
-        await loadImportSources(new URL("./fixtures/memos/", import.meta.url))
-      ).map((row) => row.name),
-    ).toEqual(["sample"]);
   } finally {
     await local.dispose();
   }
@@ -3803,7 +3730,12 @@ test("memo updates charge committed source batches only and recover original cha
         request_id: crypto.randomUUID(),
         expected_version: (await store.getTpsReport()).version,
       }),
-    ).rejects.toMatchObject({ code: "memo_updates_exhausted" });
+    ).rejects.toMatchObject({
+      code: "memo_updates_exhausted",
+      message: expect.stringContaining(
+        "You can still read and download your cover sheet and reports.",
+      ),
+    });
     expect(calls).toBe(called);
     expect((await store.getTpsReport()).text).toContain(
       "Use fictional bullets.",
@@ -4587,17 +4519,14 @@ test("account deletion removes every tenant row, keeps global spend and refusals
     };
     const gone = await open("leaving");
     const kept = await open("staying");
-    const legacy = await gone.store.createMemo({
-      name: "legacy",
-      description: "Fictional",
-      text: "A legacy rule.",
-    });
-    await gone.store.updateMemo({
-      name: "legacy",
-      text: "A legacy rule, revised.",
-      reason: "Fixture",
-      expected_version: legacy.version,
-    });
+    // A legacy memo with history, beside the signup seed.
+    await local.db.query(
+      sql`INSERT INTO memos (user_id,id,name) VALUES (${gone.auth.userId},'legacy','legacy')`,
+    );
+    await local.db
+      .query(sql`INSERT INTO memo_versions (user_id,memo_id,version,description,body,reason,actor_json)
+      VALUES (${gone.auth.userId},'legacy',1,'Fictional','A legacy rule.','Fixture','{}'),
+        (${gone.auth.userId},'legacy',2,'Fictional','A legacy rule, revised.','Fixture','{}')`);
     expect((await gone.save()).status).toBe("saved");
     // A kind, a sample replaced by another (lineage) and an active pair.
     const goneSamples = () =>

@@ -4,10 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "generate": "bun scripts/generate-memos.ts",
-    "build": "bun run generate && bun scripts/build.ts",
-    "check-types": "bun run build && tsc --noEmit",
-    "dev": "bun run generate && bun --watch scripts/dev.ts",
+    "build": "bun scripts/build.ts",
+    "check-types": "bun scripts/build.ts && tsc --noEmit",
+    "dev": "bun --watch scripts/dev.ts",
     "test:client": "bun scripts/check-mcp.ts",
     "test:local": "bun scripts/check-local.tsx",
     "db:migrate": "bun --no-env-file scripts/migrate.ts",
@@ -24,7 +23,6 @@
     "@neondatabase/auth": "0.7.0-beta",
     "@neondatabase/serverless": "1.2.0",
     "drizzle-orm": "0.45.4",
-    "fflate": "0.8.3",
     "hono": "4.13.16",
     "jose": "6.2.14",
     "zod": "4.6.7"

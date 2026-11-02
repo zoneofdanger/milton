@@ -8,7 +8,6 @@
 !server/vite.config.ts
 !server/src/**
 !server/scripts/build.ts
-!server/scripts/generate-memos.ts
 !packages/
 !packages/theme/
 !packages/theme/package.json
@@ -18,7 +17,6 @@
 !apps/
 !apps/site/
 !apps/site/package.json
-!templates/**
 **/.env*
 **/*.pem
 **/node_modules

@@ -151,10 +151,11 @@ refused until capacity is available. Check headroom before rollout. Later remova
 legacy copies requires a separate migration; it is not included here. The existing
 count ceiling also bounds card identities, including archived ones.
 
-Legacy import/initialization writes synchronize only untouched one-card memos. Once
-cards are independently edited, legacy writes/deletion refuse with
-`card_legacy_conflict`; use the current `create_memo` path. Legacy internal history readers
-remain historical, not a card-management interface. No extra MCP tool or UI is added.
+Signup initialization (the empty `vibes` seed) is the only remaining legacy memo
+write; it synchronizes only untouched one-card memos. Once cards are independently
+edited, legacy writes/deletion refuse with
+`card_legacy_conflict`; use the current `create_memo` path. No MCP tool or UI reads or
+writes legacy memos.
 
 `drizzle/rollback/0008_instruction_cards.sql` is an offline **pre-write rollback**.
 It proves every card/history row is an unchanged legacy copy, refuses native card data,
@@ -407,7 +408,7 @@ bun test
 bun run --cwd server test:client
 ```
 
-The tests use fresh PGlite databases and stubbed Auth responses. `test:client` uses an in-memory SDK connection and the empty starter template. These checks need no live Neon credentials. The interactive `test:local` check does contact your configured Neon Auth service. Embedded tests do not prove contention between independent Neon connections.
+The tests use fresh PGlite databases and stubbed Auth responses. `test:client` uses an in-memory SDK connection to an empty stub store. These checks need no live Neon credentials. The interactive `test:local` check does contact your configured Neon Auth service. Embedded tests do not prove contention between independent Neon connections.
 
 ## Store, history, and limits
 
@@ -545,36 +546,6 @@ oldest beyond two, which may be samples the person did not touch, and reports th
 `drizzle/rollback/0020_filing_kinds.sql` is lossy: each card returns to its latest
 version's report, and retirement reasons, retiring request IDs and replacement
 lineage are dropped. Case variants of one label return as that kind's label.
-
-## Import existing memos
-
-This administrative importer is for offline data work, not the agent interface. It writes legacy memos directly; each imported memo becomes a cover-sheet rule (report `cover`), and the next read rebuilds the snapshot. It does not file rules into reports. The importer requires an explicit `--source-dir`. The repository contains the empty starter `templates/`, not your personal memos. The importer still addresses the legacy `vibes` folder/key; this is a maintenance exception, not an MCP alias. Prepare a directory of `<name>/SKILL.md` folders with valid name and description frontmatter.
-
-Find your Milton account ID in the `milton` database:
-
-```sql
-SELECT u.id AS milton_user_id
-FROM users AS u
-JOIN identities AS i ON i.user_id = u.id
-WHERE i.provider = 'neon'
-  AND i.subject = 'YOUR_NEON_AUTH_USER_ID';
-```
-
-Export the connection string as `DATABASE_URL` in the import process's environment. Set `MEMO_SOURCE_DIR` to your source directory and `MILTON_USER_ID` to the account ID returned above. From `server/`, for an empty account whose `vibes` memo is still at version 1 and a new ordinary email-voice memo:
-
-```sh
-bun --no-env-file scripts/import-memos.ts \
-  --source-dir "$MEMO_SOURCE_DIR" \
-  --user "$MILTON_USER_ID" \
-  --expected-version email-voice=0 \
-  --expected-version vibes=1
-```
-
-The importer reads inherited `DATABASE_URL` or an absolute URL-only file supplied through `--database-url-file`, never both. It does not read `.env.local` or `.dev.vars`. Keep connection strings out of command arguments, source, and logs.
-
-For an existing memo, pass its current integer version using `--expected-version name=number`. A fresh name defaults to expected version 0. These administrative flags use integers, unlike MCP's version tags.
-
-The importer validates UTF-8, preserves source bytes, and imports every requested memo in one transaction. A conflict rolls the whole import back. It verifies the stored snapshots after commit before reporting success. An uncertain post-commit result requires reading the committed versions before retrying. Import respects memo, field, and history caps without consuming the daily write allowance.
 
 ### Trial transition groundwork (0012, inactive)
 

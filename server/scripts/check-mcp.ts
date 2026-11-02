@@ -3,8 +3,22 @@ import { strict as assert } from "node:assert";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { loadMemos } from "../src/memos";
 import { createMiltonServer, storeInstructions } from "../src/mcp";
+import type { TenantStore } from "../src/store";
+import { assembleDocuments } from "../src/store/reports";
+
+// An empty account that allows every call and saves nothing.
+export function stubStore(): TenantStore {
+  const documents = { ...assembleDocuments([], []), version: "stub" };
+  return {
+    readTpsReport: async () => ({ text: "", version: "stub", is_empty: true }),
+    readDocuments: async () => documents,
+    saveMemo: async () => {
+      throw new Error("The stub store saves nothing.");
+    },
+    chargeToolCall: async () => ({ allowed: true }),
+  };
+}
 
 export async function checkMcp(client: Client) {
   assert.equal(client.getInstructions(), storeInstructions);
@@ -50,10 +64,7 @@ if (import.meta.main) {
         }),
       );
     } else {
-      server = createMiltonServer(
-        await loadMemos(new URL("../../templates/", import.meta.url)),
-        () => "milton-check",
-      );
+      server = createMiltonServer(stubStore());
       const [clientTransport, serverTransport] =
         InMemoryTransport.createLinkedPair();
       await server.connect(serverTransport);

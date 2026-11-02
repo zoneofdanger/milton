@@ -9,7 +9,7 @@ import {
 } from "./checks";
 
 const usage = `Milton local agent kit (Bun; no network calls)
-  status                 Read a cover-sheet JSON response on stdin; print revision and report count.
+  status                 Read a cover-sheet JSON response on stdin; print version and report count.
   check                  Read {text,scope,constraints} on stdin; check explicit local rules.
   dependencies           Read {before,after,allowedAdditions?} package manifests on stdin.
   manager                Read {choice,policy:{standingDefault?,projectRequired?}} on stdin.

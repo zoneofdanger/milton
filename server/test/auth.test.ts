@@ -1106,7 +1106,9 @@ test("pages on the MCP host redirect to the app host; assistant routes stay", as
   expect(discovery.status).toBe(200);
 });
 
-async function memoPageFixture() {
+async function memoPageFixture(
+  answer?: (path: string) => Response | undefined,
+) {
   const local = await localStore();
   await local.db.query(sql`UPDATE store_config SET signup_mode='open'`);
   await resolveIdentityAccount(local.env, {
@@ -1122,7 +1124,9 @@ async function memoPageFixture() {
     issuer,
     clientId: "fixture",
   });
-  const upstream = fakeNeon((_path, _body, _request, url) => {
+  const upstream = fakeNeon((path, _body, _request, url) => {
+    const answered = answer?.(path);
+    if (answered) return answered;
     if (url.href !== issuer + "/get-session")
       throw new Error("Unexpected upstream endpoint");
     return neonSession("page-fixes");
@@ -1195,7 +1199,18 @@ test("trial reminders stay outside TPS and expired accounts retain web view and 
 });
 
 test("no served page, trial notice or subscription refusal links to a route that does not exist", async () => {
-  const fixture = await memoPageFixture();
+  let signedIn = true;
+  const fixture = await memoPageFixture((path) => {
+    if (path === "/get-session")
+      return signedIn ? neonSession("page-fixes") : Response.json(null);
+    if (path === "/oauth2/get-consents") return Response.json([]);
+    if (path === "/oauth2/public-client")
+      return Response.json({
+        client_id: "fixture",
+        client_name: "Fixture assistant",
+        client_uri: "https://client.example",
+      });
+  });
   try {
     const first = await fixture.store.readTpsReport();
     await fixture.author.saveMemo({
@@ -1217,13 +1232,43 @@ test("no served page, trial notice or subscription refusal links to a route that
       ))
         links.add(match[0]);
     };
-    const pages = ["/", "/tps-report", "/assistants", "/account/delete"];
+    // Browser routing is an if-chain (browserPages and isMemoRoute), not a
+    // route table, so the served GET pages are listed here: signed-in pages,
+    // consent, signed-out landing and login, and the not-found page.
+    const signedInPages = [
+      "/",
+      "/tps-report",
+      "/assistants",
+      "/account/delete",
+      "/consent?" + signedQuery,
+    ];
+    const signedOutPages = ["/", "/login", "/login?" + signedQuery];
     const visit = async () => {
-      for (const path of pages) {
-        const html = await (await fixture.send(path)).text();
-        for (const match of html.matchAll(/href="([^"]+)"/g))
+      const pages = [
+        ...signedInPages.map((path) => [path, true] as const),
+        ...signedOutPages.map((path) => [path, false] as const),
+        ["/no-such-page", true] as const,
+      ];
+      for (const [path, session] of pages) {
+        signedIn = session;
+        // Consent is past Neon's middleware, which needs its session cookie.
+        const response = await fixture.send(
+          path,
+          undefined,
+          path.startsWith("/consent")
+            ? {
+                Cookie: `${NEON_AUTH_SESSION_COOKIE_NAME}=fixture-session-token`,
+              }
+            : {},
+        );
+        expect([path, response.status]).toEqual([
+          path,
+          path === "/no-such-page" ? 404 : 200,
+        ]);
+        for (const match of (await response.text()).matchAll(/href="([^"]+)"/g))
           links.add(match[1]!);
       }
+      signedIn = true;
     };
     await visit();
     const notice = await fixture.author.trialNotice!();

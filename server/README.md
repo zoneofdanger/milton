@@ -501,8 +501,10 @@ there is no refresh step and no `tps_report_unavailable` error. An empty account
 without a snapshot stays unwritten.
 
 Each body has its own cap (`report_body_bytes`, 256 KB by default); the full text is
-bounded at six bodies. A save that would exceed a cap is refused with `tps_body_limit`
-and nothing is truncated or published. Card text still cannot contain a Markdown
+bounded at six bodies. Caps measure the printed text, bullets included. A save that
+would exceed a cap is refused with `tps_body_limit` and nothing is truncated or
+published. Reads are not rechecked: a snapshot last published before rules printed as
+bullets can read up to two bytes per bare rule over the cap until its next save. Card text still cannot contain a Markdown
 heading line (`card_heading`). Each `rules` entry names its card's report; since 0020
 a card moves only through an explicit `moves` list.
 

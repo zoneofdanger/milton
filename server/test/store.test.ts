@@ -1614,6 +1614,42 @@ test("duplicate checks compare printed rules, so a bare rule beside its compiler
   }
 });
 
+test("the report cap measures the printed text, bullets included", async () => {
+  const local = await localStore();
+  try {
+    await local.pg.exec("INSERT INTO users(id) VALUES ('capped')");
+    const store = compiledMemos(local.db, "capped", {
+      issuer: "fixture",
+      clientId: "fixture",
+    });
+    // Long enough that the cover sheet, not an empty report's heading, binds.
+    const rule = "Keep it short. ".repeat(20).trim();
+    // The stored rule fits the cap; printed with its bullet it is one byte over.
+    await local.pg.exec(
+      `UPDATE store_config SET limits_json=limits_json || '{"report_body_bytes":${rule.length + 1}}'::jsonb`,
+    );
+    const save = async (text: string) =>
+      store.saveMemo({
+        text: "Fictional change.",
+        request_id: crypto.randomUUID(),
+        expected_version: (await store.getTpsReport()).version,
+        rules: [{ report: "cover", text }],
+      });
+    expect(await save(rule)).toMatchObject({
+      status: "failed",
+      error: "tps_body_limit",
+    });
+    expect((await store.readDocuments()).cover).toBe("");
+    await local.pg.exec(
+      `UPDATE store_config SET limits_json=limits_json || '{"report_body_bytes":${rule.length + 2}}'::jsonb`,
+    );
+    expect(await save(rule)).toMatchObject({ status: "saved" });
+    expect((await store.readDocuments()).cover).toBe("- " + rule);
+  } finally {
+    await local.dispose();
+  }
+});
+
 test("an exact duplicate rule is skipped as unchanged without a charge", async () => {
   const local = await localStore();
   try {

@@ -4,8 +4,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
-import { checkMcp } from "../scripts/check-mcp";
-import { loadMemos } from "../src/memos";
+import { checkMcp, stubStore } from "../scripts/check-mcp";
 import {
   createMiltonServer,
   storeInstructions,
@@ -81,10 +80,8 @@ test("server instructions fit within Claude Code's 4,096-character limit", () =>
 
 test("an SDK client receives instructions, discovers the four tools, and reads the cover sheet", async () => {
   const calls: string[] = [];
-  const server = createMiltonServer(
-    await loadMemos(new URL("../../templates/", import.meta.url)),
-    () => "sdk-test",
-    (call) => calls.push(call.tool),
+  const server = createMiltonServer(stubStore(), (call) =>
+    calls.push(call.tool),
   );
   const client = new Client({ name: "sdk-test", version: "0.0.0" });
   const [clientTransport, serverTransport] =
@@ -647,11 +644,7 @@ test("one code constant bounds requests: limits_json.request_bytes refuses nothi
 
 test("tool dispatch logs bounded final outcomes, invalid arguments, and unknown tools exactly once", async () => {
   const calls: unknown[] = [];
-  const server = createMiltonServer(
-    await loadMemos(new URL("../../templates/", import.meta.url)),
-    () => "registered-client",
-    (call) => calls.push(call),
-  );
+  const server = createMiltonServer(stubStore(), (call) => calls.push(call));
   const client = new Client({ name: "claimed-client", version: "0.0.0" });
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
@@ -748,15 +741,10 @@ test("final outcomes include early refusal/read failure and advisory/logging fai
     store.memoUpdates = async () => {
       throw new Error("Fictional balance failure");
     };
-    server = createMiltonServer(
-      [],
-      () => "private-client-must-not-appear",
-      (event) => {
-        events.push(event);
-        if (throwLog) throw new Error("Fictional logger failure");
-      },
-      store,
-    );
+    server = createMiltonServer(store, (event) => {
+      events.push(event);
+      if (throwLog) throw new Error("Fictional logger failure");
+    });
     client = new Client({ name: "fixture", version: "1" });
     const [a, b] = InMemoryTransport.createLinkedPair();
     await server.connect(b);

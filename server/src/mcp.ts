@@ -1,5 +1,4 @@
 import { McpServer, type Transport } from "@modelcontextprotocol/server";
-import type { Memo } from "./memos";
 
 import { StoreError, type TenantStore } from "./store";
 import {
@@ -8,15 +7,9 @@ import {
   coverSheetInput,
   reportInput,
   listReportsInput,
-  coverSheet,
-  reportEnvelope,
-  reportList,
 } from "./store/tools";
-import { assembleDocuments, resolveReportId } from "./store/reports";
 
 import { saveMemoInput } from "./store/compiled";
-import { createHash } from "node:crypto";
-import { hookOutput } from "../../packages/agent-kit/src/context";
 import {
   finalToolCall,
   knownTool,
@@ -42,10 +35,8 @@ export const storeInstructions = [
 ].join("\n\n");
 
 export function createMiltonServer(
-  memos: readonly Memo[],
-  _client: () => string,
+  store: TenantStore,
   log: (call: ToolCall) => void = (call) => console.info(JSON.stringify(call)),
-  store?: TenantStore,
 ) {
   const server = new (class extends McpServer {
     override async connect(transport: Transport) {
@@ -78,43 +69,41 @@ export function createMiltonServer(
               tool: knownTool(message.params?.name),
               started: performance.now(),
             });
-          if (store) {
-            try {
-              const allowance = await store.chargeToolCall();
-              if (!allowance.allowed) {
-                if ("id" in message)
-                  await transport.send({
-                    jsonrpc: "2.0",
-                    id: message.id,
-                    result: storeResult(
-                      {
-                        error: "rate_limited",
-                        limit: allowance.limit,
-                        retry_at_ms: allowance.retry_at_ms,
-                      },
-                      true,
-                    ),
-                  });
-                return;
-              }
-            } catch (error) {
+          try {
+            const allowance = await store.chargeToolCall();
+            if (!allowance.allowed) {
               if ("id" in message)
                 await transport.send({
                   jsonrpc: "2.0",
                   id: message.id,
                   result: storeResult(
                     {
-                      error:
-                        error instanceof StoreError
-                          ? error.code
-                          : "store_unavailable",
-                      message: "The memo store is unavailable. Try again.",
+                      error: "rate_limited",
+                      limit: allowance.limit,
+                      retry_at_ms: allowance.retry_at_ms,
                     },
                     true,
                   ),
                 });
               return;
             }
+          } catch (error) {
+            if ("id" in message)
+              await transport.send({
+                jsonrpc: "2.0",
+                id: message.id,
+                result: storeResult(
+                  {
+                    error:
+                      error instanceof StoreError
+                        ? error.code
+                        : "store_unavailable",
+                    message: "The memo store is unavailable. Try again.",
+                  },
+                  true,
+                ),
+              });
+            return;
           }
         }
         dispatch?.(message, extra);
@@ -132,20 +121,7 @@ export function createMiltonServer(
     idempotentHint: false,
     openWorldHint: true,
   };
-  const storeTools = store ? createStoreMemoTools(store) : undefined;
-  // Without a store, the bundled templates are the cover sheet and reports are empty.
-  const bundled = () => {
-    const text = memos
-      .map((m) => m.text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, "").trim())
-      .filter(Boolean)
-      .join("\n\n");
-    return {
-      ...assembleDocuments([], []),
-      cover: text,
-      is_empty: text === "",
-      version: createHash("sha256").update(text).digest("hex"),
-    };
-  };
+  const storeTools = createStoreMemoTools(store);
   server.registerTool(
     "get_cover_sheet",
     {
@@ -156,13 +132,7 @@ export function createMiltonServer(
       inputSchema: coverSheetInput,
       annotations: readOnly,
     },
-    async (input) => {
-      if (storeTools) return storeTools.get_cover_sheet(input);
-      const sheet = coverSheet(bundled());
-      return storeResult(
-        input.hook_event ? hookOutput(sheet, input.hook_event) : sheet,
-      );
-    },
+    (input) => storeTools.get_cover_sheet(input),
   );
   server.registerTool(
     "get_report",
@@ -172,12 +142,7 @@ export function createMiltonServer(
       inputSchema: reportInput,
       annotations: readOnly,
     },
-    async (input) =>
-      storeTools
-        ? storeTools.get_report(input)
-        : storeResult(
-            reportEnvelope(bundled(), resolveReportId(input.report_id)!),
-          ),
+    (input) => storeTools.get_report(input),
   );
   server.registerTool(
     "list_reports",
@@ -187,10 +152,7 @@ export function createMiltonServer(
       inputSchema: listReportsInput,
       annotations: readOnly,
     },
-    async () =>
-      storeTools
-        ? storeTools.list_reports()
-        : storeResult(reportList(bundled())),
+    () => storeTools.list_reports(),
   );
   server.registerTool(
     "create_memo",
@@ -205,16 +167,7 @@ export function createMiltonServer(
         openWorldHint: true,
       },
     },
-    async (input) =>
-      storeTools
-        ? storeTools.create_memo(input)
-        : storeResult(
-            {
-              error: "store_required",
-              message: "Saving requires an authenticated memo store.",
-            },
-            true,
-          ),
+    (input) => storeTools.create_memo(input),
   );
   return server;
 }

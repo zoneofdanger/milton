@@ -139,15 +139,12 @@ export function createMiltonHandler(
         issuer: identity.issuer,
         clientId: identity.clientId,
       });
-      const sdk = createMcpHandler(
-        () => createMiltonServer([], () => identity.clientId, emit, store),
-        {
-          legacy: "stateless",
-          maxSubscriptions: 0,
-          keepAliveMs: 0,
-          maxRequestBodySize: MAX_REQUEST_BYTES,
-        },
-      );
+      const sdk = createMcpHandler(() => createMiltonServer(store, emit), {
+        legacy: "stateless",
+        maxSubscriptions: 0,
+        keepAliveMs: 0,
+        maxRequestBodySize: MAX_REQUEST_BYTES,
+      });
       const result = await sdk.fetch(bounded);
       if (result.status >= 400)
         recordFailure(

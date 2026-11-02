@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { sql } from "drizzle-orm";
-import templates from "../../generated/templates.json";
 import {
   neonDatabase,
   databaseFailure,
@@ -168,9 +167,7 @@ export async function resolveIdentityAccount(
           await tx.query(
             sql`INSERT INTO memos (user_id,name) VALUES (${account.id},${TPS_REPORT_KEY}) ON CONFLICT (user_id,name) DO NOTHING`,
           );
-          const description =
-            templates.find((item) => item.name === TPS_REPORT_KEY)
-              ?.description ?? "How you want your assistants to work with you.";
+          const description = "How you want your assistants to work with you.";
           await tx.query(sql`INSERT INTO memo_versions (user_id,memo_id,version,description,body,reason,actor_json,details_json)
             SELECT ${account.id},id,1,${description},'','Created TPS Report','{"kind":"system"}','{"kind":"create"}'
             FROM memos WHERE user_id=${account.id} AND name=${TPS_REPORT_KEY}`);

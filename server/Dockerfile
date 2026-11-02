@@ -8,12 +8,10 @@ COPY apps/site/package.json apps/site/package.json
 RUN bun install --frozen-lockfile --filter @milton/server
 COPY server/src server/src
 COPY server/scripts/build.ts server/scripts/build.ts
-COPY server/scripts/generate-memos.ts server/scripts/generate-memos.ts
 COPY server/vite.config.ts server/vite.config.ts
 COPY server/tsconfig.json server/tsconfig.json
 COPY packages/theme packages/theme
 COPY packages/agent-kit/src packages/agent-kit/src
-COPY templates templates
 RUN bun run --cwd server build
 
 FROM node:26-bookworm-slim

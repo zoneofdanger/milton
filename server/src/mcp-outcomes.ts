@@ -56,7 +56,6 @@ const response = z.object({
 const errorCodes = new Set([
   "rate_limited",
   "store_unavailable",
-  "store_required",
   "configuration",
   "account_unavailable",
   "subscription_required",

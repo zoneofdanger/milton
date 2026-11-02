@@ -407,7 +407,7 @@ bun test
 bun run --cwd server test:client
 ```
 
-The tests use fresh PGlite databases and stubbed Auth responses. `test:client` uses an in-memory SDK connection and the empty starter template. These checks need no live Neon credentials. The interactive `test:local` check does contact your configured Neon Auth service. Embedded tests do not prove contention between independent Neon connections.
+The tests use fresh PGlite databases and stubbed Auth responses. `test:client` uses an in-memory SDK connection to an empty stub store. These checks need no live Neon credentials. The interactive `test:local` check does contact your configured Neon Auth service. Embedded tests do not prove contention between independent Neon connections.
 
 ## Store, history, and limits
 

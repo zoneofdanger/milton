@@ -4,6 +4,7 @@ import type { Child } from "hono/jsx";
 import type { PersonStore } from "./store";
 import type { TrialStatus } from "./store/trials";
 import type { CompiledReport, Documents } from "./store/compiled";
+import { ruleText } from "./store/reports";
 
 export const isMemoRoute = (path: string) =>
   path === "/" ||
@@ -175,14 +176,12 @@ function current(
   email?: string,
 ) {
   const docs = documents?.version === report.version ? documents : null;
-  // The list supplies the bullet; a one-line "- " card shows without its marker.
-  const item = (body: string) =>
-    body.startsWith("- ") && !body.includes("\n") ? body.slice(2) : body;
+  // The list supplies the bullet; ruleText drops a stored "- " as assembly does.
   const rules = (bodies: string[]) =>
     bodies.length > 0 && (
       <ul class="instruction-list">
         {bodies.map((body) => (
-          <li>{item(body)}</li>
+          <li>{ruleText(body)}</li>
         ))}
       </ul>
     );

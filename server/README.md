@@ -279,10 +279,12 @@ earlier entry in the request, is skipped; when nothing else changes the save ret
 picks the report and the wording; a wrong report is fixable with `moves`.
 
 Corrections and removals of existing rules use `exact_edits`, a nonempty array of
-`{before, after}`. Copy each nonempty `before` verbatim from a current rule, without
-the `- ` bullet that assembly prints before it; `after`
+`{before, after}`. Copy each nonempty `before` verbatim from a current rule as printed,
+with or without its `- ` bullet; `after`
 is the exact replacement, including an empty string for removal. Each anchor must
-occur once across all active instruction cards and fit within one card. Missing, repeated
+occur once across all printed rules (each card as `- ` plus its text) and fit within
+one card; it is then applied to the stored bytes, and a copied bullet in `after` is not
+doubled. Moves resolve the same way. Missing, repeated
 or overlapping anchors return `failed` with `edit_conflict`, without partial edits;
 reread the report and choose unambiguous spans. All matches use the original snapshot,
 so a later edit cannot target text produced by an earlier one. Both strings must

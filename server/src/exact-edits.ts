@@ -1,33 +1,36 @@
 import { StoreError } from "./store/errors";
+import { bullet } from "./store/reports";
 
 type Source = { id: string; description: string; text: string };
 type Edit = { before: string; after: string };
 
-/** The one card whose text contains `before` exactly once, across all cards;
- * null when it occurs more than once, undefined when it occurs nowhere. */
-function findAnchor(memos: Source[], before: string) {
-  let match: { id: string; start: number } | undefined;
-  for (const memo of memos) {
-    const start = memo.text.indexOf(before);
-    if (start < 0) continue;
-    if (match || memo.text.indexOf(before, start + 1) >= 0) return null;
-    match = { id: memo.id, start };
-  }
-  return match;
-}
-/** Assembly prints every rule as "- " plus its body, so a quote copied with
- * that bullet which matches no rule verbatim is matched without it, under the
- * same once-within-one-rule condition. `bulleted` marks that fallback. */
+/** Resolve `before` against the rules as the person reads them: each card's
+ * printed form (its bullet plus its text). The quote must occur exactly once
+ * across all printed rules and within one rule; the match is then mapped back
+ * to the stored bytes. A card stored without the dash prints two bytes longer,
+ * so its offsets shift by two; a match starting inside that printed bullet
+ * starts at stored offset 0, and `bullet` is the part of the bullet it quoted.
+ * A quote that lies wholly within a bullet targets no stored text. */
 function resolveAnchor(memos: Source[], before: string) {
-  const verbatim = findAnchor(memos, before);
-  if (verbatim) return { ...verbatim, length: before.length, bulleted: false };
-  if (verbatim === null || !before.startsWith("- ") || before === "- ")
-    return undefined;
-  const stripped = before.slice(2);
-  const match = findAnchor(memos, stripped);
-  return match
-    ? { ...match, length: stripped.length, bulleted: true }
-    : undefined;
+  let found: { memo: Source; start: number } | undefined;
+  for (const memo of memos) {
+    const printed = bullet(memo.text);
+    const start = printed.indexOf(before);
+    if (start < 0) continue;
+    if (found || printed.indexOf(before, start + 1) >= 0) return undefined;
+    found = { memo, start };
+  }
+  if (!found) return undefined;
+  const shift = found.memo.text.startsWith("- ") ? 0 : 2;
+  const start = Math.max(0, found.start - shift);
+  const end = found.start + before.length - shift;
+  if (end <= start) return undefined;
+  return {
+    id: found.memo.id,
+    start,
+    end,
+    bullet: shift ? "- ".slice(found.start, 2) : "",
+  };
 }
 /** Resolve caller-authored moves against the original snapshot. Each quote
  * identifies one card, and a card moves at most once per save. */
@@ -66,13 +69,14 @@ export function exactEditsProposal(memos: Source[], edits: Edit[]) {
     const match = resolveAnchor(memos, edit.before);
     if (!match) throw conflict();
     const spans = changes.get(match.id) ?? [];
-    // A bullet copied into after is dropped once, so it never doubles.
+    // The quoted part of a printed bullet, copied into after, is dropped
+    // once, so a bullet never doubles in the stored text.
     spans.push({
       start: match.start,
-      end: match.start + match.length,
+      end: match.end,
       after:
-        match.bulleted && edit.after.startsWith("- ")
-          ? edit.after.slice(2)
+        match.bullet && edit.after.startsWith(match.bullet)
+          ? edit.after.slice(match.bullet.length)
           : edit.after,
     });
     changes.set(match.id, spans);

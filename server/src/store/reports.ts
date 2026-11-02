@@ -83,10 +83,13 @@ export type Documents = {
 
 const rules = (active: CardHead[], report: Filing) =>
   active.filter((h) => h.report === report).map((h) => h.body);
+/** A rule's text without its bullet: one stored leading "- " (the retired
+ * compiler's) dropped. The stored bytes stay as they are. */
+export const ruleText = (body: string) =>
+  body.startsWith("- ") ? body.slice(2) : body;
 /** One rule as printed: a bullet, whether the body was stored with the retired
- * compiler's leading "- " or as sent since. The stored bytes stay as they are. */
-const bullet = (body: string) =>
-  "- " + (body.startsWith("- ") ? body.slice(2) : body);
+ * compiler's leading "- " or as sent since. */
+export const bullet = (body: string) => "- " + ruleText(body);
 const quote = (body: string) =>
   body
     .split("\n")

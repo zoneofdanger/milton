@@ -20,7 +20,8 @@ const createdAt = () =>
   timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
 // Changing this default needs a migration, so retired keys stay. Triggers still
 // read name_bytes (memos) and reason_bytes (memo and card versions); no
-// application code reads them or page_size.
+// application code reads them, page_size or daily_writes (the technical write
+// cap is retired; the memo-update allowance is the daily save cap).
 const limits = {
   memos: 100,
   body_bytes: 32768,
@@ -258,6 +259,7 @@ export const usageDaily = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     dayUtc: date("day_utc").notNull(),
     toolCalls: integer("tool_calls").notNull().default(0),
+    // Retired technical write counter: nothing writes it; dropping it needs a migration.
     writes: integer("writes").notNull().default(0),
   },
   (t) => [

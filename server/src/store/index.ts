@@ -41,7 +41,6 @@ const limitsSchema = z.object({
   history_bytes: positiveLimit,
   report_body_bytes: positiveLimit,
   daily_calls: positiveLimit,
-  daily_writes: positiveLimit,
 });
 export type StoreLimits = z.infer<typeof limitsSchema>;
 

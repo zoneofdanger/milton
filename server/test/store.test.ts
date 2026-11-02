@@ -412,10 +412,10 @@ test("compiled saves publish memos and TPS together and charge once with durable
     expect(
       (
         await local.pg.query(
-          "SELECT writes FROM usage_daily WHERE user_id='compiled-a'",
+          "SELECT count(*)::int AS n FROM accepted_changes WHERE user_id='compiled-a'",
         )
       ).rows,
-    ).toEqual([{ writes: 1 }]);
+    ).toEqual([{ n: 1 }]);
     const noop = await store.saveMemo({
       text: "Repeat",
       rules: [{ report: "cover", text: "Be concise." }],
@@ -427,10 +427,10 @@ test("compiled saves publish memos and TPS together and charge once with durable
     expect(
       (
         await local.pg.query(
-          "SELECT writes FROM usage_daily WHERE user_id='compiled-a'",
+          "SELECT count(*)::int AS n FROM accepted_changes WHERE user_id='compiled-a'",
         )
       ).rows,
-    ).toEqual([{ writes: 1 }]);
+    ).toEqual([{ n: 1 }]);
     await expect(
       store.saveMemo({ ...input, text: "Changed" }),
     ).rejects.toMatchObject({ code: "request_id_reused" });
@@ -731,10 +731,10 @@ test("stale and failed compiled saves preserve current memos, receipts and charg
     expect(
       (
         await local.pg.query(
-          "SELECT writes FROM usage_daily WHERE user_id='race'",
+          "SELECT count(*)::int AS n FROM accepted_changes WHERE user_id='race'",
         )
       ).rows,
-    ).toEqual([{ writes: 2 }]);
+    ).toEqual([{ n: 2 }]);
     expect(
       (
         await local.pg.query(
@@ -756,7 +756,7 @@ test("stale and failed compiled saves preserve current memos, receipts and charg
   }
 });
 
-test("saves anchor in every active memo, never archived or foreign text, and respect the daily write cap", async () => {
+test("saves anchor in every active memo, never archived or foreign text, and have no technical write cap", async () => {
   const local = await localStore();
   try {
     await local.pg.exec(`INSERT INTO users(id) VALUES ('collection'),('other');
@@ -787,21 +787,20 @@ test("saves anchor in every active memo, never archived or foreign text, and res
       (await send("Instruction m-51", "Instruction m-51 changed")).status,
     ).toBe("saved");
     base = (await store.getTpsReport()).version;
+    // The stored daily_writes key is retired: a value of 1 refuses nothing, and
+    // saves leave no per-day write counter. The memo-update cap is the save cap.
     await local.pg.exec(
       `UPDATE store_config SET limits_json=limits_json || '{"daily_writes":1}'::jsonb`,
     );
     expect(
-      (await send("Instruction m-50", "Instruction m-50 changed")).error,
-    ).toBe("rate_limited");
-    expect((await store.getTpsReport()).version).toBe(base);
-    expect((await send("Instruction m-50")).status).toBe("unchanged");
-    expect(
-      (
-        await local.pg.query(
-          "SELECT writes FROM usage_daily WHERE user_id='collection'",
-        )
-      ).rows,
-    ).toEqual([{ writes: 1 }]);
+      (await send("Instruction m-50", "Instruction m-50 changed")).status,
+    ).toBe("saved");
+    expect((await store.getTpsReport()).version).not.toBe(base);
+    base = (await store.getTpsReport()).version;
+    expect((await send("Instruction m-50 changed")).status).toBe("unchanged");
+    expect((await local.pg.query("SELECT * FROM usage_daily")).rows).toEqual(
+      [],
+    );
   } finally {
     await local.dispose();
   }
@@ -1111,10 +1110,10 @@ test("targeted saves preserve omitted memos and reject invalid changes atomicall
     expect(
       (
         await local.pg.query(
-          "SELECT writes FROM usage_daily WHERE user_id='targeted'",
+          "SELECT count(*)::int AS n FROM accepted_changes WHERE user_id='targeted'",
         )
       ).rows,
-    ).toEqual([{ writes: 1 }]);
+    ).toEqual([{ n: 1 }]);
   } finally {
     await local.dispose();
   }
@@ -1264,10 +1263,10 @@ test("exact caller edits preserve conditions and scope without a model, with ato
     expect(
       (
         await local.pg.query(
-          "SELECT writes FROM usage_daily WHERE user_id='exact'",
+          "SELECT count(*)::int AS n FROM accepted_changes WHERE user_id='exact'",
         )
       ).rows,
-    ).toEqual([{ writes: 1 }]);
+    ).toEqual([{ n: 1 }]);
     // Removing a complete body explicitly retires only that memo.
     expect((await send([{ before: sources[2]!.body, after: "" }])).status).toBe(
       "saved",
@@ -1353,10 +1352,10 @@ test("rules are stored byte for byte, one card each, with one charge", async () 
     expect(
       (
         await local.pg.query(
-          "SELECT writes FROM usage_daily WHERE user_id='rules'",
+          "SELECT count(*)::int AS n FROM accepted_changes WHERE user_id='rules'",
         )
       ).rows,
-    ).toEqual([{ writes: 1 }]);
+    ).toEqual([{ n: 1 }]);
   } finally {
     await local.dispose();
   }
@@ -1696,10 +1695,10 @@ test("an exact duplicate rule is skipped as unchanged without a charge", async (
     expect(
       (
         await local.pg.query(
-          "SELECT writes FROM usage_daily WHERE user_id='dupes'",
+          "SELECT count(*)::int AS n FROM accepted_changes WHERE user_id='dupes'",
         )
       ).rows,
-    ).toEqual([{ writes: 2 }]);
+    ).toEqual([{ n: 2 }]);
   } finally {
     await local.dispose();
   }

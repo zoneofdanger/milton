@@ -13,7 +13,7 @@ import { expect, test } from "bun:test";
 import { sql } from "drizzle-orm";
 import type { StoreDatabase } from "../src/store/database";
 import { localStore } from "./local-store";
-import { betweenPhases } from "./store-fixtures";
+import { betweenPhases, fixtureStore, seedUsers } from "./store-fixtures";
 
 test("memo updates charge committed source batches only and recover original charges", async () => {
   const local = await localStore();
@@ -25,14 +25,15 @@ test("memo updates charge committed source batches only and recover original cha
         )
       ).rows,
     ).toEqual([{ memo_updates_enabled: false, memo_updates_daily_limit: 100 }]);
+    await seedUsers(local.pg, "updates");
     await local.pg.exec(
-      "INSERT INTO users(id) VALUES ('updates'); UPDATE store_config SET global_spend_policy='alerts_only',foreground_accounting_ready=true,memo_updates_enabled=true,memo_updates_daily_limit=2",
+      "UPDATE store_config SET global_spend_policy='alerts_only',foreground_accounting_ready=true,memo_updates_enabled=true,memo_updates_daily_limit=2",
     );
     let calls = 0;
-    const store = compiledMemos(
+    const store = fixtureStore(
       betweenPhases(local.db, async () => calls++),
       "updates",
-      { issuer: "fixture", clientId: "allowance" },
+      "allowance",
     );
     const input = {
       text: "Fictional batch.",
@@ -137,16 +138,21 @@ test("memo updates charge committed source batches only and recover original cha
 test("memo-update holds fence last-slot dispatch, expired claims, activation and uncertain commits", async () => {
   const local = await localStore();
   try {
-    await local.pg.exec(
-      "INSERT INTO users(id) VALUES ('hold-race'),('hold-legacy'),('hold-claim'),('hold-commit'),('hold-failure'),('hold-midnight')",
+    await seedUsers(
+      local.pg,
+      "hold-race",
+      "hold-legacy",
+      "hold-claim",
+      "hold-commit",
+      "hold-failure",
+      "hold-midnight",
     );
     const releases = new Map<string, () => void>(),
       starts = new Map<string, () => void>();
     // Claims that reached the write phase; a paused account's next one waits there.
     let calls = 0;
-    const actor = { issuer: "fixture", clientId: "holds" };
     const store = (id: string, db: StoreDatabase = local.db) =>
-      compiledMemos(
+      fixtureStore(
         betweenPhases(db, async () => {
           calls++;
           const start = starts.get(id);
@@ -159,7 +165,7 @@ test("memo-update holds fence last-slot dispatch, expired claims, activation and
           await wait;
         }),
         id,
-        actor,
+        "holds",
       );
     const input = async (s: ReturnType<typeof store>, text: string) => ({
       text,
@@ -370,15 +376,13 @@ test("alerts-only spending continues through every threshold, counts the frozen 
   const local = await localStore();
   try {
     // Legacy ledgers have no writers; their rows still count toward today's total.
+    await seedUsers(local.pg, "alerts");
     await local.pg.exec(
-      `INSERT INTO users(id) VALUES ('alerts'); UPDATE store_config SET global_spend_policy='alerts_only',foreground_accounting_ready=true,memo_updates_enabled=true;
+      `UPDATE store_config SET global_spend_policy='alerts_only',foreground_accounting_ready=true,memo_updates_enabled=true;
       INSERT INTO gardening_usage(user_id,day_utc,reserved_micros) VALUES ('alerts',(clock_timestamp() AT TIME ZONE 'UTC')::date,1000000);
       INSERT INTO derivation_usage(user_id,day_utc,reserved_micros) VALUES ('alerts',(clock_timestamp() AT TIME ZONE 'UTC')::date,2000000);`,
     );
-    const store = compiledMemos(local.db, "alerts", {
-      issuer: "fixture",
-      clientId: "alerts",
-    });
+    const store = fixtureStore(local.db, "alerts", "alerts");
     for (const [i, threshold] of spendAlertThresholds.entries()) {
       // Filing alone stays $3 short; only the legacy rows cross the threshold.
       await local.db.query(

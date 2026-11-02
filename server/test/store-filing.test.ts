@@ -1,8 +1,9 @@
 import { cardHeads, cardFingerprint } from "../src/store/cards";
-import { compiledMemos, type SaveMemoInput } from "../src/store/compiled";
+import type { SaveMemoInput } from "../src/store/compiled";
 import { expect, test } from "bun:test";
 import { sql } from "drizzle-orm";
 import { localStore } from "./local-store";
+import { fixtureStore, seedUsers } from "./store-fixtures";
 import { coverSheet, reportEnvelope } from "../src/store/tools";
 
 const enableMemoUpdates =
@@ -11,13 +12,9 @@ const enableMemoUpdates =
 test("rules are stored byte for byte, one card each, with one charge", async () => {
   const local = await localStore();
   try {
-    await local.pg.exec(
-      `INSERT INTO users(id) VALUES ('rules'); ${enableMemoUpdates}`,
-    );
-    const store = compiledMemos(local.db, "rules", {
-      issuer: "fixture",
-      clientId: "fixture",
-    });
+    await seedUsers(local.pg, "rules");
+    await local.pg.exec(enableMemoUpdates);
+    const store = fixtureStore(local.db, "rules");
     const rules = [
       {
         report: "email" as const,
@@ -83,11 +80,8 @@ test("rules are stored byte for byte, one card each, with one charge", async () 
 test("every rule reads as one bullet, whether stored with the compiler's leading dash or as sent", async () => {
   const local = await localStore();
   try {
-    await local.pg.exec("INSERT INTO users(id) VALUES ('bullets')");
-    const store = compiledMemos(local.db, "bullets", {
-      issuer: "fixture",
-      clientId: "fixture",
-    });
+    await seedUsers(local.pg, "bullets");
+    const store = fixtureStore(local.db, "bullets");
     // The retired compiler stored "- " before each rule; saves since store the rule as sent.
     const rules = [
       { report: "cover" as const, text: "- Never use em dashes." },
@@ -127,11 +121,8 @@ test("every rule reads as one bullet, whether stored with the compiler's leading
 test("edits and moves accept a quoted bullet for rules stored with or without the dash", async () => {
   const local = await localStore();
   try {
-    await local.pg.exec("INSERT INTO users(id) VALUES ('anchors')");
-    const store = compiledMemos(local.db, "anchors", {
-      issuer: "fixture",
-      clientId: "fixture",
-    });
+    await seedUsers(local.pg, "anchors");
+    const store = fixtureStore(local.db, "anchors");
     const save = async (change: Partial<SaveMemoInput>) =>
       store.saveMemo({
         text: "Fictional change.",
@@ -208,11 +199,8 @@ test("edits and moves accept a quoted bullet for rules stored with or without th
 test("anchors resolve against the printed rules, so a quote never lands on a rule the person did not see it in", async () => {
   const local = await localStore();
   try {
-    await local.pg.exec("INSERT INTO users(id) VALUES ('printed')");
-    const store = compiledMemos(local.db, "printed", {
-      issuer: "fixture",
-      clientId: "fixture",
-    });
+    await seedUsers(local.pg, "printed");
+    const store = fixtureStore(local.db, "printed");
     const save = async (change: Partial<SaveMemoInput>) =>
       store.saveMemo({
         text: "Fictional change.",
@@ -292,11 +280,8 @@ test("anchors resolve against the printed rules, so a quote never lands on a rul
 test("duplicate checks compare printed rules, so a bare rule beside its compiler-era twin is skipped or refused", async () => {
   const local = await localStore();
   try {
-    await local.pg.exec("INSERT INTO users(id) VALUES ('twins')");
-    const store = compiledMemos(local.db, "twins", {
-      issuer: "fixture",
-      clientId: "fixture",
-    });
+    await seedUsers(local.pg, "twins");
+    const store = fixtureStore(local.db, "twins");
     const save = async (change: Partial<SaveMemoInput>) =>
       store.saveMemo({
         text: "Fictional change.",
@@ -332,11 +317,8 @@ test("duplicate checks compare printed rules, so a bare rule beside its compiler
 test("the report cap measures the printed text, bullets included", async () => {
   const local = await localStore();
   try {
-    await local.pg.exec("INSERT INTO users(id) VALUES ('capped')");
-    const store = compiledMemos(local.db, "capped", {
-      issuer: "fixture",
-      clientId: "fixture",
-    });
+    await seedUsers(local.pg, "capped");
+    const store = fixtureStore(local.db, "capped");
     // Long enough that the cover sheet, not an empty report's heading, binds.
     const rule = "Keep it short. ".repeat(20).trim();
     // The stored rule fits the cap; printed with its bullet it is one byte over.
@@ -368,13 +350,9 @@ test("the report cap measures the printed text, bullets included", async () => {
 test("an exact duplicate rule is skipped as unchanged without a charge", async () => {
   const local = await localStore();
   try {
-    await local.pg.exec(
-      `INSERT INTO users(id) VALUES ('dupes'); ${enableMemoUpdates}`,
-    );
-    const store = compiledMemos(local.db, "dupes", {
-      issuer: "fixture",
-      clientId: "fixture",
-    });
+    await seedUsers(local.pg, "dupes");
+    await local.pg.exec(enableMemoUpdates);
+    const store = fixtureStore(local.db, "dupes");
     const rule = { report: "chat" as const, text: "Keep replies short." };
     const first = await store.saveMemo({
       text: "Add a fictional rule.",
@@ -426,11 +404,8 @@ test("an exact duplicate rule is skipped as unchanged without a charge", async (
 test("a save that would leave two identical rules in one report is refused; re-adding a removed rule saves it", async () => {
   const local = await localStore();
   try {
-    await local.pg.exec("INSERT INTO users(id) VALUES ('collide')");
-    const store = compiledMemos(local.db, "collide", {
-      issuer: "fixture",
-      clientId: "fixture",
-    });
+    await seedUsers(local.pg, "collide");
+    const store = fixtureStore(local.db, "collide");
     const save = async (change: Partial<SaveMemoInput>) =>
       store.saveMemo({
         text: "Fictional change.",
@@ -502,11 +477,8 @@ test("a save that would leave two identical rules in one report is refused; re-a
 test("malformed rules are refused with a message that says how to fix them", async () => {
   const local = await localStore();
   try {
-    await local.pg.exec("INSERT INTO users(id) VALUES ('bad-rules')");
-    const store = compiledMemos(local.db, "bad-rules", {
-      issuer: "fixture",
-      clientId: "fixture",
-    });
+    await seedUsers(local.pg, "bad-rules");
+    const store = fixtureStore(local.db, "bad-rules");
     const base = {
       text: "Add rules.",
       request_id: crypto.randomUUID(),
@@ -545,11 +517,8 @@ test("malformed rules are refused with a message that says how to fix them", asy
 test("a save without a structured field is refused with invalid_input", async () => {
   const local = await localStore();
   try {
-    await local.pg.exec("INSERT INTO users(id) VALUES ('prose')");
-    const store = compiledMemos(local.db, "prose", {
-      issuer: "fixture",
-      clientId: "fixture",
-    });
+    await seedUsers(local.pg, "prose");
+    const store = fixtureStore(local.db, "prose");
     await expect(
       store.saveMemo({
         text: "Always sign off with Best.",
@@ -571,14 +540,12 @@ test("a save without a structured field is refused with invalid_input", async ()
 test("reports print a heading, when line, samples newest first and rules; samples replace per kind; card text cannot add headings", async () => {
   const local = await localStore();
   try {
-    await local.pg.exec(`INSERT INTO users(id) VALUES ('reports');
-      INSERT INTO memos(user_id,id,name) VALUES ('reports','w','working');
+    await seedUsers(local.pg, "reports");
+    await local.pg
+      .exec(`INSERT INTO memos(user_id,id,name) VALUES ('reports','w','working');
       INSERT INTO memo_versions(user_id,memo_id,version,description,body,reason,actor_json) VALUES
       ('reports','w',1,'One','- No em dashes.','Fixture','{}');`);
-    const store = compiledMemos(local.db, "reports", {
-      issuer: "fixture",
-      clientId: "assistant",
-    });
+    const store = fixtureStore(local.db, "reports", "assistant");
     const save = async (extra: object) =>
       store.saveMemo({
         text: "Fictional change.",
@@ -695,11 +662,8 @@ test("reports print a heading, when line, samples newest first and rules; sample
 // One account with a cover rule and an email rule.
 async function filingFixture(userId: string) {
   const local = await localStore();
-  await local.pg.exec(`INSERT INTO users(id) VALUES ('${userId}')`);
-  const store = compiledMemos(local.db, userId, {
-    issuer: "fixture",
-    clientId: "assistant",
-  });
+  await seedUsers(local.pg, userId);
+  const store = fixtureStore(local.db, userId, "assistant");
   const save = async (extra: object) =>
     store.saveMemo({
       text: "Fictional change.",

@@ -1,7 +1,7 @@
 import { expect, jest, spyOn, test } from "bun:test";
 import { sql } from "drizzle-orm";
 import { localStore } from "./local-store";
-import { betweenPhases, read } from "./store-fixtures";
+import { betweenPhases, read, seedUsers } from "./store-fixtures";
 import { createStoreMemoTools } from "../src/store/tools";
 import { createHash } from "node:crypto";
 import {
@@ -504,8 +504,9 @@ test("tenants with overlapping card, sample and request IDs never read, edit or 
 test("Postgres accounts per user for immutable contiguous history and plain deletion", async () => {
   const local = await localStore();
   try {
-    await local.pg.exec(`INSERT INTO users (id) VALUES ('m_first'),('m_second');
-      INSERT INTO memos (user_id,id,name) VALUES ('m_first','same-id','sample'),('m_second','same-id','sample');
+    await seedUsers(local.pg, "m_first", "m_second");
+    await local.pg
+      .exec(`INSERT INTO memos (user_id,id,name) VALUES ('m_first','same-id','sample'),('m_second','same-id','sample');
       INSERT INTO memo_versions (user_id,memo_id,version,description,body,reason,actor_json)
       VALUES ('m_first','same-id',1,'Sample.','hello','seed','{}'),('m_second','same-id',1,'Sample.','hello','seed','{}');`);
     expect(
@@ -671,8 +672,8 @@ test("identity lookup never admits or seeds an MCP caller", async () => {
 test("the signup seed's empty legacy card changes no read or save", async () => {
   const local = await localStore();
   try {
+    await seedUsers(local.pg, "m_bare");
     await local.pg.exec(`UPDATE store_config SET signup_mode='open';
-      INSERT INTO users (id) VALUES ('m_bare');
       INSERT INTO identities (provider,subject,user_id) VALUES ('neon','bare','m_bare');`);
     const seeded = { provider: "neon", subject: "seeded" };
     await resolveIdentityAccount(local.env, seeded);
@@ -861,8 +862,8 @@ test("closing an account refuses its reads, saves and replays, fences a pending 
 test("unfinished initialization creates only empty TPS at retained-history capacity", async () => {
   const local = await localStore();
   try {
+    await seedUsers(local.pg, "m_unfinished");
     await local.pg.exec(`
-      INSERT INTO users (id) VALUES ('m_unfinished');
       INSERT INTO identities (provider,subject,user_id) VALUES ('neon','unfinished','m_unfinished');
       INSERT INTO memos (user_id,id,name) VALUES ('m_unfinished','ordinary','email-voice');
       INSERT INTO memo_versions (user_id,memo_id,version,description,body,reason,actor_json)

@@ -5,19 +5,17 @@ import { sql } from "drizzle-orm";
 import { databaseFailure } from "../src/store/database";
 import { StoreError } from "../src/store/errors";
 import { localStore } from "./local-store";
-import { betweenPhases } from "./store-fixtures";
+import { betweenPhases, fixtureStore, seedUsers } from "./store-fixtures";
 
 test("compiled saves publish memos and TPS together and charge once with durable replay", async () => {
   const local = await localStore();
   try {
-    await local.pg.exec(
-      "INSERT INTO users(id) VALUES ('compiled-a'),('compiled-b')",
-    );
+    await seedUsers(local.pg, "compiled-a", "compiled-b");
     let calls = 0;
-    const store = compiledMemos(
+    const store = fixtureStore(
       betweenPhases(local.db, async () => calls++),
       "compiled-a",
-      { issuer: "fixture", clientId: "assistant" },
+      "assistant",
     );
     const empty = await store.getTpsReport();
     expect(empty.text).toBe("");
@@ -96,9 +94,7 @@ test("compiled saves publish memos and TPS together and charge once with durable
 test("TPS preserves every active source body verbatim and refreshes only the derived report", async () => {
   const local = await localStore();
   try {
-    await local.pg.exec(
-      "INSERT INTO users(id) VALUES ('fidelity'),('fidelity-other')",
-    );
+    await seedUsers(local.pg, "fidelity", "fidelity-other");
     const source =
       "Where relevant, identify products by their full model names.\n\nKeep exceptions intact.\n";
     const companion = "  Keep units explicit: µm.\r\nDo not infer a model.  ";
@@ -119,7 +115,7 @@ test("TPS preserves every active source body verbatim and refreshes only the der
     const held = new Promise<void>((r) => {
       release = r;
     });
-    const store = compiledMemos(
+    const store = fixtureStore(
       betweenPhases(local.db, async () => {
         if (slow) {
           started();
@@ -127,7 +123,7 @@ test("TPS preserves every active source body verbatim and refreshes only the der
         }
       }),
       "fidelity",
-      { issuer: "fixture", clientId: "assistant" },
+      "assistant",
     );
     // Legacy sources assemble on first read, in stored position order.
     const initial = await store.getTpsReport();
@@ -262,7 +258,7 @@ test("TPS preserves every active source body verbatim and refreshes only the der
 test("stale and failed compiled saves preserve current memos, receipts and charges", async () => {
   const local = await localStore();
   try {
-    await local.pg.exec("INSERT INTO users(id) VALUES ('race'),('foreign')");
+    await seedUsers(local.pg, "race", "foreign");
     let release!: () => void, started!: () => void;
     const begun = new Promise<void>((r) => {
       started = r;
@@ -272,8 +268,7 @@ test("stale and failed compiled saves preserve current memos, receipts and charg
     });
     // Claims that reached the write phase; the first one waits there.
     let calls = 0;
-    const actor = { issuer: "fixture", clientId: "fixture" };
-    const store = compiledMemos(
+    const store = fixtureStore(
       betweenPhases(local.db, async () => {
         if (++calls === 1) {
           started();
@@ -281,7 +276,6 @@ test("stale and failed compiled saves preserve current memos, receipts and charg
         }
       }),
       "race",
-      actor,
     );
     const initial = await store.getTpsReport();
     const slow = {
@@ -327,7 +321,7 @@ test("stale and failed compiled saves preserve current memos, receipts and charg
         return result;
       },
     };
-    const saved = await compiledMemos(uncertain, "race", actor).saveMemo({
+    const saved = await fixtureStore(uncertain, "race").saveMemo({
       text: "Lead with the answer.",
       exact_edits: [{ before: "Be concise.", after: "Lead with the answer." }],
       request_id: crypto.randomUUID(),
@@ -390,14 +384,14 @@ test("stale and failed compiled saves preserve current memos, receipts and charg
 test("saves anchor in every active memo, never archived or foreign text, and have no technical write cap", async () => {
   const local = await localStore();
   try {
-    await local.pg.exec(`INSERT INTO users(id) VALUES ('collection'),('other');
-      INSERT INTO memos(user_id,id,name) SELECT 'collection','m-'||n,'memo-'||n FROM generate_series(1,52) n;
+    await seedUsers(local.pg, "collection", "other");
+    await local.pg
+      .exec(`INSERT INTO memos(user_id,id,name) SELECT 'collection','m-'||n,'memo-'||n FROM generate_series(1,52) n;
       INSERT INTO memo_versions(user_id,memo_id,version,description,body,archived,reason,actor_json)
         SELECT user_id,id,1,'Scoped instruction','Instruction '||id,id='m-52','Fixture','{}' FROM memos;
       INSERT INTO memos(user_id,id,name) VALUES ('other','foreign-id','other');
       INSERT INTO memo_versions(user_id,memo_id,version,description,body,reason,actor_json) VALUES ('other','foreign-id',1,'Other','Never exposed','Fixture','{}');`);
-    const actor = { issuer: "fixture", clientId: "fixture" };
-    const store = compiledMemos(local.db, "collection", actor);
+    const store = fixtureStore(local.db, "collection");
     // Legacy sources without a compiled snapshot assemble on first read.
     let base = (await store.getTpsReport()).version;
     const send = (before: string, after = before) =>
@@ -440,15 +434,15 @@ test("saves anchor in every active memo, never archived or foreign text, and hav
 test("targeted saves preserve omitted memos and reject invalid changes atomically", async () => {
   const local = await localStore();
   try {
-    await local.pg.exec(`INSERT INTO users(id) VALUES ('targeted');
-      INSERT INTO memos(user_id,id,name) VALUES ('targeted','a','a'),('targeted','b','b'),('targeted','c','c');
+    await seedUsers(local.pg, "targeted");
+    await local.pg
+      .exec(`INSERT INTO memos(user_id,id,name) VALUES ('targeted','a','a'),('targeted','b','b'),('targeted','c','c');
       INSERT INTO memo_versions(user_id,memo_id,version,description,body,reason,actor_json)
         SELECT user_id,id,1,'Instruction '||id,'Preserve '||id||' exactly.','Fixture','{}' FROM memos;`);
     let calls = 0;
-    const store = compiledMemos(
+    const store = fixtureStore(
       betweenPhases(local.db, async () => calls++),
       "targeted",
-      { issuer: "fixture", clientId: "fixture" },
     );
     const initial = await store.getTpsReport();
     const request = {
@@ -542,7 +536,7 @@ test("targeted saves preserve omitted memos and reject invalid changes atomicall
 test("exact caller edits preserve conditions and scope without a model, with atomic anchors and replay", async () => {
   const local = await localStore();
   try {
-    await local.pg.exec("INSERT INTO users(id) VALUES ('exact')");
+    await seedUsers(local.pg, "exact");
     const sources = [
       {
         id: "a",
@@ -562,10 +556,7 @@ test("exact caller edits preserve conditions and scope without a model, with ato
         sql`INSERT INTO memo_versions(user_id,memo_id,version,description,body,reason,actor_json) VALUES ('exact',${m.id},1,${"Instruction " + m.id},${m.body},'Fixture','{}')`,
       );
     }
-    const store = compiledMemos(local.db, "exact", {
-      issuer: "fixture",
-      clientId: "fixture",
-    });
+    const store = fixtureStore(local.db, "exact");
     const initial = await store.getTpsReport();
     const input = {
       text: "Add API stability and remove mobile formatting, preserving scope.",
@@ -709,8 +700,9 @@ test("exact caller edits preserve conditions and scope without a model, with ato
 test("Postgres enforces separate UTF-8 field and memo caps and counts recovery bytes", async () => {
   const local = await localStore();
   try {
+    await seedUsers(local.pg, "m_caps");
     await local.pg.exec(
-      `UPDATE store_config SET limits_json=limits_json || '{"memos":1}'::jsonb; INSERT INTO users (id) VALUES ('m_caps');`,
+      `UPDATE store_config SET limits_json=limits_json || '{"memos":1}'::jsonb;`,
     );
     await local.pg.query(
       "INSERT INTO memos (user_id,id,name) VALUES ('m_caps','memo',$1)",
@@ -822,7 +814,7 @@ test("Postgres version conflicts and history-cap refusals return typed errors", 
   const local = await localStore();
   const userId = "m_00000000-0000-4000-8000-000000000001";
   try {
-    await local.db.query(sql`INSERT INTO users (id) VALUES (${userId})`);
+    await seedUsers(local.pg, userId);
     await local.db.query(
       sql`INSERT INTO memos (user_id,id,name) VALUES (${userId},'memo','sample')`,
     );
@@ -876,15 +868,13 @@ test("Postgres version conflicts and history-cap refusals return typed errors", 
 test("instruction cards edit independently inside a memo, keep write-once grouping, and fence stale changes", async () => {
   const local = await localStore();
   try {
-    await local.pg.exec(`INSERT INTO users(id) VALUES ('cards');
-      INSERT INTO memos(user_id,id,name) VALUES ('cards','a','writing'),('cards','b','actions');
+    await seedUsers(local.pg, "cards");
+    await local.pg
+      .exec(`INSERT INTO memos(user_id,id,name) VALUES ('cards','a','writing'),('cards','b','actions');
       INSERT INTO memo_versions(user_id,memo_id,version,description,body,reason,actor_json) VALUES
       ('cards','a',1,'Writing','When comparing products, include units.','Fixture','{}'),
       ('cards','b',1,'Actions','Ask before sending.','Fixture','{}');`);
-    const store = compiledMemos(local.db, "cards", {
-      issuer: "fixture",
-      clientId: "assistant",
-    });
+    const store = fixtureStore(local.db, "cards", "assistant");
     const before = await store.getTpsReport();
     const versions = (
       await local.pg.query(
@@ -1012,11 +1002,8 @@ test("instruction cards edit independently inside a memo, keep write-once groupi
 test("accepted change evidence replays once and rolls back with an over-quota save", async () => {
   const local = await localStore();
   try {
-    await local.pg.exec("INSERT INTO users(id) VALUES ('provenance')");
-    const store = compiledMemos(local.db, "provenance", {
-      issuer: "fixture",
-      clientId: "assistant",
-    });
+    await seedUsers(local.pg, "provenance");
+    const store = fixtureStore(local.db, "provenance", "assistant");
     const input = {
       text: "Keep examples short.\r\nOnly examples.",
       rules: [{ report: "cover" as const, text: "Keep examples short." }],

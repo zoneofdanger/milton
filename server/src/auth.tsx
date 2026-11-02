@@ -6,13 +6,11 @@ import type { RuntimeConfig } from "./config";
 import { isLoopback } from "./config";
 import {
   clearAssistantDisconnect,
-  deleteAccount,
   lookupIdentityAccount,
   resolveIdentityAccount,
   StoreError,
 } from "./store";
-import { accountChrome, isMemoRoute } from "./memo-pages";
-import type { Child } from "hono/jsx";
+import { isMemoRoute } from "./memo-pages";
 import { AuthError } from "./token";
 import { navigation, page } from "./pages";
 import {
@@ -21,14 +19,9 @@ import {
   silentLog,
   timed,
   upstreamError,
-  type SessionUser,
 } from "./auth-session";
-import {
-  assistants,
-  clientHost,
-  consentList,
-  readConsents,
-} from "./auth-assistants";
+import { assistants, clientHost } from "./auth-assistants";
+import { accountDeletion } from "./auth-account";
 
 function oauthQuery(
   request: Request,
@@ -80,7 +73,7 @@ export function browserPages(config: RuntimeConfig) {
   const csrfName = secure ? "__Host-milton-csrf" : "milton-csrf";
   const loopName = secure ? "__Host-milton-continue" : "milton-continue";
   return async (request: Request): Promise<Response> => {
-    const ctx = pageContext(config, request, secure, csrfName);
+    const ctx = pageContext(config, request, secure, csrfName, loopName);
     const {
       url,
       cookies,
@@ -89,175 +82,11 @@ export function browserPages(config: RuntimeConfig) {
       rotateCsrf,
       auth,
       session,
-      signedIn,
       identity,
       readForm,
       renderMemos,
     } = ctx;
     let loginRecovery: string | undefined;
-    // Account deletion. The phrase must match exactly; nothing is deleted
-    // until Milton has recorded a disconnect for every live consent.
-    const deletePhrase = "delete my account";
-    const activeAccount = async (user: SessionUser) => {
-      try {
-        await lookupIdentityAccount(config, {
-          provider: "neon",
-          subject: user.id,
-        });
-      } catch (error) {
-        if (error instanceof StoreError && error.code === "account_unavailable")
-          throw new StoreError(
-            "account_unavailable",
-            "This Milton account is unavailable. It may already be deleted.",
-            403,
-          );
-        throw error;
-      }
-    };
-    const deletionPage = (
-      user: SessionUser,
-      notice: Child = null,
-      status = 200,
-    ) =>
-      page(
-        "Delete your account",
-        <>
-          {accountChrome(csrfField, user.email, "delete")}
-          {notice}
-          <p>
-            Deleting your Milton account cannot be undone. To keep a copy of
-            your report, <a href="/download">download TPS.md</a> first.
-          </p>
-          <h2>Deleted now</h2>
-          <p>
-            Your rules, approved samples, report and its history, save receipts,
-            usage counters, and Milton's link to your sign-in. Every connected
-            assistant is disconnected and you are signed out.
-          </p>
-          <h2>Kept</h2>
-          <ul>
-            <li>Daily spending totals that are not linked to your account.</li>
-            <li>
-              A record of the assistants you connected (sign-in ID and assistant
-              ID, no content), so their old tokens cannot reach a new account.
-            </li>
-            <li>
-              A one-way fingerprint of your sign-in, so a new account does not
-              get a second trial.
-            </li>
-            <li>
-              If you received an early-access invitation, that invitation entry
-              (your sign-in ID), which an operator can remove.
-            </li>
-            <li>
-              Your sign-in record (email, name, Google or GitHub link) stays
-              with our sign-in provider. To remove it, email{" "}
-              <a href="mailto:support@meetmilton.com">support@meetmilton.com</a>
-              .
-            </li>
-            <li>
-              Copies in database backups are not erased immediately; they are
-              removed when those backups expire or are deleted.
-            </li>
-          </ul>
-          <form method="post" action="/account/delete">
-            {csrfField()}
-            <label>
-              <span>
-                Type <code>{deletePhrase}</code> to confirm.
-              </span>
-              <input
-                name="confirm"
-                autocomplete="off"
-                autocapitalize="none"
-                spellcheck={false}
-                required
-              />
-            </label>
-            <button class="secondary">Delete my account</button>
-          </form>
-        </>,
-        status,
-      );
-    const accountDeletion = async (): Promise<Response> => {
-      if (request.method !== "GET" && request.method !== "POST")
-        return page(
-          "Method not allowed",
-          <p>Use the page's controls to continue.</p>,
-          405,
-        );
-      if (request.method === "GET") {
-        const user = await signedIn();
-        await activeAccount(user);
-        return deletionPage(user);
-      }
-      const form = await readForm();
-      const user = await signedIn();
-      await activeAccount(user);
-      if (form.get("confirm") !== deletePhrase)
-        return deletionPage(
-          user,
-          <p role="alert">
-            Type {deletePhrase} exactly to delete your account. Nothing was
-            deleted.
-          </p>,
-          400,
-        );
-      let consents: z.infer<typeof consentList>;
-      try {
-        consents = await readConsents(ctx, user);
-      } catch (error) {
-        if (error instanceof AuthError && error.code === "session_required")
-          throw error;
-        throw new AuthError(
-          "deletion_unavailable",
-          "Account deletion is unavailable right now. Nothing was deleted. Try again.",
-          503,
-        );
-      }
-      await deleteAccount(
-        config,
-        { provider: "neon", subject: user.id },
-        consents.map((consent) => consent.clientId),
-      );
-      // Best effort from here: Milton already refuses every listed assistant.
-      await Promise.allSettled(
-        consents.map((consent) =>
-          timed(auth.oauth2.deleteConsent({ id: consent.id })),
-        ),
-      );
-      let signedOut = false;
-      try {
-        signedOut = !(await timed(auth.signOut())).error;
-      } catch {
-        /* The account is gone either way. */
-      }
-      writeCookie(csrfName, "", 0);
-      writeCookie(loopName, "", 0);
-      return page(
-        "Account deleted",
-        <>
-          <p role="status">Your Milton account is deleted.</p>
-          <p>
-            Your rules, approved samples, report and its history, save receipts
-            and usage counters are gone, and Milton no longer links to your
-            sign-in. Every connected assistant is disconnected.
-            {signedOut
-              ? " This browser is signed out."
-              : " Signing this browser out did not finish; sign out of your Google or GitHub account if this is a shared computer."}
-          </p>
-          <p>
-            Copies in database backups are not erased immediately; they are
-            removed when those backups expire or are deleted. Your sign-in
-            record stays with our sign-in provider. To remove it, email{" "}
-            <a href="mailto:support@meetmilton.com">support@meetmilton.com</a>.
-          </p>
-          <p>
-            <a href="/">Milton home</a>
-          </p>
-        </>,
-      );
-    };
     const perform = async (): Promise<Response> => {
       if (isMemoRoute(url.pathname) && url.pathname !== "/")
         return renderMemos();
@@ -266,7 +95,7 @@ export function browserPages(config: RuntimeConfig) {
         url.pathname === "/assistants/disconnect"
       )
         return assistants(ctx);
-      if (url.pathname === "/account/delete") return accountDeletion();
+      if (url.pathname === "/account/delete") return accountDeletion(ctx);
       if (!["/", "/login", "/consent", "/logout"].includes(url.pathname))
         return page("Not found", <p>This page does not exist.</p>, 404);
       if (

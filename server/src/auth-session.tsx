@@ -81,6 +81,7 @@ export function pageContext(
   request: Request,
   secure: boolean,
   csrfName: string,
+  loopName: string,
 ) {
   const url = new URL(request.url);
   const cookies: string[] = [];
@@ -220,6 +221,8 @@ export function pageContext(
     config,
     request,
     url,
+    csrfName,
+    loopName,
     cookies,
     writeCookie,
     csrfField,

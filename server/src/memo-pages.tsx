@@ -32,7 +32,8 @@ function trialBanner(status?: TrialStatus) {
         {status.status === "expired"
           ? "Your Milton trial has ended. Assistant reads and saves are paused. Your preferences are still here to view and download."
           : `Your Milton trial ends ${status.trial_ends_at!.slice(0, 10)} (UTC).`}{" "}
-        <a href="/billing">Subscribe for $5.01/month</a>
+        {/* Plain text until billing exists: /billing has no route. */}
+        Subscribe for $5.01/month.
       </p>
     </aside>
   );

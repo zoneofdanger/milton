@@ -218,7 +218,6 @@ test("trial transition preserves saves and TPS while notices and access follow t
       code: "trial_ending_7_days",
       trial_ends_at: new Date(0).toISOString(),
       message: "Fixture notice",
-      subscription_url: "https://app.example.test/billing",
     } as const;
     // The claim settles an hour late on fake clocks. Every timer the save could
     // race it against (setTimeout, AbortSignal.timeout, Bun.sleep), armed before
@@ -318,9 +317,7 @@ test("trial transition preserves saves and TPS while notices and access follow t
       error: "subscription_required",
       retryable: false,
     });
-    expect(racingSave.subscription_url).toBe(
-      "https://app.meetmilton.com/billing",
-    );
+    expect(racingSave).not.toHaveProperty("subscription_url");
     expect(await person.readTpsReport()).toEqual(report);
     const denied = await tools.get_cover_sheet();
     expect(denied.isError).toBe(true);

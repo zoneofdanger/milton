@@ -558,9 +558,9 @@ $5 proposal. Current early access remains free; no payment price exists in this 
 Billing is not launched. Do not enable it until authenticated `/billing` checkout,
 verified provider entitlement synchronization and the remaining launch policies are
 implemented and tested. This slice contains no Stripe API/webhook, checkout page,
-credentials or live subscription actions. Its subscription links reserve the
-same-origin `/billing` destination for that integration; they are not a working
-checkout yet. Existing early access must not acquire a payment gate implicitly.
+credentials or live subscription actions. Until `/billing` exists, the trial notice,
+the page banner and the `subscription_required` refusal carry no subscription link;
+the banner names the price as plain text. Existing early access must not acquire a payment gate implicitly.
 
 When explicitly enabled, only newly admitted accounts get a `trial_accounts` row.
 Existing accounts without a row remain early access, including on later sign-ins.

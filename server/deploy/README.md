@@ -21,9 +21,9 @@ decommission on 2026-11-01. Hosting rollback now uses Cloud Run revisions.
 Project `milton-510506`, Cloud Run/Artifact Registry region `us-east4`, Scheduler
 region `us-east1`. Service manifests in this directory pin an immutable image and
 secret versions. They contain configuration and secret references, never values.
-The manifests pin what is serving now: app `milton-app-cleanup1-c260d0f`
-(`sha256:832ec9d2…`, env 1, key 1), MCP `milton-mcp-cleanup1-c260d0f`
-(`sha256:832ec9d2…`, env 2, key 1) and worker `milton-worker-filing-f505745`
+The manifests pin what is serving now: app `milton-app-cleanup2-dc47f47`
+(`sha256:28d5118f…`, env 1, key 1), MCP `milton-mcp-cleanup2-dc47f47`
+(`sha256:28d5118f…`, env 2, key 1) and worker `milton-worker-filing-f505745`
 (`sha256:a370b7c3…`, env 4, key 1); see the release records below. The app and MCP
 manifests still set `MILTON_GLOBAL_SPEND_POLICY=alerts_only`, which the runtime no
 longer reads; the SQL policy in `store_config` controls admission. Existing positive account safeguards
@@ -210,13 +210,39 @@ gcloud run services update-traffic milton-mcp --to-revisions=milton-mcp-derived-
 gcloud run services update-traffic milton-worker --to-revisions=milton-worker-env4-cba4f6c=100 --project=milton-510506 --region=us-east4
 ```
 
-Now serving (since 2026-11-02 23:11:09Z): MCP `milton-mcp-cleanup1-c260d0f`, app
-`milton-app-cleanup1-c260d0f`, worker `milton-worker-filing-f505745`; each is recorded below.
+Now serving (since 2026-11-02 23:29:06Z): MCP `milton-mcp-cleanup2-dc47f47`, app
+`milton-app-cleanup2-dc47f47`, worker `milton-worker-filing-f505745`; each is recorded below.
 
-Current release cleanup1-c260d0f: app and MCP. Revisions `milton-app-cleanup1-c260d0f` and
+Current release cleanup2-dc47f47: app and MCP. Revisions `milton-app-cleanup2-dc47f47` and
+`milton-mcp-cleanup2-dc47f47`, staged with `--no-traffic`; at milton-lead's assignment under
+Peter's go, a release agent switched MCP at 2026-11-02 23:27:55Z and the app at 23:29:06Z,
+and each serves 100%. The worker stays on `milton-worker-filing-f505745`. Both run image
+`sha256:28d5118ffbb9f09f080b0ff35a597c2422a9cfe376d077c92c61fa73d70803e7` (amd64
+`sha256:ba74baeded2931564800fdd7b8a2d3a00db8381f5493bd66edf190771e635cdb`; uid 1000, Node 26,
+no env, key or pem files; build stage `oven/bun:1.4.4`), built from main `dc47f47`.
+Configuration is identical to the previous serving revisions apart from the image (app
+`milton-app-env:1`, `milton-app-key:1`; MCP `milton-mcp-env:2`, `milton-mcp-key:1`). No
+migration and no schema change. Change: the legacy memo store, the bundled no-store MCP path
+and the memo importer are deleted (the bundle has no `guardStoreRequest`, `generate-memos`,
+`import-memos` or `fflate`), and served strings say cover sheet and reports instead of TPS;
+the four tools are otherwise unchanged. After the switch, unauthenticated `/mcp` returned 401,
+discovery 200, an authenticated `get_cover_sheet` 200 with an unchanged version and bulleted
+rules, and `get_report("email")` 200 unchanged; the app and `/login` returned 200,
+`bun scripts/probe-forms.ts` printed `PASS`, and a signed-out `/download` returned the 403
+sign-in refusal. From 23:27Z to 23:39Z the two new revisions served 85 requests with no 5xx
+and no error logs, and 12 worker ticks returned 200.
+
+Rollback (image `sha256:832ec9d2…`; no schema change):
+
+```sh
+gcloud run services update-traffic milton-mcp --to-revisions=milton-mcp-cleanup1-c260d0f=100 --project=milton-510506 --region=us-east4
+gcloud run services update-traffic milton-app --to-revisions=milton-app-cleanup1-c260d0f=100 --project=milton-510506 --region=us-east4
+```
+
+Release cleanup1-c260d0f: app and MCP. Revisions `milton-app-cleanup1-c260d0f` and
 `milton-mcp-cleanup1-c260d0f`, staged with `--no-traffic`; at milton-lead's assignment under
 Peter's go, a release agent switched MCP at 2026-11-02 23:10:48Z and the app at 23:11:09Z,
-and each serves 100%. The worker stays on `milton-worker-filing-f505745`. Both run image
+and each served 100% until cleanup2-dc47f47. The worker stays on `milton-worker-filing-f505745`. Both run image
 `sha256:832ec9d28e90f511bd9acc55f27e53f46896806d559a3f1bf6bd2d7b50c32b68` (amd64
 `sha256:48b38305c682b149893611d8110760f094c75bbd7d9fd654ce1d66b99d1a45d0`; uid 1000, Node 26,
 no env, key or pem files; build stage `oven/bun:1.4.4`), built from main `c260d0f`.

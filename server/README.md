@@ -417,7 +417,8 @@ snapshot and publishes in a second transaction. Exact edits and moves name exist
 cards only through unique anchors; `rules` entries become new cards with
 server-assigned IDs. Omitted cards keep their exact bodies, descriptions and versions.
 The cover sheet and reports are assembled from the final stored active bodies and
-samples (see 0017 below). Bodies are not trimmed, rewritten or truncated;
+samples (see 0017 below). Bodies are not trimmed, rewritten or truncated, apart from
+one stored leading `- ` that the printed bullet replaces;
 descriptions are metadata, not an additional instruction source. Publication rechecks
 the account, request deadline, source fingerprint and report version; card versions,
 the current snapshot, receipt and single write charge commit together. Stale or conflicting
@@ -460,8 +461,9 @@ public archive/restore exemptions or history controls.
 
 The website shows the current cover sheet and reports, escapes their text and serves no browser JavaScript.
 It displays one bullet per complete active instruction card, preserving internal
-line breaks and conditions, only when a browser-only tenant-locked lookup matches
-the canonical report revision, source versions, order and exact assembled text.
+line breaks and conditions and dropping one stored leading `- ` as assembly does,
+only when a browser-only tenant-locked lookup returns the same version as the
+canonical report; it does not compare the text.
 Unavailable or mismatched layout data keeps the original plain-text view. Report
 pages preload the shared Geist and JetBrains Mono fonts; the theme uses
 `font-display: optional` to avoid a late font swap.
@@ -488,7 +490,9 @@ two per kind stay active, and retirement is the only automatic change.
 
 Assembly is deterministic and runs on read. Every rule prints as one bullet: `- `
 followed by its stored body, with one stored leading `- ` (as the retired compiler
-filed rules) dropped first, so rules from either era read alike; stored cards are not
+filed rules) dropped first, so rules from either era read alike. Known limitation: a
+rule whose own text starts with `- ` (stored as sent) prints as a plain bullet, so a
+reader cannot tell that dash is content. Stored cards are not
 edited. The cover sheet is the cover-sheet rules joined by blank lines; the fixed
 report index (one "when" line per report) travels beside it as data. Each report
 prints `# Title`, its when line, its active samples newest first (a context line with

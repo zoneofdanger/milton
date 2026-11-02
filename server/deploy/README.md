@@ -213,7 +213,7 @@ gcloud run services update-traffic milton-worker --to-revisions=milton-worker-en
 Now serving (since 2026-11-02 22:29:13Z): MCP `milton-mcp-rules-env2-e3f2f67`, app
 `milton-app-forms-92975ff`, worker `milton-worker-filing-f505745`; each is recorded below.
 
-Current release: revisions `milton-app-filing-f505745`, `milton-mcp-filing-f505745`, and
+Filing release: revisions `milton-app-filing-f505745`, `milton-mcp-filing-f505745`, and
 `milton-worker-filing-f505745`. The worker still serves them; since 22:00:35Z the app
 serves the forms-92975ff hotfix and since 22:29:13Z MCP serves rules-env2-e3f2f67, both
 below. They run image

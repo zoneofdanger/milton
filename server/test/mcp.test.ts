@@ -552,9 +552,13 @@ test("one code constant bounds requests: limits_json.request_bytes refuses nothi
     });
     const fixture = await tokenFixture();
     const authorization = `Bearer ${await fixture.token("bound")}`;
+    let verified = 0;
     const handler = createMiltonHandler(
       { ...local.env, issuer, resource, appOrigin: origin },
-      fixture.verify,
+      (header) => {
+        verified++;
+        return fixture.verify(header);
+      },
       (call) => logged.push(call),
     );
     client = new Client({ name: "bound-client", version: "0.0.0" });
@@ -594,8 +598,27 @@ test("one code constant bounds requests: limits_json.request_bytes refuses nothi
     expect(saved.isError).not.toBe(true);
     expect(text(saved).status).toBe("saved");
 
-    // Over the bound, the stream is refused once, before parsing, auth or a tool event.
+    // Over the bound, a well-formed create_memo call is refused once, before
+    // parsing, auth or a tool event; one that got through would log create_memo.
     logged.length = 0;
+    verified = 0;
+    const call = new TextEncoder().encode(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 9,
+        method: "tools/call",
+        params: {
+          name: "create_memo",
+          arguments: {
+            text: "Fictional oversized save.",
+            request_id: crypto.randomUUID(),
+            expected_version: sheet.version,
+            rules: [{ report: "email", text: "x".repeat(65536) }],
+          },
+        },
+      }),
+    );
+    expect(call.byteLength).toBeGreaterThan(65536);
     const oversized = await handler(
       new Request(resource, {
         method: "POST",
@@ -606,8 +629,7 @@ test("one code constant bounds requests: limits_json.request_bytes refuses nothi
         },
         body: new ReadableStream({
           start(c) {
-            c.enqueue(new TextEncoder().encode('{"method":"tools/call",'));
-            c.enqueue(new Uint8Array(65536).fill(32));
+            c.enqueue(call);
             c.close();
           },
         }),
@@ -616,6 +638,7 @@ test("one code constant bounds requests: limits_json.request_bytes refuses nothi
     expect(oversized.status).toBe(413);
     expect(await oversized.json()).toEqual({ error: "request_too_large" });
     expect(logged).toEqual([]);
+    expect(verified).toBe(0);
   } finally {
     await client?.close();
     await local.dispose();

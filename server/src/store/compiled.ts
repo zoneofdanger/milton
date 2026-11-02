@@ -7,6 +7,7 @@ import {
 } from "./cards";
 import {
   assembleDocuments,
+  bullet,
   resolveReportId,
   FILINGS,
   REPORT_IDS,
@@ -21,6 +22,7 @@ import { databaseFailure } from "./database";
 import { StoreError } from "./errors";
 import { readLimits, utf8Bytes } from "./index";
 import { exactEditsProposal, exactMoves } from "../exact-edits";
+import { MAX_REQUEST_BYTES } from "../http";
 import { assertTrialAccess } from "./trials";
 import { lockSpendPolicy } from "./spend-policy";
 import {
@@ -456,7 +458,7 @@ export function compiledMemos(
               outcome: result("conflict", { version: current.version }),
             };
           const limits = await readLimits(tx);
-          if (utf8Bytes(JSON.stringify(input)) > limits.request_bytes)
+          if (utf8Bytes(JSON.stringify(input)) > MAX_REQUEST_BYTES)
             throw new StoreError(
               "request_too_large",
               "The save request is too large.",
@@ -554,14 +556,15 @@ export function compiledMemos(
           })),
         );
         // The active rules as this save leaves them: edits, removals and moves
-        // applied. A changed rule may not end up byte-identical to another in
-        // its report, because neither could then be targeted; an untouched
-        // identical pair does not block the save.
+        // applied. A changed rule may not end up printing identically to another
+        // in its report, because neither could then be targeted; an untouched
+        // identical pair does not block the save. Rules compare as printed, so a
+        // bare rule and its compiler-era "- " twin are the same rule.
         const retiring = new Set(retire);
         const edited = new Map(updates.map((u) => [u.id, u.text]));
         const movedTo = new Map(moves.map((m) => [m.id, m.report]));
         const key = (report: string, body: string) =>
-          JSON.stringify([report, body]);
+          JSON.stringify([report, bullet(body)]);
         const after = claim.current.active
           .filter((h) => !retiring.has(h.id))
           .map((h) => {
@@ -586,16 +589,16 @@ export function compiledMemos(
             `This save would leave two identical rules in ${collision.report === "cover" ? "the cover sheet" : `the ${collision.report} report`}: "${describe(collision.body, 120)}". Change the wording or remove one of them. Nothing was changed.`,
             409,
           );
-        // A rule whose bytes match a rule in the same report after this save, or
+        // A rule that prints like a rule in the same report after this save, or
         // an earlier entry in this request, is skipped.
         const onFile = new Set(after.map((card) => card.key));
         const creates: { report: (typeof FILINGS)[number]; text: string }[] =
           [];
         for (const rule of input.rules ?? []) {
           const report = rule.report === "doc" ? "document" : rule.report;
-          const key = JSON.stringify([report, rule.text]);
-          if (onFile.has(key)) continue;
-          onFile.add(key);
+          const printed = key(report, rule.text);
+          if (onFile.has(printed)) continue;
+          onFile.add(printed);
           creates.push({ report, text: rule.text });
         }
         return await db.transaction(async (tx) => {

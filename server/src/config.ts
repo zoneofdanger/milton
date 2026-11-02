@@ -33,8 +33,7 @@ export function mcpRuntimeConfig(
       !valid(resource) ||
       app.href !== app.origin + "/" ||
       resource.pathname !== "/mcp" ||
-      issuer.href.endsWith("/") ||
-      (env.MEMOS_SOURCE && env.MEMOS_SOURCE !== "store")
+      issuer.href.endsWith("/")
     )
       throw new Error();
     return {
@@ -42,7 +41,6 @@ export function mcpRuntimeConfig(
       resource: resource.href,
       appOrigin: app.origin,
       DATABASE_URL: env.DATABASE_URL,
-      MEMOS_SOURCE: "store",
     };
   } catch {
     throw new StoreError(

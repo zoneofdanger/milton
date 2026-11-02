@@ -1265,7 +1265,7 @@ test("web shows only current TPS and rejects all retired history and mutation ro
     expect(download.headers.get("Content-Disposition")).toBe(
       'attachment; filename="TPS.md"',
     );
-    expect(await download.text()).toBe(body);
+    expect(await download.text()).toBe("- " + body);
   } finally {
     await fixture.dispose();
   }
@@ -1414,6 +1414,17 @@ test("report bullets require exact revision and complete text parity; optional l
   expect(html).toContain(
     '<ul class="instruction-list"><li>  Keep fictional units explicit.\n\nUnless a condition applies, preserve &lt;tag&gt; &amp; wording.  </li><li>Do the second instruction after the first.\nKeep this exception attached.\n</li></ul>',
   );
+  // A multi-line compiler-era rule drops its stored dash, as in MCP and TPS.md.
+  expect(
+    await (
+      await render(async () => ({
+        ...exact,
+        cover_rules: ["- Fictional older rule.\nIts second line."],
+      }))
+    ).text(),
+  ).toContain(
+    '<ul class="instruction-list"><li>Fictional older rule.\nIts second line.</li></ul>',
+  );
   expect(html.indexOf("<h1>Cover sheet</h1>")).toBeLessThan(
     html.indexOf('<ul class="instruction-list">'),
   );
@@ -1480,7 +1491,7 @@ test("report bullets require exact revision and complete text parity; optional l
     () => "",
   );
   expect(await titled.text()).toContain(
-    '<h2 class="instruction-group">Email</h2><p class="small-note">Applies when fictional.</p><figure class="sample"><figcaption>Approved, after a call, 2026-11-02</figcaption><blockquote><pre class="memo-text"><span>Hi &lt;there&gt;,\n\nThanks.</span></pre></blockquote></figure><ul class="instruction-list"><li>One.</li><li>- Two\nlines.</li></ul>',
+    '<h2 class="instruction-group">Email</h2><p class="small-note">Applies when fictional.</p><figure class="sample"><figcaption>Approved, after a call, 2026-11-02</figcaption><blockquote><pre class="memo-text"><span>Hi &lt;there&gt;,\n\nThanks.</span></pre></blockquote></figure><ul class="instruction-list"><li>One.</li><li>Two\nlines.</li></ul>',
   );
 });
 

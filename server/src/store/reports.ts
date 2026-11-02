@@ -83,6 +83,13 @@ export type Documents = {
 
 const rules = (active: CardHead[], report: Filing) =>
   active.filter((h) => h.report === report).map((h) => h.body);
+/** A rule's text without its bullet: one stored leading "- " (the retired
+ * compiler's) dropped. The stored bytes stay as they are. */
+export const ruleText = (body: string) =>
+  body.startsWith("- ") ? body.slice(2) : body;
+/** One rule as printed: a bullet, whether the body was stored with the retired
+ * compiler's leading "- " or as sent since. */
+export const bullet = (body: string) => "- " + ruleText(body);
 const quote = (body: string) =>
   body
     .split("\n")
@@ -90,11 +97,12 @@ const quote = (body: string) =>
     .join("\n");
 
 export const coverSheetText = (active: CardHead[]) =>
-  rules(active, "cover").join("\n\n");
+  rules(active, "cover").map(bullet).join("\n\n");
 export const reportIndex = () =>
   REPORTS.map((r) => ({ id: r.id, when: r.when }));
 /** Heading, the when line, samples newest first (context line, quoted body),
- * then rules. Every stored byte of a rule or sample is preserved. */
+ * then rules as bullets. Every stored byte of a rule or sample is preserved,
+ * apart from one leading "- " a bullet replaces. */
 export function reportDocument(
   report: (typeof REPORTS)[number],
   active: CardHead[],
@@ -113,7 +121,7 @@ export function reportDocument(
     `# ${report.title}`,
     `Applies when ${report.when}.`,
     ...own.map((s) => `Approved, ${s.context}, ${s.date}:\n${quote(s.body)}`),
-    ...rules(active, report.id),
+    ...rules(active, report.id).map(bullet),
   ];
   return {
     id: report.id,

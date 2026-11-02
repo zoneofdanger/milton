@@ -24,11 +24,14 @@ import {
   migratedThrough,
   migrationsThrough,
 } from "./local-store";
-import { createStoreMemoTools, reportEnvelope } from "../src/store/tools";
+import {
+  coverSheet,
+  createStoreMemoTools,
+  reportEnvelope,
+} from "../src/store/tools";
 import { createHash } from "node:crypto";
 import {
   deleteAccount,
-  guardStoreRequest,
   resolveIdentityAccount,
   lookupIdentityAccount,
   storeForCurrentRequest,
@@ -406,8 +409,8 @@ test("compiled saves publish memos and TPS together and charge once with durable
     expect(saved.status).toBe("saved");
     const current = await store.getTpsReport();
     expect(current.text.split("\n\n").sort()).toEqual([
-      "Ask before sending.",
-      "Be concise.",
+      "- Ask before sending.",
+      "- Be concise.",
     ]);
     expect(current.version).not.toBe(empty.version);
     expect(await store.saveMemo(input)).toEqual(saved);
@@ -474,7 +477,8 @@ test("TPS preserves every active source body verbatim and refreshes only the der
     const source =
       "Where relevant, identify products by their full model names.\n\nKeep exceptions intact.\n";
     const companion = "  Keep units explicit: µm.\r\nDo not infer a model.  ";
-    const exact = companion + "\n\n" + source;
+    // Each rule prints as a bullet ahead of its exact stored bytes.
+    const exact = "- " + companion + "\n\n- " + source;
     await local.db.query(sql`INSERT INTO memos(user_id,id,name) VALUES
       ('fidelity','z','product-naming'),('fidelity','a','units'),('fidelity','retired','old');`);
     await local.db
@@ -676,7 +680,7 @@ test("stale and failed compiled saves preserve current memos, receipts and charg
     expect((await pending).status).toBe("conflict");
     expect(calls).toBe(2);
     const first = await store.getTpsReport();
-    expect(first.text).toBe("Be concise.");
+    expect(first.text).toBe("- Be concise.");
     // Throw after actual commit: receipt resolution must report the committed result.
     let dropped = false;
     const uncertain = {
@@ -706,7 +710,7 @@ test("stale and failed compiled saves preserve current memos, receipts and charg
     });
     expect(saved.status).toBe("saved");
     if (!saved.version) throw new Error("Saved revision missing");
-    expect((await store.getTpsReport()).text).toBe("Lead with the answer.");
+    expect((await store.getTpsReport()).text).toBe("- Lead with the answer.");
     expect((await store.saveMemo(fast)).version).toBe(first.version);
     expect((await store.getTpsReport()).version).toBe(saved.version);
     const before = await local.pg.query(
@@ -1072,7 +1076,7 @@ test("targeted saves preserve omitted memos and reject invalid changes atomicall
     expect(heads.filter((h) => !h.archived)).toHaveLength(3);
     // A new card appends after existing ones, whatever its random ID.
     expect(current.text).toBe(
-      "Change a only.\n\nPreserve b exactly.\n\nAdd d.",
+      "- Change a only.\n\n- Preserve b exactly.\n\n- Add d.",
     );
     const history = await local.pg.query(
       "SELECT * FROM instruction_card_versions WHERE user_id='targeted' ORDER BY card_id,version",
@@ -1183,7 +1187,9 @@ test("exact caller edits preserve conditions and scope without a model, with ato
           input.exact_edits[1]!.after,
         ),
         sources[2]!.body,
-      ].join("\n\n"),
+      ]
+        .map((body) => "- " + body)
+        .join("\n\n"),
     );
     const history = await local.pg.query(
       "SELECT * FROM instruction_card_versions WHERE user_id='exact' ORDER BY card_id,version",
@@ -1270,7 +1276,7 @@ test("exact caller edits preserve conditions and scope without a model, with ato
       "saved",
     );
     expect((await store.getTpsReport()).text).toBe(
-      report.text.slice(0, -(sources[2]!.body.length + 2)),
+      report.text.slice(0, -("\n\n- ".length + sources[2]!.body.length)),
     );
     expect(
       (
@@ -1354,6 +1360,291 @@ test("rules are stored byte for byte, one card each, with one charge", async () 
         )
       ).rows,
     ).toEqual([{ writes: 1 }]);
+  } finally {
+    await local.dispose();
+  }
+});
+
+test("every rule reads as one bullet, whether stored with the compiler's leading dash or as sent", async () => {
+  const local = await localStore();
+  try {
+    await local.pg.exec("INSERT INTO users(id) VALUES ('bullets')");
+    const store = compiledMemos(local.db, "bullets", {
+      issuer: "fixture",
+      clientId: "fixture",
+    });
+    // The retired compiler stored "- " before each rule; saves since store the rule as sent.
+    const rules = [
+      { report: "cover" as const, text: "- Never use em dashes." },
+      { report: "cover" as const, text: "Use the Oxford comma." },
+      { report: "email" as const, text: "- Sign off with Best." },
+      { report: "email" as const, text: "Open with Hi and a first name." },
+    ];
+    expect(
+      await store.saveMemo({
+        text: "Add four fictional rules.",
+        request_id: crypto.randomUUID(),
+        expected_version: (await store.getTpsReport()).version,
+        rules,
+      }),
+    ).toMatchObject({ status: "saved" });
+    const documents = await store.readDocuments();
+    expect(documents.cover).toBe(
+      "- Never use em dashes.\n\n- Use the Oxford comma.",
+    );
+    expect(
+      reportEnvelope(documents, "email").text.split("\n\n").slice(2),
+    ).toEqual(["- Sign off with Best.", "- Open with Hi and a first name."]);
+    expect(coverSheet(documents).text).toBe(documents.cover);
+    // Assembly is presentation only: the stored cards keep their exact bytes.
+    expect(
+      (
+        await local.pg.query(
+          "SELECT body FROM instruction_card_versions WHERE user_id='bullets' ORDER BY body",
+        )
+      ).rows.map((r) => (r as { body: string }).body),
+    ).toEqual(rules.map((r) => r.text).sort());
+  } finally {
+    await local.dispose();
+  }
+});
+
+test("edits and moves accept a quoted bullet for rules stored with or without the dash", async () => {
+  const local = await localStore();
+  try {
+    await local.pg.exec("INSERT INTO users(id) VALUES ('anchors')");
+    const store = compiledMemos(local.db, "anchors", {
+      issuer: "fixture",
+      clientId: "fixture",
+    });
+    const save = async (change: Partial<SaveMemoInput>) =>
+      store.saveMemo({
+        text: "Fictional change.",
+        request_id: crypto.randomUUID(),
+        expected_version: (await store.getTpsReport()).version,
+        ...change,
+      });
+    const bodies = async () =>
+      (
+        await local.pg.query(
+          `SELECT DISTINCT ON (card_id) report,body FROM instruction_card_versions
+          WHERE user_id='anchors' AND NOT archived ORDER BY card_id,version DESC`,
+        )
+      ).rows
+        .map((r) => r as { report: string; body: string })
+        .sort((a, b) => a.body.localeCompare(b.body));
+    expect(
+      await save({
+        rules: [
+          { report: "cover", text: "- Old rule here." },
+          { report: "cover", text: "New rule here." },
+          { report: "cover", text: "Shared phrase one." },
+          { report: "cover", text: "Shared phrase two." },
+        ],
+      }),
+    ).toMatchObject({ status: "saved" });
+    // Both quoted as printed: the old one matches verbatim, the new one without
+    // its printed dash, and a copied bullet in after is not doubled.
+    expect(
+      await save({
+        exact_edits: [
+          { before: "- Old rule here.", after: "- Old rule changed." },
+          { before: "- New rule here.", after: "- New rule changed." },
+        ],
+      }),
+    ).toMatchObject({ status: "saved" });
+    expect(
+      await save({
+        moves: [
+          { before: "- Old rule changed.", report: "email" },
+          { before: "- New rule changed.", report: "email" },
+        ],
+      }),
+    ).toMatchObject({ status: "saved" });
+    // The new-style rule still matches without the dash.
+    expect(
+      await save({
+        exact_edits: [
+          { before: "New rule changed.", after: "New rule edited." },
+        ],
+        moves: [{ before: "New rule changed.", report: "chat" }],
+      }),
+    ).toMatchObject({ status: "saved" });
+    expect(await bodies()).toEqual([
+      { report: "email", body: "- Old rule changed." },
+      { report: "chat", body: "New rule edited." },
+      { report: "cover", body: "Shared phrase one." },
+      { report: "cover", body: "Shared phrase two." },
+    ]);
+    // Ambiguity is unchanged: a bullet-stripped anchor in two rules conflicts.
+    const before = await bodies();
+    expect(
+      await save({ exact_edits: [{ before: "- Shared phrase", after: "x" }] }),
+    ).toMatchObject({ status: "failed", error: "edit_conflict" });
+    expect(
+      await save({ moves: [{ before: "- Shared phrase", report: "post" }] }),
+    ).toMatchObject({ status: "failed", error: "move_conflict" });
+    expect(await bodies()).toEqual(before);
+  } finally {
+    await local.dispose();
+  }
+});
+
+test("anchors resolve against the printed rules, so a quote never lands on a rule the person did not see it in", async () => {
+  const local = await localStore();
+  try {
+    await local.pg.exec("INSERT INTO users(id) VALUES ('printed')");
+    const store = compiledMemos(local.db, "printed", {
+      issuer: "fixture",
+      clientId: "fixture",
+    });
+    const save = async (change: Partial<SaveMemoInput>) =>
+      store.saveMemo({
+        text: "Fictional change.",
+        request_id: crypto.randomUUID(),
+        expected_version: (await store.getTpsReport()).version,
+        ...change,
+      });
+    const bodies = async () =>
+      (
+        await local.pg.query(
+          `SELECT DISTINCT ON (card_id) report,body FROM instruction_card_versions
+          WHERE user_id='printed' AND NOT archived ORDER BY card_id,version DESC`,
+        )
+      ).rows
+        .map((r) => r as { report: string; body: string })
+        .sort((a, b) => a.body.localeCompare(b.body));
+    expect(
+      await save({
+        rules: [
+          { report: "cover", text: "Be concise" },
+          { report: "cover", text: "In email:\n- Be concise" },
+          { report: "cover", text: "- Be concise when replying" },
+          { report: "cover", text: "Avoid jargon and filler." },
+          { report: "cover", text: "Short." },
+        ],
+      }),
+    ).toMatchObject({ status: "saved" });
+    const filed = await bodies();
+    // "- Be concise" is printed in three rules: the bare one, the multi-line
+    // one's second line and the compiler-era one. Each quote is refused, as are
+    // quotes that appear nowhere in the printed text.
+    for (const before of [
+      "- Be concise",
+      "-  ",
+      "- \t",
+      "- jargon",
+      "- ",
+      "-",
+    ]) {
+      expect(
+        await save({ exact_edits: [{ before, after: "- Be brief" }] }),
+      ).toMatchObject({ status: "failed", error: "edit_conflict" });
+      expect(
+        await save({ moves: [{ before, report: "email" }] }),
+      ).toMatchObject({ status: "failed", error: "move_conflict" });
+    }
+    expect(await bodies()).toEqual(filed);
+    // Quotes unique in the printed text land on the rule they were copied from.
+    expect(
+      await save({
+        exact_edits: [
+          {
+            before: "- Be concise when replying",
+            after: "- Be brief when replying",
+          },
+          { before: "In email:\n- Be concise", after: "In email:\n- Be brief" },
+          { before: "- Avoid jargon and filler.", after: "- Avoid filler." },
+        ],
+        moves: [{ before: "- Short.", report: "chat" }],
+      }),
+    ).toMatchObject({ status: "saved" });
+    expect(await bodies()).toEqual([
+      { report: "cover", body: "- Be brief when replying" },
+      { report: "cover", body: "Avoid filler." },
+      { report: "cover", body: "Be concise" },
+      { report: "cover", body: "In email:\n- Be brief" },
+      { report: "chat", body: "Short." },
+    ]);
+    expect((await store.readDocuments()).cover).toBe(
+      "- Be concise\n\n- In email:\n- Be brief\n\n- Be brief when replying\n\n- Avoid filler.",
+    );
+  } finally {
+    await local.dispose();
+  }
+});
+
+test("duplicate checks compare printed rules, so a bare rule beside its compiler-era twin is skipped or refused", async () => {
+  const local = await localStore();
+  try {
+    await local.pg.exec("INSERT INTO users(id) VALUES ('twins')");
+    const store = compiledMemos(local.db, "twins", {
+      issuer: "fixture",
+      clientId: "fixture",
+    });
+    const save = async (change: Partial<SaveMemoInput>) =>
+      store.saveMemo({
+        text: "Fictional change.",
+        request_id: crypto.randomUUID(),
+        expected_version: (await store.getTpsReport()).version,
+        ...change,
+      });
+    expect(
+      await save({
+        rules: [
+          { report: "cover", text: "- Be concise." },
+          { report: "cover", text: "Be brief." },
+        ],
+      }),
+    ).toMatchObject({ status: "saved" });
+    // "Be concise." prints exactly as the compiler-era "- Be concise.".
+    expect(
+      await save({ rules: [{ report: "cover", text: "Be concise." }] }),
+    ).toMatchObject({ status: "unchanged" });
+    expect(
+      await save({
+        exact_edits: [{ before: "Be brief.", after: "Be concise." }],
+      }),
+    ).toMatchObject({ status: "failed", error: "edit_conflict" });
+    expect((await store.readDocuments()).cover).toBe(
+      "- Be concise.\n\n- Be brief.",
+    );
+  } finally {
+    await local.dispose();
+  }
+});
+
+test("the report cap measures the printed text, bullets included", async () => {
+  const local = await localStore();
+  try {
+    await local.pg.exec("INSERT INTO users(id) VALUES ('capped')");
+    const store = compiledMemos(local.db, "capped", {
+      issuer: "fixture",
+      clientId: "fixture",
+    });
+    // Long enough that the cover sheet, not an empty report's heading, binds.
+    const rule = "Keep it short. ".repeat(20).trim();
+    // The stored rule fits the cap; printed with its bullet it is one byte over.
+    await local.pg.exec(
+      `UPDATE store_config SET limits_json=limits_json || '{"report_body_bytes":${rule.length + 1}}'::jsonb`,
+    );
+    const save = async (text: string) =>
+      store.saveMemo({
+        text: "Fictional change.",
+        request_id: crypto.randomUUID(),
+        expected_version: (await store.getTpsReport()).version,
+        rules: [{ report: "cover", text }],
+      });
+    expect(await save(rule)).toMatchObject({
+      status: "failed",
+      error: "tps_body_limit",
+    });
+    expect((await store.readDocuments()).cover).toBe("");
+    await local.pg.exec(
+      `UPDATE store_config SET limits_json=limits_json || '{"report_body_bytes":${rule.length + 2}}'::jsonb`,
+    );
+    expect(await save(rule)).toMatchObject({ status: "saved" });
+    expect((await store.readDocuments()).cover).toBe("- " + rule);
   } finally {
     await local.dispose();
   }
@@ -1864,37 +2155,11 @@ test("Postgres version conflicts and history-cap import refusals return typed er
   }
 }, 30000);
 
-test("store ingress bounds streamed bodies before parsing and preserves typed failures", async () => {
+test("identity resolution preserves a typed store failure", async () => {
   const local = await localStore();
   try {
-    const bindings = { ...local.env, MEMOS_SOURCE: "store" };
-    const refused = await guardStoreRequest(
-      new Request("http://localhost:8787/mcp", {
-        method: "POST",
-        body: new ReadableStream<Uint8Array>({
-          start(controller) {
-            controller.enqueue(new Uint8Array(65537));
-            controller.close();
-          },
-        }),
-      }),
-      bindings,
-    );
-    expect(refused).toBeInstanceOf(Response);
-    if (!(refused instanceof Response))
-      throw new Error("Expected body refusal");
-    expect(refused.status).toBe(413);
-    expect(
-      await guardStoreRequest(
-        new Request("http://localhost:8787/register", {
-          method: "POST",
-          body: "{}",
-        }),
-        bindings,
-      ),
-    ).toBeInstanceOf(Request);
     const unavailable = {
-      ...bindings,
+      ...local.env,
       storeDatabase: new Proxy(local.db, {
         get(target, key) {
           if (key === "query" || key === "transaction")
@@ -1905,15 +2170,6 @@ test("store ingress bounds streamed bodies before parsing and preserves typed fa
         },
       }),
     };
-    await expect(
-      guardStoreRequest(
-        new Request("http://localhost:8787/register", {
-          method: "POST",
-          body: "{}",
-        }),
-        unavailable,
-      ),
-    ).rejects.toMatchObject({ code: "store_unavailable", status: 503 });
     await expect(
       resolveIdentityAccount(unavailable, {
         provider: "neon",
@@ -2438,7 +2694,7 @@ test("instruction cards edit independently inside a memo, keep write-once groupi
     expect(saved.status).toBe("saved");
     expect(await store.saveMemo(request)).toEqual(saved);
     expect((await store.getTpsReport()).text).toBe(
-      "When comparing products, include units.\n\nGet approval before sending.",
+      "- When comparing products, include units.\n\n- Get approval before sending.",
     );
     expect(
       (
@@ -3785,7 +4041,7 @@ test("memo-update holds fence last-slot dispatch, expired claims, activation and
     });
     expect(
       (await compiledMemos(local.db, "hold-commit").getTpsReport()).text,
-    ).toBe("committed request");
+    ).toBe("- committed request");
   } finally {
     await local.dispose();
   }

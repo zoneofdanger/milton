@@ -31,19 +31,9 @@ export const TPS_REPORT_KEY = "vibes";
 
 export interface StoreBindings {
   DATABASE_URL?: string;
-  MEMOS_SOURCE?: string;
   // Private dependency injection for the embedded fixture; never populated from a request.
   storeDatabase?: StoreDatabase;
   appOrigin?: string;
-}
-export function memosSource(bindings: StoreBindings) {
-  const source = bindings.MEMOS_SOURCE ?? "bundle";
-  if (source !== "bundle" && source !== "store")
-    throw new StoreError(
-      "configuration",
-      "MEMOS_SOURCE must be bundle or store.",
-    );
-  return source;
 }
 function database(bindings: StoreBindings): StoreDatabase {
   if (bindings.storeDatabase) return bindings.storeDatabase;
@@ -62,7 +52,6 @@ const limitsSchema = z.object({
   report_body_bytes: positiveLimit,
   daily_calls: positiveLimit,
   daily_writes: positiveLimit,
-  request_bytes: positiveLimit,
   page_size: positiveLimit.max(50),
 });
 export type StoreLimits = z.infer<typeof limitsSchema>;
@@ -834,37 +823,3 @@ export async function personStoreForCurrentRequest(
 export type PersonStore = Awaited<
   ReturnType<typeof personStoreForCurrentRequest>
 >;
-
-export async function guardStoreRequest(
-  request: Request,
-  bindings: StoreBindings,
-): Promise<Request | Response> {
-  if (memosSource(bindings) === "bundle") return request;
-  const db = database(bindings);
-  const limits = await readLimits(db);
-  let bounded = request;
-  if (request.body) {
-    const reader = request.body.getReader();
-    const chunks: Uint8Array[] = [];
-    let size = 0;
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      size += value.byteLength;
-      if (size > limits.request_bytes) {
-        await reader.cancel();
-        return Response.json({ error: "request_too_large" }, { status: 413 });
-      }
-      chunks.push(value);
-    }
-    const body = new Uint8Array(size);
-    let offset = 0;
-    for (const chunk of chunks) {
-      body.set(chunk, offset);
-      offset += chunk.byteLength;
-    }
-    bounded = new Request(request, { body: body.buffer });
-  }
-
-  return bounded;
-}

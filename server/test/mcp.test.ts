@@ -6,7 +6,11 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { checkMcp } from "../scripts/check-mcp";
 import { loadMemos } from "../src/memos";
-import { createMiltonServer, storeInstructions } from "../src/mcp";
+import {
+  createMiltonServer,
+  storeInstructions,
+  type ToolCall,
+} from "../src/mcp";
 import { saveMemoInput } from "../src/store/compiled";
 import { createMiltonHandler } from "../src/handler";
 import { createAccessTokenVerifier } from "../src/token";
@@ -75,7 +79,7 @@ test("server instructions fit within Claude Code's 4,096-character limit", () =>
   expect(storeInstructions.length).toBeLessThanOrEqual(4096);
 });
 
-test("an SDK client receives instructions, discovers the four tools, and reads TPS", async () => {
+test("an SDK client receives instructions, discovers the four tools, and reads the cover sheet", async () => {
   const calls: string[] = [];
   const server = createMiltonServer(
     await loadMemos(new URL("../../templates/", import.meta.url)),
@@ -123,7 +127,6 @@ test("two authenticated clients isolate tenants, save once and reject retired to
     const handler = createMiltonHandler(
       {
         ...local.env,
-        MEMOS_SOURCE: "store",
         issuer,
         resource,
         appOrigin: origin,
@@ -252,7 +255,7 @@ test("two authenticated clients isolate tenants, save once and reject retired to
     expect(saved.value.status).toBe("saved");
     expect(await call(0, "create_memo", input)).toEqual(saved);
     const filed = (await call(0, "get_cover_sheet")).value;
-    expect(filed.text).toBe(input.text);
+    expect(filed.text).toBe("- " + input.text);
     expect(filed.setup).toBeUndefined();
     const lifecycle = await call(0, "get_cover_sheet", {
       hook_event: "UserPromptSubmit",
@@ -332,7 +335,7 @@ test("two authenticated clients isolate tenants, save once and reject retired to
     expect(exactResult.value.status).toBe("saved");
     expect(await call(0, "create_memo", exact)).toEqual(exactResult);
     expect((await call(0, "get_cover_sheet")).value.text).toBe(
-      "Lead with the conclusion.",
+      "- Lead with the conclusion.",
     );
     expect((await call(1, "get_cover_sheet")).value.text).toBe("");
     const rejected = await handler(
@@ -367,7 +370,6 @@ test("disconnected assistants and assistants of a deleted account are refused, e
     const handler = createMiltonHandler(
       {
         ...local.env,
-        MEMOS_SOURCE: "store",
         issuer,
         resource,
         appOrigin: origin,
@@ -481,7 +483,6 @@ test("MCP refuses unsafe transports and oversized bodies before database access"
         issuer,
         resource,
         appOrigin: "https://mcp.meetmilton.com",
-        MEMOS_SOURCE: "store",
       },
       fixture.verify,
     );
@@ -532,6 +533,114 @@ test("MCP refuses unsafe transports and oversized bodies before database access"
     expect(oversized.status).toBe(413);
     expect(queries).toBe(0);
   } finally {
+    await local.dispose();
+  }
+}, 30000);
+
+test("one code constant bounds requests: limits_json.request_bytes refuses nothing, and an oversized body is refused once", async () => {
+  const local = await localStore();
+  const logged: ToolCall[] = [];
+  let client: Client | undefined;
+  try {
+    // A lowered stored value must not refuse a body within the code bound.
+    await local.db.query(
+      sql`UPDATE store_config SET signup_mode='open', limits_json = limits_json || '{"request_bytes":256}'::jsonb`,
+    );
+    await resolveIdentityAccount(local.env, {
+      provider: "neon",
+      subject: "bound",
+    });
+    const fixture = await tokenFixture();
+    const authorization = `Bearer ${await fixture.token("bound")}`;
+    let verified = 0;
+    const handler = createMiltonHandler(
+      { ...local.env, issuer, resource, appOrigin: origin },
+      (header) => {
+        verified++;
+        return fixture.verify(header);
+      },
+      (call) => logged.push(call),
+    );
+    client = new Client({ name: "bound-client", version: "0.0.0" });
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(resource), {
+        fetch: (input, init) => {
+          const request = new Request(input, init);
+          request.headers.set("Host", new URL(request.url).host);
+          return handler(request);
+        },
+        requestInit: { headers: { Authorization: authorization } },
+      }),
+    );
+    const text = (reply: unknown) =>
+      z
+        .record(z.string(), z.unknown())
+        .parse(
+          JSON.parse(
+            z
+              .object({ content: z.array(z.object({ text: z.string() })) })
+              .parse(reply).content[0]!.text,
+          ),
+        );
+    const sheet = text(
+      await client.callTool({ name: "get_cover_sheet", arguments: {} }),
+    );
+    const rule = "Keep every sentence short and plain. ".repeat(30).trim();
+    const saved = await client.callTool({
+      name: "create_memo",
+      arguments: {
+        text: "Bound check",
+        request_id: crypto.randomUUID(),
+        expected_version: sheet.version,
+        rules: [{ report: "email", text: rule }],
+      },
+    });
+    expect(saved.isError).not.toBe(true);
+    expect(text(saved).status).toBe("saved");
+
+    // Over the bound, a well-formed create_memo call is refused once, before
+    // parsing, auth or a tool event; one that got through would log create_memo.
+    logged.length = 0;
+    verified = 0;
+    const call = new TextEncoder().encode(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 9,
+        method: "tools/call",
+        params: {
+          name: "create_memo",
+          arguments: {
+            text: "Fictional oversized save.",
+            request_id: crypto.randomUUID(),
+            expected_version: sheet.version,
+            rules: [{ report: "email", text: "x".repeat(65536) }],
+          },
+        },
+      }),
+    );
+    expect(call.byteLength).toBeGreaterThan(65536);
+    const oversized = await handler(
+      new Request(resource, {
+        method: "POST",
+        headers: {
+          Host: new URL(resource).host,
+          Authorization: authorization,
+          "Content-Type": "application/json",
+        },
+        body: new ReadableStream({
+          start(c) {
+            c.enqueue(call);
+            c.close();
+          },
+        }),
+      }),
+    );
+    expect(oversized.status).toBe(413);
+    expect(await oversized.json()).toEqual({ error: "request_too_large" });
+    expect(logged).toEqual([]);
+    expect(verified).toBe(0);
+  } finally {
+    await client?.close();
     await local.dispose();
   }
 }, 30000);

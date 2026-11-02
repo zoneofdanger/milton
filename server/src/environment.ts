@@ -3,10 +3,11 @@ import { config } from "@dotenvx/dotenvx";
 
 // The encrypted payload is a mounted secret file (Cloud Run); its private key
 // is a separate platform secret. The retired inline MILTON_ENCRYPTED_ENV value
-// is refused rather than ignored, so a caller still setting it fails closed.
+// is refused rather than ignored, so a caller still setting it fails closed;
+// an empty or whitespace-only value counts as unset.
 export function loadEnvironment(env: NodeJS.ProcessEnv = process.env) {
   const path = env.MILTON_ENCRYPTED_ENV_FILE;
-  if (env.MILTON_ENCRYPTED_ENV !== undefined)
+  if (env.MILTON_ENCRYPTED_ENV?.trim())
     throw new Error("Milton runtime secrets are unavailable.");
   if (!path) return env; // Local development and staged rollout.
   try {

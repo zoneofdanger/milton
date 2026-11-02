@@ -11,7 +11,13 @@ test("an inline encrypted payload without a file is refused, not ignored", () =>
       DOTENV_PRIVATE_KEY: "fixture",
     }),
   ).toThrow("Milton runtime secrets are unavailable.");
-  // Without any payload the environment is used as it is (local development).
-  const plain = { DATABASE_URL: "postgres://fixture" };
-  expect(loadEnvironment(plain)).toBe(plain);
+  // Without any payload the environment is used as it is (local development);
+  // an empty or whitespace-only inline value counts as unset.
+  for (const inline of [undefined, "", "  \n"]) {
+    const plain = {
+      DATABASE_URL: "postgres://fixture",
+      ...(inline === undefined ? {} : { MILTON_ENCRYPTED_ENV: inline }),
+    };
+    expect(loadEnvironment(plain)).toBe(plain);
+  }
 });

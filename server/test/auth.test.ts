@@ -12,7 +12,9 @@ import {
   lookupIdentityAccount,
   personStoreForCurrentRequest,
   storeForCurrentRequest,
+  StoreError,
 } from "../src/store";
+import { localAsset } from "../src/assets";
 import { localStore } from "./local-store";
 
 const appOrigin = "http://localhost:3001";
@@ -1104,7 +1106,9 @@ test("pages on the MCP host redirect to the app host; assistant routes stay", as
   expect(discovery.status).toBe(200);
 });
 
-async function memoPageFixture() {
+async function memoPageFixture(
+  answer?: (path: string) => Response | undefined,
+) {
   const local = await localStore();
   await local.db.query(sql`UPDATE store_config SET signup_mode='open'`);
   await resolveIdentityAccount(local.env, {
@@ -1120,7 +1124,9 @@ async function memoPageFixture() {
     issuer,
     clientId: "fixture",
   });
-  const upstream = fakeNeon((_path, _body, _request, url) => {
+  const upstream = fakeNeon((path, _body, _request, url) => {
+    const answered = answer?.(path);
+    if (answered) return answered;
     if (url.href !== issuer + "/get-session")
       throw new Error("Unexpected upstream endpoint");
     return neonSession("page-fixes");
@@ -1166,7 +1172,9 @@ test("trial reminders stay outside TPS and expired accounts retain web view and 
     );
     const warning = await fixture.send("/");
     expect(warning.status).toBe(200);
-    expect(await warning.text()).toContain('href="/billing"');
+    const warned = await warning.text();
+    expect(warned).toContain("Subscribe for $5.01/month.");
+    expect(warned).not.toContain('href="/billing"');
     // Page views do not consume an assistant's reminder milestone.
     expect(
       (await fixture.db.query(sql`SELECT notice_stage FROM trial_accounts`))[0]!
@@ -1185,6 +1193,113 @@ test("trial reminders stay outside TPS and expired accounts retain web view and 
     expect(download.status).toBe(200);
     expect(await download.text()).toBe(report.text);
     expect(await fixture.store.readTpsReport()).toEqual(report);
+  } finally {
+    await fixture.dispose();
+  }
+});
+
+test("no served page, trial notice or subscription refusal links to a route that does not exist", async () => {
+  let signedIn = true;
+  const fixture = await memoPageFixture((path) => {
+    if (path === "/get-session")
+      return signedIn ? neonSession("page-fixes") : Response.json(null);
+    if (path === "/oauth2/get-consents") return Response.json([]);
+    if (path === "/oauth2/public-client")
+      return Response.json({
+        client_id: "fixture",
+        client_name: "Fixture assistant",
+        client_uri: "https://client.example",
+      });
+  });
+  try {
+    const first = await fixture.store.readTpsReport();
+    await fixture.author.saveMemo({
+      text: "Be concise.",
+      rules: [{ report: "cover", text: "Be concise." }],
+      expected_version: first.version,
+      request_id: crypto.randomUUID(),
+    });
+    await fixture.db.query(sql`UPDATE store_config SET trials_enabled=true`);
+    await fixture.db.query(
+      sql`INSERT INTO trial_accounts(user_id,started_at) SELECT id,clock_timestamp()-interval '24 days' FROM users`,
+    );
+    // Every link Milton serves: page hrefs, and URL fields in the notice and
+    // the refusal assistants receive. Only same-origin paths are checked.
+    const links = new Set<string>();
+    const collect = (value: unknown) => {
+      for (const match of JSON.stringify(value ?? null).matchAll(
+        /https?:\/\/[^"\s\\]+/g,
+      ))
+        links.add(match[0]);
+    };
+    // Browser routing is an if-chain (browserPages and isMemoRoute), not a
+    // route table, so the served GET pages are listed here: signed-in pages,
+    // consent, signed-out landing and login, and the not-found page.
+    const signedInPages = [
+      "/",
+      "/tps-report",
+      "/assistants",
+      "/account/delete",
+      "/consent?" + signedQuery,
+    ];
+    const signedOutPages = ["/", "/login", "/login?" + signedQuery];
+    const visit = async () => {
+      const pages = [
+        ...signedInPages.map((path) => [path, true] as const),
+        ...signedOutPages.map((path) => [path, false] as const),
+        ["/no-such-page", true] as const,
+      ];
+      for (const [path, session] of pages) {
+        signedIn = session;
+        // Consent is past Neon's middleware, which needs its session cookie.
+        const response = await fixture.send(
+          path,
+          undefined,
+          path.startsWith("/consent")
+            ? {
+                Cookie: `${NEON_AUTH_SESSION_COOKIE_NAME}=fixture-session-token`,
+              }
+            : {},
+        );
+        expect([path, response.status]).toEqual([
+          path,
+          path === "/no-such-page" ? 404 : 200,
+        ]);
+        for (const match of (await response.text()).matchAll(/href="([^"]+)"/g))
+          links.add(match[1]!);
+      }
+      signedIn = true;
+    };
+    await visit();
+    const notice = await fixture.author.trialNotice!();
+    expect(notice?.code).toBe("trial_ending_7_days");
+    collect(notice);
+    await fixture.db.query(
+      sql`UPDATE trial_accounts SET started_at=clock_timestamp()-interval '31 days'`,
+    );
+    await visit();
+    const refused = await fixture.author
+      .saveMemo({
+        text: "Be brief.",
+        rules: [{ report: "cover", text: "Be brief." }],
+        expected_version: first.version,
+        request_id: crypto.randomUUID(),
+      })
+      .catch((error: StoreError) => error);
+    expect(refused).toBeInstanceOf(StoreError);
+    expect((refused as StoreError).code).toBe("subscription_required");
+    collect((refused as StoreError).details);
+    const dead: string[] = [];
+    for (const link of links) {
+      const url = new URL(link, appOrigin);
+      if (![appOrigin, "https://app.meetmilton.com"].includes(url.origin))
+        continue;
+      // Built assets are served ahead of the app, as in cloud-app.ts.
+      const served =
+        localAsset(new Request(url)) ?? (await fixture.send(url.pathname));
+      if (served.status === 404) dead.push(link);
+    }
+    expect(dead).toEqual([]);
   } finally {
     await fixture.dispose();
   }

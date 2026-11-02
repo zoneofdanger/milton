@@ -11,7 +11,6 @@ export type TrialNotice = {
   code: "trial_ending_7_days" | "trial_ending_1_day";
   trial_ends_at: string;
   message: string;
-  subscription_url: string;
 };
 
 export async function trialStatus(
@@ -61,7 +60,7 @@ export function subscriptionRequired(appOrigin = "https://app.meetmilton.com") {
     402,
     {
       retryable: false,
-      subscription_url: `${appOrigin}/billing`,
+      // No subscription link until billing exists: /billing has no route.
       preferences_url: `${appOrigin}/tps-report`,
     },
   );
@@ -79,7 +78,6 @@ export async function assertTrialAccess(
 export async function claimTrialNotice(
   db: StoreSession,
   userId: string,
-  appOrigin = "https://app.meetmilton.com",
 ): Promise<TrialNotice | undefined> {
   // One SQL update arbitrates concurrent clients. Only the current milestone is
   // offered: an inactive account returning on day29 gets one reminder, not two.
@@ -102,6 +100,5 @@ export async function claimTrialNotice(
     code: row.stage === 2 ? "trial_ending_1_day" : "trial_ending_7_days",
     trial_ends_at: ends,
     message: `Your Milton trial ends ${ends.slice(0, 10)} (UTC). Keep using Milton for $5.01/month. Your preferences remain available to view and download after expiry.`,
-    subscription_url: `${appOrigin}/billing`,
   };
 }

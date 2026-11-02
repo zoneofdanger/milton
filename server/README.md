@@ -39,10 +39,10 @@ Cloud Run listens on `0.0.0.0:$PORT`. SIGTERM stops accepting requests and allow
 to eight seconds to finish.
 
 For dotenvx, mount an encrypted file and set `MILTON_ENCRYPTED_ENV_FILE` on Cloud Run.
-`MILTON_ENCRYPTED_ENV` accepts encrypted contents for local or alternative adapters. Supply the matching
-`DOTENV_PRIVATE_KEY` separately through platform secret storage. Do not set both
-payload options. Missing or invalid decryption fails closed. Existing platform
-environment values take precedence. Without either payload option, the runtime
+Supply the matching `DOTENV_PRIVATE_KEY` separately through platform secret storage.
+The file is the only payload option; the retired inline `MILTON_ENCRYPTED_ENV`
+value is refused. Missing or invalid decryption fails closed. Existing platform
+environment values take precedence. Without a payload file, the runtime
 uses its environment directly, supporting local development and staged migration.
 Keep encrypted release payloads private and versioned, and keep private keys out of
 images, logs and git. The app gets its own cookie-signing key; MCP and worker do not.
@@ -260,7 +260,7 @@ in receipts saved before saves became model-free; their replay returns it unchan
 proves the requested meaning is on file: reread the cover sheet or report and compare it
 with the requested change before confirming that. Reuse the exact same
 arguments to recover an uncertain request; a completed receipt returns its original
-outcome without another write charge. That receipt's version may be
+outcome without another memo-update charge. That receipt's version may be
 older than the current report. Reusing an ID with different arguments is rejected.
 For a conflict, reread the cover sheet and reconsider a new request. No blind retry.
 
@@ -422,7 +422,7 @@ samples (see 0017 below). Bodies are not trimmed, rewritten or truncated, apart 
 one stored leading `- ` that the printed bullet replaces;
 descriptions are metadata, not an additional instruction source. Publication rechecks
 the account, request deadline, source fingerprint and report version; card versions,
-the current snapshot, receipt and single write charge commit together. Stale or conflicting
+the current snapshot, receipt and any memo-update charge commit together. Stale or conflicting
 saves cannot partially publish.
 
 Internal `instruction_card_versions` are append-only; legacy `memo_versions` are retained. `tps_reports` holds one replaceable
@@ -438,7 +438,7 @@ Existing content under the former `vibes` core key is ordinary source. Invalid U
 in submitted text is rejected before a driver can replace it. The database validates
 identity, complete publication and size limits. If a report or the full text exceeds
 its bound, the whole publication rolls back with `tps_body_limit`; the failed
-request receipt remains, but no source change or write charge commits. No read or
+request receipt remains, but no source change or memo-update charge commits. No read or
 save invokes a model.
 
 | Limit                                       | Default                                                           |
@@ -449,15 +449,17 @@ save invokes a model.
 | Description/reason                          | 500 UTF-8 bytes each                                              |
 | Retained memo versions and bounded receipts | 64 MiB per account                                                |
 | Attempted MCP calls                         | 1,000 per account per UTC day                                     |
-| Technical write quota                       | 200 per account per UTC day                                       |
 | Launch memo updates (0014, default off)     | 100 successful user-directed batches per account per UTC day      |
 | Request body                                | 64 KiB before parsing (`MAX_REQUEST_BYTES` in `src/http.ts`)      |
 
-Each successful `create_memo` counts **once** against the
-technical write quota, regardless of internal memo changes. The separate default-off
-launch memo-update allowance charges only actual user-directed source changes (0014).
-No-op, conflict, failed saves and receipt replays consume no extra write allowance.
-Every attempted MCP call still counts, including retries. There are no
+The memo-update allowance is the only daily save cap: each successful
+`create_memo` that changes rules or samples charges one update, regardless of how
+many internal memos it touches (0014). No-op, conflict, failed saves and receipt
+replays charge nothing. While the allowance is off (the 0014 default), the
+attempted-call limit is the only daily bound on saves. The former 200-a-day
+technical write quota is retired; its
+`daily_writes` key and `usage_daily.writes` column stay unread until a migration
+drops them. Every attempted MCP call still counts, including retries. There are no
 public archive/restore exemptions or history controls.
 
 The website shows the current cover sheet and reports, escapes their text and serves no browser JavaScript.
@@ -556,9 +558,9 @@ $5 proposal. Current early access remains free; no payment price exists in this 
 Billing is not launched. Do not enable it until authenticated `/billing` checkout,
 verified provider entitlement synchronization and the remaining launch policies are
 implemented and tested. This slice contains no Stripe API/webhook, checkout page,
-credentials or live subscription actions. Its subscription links reserve the
-same-origin `/billing` destination for that integration; they are not a working
-checkout yet. Existing early access must not acquire a payment gate implicitly.
+credentials or live subscription actions. Until `/billing` exists, the trial notice,
+the page banner and the `subscription_required` refusal carry no subscription link;
+the banner names the price as plain text. Existing early access must not acquire a payment gate implicitly.
 
 When explicitly enabled, only newly admitted accounts get a `trial_accounts` row.
 Existing accounts without a row remain early access, including on later sign-ins.

@@ -324,20 +324,6 @@ export function compiledMemos(
     );
     return withMemoUpdate(result, rows[0]!);
   }
-  async function chargeWrite(tx: StoreSession) {
-    const limits = await readLimits(tx);
-    const charged =
-      await tx.query(sql`INSERT INTO usage_daily(user_id,day_utc,writes)
-      VALUES (${userId},(clock_timestamp() AT TIME ZONE 'UTC')::date,1)
-      ON CONFLICT(user_id,day_utc) DO UPDATE SET writes=usage_daily.writes+1
-      WHERE usage_daily.writes < ${limits.daily_writes} RETURNING writes`);
-    if (!charged.length)
-      throw new StoreError(
-        "rate_limited",
-        "The daily save limit has been reached.",
-        429,
-      );
-  }
   async function assemble(tx: StoreSession, documents: Documents) {
     // Every source byte is preserved; only headings, when lines, sample context
     // and quoting, and blank lines are added. Each body has its own cap.
@@ -806,7 +792,6 @@ export function compiledMemos(
               tx,
               result("unchanged", { version: current.version }),
             );
-          await chargeWrite(tx);
           const append = async (
             h: Pick<Head, "id" | "version" | "description" | "body" | "report">,
             archived: boolean,

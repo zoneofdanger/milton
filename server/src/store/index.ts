@@ -41,7 +41,6 @@ const limitsSchema = z.object({
   history_bytes: positiveLimit,
   report_body_bytes: positiveLimit,
   daily_calls: positiveLimit,
-  daily_writes: positiveLimit,
 });
 export type StoreLimits = z.infer<typeof limitsSchema>;
 
@@ -388,7 +387,7 @@ export async function storeForCurrentRequest(
       db.transaction(async (tx) => {
         await tx.query(sql`SET LOCAL lock_timeout='250ms'`);
         await tx.query(sql`SET LOCAL statement_timeout='500ms'`);
-        return claimTrialNotice(tx, userId, bindings.appOrigin);
+        return claimTrialNotice(tx, userId);
       }),
     memoUpdates: compiled.memoUpdates,
     readTpsReport: compiled.getTpsReport,

@@ -59,11 +59,11 @@ as a rule. Corrections go through `exact_edits`; an edit whose `before` is a who
 and whose `after` is empty retires it. All fields resolve against one claimed snapshot
 and apply atomically. Anchors resolve uniquely within active card bodies, never
 against generated text; overlapping edits fail. The source/report fences, receipt and
-replay, history, size, heading and memo-count limits and the single write charge
-still apply; reservation is always zero. A report exceeding its bound refuses the
+replay, history, size, heading and memo-count limits and the single memo-update
+charge still apply; reservation is always zero. A report exceeding its bound refuses the
 entire save; source instructions are never truncated. Count one successful logical
-save against the existing 200/day allowance; no-ops, failures and replays do not add
-a write. Keep the separate 1,000 attempted-call and retained-history limits.
+save against the 100/day memo-update cap; no-ops, failures and replays charge
+nothing. Keep the separate 1,000 attempted-call and retained-history limits.
 
 Removing the model removes paraphrase drift, not interpretation risk: the assistant
 picks the report and wording, and a free-text correction sent as a new rule leaves
@@ -380,7 +380,7 @@ layer, and revisits per-user stores later (decision 2).
 ### Caps, not logs
 
 Per user: 100 ordinary memos including archived ones (TPS is exempt), 32 KB of UTF-8 body text, a name of up to 64 bytes and a
-description of up to 500 bytes, 500 bytes of reason, 1,000 tool calls and 200 writes a day, reset at midnight UTC. Request bodies are capped at 64 KB before parsing; list, search and history answers come in pages of 50. The daily allowance counts MCP calls; the page has no request limit of its own in the MVP. Retained history is counted in bytes per user and capped at 64 MB; past the cap new text is refused with a clear message, while reverts and restores still go through and do not count against the daily writes, so recovery is never blocked; history is never discarded silently. Per-minute and per-address limits are left to the
+description of up to 500 bytes, 500 bytes of reason, 1,000 tool calls and 100 memo updates a day, reset at midnight UTC. Request bodies are capped at 64 KB before parsing; list, search and history answers come in pages of 50. The daily allowance counts MCP calls; the page has no request limit of its own in the MVP. Retained history is counted in bytes per user and capped at 64 MB; past the cap new text is refused with a clear message, while reverts and restores still go through and do not count against the daily cap, so recovery is never blocked; history is never discarded silently. Per-minute and per-address limits are left to the
 host's firewall, and client registration to Neon Auth. Archive keeps the normal daily/history ceilings; only stored recovery is exempt. The OAuth provider's own lifetimes apply to client
 registrations and grants; the page lists the user's grants and revokes them, and never deletes a
 client registration another user may share. The caps are configuration.

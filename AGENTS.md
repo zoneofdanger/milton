@@ -14,7 +14,7 @@ TPS Report to connected assistants through its MCP server. [SPEC.md](SPEC.md) is
   TPS has only a current snapshot and revision token. Never edit live memos on your own initiative.
 - **Peter's memos live on the server.** Claude Code, Codex and Pi read them from the Milton MCP
   server (`https://mcp.meetmilton.com/mcp`). Change memos through Milton, not by editing files;
-  the repository holds only the starter templates.
+  the repository holds no memos.
 - **Publishing requires authorization.** Push only when Peter asks. Deploys run from the
   command line: Vercel hosts the static site; Cloud Run hosts the browser app, MCP and
   the private observer. Preserve Cloud Run rollback revisions, pinned images and

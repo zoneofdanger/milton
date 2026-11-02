@@ -28,6 +28,7 @@ const limits = {
   report_body_bytes: 262144,
   daily_calls: 1000,
   daily_writes: 200,
+  // Unread: the request bound is MAX_REQUEST_BYTES in src/http.ts.
   request_bytes: 65536,
   page_size: 50,
 };

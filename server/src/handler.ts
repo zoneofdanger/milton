@@ -5,7 +5,6 @@ import {
 } from "@modelcontextprotocol/server";
 import { createMiltonServer } from "./mcp";
 import {
-  guardStoreRequest,
   lookupIdentityAccount,
   storeForCurrentRequest,
   type StoreBindings,
@@ -17,7 +16,7 @@ import {
   type AccessTokenVerifier,
 } from "./token";
 import { isLoopback } from "./config";
-import { boundRequest } from "./http";
+import { boundRequest, MAX_REQUEST_BYTES } from "./http";
 import { z } from "zod";
 import {
   finalToolCall,
@@ -130,19 +129,13 @@ export function createMiltonHandler(
       );
       if (call.success) pending = knownTool(call.data.params.name);
       const identity = await verify(request.headers.get("Authorization"));
-      const bindings = { ...config, MEMOS_SOURCE: "store" };
       // Also refuses an assistant the person disconnected, on every request.
-      const auth = await lookupIdentityAccount(bindings, {
+      const auth = await lookupIdentityAccount(config, {
         provider: "neon",
         subject: identity.subject,
         clientId: identity.clientId,
       });
-      const checked = await guardStoreRequest(bounded, bindings);
-      if (checked instanceof Response) {
-        recordFailure("request_too_large");
-        return withMcpCors(checked);
-      }
-      const store = await storeForCurrentRequest(bindings, auth, {
+      const store = await storeForCurrentRequest(config, auth, {
         issuer: identity.issuer,
         clientId: identity.clientId,
       });
@@ -152,10 +145,10 @@ export function createMiltonHandler(
           legacy: "stateless",
           maxSubscriptions: 0,
           keepAliveMs: 0,
-          maxRequestBodySize: 65536,
+          maxRequestBodySize: MAX_REQUEST_BYTES,
         },
       );
-      const result = await sdk.fetch(checked);
+      const result = await sdk.fetch(bounded);
       if (result.status >= 400)
         recordFailure(
           result.status === 413 ? "request_too_large" : "protocol_error",

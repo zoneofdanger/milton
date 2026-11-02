@@ -1,6 +1,10 @@
+/** The one request-size bound, read before parsing, authentication or any
+ * database access. `limits_json.request_bytes` is not read. */
+export const MAX_REQUEST_BYTES = 65536;
+
 export async function boundRequest(
   request: Request,
-  maximum = 65536,
+  maximum = MAX_REQUEST_BYTES,
 ): Promise<Request | Response> {
   if (Number(request.headers.get("Content-Length")) > maximum)
     return Response.json({ error: "request_too_large" }, { status: 413 });

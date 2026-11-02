@@ -28,7 +28,6 @@ import { createStoreMemoTools, reportEnvelope } from "../src/store/tools";
 import { createHash } from "node:crypto";
 import {
   deleteAccount,
-  guardStoreRequest,
   resolveIdentityAccount,
   lookupIdentityAccount,
   storeForCurrentRequest,
@@ -1864,37 +1863,11 @@ test("Postgres version conflicts and history-cap import refusals return typed er
   }
 }, 30000);
 
-test("store ingress bounds streamed bodies before parsing and preserves typed failures", async () => {
+test("identity resolution preserves a typed store failure", async () => {
   const local = await localStore();
   try {
-    const bindings = { ...local.env, MEMOS_SOURCE: "store" };
-    const refused = await guardStoreRequest(
-      new Request("http://localhost:8787/mcp", {
-        method: "POST",
-        body: new ReadableStream<Uint8Array>({
-          start(controller) {
-            controller.enqueue(new Uint8Array(65537));
-            controller.close();
-          },
-        }),
-      }),
-      bindings,
-    );
-    expect(refused).toBeInstanceOf(Response);
-    if (!(refused instanceof Response))
-      throw new Error("Expected body refusal");
-    expect(refused.status).toBe(413);
-    expect(
-      await guardStoreRequest(
-        new Request("http://localhost:8787/register", {
-          method: "POST",
-          body: "{}",
-        }),
-        bindings,
-      ),
-    ).toBeInstanceOf(Request);
     const unavailable = {
-      ...bindings,
+      ...local.env,
       storeDatabase: new Proxy(local.db, {
         get(target, key) {
           if (key === "query" || key === "transaction")
@@ -1905,15 +1878,6 @@ test("store ingress bounds streamed bodies before parsing and preserves typed fa
         },
       }),
     };
-    await expect(
-      guardStoreRequest(
-        new Request("http://localhost:8787/register", {
-          method: "POST",
-          body: "{}",
-        }),
-        unavailable,
-      ),
-    ).rejects.toMatchObject({ code: "store_unavailable", status: 503 });
     await expect(
       resolveIdentityAccount(unavailable, {
         provider: "neon",

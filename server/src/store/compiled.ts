@@ -21,6 +21,7 @@ import { databaseFailure } from "./database";
 import { StoreError } from "./errors";
 import { readLimits, utf8Bytes } from "./index";
 import { exactEditsProposal, exactMoves } from "../exact-edits";
+import { MAX_REQUEST_BYTES } from "../http";
 import { assertTrialAccess } from "./trials";
 import { lockSpendPolicy } from "./spend-policy";
 import {
@@ -456,7 +457,7 @@ export function compiledMemos(
               outcome: result("conflict", { version: current.version }),
             };
           const limits = await readLimits(tx);
-          if (utf8Bytes(JSON.stringify(input)) > limits.request_bytes)
+          if (utf8Bytes(JSON.stringify(input)) > MAX_REQUEST_BYTES)
             throw new StoreError(
               "request_too_large",
               "The save request is too large.",

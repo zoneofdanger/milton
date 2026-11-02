@@ -80,7 +80,6 @@ Set these in the runtime's platform configuration or dotenvx payload before depl
 | `NEON_AUTH_BASE_URL`      | The exact branch Auth URL copied from Neon, including its database and Auth path, without a trailing slash. It is also the expected token issuer. |
 | `NEON_AUTH_COOKIE_SECRET` | A fresh random server-only secret of at least 32 characters for browser session cookies.                                                          |
 | `DATABASE_URL`            | The TLS connection string for the `milton` database. Use the owner connection for migrations and imports.                                         |
-| `MEMOS_SOURCE`            | Optional memo-source selector. Leaving it unset uses the tenant database store; bundled memo serving is unavailable.                              |
 
 Saves are model-free: Milton stores the exact text the assistant sends and calls no
 model on any read or save, so it needs no model credential, project or budget. The
@@ -287,7 +286,7 @@ or overlapping anchors return `failed` with `edit_conflict`, without partial edi
 reread the report and choose unambiguous spans. All matches use the original snapshot,
 so a later edit cannot target text produced by an earlier one. Both strings must
 be valid Unicode, within the existing body limit, and contain no NUL. The complete
-request must fit the configured request-byte limit.
+request must fit the 64 KiB request bound.
 
 Some text cannot be targeted exactly: identical card bodies have no unique anchor,
 and a span cannot cross memo boundaries. Refuse those edits instead of selecting an
@@ -446,7 +445,7 @@ save invokes a model.
 | Attempted MCP calls                         | 1,000 per account per UTC day                                     |
 | Technical write quota                       | 200 per account per UTC day                                       |
 | Launch memo updates (0014, default off)     | 100 successful user-directed batches per account per UTC day      |
-| Request body                                | 64 KiB before parsing                                             |
+| Request body                                | 64 KiB before parsing (`MAX_REQUEST_BYTES` in `src/http.ts`)      |
 
 Each successful `create_memo` counts **once** against the
 technical write quota, regardless of internal memo changes. The separate default-off

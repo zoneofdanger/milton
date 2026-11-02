@@ -6,7 +6,11 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { checkMcp } from "../scripts/check-mcp";
 import { loadMemos } from "../src/memos";
-import { createMiltonServer, storeInstructions } from "../src/mcp";
+import {
+  createMiltonServer,
+  storeInstructions,
+  type ToolCall,
+} from "../src/mcp";
 import { saveMemoInput } from "../src/store/compiled";
 import { createMiltonHandler } from "../src/handler";
 import { createAccessTokenVerifier } from "../src/token";
@@ -123,7 +127,6 @@ test("two authenticated clients isolate tenants, save once and reject retired to
     const handler = createMiltonHandler(
       {
         ...local.env,
-        MEMOS_SOURCE: "store",
         issuer,
         resource,
         appOrigin: origin,
@@ -367,7 +370,6 @@ test("disconnected assistants and assistants of a deleted account are refused, e
     const handler = createMiltonHandler(
       {
         ...local.env,
-        MEMOS_SOURCE: "store",
         issuer,
         resource,
         appOrigin: origin,
@@ -481,7 +483,6 @@ test("MCP refuses unsafe transports and oversized bodies before database access"
         issuer,
         resource,
         appOrigin: "https://mcp.meetmilton.com",
-        MEMOS_SOURCE: "store",
       },
       fixture.verify,
     );
@@ -532,6 +533,91 @@ test("MCP refuses unsafe transports and oversized bodies before database access"
     expect(oversized.status).toBe(413);
     expect(queries).toBe(0);
   } finally {
+    await local.dispose();
+  }
+}, 30000);
+
+test("one code constant bounds requests: limits_json.request_bytes refuses nothing, and an oversized body is refused once", async () => {
+  const local = await localStore();
+  const logged: ToolCall[] = [];
+  let client: Client | undefined;
+  try {
+    // A lowered stored value must not refuse a body within the code bound.
+    await local.db.query(
+      sql`UPDATE store_config SET signup_mode='open', limits_json = limits_json || '{"request_bytes":256}'::jsonb`,
+    );
+    await resolveIdentityAccount(local.env, {
+      provider: "neon",
+      subject: "bound",
+    });
+    const fixture = await tokenFixture();
+    const authorization = `Bearer ${await fixture.token("bound")}`;
+    const handler = createMiltonHandler(
+      { ...local.env, issuer, resource, appOrigin: origin },
+      fixture.verify,
+      (call) => logged.push(call),
+    );
+    client = new Client({ name: "bound-client", version: "0.0.0" });
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(resource), {
+        fetch: (input, init) => {
+          const request = new Request(input, init);
+          request.headers.set("Host", new URL(request.url).host);
+          return handler(request);
+        },
+        requestInit: { headers: { Authorization: authorization } },
+      }),
+    );
+    const text = (reply: unknown) =>
+      z
+        .record(z.string(), z.unknown())
+        .parse(
+          JSON.parse(
+            z
+              .object({ content: z.array(z.object({ text: z.string() })) })
+              .parse(reply).content[0]!.text,
+          ),
+        );
+    const sheet = text(
+      await client.callTool({ name: "get_cover_sheet", arguments: {} }),
+    );
+    const rule = "Keep every sentence short and plain. ".repeat(30).trim();
+    const saved = await client.callTool({
+      name: "create_memo",
+      arguments: {
+        text: "Bound check",
+        request_id: crypto.randomUUID(),
+        expected_version: sheet.version,
+        rules: [{ report: "email", text: rule }],
+      },
+    });
+    expect(saved.isError).not.toBe(true);
+    expect(text(saved).status).toBe("saved");
+
+    // Over the bound, the stream is refused once, before parsing, auth or a tool event.
+    logged.length = 0;
+    const oversized = await handler(
+      new Request(resource, {
+        method: "POST",
+        headers: {
+          Host: new URL(resource).host,
+          Authorization: authorization,
+          "Content-Type": "application/json",
+        },
+        body: new ReadableStream({
+          start(c) {
+            c.enqueue(new TextEncoder().encode('{"method":"tools/call",'));
+            c.enqueue(new Uint8Array(65536).fill(32));
+            c.close();
+          },
+        }),
+      }),
+    );
+    expect(oversized.status).toBe(413);
+    expect(await oversized.json()).toEqual({ error: "request_too_large" });
+    expect(logged).toEqual([]);
+  } finally {
+    await client?.close();
     await local.dispose();
   }
 }, 30000);

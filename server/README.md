@@ -1,11 +1,11 @@
 # Self-hosting Milton
 
 Milton maintains internal memos containing writing rules and approved samples.
-Connected assistants submit changes through `create_memo` and read the compiled
+Connected assistants submit changes through `create_memo` and read the
 cover sheet and reports through `get_cover_sheet`, `get_report` and `list_reports`.
 This directory contains the MCP server and current-report web app,
-rendered with Hono JSX and Vite-built theme assets on Node 26 LTS, with a separate scheduled spend-alert worker. Neon Postgres stores instruction cards, memo groups, internal
-history, current TPS and request receipts; Neon Auth handles sign-in and authorization.
+rendered with Hono JSX and Vite-built theme assets on Node 26 LTS, with a separate scheduled spend-alert worker. Neon Postgres stores instruction cards, samples, internal
+history, the current report snapshot and request receipts; Neon Auth handles sign-in and authorization.
 
 ## Prerequisites
 
@@ -110,15 +110,12 @@ This command explicitly reads `.dev.vars`. It does not use `.env.local` or an in
 The migrations create the application tables defined in `src/store/schema.ts`.
 Fresh installations start with sign-ups closed.
 
-Migration `0006_compiled_memos.sql` adds current TPS and durable save receipts.
-It preserves existing memos and their version history, including content formerly
-stored under the legacy `vibes` name. That content participates as an internal
-memo when a new save or administrative refresh publishes the account. Nonempty accounts with no valid compiled
-TPS return `tps_report_unavailable` and the current fencing version; reads do not
-invent an empty report or invoke a model. Use the explicit administrative refresh
-below for currently approved sources; do not fabricate an instruction to repair a
-read. A genuine user-directed save also publishes the current sources together.
-Empty accounts read an empty initial report.
+Migration `0006_compiled_memos.sql` adds the current report snapshot (`tps_reports`)
+and durable save receipts. It preserves existing memos and their version history,
+including content formerly stored under the legacy `vibes` name, which participates
+as an ordinary internal memo. Since 0017 a read whose snapshot lags its sources
+rebuilds it under the account lock (see below); reads never invoke a model. Empty
+accounts read an empty cover sheet and empty reports.
 
 There are no old tool aliases or compatibility mode. Apply the
 migration before running this server, and refresh client tool discovery. The
@@ -145,9 +142,8 @@ are unchanged before reopening writes. This work does not itself authorize a liv
 
 Each legacy memo, including archived/empty heads, becomes one stable card with the
 same ID and full version history. Its text and timestamps are copied exactly; no
-model call or speculative split occurs. `memos` now group cards through `memo_cards`.
-Card order was independent of grouping, preserving the existing TPS separators and
-source fingerprint; 0016 adds group titles without changing untitled assembly.
+model call or speculative split occurs. 0008 also added the `memo_cards` membership
+table; since 0017 assembly no longer reads it, and it remains as history only.
 
 This expand phase retains the original memo history and a complete card-history copy.
 Both copies count toward retained storage. Backfill does not discard history or fail
@@ -157,11 +153,9 @@ legacy copies requires a separate migration; it is not included here. The existi
 count ceiling also bounds card identities, including archived ones.
 
 Legacy import/initialization writes synchronize only untouched one-card memos. Once
-cards are independently edited or regrouped, legacy writes/deletion refuse with
+cards are independently edited, legacy writes/deletion refuse with
 `card_legacy_conflict`; use the current `create_memo` path. Legacy internal history readers
 remain historical, not a card-management interface. No extra MCP tool or UI is added.
-Internal `regroupCards` checks the current report and each membership version; it
-changes membership only. A stale generation that relied on old grouping cannot save.
 
 `drizzle/rollback/0008_instruction_cards.sql` is an offline **pre-write rollback**.
 It proves every card/history row is an unchanged legacy copy, refuses native card data,
@@ -186,7 +180,7 @@ and secret versions; never roll back memo data with a hosting release.
 Check `/health` on both canonical deployments and open `/login` on the browser app
 origin. Finish admission before connecting an assistant. Preserve Cloud Run revisions,
 pinned images and numeric secret versions for recovery; never replace newer source
-or TPS data when changing a runtime release. The old Vercel app/MCP project is retired.
+or report data when changing a runtime release. The old Vercel app/MCP project is retired.
 
 ## Admit the first user
 
@@ -226,7 +220,7 @@ WHERE singleton = 1;
 
 You can apply this before anyone signs in. There is no account-count cap. Setting `signup_mode` back to `closed` stops new admissions without locking out existing users.
 
-The first admitted sign-in starts with empty TPS and no active instructions. Existing memo bodies and history are preserved. The browser views the current report; connected assistants submit user-directed changes.
+The first admitted sign-in starts with an empty cover sheet, empty reports and no active rules. Existing memo bodies and history are preserved. The browser views the current report; connected assistants submit user-directed changes.
 
 ## Connect an assistant
 
@@ -263,17 +257,17 @@ It cannot establish adherence or force unsupported clients to retrieve instructi
 with the request ID and relevant version/error. (`needs_clarification` appears only
 in receipts saved before saves became model-free; their replay returns it unchanged.)
 `saved` confirms a committed write; `unchanged` confirms no write. Neither alone
-proves the requested meaning is on file: read current TPS and compare it with the
-requested change before confirming that. Reuse the exact same
+proves the requested meaning is on file: reread the cover sheet or report and compare it
+with the requested change before confirming that. Reuse the exact same
 arguments to recover an uncertain request; a completed receipt returns its original
 outcome without another write charge. That receipt's version may be
 older than the current report. Reusing an ID with different arguments is rejected.
-For a conflict, read current TPS and reconsider a new request. No blind retry.
+For a conflict, reread the cover sheet and reconsider a new request. No blind retry.
 
 Every save needs at least one structured field; a save with only `text` is refused
 with `invalid_input`: "Name the report and send the rule's text in rules." `text` is
 the stated purpose for every save: recorded with the accepted change, never stored or
-compiled as a rule. Milton runs no model, rewrites nothing and reserves no budget.
+stored as a rule. Milton runs no model, rewrites nothing and reserves no budget.
 
 New rules go in `rules`, 1-20 entries of `{report, text}`. `report` is one of the five
 reports (`doc` accepted) or `cover`. Each entry becomes one new card holding `text`
@@ -286,11 +280,11 @@ earlier entry in the request, is skipped; when nothing else changes the save ret
 picks the report and the wording; a wrong report is fixable with `moves`.
 
 Corrections and removals of existing rules use `exact_edits`, a nonempty array of
-`{before, after}`. Copy each nonempty `before` verbatim from current TPS; `after`
+`{before, after}`. Copy each nonempty `before` verbatim from a current rule; `after`
 is the exact replacement, including an empty string for removal. Each anchor must
 occur once across all active instruction cards and fit within one card. Missing, repeated
 or overlapping anchors return `failed` with `edit_conflict`, without partial edits;
-re-read TPS and choose unambiguous spans. All matches use the original snapshot,
+reread the report and choose unambiguous spans. All matches use the original snapshot,
 so a later edit cannot target text produced by an earlier one. Both strings must
 be valid Unicode, within the existing body limit, and contain no NUL. The complete
 request must fit the configured request-byte limit.
@@ -303,8 +297,8 @@ ones need an administrative fix.
 The caller authors every byte and remains responsible for its meaning and user
 authorization. All other source bytes and descriptions stay exact; an edit whose
 `before` is a whole rule and whose `after` is empty retires it, retaining its internal
-history. When TPS already matches its sources, an unchanged replacement leaves history
-and TPS revision alone. This avoids server-side paraphrasing; it does not certify
+history. When the snapshot already matches its sources, an unchanged replacement leaves
+history and the version alone. This avoids server-side paraphrasing; it does not certify
 caller edits, and nothing detects a correction sent as a new rule that contradicts an
 old one. It does not change first-setup and capture approval rules.
 
@@ -327,7 +321,7 @@ date}`, newest first; kind labels never appear in report text.
 The assistant offers first setup once when empty, uses available explicit
 instructions or asks questions, and shows the full draft for approval before
 saving. Milton cannot inspect other assistants' memories. It stores instructions,
-not factual/project memory. The assistant applies TPS to its drafts itself.
+not factual/project memory. The assistant applies the rules and samples to its drafts itself.
 
 Two offers follow from drafting. When the person approves a draft to send, post,
 or say, the assistant offers once to save it as a sample under the report that
@@ -345,15 +339,15 @@ opaque version and same-request retry rules. Server instructions stay at or unde
 The empty web page also provides a user-invoked setup prompt. No extra setup tool or
 prompt capability is required.
 
-Session capture is an optional assistant workflow using these same two tools.
+Session capture is an optional assistant workflow using these same tools.
 The person must explicitly opt in in the current conversation; connection consent,
-first-draft approval, TPS content and quoted examples do not enable it. At task
-completion, the assistant compares explicit reusable standing instructions with
-current TPS and submits only genuine changes, preserving scope and conditions.
+first-draft approval, report content and quoted examples do not enable it. At task
+completion, the assistant compares explicit reusable standing rules with the current
+cover sheet and reports and submits only genuine changes, preserving scope and conditions.
 It excludes one-off requests, project facts, inferred preferences, transcripts,
-secrets and other people's private details. Empty TPS still needs complete-draft
-approval. Opt-out stops future capture without deleting existing instructions or
-undoing a save already submitted. Capture consent itself is never filed in TPS.
+secrets and other people's private details. An empty account still needs complete-draft
+approval. Opt-out stops future capture without deleting existing rules or
+undoing a save already submitted. Capture consent itself is never filed as a rule.
 Copyable on/off prompts are in the root README.
 
 No new tool, schema, consent flag, hook or background worker is involved. The server
@@ -400,7 +394,7 @@ In another terminal, run the interactive OAuth check:
 bun run --cwd server test:local
 ```
 
-The check uses the default local origin. If you changed the port or origin, supply `--origin` with the origin hosting `/mcp`, without the `/mcp` path. Open the loopback page address it prints and complete sign-in manually. It checks OAuth discovery, DCR, PKCE, callback state, connection instructions, exactly two tools, and a current TPS read. It does not save instructions, open a browser automatically, or print tokens.
+The check uses the default local origin. If you changed the port or origin, supply `--origin` with the origin hosting `/mcp`, without the `/mcp` path. Open the loopback page address it prints and complete sign-in manually. It checks OAuth discovery, DCR, PKCE, callback state, connection instructions, exactly four tools, and a current cover sheet read. It does not save instructions, open a browser automatically, or print tokens.
 
 Run automated checks from the repository root:
 
@@ -410,7 +404,7 @@ bun test
 bun run --cwd server test:client
 ```
 
-The tests use fresh PGlite databases and stubbed Auth responses. `test:client` uses an in-memory SDK connection and the empty TPS template. These checks need no live Neon credentials. The interactive `test:local` check does contact your configured Neon Auth service. Embedded tests do not prove contention between independent Neon connections.
+The tests use fresh PGlite databases and stubbed Auth responses. `test:client` uses an in-memory SDK connection and the empty starter template. These checks need no live Neon credentials. The interactive `test:local` check does contact your configured Neon Auth service. Embedded tests do not prove contention between independent Neon connections.
 
 ## Store, history, and limits
 
@@ -419,33 +413,34 @@ claims the request in a short transaction, then resolves the save against that
 snapshot and publishes in a second transaction. Exact edits and moves name existing
 cards only through unique anchors; `rules` entries become new cards with
 server-assigned IDs. Omitted cards keep their exact bodies, descriptions and versions.
-TPS is assembled from the final stored active bodies in card position order, joined
-by two newline characters (see 0016 below). Bodies are not trimmed, rewritten or truncated;
+The cover sheet and reports are assembled from the final stored active bodies and
+samples (see 0017 below). Bodies are not trimmed, rewritten or truncated;
 descriptions are metadata, not an additional instruction source. Publication rechecks
 the account, request deadline, source fingerprint and report version; card versions,
-current TPS, receipt and single write charge commit together. Stale or conflicting
+the current snapshot, receipt and single write charge commit together. Stale or conflicting
 saves cannot partially publish.
 
 Internal `instruction_card_versions` are append-only; legacy `memo_versions` are retained. `tps_reports` holds one replaceable
 snapshot per account, with a monotonic revision and source fingerprint. There is
-no TPS content history. Receipts keep input hashes and bounded outcomes, not raw
-submitted text or copies of TPS. Their maximum 2-KiB result space plus metadata is
+no report content history. Receipts keep input hashes and bounded outcomes, not raw
+submitted text or copies of reports. Their maximum 2-KiB result space plus metadata is
 reserved against retained-history capacity when claimed, so terminal failures fit.
 Completed receipts are immutable. A crashed request can expire; the same ID never
 applies again.
 
-Saves anchor only in current active cards, never archived versions or a prior TPS.
+Saves anchor only in current active cards, never archived versions or a prior snapshot.
 Existing content under the former `vibes` core key is ordinary source. Invalid Unicode
 in submitted text is rejected before a driver can replace it. The database validates
-identity, complete publication and size limits. If all bodies plus separators exceed
-the TPS bound, the whole publication rolls back with `tps_body_limit`; the failed
+identity, complete publication and size limits. If a report or the full text exceeds
+its bound, the whole publication rolls back with `tps_body_limit`; the failed
 request receipt remains, but no source change or write charge commits. No read or
 save invokes a model.
 
 | Limit                                       | Default                                                           |
 | ------------------------------------------- | ----------------------------------------------------------------- |
 | Internal memos, including archived          | 100 (historical `vibes` row retains its existing guard exemption) |
-| Memo/TPS body                               | 32 KiB UTF-8                                                      |
+| Rule (card) body                            | 32 KiB UTF-8                                                      |
+| Cover sheet or report body                  | 256 KiB UTF-8 each (`report_body_bytes`)                          |
 | Description/reason                          | 500 UTF-8 bytes each                                              |
 | Retained memo versions and bounded receipts | 64 MiB per account                                                |
 | Attempted MCP calls                         | 1,000 per account per UTC day                                     |
@@ -460,7 +455,7 @@ No-op, conflict, failed saves and receipt replays consume no extra write allowan
 Every attempted MCP call still counts, including retries. There are no
 public archive/restore exemptions or history controls.
 
-The website shows current TPS, escapes its text and serves no browser JavaScript.
+The website shows the current cover sheet and reports, escapes their text and serves no browser JavaScript.
 It displays one bullet per complete active instruction card, preserving internal
 line breaks and conditions, only when a browser-only tenant-locked lookup matches
 the canonical report revision, source versions, order and exact assembled text.
@@ -472,9 +467,10 @@ routes return 404.
 
 ## Reports, samples and the cover sheet (0017)
 
-A report is the unit of the compiled output. Each instruction card carries a
-write-once `report`: one of `email`, `chat`, `post`, `document` or `speech`, or NULL
-for a rule that applies to all writing. The migration backfills it from the group
+A report is the unit of the assembled output. 0017 gave each instruction card a
+`report`: one of `email`, `chat`, `post`, `document` or `speech`, or NULL
+for a rule that applies to all writing (0020 moves it onto card versions; see below).
+The migration backfilled it from the group
 title a card was filed under (a title naming a report becomes that report; every
 other card, including archived working-style rules, belongs to the cover sheet) and
 deletes groups that never held a card or a legacy version. Group tables remain as
@@ -540,7 +536,7 @@ lineage are dropped. Case variants of one label return as that kind's label.
 
 ## Import existing memos
 
-This administrative importer is for offline data work, not the agent interface. It changes canonical sources without compilation; TPS reads then refuse the stale snapshot until an explicit administrative refresh (above) or a user-directed `create_memo` publishes the new sources. The importer requires an explicit `--source-dir`. The repository contains the empty TPS `templates/`, not your personal memos. The administrative importer still addresses TPS with the internal `vibes` folder/key; this is a maintenance exception, not an MCP alias. Prepare a directory of `<name>/SKILL.md` folders with valid name and description frontmatter.
+This administrative importer is for offline data work, not the agent interface. It writes legacy memos directly; each imported memo becomes a cover-sheet rule (report `cover`), and the next read rebuilds the snapshot. It does not file rules into reports. The importer requires an explicit `--source-dir`. The repository contains the empty starter `templates/`, not your personal memos. The importer still addresses the legacy `vibes` folder/key; this is a maintenance exception, not an MCP alias. Prepare a directory of `<name>/SKILL.md` folders with valid name and description frontmatter.
 
 Find your Milton account ID in the `milton` database:
 
@@ -552,7 +548,7 @@ WHERE i.provider = 'neon'
   AND i.subject = 'YOUR_NEON_AUTH_USER_ID';
 ```
 
-Export the connection string as `DATABASE_URL` in the import process's environment. Set `MEMO_SOURCE_DIR` to your source directory and `MILTON_USER_ID` to the account ID returned above. From `server/`, for the empty TPS still at version 1 and a new ordinary email-voice memo:
+Export the connection string as `DATABASE_URL` in the import process's environment. Set `MEMO_SOURCE_DIR` to your source directory and `MILTON_USER_ID` to the account ID returned above. From `server/`, for an empty account whose `vibes` memo is still at version 1 and a new ordinary email-voice memo:
 
 ```sh
 bun --no-env-file scripts/import-memos.ts \
@@ -591,15 +587,15 @@ explanation is shown in the product. Store
 only the start, a trusted paid-through projection and a reminder milestone; no
 preference bodies or payment details enter these records. Account deletion cascades.
 
-Both MCP tools may attach a separate `notice` object to a successful result in the
+Every MCP tool may attach a separate `notice` object to a successful result in the
 last seven days and last day. Atomic account-wide claims offer each milestone at
-most once across assistants and both tools; returning during the last day skips
+most once across assistants and tools; returning during the last day skips
 the earlier reminder. A lost response or timed-out notice lookup can lose that
 reminder. Delivery does not establish display or acknowledgment. Lookup is bounded
 to one second, with short database lock/statement limits, and never turns a
 confirmed save into failure. The website banner does not consume MCP reminders. Background lifecycle hook
 reads return instruction context only and do not consume billing notices.
-TPS text, revision, downloads and saved receipts contain no billing notices.
+Report text, version, downloads and saved receipts contain no billing notices.
 
 Expired unsubscribed accounts receive a tool error `subscription_required` with
 `retryable:false`, a subscription URL and a web-preferences URL. This is not an
@@ -626,12 +622,12 @@ Do not reset clocks, erase notices or infer subscription state during recovery.
 ### Durable accepted changes (0010)
 
 Every successful `create_memo` change writes immutable internal provenance in the same
-transaction as card history and TPS. (Records from the removed refinement Apply keep
+transaction as card history and the report snapshot. (Records from the removed refinement Apply keep
 their `refinement_apply` operation.) It preserves the exact submitted instruction or
-exact edits, `rules` and stated purpose, actor, request ID, affected before/after card-version references, source/TPS revision
+exact edits, `rules` and stated purpose, actor, request ID, affected before/after card-version references, source/report revision
 hashes and transformation identity. It records only what Milton received, not a conversation
 or proof of the human's full intent. Legacy missing request evidence is not reconstructed.
-No-op, clarification, failed and discarded proposals add no accepted-change record.
+No-op and failed saves add no accepted-change record.
 Replay adds no duplicate. New saves record transformation pipeline `exact:v1`.
 
 Records live as long as internal history and are removed with account deletion. Their
@@ -657,7 +653,7 @@ See [deployment and rollback](deploy/README.md).
 ### Memo-update allowance and reservation alerts (0014)
 
 Migration 0014 is additive and defaults off. It preserves existing receipt JSON,
-source/history/TPS and trials. After every writer and worker
+source/history, the report snapshot and trials. After every writer and worker
 runs compatible code, the operator can select explicit SQL alerts-only policy and
 mark that boundary ready. From `server/`, with the protected database/dotenvx setup:
 
@@ -672,12 +668,10 @@ work. `disable` stops allowance enforcement without erasing holds
 or charges; drain mutating traffic/holds before a compatible rollback.
 
 The launch allowance is **100 memo updates per account per UTC day**, shared across
-assistants, with no rollover. One committed user-directed batch, exact edit or
-changed reviewed Apply consumes one. Deterministic unchanged, clarification,
-failed/rolled-back publication, source-free TPS rebuild, reads/downloads,
-preview/discard and completed-request replay consume zero.
-Historical/pre-activation ordinary claims stay uncharged; a valid older preview
-newly applied after activation charges on Apply day. Ordinary saves keep their
+assistants, with no rollover. One committed save that changes rules or samples
+consumes one. Unchanged saves, failed or rolled-back publication, snapshot
+rebuilds on read, reads/downloads and completed-request replay consume zero.
+Historical/pre-activation claims stay uncharged. Saves keep their
 post-lock claim day across midnight. The captured claim timestamp plus 40 seconds
 remains the publication deadline. An expired hold no longer occupies capacity and
 cannot publish late.
@@ -691,7 +685,7 @@ and an uncertain publication recovers the original receipt.
 
 MCP `memo_updates` metadata contains `limit`, `used`, `pending`, `available`,
 `resets_at` and `as_of`. Save `memo_update` separately describes the original
-request's charge/state/day/replay. Both are outside TPS and immutable receipt JSON.
+request's charge/state/day/replay. Both are outside report text and immutable receipt JSON.
 The advisory balance lookup is bounded and omitted on failure; it cannot reverse a
 confirmed save. Core quota checks fail closed. Final MCP events contain only known
 tool/outcome/error values, elapsed time and charge/replay/release state, without

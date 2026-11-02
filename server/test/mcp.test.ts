@@ -75,7 +75,7 @@ test("server instructions fit within Claude Code's 4,096-character limit", () =>
   expect(storeInstructions.length).toBeLessThanOrEqual(4096);
 });
 
-test("an SDK client receives instructions, discovers the four tools, and reads TPS", async () => {
+test("an SDK client receives instructions, discovers the four tools, and reads the cover sheet", async () => {
   const calls: string[] = [];
   const server = createMiltonServer(
     await loadMemos(new URL("../../templates/", import.meta.url)),

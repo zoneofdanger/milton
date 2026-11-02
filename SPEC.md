@@ -2,11 +2,18 @@
 
 ## Current build: Instruction cards, reports, samples and the cover sheet
 
-This section supersedes older tool, history-screen, authored-TPS and recovery
-choices below. Agents use only `get_cover_sheet`, `get_report`, `list_reports` and
+Product direction comes from Peter's product note of 2026-11-02 (kept with the
+agents' working notes, not in this repository); where this section and the note
+differ, the note wins. Its vocabulary applies here: a memo is anything sent to Milton
+(a rule, a correction or an approved sample), a report is one assembled document per
+writing situation, and the cover sheet carries the rules true of all writing plus the
+report index. "TPS Report" and "group" are retired words; they survive only as code
+identifiers such as `tps_reports`, `TPS.md` and `tps_body_limit`. This section records
+the contracts as built and supersedes older tool, history-screen, authored-TPS and
+recovery choices below. Agents use only `get_cover_sheet`, `get_report`, `list_reports` and
 `create_memo`. Saves are model-free: the assistant names each rule's
 report and sends its exact approved wording, and Milton stores those bytes. Complete
-instructions, including conditions and exceptions, are independently versioned cards. Each card belongs, once, to one of five fixed
+instructions, including conditions and exceptions, are independently versioned cards. Each card belongs to one of five fixed
 reports (`email`, `chat`, `post`, `document`, `speech`) or to the cover sheet, the
 rules true of all writing. Approved samples are stored exactly as sent in their own
 append-only table, newest per kind winning and at most two per kind staying active.
@@ -14,7 +21,7 @@ Assembly is deterministic and runs on read: the cover sheet is its rules in
 write-once insertion order; each report prints its heading, its when line, its
 samples newest first, then its rules (0017). Card text cannot contain Markdown
 headings. The card fingerprint, extended by active sample IDs, fences every
-published version. Memo groups (0016) remain as history only.
+published version. The memo group tables (0016) remain as history only.
 
 Filing is correctable (0020): a card's report (or `cover`) lives on each version, so
 an explicit `moves` entry appends a version that keeps the card's identity, text and
@@ -62,9 +69,9 @@ two rules that disagree. Nothing detects that; the instructions require exact_ed
 for every correction. Stored receipts from the retired model path (for example
 `needs_clarification`) still replay.
 
-History belongs to internal instruction cards; legacy memo history is retained. TPS stores only its current snapshot and a
-revision token. The website shows current TPS and downloads TPS.md; it exposes no
-memo-management or history/recovery UI. There are no legacy tool aliases or
+History belongs to internal instruction cards; legacy memo history is retained. The
+cover sheet and reports keep only a current snapshot and a version. The website shows
+them and downloads TPS.md; it exposes no memo-management or history/recovery UI. There are no legacy tool aliases or
 compatibility rollout paths. See server/README.md for the current contracts,
 configuration, migration and local verification instructions.
 
@@ -73,26 +80,16 @@ Apply and Discard) has been removed; its routes return 404. Wording changes go t
 `create_memo`, including `exact_edits`. Historical refinement receipts and accepted-change
 records stay in the database unchanged.
 
-Review uses native POST forms under the existing no-script CSP. Existing bounded
-receipts bind a client-carried base64url payload to its account and exact report/source
-snapshot; no schema or budget changes. Both generation and action receipt capacity
-are reserved before model work. Reviews have no arbitrary TTL: source/report fences
-and consumption determine validity. Receipt status survives a lost response, but the
-candidate text does not; refresh/replay never regenerates. A fresh preview requires
-an explicit action. Source text never appears in URLs, cookies or receipt storage.
-
-An administrative refresh can rebuild an existing TPS from its current approved
-sources without changing card history, invoking a model or fabricating a save.
-It checks both report revision and source fingerprint, then advances the report
-revision only when refreshing.
+A read whose stored snapshot lags its sources rebuilds and publishes it under the
+account lock (0017), without changing card history, invoking a model or fabricating a
+save; there is no separate refresh step.
 
 Migration 0008 conservatively carries each complete legacy memo into one card,
 keeping IDs, versions, source order, exact text and all old history. No model splits
-existing instructions. New cards can share an existing memo; internal regrouping has
-its own version fence and cannot change TPS or card text history. Cards organize and narrow edits; they do not establish semantic correctness.
+existing instructions. Cards organize and narrow edits; they do not establish semantic correctness.
 
 Accepted changes now retain the exact submitted purpose, rules and edits, actor, affected card
-versions and transformation identity atomically with source/history/TPS. These internal
+versions and transformation identity atomically with source, history and the report snapshot. These internal
 records use the existing history quota and account-deletion policy. Missing legacy
 request evidence remains unavailable.
 
@@ -104,9 +101,9 @@ production actions or override the current contract above.
 Optional capture uses existing `get_cover_sheet`, `get_report` and `create_memo`, with explicit opt-in
 for the current conversation and an immediate stop instruction. Connection consent
 and first-draft approval do not enable capture; opt-in never replaces approval of
-the complete first draft for empty TPS. Capture controls stay in the conversation,
-not in shared TPS. At task completion, the assistant compares explicit reusable
-standing instructions against current TPS and saves only genuine changes with
+the complete first draft for an empty account. Capture controls stay in the conversation,
+not in the shared reports. At task completion, the assistant compares explicit reusable
+standing rules against the current cover sheet and reports and saves only genuine changes with
 their original scope and conditions. Exclude one-off requests, project facts,
 unconfirmed inferences, transcripts, secrets and other people's private details.
 Stopping capture preserves existing instructions and cannot undo submitted saves.

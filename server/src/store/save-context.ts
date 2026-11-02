@@ -70,4 +70,10 @@ export type SaveContext = {
     result: SaveOutcome,
     changed?: boolean,
   ) => Promise<SaveOutcome>;
+  assemble: (tx: StoreSession, documents: Documents) => Promise<string>;
+  publish: (
+    tx: StoreSession,
+    current: Snapshot,
+    body: string,
+  ) => Promise<string>;
 };

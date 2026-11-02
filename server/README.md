@@ -39,10 +39,10 @@ Cloud Run listens on `0.0.0.0:$PORT`. SIGTERM stops accepting requests and allow
 to eight seconds to finish.
 
 For dotenvx, mount an encrypted file and set `MILTON_ENCRYPTED_ENV_FILE` on Cloud Run.
-`MILTON_ENCRYPTED_ENV` accepts encrypted contents for local or alternative adapters. Supply the matching
-`DOTENV_PRIVATE_KEY` separately through platform secret storage. Do not set both
-payload options. Missing or invalid decryption fails closed. Existing platform
-environment values take precedence. Without either payload option, the runtime
+Supply the matching `DOTENV_PRIVATE_KEY` separately through platform secret storage.
+The file is the only payload option; the retired inline `MILTON_ENCRYPTED_ENV`
+value is refused. Missing or invalid decryption fails closed. Existing platform
+environment values take precedence. Without a payload file, the runtime
 uses its environment directly, supporting local development and staged migration.
 Keep encrypted release payloads private and versioned, and keep private keys out of
 images, logs and git. The app gets its own cookie-signing key; MCP and worker do not.

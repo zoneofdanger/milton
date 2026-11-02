@@ -25,7 +25,8 @@ const usage = `Usage:
   bun --no-env-file scripts/memo-updates.ts policy --compatible-writers [--daily-limit COUNT]
   bun --no-env-file scripts/memo-updates.ts enable | disable | observe
 
-Uses explicit DATABASE_URL or dotenvx settings. policy selects alerts_only, marks
+Uses explicit DATABASE_URL, or a dotenvx payload file in MILTON_ENCRYPTED_ENV_FILE
+with DOTENV_PRIVATE_KEY. policy selects alerts_only, marks
 compatible writers ready and optionally sets the daily memo-update limit. It does
 not enable memo updates, trials or model work.
 Deploy every compatible writer/worker before --compatible-writers. enable is a

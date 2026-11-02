@@ -1,15 +1,16 @@
 import { readFileSync } from "node:fs";
 import { config } from "@dotenvx/dotenvx";
 
-// The encrypted payload is a platform environment value (Vercel) or mounted
-// secret file (Cloud Run). Its private key is a separate platform secret.
+// The encrypted payload is a mounted secret file (Cloud Run); its private key
+// is a separate platform secret. The retired inline MILTON_ENCRYPTED_ENV value
+// is refused rather than ignored, so a caller still setting it fails closed.
 export function loadEnvironment(env: NodeJS.ProcessEnv = process.env) {
-  const inline = env.MILTON_ENCRYPTED_ENV;
   const path = env.MILTON_ENCRYPTED_ENV_FILE;
-  if (!inline && !path) return env; // Local development and staged rollout.
+  if (env.MILTON_ENCRYPTED_ENV !== undefined)
+    throw new Error("Milton runtime secrets are unavailable.");
+  if (!path) return env; // Local development and staged rollout.
   try {
-    if (inline && path) throw new Error();
-    const value = inline ?? readFileSync(path!, "utf8");
+    const value = readFileSync(path, "utf8");
     const resolved: Record<string, string> = {};
     for (const [key, value] of Object.entries(env))
       if (value !== undefined) resolved[key] = value;

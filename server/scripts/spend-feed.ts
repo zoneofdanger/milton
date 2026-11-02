@@ -80,8 +80,9 @@ const usage = `Usage:
   bun --no-env-file scripts/spend-feed.ts rotate --logging-verified --output ABSOLUTE_PRIVATE_FILE
   bun --no-env-file scripts/spend-feed.ts revoke
 
-Operator CLI only: uses explicit protected DATABASE_URL/dotenvx and verifies the
-milton owner connection. No public write route or key argument. rotate requires
+Operator CLI only: uses explicit protected DATABASE_URL, or a dotenvx payload file
+in MILTON_ENCRYPTED_ENV_FILE with DOTENV_PRIVATE_KEY, and verifies the milton owner
+connection. No public write route or key argument. rotate requires
 Lead's completed all-platform request-log protection before --logging-verified;
 this flag is an attestation, not automatic proof. It writes a new 0600 URL file in
 an owned private directory, never overwriting a file or printing the credential.

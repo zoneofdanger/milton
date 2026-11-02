@@ -1,4 +1,4 @@
-import { sql, type SQL } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import type { StoreSession } from "./database";
 import { StoreError } from "./errors";
 
@@ -13,15 +13,6 @@ export type TrialNotice = {
   message: string;
   subscription_url: string;
 };
-
-// Used for worker eligibility as well as foreground access. Unknown accounts are
-// still refused by each caller's active-account guard. Never select by client ID.
-export const trialEligible = (user: SQL) => sql`NOT EXISTS (
-  SELECT 1 FROM trial_accounts ta CROSS JOIN store_config tc
-  WHERE tc.singleton=1 AND tc.trials_enabled AND ta.user_id=${user}
-    AND ta.started_at + interval '720 hours' <= clock_timestamp()
-    AND (ta.paid_through IS NULL OR ta.paid_through <= clock_timestamp())
-)`;
 
 export async function trialStatus(
   db: StoreSession,

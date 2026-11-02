@@ -273,8 +273,9 @@ reports (`doc` accepted) or `cover`. Each entry becomes one new card holding `te
 byte for byte; its description is the first non-blank line, trimmed and cut to the
 description cap. Each body must fit the body limit, contain no Markdown heading line
 (`card_heading`) and keep the account within its memo count (`memo_count_limit`). An
-entry whose text is byte-identical to an active card in the same report, or to an
-earlier entry in the request, is skipped; when nothing else changes the save returns
+entry that prints identically to an active card in the same report (compared as
+printed, so `Be concise.` matches a stored `- Be concise.`), or to an earlier entry in
+the request, is skipped; when nothing else changes the save returns
 `unchanged` and charges nothing. Duplicates by meaning are not detected. The assistant
 picks the report and the wording; a wrong report is fixable with `moves`.
 

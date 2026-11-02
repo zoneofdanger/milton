@@ -52,7 +52,7 @@ Every save is exact. `create_memo` needs at least one structured field: `rules`
 with `invalid_input` ("Name the report and send the rule's text in rules."). Each
 `rules` entry becomes one new card stored byte for byte; its description is its first
 non-blank line, trimmed and cut to the description cap, with no model. An entry whose
-text equals an active card's body in the same report, or an earlier entry in the same
+text prints like an active card in the same report, or an earlier entry in the same
 request, is skipped; a save that then changes nothing returns `unchanged` and charges
 nothing. `text` is the stated purpose: recorded with the accepted change, never stored
 as a rule. Corrections go through `exact_edits`; an edit whose `before` is a whole rule

@@ -1574,6 +1574,46 @@ test("anchors resolve against the printed rules, so a quote never lands on a rul
   }
 });
 
+test("duplicate checks compare printed rules, so a bare rule beside its compiler-era twin is skipped or refused", async () => {
+  const local = await localStore();
+  try {
+    await local.pg.exec("INSERT INTO users(id) VALUES ('twins')");
+    const store = compiledMemos(local.db, "twins", {
+      issuer: "fixture",
+      clientId: "fixture",
+    });
+    const save = async (change: Partial<SaveMemoInput>) =>
+      store.saveMemo({
+        text: "Fictional change.",
+        request_id: crypto.randomUUID(),
+        expected_version: (await store.getTpsReport()).version,
+        ...change,
+      });
+    expect(
+      await save({
+        rules: [
+          { report: "cover", text: "- Be concise." },
+          { report: "cover", text: "Be brief." },
+        ],
+      }),
+    ).toMatchObject({ status: "saved" });
+    // "Be concise." prints exactly as the compiler-era "- Be concise.".
+    expect(
+      await save({ rules: [{ report: "cover", text: "Be concise." }] }),
+    ).toMatchObject({ status: "unchanged" });
+    expect(
+      await save({
+        exact_edits: [{ before: "Be brief.", after: "Be concise." }],
+      }),
+    ).toMatchObject({ status: "failed", error: "edit_conflict" });
+    expect((await store.readDocuments()).cover).toBe(
+      "- Be concise.\n\n- Be brief.",
+    );
+  } finally {
+    await local.dispose();
+  }
+});
+
 test("an exact duplicate rule is skipped as unchanged without a charge", async () => {
   const local = await localStore();
   try {

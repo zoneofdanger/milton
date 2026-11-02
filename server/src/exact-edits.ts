@@ -58,7 +58,7 @@ export function exactEditsProposal(memos: Source[], edits: Edit[]) {
   const conflict = () =>
     new StoreError(
       "edit_conflict",
-      "Each exact edit must match one unique, nonoverlapping span in a current instruction card. Read TPS again and include enough surrounding text to identify it. Nothing was changed.",
+      "Each exact edit must match one unique, nonoverlapping span in a current instruction card. Read the cover sheet and reports again and include enough surrounding text to identify it. Nothing was changed.",
       409,
     );
   const changes = new Map<

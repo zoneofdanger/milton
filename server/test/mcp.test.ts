@@ -92,6 +92,9 @@ test("an SDK client receives instructions, discovers the four tools, and reads t
     expect(await checkMcp(client)).toContain("exactly four");
     expect(calls).toEqual(["get_cover_sheet"]);
     const tools = (await client.listTools()).tools;
+    // Assistants see cover sheet and reports, never the retired TPS name.
+    for (const served of [client.getInstructions(), ...tools])
+      expect(JSON.stringify(served)).not.toMatch(/TPS|tps_report/);
     const guidance = [
       client.getInstructions(),
       tools.find((tool) => tool.name === "get_cover_sheet")?.description,

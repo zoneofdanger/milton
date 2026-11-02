@@ -1234,7 +1234,12 @@ test("exact caller edits preserve conditions and scope without a model, with ato
         { before: "new anchor", after: "cascade" },
       ],
     ])
-      expect((await send(edits)).error).toBe("edit_conflict");
+      expect(await send(edits)).toMatchObject({
+        error: "edit_conflict",
+        message: expect.stringContaining(
+          "Read the cover sheet and reports again",
+        ),
+      });
     for (const edits of [
       [],
       [{ before: "", after: "new" }],
@@ -3725,7 +3730,12 @@ test("memo updates charge committed source batches only and recover original cha
         request_id: crypto.randomUUID(),
         expected_version: (await store.getTpsReport()).version,
       }),
-    ).rejects.toMatchObject({ code: "memo_updates_exhausted" });
+    ).rejects.toMatchObject({
+      code: "memo_updates_exhausted",
+      message: expect.stringContaining(
+        "You can still read and download your cover sheet and reports.",
+      ),
+    });
     expect(calls).toBe(called);
     expect((await store.getTpsReport()).text).toContain(
       "Use fictional bullets.",

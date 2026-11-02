@@ -165,7 +165,7 @@ export const saveMemoInput = z.strictObject({
     .string()
     .regex(/^[a-f0-9]{64}$/)
     .describe(
-      "Copy the opaque version from the latest get_cover_sheet or get_report result or tps_report_unavailable error. Never invent a version.",
+      "Copy the opaque version from the latest get_cover_sheet or get_report result. Never invent a version.",
     ),
 });
 export type SaveMemoInput = z.infer<typeof saveMemoInput>;

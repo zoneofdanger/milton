@@ -83,8 +83,8 @@ export async function admitMemoUpdate(
     throw new StoreError(
       pending ? "memo_updates_pending" : "memo_updates_exhausted",
       pending
-        ? "Today's remaining memo updates are in progress. Retry shortly. Nothing was changed. You can still read and download your TPS Report."
-        : `You've used today's ${balance.limit} memo updates. You can still read and download your TPS Report. Updates reset at ${balance.resets_at}. Nothing was changed.`,
+        ? "Today's remaining memo updates are in progress. Retry shortly. Nothing was changed. You can still read and download your cover sheet and reports."
+        : `You've used today's ${balance.limit} memo updates. You can still read and download your cover sheet and reports. Updates reset at ${balance.resets_at}. Nothing was changed.`,
       429,
       {
         resets_at: balance.resets_at,

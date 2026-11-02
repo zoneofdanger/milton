@@ -47,5 +47,5 @@ export function hookOutput(report: unknown, event: HookEvent) {
 }
 export function deliveryStatus(raw: unknown) {
   const r = parseReport(raw);
-  return `TPS revision ${r.version}; ${r.is_empty ? "empty" : "not empty"}; ${r.reports?.length ?? 0} reports. Served/injected status does not establish behavior.`;
+  return `Cover sheet version ${r.version}; ${r.is_empty ? "empty" : "not empty"}; ${r.reports?.length ?? 0} reports. Served/injected status does not establish behavior.`;
 }

@@ -39,7 +39,8 @@ test("context replacement preserves complete rules and other messages; hook outp
       JSON.stringify(fixture()),
   );
   const status = deliveryStatus(fixture());
-  expect(status).toContain(version);
+  expect(status).toStartWith(`Cover sheet version ${version};`);
+  expect(status).not.toContain("TPS");
   expect(status).toContain("1 reports");
   expect(status).not.toContain(rule);
 });

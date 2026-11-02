@@ -18,11 +18,11 @@ messages = upsertMiltonContext(messages, report);
 ```
 
 `parseReport` throws `MiltonReadError` on an access or read error; there is no
-offline fallback and no cache. Read again for each task so a new TPS revision
+offline fallback and no cache. Read again for each task so a new version
 takes effect.
 
 Context replacement affects only developer messages marked `origin: "milton"` by
-this adapter. It leaves the conversation intact and supplies every complete TPS
+this adapter. It leaves the conversation intact and supplies every complete
 instruction. Call `withoutMiltonContext` if
 the fresh read fails. Supply the resulting messages to the model only after a
 successful read; old context in an already-running request cannot be withdrawn.
@@ -59,4 +59,4 @@ recovering an uncertain response, and follow ordinary conflicts/first-setup appr
 The CLI command `prepare-correction` accepts the same fields on stdin.
 
 Feed a cover-sheet response to `deliveryStatus` or the `status` CLI command to print
-metadata only: the TPS revision, whether the account is empty and the report count.
+metadata only: the cover sheet version, whether the account is empty and the report count.

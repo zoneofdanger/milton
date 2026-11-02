@@ -8,7 +8,7 @@ import { readLimits, utf8Bytes } from "./index";
 import { exactEditsProposal, exactMoves } from "../exact-edits";
 import { assertTrialAccess } from "./trials";
 import { withMemoUpdate } from "./memo-updates";
-import { recordAcceptedChange } from "./provenance";
+import { publishSave } from "./save-publish";
 import {
   outcomeSchema,
   retiredSample,
@@ -54,8 +54,6 @@ export async function applySave(
     snapshot,
     receipt,
     complete,
-    assemble,
-    publish,
   } = ctx;
   // Every anchor resolves against the claimed snapshot.
   const cards = claim.current.active.map((h) => ({
@@ -214,44 +212,6 @@ export async function applySave(
       for (const { id } of evicted.toSorted((a, b) => a.id.localeCompare(b.id)))
         retired.push({ id, reason: "evicted" });
     };
-    const finish = async (before: typeof current) => {
-      const updated = await snapshot(tx);
-      const body = await assemble(tx, updated.documents);
-      const publishedVersion = await publish(tx, updated, body);
-      const changed = await recordAcceptedChange(tx, {
-        userId,
-        requestId: input.request_id,
-        operation: "save_memo",
-        request: {
-          text: input.text,
-          ...(input.rules ? { rules: input.rules } : {}),
-          ...(input.exact_edits ? { exact_edits: input.exact_edits } : {}),
-          ...(input.moves ? { moves: input.moves } : {}),
-          ...(input.sample ? { sample: input.sample } : {}),
-          ...(input.retire_samples
-            ? { retire_samples: input.retire_samples }
-            : {}),
-        },
-        actor: JSON.parse(attribution),
-        transformation: { pipeline: "exact:v1" },
-        before: before.heads,
-        after: updated.heads,
-        beforeTps: before.version,
-        afterTps: publishedVersion,
-        beforeSource: before.fingerprint,
-        afterSource: updated.fingerprint,
-      });
-      // A sample change touches no cards but is still one user-directed
-      // filing, so it charges one memo update.
-      return complete(
-        tx,
-        result("saved", {
-          version: publishedVersion,
-          ...(retired.length ? { samples_retired: retired } : {}),
-        }),
-        changed || samplesChanged,
-      );
-    };
     const limits = await readLimits(tx);
     const known = new Map(current.active.map((h) => [h.id, h]));
     // A rule cannot be moved and retired at once, including by an exact
@@ -355,6 +315,6 @@ export async function applySave(
     }
     for (const id of retire) await append(known.get(id)!, true, "archive");
     await applySamples();
-    return finish(current);
+    return publishSave(ctx, tx, current, retired, attribution, samplesChanged);
   });
 }

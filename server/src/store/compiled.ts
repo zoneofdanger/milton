@@ -19,15 +19,10 @@ import {
   withMemoUpdate,
   type UpdateReceipt,
 } from "./memo-updates";
-import {
-  outcomeSchema,
-  type Receipt,
-  type Report,
-  type SaveContext,
-  type SaveOutcome,
-} from "./save-context";
+import type { Receipt, Report, SaveContext, SaveOutcome } from "./save-context";
 import { claimSave } from "./save-claim";
 import { applySave } from "./save-apply";
+import { recoverSave } from "./save-publish";
 
 const hash = (value: unknown) =>
   createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -365,37 +360,7 @@ export function compiledMemos(
       try {
         return await applySave(ctx, claim);
       } catch (error) {
-        const failure = databaseFailure(error);
-        // A committed result wins even when the connection failed while returning it.
-        return db
-          .transaction(async (tx) => {
-            await lock(tx);
-            const existing = await receipt(tx, input.request_id);
-            if (existing?.completed)
-              return withMemoUpdate(
-                outcomeSchema.parse(existing.result_json),
-                existing,
-                true,
-              );
-            if (!existing) throw failure;
-            // databaseFailure yields only StoreErrors, whose messages are written
-            // for clients; unknown errors carry its generic message.
-            return complete(
-              tx,
-              result("failed", {
-                error: failure.code,
-                message: failure.message,
-              }),
-            );
-          })
-          .catch(() => {
-            throw new StoreError(
-              "save_outcome_unknown",
-              "Repeat the exact same request ID and input to recover the outcome. Do not submit a new request yet.",
-              503,
-              { request_id: input.request_id },
-            );
-          });
+        return recoverSave(ctx, error);
       }
     },
   };

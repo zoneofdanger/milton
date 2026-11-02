@@ -217,6 +217,8 @@ export function pageContext(
     return memoPages(request, store, csrfField, user.email);
   };
   return {
+    config,
+    request,
     url,
     cookies,
     writeCookie,

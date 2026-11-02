@@ -1,0 +1,701 @@
+{
+  "id": "e03a859c-8a43-4257-a9a2-bd3322fdbf8c",
+  "prevId": "eba6fbd5-1415-46ad-96ac-89eb158ca727",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.identities": {
+      "name": "identities",
+      "schema": "",
+      "columns": {
+        "provider": {
+          "name": "provider",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "subject": {
+          "name": "subject",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "profile_json": {
+          "name": "profile_json",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "identities_by_user": {
+          "name": "identities_by_user",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "identities_user_id_users_id_fk": {
+          "name": "identities_user_id_users_id_fk",
+          "tableFrom": "identities",
+          "tableTo": "users",
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "identities_provider_subject_pk": {
+          "name": "identities_provider_subject_pk",
+          "columns": ["provider", "subject"]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "identities_subject": {
+          "name": "identities_subject",
+          "value": "\"identities\".\"subject\" <> ''"
+        },
+        "identities_profile_object": {
+          "name": "identities_profile_object",
+          "value": "jsonb_typeof(\"identities\".\"profile_json\") = 'object'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.memo_versions": {
+      "name": "memo_versions",
+      "schema": "",
+      "columns": {
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "memo_id": {
+          "name": "memo_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "body": {
+          "name": "body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "archived": {
+          "name": "archived",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor_json": {
+          "name": "actor_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "details_json": {
+          "name": "details_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'"
+        },
+        "payload_bytes": {
+          "name": "payload_bytes",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "generated": {
+            "as": "octet_length(description)::bigint + octet_length(body) + octet_length(reason) + octet_length(actor_json) + octet_length(details_json)",
+            "type": "stored"
+          }
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "memo_versions_memo": {
+          "name": "memo_versions_memo",
+          "tableFrom": "memo_versions",
+          "tableTo": "memos",
+          "columnsFrom": ["user_id", "memo_id"],
+          "columnsTo": ["user_id", "id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "memo_versions_user_id_memo_id_version_pk": {
+          "name": "memo_versions_user_id_memo_id_version_pk",
+          "columns": ["user_id", "memo_id", "version"]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "memo_versions_positive": {
+          "name": "memo_versions_positive",
+          "value": "\"memo_versions\".\"version\" >= 1"
+        },
+        "memo_versions_description": {
+          "name": "memo_versions_description",
+          "value": "\"memo_versions\".\"description\" <> '' AND position(chr(10) in \"memo_versions\".\"description\") = 0 AND position(chr(13) in \"memo_versions\".\"description\") = 0"
+        },
+        "memo_versions_actor_object": {
+          "name": "memo_versions_actor_object",
+          "value": "jsonb_typeof(\"memo_versions\".\"actor_json\"::jsonb) = 'object'"
+        },
+        "memo_versions_details_object": {
+          "name": "memo_versions_details_object",
+          "value": "jsonb_typeof(\"memo_versions\".\"details_json\"::jsonb) = 'object'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.memos": {
+      "name": "memos",
+      "schema": "",
+      "columns": {
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "gen_random_uuid()::text"
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "memos_user_id_users_id_fk": {
+          "name": "memos_user_id_users_id_fk",
+          "tableFrom": "memos",
+          "tableTo": "users",
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "memos_user_id_id_pk": {
+          "name": "memos_user_id_id_pk",
+          "columns": ["user_id", "id"]
+        }
+      },
+      "uniqueConstraints": {
+        "memos_user_name": {
+          "name": "memos_user_name",
+          "nullsNotDistinct": false,
+          "columns": ["user_id", "name"]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "memos_slug": {
+          "name": "memos_slug",
+          "value": "\"memos\".\"name\" ~ '^[a-z0-9]+(-[a-z0-9]+)*$' AND \"memos\".\"name\" !~ '[^a-z0-9-]'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.save_requests": {
+      "name": "save_requests",
+      "schema": "",
+      "columns": {
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "request_id": {
+          "name": "request_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "input_hash": {
+          "name": "input_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source_hash": {
+          "name": "source_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reserved_micros": {
+          "name": "reserved_micros",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "result_json": {
+          "name": "result_json",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "completed": {
+          "name": "completed",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "deadline": {
+          "name": "deadline",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "payload_bytes": {
+          "name": "payload_bytes",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "generated": {
+            "as": "octet_length(request_id)::bigint + octet_length(input_hash) + octet_length(source_hash) + 2048 + 128",
+            "type": "stored"
+          }
+        }
+      },
+      "indexes": {
+        "save_requests_by_day": {
+          "name": "save_requests_by_day",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "save_requests_by_account_day": {
+          "name": "save_requests_by_account_day",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "save_requests_user_id_users_id_fk": {
+          "name": "save_requests_user_id_users_id_fk",
+          "tableFrom": "save_requests",
+          "tableTo": "users",
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "save_requests_user_id_request_id_pk": {
+          "name": "save_requests_user_id_request_id_pk",
+          "columns": ["user_id", "request_id"]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "save_request_hashes": {
+          "name": "save_request_hashes",
+          "value": "\"save_requests\".\"input_hash\" ~ '^[a-f0-9]{64}$' AND \"save_requests\".\"source_hash\" ~ '^[a-f0-9]{64}$'"
+        },
+        "save_request_cost": {
+          "name": "save_request_cost",
+          "value": "\"save_requests\".\"reserved_micros\" >= 0"
+        },
+        "save_request_id": {
+          "name": "save_request_id",
+          "value": "length(\"save_requests\".\"request_id\") = 36"
+        },
+        "save_request_result": {
+          "name": "save_request_result",
+          "value": "jsonb_typeof(\"save_requests\".\"result_json\") = 'object' AND octet_length(\"save_requests\".\"result_json\"::text) <= 2048"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.store_config": {
+      "name": "store_config",
+      "schema": "",
+      "columns": {
+        "singleton": {
+          "name": "singleton",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "signup_mode": {
+          "name": "signup_mode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'closed'"
+        },
+        "allowed_identities_json": {
+          "name": "allowed_identities_json",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "limits_json": {
+          "name": "limits_json",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{\"memos\":100,\"body_bytes\":32768,\"name_bytes\":64,\"description_bytes\":500,\"reason_bytes\":500,\"history_bytes\":67108864,\"daily_calls\":1000,\"daily_writes\":200,\"request_bytes\":65536,\"page_size\":50}'::jsonb"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "config_singleton": {
+          "name": "config_singleton",
+          "value": "\"store_config\".\"singleton\" = 1"
+        },
+        "config_signup_mode": {
+          "name": "config_signup_mode",
+          "value": "\"store_config\".\"signup_mode\" IN ('closed','allowlist','open')"
+        },
+        "config_allowlist_array": {
+          "name": "config_allowlist_array",
+          "value": "jsonb_typeof(\"store_config\".\"allowed_identities_json\") = 'array'"
+        },
+        "config_limits_object": {
+          "name": "config_limits_object",
+          "value": "jsonb_typeof(\"store_config\".\"limits_json\") = 'object'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.tps_reports": {
+      "name": "tps_reports",
+      "schema": "",
+      "columns": {
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "body": {
+          "name": "body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source_hash": {
+          "name": "source_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "tps_reports_user_id_users_id_fk": {
+          "name": "tps_reports_user_id_users_id_fk",
+          "tableFrom": "tps_reports",
+          "tableTo": "users",
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "tps_revision_positive": {
+          "name": "tps_revision_positive",
+          "value": "\"tps_reports\".\"revision\" > 0"
+        },
+        "tps_body_limit": {
+          "name": "tps_body_limit",
+          "value": "octet_length(\"tps_reports\".\"body\") <= 32768"
+        },
+        "tps_source_hash": {
+          "name": "tps_source_hash",
+          "value": "\"tps_reports\".\"source_hash\" ~ '^[a-f0-9]{64}$'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.usage_daily": {
+      "name": "usage_daily",
+      "schema": "",
+      "columns": {
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "day_utc": {
+          "name": "day_utc",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tool_calls": {
+          "name": "tool_calls",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "writes": {
+          "name": "writes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "usage_daily_user_id_users_id_fk": {
+          "name": "usage_daily_user_id_users_id_fk",
+          "tableFrom": "usage_daily",
+          "tableTo": "users",
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "usage_daily_user_id_day_utc_pk": {
+          "name": "usage_daily_user_id_day_utc_pk",
+          "columns": ["user_id", "day_utc"]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "usage_nonnegative": {
+          "name": "usage_nonnegative",
+          "value": "\"usage_daily\".\"tool_calls\" >= 0 AND \"usage_daily\".\"writes\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.users": {
+      "name": "users",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'active'"
+        },
+        "templates_revision": {
+          "name": "templates_revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "profile_json": {
+          "name": "profile_json",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "retained_bytes": {
+          "name": "retained_bytes",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "users_status": {
+          "name": "users_status",
+          "value": "\"users\".\"status\" IN ('active','deleting')"
+        },
+        "users_revision": {
+          "name": "users_revision",
+          "value": "\"users\".\"templates_revision\" >= 0"
+        },
+        "users_profile_object": {
+          "name": "users_profile_object",
+          "value": "jsonb_typeof(\"users\".\"profile_json\") = 'object'"
+        },
+        "users_bytes": {
+          "name": "users_bytes",
+          "value": "\"users\".\"retained_bytes\" >= 0"
+        },
+        "users_id_format": {
+          "name": "users_id_format",
+          "value": "\"users\".\"id\" <> '' AND position(':' in \"users\".\"id\") = 0"
+        }
+      },
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

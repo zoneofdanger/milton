@@ -1,0 +1,672 @@
+import { sql } from "drizzle-orm";
+import {
+  pgTable,
+  text,
+  integer,
+  bigint,
+  boolean,
+  jsonb,
+  timestamp,
+  date,
+  primaryKey,
+  unique,
+  uniqueIndex,
+  foreignKey,
+  index,
+  check,
+} from "drizzle-orm/pg-core";
+
+const createdAt = () =>
+  timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
+const limits = {
+  memos: 100,
+  body_bytes: 32768,
+  name_bytes: 64,
+  description_bytes: 500,
+  reason_bytes: 500,
+  history_bytes: 67108864,
+  report_body_bytes: 262144,
+  daily_calls: 1000,
+  daily_writes: 200,
+  request_bytes: 65536,
+  page_size: 50,
+};
+export const storeConfig = pgTable(
+  "store_config",
+  {
+    singleton: integer("singleton").primaryKey(),
+    signupMode: text("signup_mode").notNull().default("closed"),
+    trialsEnabled: boolean("trials_enabled").notNull().default(false),
+    globalSpendPolicy: text("global_spend_policy").notNull().default("capped"),
+    foregroundAccountingReady: boolean("foreground_accounting_ready")
+      .notNull()
+      .default(false),
+    memoUpdatesEnabled: boolean("memo_updates_enabled")
+      .notNull()
+      .default(false),
+    memoUpdatesDailyLimit: integer("memo_updates_daily_limit")
+      .notNull()
+      .default(100),
+    spendFeedKeyHash: text("spend_feed_key_hash"),
+    allowedIdentities: jsonb("allowed_identities_json").notNull().default([]),
+    limits: jsonb("limits_json").notNull().default(limits),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    check("config_singleton", sql`${t.singleton} = 1`),
+    check(
+      "config_signup_mode",
+      sql`${t.signupMode} IN ('closed','allowlist','open')`,
+    ),
+    check(
+      "config_allowlist_array",
+      sql`jsonb_typeof(${t.allowedIdentities}) = 'array'`,
+    ),
+    check("config_limits_object", sql`jsonb_typeof(${t.limits}) = 'object'`),
+    check(
+      "config_global_spend_policy",
+      sql`${t.globalSpendPolicy} IN ('capped','alerts_only')`,
+    ),
+    check(
+      "config_memo_updates",
+      sql`${t.memoUpdatesDailyLimit}>0 AND (NOT ${t.memoUpdatesEnabled} OR (${t.foregroundAccountingReady} AND ${t.globalSpendPolicy}='alerts_only'))`,
+    ),
+    check(
+      "config_spend_feed_key",
+      sql`${t.spendFeedKeyHash} IS NULL OR ${t.spendFeedKeyHash} ~ '^[a-f0-9]{64}$'`,
+    ),
+  ],
+);
+export const users = pgTable(
+  "users",
+  {
+    id: text("id").primaryKey(),
+    status: text("status").notNull().default("active"),
+    templatesRevision: integer("templates_revision").notNull().default(0),
+    profile: jsonb("profile_json").notNull().default({}),
+    retainedBytes: bigint("retained_bytes", { mode: "number" })
+      .notNull()
+      .default(0),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    check("users_status", sql`${t.status} IN ('active','deleting')`),
+    check("users_revision", sql`${t.templatesRevision} >= 0`),
+    check("users_profile_object", sql`jsonb_typeof(${t.profile}) = 'object'`),
+    check("users_bytes", sql`${t.retainedBytes} >= 0`),
+    check(
+      "users_id_format",
+      sql`${t.id} <> '' AND position(':' in ${t.id}) = 0`,
+    ),
+  ],
+);
+// No row means existing early access. Only an explicitly enabled new-account
+// enrollment creates a row; a subscription provider will own paidThrough.
+export const trialAccounts = pgTable(
+  "trial_accounts",
+  {
+    userId: text("user_id")
+      .primaryKey()
+      .references(() => users.id, { onDelete: "cascade" }),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    paidThrough: timestamp("paid_through", { withTimezone: true }),
+    noticeStage: integer("notice_stage").notNull().default(0),
+  },
+  (t) => [
+    check("trial_notice_stage", sql`${t.noticeStage} BETWEEN 0 AND 2`),
+    check(
+      "trial_finite_dates",
+      sql`(${t.startedAt} IS NULL OR isfinite(${t.startedAt})) AND (${t.paidThrough} IS NULL OR isfinite(${t.paidThrough}))`,
+    ),
+  ],
+);
+
+export const identities = pgTable(
+  "identities",
+  {
+    provider: text("provider").notNull(),
+    subject: text("subject").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    profile: jsonb("profile_json").notNull().default({}),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.provider, t.subject] }),
+    index("identities_by_user").on(t.userId),
+    check("identities_subject", sql`${t.subject} <> ''`),
+    check(
+      "identities_profile_object",
+      sql`jsonb_typeof(${t.profile}) = 'object'`,
+    ),
+  ],
+);
+// Assistants a person disconnected from Milton, keyed by sign-in identity and
+// OAuth client. No foreign key to users: a row outlives account deletion so a
+// later account for the same identity stays protected until reconnection.
+export const assistantDisconnects = pgTable(
+  "assistant_disconnects",
+  {
+    provider: text("provider").notNull(),
+    subject: text("subject").notNull(),
+    clientId: text("client_id").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.provider, t.subject, t.clientId] }),
+    check(
+      "assistant_disconnects_bounds",
+      sql`char_length(${t.provider}) BETWEEN 1 AND 64 AND char_length(${t.subject}) BETWEEN 1 AND 512 AND char_length(${t.clientId}) BETWEEN 1 AND 2048`,
+    ),
+  ],
+);
+// One-way sha256("provider:subject") of each deleted sign-in identity, kept only
+// so a re-created account gets no second trial. No foreign key: it outlives the
+// account, and holds no content, email or Milton user id.
+export const deletedIdentities = pgTable(
+  "deleted_identities",
+  {
+    identityHash: text("identity_hash").primaryKey(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    check("deleted_identities_hash", sql`${t.identityHash} ~ '^[a-f0-9]{64}$'`),
+  ],
+);
+export const memos = pgTable(
+  "memos",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    id: text("id")
+      .notNull()
+      .default(sql`gen_random_uuid()::text`),
+    name: text("name").notNull(),
+    // Rendered once above the group's cards in TPS. Set once; see 0016.
+    title: text("title"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.id] }),
+    unique("memos_user_name").on(t.userId, t.name),
+    check(
+      "memos_slug",
+      sql`${t.name} ~ '^[a-z0-9]+(-[a-z0-9]+)*$' AND ${t.name} !~ '[^a-z0-9-]'`,
+    ),
+    check(
+      "memos_title",
+      sql`${t.title} IS NULL OR (char_length(${t.title}) BETWEEN 1 AND 120 AND position(chr(10) in ${t.title})=0 AND position(chr(13) in ${t.title})=0 AND btrim(${t.title})=${t.title})`,
+    ),
+  ],
+);
+export const memoVersions = pgTable(
+  "memo_versions",
+  {
+    userId: text("user_id").notNull(),
+    memoId: text("memo_id").notNull(),
+    version: integer("version").notNull(),
+    description: text("description").notNull(),
+    body: text("body").notNull(),
+    archived: boolean("archived").notNull().default(false),
+    reason: text("reason").notNull(),
+    actorJson: text("actor_json").notNull(),
+    detailsJson: text("details_json").notNull().default("{}"),
+    payloadBytes: bigint("payload_bytes", { mode: "number" })
+      .notNull()
+      .generatedAlwaysAs(
+        sql`octet_length(description)::bigint + octet_length(body) + octet_length(reason) + octet_length(actor_json) + octet_length(details_json)`,
+      ),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.memoId, t.version] }),
+    foreignKey({
+      name: "memo_versions_memo",
+      columns: [t.userId, t.memoId],
+      foreignColumns: [memos.userId, memos.id],
+    }).onDelete("cascade"),
+    check("memo_versions_positive", sql`${t.version} >= 1`),
+    check(
+      "memo_versions_description",
+      sql`${t.description} <> '' AND position(chr(10) in ${t.description}) = 0 AND position(chr(13) in ${t.description}) = 0`,
+    ),
+    check(
+      "memo_versions_actor_object",
+      sql`jsonb_typeof(${t.actorJson}::jsonb) = 'object'`,
+    ),
+    check(
+      "memo_versions_details_object",
+      sql`jsonb_typeof(${t.detailsJson}::jsonb) = 'object'`,
+    ),
+  ],
+);
+export const usageDaily = pgTable(
+  "usage_daily",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    dayUtc: date("day_utc").notNull(),
+    toolCalls: integer("tool_calls").notNull().default(0),
+    writes: integer("writes").notNull().default(0),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.dayUtc] }),
+    check("usage_nonnegative", sql`${t.toolCalls} >= 0 AND ${t.writes} >= 0`),
+  ],
+);
+
+// TPS is a replaceable projection. Content history belongs to instruction_card_versions; legacy memo history is retained.
+export const tpsReports = pgTable(
+  "tps_reports",
+  {
+    userId: text("user_id")
+      .primaryKey()
+      .references(() => users.id, { onDelete: "cascade" }),
+    revision: integer("revision").notNull(),
+    body: text("body").notNull(),
+    sourceHash: text("source_hash").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    check("tps_revision_positive", sql`${t.revision} > 0`),
+    // The cover sheet plus five reports, each within report_body_bytes (0017).
+    check("tps_body_limit", sql`octet_length(${t.body}) <= 1572864`),
+    check("tps_source_hash", sql`${t.sourceHash} ~ '^[a-f0-9]{64}$'`),
+  ],
+);
+
+export const saveRequests = pgTable(
+  "save_requests",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    requestId: text("request_id").notNull(),
+    inputHash: text("input_hash").notNull(),
+    sourceHash: text("source_hash").notNull(),
+    reservedMicros: integer("reserved_micros").notNull(),
+    result: jsonb("result_json").notNull().default({}),
+    completed: boolean("completed").notNull().default(false),
+    deadline: timestamp("deadline", { withTimezone: true }).notNull(),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    memoUpdateDay: date("memo_update_day"),
+    memoUpdateState: text("memo_update_state").notNull().default("none"),
+    createdAt: createdAt(),
+    payloadBytes: bigint("payload_bytes", { mode: "number" })
+      .notNull()
+      .generatedAlwaysAs(
+        sql`octet_length(request_id)::bigint + octet_length(input_hash) + octet_length(source_hash) + 2048 + 128`,
+      ),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.requestId] }),
+    index("save_requests_by_day").on(t.createdAt),
+    index("save_requests_by_account_day").on(t.userId, t.createdAt),
+    index("save_requests_memo_updates")
+      .on(t.userId, t.memoUpdateDay)
+      .where(sql`${t.memoUpdateState} IN ('held','charged')`),
+    check(
+      "save_request_claim_clock",
+      sql`${t.claimedAt} IS NULL OR (isfinite(${t.claimedAt}) AND ${t.claimedAt}=${t.createdAt})`,
+    ),
+    check(
+      "save_request_memo_update",
+      sql`(${t.memoUpdateState}='none' AND ${t.memoUpdateDay} IS NULL) OR (${t.memoUpdateDay} IS NOT NULL AND isfinite(${t.memoUpdateDay}) AND ((${t.memoUpdateState}='held' AND NOT ${t.completed}) OR (${t.memoUpdateState} IN ('charged','released') AND ${t.completed})))`,
+    ),
+    check(
+      "save_request_hashes",
+      sql`${t.inputHash} ~ '^[a-f0-9]{64}$' AND ${t.sourceHash} ~ '^[a-f0-9]{64}$'`,
+    ),
+    check("save_request_cost", sql`${t.reservedMicros} >= 0`),
+    check("save_request_id", sql`length(${t.requestId}) = 36`),
+    check(
+      "save_request_result",
+      sql`jsonb_typeof(${t.result}) = 'object' AND octet_length(${t.result}::text) <= 2048`,
+    ),
+  ],
+);
+
+// No tenant foreign key: deleting an account never erases dispatched spending.
+export const foregroundUsage = pgTable(
+  "foreground_usage",
+  {
+    day: date("day_utc").primaryKey(),
+    reservedMicros: bigint("reserved_micros", { mode: "bigint" }).notNull(),
+  },
+  (t) => [check("foreground_usage_cost", sql`${t.reservedMicros}>=0`)],
+);
+
+export const spendAlerts = pgTable(
+  "spend_alerts",
+  {
+    id: text("id").notNull().unique(),
+    day: date("day_utc").notNull(),
+    metric: text("metric").notNull(),
+    thresholdMicros: bigint("threshold_micros", { mode: "bigint" }).notNull(),
+    filingMicros: bigint("filing_micros", { mode: "bigint" }).notNull(),
+    reviewMicros: bigint("review_micros", { mode: "bigint" }).notNull(),
+    derivedMicros: bigint("derived_micros", { mode: "bigint" }).notNull(),
+    status: text("status").notNull(),
+    observedAt: createdAt(),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.day, t.metric, t.thresholdMicros] }),
+    index("spend_alerts_published").on(t.publishedAt),
+    check("spend_alert_metric", sql`${t.metric}='model_reservations'`),
+    check(
+      "spend_alert_id",
+      sql`${t.id} ~ '^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$'`,
+    ),
+    check(
+      "spend_alert_cost",
+      sql`${t.thresholdMicros}>0 AND ${t.filingMicros}>=0 AND ${t.reviewMicros}>=0 AND ${t.derivedMicros}>=0`,
+    ),
+    check(
+      "spend_alert_publication",
+      sql`(${t.status}='published' AND ${t.publishedAt} IS NOT NULL) OR (${t.status}='covered' AND ${t.publishedAt} IS NULL)`,
+    ),
+  ],
+);
+
+// Retain delivery identities across runtime rollback; deleting these can resend mail.
+export const spendAlertEmails = pgTable(
+  "spend_alert_emails",
+  {
+    alertId: text("alert_id")
+      .primaryKey()
+      .references(() => spendAlerts.id),
+    envelope: jsonb("envelope").notNull(),
+    status: text("status").notNull().default("pending"),
+    firstAttemptAt: timestamp("first_attempt_at", { withTimezone: true }),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    token: text("token"),
+    leaseUntil: timestamp("lease_until", { withTimezone: true }),
+    attempts: integer("attempts").notNull().default(0),
+    providerId: text("provider_id"),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    lastError: text("last_error"),
+  },
+  (t) => [
+    index("spend_alert_emails_pending").on(t.status, t.nextAttemptAt),
+    check(
+      "spend_alert_email_status",
+      sql`${t.status} IN ('pending','sent','failed','unknown')`,
+    ),
+    check("spend_alert_email_attempts", sql`${t.attempts}>=0`),
+    check(
+      "spend_alert_email_lease",
+      sql`(${t.token} IS NULL)=(${t.leaseUntil} IS NULL)`,
+    ),
+    check(
+      "spend_alert_email_sent",
+      sql`(${t.status}='sent')=(${t.sentAt} IS NOT NULL AND ${t.providerId} IS NOT NULL)`,
+    ),
+  ],
+);
+
+// Frozen legacy ledger: nothing writes it since 0018; spend totals still read it.
+// No user FK: account deletion must not refund today's global model reservation.
+export const gardeningUsage = pgTable(
+  "gardening_usage",
+  {
+    userId: text("user_id").notNull(),
+    dayUtc: date("day_utc").notNull(),
+    reservedMicros: bigint("reserved_micros", { mode: "number" }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.dayUtc] }),
+    index("gardening_usage_day").on(t.dayUtc),
+    check("gardening_usage_cost", sql`${t.reservedMicros} > 0`),
+  ],
+);
+
+// Instruction identities and content history are independent from memo grouping.
+export const instructionCards = pgTable(
+  "instruction_cards",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    id: text("id").notNull(),
+    // TPS order. Assigned once at insert, in insertion order; see 0016.
+    position: bigint("position", { mode: "number" })
+      .notNull()
+      .default(sql`nextval('instruction_card_position')`),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.id] }),
+    unique("instruction_cards_position").on(t.userId, t.position),
+    check("card_id_nonempty", sql`${t.id} <> ''`),
+  ],
+);
+export const instructionCardVersions = pgTable(
+  "instruction_card_versions",
+  {
+    userId: text("user_id").notNull(),
+    cardId: text("card_id").notNull(),
+    version: integer("version").notNull(),
+    description: text("description").notNull(),
+    body: text("body").notNull(),
+    archived: boolean("archived").notNull().default(false),
+    // Where this version files the rule: one of the five reports or 'cover', the
+    // cover sheet. A move is a new version; see 0020.
+    report: text("report").notNull(),
+    reason: text("reason").notNull(),
+    actorJson: text("actor_json").notNull(),
+    detailsJson: text("details_json").notNull().default("{}"),
+    legacy: boolean("legacy").notNull().default(false),
+    payloadBytes: bigint("payload_bytes", { mode: "number" })
+      .notNull()
+      .generatedAlwaysAs(
+        sql`octet_length(description)::bigint + octet_length(body) + octet_length(reason) + octet_length(actor_json) + octet_length(details_json)`,
+      ),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.cardId, t.version] }),
+    foreignKey({
+      columns: [t.userId, t.cardId],
+      foreignColumns: [instructionCards.userId, instructionCards.id],
+    }).onDelete("cascade"),
+    check("instruction_card_versions_version_check", sql`${t.version} > 0`),
+    check(
+      "instruction_card_versions_description_check",
+      sql`${t.description} <> '' AND position(chr(10) in ${t.description})=0 AND position(chr(13) in ${t.description})=0`,
+    ),
+    check(
+      "instruction_card_versions_actor_json_check",
+      sql`jsonb_typeof(${t.actorJson}::jsonb)='object'`,
+    ),
+    check(
+      "instruction_card_versions_details_json_check",
+      sql`jsonb_typeof(${t.detailsJson}::jsonb)='object'`,
+    ),
+    check(
+      "instruction_card_versions_report",
+      sql`${t.report} IN ('cover','email','chat','post','document','speech')`,
+    ),
+  ],
+);
+export const memoCards = pgTable(
+  "memo_cards",
+  {
+    userId: text("user_id").notNull(),
+    cardId: text("card_id").notNull(),
+    memoId: text("memo_id").notNull(),
+    version: integer("version").notNull().default(1),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.cardId] }),
+    foreignKey({
+      columns: [t.userId, t.cardId],
+      foreignColumns: [instructionCards.userId, instructionCards.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [t.userId, t.memoId],
+      foreignColumns: [memos.userId, memos.id],
+    }).onDelete("cascade"),
+    index("memo_cards_by_memo").on(t.userId, t.memoId),
+    check("memo_cards_version_check", sql`${t.version} > 0`),
+  ],
+);
+
+// A stable, named kind of sample within one report. Labels are unique per
+// report regardless of case and never change; rows leave only with their
+// account; see 0020.
+export const sampleKinds = pgTable(
+  "sample_kinds",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    id: text("id").notNull(),
+    report: text("report").notNull(),
+    // Free-form label chosen by the filing assistant ("follow-up email").
+    label: text("label").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.id] }),
+    unique("sample_kinds_report_key").on(t.userId, t.id, t.report),
+    uniqueIndex("sample_kinds_label").on(
+      t.userId,
+      t.report,
+      sql`lower(${t.label})`,
+    ),
+    check(
+      "sample_kinds_report",
+      sql`${t.report} IN ('email','chat','post','document','speech')`,
+    ),
+    check(
+      "sample_kinds_label_check",
+      sql`char_length(${t.label}) BETWEEN 1 AND 60 AND position(chr(10) in ${t.label})=0 AND position(chr(13) in ${t.label})=0 AND btrim(${t.label})=${t.label}`,
+    ),
+  ],
+);
+
+// Approved writing, stored exactly as submitted. Append-only: the only change a
+// row ever sees is retirement (retired_at and its reason set once); see 0020.
+export const samples = pgTable(
+  "samples",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    id: text("id").notNull(),
+    report: text("report").notNull(),
+    kindId: text("kind_id").notNull(),
+    // One line of context shown above the quoted sample.
+    context: text("context").notNull(),
+    body: text("body").notNull(),
+    clientJson: text("client_json").notNull(),
+    // The sample this one explicitly replaced, always of the same kind.
+    replacesId: text("replaces_id"),
+    createdAt: createdAt(),
+    retiredAt: timestamp("retired_at", { withTimezone: true }),
+    // replaced, removed or evicted; set together with retired_at.
+    retireReason: text("retire_reason"),
+    // The save that retired it; NULL only for retirements before 0020.
+    retiredRequestId: text("retired_request_id"),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.id] }),
+    unique("samples_kind_key").on(t.userId, t.id, t.kindId),
+    index("samples_by_report").on(t.userId, t.report),
+    index("samples_by_kind").on(t.userId, t.kindId),
+    // A sample's report is its kind's report, by construction.
+    foreignKey({
+      name: "samples_kind_fk",
+      columns: [t.userId, t.kindId, t.report],
+      foreignColumns: [sampleKinds.userId, sampleKinds.id, sampleKinds.report],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "samples_replaces_fk",
+      columns: [t.userId, t.replacesId, t.kindId],
+      foreignColumns: [t.userId, t.id, t.kindId],
+    }).onDelete("cascade"),
+    check(
+      "samples_report",
+      sql`${t.report} IN ('email','chat','post','document','speech')`,
+    ),
+    check(
+      "samples_context",
+      sql`char_length(${t.context}) BETWEEN 1 AND 200 AND position(chr(10) in ${t.context})=0 AND position(chr(13) in ${t.context})=0 AND btrim(${t.context})=${t.context}`,
+    ),
+    check(
+      "samples_body",
+      sql`btrim(${t.body}) <> '' AND octet_length(${t.body}) <= 32768`,
+    ),
+    check(
+      "samples_client_object",
+      sql`jsonb_typeof(${t.clientJson}::jsonb)='object'`,
+    ),
+    check(
+      "samples_retirement",
+      sql`(${t.retireReason} IS NULL) = (${t.retiredAt} IS NULL) AND (${t.retireReason} IS NULL OR ${t.retireReason} IN ('replaced','removed','evicted')) AND (${t.retiredRequestId} IS NULL OR ${t.retiredAt} IS NOT NULL)`,
+    ),
+  ],
+);
+
+// Frozen legacy ledger: nothing writes it since 0018; spend totals still read it.
+// No account FK: deletion cannot refund today's reservation.
+export const derivationUsage = pgTable(
+  "derivation_usage",
+  {
+    userId: text("user_id").notNull(),
+    dayUtc: date("day_utc").notNull(),
+    reservedMicros: bigint("reserved_micros", { mode: "number" }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.dayUtc] }),
+    index("derivation_usage_day").on(t.dayUtc),
+    check("derivation_usage_cost", sql`${t.reservedMicros} > 0`),
+  ],
+);
+
+// Durable evidence of accepted instruction changes, independent of expiring jobs.
+export const acceptedChanges = pgTable(
+  "accepted_changes",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    requestId: text("request_id").notNull(),
+    operation: text("operation").notNull(),
+    request: jsonb("request_json").notNull(),
+    actor: jsonb("actor_json").notNull(),
+    transformation: jsonb("transformation_json").notNull(),
+    affected: jsonb("affected_json").notNull(),
+    beforeTps: text("before_tps").notNull(),
+    afterTps: text("after_tps").notNull(),
+    beforeSource: text("before_source").notNull(),
+    afterSource: text("after_source").notNull(),
+    createdAt: createdAt(),
+    payloadBytes: bigint("payload_bytes", { mode: "number" })
+      .notNull()
+      .generatedAlwaysAs(
+        sql`octet_length(request_id)::bigint + octet_length(operation) + octet_length(request_json::text) + octet_length(actor_json::text) + octet_length(transformation_json::text) + octet_length(affected_json::text) + octet_length(before_tps) + octet_length(after_tps) + octet_length(before_source) + octet_length(after_source) + 128`,
+      ),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.requestId] }),
+    check(
+      "accepted_change_shape",
+      sql`length(${t.requestId})=36 AND ${t.operation} IN ('save_memo','refinement_apply') AND jsonb_typeof(${t.request})='object' AND jsonb_typeof(${t.actor})='object' AND jsonb_typeof(${t.transformation})='object' AND jsonb_typeof(${t.affected})='array' AND jsonb_array_length(${t.affected})<=100`,
+    ),
+    check(
+      "accepted_change_hashes",
+      sql`${t.beforeTps} ~ '^[a-f0-9]{64}$' AND ${t.afterTps} ~ '^[a-f0-9]{64}$' AND ${t.beforeSource} ~ '^[a-f0-9]{64}$' AND ${t.afterSource} ~ '^[a-f0-9]{64}$'`,
+    ),
+  ],
+);

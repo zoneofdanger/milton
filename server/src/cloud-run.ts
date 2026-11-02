@@ -1,0 +1,32 @@
+import { serve } from "@hono/node-server";
+import { loadEnvironment } from "./environment";
+import { mcpRuntimeConfig, runtimeConfig } from "./config";
+import { createMcpApp } from "./index";
+import { createCloudApp } from "./cloud-app";
+import { createSpendAlertHandler } from "./spend-alert-worker";
+
+try {
+  const env = loadEnvironment();
+  const port = Number(env.PORT ?? 8080);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error();
+  if (!["app", "mcp", "worker"].includes(env.MILTON_SERVICE ?? ""))
+    throw new Error();
+  const fetch =
+    env.MILTON_SERVICE === "app"
+      ? createCloudApp(runtimeConfig(env))
+      : env.MILTON_SERVICE === "mcp"
+        ? createMcpApp(mcpRuntimeConfig(env))
+        : createSpendAlertHandler(env);
+  const server = serve({ fetch, port, hostname: "0.0.0.0" });
+  const shutdown = () => {
+    server.close(() => process.exit(0));
+    // Cloud Run grants ten seconds. Interrupted work retains its durable lease
+    // and reservation; we never start a replacement paid attempt on shutdown.
+    setTimeout(() => process.exit(0), 8000).unref();
+  };
+  process.once("SIGTERM", shutdown);
+  process.once("SIGINT", shutdown);
+} catch {
+  console.error("Milton failed to start: runtime configuration unavailable.");
+  process.exitCode = 1;
+}

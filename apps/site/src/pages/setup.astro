@@ -1,0 +1,310 @@
+---
+import SiteLayout from "../layouts/SiteLayout.astro";
+import AssistantSetup from "../components/AssistantSetup.astro";
+---
+
+<SiteLayout
+  title="Connect your assistant — Milton"
+  description="Connect Milton to your assistant with MCP. Setup guidance for Claude, ChatGPT, Claude Code, Codex, and Cursor, plus unverified guides for Grok Bot, Muse, and Claude Duet."
+  legal
+>
+  <p class="eyebrow">// A little paperwork. Once.</p>
+  <h1>Connect your assistant.</h1>
+  <p>
+    <strong>Connect Milton. Ask “did you get that memo?”</strong>
+  </p>
+  <p>
+    Milton connects through MCP, a standard that lets assistants use tools. You
+    need a client that supports remote MCP, OAuth sign-in, and tools that read
+    and save. Your plan or workspace administrator may restrict these features.
+  </p>
+  <p>
+    First, <a href="https://app.meetmilton.com/login">sign in to Milton</a> with
+    Google or GitHub. Use the same account when your assistant asks you to
+    authorize the connection. Early access is free; no credit card is required.
+  </p>
+  <div class="guided-setup">
+    <AssistantSetup />
+  </div>
+  <div class="connection sheet">
+    <div class="sheet-bar">Milton’s MCP server URL</div>
+    <div class="sheet-content">
+      <code>https://mcp.meetmilton.com/mcp</code>
+    </div>
+  </div>
+  <nav class="clients" aria-label="Choose your assistant">
+    <a href="#claude">Claude</a>
+    <a href="#claude-duet">Claude Duet</a>
+    <a href="#chatgpt">ChatGPT</a>
+    <a href="#grok-bot">Grok Bot</a>
+    <a href="#muse">Muse</a>
+    <a href="#claude-code">Claude Code</a>
+    <a href="#codex">Codex</a>
+    <a href="#cursor">Cursor</a>
+  </nav>
+  <section id="claude" aria-labelledby="claude-heading">
+    <h2 id="claude-heading">Claude</h2>
+    <ol>
+      <li>
+        Open Claude’s connector settings and add a custom connector named
+        Milton.
+      </li>
+      <li>
+        Use the server URL above, then complete the sign-in and authorization
+        prompts.
+      </li>
+      <li>
+        Enable Milton in the conversation’s connectors menu before asking Claude
+        to use it.
+      </li>
+    </ol>
+    <p>
+      Claude supports custom connectors across its plans; Free accounts have a
+      one-custom-connector limit. Workspaces may need an owner or administrator
+      to add it.{" "}
+      <a href="https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp">
+        Claude’s current connector guide ↗
+      </a>
+    </p>
+  </section>
+  <section id="claude-duet" aria-labelledby="claude-duet-heading">
+    <h2 id="claude-duet-heading">Claude Duet</h2>
+    <p class="small-note">Guide only: not yet verified with Milton.</p>
+    <p>
+      Anthropic says Duet uses the connectors in your Claude account. The
+      expected setup path is to connect Milton in Claude first, then use that
+      connection in Duet.
+    </p>
+    <ol>
+      <li>
+        Follow the <a href="#claude">Claude setup steps</a> above.
+      </li>
+      <li>
+        Open Duet with the same Claude account and make Milton available to the
+        conversation.
+      </li>
+      <li>
+        Ask “Did you get that memo?” Confirm it reads your current cover sheet
+        before relying on the connection.
+      </li>
+    </ol>
+    <p>
+      Duet is a research preview with limited access. Check{" "}
+      <a href="https://support.claude.com/en/articles/17631495-get-started-with-claude-duet">
+        Anthropic’s Duet guide ↗
+      </a>
+      for current availability. If Milton is unavailable in Duet, use the
+      connected Claude client while compatibility is being checked.
+    </p>
+  </section>
+  <section id="chatgpt" aria-labelledby="chatgpt-heading">
+    <h2 id="chatgpt-heading">ChatGPT</h2>
+    <ol>
+      <li>Open Plugins and look for the option to add a custom MCP server.</li>
+      <li>
+        Add Milton with the server URL above and complete the sign-in prompts.
+      </li>
+      <li>
+        Make Milton available in your conversation before asking ChatGPT to read
+        or save preferences.
+      </li>
+    </ol>
+    <p>
+      Custom MCP access depends on your plan and workspace settings. You need
+      both read and write tools; a search-only connection won’t save
+      preferences. If the option is missing, check the{" "}
+      <a href="https://developers.openai.com/plugins/build/app-quickstart">
+        official connection guide ↗
+      </a>{" "}
+      before signing up for a different plan.
+    </p>
+  </section>
+  <section id="grok-bot" aria-labelledby="grok-bot-heading">
+    <h2 id="grok-bot-heading">Grok Bot</h2>
+    <p class="small-note">Guide only: not yet verified with Milton.</p>
+    <p>
+      Grok Bot can add an MCP server by URL through chat. Try this in your Bot:
+    </p>
+    <blockquote>
+      Add Milton as a remote MCP server at https://mcp.meetmilton.com/mcp. Use
+      OAuth browser sign-in, then list its tools. Do not save or change
+      preferences during setup.
+    </blockquote>
+    <ol>
+      <li>Complete the browser sign-in using your Milton account.</li>
+      <li>
+        Start a new message after connecting, then ask “Did you get that memo?”
+      </li>
+      <li>
+        Confirm the Bot reads your current cover sheet. Once connected, use the{" "}
+        <a href="#first-preference">save and read examples below</a>.
+      </li>
+    </ol>
+    <p>
+      Grok Bot connections are shared across the Bots on your account. Workspace
+      policies may restrict connectors. See the{" "}
+      <a href="https://docs.x.ai/grok-bot/computer-and-apps#connect-an-app">
+        Grok Bot connection guide ↗
+      </a>
+      .
+    </p>
+  </section>
+  <section id="muse" aria-labelledby="muse-heading">
+    <h2 id="muse-heading">Muse</h2>
+    <p class="small-note">Guide only: not yet verified with Milton.</p>
+    <p>Ask Muse in chat to create a Custom Connector:</p>
+    <blockquote>
+      Create a Custom Connector named Milton for the remote MCP server at
+      https://mcp.meetmilton.com/mcp. It uses Streamable HTTP and OAuth browser
+      sign-in. List its tools after connecting. Do not save or change
+      preferences during setup.
+    </blockquote>
+    <ol>
+      <li>
+        Follow Muse’s connection flow and complete browser sign-in using your
+        Milton account.
+      </li>
+      <li>
+        Ask “Did you get that memo?” and confirm Muse reads the current cover
+        Report.
+      </li>
+      <li>
+        Once the connection works, use the{" "}
+        <a href="#first-preference">save and read examples below</a>.
+      </li>
+    </ol>
+    <p>
+      Meta documents chat-created Custom Connectors; Milton’s OAuth flow still
+      needs a complete Muse test. Milton does not provide an API key, so this
+      connection must use browser sign-in. If Muse cannot complete it, report
+      the connection issue instead of treating setup as finished.{" "}
+      <a href="https://www.meta.com/help/superintelligence/1687253048996149/">
+        Meta’s connector guide ↗
+      </a>
+    </p>
+  </section>
+  <section id="claude-code" aria-labelledby="claude-code-heading">
+    <h2 id="claude-code-heading">Claude Code</h2>
+    <p>In your terminal, add Milton for your user account:</p>
+    <pre><code>claude mcp add --transport http --scope user milton https://mcp.meetmilton.com/mcp</code></pre>
+    <p>
+      Then open Claude Code, run <code>/mcp</code>, select Milton, and complete
+      authentication. User scope makes the connection available across projects.{" "}
+      <a href="https://code.claude.com/docs/en/mcp">
+        Claude Code’s MCP guide ↗
+      </a>
+    </p>
+  </section>
+  <section id="codex" aria-labelledby="codex-heading">
+    <h2 id="codex-heading">Codex</h2>
+    <p>With the Codex CLI installed, run:</p>
+    <pre><code>{`codex mcp add milton --url https://mcp.meetmilton.com/mcp
+codex mcp login milton`}</code></pre>
+    <p>
+      Complete the browser authorization. If adding Milton already signed you
+      in, you don’t need to sign in again. Start a new Codex session if the
+      tools aren’t available in the current one.{" "}
+      <a href="https://developers.openai.com/codex/mcp">Codex’s MCP guide ↗</a>
+    </p>
+  </section>
+  <section id="cursor" aria-labelledby="cursor-heading">
+    <h2 id="cursor-heading">Cursor</h2>
+    <p>
+      Add a remote MCP server named Milton in Cursor’s MCP configuration, using
+      the server URL above. Cursor supports HTTP connections and OAuth sign-in.
+      Complete authentication and enable the tools for your agent.{" "}
+      <a href="https://cursor.com/docs/mcp">
+        Cursor’s setup and configuration guide ↗
+      </a>
+    </p>
+  </section>
+  <section id="first-preference" aria-labelledby="first-heading">
+    <h2 id="first-heading">Put your first preference on file.</h2>
+    <p>
+      Your account starts empty. Try an instruction you actually want to keep.
+      For example:
+    </p>
+    <blockquote>
+      “Milton, go ahead and file this: lead with the answer. Keep replies
+      concise unless I ask for detail.”
+    </blockquote>
+    <p>
+      Or ask your assistant to help draft your preferences, then approve the
+      complete draft before saving.{" "}
+      <a href="https://app.meetmilton.com/">Open Milton</a> to check the report.
+    </p>
+    <p>In your next conversation, ask:</p>
+    <blockquote>“Did you get that memo?”</blockquote>
+    <p>“Did you get the memo?” also works.</p>
+    <p>
+      Use this to ask your assistant to fetch your latest cover sheet, even if
+      it read an earlier copy. It should confirm only after a successful read.
+      This requests a read, not a save.
+    </p>
+    <p>
+      Connecting Milton doesn’t automatically load the report into every chat.
+      Ask for a read when you start work. All connected assistants can read the
+      whole report, so keep private project context in its own tools.
+    </p>
+  </section>
+  <section aria-labelledby="help-heading">
+    <h2 id="help-heading">Not connecting?</h2>
+    <p>
+      Check the server URL, sign in with the same Milton account, and confirm
+      your assistant allows the connector in this conversation. Workspace
+      policies may require administrator approval. For help, email{" "}
+      <a href="mailto:support@meetmilton.com">support@meetmilton.com</a>.
+    </p>
+    <p>
+      <a href="/#pricing">See current access and planned pricing →</a>
+    </p>
+  </section>
+</SiteLayout>
+
+<style>
+  .guided-setup {
+    margin-top: var(--space-6);
+    width: fit-content;
+  }
+  h1 {
+    margin-top: var(--space-4);
+  }
+  section {
+    scroll-margin-top: var(--space-6);
+  }
+  .connection {
+    margin-top: var(--space-6);
+  }
+  .clients {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-5);
+    margin-top: var(--space-4);
+  }
+  .clients a {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--touch-target);
+  }
+  ol {
+    padding-left: var(--space-6);
+  }
+  li + li {
+    margin-top: var(--space-2);
+  }
+  pre {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    background: var(--surface);
+    padding: var(--space-5);
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-control);
+    font-size: var(--text-small);
+  }
+  blockquote {
+    margin: var(--space-5) 0;
+    padding: var(--space-4) var(--space-5);
+    border-left: 3px solid var(--sheet-rule);
+    background: var(--surface);
+  }
+</style>

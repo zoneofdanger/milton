@@ -1,0 +1,20 @@
+# Secrets. Never commit a plaintext env file.
+.env*
+.dev.vars
+!.env.example
+
+# Dependencies and build output
+node_modules
+.next
+next-env.d.ts
+dist
+.vercel
+*.tsbuildinfo
+
+# Local agent state
+.claude/scheduled_tasks.lock
+.claude/settings.local.json
+.claude/worktrees
+
+# OS
+.DS_Store

@@ -1,0 +1,193 @@
+---
+const prompt =
+  "Help me set up Milton using https://www.meetmilton.com/setup. Guide me through connecting it to this assistant. Then read my Milton cover sheet. If it is empty, run the setup questions it returns, one at a time, and show me the complete draft of rules for approval before saving anything. If Milton already has rules or samples, preserve them and ask what I want to change. Do not import conversation history or assume access to another service’s memory.";
+const encodedPrompt = encodeURIComponent(prompt);
+---
+
+<details class="assistant-setup" data-assistant-setup>
+  <summary class="button secondary">
+    Set up with your assistant
+    <svg
+      class="setup-caret"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="m6 9 6 6 6-6"></path>
+    </svg>
+  </summary>
+  <div class="setup-panel">
+    <p class="eyebrow">// Start with a prompt</p>
+    <a
+      class="launch-link"
+      href={`https://claude.ai/new?q=${encodedPrompt}`}
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      Open in Claude <span aria-hidden="true">↗</span>
+    </a>
+    <a
+      class="launch-link"
+      href={`https://chatgpt.com/?q=${encodedPrompt}`}
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      Open in ChatGPT <span aria-hidden="true">↗</span>
+    </a>
+    <p class="setup-hint small-note">
+      Opens a new tab with the setup prompt. You may need to sign in. If the
+      prompt doesn’t appear, copy it below.
+    </p>
+    <button class="secondary" type="button" data-copy-prompt hidden>
+      Copy setup prompt
+    </button>
+    <p class="copy-status" role="status" data-copy-status></p>
+    <details class="prompt-fallback" data-prompt-fallback>
+      <summary>Read or copy the prompt</summary>
+      <label>
+        Setup prompt
+        <textarea readonly rows="8" data-setup-prompt>{prompt}</textarea>
+      </label>
+    </details>
+    <a class="manual-link" href="/setup">
+      Manual setup instructions →
+    </a>
+  </div>
+</details>
+
+<script>
+  for (const setup of document.querySelectorAll<HTMLDetailsElement>(
+    "[data-assistant-setup]",
+  )) {
+    const button =
+      setup.querySelector<HTMLButtonElement>("[data-copy-prompt]")!;
+    const prompt = setup.querySelector<HTMLTextAreaElement>(
+      "[data-setup-prompt]",
+    )!;
+    const fallback = setup.querySelector<HTMLDetailsElement>(
+      "[data-prompt-fallback]",
+    )!;
+    const status = setup.querySelector<HTMLElement>("[data-copy-status]")!;
+    const summary = setup.querySelector<HTMLElement>(":scope > summary")!;
+    button.hidden = false;
+    button.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(prompt.value);
+        status.textContent = "Copied. Paste it into your assistant.";
+      } catch {
+        fallback.open = true;
+        prompt.focus();
+        prompt.select();
+        status.textContent =
+          "Copy wasn’t available. Select and copy the prompt below.";
+      }
+    });
+    setup.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && setup.open) {
+        setup.open = false;
+        summary.focus();
+      }
+    });
+    document.addEventListener("click", (event) => {
+      if (event.target instanceof Node && !setup.contains(event.target))
+        setup.open = false;
+    });
+  }
+</script>
+
+<style>
+  .assistant-setup {
+    position: relative;
+  }
+  .assistant-setup > summary {
+    list-style: none;
+  }
+  .assistant-setup > summary::-webkit-details-marker {
+    display: none;
+  }
+  .setup-caret {
+    display: block;
+    flex: none;
+  }
+  .assistant-setup[open] > summary .setup-caret {
+    transform: rotate(180deg);
+  }
+  .setup-panel {
+    position: absolute;
+    z-index: 3;
+    top: calc(100% + var(--space-2));
+    left: 0;
+    width: min(22rem, calc(100vw - 2 * var(--space-5)));
+    padding: var(--space-5);
+    background: var(--surface);
+    border: 1px solid var(--input);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-sheet);
+  }
+  .setup-panel p {
+    margin: 0;
+  }
+  .setup-panel .eyebrow {
+    margin-bottom: var(--space-3);
+  }
+  .launch-link {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: var(--control-height);
+    gap: var(--space-4);
+    padding-block: var(--space-3);
+    text-decoration: none;
+    border-bottom: 1px solid var(--hairline);
+    font-weight: 600;
+  }
+  .launch-link:hover {
+    text-decoration: underline;
+  }
+  .setup-panel .setup-hint {
+    margin-block: var(--space-4);
+  }
+  [data-copy-prompt] {
+    width: 100%;
+  }
+  [hidden] {
+    display: none !important;
+  }
+  .setup-panel .copy-status {
+    margin-top: var(--space-2);
+    font-size: var(--text-small);
+  }
+  .copy-status:empty {
+    display: none;
+  }
+  .prompt-fallback summary,
+  .manual-link {
+    padding-block: var(--space-3);
+    min-height: var(--touch-target);
+    font-size: var(--text-small);
+  }
+  .prompt-fallback summary {
+    cursor: pointer;
+  }
+  .prompt-fallback label {
+    display: block;
+    font-size: var(--text-small);
+  }
+  textarea {
+    display: block;
+    width: 100%;
+    margin-top: var(--space-2);
+    resize: vertical;
+  }
+  .manual-link {
+    display: inline-flex;
+    align-items: center;
+  }
+</style>

@@ -1,0 +1,248 @@
+---
+import { folderMark } from "@milton/theme/brand";
+---
+
+<figure
+  id="collation-demo"
+  class="collation-demo"
+  data-collation-demo
+  data-visible="false"
+>
+  <div class="demo-header">
+    <div>
+      <p class="eyebrow">// Collating, illustrated</p>
+      <h3>Keep the rule. Keep the exception.</h3>
+    </div>
+    <button class="secondary" type="button" data-demo-toggle hidden>
+      Play animation
+    </button>
+  </div>
+  <div class="demo-flow">
+    <div class="instructions">
+      <p class="demo-label">You tell your assistant</p>
+      <blockquote class="instruction instruction-first">
+        <span>General instruction</span>
+        <p>“Keep replies concise.”</p>
+      </blockquote>
+      <blockquote class="instruction instruction-second">
+        <span>Later clarification</span>
+        <p>“Walk me through architectural tradeoffs.”</p>
+      </blockquote>
+    </div>
+    <div class="collator" aria-hidden="true">
+      <span class="folder">
+        <Fragment set:html={folderMark} />
+      </span>
+      <span class="demo-label">Milton collates</span>
+      <span class="flow-arrow">→</span>
+    </div>
+    <div class="report sheet">
+      <div class="sheet-bar">
+        Cover sheet <span>Example</span>
+      </div>
+      <div class="sheet-content">
+        <h4 class="sheet-heading">How to respond</h4>
+        <p>Keep replies concise.</p>
+        <p>When discussing architectural tradeoffs, explain them in detail.</p>
+      </div>
+    </div>
+  </div>
+  <figcaption>Illustrative example; your account starts empty.</figcaption>
+</figure>
+
+<script>
+  const demo = document.querySelector<HTMLElement>("[data-collation-demo]");
+  const toggle = demo?.querySelector<HTMLButtonElement>("[data-demo-toggle]");
+  if (demo && toggle) {
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    let playing = !reducedMotion.matches;
+    const render = () => {
+      demo.dataset.playing = String(playing && !reducedMotion.matches);
+      toggle.hidden = reducedMotion.matches;
+      toggle.textContent = playing ? "Stop animation" : "Play animation";
+    };
+    toggle.addEventListener("click", () => {
+      playing = !playing;
+      render();
+    });
+    reducedMotion.addEventListener("change", () => {
+      playing = !reducedMotion.matches;
+      render();
+    });
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        demo.dataset.visible = String(entry.isIntersecting);
+      },
+      { threshold: 0.15 },
+    );
+    observer.observe(demo);
+    render();
+  }
+</script>
+
+<style>
+  .collation-demo {
+    margin: var(--space-10) 0 var(--space-12);
+    padding: var(--space-6);
+    background: var(--surface);
+    border: 1px solid var(--input);
+    border-radius: var(--radius-card);
+  }
+  .demo-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--space-4);
+    margin-bottom: var(--space-6);
+  }
+  .demo-label {
+    margin: 0;
+    color: var(--muted);
+    font: var(--text-caption) / var(--leading-label) var(--font-mono);
+  }
+  h3 {
+    margin: var(--space-2) 0 0;
+    font-size: var(--text-title);
+  }
+  button {
+    font-size: var(--text-caption);
+    min-height: var(--touch-target);
+    padding: var(--space-2) var(--space-4);
+  }
+  button[hidden] {
+    display: none;
+  }
+  .demo-flow {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) max-content minmax(0, 1.1fr);
+    align-items: center;
+    gap: var(--space-5);
+  }
+  .instructions {
+    display: grid;
+    gap: var(--space-4);
+  }
+  .instruction {
+    margin: 0;
+    padding: var(--space-4) var(--space-5);
+    background: var(--ground);
+    border: 1px solid var(--input);
+    border-left: 4px solid var(--sheet-rule);
+    border-radius: var(--radius-control);
+  }
+  .instruction span {
+    color: var(--muted);
+    font: var(--text-caption) / var(--leading-label) var(--font-mono);
+    text-transform: uppercase;
+  }
+  .instruction p {
+    margin: var(--space-2) 0 0;
+    font-size: var(--text-body);
+  }
+  .collator {
+    display: grid;
+    justify-items: center;
+    gap: var(--space-2);
+    text-align: center;
+  }
+  .folder {
+    display: flex;
+  }
+  .folder :global(svg) {
+    width: 48px;
+    height: 48px;
+  }
+  .flow-arrow {
+    font-size: var(--text-title);
+    line-height: 1;
+  }
+  .report {
+    align-self: stretch;
+  }
+  figcaption {
+    margin-top: var(--space-4);
+    color: var(--muted);
+    font-size: var(--text-caption);
+    max-width: 75ch;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    [data-playing="true"] .instruction-first {
+      animation: first-instruction 12s ease-in-out infinite;
+    }
+    [data-playing="true"] .instruction-second {
+      animation: second-instruction 12s ease-in-out infinite;
+    }
+    [data-playing="true"] .folder {
+      animation: collate 12s ease-in-out infinite;
+    }
+    [data-visible="false"] .instruction,
+    [data-visible="false"] .folder {
+      animation-play-state: paused;
+    }
+  }
+  @keyframes first-instruction {
+    0%,
+    3%,
+    100% {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    10%,
+    94% {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes second-instruction {
+    0%,
+    24%,
+    100% {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    32%,
+    94% {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes collate {
+    0%,
+    36%,
+    56%,
+    100% {
+      transform: none;
+    }
+    42%,
+    50% {
+      transform: translateY(-5px);
+    }
+    46% {
+      transform: translateY(-1px);
+    }
+  }
+  @media (max-width: 767px) {
+    .collation-demo {
+      padding: var(--space-5);
+      margin-block: var(--space-8);
+    }
+    .demo-flow {
+      grid-template-columns: minmax(0, 1fr);
+      gap: var(--space-6);
+    }
+    .collator {
+      grid-template-columns: auto auto auto;
+      align-items: center;
+      justify-content: center;
+      gap: var(--space-3);
+    }
+    .flow-arrow {
+      transform: rotate(90deg);
+    }
+    .folder :global(svg) {
+      width: 32px;
+      height: 32px;
+    }
+  }
+</style>

@@ -1,0 +1,18 @@
+# Upload only what the static site build needs; everything else stays local.
+/*
+!/apps
+/apps/*
+!/apps/site
+/apps/site/node_modules
+/apps/site/dist
+/apps/site/.vercel
+!/packages
+/packages/*
+!/packages/theme
+/packages/theme/node_modules
+!/server
+/server/*
+!/server/package.json
+!/package.json
+!/bun.lock
+!/tsconfig.base.json

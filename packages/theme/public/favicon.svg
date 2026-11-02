@@ -1,0 +1,18 @@
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 32 32"
+  shape-rendering="crispEdges"
+>
+  <title>Milton's office printer</title>
+  <path fill="#221F1B" d="M6 2h14v4h2v8h6v2h2v12H2V16h2v-2h4V6H6z" />
+  <path fill="#B4AA98" d="M8 4h12v12H8z" />
+  <path fill="#FFFDF8" d="M10 2h8v12h-8z" />
+  <path fill="#8D7F6E" d="M12 6h4v2h-4zm0 4h4v2h-4z" />
+  <path fill="#E8E1D3" d="M6 16h20v2h2v4H4v-4h2z" />
+  <path fill="#B4AA98" d="M4 22h24v4H4z" />
+  <path fill="#221F1B" d="M6 20h14v4H6zm16-4h4v4h-4z" />
+  <path fill="#7FA08A" d="M22 16h4v2h-4z" />
+  <path fill="#221F1B" d="M8 22h14v10H8z" />
+  <path fill="#FFFDF8" d="M10 22h10v8H10z" />
+  <path fill="#B4AA98" d="M12 24h6v2h-6zm0 4h4v2h-4z" />
+</svg>

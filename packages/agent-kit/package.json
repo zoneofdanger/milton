@@ -1,0 +1,11 @@
+{
+  "name": "@milton/agent-kit",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": {
+    "check-types": "tsc --noEmit",
+    "check": "bun src/cli.ts"
+  }
+}

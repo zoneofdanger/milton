@@ -1,0 +1,215 @@
+.app-shell {
+  max-width: 50rem;
+  margin: 0 auto;
+  padding: var(--space-8) var(--space-10) var(--space-16);
+}
+.app-shell.narrow {
+  max-width: 38rem;
+  padding-top: var(--space-16);
+}
+.app-header {
+  margin-bottom: var(--space-3);
+}
+main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+main > nav {
+  order: -1;
+}
+h1 {
+  margin: var(--space-6) 0 var(--space-6);
+  font-size: var(--text-page);
+}
+h2 {
+  font-size: var(--text-title);
+  margin: 0 0 var(--space-4);
+}
+p {
+  margin: 0 0 var(--space-4);
+}
+nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--space-6);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--hairline);
+  font-size: var(--text-small);
+}
+nav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--touch-target);
+}
+form {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-3);
+  margin-top: var(--space-6);
+}
+.narrow form {
+  justify-items: stretch;
+}
+form p {
+  margin: 0;
+}
+label {
+  display: grid;
+  gap: var(--space-2);
+}
+code {
+  font-size: 0.875em;
+}
+pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: normal;
+  margin: 0;
+  font: var(--text-small) / var(--leading-document) var(--font-mono);
+  font-variant-ligatures: none;
+}
+section {
+  margin-top: var(--space-8);
+}
+.tps-title {
+  text-align: center;
+  padding: var(--space-8) var(--sheet-padding) var(--space-6);
+}
+.tps-title h1,
+.tps-title h2 {
+  margin: 0;
+  font-size: var(--text-report);
+  text-transform: uppercase;
+  letter-spacing: -0.03em;
+  line-height: 1.06;
+}
+.cover-subtitle {
+  display: inline-block;
+  margin: var(--space-4) 0 0;
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--ink);
+  font: var(--font-display-weight) var(--text-body) / var(--leading-heading)
+    var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.document-body {
+  padding: var(--space-6) var(--sheet-padding) var(--space-8);
+}
+.document-body .instruction-list > li {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.instruction-group {
+  margin: var(--space-6) 0 var(--space-3);
+  font: var(--font-display-weight) var(--text-subtitle) / var(--leading-heading)
+    var(--font-display);
+}
+.instruction-group:first-child {
+  margin-top: 0;
+}
+.empty-placeholder {
+  max-width: 27ch;
+  margin: 0 auto;
+  text-align: center;
+  color: var(--muted);
+  font: var(--text-small) / var(--leading-body) var(--font-mono);
+}
+.document-end {
+  height: 4px;
+  border-block: 1px solid var(--input);
+  margin: 0 var(--sheet-padding) var(--space-6);
+}
+.connection-help {
+  margin-bottom: var(--space-6);
+  font-size: var(--text-small);
+}
+.connection-help summary {
+  font: var(--font-display-weight) var(--text-subtitle) / var(--leading-heading)
+    var(--font-display);
+}
+.connection-help p {
+  max-width: 60ch;
+}
+.setup-steps {
+  padding-left: var(--space-6);
+}
+.setup-steps li + li {
+  margin-top: var(--space-6);
+}
+.setup-steps h3 {
+  font-size: var(--text-subtitle);
+  margin: 0 0 var(--space-3);
+}
+.setup-copy {
+  margin: 0 0 var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--input);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--ink);
+  user-select: all;
+  -webkit-user-select: all;
+}
+.setup-copy code {
+  font-size: inherit;
+}
+nav .signout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin: 0 0 0 auto;
+}
+.assistant-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 var(--space-6);
+}
+.assistant-list li {
+  padding-block: var(--space-4);
+  border-bottom: 1px solid var(--hairline);
+}
+.assistant-list p,
+.assistant-list form {
+  margin: 0 0 var(--space-2);
+}
+#signout-note {
+  margin-top: var(--space-3);
+}
+summary {
+  cursor: pointer;
+  padding-block: var(--space-2);
+  min-height: var(--touch-target);
+}
+.sheet + h2 {
+  margin-top: var(--space-8);
+}
+[role="status"],
+[role="alert"] {
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--input);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  margin-block: var(--space-6);
+}
+[role="alert"] {
+  border-left: 4px solid var(--ink);
+}
+@media (max-width: 600px) {
+  .app-shell,
+  .app-shell.narrow {
+    padding: var(--space-5) var(--space-5) var(--space-10);
+  }
+  nav {
+    gap: 0 var(--space-5);
+    font-size: var(--text-small);
+  }
+  .tps-title {
+    padding-block: var(--space-6);
+  }
+  .cover-subtitle {
+    font-size: var(--text-small);
+    letter-spacing: 0.05em;
+  }
+}

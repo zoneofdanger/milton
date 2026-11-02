@@ -1,0 +1,9 @@
+name: milton-mcp
+defaultService: https://www.googleapis.com/compute/v1/projects/milton-510506/global/backendServices/milton-mcp
+hostRules:
+  - hosts:
+      - app.meetmilton.com
+    pathMatcher: browser-app
+pathMatchers:
+  - name: browser-app
+    defaultService: https://www.googleapis.com/compute/v1/projects/milton-510506/global/backendServices/milton-app

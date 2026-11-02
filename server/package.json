@@ -1,0 +1,42 @@
+{
+  "name": "@milton/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "bun scripts/generate-memos.ts",
+    "build": "bun run generate && bun scripts/build.ts",
+    "check-types": "bun run build && tsc --noEmit",
+    "dev": "bun run generate && bun --watch scripts/dev.ts",
+    "test:client": "bun scripts/check-mcp.ts",
+    "test:local": "bun scripts/check-local.tsx",
+    "db:migrate": "bun --no-env-file scripts/migrate.ts",
+    "db:generate": "drizzle-kit generate"
+  },
+  "engines": {
+    "node": "26.x"
+  },
+  "dependencies": {
+    "@dotenvx/dotenvx": "2.38.2",
+    "@hono/node-server": "2.1.5",
+    "@milton/theme": "workspace:*",
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "@modelcontextprotocol/server": "2.4.0",
+    "@neondatabase/auth": "0.7.0-beta",
+    "@neondatabase/serverless": "1.2.0",
+    "drizzle-orm": "0.45.4",
+    "fflate": "0.8.3",
+    "hono": "4.13.16",
+    "jose": "6.2.14",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.13",
+    "@electric-sql/pglite-pgvector": "0.0.14",
+    "@types/bun": "catalog:",
+    "@types/node": "catalog:",
+    "drizzle-kit": "0.31.11",
+    "typescript": "catalog:",
+    "vite": "8.3.5"
+  }
+}

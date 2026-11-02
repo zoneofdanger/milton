@@ -1,0 +1,25 @@
+@import "./base.css";
+
+/* Utilities resolve to the same shared palette. */
+@theme inline {
+  --color-*: initial;
+  --color-ground: var(--ground);
+  --color-surface: var(--surface);
+  --color-ink: var(--ink);
+  --color-on-ink: var(--on-ink);
+  --color-muted: var(--muted);
+  --color-hairline: var(--hairline);
+  --color-accent: var(--accent);
+  --color-on-accent: var(--on-accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-sheet-bar: var(--sheet-bar);
+  --color-sheet-bar-ink: var(--sheet-bar-ink);
+  --color-sheet-rule: var(--sheet-rule);
+  --color-input: var(--input);
+  --color-band: var(--band);
+  --color-on-band: var(--on-band);
+  --color-band-muted: var(--band-muted);
+  --font-sans: var(--font-sans);
+  --font-display: var(--font-display);
+  --font-mono: var(--font-mono);
+}

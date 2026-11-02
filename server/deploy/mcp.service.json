@@ -1,0 +1,91 @@
+{
+  "apiVersion": "serving.knative.dev/v1",
+  "kind": "Service",
+  "metadata": {
+    "name": "milton-mcp",
+    "annotations": {
+      "run.googleapis.com/ingress": "internal-and-cloud-load-balancing",
+      "run.googleapis.com/minScale": "1",
+      "run.googleapis.com/maxScale": "3"
+    }
+  },
+  "spec": {
+    "template": {
+      "metadata": {
+        "annotations": {
+          "run.googleapis.com/execution-environment": "gen2"
+        }
+      },
+      "spec": {
+        "serviceAccountName": "milton-mcp@milton-510506.iam.gserviceaccount.com",
+        "containerConcurrency": 40,
+        "timeoutSeconds": 180,
+        "containers": [
+          {
+            "image": "us-east4-docker.pkg.dev/milton-510506/milton/runtime@sha256:14147524680a2ce6aa4967345b8606859af1ea9845c6f84c2d379b545356da57",
+            "ports": [
+              {
+                "containerPort": 8080
+              }
+            ],
+            "resources": {
+              "limits": {
+                "cpu": "1",
+                "memory": "512Mi"
+              }
+            },
+            "env": [
+              {
+                "name": "MILTON_SERVICE",
+                "value": "mcp"
+              },
+              {
+                "name": "MILTON_ENCRYPTED_ENV_FILE",
+                "value": "/run/milton/.env"
+              },
+              {
+                "name": "DOTENV_PRIVATE_KEY",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "name": "milton-mcp-key",
+                    "key": "1"
+                  }
+                }
+              },
+              {
+                "name": "MILTON_GLOBAL_SPEND_POLICY",
+                "value": "alerts_only"
+              }
+            ],
+            "volumeMounts": [
+              {
+                "name": "environment",
+                "mountPath": "/run/milton"
+              }
+            ]
+          }
+        ],
+        "volumes": [
+          {
+            "name": "environment",
+            "secret": {
+              "secretName": "milton-mcp-env",
+              "items": [
+                {
+                  "key": "2",
+                  "path": ".env"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "traffic": [
+      {
+        "latestRevision": true,
+        "percent": 100
+      }
+    ]
+  }
+}

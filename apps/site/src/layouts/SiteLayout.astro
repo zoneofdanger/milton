@@ -1,0 +1,194 @@
+---
+import "@milton/theme/base";
+import { faviconLinks, folderMark } from "@milton/theme/brand";
+
+interface Props {
+  title: string;
+  description: string;
+  legal?: boolean;
+}
+const { title, description, legal = false } = Astro.props;
+const canonical = new URL(Astro.url.pathname, Astro.site);
+---
+
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical} />
+    <link
+      rel="preload"
+      href="/fonts/geist-latin-variable.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <link
+      rel="preload"
+      href="/fonts/jetbrains-mono-regular.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <Fragment set:html={faviconLinks} />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta name="twitter:card" content="summary" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">
+      Skip to content
+    </a>
+    <header class="site-header">
+      <nav class="wrap navigation" aria-label="Main">
+        <a class="brand" href="/" aria-label="Milton home">
+          <Fragment set:html={folderMark} />
+          <span>Milton</span>
+        </a>
+        <div class="nav-links">
+          <a href="/#how-it-works">How it works</a>
+          <a href="/#pricing">Pricing</a>
+          <a class="button secondary" href="https://app.meetmilton.com/">
+            Open Milton
+          </a>
+        </div>
+      </nav>
+    </header>
+    <main id="main" tabindex="-1" class:list={["wrap", { legal }]}>
+      <slot />
+    </main>
+    <footer class="wrap">
+      <div class="footer-links">
+        <span>© 2026 Zone of Danger, LLC</span>
+        <nav aria-label="Legal">
+          <a href="/privacy">Privacy</a>
+          <a href="/terms">Terms</a>
+        </nav>
+        <a href="mailto:support@meetmilton.com">
+          Contact: support@meetmilton.com
+        </a>
+      </div>
+      {!legal && (
+        <p class="footer-aside">
+          A small website with strong feelings about punctuation.
+        </p>
+      )}
+    </footer>
+  </body>
+</html>
+
+<style>
+  .wrap {
+    max-width: 1200px;
+    margin-inline: auto;
+    padding-inline: var(--space-10);
+  }
+  .site-header {
+    border-bottom: 1px solid var(--hairline);
+  }
+  .navigation {
+    min-height: 80px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-6);
+    padding-block: var(--space-3);
+    flex-wrap: wrap;
+  }
+  .nav-links {
+    display: flex;
+    align-items: center;
+    gap: var(--space-6);
+    flex-wrap: wrap;
+    font-size: var(--text-small);
+  }
+  .nav-links > a {
+    display: inline-flex;
+    min-height: var(--touch-target);
+    align-items: center;
+  }
+  .nav-links > a:not(.button) {
+    text-decoration: none;
+  }
+  .nav-links > a:not(.button):hover {
+    text-decoration: underline;
+  }
+  .legal {
+    max-width: 760px;
+    padding-block: var(--space-16) 96px;
+  }
+  .legal :global(h1) {
+    font-size: var(--text-page);
+    margin: 0 0 var(--space-6);
+  }
+  .legal :global(h2) {
+    font-size: var(--text-title);
+    margin: var(--space-8) 0 var(--space-3);
+  }
+  .legal :global(p) {
+    margin: var(--space-4) 0 0;
+    line-height: 1.75;
+  }
+  .legal :global(.updated) {
+    margin: var(--space-3) 0 var(--space-8);
+    color: var(--muted);
+    font: var(--text-caption) / var(--leading-label) var(--font-mono);
+  }
+  footer {
+    padding-block: var(--space-6) var(--space-8);
+  }
+  .footer-links {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-6);
+    border-top: 1px solid var(--hairline);
+    padding-top: var(--space-4);
+    font-size: var(--text-caption);
+    color: var(--muted);
+  }
+  .footer-links nav {
+    display: flex;
+    gap: var(--space-5);
+  }
+  .footer-links a {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--touch-target);
+  }
+  .footer-links > a {
+    margin-left: auto;
+  }
+  .footer-aside {
+    margin: var(--space-3) 0 0;
+    color: var(--muted);
+    font: var(--text-caption) / var(--leading-label) var(--font-mono);
+  }
+  @media (max-width: 600px) {
+    .wrap {
+      padding-inline: var(--space-5);
+    }
+    .navigation {
+      gap: var(--space-2) var(--space-5);
+    }
+    .nav-links {
+      gap: var(--space-3);
+      font-size: var(--text-caption);
+    }
+    .nav-links .button {
+      padding-inline: var(--space-4);
+      font-size: var(--text-caption);
+    }
+    .legal {
+      padding-block: var(--space-10) 56px;
+    }
+    .footer-links > a {
+      margin-left: 0;
+    }
+  }
+</style>

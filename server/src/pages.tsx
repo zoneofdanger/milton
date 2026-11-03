@@ -138,6 +138,18 @@ export function page(
     },
   });
 }
+/** The unexpected-error page for browser page requests: nothing changed, no
+ * link or button. Every other request keeps onError's JSON. */
+export function unavailablePage() {
+  return page(
+    "PC LOAD LETTER",
+    <p>
+      Something went wrong on our side. Your cover sheet and reports are
+      unchanged. Try again in a moment.
+    </p>,
+    503,
+  );
+}
 export function navigation(target: string) {
   let url: URL;
   try {

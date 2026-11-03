@@ -21,10 +21,10 @@ decommission on 2026-11-01. Hosting rollback now uses Cloud Run revisions.
 Project `milton-510506`, Cloud Run/Artifact Registry region `us-east4`, Scheduler
 region `us-east1`. Service manifests in this directory pin an immutable image and
 secret versions. They contain configuration and secret references, never values.
-The manifests pin what is serving now: app `milton-app-quiz-4644a5f`
-(`sha256:a497749e…`, env 1, key 1), MCP `milton-mcp-quiz-4644a5f`
-(`sha256:a497749e…`, env 2, key 1) and worker `milton-worker-filing-f505745`
-(`sha256:a370b7c3…`, env 4, key 1); see the release records below. The app and MCP
+The manifests pin what is serving now: app `milton-app-savelock-712c7c1`
+(`sha256:e879f531…`, env 1, key 1), MCP `milton-mcp-savelock-712c7c1`
+(`sha256:e879f531…`, env 2, key 1) and worker `milton-worker-savelock-712c7c1`
+(`sha256:e879f531…`, env 4, key 1); see the release records below. The app and MCP
 manifests still set `MILTON_GLOBAL_SPEND_POLICY=alerts_only`, which the runtime no
 longer reads; `memo_updates_enabled` and `memo_updates_daily_limit` in `store_config`
 control admission (0022 dropped the SQL spend policy). Existing positive account safeguards
@@ -215,13 +215,59 @@ gcloud run services update-traffic milton-mcp --to-revisions=milton-mcp-derived-
 gcloud run services update-traffic milton-worker --to-revisions=milton-worker-env4-cba4f6c=100 --project=milton-510506 --region=us-east4
 ```
 
-Now serving (since 2026-11-03 05:50:01Z): MCP `milton-mcp-quiz-4644a5f`, app
-`milton-app-quiz-4644a5f`, worker `milton-worker-filing-f505745`; each is recorded below.
+Now serving (since 2026-11-03 06:31:58Z): MCP `milton-mcp-savelock-712c7c1`, app
+`milton-app-savelock-712c7c1`, worker `milton-worker-savelock-712c7c1`; each is recorded below.
 
-Current release quiz-4644a5f: app and MCP. Revisions `milton-mcp-quiz-4644a5f` and
+Current release savelock-712c7c1: MCP, app and worker, then migration 0022. Revisions
+`milton-mcp-savelock-712c7c1`, `milton-app-savelock-712c7c1` and
+`milton-worker-savelock-712c7c1`, deployed without a zero-traffic soak at Peter's word (no
+users yet); a release agent switched MCP at 2026-11-03 06:30:51Z, the app at 06:31:33Z and the
+worker at 06:31:58Z, and each serves 100%. All three run image
+`sha256:e879f531ee6033d4364e3575b2cd8b8462a7875e55cdb1d767ea7a4e6a84622e` (amd64
+`sha256:6d91c008e0749a1a58d7a860c23a62d736da74617ef39d794a8505a62bd5b1a3`; uid 1000, Node 26,
+no env, key or pem files; build stage `oven/bun:1.4.4`), built from main `712c7c1`, the merge
+of `agent/save-lock`. Configuration is identical to the quiz-4644a5f revisions (app, MCP) and
+`milton-worker-filing-f505745` apart from the image (app `milton-app-env:1`, `milton-app-key:1`;
+MCP `milton-mcp-env:2`, `milton-mcp-key:1`; worker `milton-worker-env:4`, `milton-worker-key:1`).
+Change: a save takes only the account lock and reads `memo_updates_enabled` and
+`memo_updates_daily_limit` without locking `store_config`; the worker observes spend alerts
+without the global spend policy; `memo-updates policy` sets only the daily limit. Release order:
+code first, because every earlier revision locks and reads the two columns 0022 drops. On the
+pre-0022 schema the new revisions answered the canonical checks (unauthenticated `/mcp` 401,
+discovery and health 200, app `/` and `/login` 200 with its CSRF field, signed-out
+`/assistants`, `/account/delete` and `/download` 403, HTTP 308, `run.app` 404), an authenticated
+`get_cover_sheet` 200 with an unchanged version, `bun scripts/probe-forms.ts` printed `PASS`,
+and a worker tick returned 200 at 06:32:02Z. Then Neon snapshot `before-0022-save-lock`
+(`snap-hidden-rain-b8ca7adt`, 06:32:59Z) and 0022 applied at 06:33:11Z to 06:33:13Z through
+`migrateStore` from the `712c7c1` tree (Drizzle journal 22 to 23); the scheduler kept running.
+All 22 tables kept their counts (269 rows) and 21 their hashes; `store_config` lost
+`global_spend_policy`, `foreground_accounting_ready`, `config_global_spend_policy` and the old
+`config_memo_updates`, gained `config_memo_updates` as `memo_updates_daily_limit > 0`, and kept
+`memo_updates_enabled` true and `memo_updates_daily_limit` 100; functions, triggers and indexes
+are unchanged. After the migration an authenticated `get_cover_sheet` returned 200 with an
+unchanged version and memo updates at limit 100. From 06:30Z to 06:36:39Z the three new
+revisions logged no error, no `unexpected_error`, no ReferenceError or TypeError and no 5xx
+(app 4 x 200 and 4 x 403, the checks and the probe; MCP 8 x 200 and 6 x 401 from the checks;
+worker 5 ticks x 200, three after the migration), and the previous revisions logged none.
+No save ran in production, so the lock change was not exercised there.
+
+Rollback (image `sha256:a497749e…` for app and MCP, `sha256:a370b7c3…` for the worker). Since
+0022 is applied, no earlier revision can save or tick: a traffic shift alone breaks saves and
+the worker. Stop writers (pause the scheduler), run
+`server/drizzle/rollback/0022_no_model_gate.sql` offline, then shift traffic; the 0022 journal
+row stays, so re-forwarding means running `0022_no_model_gate.sql` by hand. Never restore the
+`before-0022-save-lock` snapshot to roll back code.
+
+```sh
+gcloud run services update-traffic milton-mcp --to-revisions=milton-mcp-quiz-4644a5f=100 --project=milton-510506 --region=us-east4
+gcloud run services update-traffic milton-app --to-revisions=milton-app-quiz-4644a5f=100 --project=milton-510506 --region=us-east4
+gcloud run services update-traffic milton-worker --to-revisions=milton-worker-filing-f505745=100 --project=milton-510506 --region=us-east4
+```
+
+Release quiz-4644a5f: app and MCP. Revisions `milton-mcp-quiz-4644a5f` and
 `milton-app-quiz-4644a5f`, staged with `--no-traffic`; at milton-lead's assignment, a release
-agent switched MCP at 2026-11-03 05:49:41Z and the app at 05:50:01Z, and each serves 100%. The
-worker stays on `milton-worker-filing-f505745`. Both run image
+agent switched MCP at 2026-11-03 05:49:41Z and the app at 05:50:01Z, and each served 100% until
+savelock-712c7c1. The worker stayed on `milton-worker-filing-f505745`. Both run image
 `sha256:a497749ea9543648eb431dc2d136247a067b94428bf23b0014c17ccca908a431` (amd64
 `sha256:5a2100b24fd3cc36e1e38c9b68023b24be30ea6fdd2e5b45f9f750988cb6b01b`; uid 1000, Node 26,
 no env, key or pem files; build stage `oven/bun:1.4.4`), built from main `4644a5f`, the merge
@@ -242,8 +288,8 @@ tools from the new revision. The app and `/login` returned 200 with its CSRF fie
 No save ran in production, so the setup script, the baseline check and the 25-rule limit were
 not exercised there.
 
-Rollback (image `sha256:537f8078…`; no schema change; restores the previous setup text and
-save checks):
+Rollback (image `sha256:537f8078…`; since 0022, reachable only after the 0022 rollback above;
+restores the previous setup text and save checks):
 
 ```sh
 gcloud run services update-traffic milton-mcp --to-revisions=milton-mcp-audit4-4623c9d=100 --project=milton-510506 --region=us-east4
@@ -465,7 +511,7 @@ gcloud run services update-traffic milton-app --to-revisions=milton-app-forms-92
 ```
 
 Filing release: revisions `milton-app-filing-f505745`, `milton-mcp-filing-f505745`, and
-`milton-worker-filing-f505745`. The worker still serves them; the app moved to the forms-92975ff hotfix at 22:00:35Z and
+`milton-worker-filing-f505745`. The worker served them until savelock-712c7c1 (06:31:58Z on 2026-11-03); the app moved to the forms-92975ff hotfix at 22:00:35Z and
 MCP to rules-env2-e3f2f67 at 22:29:13Z, both below, and both to cleanup1-c260d0f above. They run image
 `sha256:a370b7c3f414560141d345e31ca84c329c5ad51c692eb526af6d16329feddd62` (amd64
 `sha256:169ab9e4383e3c7a27b67e6da6b6e5ef2c3de75949f7e73fffba3a9a98b0b005`; uid 1000, Node 26,
@@ -704,7 +750,9 @@ cards and cannot add more until it is back under it.
 
 ## No model-era gate (0022)
 
-Not yet applied. Migration 0022 drops `store_config.global_spend_policy` and
+Applied 2026-11-03 06:33:11Z (journal 23, snapshot `before-0022-save-lock`,
+`snap-hidden-rain-b8ca7adt`), after the savelock-712c7c1 code served all three services.
+Migration 0022 drops `store_config.global_spend_policy` and
 `foreground_accounting_ready` and narrows `config_memo_updates` to a positive daily
 limit (see the server README). Every revision before this release locks and reads
 those columns on each save and worker tick; this release reads neither and runs on

@@ -6,6 +6,7 @@ import {
   storeDatabase,
 } from "./local-store";
 import { fixtureStore, seedUsers } from "./store-fixtures";
+import { checkRuntimeRole } from "../scripts/check-runtime-role";
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
@@ -187,6 +188,11 @@ test("0024 runtime role saves through its grants, cannot change the schema or by
       expect((await pg.query("SELECT current_user AS role")).rows).toEqual([
         { role: "milton_app_fixture" },
       ]);
+      // The release check passes for the member and fails for any other role.
+      expect(
+        await checkRuntimeRole(storeDatabase(pg), "milton_app_fixture"),
+      ).toBe(true);
+      expect(await checkRuntimeRole(storeDatabase(pg))).toBe(false);
       const empty = await store.getTpsReport();
       const rule = await store.saveMemo({
         text: "Add a rule.",
@@ -238,6 +244,10 @@ test("0024 runtime role saves through its grants, cannot change the schema or by
       await expect(pg.query(edit)).rejects.toThrow("sample_is_append_only");
       await pg.exec("RESET ROLE");
       await expect(pg.query(edit)).rejects.toThrow("sample_is_append_only");
+      // The owner session is a superuser here, not a runtime member.
+      expect(
+        await checkRuntimeRole(storeDatabase(pg), "milton_app_fixture"),
+      ).toBe(false);
       expect(
         (await pg.query("SELECT body FROM samples WHERE user_id='runtime'"))
           .rows,

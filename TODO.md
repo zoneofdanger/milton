@@ -10,7 +10,7 @@ landed and the item is still open), `blocked: <why or #id>`. A bolded headline o
 or fewer states the task; one item is one landing. **A section heading and its preamble are
 shared context for every item beneath it.**
 
-**next-id: 13.** Ids are never reused, so this counter survives deleting the newest item.
+**next-id: 14.** Ids are never reused, so this counter survives deleting the newest item.
 
 ## MVP
 
@@ -58,3 +58,11 @@ reports, memos) and plain text on security screens and anything an assistant rea
       each other, now also through save-claim.ts and save-apply.ts. Nothing reads those imports
       at load time, so it works today; a top-level use of utf8Bytes in a save module would crash
       startup. Move readLimits and utf8Bytes into a module with no store imports.
+
+- [ ] #13 (server, med, founder) **Optional learn-from-sent-mail step in first setup.** Decided
+      2026-11-03, then parked the same day: the assistant, with permission, reads about twenty
+      recent sent emails through its own mail connector, proposes up to five of different kinds
+      with the full text, and files only the approved ones as exact samples; Milton gets no mail
+      access. Built and reviewed as merge f2ea867 (setup.ts question 6, test, README), reverted
+      unreleased; reapply by reverting the revert, then run first setup on an empty test account
+      through Claude Code with a mail connector (#8) before release.

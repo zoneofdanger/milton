@@ -95,6 +95,10 @@ test("setup renders from its catalog, per report while empty, under the agent ki
       ...setupCatalog.slice(1, 20).map((text) => ({ report: "email", text })),
     ],
   });
+  // The approved paste is filed first, so an abandoned block keeps it.
+  expect(sheet.setup!.indexOf("sample { ")).toBeLessThan(
+    sheet.setup!.indexOf("rules [{ "),
+  );
   const sample = between(sheet.setup!, "sample { ", " }");
   expect([...sample.matchAll(/(\w+):/g)].map((m) => m[1]!)).toEqual([
     "report",
@@ -104,6 +108,7 @@ test("setup renders from its catalog, per report while empty, under the agent ki
   ]);
   parses({
     ...envelope(),
+    text: between(sheet.setup!, 'its own create_memo: text "', '"'),
     sample: {
       report: /report: "(\w+)"/.exec(sample)![1],
       new_kind: /such as "([^"]+)"/.exec(sample)![1],

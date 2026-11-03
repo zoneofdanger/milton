@@ -523,13 +523,13 @@ renaming a memo.
 
 ## Hybrid hosting and runtime
 
-The selected hosting architecture uses Hono JSX and Vite assets for the browser app,
-Hono MCP and a private spend-alert worker on separate Cloud Run services, and Cloud
-Scheduler to invoke the worker. The public Astro site stays on Vercel. Neon PostgreSQL and
+The selected hosting architecture uses Hono JSX and Vite assets for the browser app and
+Hono MCP on separate Cloud Run services. The public Astro site stays on Vercel. Neon PostgreSQL and
 Neon Auth remain unchanged. Bun installs, builds and tests; Node 26 LTS runs deployed
 server code. Separate dotenvx payloads use platform-held private keys.
 
-The app, MCP and worker are migrated. Their canonical URLs and Neon identity remain
+The app and MCP are migrated. The private spend-alert worker and its scheduler are
+removed with migration 0023. Their canonical URLs and Neon identity remain
 unchanged. The [hosting runbook](server/deploy/README.md) defines release checks and rollback.
 The retired Vercel app/MCP project and migration validation services are decommissioned;
 there is no Vercel backend failover. Preserve the current Cloud Run revisions, pinned

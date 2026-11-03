@@ -208,11 +208,14 @@ import MemoDemo from "../components/MemoDemo.astro";
         </p>
         <p>Five dollars for Milton. One cent for accounting.</p>
         <p>30 days free. No credit card required.</p>
-        <ul>
+        <ul class="badges">
+          <li>Not AI-powered. Your AI is.</li>
           <li>Enterprise-grade asking nicely.</li>
           <li>Synergy, pending approval.</li>
-          <li>A founder who has mistaken this for a company.</li>
         </ul>
+        <p class="small-note badge-issuer">
+          A founder who has mistaken this for a company.
+        </p>
         <a class="button" href="https://app.meetmilton.com/login">
           Try free early access <span aria-hidden="true">↗</span>
         </a>
@@ -547,12 +550,28 @@ import MemoDemo from "../components/MemoDemo.astro";
     color: var(--muted);
     font-size: var(--text-small);
   }
-  .price-card ul {
-    padding-left: var(--space-5);
-    margin-block: var(--space-6);
+  /* Compliance-style chips: statements, not controls. Rounded, hairline and
+     mono so they cannot pass for the square, filled buttons. */
+  .badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin: var(--space-6) 0 0;
+    padding: 0;
+    list-style: none;
   }
-  .price-card li + li {
-    margin-top: var(--space-2);
+  .badges li {
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-control);
+    background: var(--ground);
+    color: var(--ink);
+    font: var(--text-caption) / var(--leading-label) var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .price-card .badge-issuer {
+    margin-block: var(--space-3) var(--space-6);
   }
 
   .reading-note {
@@ -672,6 +691,10 @@ import MemoDemo from "../components/MemoDemo.astro";
     }
     .use-case {
       padding: var(--space-6);
+    }
+    .badges {
+      flex-direction: column;
+      align-items: flex-start;
     }
   }
   .memo-limit {

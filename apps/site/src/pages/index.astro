@@ -2,6 +2,7 @@
 import SiteLayout from "../layouts/SiteLayout.astro";
 import AssistantSetup from "../components/AssistantSetup.astro";
 import MemoDemo from "../components/MemoDemo.astro";
+import FilingComparison from "../components/FilingComparison.astro";
 ---
 
 <SiteLayout
@@ -16,7 +17,7 @@ import MemoDemo from "../components/MemoDemo.astro";
       <p class="intro">
         Your AI has a case of the Mondays in every new chat. Milton keeps what
         you wrote, from emails to speeches, so the next draft sounds like you.
-        It’s a filing cabinet. We’re proud.
+        It’s a filing cabinet. We’re so proud.
       </p>
       <p class="hero-aside">
         Everyone else is building superintelligence. We’re asking it to stop
@@ -70,8 +71,7 @@ import MemoDemo from "../components/MemoDemo.astro";
         <h3>The voice you carry.</h3>
         <p>
           Samples you approved: the follow-up you actually sent, the connection
-          note that worked. Rules for what a sample cannot show: greetings,
-          sign-offs, length, and the phrases you never use.
+          note that worked.
         </p>
         <p class="sample-rule">
           “Use at most one exclamation point, in the opening line.”
@@ -89,131 +89,148 @@ import MemoDemo from "../components/MemoDemo.astro";
       </article>
     </div>
   </section>
+  <section class="section" id="why-milton" aria-labelledby="why-heading">
+    <p class="eyebrow">## Why not a memory app</p>
+    <h2 id="why-heading">
+      Memory keeps a junk drawer. Milton keeps a filing cabinet.
+    </h2>
+    <FilingComparison />
+  </section>
   <section class="section" id="how-it-works" aria-labelledby="how-heading">
-    <p class="eyebrow">## Less repeating. Less paperwork.</p>
+    <p class="eyebrow">## How it works</p>
     <h2 id="how-heading">Tell it once. Keep it on file.</h2>
-    <ol class="steps">
-      <li>
-        <h3>Connect your AI.</h3>
-        <p>
-          Add Milton through your AI’s MCP or connector settings and sign in to
-          your Milton account.
-        </p>
-        <p>
-          <a href="/setup">Find your setup instructions →</a>
-        </p>
-      </li>
-      <li>
-        <h3>Approve a draft. Keep it.</h3>
-        <p>
-          When a draft is right, say so. Your AI shows you the exact text and
-          asks before saving it as a sample. Correct the same thing twice and it
-          proposes a rule for your yes. Starting from scratch? Paste one email
-          you sent, then pick between short examples, one question at a time.
-          One approved email is enough to start.
-        </p>
-      </li>
-      <li>
-        <h3>Bring it to the next chat.</h3>
-        <p>
-          Ask “did you get that memo?” to load your cover sheet and the report
-          that fits: email, chat, post, document, or speech. Tell your AI what
-          to add, correct, or remove as your writing changes.
-        </p>
-      </li>
-    </ol>
-    <p class="reading-note small-note">
-      <strong class="memo-limit">
-        We distribute the memo. We cannot make everyone read it.
-      </strong>
-      Ask your AI to read your Milton cover sheet when you start work. It isn’t
-      automatically included in every chat, and following it is still up to the
+    <p class="section-lead">
+      We distribute the memo. We cannot make everyone read it. Ask your AI to
+      read your cover sheet when you start work; following it is still up to the
       AI.
     </p>
-    <div class="where-to-start" id="where-to-start">
-      <p class="eyebrow">// Onboarding</p>
-      <h3>Not sure where to start?</h3>
-      <p>
-        Say “set up Milton” to your assistant and answer a few questions. That’s
-        the onboarding. No call, no specialist, no calendar link. We looked into
-        offering one and decided it could have been an email. Email{" "}
-        <a href="mailto:lumbergh@meetmilton.com">lumbergh@meetmilton.com</a> and
-        nobody will read it.
-      </p>
+    <div class="slip-wrap">
+      <figure class="sheet slip" aria-labelledby="slip-title">
+        <div class="sheet-bar">
+          <span id="slip-title">INTEROFFICE ROUTING SLIP</span>
+        </div>
+        <dl class="slip-fields">
+          <div>
+            <dt>To:</dt>
+            <dd>Every AI you connect</dd>
+          </div>
+          <div>
+            <dt>From:</dt>
+            <dd>You</dd>
+          </div>
+          <div>
+            <dt>Re:</dt>
+            <dd>How you write</dd>
+          </div>
+        </dl>
+        <ol class="slip-rows">
+          <li class="slip-row">
+            <span class="slip-box" aria-hidden="true">
+              ✓
+            </span>
+            <p class="slip-text">
+              <strong>Connect.</strong> Add Milton to your AI’s connector
+              settings and sign in.
+            </p>
+            <p class="slip-initials">
+              <span class="slip-initials-label">Initials</span>
+              <span class="slip-initials-value">You</span>
+            </p>
+          </li>
+          <li class="slip-row">
+            <span class="slip-box" aria-hidden="true">
+              ✓
+            </span>
+            <p class="slip-text">
+              <strong>File.</strong> When a draft is right, your AI asks “Save
+              this as a sample?” You say yes.
+            </p>
+            <p class="slip-initials">
+              <span class="slip-initials-label">Initials</span>
+              <span class="slip-initials-value">You</span>
+            </p>
+          </li>
+          <li class="slip-row">
+            <span class="slip-box" aria-hidden="true">
+              ✓
+            </span>
+            <p class="slip-text">
+              <strong>Distribute.</strong> In any new chat, ask “Did you get
+              that memo?” Your AI reads your cover sheet and the report that
+              fits.
+            </p>
+            <p class="slip-initials">
+              <span class="slip-initials-label">Initials</span>
+              <span class="slip-initials-value">AI</span>
+            </p>
+          </li>
+        </ol>
+      </figure>
+      <span class="stamp" aria-hidden="true">
+        FILED
+      </span>
     </div>
   </section>
-  <section
-    class="section control-section"
-    id="your-preferences"
-    aria-labelledby="control-heading"
-  >
-    <div>
-      <p class="eyebrow">## You stay in control</p>
-      <h2 id="control-heading">We won’t take your stapler.</h2>
-      <p class="portability-copy">
-        Check it yourself. The source is public, and you can run Milton
-        yourself. Download TPS.md to see what your AI reads. Disconnect an AI
-        and Milton refuses it at once.
-      </p>
-      <p class="portability-aside">
-        We’d prefer you keep paying us, but apparently that’s not a retention
-        strategy.
-      </p>
-      <p>
-        <a href="https://github.com/zoneofdanger/milton">Read the source ↗</a>
-      </p>
-    </div>
-    <figure class="employee-testimonial" id="employee-testimonial">
-      <p class="eyebrow">## Fictional employee testimonial</p>
-      <blockquote>
-        “Milton lets me say ‘Did you get that memo?’ to software. I have never
-        felt more qualified for management.”
-      </blockquote>
-      <figcaption>
-        <strong>Michael Bolton</strong>
-        <span>Senior Founding AI Forward Deployed Product Engineer</span>
-      </figcaption>
-    </figure>
-  </section>
-  <section
-    class="section pricing"
-    id="pricing"
-    aria-labelledby="pricing-heading"
-  >
-    <div>
-      <p class="eyebrow">## One plan. We resisted making three columns.</p>
-      <h2 id="pricing-heading">Less repeating yourself.</h2>
-      <p class="section-lead">
-        One plan for your writing voice, whether you use one AI or several.
-      </p>
-      <p class="reading-note small-note">
-        Early access is free while we prepare paid subscriptions. No card is
-        required, and signing up today won’t charge you.
-      </p>
-      <p class="reading-note small-note">
-        After your free trial, subscribe to keep AI access. You can still view
-        and download your report without a subscription.
-      </p>
-    </div>
-    <div class="sheet price-card">
-      <div class="sheet-bar">
-        <span>Planned launch pricing</span>
+  <section class="section" id="pricing" aria-labelledby="pricing-heading">
+    <p class="eyebrow">## One plan. We resisted making three columns.</p>
+    <h2 id="pricing-heading" class="visually-hidden">
+      Pricing
+    </h2>
+    <div class="pricing-grid">
+      <div class="price-column">
+        <div class="sheet price-card">
+          <div class="sheet-bar">
+            <span>Planned launch pricing</span>
+          </div>
+          <div class="sheet-content">
+            <p class="price">
+              <strong>$5.01</strong> <span>USD / month</span>
+            </p>
+            <p>Five dollars for Milton. One cent for accounting.</p>
+            <p>Free during early access. No credit card required.</p>
+            <ul class="checklist">
+              <li>
+                <span class="check-box" aria-hidden="true">
+                  ✓
+                </span>
+                <span>
+                  Not AI-powered. Your AI is.
+                  <span class="visually-hidden">(done)</span>
+                </span>
+              </li>
+              <li>
+                <span class="check-box" aria-hidden="true">
+                  ✓
+                </span>
+                <span>
+                  Enterprise-grade asking nicely.
+                  <span class="visually-hidden">(done)</span>
+                </span>
+              </li>
+              <li>
+                <span class="check-box" aria-hidden="true"></span>
+                <span>
+                  Synergy, pending approval.
+                  <span class="visually-hidden">(pending)</span>
+                </span>
+              </li>
+            </ul>
+            <a class="button" href="https://app.meetmilton.com/login">
+              Try free early access <span aria-hidden="true">↗</span>
+            </a>
+          </div>
+        </div>
       </div>
-      <div class="sheet-content">
-        <p class="price">
-          <strong>$5.01</strong> <span>USD / month</span>
-        </p>
-        <p>Five dollars for Milton. One cent for accounting.</p>
-        <p>30 days free. No credit card required.</p>
-        <ul>
-          <li>Enterprise-grade asking nicely.</li>
-          <li>Synergy, pending approval.</li>
-          <li>A founder who has mistaken this for a company.</li>
-        </ul>
-        <a class="button" href="https://app.meetmilton.com/login">
-          Try free early access <span aria-hidden="true">↗</span>
-        </a>
-      </div>
+      <figure class="employee-testimonial" id="employee-testimonial">
+        <blockquote>
+          “Milton lets me say ‘Did you get that memo?’ to software. I have never
+          felt more qualified for management.”
+        </blockquote>
+        <figcaption>
+          <strong>Michael Bolton</strong>
+          <span>Senior Founding AI Forward Deployed Product Engineer</span>
+        </figcaption>
+      </figure>
     </div>
   </section>
   <section class="section faq" aria-labelledby="faq-heading">
@@ -226,6 +243,18 @@ import MemoDemo from "../components/MemoDemo.astro";
         the rules you ask for, stored as your AI sends them. Milton never
         rewrites a rule or a sample. It never reads your inbox, your files, or
         your conversations.
+      </p>
+    </details>
+    <details>
+      <summary>Can I take my writing and leave?</summary>
+      <p>
+        We won’t take your stapler. The source is public, and you can run Milton
+        yourself. Download TPS.md to see what your AI reads. Disconnect an AI
+        and Milton refuses it at once. We’d prefer you keep paying us, but
+        apparently that’s not a retention strategy.
+      </p>
+      <p>
+        <a href="https://github.com/zoneofdanger/milton">Read the source ↗</a>
       </p>
     </details>
     <details>
@@ -331,7 +360,7 @@ import MemoDemo from "../components/MemoDemo.astro";
       <summary>Why the extra penny?</summary>
       <p>We’ve been assured the accounting software is working as intended.</p>
     </details>
-    <details id="why-milton">
+    <details id="why-this-exists">
       <summary>Why does this exist?</summary>
       <p>
         Peter wanted his AIs to write like him. Somehow he ended up building
@@ -394,7 +423,6 @@ import MemoDemo from "../components/MemoDemo.astro";
     font-size: var(--text-lead);
     line-height: var(--leading-body);
     margin-top: var(--space-6);
-    max-width: 36em;
   }
   .hero-aside {
     margin-top: var(--space-5);
@@ -495,40 +523,190 @@ import MemoDemo from "../components/MemoDemo.astro";
     color: var(--ink);
     font-size: var(--text-body);
   }
-  .steps {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: var(--space-8);
-    padding: 0;
-    margin: var(--space-8) 0;
+  /* How it works: an interoffice routing slip across the container. */
+  .slip-wrap {
+    position: relative;
+    margin-top: var(--space-8);
+    padding-bottom: var(--space-6);
+  }
+  .slip {
+    margin: 0;
+  }
+  .slip-fields {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-3);
+    margin: 0;
+    padding: var(--space-3) var(--sheet-padding);
+    border-bottom: 1px solid var(--ink);
+    font: var(--text-small) / var(--leading-label) var(--font-mono);
+  }
+  .slip-fields > div {
+    display: flex;
+    gap: var(--space-2);
+  }
+  /* The dot between fields is decoration, not read aloud. */
+  .slip-fields > div:not(:last-child)::after {
+    content: "·";
+    content: "·" / "";
+    margin-left: var(--space-2);
+    color: var(--muted);
+  }
+  .slip-fields dt {
+    color: var(--muted);
+  }
+  .slip-fields dd {
+    margin: 0;
+  }
+  .slip-rows {
     list-style: none;
-    counter-reset: step;
+    margin: 0;
+    padding: 0;
+    counter-reset: slip;
   }
-  .steps li {
-    counter-increment: step;
+  .slip-row {
+    counter-increment: slip;
+    display: grid;
+    grid-template-columns: auto auto minmax(0, 1fr) calc(
+        var(--space-16) * 1.75
+      );
+    grid-template-areas: "num box text initials";
+    align-items: stretch;
+    border-bottom: 1px solid var(--hairline);
   }
-  .steps li::before {
-    content: "0" counter(step);
+  .slip-row:last-child {
+    border-bottom: 0;
+  }
+  .slip-row::before {
+    grid-area: num;
+    content: "0" counter(slip);
+    align-self: center;
+    padding-inline: var(--sheet-padding) var(--space-4);
+    color: var(--muted);
     font: var(--text-caption) / var(--leading-label) var(--font-mono);
+  }
+  /* One form box for the slip and the price card's checklist. */
+  .slip-box,
+  .check-box {
+    display: inline-grid;
+    place-items: center;
+    width: var(--space-6);
+    height: var(--space-6);
+    border: 1px solid var(--ink);
+    background: var(--surface);
+    font: var(--text-body) / 1 var(--font-mono);
+  }
+  .slip-box {
+    grid-area: box;
+    align-self: center;
+  }
+  .slip-text {
+    grid-area: text;
+    align-self: center;
+    padding: var(--space-5) var(--space-6) var(--space-5) var(--space-5);
     color: var(--muted);
   }
-  .steps h3 {
-    margin-top: var(--space-4);
+  .slip-text strong {
+    color: var(--ink);
+    font-weight: 600;
   }
-  .steps p {
+  .slip-initials {
+    grid-area: initials;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4);
+    border-left: 1px solid var(--hairline);
+  }
+  .slip-initials-label {
     color: var(--muted);
+    font: var(--text-caption) / var(--leading-label) var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
   }
-  .pricing {
+  .slip-initials-value {
+    font: italic var(--text-lead) / var(--leading-heading) var(--font-form);
+  }
+  /* A rubber stamp across the slip's lower edge, below the "AI" initials.
+     Decorative only. */
+  .stamp {
+    position: absolute;
+    right: var(--space-3);
+    bottom: calc(-1 * var(--space-5));
+    padding: var(--space-2) var(--space-5);
+    border: 2px solid currentColor;
+    outline: 1px solid currentColor;
+    outline-offset: calc(var(--space-2) / 2);
+    color: var(--ink);
+    opacity: 0.45;
+    transform: rotate(-8deg);
+    font: var(--text-section) / 1 var(--font-mono);
+    letter-spacing: 0.2em;
+    pointer-events: none;
+    user-select: none;
+  }
+  @media (max-width: 600px) {
+    .slip-fields {
+      flex-direction: column;
+      gap: 0;
+    }
+    .slip-fields > div:not(:last-child)::after {
+      display: none;
+    }
+    .slip-row {
+      grid-template-columns: auto minmax(0, 1fr);
+      grid-template-areas:
+        "box text"
+        "box initials";
+      column-gap: var(--space-4);
+      padding: var(--space-4) var(--sheet-padding);
+    }
+    .slip-row::before {
+      display: none;
+    }
+    .slip-box {
+      align-self: start;
+    }
+    .slip-text {
+      padding: 0;
+    }
+    .slip-text::before {
+      content: "0" counter(slip) " ";
+      color: var(--muted);
+      font: var(--text-caption) / var(--leading-label) var(--font-mono);
+    }
+    .slip-initials {
+      flex-direction: row;
+      align-items: baseline;
+      gap: var(--space-3);
+      margin-top: var(--space-3);
+      padding: var(--space-2) 0 0;
+      border-left: 0;
+      border-top: 1px dashed var(--hairline);
+    }
+    .stamp {
+      font-size: var(--text-subtitle);
+    }
+  }
+  /* The sentence the eyebrow stands in for, kept for headings navigation, and
+     the checklist's states. The same pattern MemoDemo uses for its hidden scene
+     labels. */
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  /* Price card first, testimonial beside it; both share a centre line. */
+  .pricing-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--space-8);
-  }
-  .steps p + p {
-    margin-top: var(--space-3);
-  }
-  .pricing {
-    align-items: start;
     gap: var(--space-16);
+    align-items: center;
+    margin-top: var(--space-8);
   }
   .price {
     display: flex;
@@ -544,38 +722,24 @@ import MemoDemo from "../components/MemoDemo.astro";
     color: var(--muted);
     font-size: var(--text-small);
   }
-  .price-card ul {
-    padding-left: var(--space-5);
-    margin-block: var(--space-6);
-  }
-  .price-card li + li {
-    margin-top: var(--space-2);
-  }
-
-  .reading-note {
-    margin-top: var(--space-8);
-  }
-  .where-to-start {
-    max-width: 75ch;
-    margin-top: var(--space-8);
-  }
-  .where-to-start h3 {
-    margin-top: var(--space-4);
-  }
-  .where-to-start p:not(.eyebrow) {
-    color: var(--muted);
-  }
-  .control-section {
+  /* A form checklist: two boxes ticked, the third left open because it is
+     pending. The boxes are drawn like a routing slip's and are decoration;
+     each item carries its state in visually hidden text. */
+  .checklist {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--space-16);
+    gap: var(--space-3);
+    margin: var(--space-6) 0;
+    padding: 0;
+    list-style: none;
   }
-  .portability-copy {
-    font-size: var(--text-lead);
+  .checklist li {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    color: var(--ink);
   }
-  .portability-aside {
-    color: var(--muted);
-    margin-block: var(--space-5);
+  .check-box {
+    flex: none;
   }
   .faq details {
     border-top: 1px solid var(--hairline);
@@ -590,9 +754,13 @@ import MemoDemo from "../components/MemoDemo.astro";
     font-weight: 600;
   }
   .faq details p {
-    max-width: 75ch;
     margin-block: var(--space-2) var(--space-3);
     color: var(--muted);
+  }
+  /* The section's divider closes the last item, as the next item's border
+     closes the others, so the list ends on the item rhythm. */
+  .section.faq {
+    padding-bottom: 0;
   }
   .closing {
     text-align: center;
@@ -613,14 +781,7 @@ import MemoDemo from "../components/MemoDemo.astro";
     }
   }
   @media (max-width: 960px) {
-    h1 {
-      max-width: 660px;
-    }
-    .intro {
-      max-width: 45ch;
-    }
-
-    .control-section {
+    .pricing-grid {
       gap: var(--space-8);
     }
   }
@@ -632,10 +793,6 @@ import MemoDemo from "../components/MemoDemo.astro";
     }
   }
   @media (max-width: 767px) {
-    .control-section {
-      grid-template-columns: 1fr;
-      gap: var(--space-10);
-    }
     .assistant-strip {
       display: grid;
       gap: var(--space-2);
@@ -647,11 +804,13 @@ import MemoDemo from "../components/MemoDemo.astro";
     .closing {
       padding-block: var(--space-12);
     }
-    .use-cases,
-    .steps,
-    .pricing {
+    .use-cases {
       grid-template-columns: 1fr;
       gap: var(--space-6);
+    }
+    .pricing-grid {
+      grid-template-columns: 1fr;
+      gap: var(--space-10);
     }
     .hero {
       padding-block: var(--space-10);
@@ -671,20 +830,11 @@ import MemoDemo from "../components/MemoDemo.astro";
       padding: var(--space-6);
     }
   }
-  .memo-limit {
-    display: block;
-    margin-bottom: var(--space-3);
-    color: var(--ink);
-    font: var(--font-display-weight) var(--text-title) / var(--leading-heading)
-      var(--font-display);
-  }
   .employee-testimonial {
     margin: 0;
-    align-self: center;
   }
   .employee-testimonial blockquote {
-    max-width: 40ch;
-    margin: var(--space-6) 0;
+    margin: 0 0 var(--space-6);
     font: var(--font-display-weight) var(--text-section) /
       var(--leading-heading) var(--font-display);
     text-wrap: balance;

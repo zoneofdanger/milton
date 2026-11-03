@@ -19,9 +19,10 @@ decommission on 2026-11-01. Hosting rollback now uses Cloud Run revisions.
 
 Project `milton-510506`, Cloud Run/Artifact Registry region `us-east4`. Service manifests in this directory pin an immutable image and
 secret versions. They contain configuration and secret references, never values.
-The manifests pin what is serving now: app `milton-app-nospend-41de4f6`
-(`sha256:2eb49f6e…`, env 1, key 1) and MCP `milton-mcp-nospend-41de4f6`
-(`sha256:2eb49f6e…`, env 2, key 1); see the release records below. The spend worker,
+The manifests pin what is serving now: app `milton-app-role-0851a8c`
+(`sha256:2eb49f6e…`, env 2, key 1) and MCP `milton-mcp-role-0851a8c`
+(`sha256:2eb49f6e…`, env 3, key 1), both connecting as `milton_app`; see the release
+records below. The spend worker,
 its scheduler job, service accounts and manifest were removed with 0023 (see
 [spend subsystem removal](#spend-subsystem-removal-0023)). `memo_updates_enabled` and
 `memo_updates_daily_limit` in `store_config` control admission. Existing positive
@@ -194,13 +195,50 @@ gcloud run services update-traffic milton-mcp --to-revisions=milton-mcp-derived-
 gcloud run services update-traffic milton-worker --to-revisions=milton-worker-env4-cba4f6c=100 --project=milton-510506 --region=us-east4
 ```
 
-Now serving (since 2026-11-03 07:13:55Z): MCP `milton-mcp-nospend-41de4f6`, app
-`milton-app-nospend-41de4f6`; each is recorded below. There is no worker service.
+Now serving (since 2026-11-03 07:44:40Z): MCP `milton-mcp-role-0851a8c`, app
+`milton-app-role-0851a8c`; each is recorded below. There is no worker service.
 
-Current release nospend-41de4f6: MCP and app, then migration 0023, then the worker
+Current release role-0851a8c: migration 0024 and the runtime role, from main `0851a8c`.
+No new image: revisions `milton-mcp-role-0851a8c` and `milton-app-role-0851a8c` run the
+nospend-41de4f6 image (`sha256:2eb49f6e…`) and differ from the nospend-41de4f6 revisions only
+in the mounted payload: MCP `milton-mcp-env:3`, app `milton-app-env:2` (keys unchanged,
+`milton-mcp-key:1`, `milton-app-key:1`), whose `DATABASE_URL` user is `milton_app` on the same
+host, database and parameters. A release agent switched MCP at 2026-11-03 07:43:53Z and the
+app at 07:44:40Z, directly at 100% (no users yet). The revisions were created with
+`gcloud run services update --update-secrets=/run/milton/.env=<secret>:<version>
+--revision-suffix=role-0851a8c` rather than `replace`, because the live MCP template carries
+`run.googleapis.com/startup-cpu-boost`, which the manifest lacks; the update changed only the
+mount (gcloud keeps the previous version's volume declared but unmounted). First, a throwaway
+branch from production rehearsed steps 2 to 5 and the rollback: the check script printed `ok`
+for both payloads and `fail` for the owner, the three refusals held, and the rollback refused
+while `milton_app` was a member, then dropped both roles. The branch was deleted. Then Neon
+snapshot `before-0024-runtime-role` (`snap-green-smoke-b8z8gpou`, 07:40:54Z) and 0024 applied
+at 07:41:10Z to 07:41:12Z through `migrateStore` (Drizzle journal 24 to 25; all 17 tables, 265
+rows and the schema hash unchanged; grants exactly as the migration states). `milton_app` was
+created with SQL at 07:42:52Z; the role check read `t`, `t`, `t`, `{milton_runtime}`.
+`pg_stat_statements` (installed in `postgres`, not `milton`) had kept the `CREATE ROLE` text;
+`pg_stat_statements_reset(0, 0, queryid)` as the owner cleared it. Old payload versions
+`milton-app-env:1` and `milton-mcp-env:2` stay enabled. After the switch the canonical checks
+were unchanged (health 200, discovery 200, unauthenticated `/mcp` 401, HTTP 308, `run.app`
+404), `bun scripts/probe-forms.ts` printed `PASS`, two authenticated `get_cover_sheet` reads
+returned 200 with an unchanged version, and from 07:43Z to 07:47:45Z the new revisions logged
+no error, no 5xx and no `permission denied` or `store_unavailable`. No save ran, so a save as
+`milton_app` has not been observed in production. The owner-credential retirement below is
+not done.
+
+Rollback: shift traffic back and, in the same step, set `items[0].key` back to `1` (app) and
+`2` (MCP) in the manifests. No schema step is needed; drop the role only after both services
+are off it (see [runtime role](#runtime-role-0024)).
+
+```sh
+gcloud run services update-traffic milton-mcp --to-revisions=milton-mcp-nospend-41de4f6=100 --project=milton-510506 --region=us-east4
+gcloud run services update-traffic milton-app --to-revisions=milton-app-nospend-41de4f6=100 --project=milton-510506 --region=us-east4
+```
+
+Release nospend-41de4f6: MCP and app, then migration 0023, then the worker
 removal. Revisions `milton-mcp-nospend-41de4f6` and `milton-app-nospend-41de4f6`, deployed
 without a zero-traffic soak at Peter's word (no users yet); a release agent switched MCP at
-2026-11-03 07:13:11Z and the app at 07:13:55Z, and each serves 100%. Both run image
+2026-11-03 07:13:11Z and the app at 07:13:55Z, and each served 100% until role-0851a8c. Both run image
 `sha256:2eb49f6eb9ef107fac21bcc2298ddade458a4b28350ff536ffa0102c3fbae395` (amd64
 `sha256:b941afc9bef44b52e64dd08c2ce913efe59724919f2bd2cd0765217c406b2054`; uid 1000, Node 26,
 no env, key or pem files; build stage `oven/bun:1.4.4`), built from main `41de4f6`, the merge
@@ -852,7 +890,9 @@ first.
 
 ## Runtime role (0024)
 
-Not yet released. Migration 0024 creates `milton_runtime`, a NOLOGIN group role with
+Applied 2026-11-03 07:41:10Z (journal 25, snapshot `before-0024-runtime-role`,
+`snap-green-smoke-b8z8gpou`); app and MCP connect as `milton_app` since the role-0851a8c
+release (see the release records). Migration 0024 creates `milton_runtime`, a NOLOGIN group role with
 only the statements the runtime runs on each table (DELETE only on `users` and
 `assistant_disconnects`; `store_config` read-only apart from the lock), USAGE on the
 `instruction_card_position` sequence and schema `public`, CONNECT on the database, and

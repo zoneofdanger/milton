@@ -133,7 +133,7 @@ export function createMiltonServer(
     "get_report",
     {
       description:
-        "Read one report by report_id: email, chat, post, document (doc is accepted) or speech. Returns report_id, text (the heading, the situation it applies to, approved samples quoted exactly and newest first, then rules), version, is_empty and samples (id, kind_id, kind, context and date of each sample in text, newest first) for reusing a kind or naming a sample to replace or remove. While the report is empty, setup carries that report's setup script: offer it once and on yes run it as written, one question at a time, showing each snippet exactly, before any other writing. Imitate the samples; use the rules for what a sample cannot show. An empty report means no guidance yet; do not guess at one. No model call, no write.",
+        "Read one report by report_id: email, chat, post, document (doc is accepted) or speech. Returns report_id, text (the heading, the situation it applies to, approved samples quoted exactly and newest first, then rules), version, is_empty and samples (id, kind_id, kind, context and date of each sample in text, newest first) for reusing a kind or naming a sample to replace or remove. While the report is empty, setup carries that report's setup script (while the whole account is empty, a pointer to the cover sheet's): offer it once and on yes run it as written, one question at a time, showing each snippet exactly, before any other writing. Imitate the samples; use the rules for what a sample cannot show. An empty report means no guidance yet; do not guess at one. No model call, no write.",
       inputSchema: reportInput,
       annotations: readOnly,
     },

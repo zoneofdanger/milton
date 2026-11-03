@@ -4,7 +4,11 @@ import { saveMemoInput } from "../src/store/compiled";
 import { parseReport } from "../../packages/agent-kit/src/report";
 import type { CardHead } from "../src/store/cards";
 import { assembleDocuments, FILINGS, type Filing } from "../src/store/reports";
-import { SETUP_MARKER, setupCatalog } from "../src/store/setup";
+import {
+  FIRST_SETUP_POINTER,
+  SETUP_MARKER,
+  setupCatalog,
+} from "../src/store/setup";
 import { coverSheet, reportEnvelope, reportList } from "../src/store/tools";
 
 // Fields every save carries, as the instructions name them.
@@ -43,9 +47,19 @@ test("setup renders from its catalog, per report while empty, under the agent ki
   expect(sheet.setup).toBe(reportEnvelope(empty, "email").setup!);
   expect(sheet.setup).toContain('Then say: "First, paste one email');
   expect(sheet.setup).toContain(`[cover] ${SETUP_MARKER}`);
+  // Until the first save, every other report points back to it.
+  for (const id of ["chat", "post", "document", "speech"] as const)
+    expect(reportEnvelope(empty, id).setup).toBe(FIRST_SETUP_POINTER);
+  // After a first save, each empty report serves its full block.
+  const started = {
+    ...assembleDocuments([head("cover", SETUP_MARKER)], []),
+    version,
+  };
   const served = [
     sheet.setup!,
-    ...reportList(empty).reports.map((r) => r.setup!),
+    ...(["email", "chat", "post", "document", "speech"] as const).map(
+      (id) => reportEnvelope(started, id).setup!,
+    ),
   ];
   const offered = new Set<string>();
   for (const setup of served) {

@@ -650,7 +650,8 @@ function question(q: Pick | Tells, lineBreak: string) {
 }
 
 /** The setup script for one report's block. `first` (the whole account is
- * empty) adds the opening lines and, for email, the cover-sheet questions;
+ * empty; served for email only) adds the opening lines and, for email, the
+ * cover-sheet questions;
  * `marker` adds the marker rule to the save; `next` names the reports still
  * empty to offer afterwards. */
 export function setupText(
@@ -704,9 +705,14 @@ export function setupText(
   ].join("\n\n");
 }
 
+/** Served instead of another block while the account is empty, so the
+ * cover-sheet questions in email's block always come first. */
+export const FIRST_SETUP_POINTER =
+  "First setup starts with Email: call get_cover_sheet and run its setup as written; then come back here.";
 /** A report's setup while it is empty: the cover sheet serves email's. */
 export function reportSetup(documents: Documents, report: ReportId) {
   if (!documents.reports.find((r) => r.id === report)?.is_empty) return;
+  if (documents.is_empty && report !== "email") return FIRST_SETUP_POINTER;
   return setupText(report, {
     first: documents.is_empty,
     marker: !documents.cover_rules.some((r) => ruleText(r) === SETUP_MARKER),

@@ -7,7 +7,7 @@ export interface MemoExcerpt {
 }
 
 export interface MemoTurn {
-  speaker: "You" | "AI";
+  speaker: "You" | "Claude" | "ChatGPT";
   text?: string;
   excerpt?: MemoExcerpt;
 }
@@ -39,7 +39,7 @@ export const memoExample: { scenes: MemoScene[] } = {
           text: "Reply to Lumbergh. I’m not coming in on Saturday.",
         },
         {
-          speaker: "AI",
+          speaker: "Claude",
           text: "Hi Bill! Thanks so much for reaching out. Unfortunately I won’t be able to...",
         },
         {
@@ -48,7 +48,7 @@ export const memoExample: { scenes: MemoScene[] } = {
           excerpt: sample,
         },
         {
-          speaker: "AI",
+          speaker: "Claude",
           text: "Milton got the memo. Filed under email, word for word.",
         },
       ],
@@ -57,9 +57,9 @@ export const memoExample: { scenes: MemoScene[] } = {
       label: "Next week · ChatGPT",
       turns: [
         { speaker: "You", text: "Did you get that memo?" },
-        { speaker: "AI", text: "Got it. One email sample on file." },
+        { speaker: "ChatGPT", text: "Got it. One email sample on file." },
         { speaker: "You", text: "Tell the Bobs I’ll miss the 2:15." },
-        { speaker: "AI", excerpt: draft },
+        { speaker: "ChatGPT", excerpt: draft },
       ],
     },
   ],

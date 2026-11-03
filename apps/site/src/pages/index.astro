@@ -200,14 +200,33 @@ import FilingComparison from "../components/FilingComparison.astro";
             </p>
             <p>Five dollars for Milton. One cent for accounting.</p>
             <p>30 days free. No credit card required.</p>
-            <ul class="badges">
-              <li>Not AI-powered. Your AI is.</li>
-              <li>Enterprise-grade asking nicely.</li>
-              <li>Synergy, pending approval.</li>
+            <ul class="checklist">
+              <li>
+                <span class="check-box" aria-hidden="true">
+                  ✓
+                </span>
+                <span>
+                  Not AI-powered. Your AI is.
+                  <span class="visually-hidden">(done)</span>
+                </span>
+              </li>
+              <li>
+                <span class="check-box" aria-hidden="true">
+                  ✓
+                </span>
+                <span>
+                  Enterprise-grade asking nicely.
+                  <span class="visually-hidden">(done)</span>
+                </span>
+              </li>
+              <li>
+                <span class="check-box" aria-hidden="true"></span>
+                <span>
+                  Synergy, pending approval.
+                  <span class="visually-hidden">(pending)</span>
+                </span>
+              </li>
             </ul>
-            <p class="small-note badge-issuer">
-              A founder who has mistaken this for a company.
-            </p>
             <a class="button" href="https://app.meetmilton.com/login">
               Try free early access <span aria-hidden="true">↗</span>
             </a>
@@ -223,9 +242,6 @@ import FilingComparison from "../components/FilingComparison.astro";
           <strong>Michael Bolton</strong>
           <span>Senior Founding AI Forward Deployed Product Engineer</span>
         </figcaption>
-        <p class="carousel-count">
-          <span class="carousel-dot" aria-hidden="true"></span>1 of 1
-        </p>
       </figure>
     </div>
   </section>
@@ -581,9 +597,9 @@ import FilingComparison from "../components/FilingComparison.astro";
     color: var(--muted);
     font: var(--text-caption) / var(--leading-label) var(--font-mono);
   }
-  .slip-box {
-    grid-area: box;
-    align-self: center;
+  /* One form box for the slip and the price card's checklist. */
+  .slip-box,
+  .check-box {
     display: inline-grid;
     place-items: center;
     width: var(--space-6);
@@ -591,6 +607,10 @@ import FilingComparison from "../components/FilingComparison.astro";
     border: 1px solid var(--ink);
     background: var(--surface);
     font: var(--text-body) / 1 var(--font-mono);
+  }
+  .slip-box {
+    grid-area: box;
+    align-self: center;
   }
   .slip-text {
     grid-area: text;
@@ -685,8 +705,9 @@ import FilingComparison from "../components/FilingComparison.astro";
       font-size: var(--text-subtitle);
     }
   }
-  /* The sentence the eyebrow stands in for, kept for headings navigation. The
-     same pattern MemoDemo uses for its hidden scene labels. */
+  /* The sentence the eyebrow stands in for, kept for headings navigation, and
+     the checklist's states. The same pattern MemoDemo uses for its hidden scene
+     labels. */
   .visually-hidden {
     position: absolute;
     width: 1px;
@@ -717,28 +738,24 @@ import FilingComparison from "../components/FilingComparison.astro";
     color: var(--muted);
     font-size: var(--text-small);
   }
-  /* Compliance-style chips: statements, not controls. Rounded, hairline and
-     mono so they cannot pass for the square, filled buttons. */
-  .badges {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-2);
-    margin: var(--space-6) 0 0;
+  /* A form checklist: two boxes ticked, the third left open because it is
+     pending. The boxes are drawn like a routing slip's and are decoration;
+     each item carries its state in visually hidden text. */
+  .checklist {
+    display: grid;
+    gap: var(--space-3);
+    margin: var(--space-6) 0;
     padding: 0;
     list-style: none;
   }
-  .badges li {
-    padding: var(--space-2) var(--space-3);
-    border: 1px solid var(--hairline);
-    border-radius: var(--radius-control);
-    background: var(--ground);
+  .checklist li {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
     color: var(--ink);
-    font: var(--text-caption) / var(--leading-label) var(--font-mono);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
   }
-  .price-card .badge-issuer {
-    margin-block: var(--space-3) var(--space-6);
+  .check-box {
+    flex: none;
   }
 
   .where-to-start {
@@ -833,10 +850,6 @@ import FilingComparison from "../components/FilingComparison.astro";
     .use-case {
       padding: var(--space-6);
     }
-    .badges {
-      flex-direction: column;
-      align-items: flex-start;
-    }
   }
   .employee-testimonial {
     margin: 0;
@@ -854,21 +867,5 @@ import FilingComparison from "../components/FilingComparison.astro";
   }
   .employee-testimonial figcaption span {
     color: var(--muted);
-  }
-  /* Where a carousel puts its dots: one testimonial, one dot. Nothing to click. */
-  .carousel-count {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    margin-top: var(--space-6);
-    color: var(--muted);
-    font: var(--text-caption) / var(--leading-label) var(--font-mono);
-  }
-  .carousel-dot {
-    flex: none;
-    width: var(--space-2);
-    height: var(--space-2);
-    border-radius: 50%;
-    background: var(--ink);
   }
 </style>

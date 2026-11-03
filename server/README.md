@@ -4,7 +4,7 @@ Milton maintains internal memos containing writing rules and approved samples.
 Connected assistants submit changes through `create_memo` and read the
 cover sheet and reports through `get_cover_sheet`, `get_report` and `list_reports`.
 This directory contains the MCP server and current-report web app,
-rendered with Hono JSX and Vite-built theme assets on Node 26 LTS, with a separate scheduled spend-alert worker. Neon Postgres stores instruction cards, samples, internal
+rendered with Hono JSX and Vite-built theme assets on Node 26 LTS. Neon Postgres stores instruction cards, samples, internal
 history, the current report snapshot and request receipts; Neon Auth handles sign-in and authorization.
 
 ## Prerequisites
@@ -23,11 +23,9 @@ browser scripts. Forms work with the existing strict CSP. Bun installs dependenc
 
 `src/function.ts` is a local compatibility adapter; hosted services use the role-specific Cloud Run entrypoint.
 `src/cloud-run.ts` serves browser pages and an exact public-asset allowlist with
-`MILTON_SERVICE=app`, the protocol/store code with `MILTON_SERVICE=mcp`, or
-the private spend-alert worker with `MILTON_SERVICE=worker`. App and MCP roles each reject
-the other hostname and direct `run.app` requests. The MCP role needs no browser
-cookie secret. The worker has no browser routes and must be protected by Cloud Run
-IAM and internal ingress; its adapter relies on that platform authentication.
+`MILTON_SERVICE=app` or the protocol/store code with `MILTON_SERVICE=mcp`; any other
+value fails startup. Each role rejects the other hostname and direct `run.app`
+requests. The MCP role needs no browser cookie secret.
 
 Build the container from the repository root:
 
@@ -45,7 +43,7 @@ value is refused. Missing or invalid decryption fails closed. Existing platform
 environment values take precedence. Without a payload file, the runtime
 uses its environment directly, supporting local development and staged migration.
 Keep encrypted release payloads private and versioned, and keep private keys out of
-images, logs and git. The app gets its own cookie-signing key; MCP and worker do not.
+images, logs and git. The app gets its own cookie-signing key; MCP does not.
 Milton discards the SDK's session-data cache and validates existing session tokens
 with Neon, so a different cache-signing key does not replace the upstream session.
 Nonexportable platform secrets must not be exported through an application route.
@@ -85,8 +83,8 @@ Set these in the runtime's platform configuration or dotenvx payload before depl
 Saves are model-free: Milton stores the exact text the assistant sends and calls no
 model on any read or save, so it needs no model credential, project or budget. The
 runtime no longer reads `MILTON_GEMINI_*` or `MILTON_MODEL_*_BUDGET_USD`;
-`MILTON_GLOBAL_SPEND_POLICY` is no longer read either, and 0022 dropped the SQL spend
-policy and readiness columns: memo updates depend only on `memo_updates_enabled` and
+`MILTON_GLOBAL_SPEND_POLICY` or any `MILTON_SPEND_*` or `RESEND_API_KEY` setting either.
+0022 dropped the SQL spend policy and readiness columns and 0023 the spend ledgers: memo updates depend only on `memo_updates_enabled` and
 `memo_updates_daily_limit` in `store_config`. Every claim reserves 0.
 
 Use separate Neon branches and matching environment settings for development and previews. Redeploy after changing runtime configuration.
@@ -173,7 +171,7 @@ never delete journal entries merely to resolve an uncertain migration outcome.
 
 ## Deploy
 
-For Cloud Run, build and publish the container, then use separate app, MCP and worker
+For Cloud Run, build and publish the container, then use separate app and MCP
 service manifests. Follow [the hosting runbook](deploy/README.md) for scoped secrets,
 ingress, hostname routing, certificate verification and rollback. The container
 includes the Vite-built CSS, fonts and favicons. Keep the previous runtime artifact
@@ -403,8 +401,7 @@ again on the consent page. Neon's own refresh tokens are not revoked.
 `/account/delete` (typed confirmation) records a disconnect for every live
 consent and a one-way `sha256("provider:subject")` in `deleted_identities`
 (no second trial on re-signup), then deletes the `users` row in the same
-transaction; every tenant table cascades. Global spend counters and the
-opaque-id gardening/derivation counters are kept. It then removes the Neon
+transaction; every tenant table cascades. It then removes the Neon
 consents and signs out, best effort; the Neon Auth user record is not deleted.
 
 ## Local development and checks
@@ -653,19 +650,7 @@ foreign keys, immutability guards and byte charges in `milton_rollback`; forward
 restores them exactly. Stop writers during schema rollback and keep them stopped until
 forward recovery: an older runtime cannot guarantee provenance for new saves.
 
-### Spend-alert worker
-
-The private worker publishes spend alerts (0014) and delivers their email (0015); it
-calls no model. Cloud Scheduler job `milton-gardening` invokes GET `/api/garden`
-every minute with an OIDC token from the dedicated scheduler service account; the
-job and route keep their historical names. Cloud Run verifies that token and the
-service-level `roles/run.invoker` grant before the request reaches Milton, and
-internal ingress refuses public requests. Request bodies, query parameters and
-account identifiers cannot steer it. Pin the worker image and both secret versions,
-and pause the old scheduler for 180 seconds before enabling a replacement.
-See [deployment and rollback](deploy/README.md).
-
-### Memo-update allowance and reservation alerts (0014)
+### Memo-update allowance (0014)
 
 Migration 0014 is additive and defaults off. It preserves existing receipt JSON,
 source/history, the report snapshot and trials. `memo_updates_enabled` alone turns the
@@ -708,110 +693,17 @@ confirmed save. Core quota checks fail closed. Final MCP events contain only kno
 tool/outcome/error values, elapsed time and charge/replay/release state, without
 client/account identity, instruction text or result bodies.
 
-`foreground_usage` is seeded under a receipt write fence and maintained atomically
-by insert triggers, including compatible legacy inserts. Its bigint totals have no
-account foreign key; deletion/replay/completion never refund provider reservations.
-Historical receipts deleted or misdated before migration cannot be reconstructed.
-The frozen review/derived ledgers keep their deletion-safe totals (0018). These
-conservative reservations are observations, not invoices or user updates.
-
-The scheduled spend-alert worker observes current and retained prior UTC days.
-Default combined reservation
-thresholds are **$100/$250/$500/$1,000**. Optional
-`MILTON_SPEND_ALERT_THRESHOLDS_USD` is an increasing comma-separated ladder of at
-most 16 levels. At each observation, only the highest newly crossed level publishes;
-unpublished lower levels are covered and previously published snapshots stay stable.
-A pre-midnight crossing is caught after midnight. Publication rollback/unknown-ack
-replay is idempotent. Observer failure never stops customer/model work. The one-cycle
-`memo-updates.ts observe` command is diagnostic; it is not the scheduler.
-
-### Spend-alert email (optional)
-
-The private scheduled worker can deliver the same published aggregate alerts as
-plain-text email through [Resend](https://resend.com/docs/api-reference/emails/send-email).
-Configure its protected environment (dotenvx/Secret Manager), never the repository:
-
-| Variable                        | Value                                              |
-| ------------------------------- | -------------------------------------------------- |
-| `RESEND_API_KEY`                | Resend sending key for one stable provider account |
-| `MILTON_SPEND_ALERT_EMAIL_FROM` | Bare sender address on a Resend-verified domain    |
-| `MILTON_SPEND_ALERT_EMAIL_TO`   | Bare operator recipient address                    |
-
-With all three absent delivery is disabled; partial/invalid configuration logs a
-sanitized failure without blocking publication. No new dependency or public route
-is required. The subject always starts with **`[Milton spend alert]`**. The body
-contains type, warning severity, reserved amount and threshold, “Milton — all
-accounts,” UTC timestamp, opaque alert ID and the token-free Google Cloud project
-console link. These global alerts cannot identify an individual customer. No
-capability-feed URL, credentials, source instructions or customer PII enters email.
-
-Each scheduled cycle reconciles published alerts from the retained 31 UTC days
-and sends at most one pending email, so first activation also catches up existing
-published events. Covered lower thresholds are not emailed. Publication commits
-before delivery; a delivery/configuration/provider failure never rolls it back or
-changes customer/model-work status. The separate durable ledger freezes the
-sender, recipient, subject and body and uses the alert ID as Resend's idempotency
-key. Changing sender/recipient configuration affects only newly queued alerts.
-
-[Resend keeps idempotency keys for 24 hours](https://resend.com/docs/dashboard/emails/idempotency-keys).
-Requests use a 5-second timeout, 60-second claim lease and five-minute retry delay.
-Transport/5xx/429/concurrent-request failures retry the same request only within
-23 hours of the durable first attempt. An expired ambiguous attempt becomes
-`unknown` and is logged for manual provider reconciliation; it is never resent
-with a new key. Permanent HTTP refusals become `failed`. `sent` means provider
-acceptance, not inbox delivery. Keep the same Resend account across key rotation;
-moving to a different provider account requires reconciling pending deliveries.
-Logs include only the opaque alert ID and a bounded error category/status code.
-
-Apply additive migration `0015_spend_alert_email` before enabling email. Its
-rollback script permits removing the empty table only before any delivery record
-exists. After activation, disable delivery by removing all three variables and
-roll back the runtime while retaining the table, immutable envelopes, provider
-IDs and deduplication epochs. Never delete/reset delivery records to retry or
-restore an earlier database snapshot: that can send duplicates after Resend's
-idempotency window. No live provider delivery is implied by local fake-provider
-checks; verify the configured sender and a controlled delivery during activation.
-
-The optional feed uses one direct **GET/HEAD JSON capability URL** under the stable
-nonsensitive `/operator/spend-alerts/` prefix on the app host. It has no browser code,
-cookie login, HTML viewer, new MCP tool or public write endpoint. It exposes only
-up to 100 recent published aggregate snapshots with opaque IDs, UTC timestamps,
-thresholds and exact decimal reservation totals. Publication does not mean a client
-read or notification. Missing/invalid/revoked keys refuse without data or redirects,
-including on the MCP host. Responses are JSON, no-store, noindex and no-referrer.
-Only the current SHA-256 hash is stored; every read checks revocation afresh.
-
-**Before provisioning or using any real capability**, the release owner must prove
-that all applicable platform, ingress/proxy and inherited request-log routes cannot
-persist the credential URL, then verify with nonsecret canaries and a positive
-logging control. Application redaction or project-only exclusions cannot establish
-that an unverified inherited destination is safe. Keep the hash NULL and the feed
-unprovisioned until this gate is resolved. This gate does not block the local build
-or the separately authorized allowance rollout.
-
-After that proof, the operator CLI requires a protected owner connection and an
-owned private output directory. It never accepts a key argument or prints a key:
-
-```sh
-bun --no-env-file scripts/spend-feed.ts rotate --logging-verified --output /absolute/private-directory/feed.url
-bun --no-env-file scripts/spend-feed.ts revoke
-```
-
-The attestation flag is not automated logging proof. Rotation creates a new 0600
-file exclusively, writes/fsyncs it before activating its hash, and preserves the
-file on an ambiguous commit. It never overwrites files or follows output symlinks.
-Use the protected file for authorized HTTPS curl/client polling without copying the
-URL into shared terminals/logs. Rotation replaces the hash; revoke clears it.
-Already admitted in-flight responses cannot be recalled. Client polling and actual
-notification need separate verification; the API does not record read receipts.
+Migration 0014 also added the foreground spend ledger, the alert observer and the
+capability feed key; 0015 added alert email. 0023 removed all of them (see
+[spend subsystem removal](#spend-subsystem-removal-0023)).
 
 The preserving `rollback/0014_memo_updates.sql` requires disabled enforcement and
 drained holds and retains receipt/charge history, counters, events, triggers and
 current key/revocation state. Reforward restores readiness but never enables the
 allowance or restores an older key. After activation use only a runtime compatible
-with accounting, alerts-only policy and capability prefix/hash checks; keeping the
-schema does not make an older runtime compatible. Since 0022, run
-`rollback/0022_no_model_gate.sql` first: it restores the policy columns 0014 expects.
+with accounting; keeping the schema does not make an older runtime compatible. Since
+0023 and 0022, run `rollback/0023_no_spend.sql` and then
+`rollback/0022_no_model_gate.sql` first: they restore the objects 0014 expects.
 
 ### Derived-systems removal (0018)
 
@@ -821,8 +713,7 @@ remaining jobs so `users.retained_bytes` stays reconciled, and drops `gardening_
 `card_embeddings`, `card_retrieval_embeddings`, `card_graphs`, `card_links`,
 `retrieval_enrollments`, their two trigger functions, the four `store_config`
 derivation columns with their checks, and the `vector` extension. `gardening_usage`
-and `derivation_usage` stay as frozen ledgers because spend totals read them; a later
-migration drops them no earlier than 31 days after their newest row. The 0018 rollback
+and `derivation_usage` stayed as frozen ledgers until 0023 dropped them. The 0018 rollback
 script recreates the dropped objects empty; their data is recoverable only from the
 pre-migration snapshot; since 0022, run `rollback/0022_no_model_gate.sql` first, because the
 0018 rollback re-adds a check on `global_spend_policy`. Release the code before applying 0018; see
@@ -848,11 +739,35 @@ Migration 0022 drops `store_config.global_spend_policy` and
 `foreground_accounting_ready` with the `config_global_spend_policy` check, and narrows
 `config_memo_updates` to a positive daily limit. Both columns had one valid value
 (`alerts_only`, ready) since saves went model-free. Saves no longer lock `store_config`
-or refuse with "Memo updates are not ready."; the spend worker observes alerts without
-a policy check. The daily limit, `memo_updates_enabled`, holds, charges and refusals are
+or refuse with "Memo updates are not ready."; the spend worker (removed in 0023)
+observed alerts without a policy check. The daily limit, `memo_updates_enabled`, holds, charges and refusals are
 unchanged. Release the code before applying 0022: the current runtime reads neither
 column and runs on either schema, while a pre-0022 runtime fails every save and worker
 tick once the columns are gone. `drizzle/rollback/0022_no_model_gate.sql` re-adds both
 columns with their 0014 defaults (`'capped'`, `false`) and both checks, sets the row to
 `alerts_only` and ready as production held before 0022, and leaves the memo-update
 settings untouched; run it before moving code back to a pre-0022 revision.
+
+### Spend subsystem removal (0023)
+
+Milton no longer meters, alerts on or reports model spending. The spend-alert worker
+(`MILTON_SERVICE=worker`), its scheduler route, alert email through Resend, the
+`/operator/spend-alerts/` capability feed, `scripts/spend-feed.ts` and the
+`memo-updates.ts observe` command are deleted. Migration 0023 drops
+`foreground_usage`, `gardening_usage`, `derivation_usage`, `spend_alerts`,
+`spend_alert_emails`, the `save_foreground_reservation` trigger and its function, the
+alert email guard, and `store_config.spend_feed_key_hash` with its check. Rows are not
+kept; take a snapshot and export them before applying it.
+
+Memo-update accounting is unchanged: the daily count is read from `save_requests`
+(`memo_update_state`, `memo_update_day`) under the account lock, and
+`memo_updates_enabled` and `memo_updates_daily_limit` stay in `store_config`. The daily
+tool-call limit (`usage_daily`), replay, fences and trials are unchanged.
+`save_requests.reserved_micros` stays, always 0, because the save guard covers it.
+
+Release the code before applying 0023: the current runtime reads no dropped object and
+runs on either schema. A pre-0023 app or MCP revision runs on 0023 too; only its feed
+route fails, closed, with 503. `drizzle/rollback/0023_no_spend.sql` recreates every
+dropped object empty (feed key NULL); the data returns only from the pre-0023 snapshot
+or the export. Run it before any older rollback script that touches these objects
+(0015, 0009, 0007). See [the hosting runbook](deploy/README.md#spend-subsystem-removal-0023).

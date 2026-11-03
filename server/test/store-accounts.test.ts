@@ -968,7 +968,7 @@ test("unfinished initialization creates only empty TPS at retained-history capac
   }
 }, 30000);
 
-test("account deletion removes every tenant row, keeps global spend and refusals, stops in-flight saves, and allows no second trial", async () => {
+test("account deletion removes every tenant row, keeps refusals, stops in-flight saves, and allows no second trial", async () => {
   const local = await localStore();
   try {
     await local.pg.exec(
@@ -1054,8 +1054,7 @@ test("account deletion removes every tenant row, keeps global spend and refusals
       await local.db.query<{ table_name: string }>(
         sql`SELECT DISTINCT c.table_name FROM information_schema.columns c
         JOIN information_schema.tables t ON t.table_schema=c.table_schema AND t.table_name=c.table_name
-        WHERE c.table_schema='public' AND c.column_name='user_id' AND t.table_type='BASE TABLE'
-        AND c.table_name NOT IN ('gardening_usage','derivation_usage') ORDER BY 1`,
+        WHERE c.table_schema='public' AND c.column_name='user_id' AND t.table_type='BASE TABLE' ORDER BY 1`,
       )
     ).map((row) => row.table_name);
     const counts = async (userId: string) =>
@@ -1104,16 +1103,6 @@ test("account deletion removes every tenant row, keeps global spend and refusals
       ).length,
     ).toBe(1);
     const keptBefore = await counts(kept.auth.userId);
-    const spend = () =>
-      local.pg.query(
-        "SELECT day_utc::text,reserved_micros::text FROM foreground_usage ORDER BY day_utc",
-      );
-    // Saves reserve nothing now; a retained aggregate row must survive deletion.
-    await local.pg.exec(
-      "INSERT INTO foreground_usage(day_utc,reserved_micros) VALUES ((clock_timestamp() AT TIME ZONE 'UTC')::date,1000) ON CONFLICT(day_utc) DO NOTHING",
-    );
-    const spendBefore = (await spend()).rows;
-    expect(spendBefore.length).toBeGreaterThan(0);
 
     await deleteAccount(local.env, neon("leaving"), ["client-c", "client-d"]);
     release();
@@ -1134,7 +1123,6 @@ test("account deletion removes every tenant row, keeps global spend and refusals
     ).toBe(0);
     expect(await counts(kept.auth.userId)).toEqual(keptBefore);
     expect((await kept.store.readTpsReport()).is_empty).toBe(false);
-    expect((await spend()).rows).toEqual(spendBefore);
     expect(
       (
         await local.pg.query(

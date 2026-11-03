@@ -10,11 +10,6 @@ import { browserPages } from "./auth";
 import { boundRequest } from "./http";
 import { logUnexpected } from "./error-log";
 import { Hono } from "hono";
-import {
-  feedDenied,
-  isSpendAlertsPath,
-  operatorAlerts,
-} from "./operator-alerts";
 
 export function createMiltonApp(config: RuntimeConfig, browserOnly = false) {
   return createHttpApp(config, browserPages(config), browserOnly);
@@ -62,18 +57,6 @@ function createHttpApp(
       allowedHosts(config),
     );
     if (hostRefusal) return hostRefusal;
-    await next();
-  });
-  app.use("*", async (context, next) => {
-    const request = context.req.raw;
-    const url = new URL(request.url);
-    if (isSpendAlertsPath(url.pathname)) {
-      // Node sees the internal proxy protocol on Cloud Run; the canonical Host
-      // is validated above. Never reflect a credential in the MCP-host redirect.
-      if (!pages || url.host !== new URL(config.appOrigin).host)
-        return feedDenied(request);
-      return operatorAlerts(request, config);
-    }
     await next();
   });
   app.all("/health", (context) =>

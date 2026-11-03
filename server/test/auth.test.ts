@@ -1767,6 +1767,9 @@ test("an unexpected error shows a browser page PC LOAD LETTER and answers everyt
     for (const request of [
       failing("/tps-report", { headers: { Accept: "application/json" } }),
       failing("/health", { headers: { Accept: "text/html" } }),
+      failing("/.well-known/oauth-protected-resource", {
+        headers: { Accept: "text/html" },
+      }),
       failing("/mcp", {
         method: "POST",
         headers: {

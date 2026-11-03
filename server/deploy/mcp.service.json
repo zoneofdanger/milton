@@ -68,7 +68,7 @@
               "secretName": "milton-mcp-env",
               "items": [
                 {
-                  "key": "2",
+                  "key": "3",
                   "path": ".env"
                 }
               ]

@@ -346,11 +346,13 @@
     border-radius: 0 0 var(--space-6) var(--space-6);
   }
 
-  /* Under each panel, one flowing caption; labels muted and inline. */
+  /* Under each panel, one flowing caption; values in ink, labels muted and
+     inline. */
   .facts {
     align-self: start;
     margin-top: var(--space-4);
-    font: var(--text-small) / var(--leading-label) var(--font-mono);
+    color: var(--ink);
+    font: var(--text-body) / var(--leading-label) var(--font-mono);
   }
   .facts .k {
     color: var(--muted);

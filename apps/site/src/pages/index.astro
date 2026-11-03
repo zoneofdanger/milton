@@ -6,14 +6,12 @@ import FilingComparison from "../components/FilingComparison.astro";
 ---
 
 <SiteLayout
-  title="Milton keeps the writing you approved, word for word"
+  title="How you write, in every AI you already use — Milton"
   description="Your AI has a case of the Mondays in every new chat. Milton keeps what you wrote, from emails to speeches, so the next draft sounds like you."
 >
   <section class="hero" aria-labelledby="headline">
     <div>
-      <h1 id="headline">
-        Milton keeps the writing you approved, word for word.
-      </h1>
+      <h1 id="headline">How you write, in every AI you already use.</h1>
       <p class="intro">
         Your AI has a case of the Mondays in every new chat. Milton keeps what
         you wrote, from emails to speeches, so the next draft sounds like you.
@@ -57,38 +55,6 @@ import FilingComparison from "../components/FilingComparison.astro";
       </ul>
     </nav>
   </div>
-  <section class="section" aria-labelledby="scope-heading">
-    <p class="eyebrow">## Less rewriting</p>
-    <h2 id="scope-heading">
-      Your AI should write like you before it writes for you.
-    </h2>
-    <p class="section-lead">
-      Save something you actually wrote, and every AI you connect writes the
-      next one like you. Yeah, that’d be great.
-    </p>
-    <div class="use-cases">
-      <article class="use-case">
-        <h3>The voice you carry.</h3>
-        <p>
-          Samples you approved: the follow-up you actually sent, the connection
-          note that worked.
-        </p>
-        <p class="sample-rule">
-          “Use at most one exclamation point, in the opening line.”
-        </p>
-      </article>
-      <article class="use-case">
-        <h3>Every kind of writing.</h3>
-        <p>
-          Emails, messages, posts, docs, and the toast you give once a year.
-          Each gets its own samples and rules.
-        </p>
-        <p class="sample-rule">
-          “Docs: say ‘I recommend,’ not ‘it is recommended.’”
-        </p>
-      </article>
-    </div>
-  </section>
   <section class="section" id="why-milton" aria-labelledby="why-heading">
     <p class="eyebrow">## Why not a memory app</p>
     <h2 id="why-heading">
@@ -276,25 +242,6 @@ import FilingComparison from "../components/FilingComparison.astro";
       </p>
     </details>
     <details>
-      <summary>How is this different from memory tools?</summary>
-      <p>
-        Memory tools remember your birthday. Milton remembers you’ve never once
-        written “I hope this finds you well.” Milton stores how you write:
-        writing you approved, quoted exactly, and the rules you asked for, in a
-        form every AI can read. Keep facts, documents, and project history in
-        the tools you already use. Milton is the voice layer beside whatever
-        remembers your work.
-      </p>
-    </details>
-    <details>
-      <summary>Does Milton build a profile of my voice?</summary>
-      <p>
-        No. Your AI reads your samples exactly as you approved them, then your
-        rules. Nothing summarizes or paraphrases them, so there is no profile to
-        drift away from what you wrote.
-      </p>
-    </details>
-    <details>
       <summary>Why not use custom instructions or AGENTS.md?</summary>
       <p>
         Those can work well. Milton gives you one place to keep your voice
@@ -313,14 +260,6 @@ import FilingComparison from "../components/FilingComparison.astro";
       </p>
     </details>
     <details>
-      <summary>What can an AI do with Milton?</summary>
-      <p>
-        Four things: read your cover sheet, read a report, list your reports,
-        and save what you approve. It can’t send anything, read any other
-        account, or browse on your behalf.
-      </p>
-    </details>
-    <details>
       <summary>What’s the cover sheet? What’s a report?</summary>
       <p>
         The cover sheet holds the rules true of all your writing and an index of
@@ -328,20 +267,6 @@ import FilingComparison from "../components/FilingComparison.astro";
         the samples you approved for that kind of writing, then its rules. Your
         AI handles the filing; you don’t manage a memo list. The names are an
         Office Space reference. The paperwork is less demanding.
-      </p>
-    </details>
-    <details>
-      <summary>What do my connected AIs share?</summary>
-      <p>
-        Each can read your cover sheet and reports, samples included, exactly as
-        you approved them. Keep private project context in its own tools. Milton
-        doesn’t import another service’s memory or your conversation history.
-      </p>
-      <p>
-        Samples are saved only when you say yes, and stored as written, names
-        included. Rules are stored exactly as your AI sends them; Milton never
-        rewrites a rule or a sample.{" "}
-        <a href="/privacy">Read the privacy policy.</a>
       </p>
     </details>
     <details>
@@ -415,7 +340,7 @@ import FilingComparison from "../components/FilingComparison.astro";
 </SiteLayout>
 
 <style>
-  :where(h1, h2:not(.sheet-heading), h3, p, figure) {
+  :where(h1, h2:not(.sheet-heading), p, figure) {
     margin: 0;
   }
   /* No paragraph ends on a lone word. Scoped to this page, so the demo's
@@ -506,41 +431,6 @@ import FilingComparison from "../components/FilingComparison.astro";
   .section-lead {
     margin-bottom: var(--space-8);
     font-size: var(--text-lead);
-  }
-  .use-cases {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--space-8);
-  }
-  .use-case {
-    background: var(--surface);
-    border: 1px solid var(--hairline);
-    padding: var(--space-8);
-    border-radius: var(--radius-card);
-  }
-  @media (min-width: 768px) {
-    .use-cases {
-      row-gap: 0;
-    }
-    .use-case {
-      display: grid;
-      grid-template-rows: subgrid;
-      grid-row: span 3;
-    }
-  }
-  h3 {
-    font-size: var(--text-title);
-    margin-bottom: var(--space-3);
-  }
-  .use-case p {
-    color: var(--muted);
-  }
-  .use-case .sample-rule {
-    margin-top: var(--space-6);
-    padding-top: var(--space-5);
-    border-top: 1px solid var(--hairline);
-    color: var(--ink);
-    font-size: var(--text-body);
   }
   /* How it works: an interoffice routing slip across the container. */
   .slip-wrap {
@@ -823,10 +713,6 @@ import FilingComparison from "../components/FilingComparison.astro";
     .closing {
       padding-block: var(--space-12);
     }
-    .use-cases {
-      grid-template-columns: 1fr;
-      gap: var(--space-6);
-    }
     .pricing-grid {
       grid-template-columns: 1fr;
       gap: var(--space-10);
@@ -844,9 +730,6 @@ import FilingComparison from "../components/FilingComparison.astro";
     }
     .section-lead {
       font-size: var(--text-body);
-    }
-    .use-case {
-      padding: var(--space-6);
     }
   }
   .employee-testimonial {

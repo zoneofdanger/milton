@@ -19,8 +19,8 @@ decommission on 2026-11-01. Hosting rollback now uses Cloud Run revisions.
 
 Project `milton-510506`, Cloud Run/Artifact Registry region `us-east4`. Service manifests in this directory pin an immutable image and
 secret versions. They contain configuration and secret references, never values.
-The manifests pin what is serving now: app `milton-app-role-0851a8c`
-(`sha256:2eb49f6e…`, env 2, key 1) and MCP `milton-mcp-role-0851a8c`
+The manifests pin what is serving now: app `milton-app-pcl-0e04873`
+(`sha256:677b40b9…`, env 2, key 1) and MCP `milton-mcp-role-0851a8c`
 (`sha256:2eb49f6e…`, env 3, key 1), both connecting as `milton_app`; see the release
 records below. The spend worker,
 its scheduler job, service accounts and manifest were removed with 0023 (see
@@ -195,16 +195,51 @@ gcloud run services update-traffic milton-mcp --to-revisions=milton-mcp-derived-
 gcloud run services update-traffic milton-worker --to-revisions=milton-worker-env4-cba4f6c=100 --project=milton-510506 --region=us-east4
 ```
 
-Now serving (since 2026-11-03 07:44:40Z): MCP `milton-mcp-role-0851a8c`, app
-`milton-app-role-0851a8c`; each is recorded below. There is no worker service.
+Now serving: MCP `milton-mcp-role-0851a8c` (since 2026-11-03 07:43:53Z), app
+`milton-app-pcl-0e04873` (since 19:23:56Z); each is recorded below. There is no worker service.
 
-Current release role-0851a8c: migration 0024 and the runtime role, from main `0851a8c`.
+Current release pcl-0e04873: app only, from main `0e04873` (the merge `d600d1b` of
+`agent/pc-load-letter` plus test fixes). Revision `milton-app-pcl-0e04873`; a release agent
+created it with `gcloud run services replace` from `app.service.json` (a copy naming the revision)
+at 2026-11-03 19:23:41Z to 19:23:56Z, and the manifest's traffic block sent it 100% directly (no
+users yet). MCP stays on `milton-mcp-role-0851a8c`, untouched (same spec and generation). It
+runs image `sha256:677b40b9087cd71d81babe1159393253caaee775f4361abba4eb546ca22335b2` (amd64
+`sha256:7d6b036dbeb778706ed9aa6b563ea361816c514c90391a51f8ace479db062ba5`; uid 1000, Node
+26.13.0, no env, key or pem files; build stage `oven/bun:1.4.4`). `replace`, not `update`,
+because the live app template carries no setting the manifest lacks (no startup CPU boost; that
+is MCP only). Configuration is identical to `milton-app-role-0851a8c` apart from the image and
+the unmounted leftover `milton-app-env:1` volume, which `replace` dropped; the mount is still
+`milton-app-env:2` and the key `milton-app-key:1`, and no secret version changed. No migration and
+no schema change (Drizzle journal 25). Change: an unexpected error now shows a browser page
+request (`Accept: text/html`) the themed 503 "PC LOAD LETTER" page; `/mcp`, `/health`,
+`/.well-known/` and non-HTML requests keep the JSON 503. The image also carries the site commits
+already live. Before the release, the commit tree passed `check-types`, `bun test` (105 pass) and
+`format:check`. After the switch the canonical checks were identical to the baseline (app `/`,
+`/login` with its CSRF field and `/health` 200; signed-out `/assistants`, `/account/delete` and
+`/download` 403; MCP health and discovery 200, unauthenticated `/mcp` 401; HTTP 308; `run.app`
+404); `GET /` with `Accept: text/html` returned 200 `text/html` with the normal sign-in page and
+no "PC LOAD LETTER"; `bun scripts/probe-forms.ts` printed `PASS`; and an authenticated
+`get_cover_sheet` returned 200 with an unchanged version. From 19:23:41Z to 19:27:07Z the app
+service logged no error, no `unexpected_error` and no 5xx (new revision 9 x 200 and 4 x 403, the
+checks' signed-out refusals and the probe), and MCP logged no error or 5xx. The error page itself
+was not seen in production, because an unexpected error cannot be caused on demand there; the
+tests cover it.
+
+Rollback (image `sha256:2eb49f6e…`; no schema step; restores the JSON 503 for every request), and
+in the same step set the app manifest's image back to `sha256:2eb49f6e…`:
+
+```sh
+gcloud run services update-traffic milton-app --to-revisions=milton-app-role-0851a8c=100 --project=milton-510506 --region=us-east4
+```
+
+Release role-0851a8c: migration 0024 and the runtime role, from main `0851a8c`.
 No new image: revisions `milton-mcp-role-0851a8c` and `milton-app-role-0851a8c` run the
 nospend-41de4f6 image (`sha256:2eb49f6e…`) and differ from the nospend-41de4f6 revisions only
 in the mounted payload: MCP `milton-mcp-env:3`, app `milton-app-env:2` (keys unchanged,
 `milton-mcp-key:1`, `milton-app-key:1`), whose `DATABASE_URL` user is `milton_app` on the same
 host, database and parameters. A release agent switched MCP at 2026-11-03 07:43:53Z and the
-app at 07:44:40Z, directly at 100% (no users yet). The revisions were created with
+app at 07:44:40Z, directly at 100% (no users yet); MCP still serves it, and the app served it
+until pcl-0e04873. The revisions were created with
 `gcloud run services update --update-secrets=/run/milton/.env=<secret>:<version>
 --revision-suffix=role-0851a8c` rather than `replace`, because the live MCP template carries
 `run.googleapis.com/startup-cpu-boost`, which the manifest lacks; the update changed only the

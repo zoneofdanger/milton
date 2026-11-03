@@ -12,3 +12,5 @@ server/drizzle/meta/
 **/fonts/*LICENSE*
 .worktrees/
 .agents/
+.playwright-mcp/
+.codex/

@@ -1788,7 +1788,7 @@ test("an unexpected error shows a browser page PC LOAD LETTER and answers everyt
     }
     expect(
       logged.mock.calls.map(([line]) => JSON.parse(String(line)).where),
-    ).toEqual(["http", "http", "http", "http"]);
+    ).toEqual(["http", "http", "http", "http", "http"]);
   } finally {
     logged.mockRestore();
   }

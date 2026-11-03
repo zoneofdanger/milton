@@ -21,9 +21,9 @@ decommission on 2026-11-01. Hosting rollback now uses Cloud Run revisions.
 Project `milton-510506`, Cloud Run/Artifact Registry region `us-east4`, Scheduler
 region `us-east1`. Service manifests in this directory pin an immutable image and
 secret versions. They contain configuration and secret references, never values.
-The manifests pin what is serving now: app `milton-app-audit4-4623c9d`
-(`sha256:537f8078…`, env 1, key 1), MCP `milton-mcp-audit4-4623c9d`
-(`sha256:537f8078…`, env 2, key 1) and worker `milton-worker-filing-f505745`
+The manifests pin what is serving now: app `milton-app-quiz-4644a5f`
+(`sha256:a497749e…`, env 1, key 1), MCP `milton-mcp-quiz-4644a5f`
+(`sha256:a497749e…`, env 2, key 1) and worker `milton-worker-filing-f505745`
 (`sha256:a370b7c3…`, env 4, key 1); see the release records below. The app and MCP
 manifests still set `MILTON_GLOBAL_SPEND_POLICY=alerts_only`, which the runtime no
 longer reads; the SQL policy in `store_config` controls admission. Existing positive account safeguards
@@ -212,14 +212,46 @@ gcloud run services update-traffic milton-mcp --to-revisions=milton-mcp-derived-
 gcloud run services update-traffic milton-worker --to-revisions=milton-worker-env4-cba4f6c=100 --project=milton-510506 --region=us-east4
 ```
 
-Now serving (since 2026-11-03 02:04:43Z): MCP `milton-mcp-audit4-4623c9d`, app
-`milton-app-audit4-4623c9d`, worker `milton-worker-filing-f505745`; each is recorded below.
+Now serving (since 2026-11-03 05:50:01Z): MCP `milton-mcp-quiz-4644a5f`, app
+`milton-app-quiz-4644a5f`, worker `milton-worker-filing-f505745`; each is recorded below.
 
-Current release audit4-4623c9d: migration 0021, then app and MCP. Revisions
+Current release quiz-4644a5f: app and MCP. Revisions `milton-mcp-quiz-4644a5f` and
+`milton-app-quiz-4644a5f`, staged with `--no-traffic`; at milton-lead's assignment, a release
+agent switched MCP at 2026-11-03 05:49:41Z and the app at 05:50:01Z, and each serves 100%. The
+worker stays on `milton-worker-filing-f505745`. Both run image
+`sha256:a497749ea9543648eb431dc2d136247a067b94428bf23b0014c17ccca908a431` (amd64
+`sha256:5a2100b24fd3cc36e1e38c9b68023b24be30ea6fdd2e5b45f9f750988cb6b01b`; uid 1000, Node 26,
+no env, key or pem files; build stage `oven/bun:1.4.4`), built from main `4644a5f`, the merge
+of `agent/quiz`. Configuration is identical to the audit4-4623c9d revisions apart from the image
+(app `milton-app-env:1`, `milton-app-key:1`; MCP `milton-mcp-env:2`, `milton-mcp-key:1`). No
+migration and no schema change (Drizzle journal unchanged at 22, ending at 0021). Change: the
+paste-first setup quiz is served per report while it has no rules (get_report serves the block,
+list_reports and hook reads a one-line pointer), tool descriptions say to run the setup as
+written, a save refuses a `Baseline: ` rule outside its report's catalog with `baseline_unknown`
+(charging nothing), a save takes up to 25 rules, and the memo page asks for approval before
+saving any rules and lists reports not set up yet. Server instructions are unchanged. After the
+switch, unauthenticated `/mcp` returned 401, discovery and health 200, an authenticated
+`get_cover_sheet` 200 with an unchanged version, and `list_reports` 200 with the new one-line
+setup pointer on the two reports without rules; a fresh Claude Code client listed exactly four
+tools from the new revision. The app and `/login` returned 200 with its CSRF field,
+`bun scripts/probe-forms.ts` printed `PASS`, and signed-out `/assistants`, `/account/delete` and
+`/download` returned the 403 sign-in refusal. From 05:49Z to 06:00Z the two new revisions logged no `unexpected_error`, no ReferenceError or TypeError, no error logs and no 5xx across 24 requests (app 4 x 200 and 4 x 403, the checks' signed-out refusals and the probe; MCP 13 x 200 and 3 x 401 from the checks), the previous revisions logged no errors or 5xx, and 12 worker ticks returned 200 on `milton-worker-filing-f505745`.
+No save ran in production, so the setup script, the baseline check and the 25-rule limit were
+not exercised there.
+
+Rollback (image `sha256:537f8078…`; no schema change; restores the previous setup text and
+save checks):
+
+```sh
+gcloud run services update-traffic milton-mcp --to-revisions=milton-mcp-audit4-4623c9d=100 --project=milton-510506 --region=us-east4
+gcloud run services update-traffic milton-app --to-revisions=milton-app-audit4-4623c9d=100 --project=milton-510506 --region=us-east4
+```
+
+Release audit4-4623c9d: migration 0021, then app and MCP. Revisions
 `milton-mcp-audit4-4623c9d` and `milton-app-audit4-4623c9d`, staged with `--no-traffic`; at
 milton-lead's assignment under Peter's approval of audit batch 4, a release agent applied 0021
-and then switched MCP at 2026-11-03 02:04:19Z and the app at 02:04:43Z, and each serves 100%.
-The worker stays on `milton-worker-filing-f505745`. Both run image
+and then switched MCP at 2026-11-03 02:04:19Z and the app at 02:04:43Z, and each served 100%
+until quiz-4644a5f. The worker stays on `milton-worker-filing-f505745`. Both run image
 `sha256:537f8078fe4a371722ec9496e8580c0f9c35ed7ad7968cea177fbe0016193ab8` (amd64
 `sha256:2fb5a14df3641a5324f397c47433fc32261b90fb4063efea6b8716637ed58ce6`; uid 1000, Node 26,
 no env, key or pem files; build stage `oven/bun:1.4.4`), built from main `4623c9d`, the merge

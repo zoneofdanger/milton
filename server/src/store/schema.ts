@@ -49,7 +49,6 @@ export const storeConfig = pgTable(
     memoUpdatesDailyLimit: integer("memo_updates_daily_limit")
       .notNull()
       .default(100),
-    spendFeedKeyHash: text("spend_feed_key_hash"),
     allowedIdentities: jsonb("allowed_identities_json").notNull().default([]),
     limits: jsonb("limits_json").notNull().default(limits),
     updatedAt: timestamp("updated_at", { withTimezone: true })
@@ -68,10 +67,6 @@ export const storeConfig = pgTable(
     ),
     check("config_limits_object", sql`jsonb_typeof(${t.limits}) = 'object'`),
     check("config_memo_updates", sql`${t.memoUpdatesDailyLimit}>0`),
-    check(
-      "config_spend_feed_key",
-      sql`${t.spendFeedKeyHash} IS NULL OR ${t.spendFeedKeyHash} ~ '^[a-f0-9]{64}$'`,
-    ),
   ],
 );
 export const users = pgTable(
@@ -329,103 +324,6 @@ export const saveRequests = pgTable(
   ],
 );
 
-// No tenant foreign key: deleting an account never erases dispatched spending.
-export const foregroundUsage = pgTable(
-  "foreground_usage",
-  {
-    day: date("day_utc").primaryKey(),
-    reservedMicros: bigint("reserved_micros", { mode: "bigint" }).notNull(),
-  },
-  (t) => [check("foreground_usage_cost", sql`${t.reservedMicros}>=0`)],
-);
-
-export const spendAlerts = pgTable(
-  "spend_alerts",
-  {
-    id: text("id").notNull().unique(),
-    day: date("day_utc").notNull(),
-    metric: text("metric").notNull(),
-    thresholdMicros: bigint("threshold_micros", { mode: "bigint" }).notNull(),
-    filingMicros: bigint("filing_micros", { mode: "bigint" }).notNull(),
-    reviewMicros: bigint("review_micros", { mode: "bigint" }).notNull(),
-    derivedMicros: bigint("derived_micros", { mode: "bigint" }).notNull(),
-    status: text("status").notNull(),
-    observedAt: createdAt(),
-    publishedAt: timestamp("published_at", { withTimezone: true }),
-  },
-  (t) => [
-    primaryKey({ columns: [t.day, t.metric, t.thresholdMicros] }),
-    index("spend_alerts_published").on(t.publishedAt),
-    check("spend_alert_metric", sql`${t.metric}='model_reservations'`),
-    check(
-      "spend_alert_id",
-      sql`${t.id} ~ '^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$'`,
-    ),
-    check(
-      "spend_alert_cost",
-      sql`${t.thresholdMicros}>0 AND ${t.filingMicros}>=0 AND ${t.reviewMicros}>=0 AND ${t.derivedMicros}>=0`,
-    ),
-    check(
-      "spend_alert_publication",
-      sql`(${t.status}='published' AND ${t.publishedAt} IS NOT NULL) OR (${t.status}='covered' AND ${t.publishedAt} IS NULL)`,
-    ),
-  ],
-);
-
-// Retain delivery identities across runtime rollback; deleting these can resend mail.
-export const spendAlertEmails = pgTable(
-  "spend_alert_emails",
-  {
-    alertId: text("alert_id")
-      .primaryKey()
-      .references(() => spendAlerts.id),
-    envelope: jsonb("envelope").notNull(),
-    status: text("status").notNull().default("pending"),
-    firstAttemptAt: timestamp("first_attempt_at", { withTimezone: true }),
-    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-    token: text("token"),
-    leaseUntil: timestamp("lease_until", { withTimezone: true }),
-    attempts: integer("attempts").notNull().default(0),
-    providerId: text("provider_id"),
-    sentAt: timestamp("sent_at", { withTimezone: true }),
-    lastError: text("last_error"),
-  },
-  (t) => [
-    index("spend_alert_emails_pending").on(t.status, t.nextAttemptAt),
-    check(
-      "spend_alert_email_status",
-      sql`${t.status} IN ('pending','sent','failed','unknown')`,
-    ),
-    check("spend_alert_email_attempts", sql`${t.attempts}>=0`),
-    check(
-      "spend_alert_email_lease",
-      sql`(${t.token} IS NULL)=(${t.leaseUntil} IS NULL)`,
-    ),
-    check(
-      "spend_alert_email_sent",
-      sql`(${t.status}='sent')=(${t.sentAt} IS NOT NULL AND ${t.providerId} IS NOT NULL)`,
-    ),
-  ],
-);
-
-// Frozen legacy ledger: nothing writes it since 0018; spend totals still read it.
-// No user FK: account deletion must not refund today's global model reservation.
-export const gardeningUsage = pgTable(
-  "gardening_usage",
-  {
-    userId: text("user_id").notNull(),
-    dayUtc: date("day_utc").notNull(),
-    reservedMicros: bigint("reserved_micros", { mode: "number" }).notNull(),
-  },
-  (t) => [
-    primaryKey({ columns: [t.userId, t.dayUtc] }),
-    index("gardening_usage_day").on(t.dayUtc),
-    check("gardening_usage_cost", sql`${t.reservedMicros} > 0`),
-  ],
-);
-
 // Instruction identities and content history are independent from memo grouping.
 export const instructionCards = pgTable(
   "instruction_cards",
@@ -611,22 +509,6 @@ export const samples = pgTable(
       "samples_retirement",
       sql`(${t.retireReason} IS NULL) = (${t.retiredAt} IS NULL) AND (${t.retireReason} IS NULL OR ${t.retireReason} IN ('replaced','removed','evicted')) AND (${t.retiredRequestId} IS NULL OR ${t.retiredAt} IS NOT NULL)`,
     ),
-  ],
-);
-
-// Frozen legacy ledger: nothing writes it since 0018; spend totals still read it.
-// No account FK: deletion cannot refund today's reservation.
-export const derivationUsage = pgTable(
-  "derivation_usage",
-  {
-    userId: text("user_id").notNull(),
-    dayUtc: date("day_utc").notNull(),
-    reservedMicros: bigint("reserved_micros", { mode: "number" }).notNull(),
-  },
-  (t) => [
-    primaryKey({ columns: [t.userId, t.dayUtc] }),
-    index("derivation_usage_day").on(t.dayUtc),
-    check("derivation_usage_cost", sql`${t.reservedMicros} > 0`),
   ],
 );
 

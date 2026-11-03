@@ -1054,8 +1054,7 @@ test("account deletion removes every tenant row, keeps refusals, stops in-flight
       await local.db.query<{ table_name: string }>(
         sql`SELECT DISTINCT c.table_name FROM information_schema.columns c
         JOIN information_schema.tables t ON t.table_schema=c.table_schema AND t.table_name=c.table_name
-        WHERE c.table_schema='public' AND c.column_name='user_id' AND t.table_type='BASE TABLE'
-        AND c.table_name NOT IN ('gardening_usage','derivation_usage') ORDER BY 1`,
+        WHERE c.table_schema='public' AND c.column_name='user_id' AND t.table_type='BASE TABLE' ORDER BY 1`,
       )
     ).map((row) => row.table_name);
     const counts = async (userId: string) =>

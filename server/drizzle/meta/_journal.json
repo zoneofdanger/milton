@@ -162,6 +162,13 @@
       "when": 1793686555879,
       "tag": "0022_no_model_gate",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1793688971143,
+      "tag": "0023_no_spend",
+      "breakpoints": true
     }
   ]
 }

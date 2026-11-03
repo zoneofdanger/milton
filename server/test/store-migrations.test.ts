@@ -42,6 +42,93 @@ const schemaCatalog = async (pg: PGlite) => {
   };
 };
 
+test("0023 drops the spend subsystem, keeps memo-update accounting, and rolls back to the empty 0022 shape", async () => {
+  const base = await migratedThrough(22);
+  const pg = await migratedThrough(22);
+  const post = await migratedThrough(23);
+  try {
+    const up = await drizzleSql("0023_no_spend.sql");
+    const down = await drizzleSql("rollback/0023_no_spend.sql");
+    const spend = [
+      "derivation_usage",
+      "foreground_usage",
+      "gardening_usage",
+      "spend_alert_emails",
+      "spend_alerts",
+    ];
+    const day = "(clock_timestamp() AT TIME ZONE 'UTC')::date";
+    // Production's shape: memo updates on, one charged and one held update
+    // today, every spend table populated and a feed key installed.
+    await pg.exec(`UPDATE store_config SET memo_updates_enabled=true,memo_updates_daily_limit=80,spend_feed_key_hash=repeat('a',64);
+      INSERT INTO users(id) VALUES ('spend');
+      INSERT INTO save_requests(user_id,request_id,input_hash,source_hash,reserved_micros,deadline,completed,result_json,memo_update_day,memo_update_state) VALUES
+      ('spend','00000000-0000-4000-8000-000000000023',repeat('a',64),repeat('c',64),100,now(),true,'{"status":"saved"}',${day},'charged'),
+      ('spend','00000000-0000-4000-8000-000000000024',repeat('b',64),repeat('c',64),0,now()+interval '1 minute',false,'{}',${day},'held');
+      INSERT INTO gardening_usage(user_id,day_utc,reserved_micros) VALUES ('spend','2026-11-01',90);
+      INSERT INTO derivation_usage(user_id,day_utc,reserved_micros) VALUES ('spend','2026-11-01',110);
+      INSERT INTO spend_alerts(id,day_utc,metric,threshold_micros,filing_micros,review_micros,derived_micros,status,published_at) VALUES
+      ('00000000-0000-4000-8000-000000000001','2026-11-01','model_reservations',100,100,0,0,'published',now());
+      INSERT INTO spend_alert_emails(alert_id,envelope) VALUES ('00000000-0000-4000-8000-000000000001','{}');`);
+    expect(
+      (
+        await pg.query(
+          "SELECT reserved_micros::int AS micros FROM foreground_usage",
+        )
+      ).rows,
+    ).toEqual([{ micros: 100 }]);
+    const accounting = async () => ({
+      settings: (
+        await pg.query(
+          "SELECT memo_updates_enabled AS enabled,memo_updates_daily_limit AS lim FROM store_config",
+        )
+      ).rows,
+      updates: (
+        await pg.query(
+          "SELECT request_id,memo_update_day::text,memo_update_state,completed FROM save_requests ORDER BY request_id",
+        )
+      ).rows,
+    });
+    const kept = await accounting();
+    expect(kept.updates).toHaveLength(2);
+    const forward = async () => {
+      await pg.exec("BEGIN;" + up + "COMMIT;");
+      expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(post));
+      const catalog = await schemaCatalog(pg);
+      expect(catalog.tables.filter((t) => spend.includes(t))).toEqual([]);
+      expect(
+        catalog.columns.filter((c) => c.column_name === "spend_feed_key_hash"),
+      ).toEqual([]);
+      expect(catalog.triggers.map((t) => t.tgname)).not.toContain(
+        "save_foreground_reservation",
+      );
+      expect(await accounting()).toEqual(kept);
+    };
+    await forward();
+    // A receipt that reserves spend no longer feeds a ledger.
+    await pg.exec(`INSERT INTO save_requests(user_id,request_id,input_hash,source_hash,reserved_micros,deadline,completed,result_json) VALUES
+      ('spend','00000000-0000-4000-8000-000000000025',repeat('d',64),repeat('c',64),100,now(),true,'{"status":"saved"}')`);
+    await pg.exec(
+      "DELETE FROM save_requests WHERE request_id='00000000-0000-4000-8000-000000000025'",
+    );
+    await pg.exec(down);
+    expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(base));
+    for (const table of spend)
+      expect(
+        (await pg.query(`SELECT count(*)::int AS n FROM ${table}`)).rows,
+      ).toEqual([{ n: 0 }]);
+    expect(
+      (await pg.query("SELECT spend_feed_key_hash AS hash FROM store_config"))
+        .rows,
+    ).toEqual([{ hash: null }]);
+    expect(await accounting()).toEqual(kept);
+    await forward();
+  } finally {
+    await post.close();
+    await pg.close();
+    await base.close();
+  }
+}, 30000);
+
 test("0022 drops the model-era spend fields, keeps the memo-update settings, and rolls back to the 0021 shape", async () => {
   const base = await migratedThrough(21);
   const pg = await migratedThrough(21);

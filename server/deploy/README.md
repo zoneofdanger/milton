@@ -26,7 +26,8 @@ The manifests pin what is serving now: app `milton-app-quiz-4644a5f`
 (`sha256:a497749e…`, env 2, key 1) and worker `milton-worker-filing-f505745`
 (`sha256:a370b7c3…`, env 4, key 1); see the release records below. The app and MCP
 manifests still set `MILTON_GLOBAL_SPEND_POLICY=alerts_only`, which the runtime no
-longer reads; the SQL policy in `store_config` controls admission. Existing positive account safeguards
+longer reads; `memo_updates_enabled` and `memo_updates_daily_limit` in `store_config`
+control admission (0022 dropped the SQL spend policy). Existing positive account safeguards
 remain in effect. Trials and billing remain disabled.
 Each image includes all roles and browser assets. Validate manifests before applying:
 
@@ -168,7 +169,9 @@ To roll back a release, first verify the selected runtime supports the current
 database schema, accounting policy and job payloads, then send traffic to its recorded
 healthy Cloud Run revision. Migration 0021 is compatible with every 0020 revision, so rolling
 back code needs no database step; roll the code back before running the 0021 rollback script
-(see [no count limit](#no-count-limit-0021)). Since migration 0020 no earlier app or MCP revision can serve
+(see [no count limit](#no-count-limit-0021)). Once 0022 is applied, no earlier revision
+can save or run the worker until its rollback script runs (see
+[no model-era gate](#no-model-era-gate-0022)). Since migration 0020 no earlier app or MCP revision can serve
 reads or saves, so every release before `filing-f505745` is reachable only after the
 offline 0020 rollback script; see the 0020, 0019 and 0018 boundaries below. Do not
 restore a database snapshot to roll back application code. An existing revision retains
@@ -586,7 +589,8 @@ or production resources as part of an ordinary release.
 Apply the additive migration with enforcement disabled, after a database snapshot
 and a quiescent worker/source baseline. Verify exact source, history, report snapshot and
 receipt preservation and the initial foreground reservation aggregate. Deploy all
-three compatible runtimes before selecting `policy --compatible-writers` and
+three compatible runtimes before selecting `policy --compatible-writers` (retired
+in 0022; `policy --daily-limit COUNT` now sets the limit only) and
 enabling the prospective 100 successful updates/account/UTCday allowance. The
 existing observer publishes aggregate threshold events independently of model work;
 its failure cannot stop service. Global thresholds are alerts-only, with existing
@@ -698,6 +702,22 @@ To restore the old guard, first move the code back, then run
 means running `0021_no_card_count.sql` by hand. An account already past the old limit keeps its
 cards and cannot add more until it is back under it.
 
+## No model-era gate (0022)
+
+Not yet applied. Migration 0022 drops `store_config.global_spend_policy` and
+`foreground_accounting_ready` and narrows `config_memo_updates` to a positive daily
+limit (see the server README). Every revision before this release locks and reads
+those columns on each save and worker tick; this release reads neither and runs on
+either schema. Release order: take a snapshot, ship MCP, app and worker from the same
+image, then apply 0022; the scheduler may keep running.
+
+**Rollback boundary.** Before 0022 is applied, code rolls back by traffic alone. After
+it, no earlier revision can save or observe: first run
+`server/drizzle/rollback/0022_no_model_gate.sql` offline with writers stopped, then shift
+traffic. The rollback re-adds both columns (defaults `'capped'`, `false`), sets the row to
+`alerts_only` and ready, and restores both checks; the 0022 journal row stays, so
+re-forwarding means running `0022_no_model_gate.sql` by hand.
+
 ## Model-free saves
 
 Released to MCP as `milton-mcp-rules-e3f2f67` on 2026-11-02 at 22:14:43Z (see the release
@@ -715,6 +735,6 @@ previous 0020 MCP revision; no pre-0020 revision is a target. Receipts from that
 revision replay on this one, but a save that sent `rules` cannot replay there, because
 its input schema refuses the field.
 
-The worker, scheduler, spend alerts and their email, `foreground_usage`, the global
-spend policy column and the now unread `MILTON_GLOBAL_SPEND_POLICY` manifest variables
-stay until the cleanup release timed with the 0018 ledger drop.
+The worker, scheduler, spend alerts and their email, `foreground_usage` and the now
+unread `MILTON_GLOBAL_SPEND_POLICY` manifest variables stay until the cleanup release
+timed with the 0018 ledger drop; 0022 drops the global spend policy column.

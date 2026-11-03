@@ -79,9 +79,11 @@ reports, memos) and plain text on security screens and anything an assistant rea
       is several HTTP queries and WebSocket connects. Measure latency first; if it pays, a process
       pool closed on SIGTERM.
 
-- [ ] #16 (server, med, founder) **Decouple memo updates from the global config lock.** Every save
+- [ ] #16 (server, med, founder, doing) **Decouple memo updates from the global config lock.** Every save
       claim locks the single store_config row and memo updates are gated by model-era spend fields
-      (A9). Prerequisite for #17 and #18.
+      (A9). Prerequisite for #17 and #18. Built on agent/save-lock (7a7b535 saves, 67e83de worker,
+      ca55736 migration 0022 drops global_spend_policy and foreground_accounting_ready); delete
+      this item once that code and 0022 are released.
 
 - [ ] #17 (ops, low, founder) **Slow the scheduler from every minute to hourly** once #16 lands, so
       Neon compute can idle; alerts keep working (A8).

@@ -1,0 +1,252 @@
+---
+import { memoExample } from "./memo-example";
+---
+
+<figure
+  class="memo-demo sheet"
+  id="memo-demo"
+  data-memo-demo
+  aria-label="Example conversation."
+>
+  <div class="sheet-bar">
+    <span>Did you get that memo?</span>
+  </div>
+  <div class="scene-stage sheet-content">
+    <section
+      class="scene"
+      id="memo-scene-0"
+      data-scene
+      aria-label="The reminder"
+    >
+      <ol class="chat">
+        <li>
+          <span class="speaker">You</span>
+          <p>{memoExample.request}</p>
+        </li>
+        <li>
+          <span class="speaker">Assistant</span>
+          <p>{memoExample.reply}</p>
+        </li>
+        <li>
+          <span class="speaker">You</span>
+          <p>You just did it.</p>
+        </li>
+        <li>
+          <span class="speaker">Assistant</span>
+          <p>Fair pushback. That’s on me.</p>
+        </li>
+      </ol>
+    </section>
+    <section
+      class="scene"
+      id="memo-scene-1"
+      data-scene
+      aria-label="File the memo and read it next time"
+    >
+      <ol class="chat">
+        <li>
+          <span class="speaker">You</span>
+          <p>Milton, go ahead and file this: no em dashes.</p>
+        </li>
+        <li>
+          <span class="speaker">Assistant</span>
+          <p>Milton got the memo. {memoExample.preference}</p>
+        </li>
+        <li>
+          <span class="speaker">You · new chat</span>
+          <p>Did you get that memo?</p>
+        </li>
+        <li class="received">
+          <span class="speaker">Assistant</span>
+          <p>Got it. {memoExample.preference}</p>
+        </li>
+      </ol>
+    </section>
+  </div>
+</figure>
+
+<script>
+  const demo = document.querySelector<HTMLElement>("[data-memo-demo]");
+  if (demo) {
+    const panels = Array.from(
+      demo.querySelectorAll<HTMLElement>("[data-scene]"),
+    );
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const messages = panels.map((panel) =>
+      Array.from(panel.querySelectorAll<HTMLElement>(".chat > li")).map(
+        (unit) => {
+          const paragraph = unit.querySelector("p");
+          const text =
+            paragraph?.textContent?.replace(/\s+/g, " ").trim() ?? "";
+          let visual: HTMLSpanElement | null = null;
+          if (paragraph) {
+            // Keep the complete text for layout and assistive technology. Only its
+            // aria-hidden visual copy types in, so line wrapping never moves the card.
+            const source = document.createElement("span");
+            source.className = "stream-source";
+            source.textContent = text;
+            visual = document.createElement("span");
+            visual.className = "stream-visual";
+            visual.setAttribute("aria-hidden", "true");
+            paragraph.classList.add("stream-line");
+            paragraph.replaceChildren(source, visual);
+          }
+          return { unit, text, visual };
+        },
+      ),
+    );
+    const timing = {
+      type: 900,
+      between: 600,
+      scene: 1200,
+      end: 2000,
+      entrance: 350,
+    };
+    let scene = 0;
+    let message = 0;
+    let character = 0;
+    let sceneComplete = false;
+    let inView = false;
+    let delay = timing.entrance;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const render = () => {
+      panels.forEach((panel, index) => {
+        const inactive = !reduced.matches && index !== scene;
+        panel.classList.toggle("active", index === scene);
+        panel.inert = inactive;
+        panel.setAttribute("aria-hidden", String(inactive));
+      });
+      demo.classList.toggle("enhanced", !reduced.matches);
+    };
+    const resetScene = () => {
+      message = 0;
+      character = 0;
+      sceneComplete = false;
+      messages[scene].forEach(({ unit, visual }) => {
+        unit.classList.add("pending");
+        if (visual) visual.textContent = "";
+      });
+      render();
+    };
+    const schedule = () => {
+      clearTimeout(timer);
+      if (!reduced.matches && inView && !document.hidden)
+        timer = setTimeout(tick, delay);
+    };
+    const tick = () => {
+      if (sceneComplete) {
+        scene = (scene + 1) % panels.length;
+        resetScene();
+      }
+      const current = messages[scene][message];
+      current.unit.classList.remove("pending");
+      if (current.visual && character < current.text.length) {
+        character += 1;
+        current.visual.textContent = current.text.slice(0, character);
+        delay = timing.type / current.text.length;
+      } else if (message < messages[scene].length - 1) {
+        message += 1;
+        character = 0;
+        delay = timing.between;
+      } else {
+        sceneComplete = true;
+        delay = scene === panels.length - 1 ? timing.end : timing.scene;
+      }
+      schedule();
+    };
+    reduced.addEventListener("change", () => {
+      resetScene();
+      delay = timing.entrance;
+      schedule();
+    });
+    document.addEventListener("visibilitychange", schedule);
+    resetScene();
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (inView !== entry.isIntersecting) {
+          inView = entry.isIntersecting;
+          schedule();
+        }
+      },
+      { threshold: 0.4 },
+    );
+    observer.observe(demo);
+  }
+</script>
+
+<style>
+  .memo-demo {
+    margin: 0;
+    min-width: 0;
+  }
+  .stream-line {
+    position: relative;
+  }
+  .stream-line :global(.stream-visual) {
+    display: none;
+  }
+  .enhanced .stream-line :global(.stream-source) {
+    opacity: 0;
+  }
+  .enhanced .stream-line :global(.stream-visual) {
+    display: block;
+    position: absolute;
+    inset: 0;
+  }
+  .enhanced :global(.pending) {
+    visibility: hidden;
+  }
+  .scene-stage {
+    display: grid;
+    gap: var(--space-8);
+  }
+  .scene {
+    min-width: 0;
+  }
+  .enhanced .scene-stage {
+    gap: 0;
+  }
+  .enhanced .scene {
+    grid-area: 1 / 1;
+    visibility: hidden;
+    opacity: 0;
+    transition: opacity 160ms ease;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .enhanced .scene.active {
+    visibility: visible;
+    opacity: 1;
+  }
+  .chat {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: var(--space-3);
+  }
+  .chat > li {
+    border-left: 2px solid var(--hairline);
+    padding: var(--space-3) var(--space-4);
+  }
+  .chat > .received {
+    background: var(--ground);
+    border-color: var(--ink);
+  }
+  .speaker {
+    display: block;
+    color: var(--muted);
+    font: var(--text-caption) / var(--leading-label) var(--font-mono);
+    margin-bottom: var(--space-2);
+  }
+  p {
+    margin: 0;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .enhanced .scene {
+      transition: none;
+    }
+  }
+</style>

@@ -1,6 +1,7 @@
 ---
 import SiteLayout from "../layouts/SiteLayout.astro";
 import AssistantSetup from "../components/AssistantSetup.astro";
+import MemoDemo from "../components/MemoDemo.astro";
 ---
 
 <SiteLayout
@@ -33,42 +34,7 @@ import AssistantSetup from "../components/AssistantSetup.astro";
         <a href="#pricing">$5.01/month at launch.</a>
       </p>
     </div>
-    <figure class="memo-example">
-      <div class="memo-exchange">
-        <dl>
-          <div>
-            <dt>You</dt>
-            <dd>“For the 100th f-ing time: no em dashes.”</dd>
-          </div>
-          <div>
-            <dt>Assistant</dt>
-            <dd>“Absolutely—I’ll remember that.”</dd>
-          </div>
-          <div>
-            <dt>Milton</dt>
-            <dd>We’ll put it in writing.</dd>
-          </div>
-        </dl>
-      </div>
-      <div class="sheet">
-        <div class="sheet-bar">
-          <span>Your writing</span>
-          <span>Example</span>
-        </div>
-        <div class="example-name">
-          Cover sheet <span>Email report</span>
-        </div>
-        <div class="sheet-content">
-          <h2 class="sheet-heading">Here’s how I write.</h2>
-          <ul class="instruction-list">
-            <li>No em dashes. Final warning.</li>
-            <li>Oxford comma. Always.</li>
-            <li>Emails: three short paragraphs, then “Best,” and my name.</li>
-            <li>Approved sample: the follow-up I actually sent.</li>
-          </ul>
-        </div>
-      </div>
-    </figure>
+    <MemoDemo />
   </section>
   <div class="assistant-strip">
     <span class="assistant-label">Works with:</span>
@@ -463,21 +429,6 @@ import AssistantSetup from "../components/AssistantSetup.astro";
   .access-note {
     margin-top: var(--space-3);
   }
-  .memo-example {
-    min-width: 0;
-  }
-  .example-name {
-    display: flex;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: var(--space-2);
-    padding: var(--space-3) var(--sheet-padding);
-    border-bottom: 3px double var(--ink);
-    font: var(--text-caption) / var(--leading-label) var(--font-mono);
-  }
-  .example-name span {
-    color: var(--muted);
-  }
   .assistant-strip {
     display: flex;
     align-items: flex-start;
@@ -746,51 +697,12 @@ import AssistantSetup from "../components/AssistantSetup.astro";
       padding: var(--space-6);
     }
   }
-  .memo-exchange {
-    margin-bottom: var(--space-6);
-  }
-  .memo-exchange dl {
-    margin: var(--space-3) 0 0;
-  }
-  .memo-exchange dl > div {
-    display: grid;
-    grid-template-columns: 5.5rem minmax(0, 1fr);
-    gap: var(--space-3);
-    padding-block: var(--space-3);
-    border-bottom: 1px solid var(--hairline);
-  }
-  .memo-exchange dl > div:last-child {
-    border-bottom: 0;
-    padding-bottom: 0;
-  }
-  .memo-exchange dt {
-    font: var(--text-caption) / var(--leading-body) var(--font-mono);
-    color: var(--muted);
-    padding-top: 0.25rem;
-  }
-  .memo-exchange dd {
-    margin: 0;
-    font-size: var(--text-lead);
-    line-height: var(--leading-body);
-  }
-  .memo-exchange dl > div:last-child dd {
-    font-weight: 600;
-  }
   .memo-limit {
     display: block;
     margin-bottom: var(--space-3);
     color: var(--ink);
     font: var(--font-display-weight) var(--text-title) / var(--leading-heading)
       var(--font-display);
-  }
-  @media (max-width: 480px) {
-    .memo-exchange dl > div {
-      grid-template-columns: 1fr;
-      gap: var(--space-2);
-    }
-    .memo-exchange dt {
-      padding-top: 0;
-    }
   }
   .employee-testimonial {
     margin: 0;

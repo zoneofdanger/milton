@@ -183,48 +183,50 @@ import FilingComparison from "../components/FilingComparison.astro";
       </p>
     </div>
   </section>
-  <section
-    class="section pricing"
-    id="pricing"
-    aria-labelledby="pricing-heading"
-  >
-    <div>
-      <p class="eyebrow">## One plan. We resisted making three columns.</p>
-      <h2 id="pricing-heading">Less repeating yourself.</h2>
-      <p class="section-lead">
-        One plan for your writing voice, whether you use one AI or several.
-      </p>
-      <p class="reading-note small-note">
-        Early access is free while we prepare paid subscriptions. No card is
-        required, and signing up today won’t charge you.
-      </p>
-      <p class="reading-note small-note">
-        After your free trial, subscribe to keep AI access. You can still view
-        and download your report without a subscription.
-      </p>
-    </div>
-    <div class="sheet price-card">
-      <div class="sheet-bar">
-        <span>Planned launch pricing</span>
+  <section class="section" id="pricing" aria-labelledby="pricing-heading">
+    <p class="eyebrow">## One plan. We resisted making three columns.</p>
+    <h2 id="pricing-heading" class="visually-hidden">
+      Pricing
+    </h2>
+    <div class="pricing-grid">
+      <div class="price-column">
+        <div class="sheet price-card">
+          <div class="sheet-bar">
+            <span>Planned launch pricing</span>
+          </div>
+          <div class="sheet-content">
+            <p class="price">
+              <strong>$5.01</strong> <span>USD / month</span>
+            </p>
+            <p>Five dollars for Milton. One cent for accounting.</p>
+            <p>30 days free. No credit card required.</p>
+            <ul class="badges">
+              <li>Not AI-powered. Your AI is.</li>
+              <li>Enterprise-grade asking nicely.</li>
+              <li>Synergy, pending approval.</li>
+            </ul>
+            <p class="small-note badge-issuer">
+              A founder who has mistaken this for a company.
+            </p>
+            <a class="button" href="https://app.meetmilton.com/login">
+              Try free early access <span aria-hidden="true">↗</span>
+            </a>
+          </div>
+        </div>
       </div>
-      <div class="sheet-content">
-        <p class="price">
-          <strong>$5.01</strong> <span>USD / month</span>
+      <figure class="employee-testimonial" id="employee-testimonial">
+        <blockquote>
+          “Milton lets me say ‘Did you get that memo?’ to software. I have never
+          felt more qualified for management.”
+        </blockquote>
+        <figcaption>
+          <strong>Michael Bolton</strong>
+          <span>Senior Founding AI Forward Deployed Product Engineer</span>
+        </figcaption>
+        <p class="carousel-count">
+          <span class="carousel-dot" aria-hidden="true"></span>1 of 1
         </p>
-        <p>Five dollars for Milton. One cent for accounting.</p>
-        <p>30 days free. No credit card required.</p>
-        <ul class="badges">
-          <li>Not AI-powered. Your AI is.</li>
-          <li>Enterprise-grade asking nicely.</li>
-          <li>Synergy, pending approval.</li>
-        </ul>
-        <p class="small-note badge-issuer">
-          A founder who has mistaken this for a company.
-        </p>
-        <a class="button" href="https://app.meetmilton.com/login">
-          Try free early access <span aria-hidden="true">↗</span>
-        </a>
-      </div>
+      </figure>
     </div>
   </section>
   <section class="section faq" aria-labelledby="faq-heading">
@@ -684,14 +686,23 @@ import FilingComparison from "../components/FilingComparison.astro";
       font-size: var(--text-subtitle);
     }
   }
-  .pricing {
+  /* The sentence the eyebrow stands in for, kept for headings navigation. The
+     same pattern MemoDemo uses for its hidden scene labels. */
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  /* Price card first, testimonial beside it; both share a centre line. */
+  .pricing-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--space-8);
-  }
-  .pricing {
-    align-items: start;
     gap: var(--space-16);
+    align-items: center;
+    margin-top: var(--space-8);
   }
   .price {
     display: flex;
@@ -731,9 +742,6 @@ import FilingComparison from "../components/FilingComparison.astro";
     margin-block: var(--space-3) var(--space-6);
   }
 
-  .reading-note {
-    margin-top: var(--space-8);
-  }
   .where-to-start {
     max-width: 75ch;
     margin-top: var(--space-8);
@@ -786,6 +794,9 @@ import FilingComparison from "../components/FilingComparison.astro";
     .intro {
       max-width: 45ch;
     }
+    .pricing-grid {
+      gap: var(--space-8);
+    }
   }
   @media (max-width: 860px) {
     .hero {
@@ -806,10 +817,13 @@ import FilingComparison from "../components/FilingComparison.astro";
     .closing {
       padding-block: var(--space-12);
     }
-    .use-cases,
-    .pricing {
+    .use-cases {
       grid-template-columns: 1fr;
       gap: var(--space-6);
+    }
+    .pricing-grid {
+      grid-template-columns: 1fr;
+      gap: var(--space-10);
     }
     .hero {
       padding-block: var(--space-10);
@@ -835,11 +849,9 @@ import FilingComparison from "../components/FilingComparison.astro";
   }
   .employee-testimonial {
     margin: 0;
-    align-self: center;
   }
   .employee-testimonial blockquote {
-    max-width: 40ch;
-    margin: var(--space-6) 0;
+    margin: 0 0 var(--space-6);
     font: var(--font-display-weight) var(--text-section) /
       var(--leading-heading) var(--font-display);
     text-wrap: balance;

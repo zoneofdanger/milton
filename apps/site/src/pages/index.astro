@@ -33,33 +33,28 @@ import MemoDemo from "../components/MemoDemo.astro";
   </section>
   <div class="assistant-strip">
     <span class="assistant-label">Works with:</span>
-    <div class="assistant-guides">
-      <nav aria-label="Assistant setup guides">
-        <span>
-          <a href="/setup#claude">Claude</a> ·{" "}
+    <nav aria-label="Assistant setup guides">
+      <ul>
+        <li>
+          <a href="/setup#claude">Claude</a>
+        </li>
+        <li>
           <a href="/setup#chatgpt">ChatGPT</a>
-        </span>
-        <span>
-          <a href="/setup#claude-code">Claude Code</a> ·{" "}
-          <a href="/setup#codex">Codex</a> · <a href="/setup#cursor">Cursor</a>
-        </span>
-      </nav>
-      <div>
-        <p class="guide-status" id="unverified-guides">
-          Guides only; not yet verified with Milton:
-        </p>
-        <nav
-          aria-label="Unverified assistant setup guides"
-          aria-describedby="unverified-guides"
-        >
-          <span>
-            <a href="/setup#claude-duet">Claude Duet</a> ·{" "}
-            <a href="/setup#grok-bot">Grok Bot</a> ·{" "}
-            <a href="/setup#muse">Muse</a>
-          </span>
-        </nav>
-      </div>
-    </div>
+        </li>
+        <li>
+          <a href="/setup#claude-code">Claude Code</a>
+        </li>
+        <li>
+          <a href="/setup#codex">Codex</a>
+        </li>
+        <li>
+          <a href="/setup#cursor">Cursor</a>
+        </li>
+        <li>
+          <a href="/setup">and more</a>
+        </li>
+      </ul>
+    </nav>
   </div>
   <section class="section" aria-labelledby="scope-heading">
     <p class="eyebrow">// Less rewriting</p>
@@ -440,23 +435,23 @@ import MemoDemo from "../components/MemoDemo.astro";
     align-items: center;
     min-height: var(--touch-target);
   }
-  .assistant-guides {
-    display: grid;
-    gap: var(--space-2);
-  }
-  .guide-status {
-    margin: 0;
-  }
-  .assistant-strip nav {
+  .assistant-strip ul {
     display: flex;
     flex-wrap: wrap;
-    gap: var(--space-2) var(--space-6);
+    gap: 0 var(--space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
   }
-  .assistant-strip nav span {
+  .assistant-strip li {
     display: inline-flex;
     align-items: center;
-    gap: var(--space-2);
-    flex-wrap: wrap;
+  }
+  /* Even separators between names; the dot is decoration, not read aloud. */
+  .assistant-strip li:not(:last-child)::after {
+    content: "·";
+    content: "·" / "";
+    margin-left: var(--space-2);
   }
   .assistant-strip a {
     display: inline-flex;

@@ -2,6 +2,7 @@
 import SiteLayout from "../layouts/SiteLayout.astro";
 import AssistantSetup from "../components/AssistantSetup.astro";
 import MemoDemo from "../components/MemoDemo.astro";
+import FilingComparison from "../components/FilingComparison.astro";
 ---
 
 <SiteLayout
@@ -88,6 +89,13 @@ import MemoDemo from "../components/MemoDemo.astro";
         </p>
       </article>
     </div>
+  </section>
+  <section class="section" id="why-milton" aria-labelledby="why-heading">
+    <p class="eyebrow">## Why not a memory app</p>
+    <h2 id="why-heading">
+      Memory keeps a junk drawer. Milton keeps a filing cabinet.
+    </h2>
+    <FilingComparison />
   </section>
   <section class="section" id="how-it-works" aria-labelledby="how-heading">
     <p class="eyebrow">## Less repeating. Less paperwork.</p>
@@ -337,7 +345,7 @@ import MemoDemo from "../components/MemoDemo.astro";
       <summary>Why the extra penny?</summary>
       <p>We’ve been assured the accounting software is working as intended.</p>
     </details>
-    <details id="why-milton">
+    <details id="why-this-exists">
       <summary>Why does this exist?</summary>
       <p>
         Peter wanted his AIs to write like him. Somehow he ended up building

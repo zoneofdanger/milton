@@ -71,8 +71,12 @@ import SiteLayout from "../layouts/SiteLayout.astro";
   <p>
     The database and sign-in run on Neon (United States). The public website
     runs on Vercel; the app and MCP server run on Google Cloud Run (United
-    States). DNS is on Cloudflare. Google and GitHub also handle your sign-in
-    with them.
+    States). The public website uses Vercel Web Analytics, which sets no
+    cookies: it records each page view’s address and query parameters, referrer,
+    time, browser, operating system, device type and location down to city, and
+    counts visitors with a daily-reset hash of the request instead of tying
+    records to a person or IP address. DNS is on Cloudflare. Google and GitHub
+    also handle your sign-in with them.
   </p>
 
   <h2>Cookies</h2>

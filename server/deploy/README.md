@@ -799,47 +799,58 @@ first.
 ## Runtime role (0024)
 
 Not yet released. Migration 0024 creates `milton_runtime`, a NOLOGIN group role with
-SELECT, INSERT, UPDATE and DELETE on the seventeen application tables, USAGE on the
-`instruction_card_position` sequence and on schema `public`, CONNECT on the database,
-and default privileges so tables and sequences that later migrations create are
-granted the same way (see the server README). It owns nothing, so it cannot alter,
-drop or truncate a table, disable a trigger or read the Drizzle journal. App and MCP
-then connect as `milton_app`, a login role whose only membership is `milton_runtime`.
-Membership inherits; the runtime needs no `SET ROLE` and no code change. The migration
-runner and `scripts/memo-updates.ts` keep the `neondb_owner` connection and refuse any
-other role.
+only the statements the runtime runs on each table (DELETE only on `users` and
+`assistant_disconnects`; `store_config` read-only apart from the lock), USAGE on the
+`instruction_card_position` sequence and schema `public`, CONNECT on the database, and
+SELECT, INSERT and UPDATE by default on tables later migrations create (see the server
+README for the table list). It owns nothing, so it cannot alter, drop or truncate a
+table, disable a trigger or read the Drizzle journal. App and MCP then connect as
+`milton_app`, a login role whose only membership is `milton_runtime`. Membership
+inherits; the runtime needs no `SET ROLE` and no code change. The migration runner and
+`scripts/memo-updates.ts` keep the `neondb_owner` connection and refuse any other role.
 
 **Create `milton_app` with SQL, not the console or API.** Neon makes every role created
 in the console, CLI or API a member of `neon_superuser`, which brings
 `pg_read_all_data`, `pg_write_all_data`, CREATEROLE, CREATEDB, BYPASSRLS and REPLICATION
 and so undoes most of what 0024 removes. A role created with SQL has only what is
-granted. Run the statement from a private operator shell as `neondb_owner`; the
-password is generated in the shell, reaches `psql` on stdin and is never written to
-the repository, a file, the shell history or a command argument.
+granted.
+
+**The password touches no file and no command argument.** It is generated into a shell
+variable and reaches `psql` through a pipe from the `printf` builtin (zsh writes a
+heredoc to a temporary file). It reaches `psql`, `dotenvx` and the check script only
+through the environment, and it is written to disk only inside the encrypted payload.
+Neon receives it in plaintext over TLS, as Neon requires, and stores only the
+verifier. Statement logging on the production project was checked on 2026-11-03:
+`log_statement` is `none`, `log_min_duration_statement` is `-1` and
+`log_min_error_statement` is `panic`, so the server log does not record the statement,
+even if it fails. `pg_stat_statements` is preloaded with `track_utility` on, so it may
+keep the `CREATE ROLE` text; step 3 checks for it and clears the entry.
 
 Release order: 0024 is additive and the current image runs on either schema, so
-traffic may stay open.
+traffic may stay open. Work in a shell that keeps no history (zsh: start it with
+`HISTFILE=/dev/null zsh`) and inside a private temporary directory outside the
+repository (`umask 077; cd "$(mktemp -d)"`).
 
-1. Rehearse steps 2 to 4 on a throwaway Neon branch made from production, with the
-   branch's own owner and `milton_app` connection strings, then delete the branch.
+1. Rehearse steps 2 to 5 on a throwaway Neon branch made from production, with that
+   branch's owner connection and a throwaway password, then delete the branch. On the
+   branch, note whether `pg_stat_statements` shows the password in step 3.
 2. Take a Neon snapshot, then apply 0024 with the normal runner (`bun run db:migrate`,
    owner connection in `server/.dev.vars`). It changes no table or row.
-3. Create `milton_app` in a shell that keeps no history (zsh: start it with
-   `HISTFILE=/dev/null zsh`). Export the owner connection as `PGHOST`, `PGUSER`
-   (`neondb_owner`), `PGDATABASE` (`milton`), `PGSSLMODE=require` and `PGPASSWORD`
-   (read with `read -rs`), then:
+3. Create `milton_app`. Export the owner connection as `PGHOST` (the host the service
+   payloads use), `PGUSER=neondb_owner`, `PGDATABASE=milton`, `PGSSLMODE=require` and
+   `PGPASSWORD` (read with `read -rs PGPASSWORD`), then:
 
    ```sh
    MILTON_APP_PASSWORD="$(openssl rand -base64 33 | tr '+/' '-_')"
-   psql -v ON_ERROR_STOP=1 <<SQL
-   CREATE ROLE milton_app LOGIN INHERIT IN ROLE milton_runtime PASSWORD '$MILTON_APP_PASSWORD';
-   SQL
+   SQL="CREATE ROLE milton_app LOGIN INHERIT IN ROLE milton_runtime PASSWORD '$MILTON_APP_PASSWORD';"
+   printf '%s' "$SQL" | psql -v ON_ERROR_STOP=1 -f -
+   unset SQL
    ```
 
    The password is 44 URL-safe characters (264 bits), above Neon's 60-bit minimum, and
-   needs no escaping in a connection string. Confirm the role, still as the owner;
-   expect `t`, `t` and `{milton_runtime}` and stop if `neon_superuser` or any other
-   role appears:
+   needs no escaping in a connection string. Confirm the role, still as the owner. The
+   four columns must read `t`, `t`, `t` and `{milton_runtime}`; stop if
+   `neon_superuser` or any other role appears:
 
    ```sql
    SELECT r.rolcanlogin, r.rolinherit,
@@ -849,26 +860,70 @@ traffic may stay open.
    FROM pg_roles r WHERE r.rolname = 'milton_app';
    ```
 
-4. Build the new connection string from the current owner string with only the user
-   and password changed (`milton_app` and `$MILTON_APP_PASSWORD`; same host, `/milton`,
-   `sslmode=require`). Connect with it and check, before any service uses it:
-   `SELECT current_user` returns `milton_app`; `SELECT count(*) FROM users` succeeds;
-   `BEGIN; ALTER TABLE samples DISABLE TRIGGER samples_guard; ROLLBACK;` fails with
-   `must be owner of table samples`; `SELECT 1 FROM drizzle.__drizzle_migrations`
-   fails with `permission denied for schema drizzle`.
-5. Mint a new payload version per service. In a private temporary directory outside
-   the repository, take the encrypted payload each service mounts now
-   (`milton-app-env:1`, `milton-mcp-env:2`) and its private key from release storage,
-   decrypt into a mode-600 file, replace only `DATABASE_URL`, re-encrypt with the
-   same keypair (`dotenvx encrypt` with an explicit `--env-keys-file`), and add it as
-   the next numeric version of `milton-app-env` and `milton-mcp-env` through
-   `--data-file`. Keep the old versions enabled; the key secrets are unchanged. Store
-   the new encrypted payloads in private release storage, delete the plaintext and
-   unset `MILTON_APP_PASSWORD` and `PGPASSWORD`.
-6. Point the volume `items[0].key` in `app.service.json` and `mcp.service.json` at the
+   Then check the statement statistics in whichever database has the extension
+   (`milton` or `postgres`):
+
+   ```sql
+   SELECT queryid, query ~ 'PASSWORD ''' AS has_text
+   FROM pg_stat_statements WHERE query ILIKE 'CREATE ROLE milton_app%';
+   ```
+
+   If `has_text` is true, clear that entry with
+   `SELECT pg_stat_statements_reset(0, 0, <queryid>);`. If Neon refuses the reset,
+   record that the text is readable only by roles with `pg_read_all_stats`, which
+   already hold the owner's rights, and go on.
+
+4. Mint the next payload version for each service from the encrypted version it mounts
+   now (`milton-app-env:1`, `milton-mcp-env:2`). For the app (repeat for MCP with its
+   own secrets and key):
+
+   ```sh
+   gcloud secrets versions access 1 --secret=milton-app-env --project=milton-510506 > app-current.env
+   export DOTENV_PRIVATE_KEY="$(gcloud secrets versions access 1 --secret=milton-app-key --project=milton-510506)"
+   dotenvx decrypt -f app-current.env --stdout \
+     | awk '/^DATABASE_URL=/ { sub(/:\/\/[^@]*@/, "://milton_app:" ENVIRON["MILTON_APP_PASSWORD"] "@") } { print }' \
+     > app-next.env
+   dotenvx encrypt -f app-next.env
+   grep -c '^DATABASE_URL=encrypted:' app-next.env
+   ```
+
+   `app-next.env` is mode 600 because of the `umask`, and it holds plaintext only
+   between the `awk` and the `encrypt`. It keeps the same keypair, because the public
+   key comes across in the decrypted header, so `milton-app-key:1` stays valid. Only
+   the user and password change; the host, `/milton` and `sslmode` are the service's
+   own. The `grep` must print `1`. A local rehearsal with fake values kept the public
+   key and changed only `DATABASE_URL`.
+
+5. Check the minted payload before any service uses it, with `DOTENV_PRIVATE_KEY`
+   still exported:
+   - Through the services' driver, against the exact host in the payload, from the
+     repository checkout (`<dir>` is the temporary directory):
+
+     ```sh
+     dotenvx run -f <dir>/app-next.env -- bun --no-env-file server/scripts/check-runtime-role.ts
+     ```
+
+     It must print `ok`. It runs one HTTP query and one WebSocket transaction that
+     locks `store_config` as a sign-in does. It passes only as `milton_app`, a plain
+     member of `milton_runtime`, and prints only `ok` or `fail`; a driver failure adds
+     the usual one-line error log (class and code, never the URL) on stderr.
+
+   - Refusals with `psql`, with the login in the environment and never a URL on the
+     command line: in `PGUSER=milton_app PGPASSWORD="$MILTON_APP_PASSWORD" psql`,
+     `BEGIN; ALTER TABLE samples DISABLE TRIGGER samples_guard; ROLLBACK;` fails with
+     `must be owner of table samples`, `DELETE FROM save_requests WHERE false;` fails
+     with `permission denied for table save_requests`, and
+     `SELECT 1 FROM drizzle.__drizzle_migrations;` fails with
+     `permission denied for schema drizzle`.
+6. Add each payload as the next numeric version with
+   `gcloud secrets versions add milton-app-env --data-file=app-next.env` (and the same
+   for `milton-mcp-env`). Keep the old versions enabled; the key secrets are unchanged.
+   Copy the encrypted payloads to private release storage, delete the temporary
+   directory and `unset MILTON_APP_PASSWORD PGPASSWORD DOTENV_PRIVATE_KEY`.
+7. Point the volume `items[0].key` in `app.service.json` and `mcp.service.json` at the
    new versions, validate with `--dry-run`, replace MCP, then app, and record the
    revisions and versions.
-7. Verify as the new role: canonical health, MCP discovery and unauthenticated 401; an
+8. Verify as the new role: canonical health, MCP discovery and unauthenticated 401; an
    authenticated `get_cover_sheet` returns 200 with an unchanged version (a read,
    which also writes the daily call count); and a save. With Peter's go, a
    `create_memo` that resends one existing cover rule verbatim returns `unchanged`: it
@@ -876,10 +931,23 @@ traffic may stay open.
    memos runs only when Peter directs one. Check the logs for `store_unavailable` or
    `permission denied`.
 
-**Rollback.** Shift app and MCP traffic back to the previous revisions, which mount
-the owner payload versions (`milton-app-env:1`, `milton-mcp-env:2`); no schema change is
-needed, because 0024 removes nothing the owner uses. To remove the role as well, after
-traffic has moved: `DROP ROLE milton_app;` as the owner, then run
+**Later, not in this release: retire the owner credential from the services.** Each
+service account can read every version of its own secret, so `milton-app-env:1` and
+`milton-mcp-env:2` still give the running services the owner connection. Once the new
+role has served for a full day without `store_unavailable` or `permission denied` (no
+sooner than 24 hours after step 8), reset `neondb_owner`'s password in Neon, update
+the owner connection kept for migrations, and disable both old versions
+(`gcloud secrets versions disable 1 --secret=milton-app-env --project=milton-510506`,
+`gcloud secrets versions disable 2 --secret=milton-mcp-env --project=milton-510506`).
+After that the traffic rollback below no longer works: rolling back means minting a
+fresh owner payload first.
+
+**Rollback.** Shift app and MCP traffic back to the previous revisions, which mount the
+owner payload versions (`milton-app-env:1`, `milton-mcp-env:2`). In the same step, set
+`items[0].key` in `app.service.json` and `mcp.service.json` back to `1` and `2`, so no
+later `replace` deploys the new versions again. No schema change is needed, because
+0024 removes nothing the owner uses. To remove the role as well, after traffic has
+moved: `DROP ROLE milton_app;` as the owner, then run
 `server/drizzle/rollback/0024_runtime_role.sql`, which refuses while a login role other
 than the caller is still a member of `milton_runtime`. The 0024 journal row stays, so
 re-forwarding means running `0024_runtime_role.sql` by hand. Restoring the branch to a

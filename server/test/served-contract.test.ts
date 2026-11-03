@@ -4,8 +4,19 @@ import { saveMemoInput } from "../src/store/compiled";
 import { parseReport } from "../../packages/agent-kit/src/report";
 import type { CardHead } from "../src/store/cards";
 import { assembleDocuments, FILINGS, type Filing } from "../src/store/reports";
-import { SETUP_MARKER, setupCatalog, setupHint } from "../src/store/setup";
-import { coverSheet, reportEnvelope, reportList } from "../src/store/tools";
+import {
+  SETUP_HOOK_POINTER,
+  SETUP_MARKER,
+  setupCatalog,
+  setupHint,
+} from "../src/store/setup";
+import {
+  coverSheet,
+  hookSheet,
+  reportEnvelope,
+  reportList,
+} from "../src/store/tools";
+import { hookOutput } from "../../packages/agent-kit/src/context";
 
 // Fields every save carries, as the instructions name them.
 const envelope = () => ({
@@ -39,6 +50,15 @@ test("setup renders from its catalog, per report while empty, under the agent ki
   const version = "a".repeat(64);
   const empty = { ...assembleDocuments([], []), version };
   const sheet = coverSheet(empty);
+  // A hook read carries a pointer, keeping injected text under Claude Code's
+  // 10,000-character limit.
+  const hooked = hookOutput(hookSheet(sheet), "SessionStart");
+  expect(hooked.hookSpecificOutput.additionalContext).toContain(
+    SETUP_HOOK_POINTER,
+  );
+  expect(hooked.hookSpecificOutput.additionalContext.length).toBeLessThan(
+    10000,
+  );
   // The cover sheet serves the opening lines and email's block, cover questions included.
   expect(sheet.setup).toBe(reportEnvelope(empty, "email").setup!);
   expect(sheet.setup).toContain('Then say: "First, paste one email');

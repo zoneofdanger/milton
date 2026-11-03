@@ -14,7 +14,7 @@ import {
   type Documents,
   type ReportDocument,
 } from "./reports";
-import { noRules, reportSetup, setupHint } from "./setup";
+import { noRules, reportSetup, setupHint, SETUP_HOOK_POINTER } from "./setup";
 
 export const coverSheetInput = z.strictObject({
   hook_event: z
@@ -52,6 +52,9 @@ export function coverSheet(documents: Documents & { version: string }) {
     ...(noRules(documents) ? { setup: reportSetup(documents, "email") } : {}),
   };
 }
+/** The cover sheet for a lifecycle hook: the script becomes a pointer. */
+export const hookSheet = (sheet: ReturnType<typeof coverSheet>) =>
+  sheet.setup === undefined ? sheet : { ...sheet, setup: SETUP_HOOK_POINTER };
 /** Active samples without their bodies (those stay in text), newest first, so
  * an assistant can reuse a kind or name a sample to replace or remove. */
 const sampleIndex = (report: ReportDocument) =>
@@ -146,7 +149,7 @@ export function createStoreMemoTools(store: TenantStore) {
         const sheet = coverSheet(await store.readDocuments());
         return storeResult(
           input?.hook_event
-            ? hookOutput(sheet, input.hook_event)
+            ? hookOutput(hookSheet(sheet), input.hook_event)
             : await withNotice(sheet),
         );
       }),

@@ -99,6 +99,11 @@ import FilingComparison from "../components/FilingComparison.astro";
   <section class="section" id="how-it-works" aria-labelledby="how-heading">
     <p class="eyebrow">## How it works</p>
     <h2 id="how-heading">Tell it once. Keep it on file.</h2>
+    <p class="section-lead">
+      We distribute the memo. We cannot make everyone read it. Ask your AI to
+      read your cover sheet when you start work; following it is still up to the
+      AI.
+    </p>
     <div class="slip-wrap">
       <figure class="sheet slip" aria-labelledby="slip-title">
         <div class="sheet-bar">
@@ -165,11 +170,6 @@ import FilingComparison from "../components/FilingComparison.astro";
         FILED
       </span>
     </div>
-    <p class="fine-print small-note">
-      We distribute the memo. We cannot make everyone read it. Ask your AI to
-      read your cover sheet when you start work; following it is still up to the
-      AI.
-    </p>
     <div class="where-to-start" id="where-to-start">
       <p class="eyebrow">## Onboarding</p>
       <h3>Not sure where to start?</h3>
@@ -656,10 +656,6 @@ import FilingComparison from "../components/FilingComparison.astro";
     letter-spacing: 0.2em;
     pointer-events: none;
     user-select: none;
-  }
-  /* A two-sentence note: no width cap, it uses the container. */
-  .fine-print {
-    margin-top: var(--space-8);
   }
   @media (max-width: 600px) {
     .slip-fields {

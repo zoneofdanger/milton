@@ -969,7 +969,9 @@ test("signed-in email shows only in authenticated chrome; switch account signs o
     expect(assistants).toContain(
       `<pre class="setup-copy"><code>${resource}</code></pre>`,
     );
-    expect(assistants).toContain("It is empty, so run the setup questions");
+    expect(assistants).toContain(
+      "It is empty, so run the setup it returns exactly as written",
+    );
     expect(report).not.toContain("https://mcp.meetmilton.com/mcp");
     expect(report).toContain('name="next" value="login"');
     expect(report).toContain(

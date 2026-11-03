@@ -105,7 +105,7 @@ export function connectSteps(empty: boolean, mcpUrl: string) {
           <p>Once connected, copy this prompt into your assistant:</p>
           <blockquote class="setup-copy">
             {empty
-              ? "Read my Milton cover sheet. It is empty, so run the setup questions it returns, one at a time. Show me the complete draft of rules and wait for my approval before saving anything."
+              ? "Read my Milton cover sheet. It is empty, so run the setup it returns exactly as written, one question at a time, starting with an email I paste. Show me the complete list of rules and wait for my approval before saving anything."
               : "Read my Milton cover sheet, then the report that fits what we’re writing, and write like me."}
           </blockquote>
         </li>

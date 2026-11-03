@@ -86,9 +86,6 @@ reports, memos) and plain text on security screens and anything an assistant rea
       claim is parsed but never enforced and clock tolerance does not apply to expiry (A27). Both
       harmless today; write them into server/README.
 
-- [ ] #20 (server, low) **Trim the agent kit to what has callers** (A20): keep hook events and output;
-      retire working-style checks; declare the workspace dependency the server imports by path.
-
 - [ ] #21 (server, low) **Squash migrations for fresh installs** (A22): 21 migrations create and drop
       the derived systems and need pgvector mid-way; 0004-0017 rollbacks are unreachable. Also
       revisit @neondatabase/auth 0.7.0-beta once GA (A21: React, Radix, Tailwind in the install).

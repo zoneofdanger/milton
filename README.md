@@ -35,9 +35,6 @@ The hosted service is at [meetmilton.com](https://meetmilton.com), in early acce
 
 ## Get started
 
-For context replacement in agent applications, local checks and correction
-preparation, see the [agent kit](packages/agent-kit/README.md).
-
 1. Sign in at [app.meetmilton.com](https://app.meetmilton.com/login) with Google or GitHub.
 2. Add `https://mcp.meetmilton.com/mcp` in your assistant's MCP or connector settings,
    then complete sign-in and approve the connection. Availability depends on the

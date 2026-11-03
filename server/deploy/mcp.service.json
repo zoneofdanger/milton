@@ -22,7 +22,7 @@
         "timeoutSeconds": 180,
         "containers": [
           {
-            "image": "us-east4-docker.pkg.dev/milton-510506/milton/runtime@sha256:537f8078fe4a371722ec9496e8580c0f9c35ed7ad7968cea177fbe0016193ab8",
+            "image": "us-east4-docker.pkg.dev/milton-510506/milton/runtime@sha256:a497749ea9543648eb431dc2d136247a067b94428bf23b0014c17ccca908a431",
             "ports": [
               {
                 "containerPort": 8080

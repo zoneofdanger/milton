@@ -777,26 +777,37 @@ or the export. Run it before any older rollback script that touches these object
 The app and MCP do not connect as the database owner. Migration 0024 creates
 `milton_runtime`, a NOLOGIN group role, and the services connect as `milton_app`, a
 login role created with SQL whose only membership is `milton_runtime` (membership
-inherits, so no `SET ROLE`). The group may SELECT, INSERT, UPDATE and DELETE rows in
-every application table, because the runtime or the triggers it fires touch each
-one: `users`, `identities`, `deleted_identities`, `assistant_disconnects`,
-`trial_accounts`, `usage_daily`, `store_config`, `save_requests`, `accepted_changes`,
-`instruction_cards`, `instruction_card_versions`, `sample_kinds`, `samples`,
-`tps_reports`, and the legacy `memos`, `memo_versions` and `memo_cards` that the signup
-seed and its triggers write. It has USAGE on the `instruction_card_position` sequence,
-which numbers new cards, and on schema `public`, and CONNECT on the database. Default
-privileges grant the same on tables and sequences later migrations create. Trigger
-functions run as the caller and need no EXECUTE grant; the runtime calls no function
-directly and runs no statement that needs ownership (`SET LOCAL` timeouts, `FOR
-UPDATE` and `ON CONFLICT DO UPDATE` need only these grants; cascading deletes run as
-the table owner).
+inherits, so no `SET ROLE`). Each table gets only the statements the runtime, or a
+trigger it fires, runs on it:
 
-It owns nothing, so it cannot alter, drop or truncate a table, disable a trigger, set
-`session_replication_role`, create objects in `public` or read the `drizzle` journal:
-the append-only, immutability, memo-update and size triggers hold against the running
-service. Migrations, imports and `scripts/memo-updates.ts` keep the owner connection
-and refuse any other role. `drizzle/rollback/0024_runtime_role.sql` revokes every grant
-and drops the group role; it refuses while a login role is still a member. See
+| Grant                          | Tables and why                                                                                                                                                                                    |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| SELECT, INSERT, UPDATE, DELETE | `users`: sign-up, the account lock, retained bytes kept by triggers, and account deletion (its cascades run as the table owner)                                                                   |
+| SELECT, INSERT, DELETE         | `assistant_disconnects`: disconnect, the refusal check, reconnect on Allow                                                                                                                        |
+| SELECT, INSERT, UPDATE         | `save_requests` (claims and receipts), `samples` (retirement), `tps_reports` (snapshot upsert), `trial_accounts` (notice stage), `usage_daily` (daily call upsert)                                |
+| SELECT, INSERT                 | `identities`, `deleted_identities`, `instruction_cards`, `instruction_card_versions`, `sample_kinds`, and the legacy `memos`, `memo_versions` and `memo_cards` (the signup seed and its triggers) |
+| INSERT                         | `accepted_changes`: provenance, written once per save and never read by the runtime                                                                                                               |
+| SELECT, UPDATE (`singleton`)   | `store_config`: settings are read under `FOR UPDATE`, which needs one updatable column; no setting can be changed                                                                                 |
+| USAGE                          | the `instruction_card_position` sequence (new card positions) and schema `public`; CONNECT on the database                                                                                        |
+
+The role owns nothing, so it cannot alter, drop or truncate a table, disable a
+trigger, set `session_replication_role`, create objects in `public` or read the
+`drizzle` journal. The triggers guard updates and deletes on the tables the runtime
+may change; where no trigger guards a row, the grant is what protects it. The runtime
+cannot delete from `save_requests` (which would erase memo-update accounting),
+`deleted_identities` or `trial_accounts` (which would let a deleted identity start a
+second trial) or `usage_daily` (which would reset the daily call count), and cannot
+change any `store_config` setting. Default privileges give tables later migrations
+create SELECT, INSERT and UPDATE and sequences USAGE; a migration grants DELETE itself
+where the runtime needs it. Trigger functions run as the caller and need no EXECUTE
+grant; the runtime calls no function directly and runs no statement that needs
+ownership (`SET LOCAL` timeouts, `FOR UPDATE` and `ON CONFLICT` need only these
+grants).
+
+Migrations, imports and `scripts/memo-updates.ts` keep the owner connection and refuse
+any other role; changing `store_config` settings is an owner operation.
+`drizzle/rollback/0024_runtime_role.sql` revokes every grant and drops the group role;
+it refuses while a login role is still a member. See
 [the hosting runbook](deploy/README.md#runtime-role-0024) for creating `milton_app`
 (with SQL, because Neon puts console and API roles in `neon_superuser`) and switching
 the services' secrets.

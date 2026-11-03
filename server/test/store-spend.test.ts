@@ -661,26 +661,22 @@ test("the worker ignores stale model flags, publishes and emails spend alerts, r
   }
 });
 
-test("alerts-only policy marks compatible writers and changes the daily limit only when given", async () => {
+test("the policy command changes the daily limit only when given", async () => {
   const { configureMemoUpdatePolicy } = await import("../scripts/memo-updates");
   const local = await localStore();
   try {
     const state = async () =>
       (
         await local.db.query<{
-          policy: string;
-          ready: boolean;
           limit: number;
           enabled: boolean;
         }>(
-          sql`SELECT global_spend_policy AS policy,foreground_accounting_ready AS ready,memo_updates_daily_limit AS "limit",memo_updates_enabled AS enabled FROM store_config`,
+          sql`SELECT memo_updates_daily_limit AS "limit",memo_updates_enabled AS enabled FROM store_config`,
         )
       )[0]!;
     const initial = await state();
     await configureMemoUpdatePolicy(local.db);
     expect(await state()).toEqual({
-      policy: "alerts_only",
-      ready: true,
       limit: initial.limit,
       enabled: false,
     });

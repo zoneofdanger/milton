@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { sql, type SQL } from "drizzle-orm";
 import type { StoreDatabase, StoreSession } from "./database";
 import { StoreError } from "./errors";
-import { lockSpendPolicy } from "./spend-policy";
 
 export const spendAlertThresholds = [100, 250, 500, 1000].map(
   (n) => n * 1_000_000,
@@ -53,9 +52,6 @@ export async function observeSpendAlerts(
     await tx.query(
       sql`SELECT set_config('lock_timeout','250ms',true),set_config('statement_timeout','1000ms',true)`,
     );
-    const policy = await lockSpendPolicy(tx);
-    if (policy.global_spend_policy !== "alerts_only")
-      return { status: "disabled", published: 0 };
     const days = await tx.query<{
       day: string;
       filing: string;

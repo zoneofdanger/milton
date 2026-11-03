@@ -1,0 +1,1018 @@
+---
+import SiteLayout from "../layouts/SiteLayout.astro";
+
+const loginUrl = "https://app.meetmilton.com/login";
+
+/* The goal and stretch goals are multiples of the real price, and the tiers
+   each end in the cent for accounting. The goal is one million months of Milton. Peter covers month one, so 999,999 months remain: 83,333
+   years and three months from November 2026 is February 85,360. */
+const jokeTiers = [
+  {
+    name: "Return of the stapler Milton already owns",
+    price: "$0.01",
+    text: "Milton is not buying a stapler. It is his, it was taken, and he would like it back. The price is the one cent for accounting.",
+    delivery: "when someone admits to having it",
+  },
+  {
+    name: "One slice of cake",
+    price: "$7.01",
+    text: "This reserves one slice at the next office birthday. The plate is passed along the table and runs out before it reaches Milton.",
+    delivery: "to the person next to Milton",
+  },
+  {
+    name: "A plant",
+    price: "$34.01",
+    text: "The plant becomes Peter’s first direct report, doubles the company’s headcount, and gets a one-on-one every time it is watered.",
+    delivery: "after the window tier, for obvious reasons",
+  },
+  {
+    name: "A chair with wheels",
+    price: "$412.01",
+    text: "The wheels offer lateral mobility only. Upward mobility is sold separately.",
+    delivery: "when someone carries it down the stairs",
+  },
+  {
+    name: "A window facing an air shaft",
+    price: "$86,000.01",
+    text: "Natural light arrives on Tuesdays from 11:40 to 11:55 a.m. The view is of another window, behind which someone has a plant.",
+    delivery: "when we have a wall that touches outdoors",
+  },
+  {
+    name: "The corner office",
+    price: "$4,900,000.01",
+    text: "It has two walls of window, a door that closes, and the view. Michael Bolton has requested it in writing. He is fictional, and so is the funding.",
+    delivery: "February 85,360",
+  },
+];
+
+/* Adds up to the goal; the shares are rounded to two places, except the penny. */
+const funds = [
+  { item: "The view", amount: "$3,900,000.00", share: "77.84%" },
+  {
+    item: "The office attached to the view",
+    amount: "$1,000,000.00",
+    share: "19.96%",
+  },
+  {
+    item: "Getting one filing cabinet up the stairs",
+    amount: "$109,999.99",
+    share: "2.20%",
+  },
+  {
+    item: "Michael Bolton’s salary (he is fictional)",
+    amount: "$0.00",
+    share: "0.00%",
+  },
+  { item: "Accounting", amount: "$0.01", share: "0.0000002%" },
+];
+
+const stretchGoals = [
+  {
+    amount: "$10.02",
+    text: "A second backer joins, and we hold a town hall.",
+  },
+  {
+    amount: "$250.50",
+    text: "Milton gets a radio at a reasonable volume. Someone will ask him to turn it down anyway.",
+  },
+  {
+    amount: "$501.00",
+    text: "We measure the rewrites we said we reduced.",
+  },
+  {
+    amount: "$50,100.00",
+    text: "We unlock synergy. Approval is still pending.",
+  },
+  {
+    amount: "$10,020,000.00",
+    text: "We fund a second corner office. Buildings have four corners, and we intend to be thorough.",
+  },
+  {
+    amount: "$100,200,000,000.00",
+    text: "We build superintelligence. It will report to the plant.",
+  },
+];
+
+const risks = [
+  {
+    risk: "The company has one founder and no staff. If Peter is hit by a bus, nobody is left to apologize.",
+    mitigation:
+      "The source is public, and you can run Milton yourself. Peter has also been told to look both ways.",
+  },
+  {
+    risk: "Your AI may not read the memo.",
+    mitigation:
+      "We ask your AI to read it, and following it is still up to the AI. Our position is enterprise-grade asking nicely.",
+  },
+  {
+    risk: "The filing cabinet came down the stairs once, and the stairs have not been the same since.",
+    mitigation:
+      "We have budgeted $109,999.99 and one person to lift the other end. We have not found the person.",
+  },
+  {
+    risk: "The Milton in this story, who is a fictional clerk, was let go some time ago. Nobody told him. His pay stopped when someone fixed the glitch, and he still comes in.",
+    mitigation:
+      "We sent him a memo, to his previous desk. This concerns the fictional clerk only, not the software or what you pay for it.",
+  },
+  {
+    risk: "Earlier plans to get the clerk out of the office ended with the building unavailable.",
+    mitigation: "His current plan B involves a beach.",
+  },
+  {
+    risk: "Peter reaches the corner office and starts asking the plant to circle back.",
+    mitigation: "This risk is scheduled for February 85,360.",
+  },
+];
+
+const updates = [
+  "Milton’s desk was moved two rows back from the window. Nobody told him why.",
+  "Milton’s desk was moved next to the copier, which faces away from the window. Nobody told him why.",
+  "Milton’s desk was moved to the landing by the freight elevator. The nearest window is now on another floor. Nobody told him why.",
+  "Milton’s desk was moved to basement storage. The memo explaining why went to his previous desk.",
+  "Nobody asked where storage is. The software runs in us-east4, a data center in Northern Virginia. It has no view, we have never been inside, and we pay for it every month. The industry calls this the cloud. It is a basement with better marketing.",
+  "Milton moved his own desk into the corner of storage. It was the first move anyone told him about. This is now, technically, a corner office. The view is two walls. The goal remains unchanged.",
+];
+
+const comments = [
+  { text: "First.", author: "Anonymous, third floor" },
+  {
+    text: "I read that nobody can pledge. I would like a refund anyway.",
+    author: "Not a backer",
+  },
+  {
+    text: "Some of us live down here. Please keep it down.",
+    author: "Neighboring basement",
+  },
+  {
+    text: "Please stop looking through my window.",
+    author: "Whoever has the corner office now",
+  },
+  { text: "We have no record of a Milton.", author: "Facilities" },
+  {
+    text: "We have located the penny. Please stop emailing.",
+    author: "Accounting",
+  },
+];
+---
+
+<SiteLayout
+  title="Pricing: free during early access, then $5.01 a month | Milton"
+  description="Milton is free during early access, with no credit card required. Planned launch pricing is $5.01 USD/month, one plan, after a 30-day free trial. This page is also a fake crowdfunding campaign."
+>
+  <div class="campaign">
+    <header class="campaign-head">
+      <p class="eyebrow">## Pricing, and a cry for help</p>
+      <h1>Get Milton out of the basement</h1>
+      <p class="intro">
+        Milton has been moved four times, and nobody told him why. This campaign
+        moves him once more, into a corner office with a view. We are
+        $5,009,994.99 short.
+      </p>
+      <p class="byline">
+        By Peter. 1 campaign created, 0 campaigns funded. Basement, Northern
+        Virginia (arguably).
+      </p>
+    </header>
+
+    <section class="sheet truth" aria-labelledby="truth-heading">
+      <div class="sheet-bar">
+        <span>The small print, in large print</span>
+        <span>Not a joke</span>
+      </div>
+      <div class="sheet-content truth-body">
+        <div class="truth-price">
+          <h2 id="truth-heading">What Milton really costs</h2>
+          <p class="price">
+            <strong>Free</strong> <span>during early access</span>
+          </p>
+          <p class="price">
+            <strong>$5.01</strong>
+            <span>USD/month, planned at launch</span>
+          </p>
+          <a class="button" href={loginUrl}>
+            Try free early access <span aria-hidden="true">↗</span>
+          </a>
+        </div>
+        <ul class="truth-list">
+          <li>
+            Milton is free during early access. No credit card required, and we
+            don’t collect payment details today.
+          </li>
+          <li>
+            The planned paid offer is one plan at $5.01 USD/month after a 30-day
+            free trial. You won’t be charged unless you subscribe.
+          </li>
+          <li>
+            After an unsubscribed trial ends at paid launch, AI reads and saves
+            will pause. Your cover sheet and reports will remain available on
+            the website to view and download.
+          </li>
+          <li>
+            The source is public, and you can run Milton yourself.{" "}
+            <a href="https://github.com/zoneofdanger/milton">
+              Read the source ↗
+            </a>
+          </li>
+          <li>
+            <strong>This is not a real crowdfunding campaign.</strong> Nobody
+            can pledge, and no money is collected. The Milton who gets moved
+            around below is a fictional clerk, not the software. If anything
+            below disagrees with this sheet, this sheet wins.
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="pitch" aria-labelledby="pitch-heading">
+      <h2 id="pitch-heading" class="visually-hidden">
+        The campaign
+      </h2>
+      <figure class="sheet video">
+        <div class="sheet-bar">
+          <span>Campaign video</span>
+          <span>Runtime 0:00</span>
+        </div>
+        <div class="video-frame">
+          <p>INT. BASEMENT STORAGE. DAY, PROBABLY.</p>
+          <span class="stamp" aria-hidden="true">
+            NOT MADE
+          </span>
+        </div>
+        <figcaption class="sheet-content">
+          <strong>Fig. 1.</strong> The video we did not make. Peter walks slowly
+          through an office we do not have, looks out of a window we do not
+          have, and turns to a camera we could not afford. A piano enters. A
+          drone pulls back to reveal the basement. We cut the drone for budget,
+          then the piano, then the walking.
+        </figcaption>
+      </figure>
+
+      <div class="sheet status">
+        <div class="sheet-bar">
+          <span>Staff pick</span>
+          <span>The staff is Peter</span>
+        </div>
+        <div class="sheet-content">
+          <p class="price">
+            <strong>$5.01</strong> <span>pledged of a $5,010,000.00 goal</span>
+          </p>
+          <progress
+            value="5.01"
+            max="5010000"
+            aria-label="Joke campaign funding"
+            aria-valuetext="0.0001 percent funded, $5.01 of a $5,010,000.00 goal"
+          ></progress>
+          <p class="small-note">
+            We are 0.0001% funded. The bar is drawn to scale. On a bar 1,000
+            pixels wide, the funded part is one thousandth of a pixel.
+          </p>
+          <dl class="stats">
+            <div>
+              <dt>Backers</dt>
+              <dd>
+                <strong>1</strong>
+                <span>
+                  It’s Peter, not counting his credit card, which declined.
+                </span>
+              </dd>
+            </div>
+            <div>
+              <dt>Days to go</dt>
+              <dd>
+                <strong>30</strong>
+                <span>
+                  It said 30 yesterday. We looked into it, and it is working as
+                  intended. The real 30 is your free trial.
+                </span>
+              </dd>
+            </div>
+          </dl>
+          <p class="small-note">
+            Peter pledged from one pocket to the other, so no money was
+            collected. Accounting is looking for the penny.
+          </p>
+          <a class="button secondary" href="#tiers">
+            See the one real tier
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="tiers" aria-labelledby="tiers-heading">
+      <p class="eyebrow">## One plan. We resisted making three columns.</p>
+      <h2 id="tiers-heading">We did make seven tiers. Six are imaginary.</h2>
+      <ul class="tiers">
+        <li class="sheet tier tier-real">
+          <div class="sheet-bar">
+            <span>Tier 1</span>
+            <span>Real</span>
+          </div>
+          <div class="sheet-content">
+            <h3>Milton</h3>
+            <p class="tier-price">$5.01 USD/month</p>
+            <p>
+              This is the planned launch price, after a 30-day free trial. It’s
+              free during early access, and no credit card is required. You get
+              one cover sheet and five reports, served to every AI you connect.
+            </p>
+            <p class="tier-meta">Estimated delivery: today.</p>
+            <a class="button" href={loginUrl}>
+              Try free early access <span aria-hidden="true">↗</span>
+            </a>
+          </div>
+        </li>
+        {jokeTiers.map(({ name, price, text, delivery }, index) => (
+          <li class="sheet tier tier-void">
+            <div class="sheet-bar">
+              <span>Tier {index + 2}</span>
+              <span>Not available</span>
+            </div>
+            <div class="sheet-content">
+              <h3>{name}</h3>
+              <p class="tier-price">{price}</p>
+              <p>{text}</p>
+              <p class="tier-meta">Estimated delivery: {delivery}.</p>
+              <span class="stamp stamp-small" aria-hidden="true">
+                VOID
+              </span>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
+
+    <section class="section" aria-labelledby="funds-heading">
+      <p class="eyebrow">## Use of funds</p>
+      <h2 id="funds-heading">Where the $5,010,000.00 goes.</h2>
+      <p class="section-lead">
+        The goal is one million months of Milton, which we arrived at by working
+        backward from a view.
+      </p>
+      <div class="funds-grid">
+        <table class="funds">
+          <caption class="visually-hidden">
+            Use of funds by item, amount, and share of the goal. All figures are
+            jokes.
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Item</th>
+              <th scope="col">Amount</th>
+              <th scope="col">Share</th>
+            </tr>
+          </thead>
+          <tbody>
+            {funds.map(({ item, amount, share }) => (
+              <tr>
+                <th scope="row">{item}</th>
+                <td>{amount}</td>
+                <td>{share}</td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr>
+              <th scope="row">Total</th>
+              <td>$5,010,000.00</td>
+              <td>100.00%</td>
+            </tr>
+          </tfoot>
+        </table>
+        <figure class="sheet altitude">
+          <div class="sheet-bar">
+            <span>Projected altitude</span>
+            <span>Floors</span>
+          </div>
+          <div
+            class="chart"
+            role="img"
+            aria-label="Line chart of Milton’s altitude. The line stays flat in the basement from 2026 to the year 85,360, then rises straight up to the corner office."
+          >
+            <div class="chart-floors">
+              <span>Corner office</span>
+              <span>Lobby</span>
+              <span>Basement</span>
+            </div>
+            <div class="chart-plot">
+              <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+                <polyline
+                  points="0,94 97,94 97,5 100,5"
+                  vector-effect="non-scaling-stroke"
+                ></polyline>
+              </svg>
+              <span class="chart-here">We are here</span>
+            </div>
+            <div class="chart-years">
+              <span>2026</span>
+              <span>85,360</span>
+            </div>
+          </div>
+          <figcaption class="sheet-content">
+            <strong>Fig. 2.</strong> Peter has covered month one. At one backer,
+            the other 999,999 months take 83,333 years and three months, so we
+            move in around February 85,360. This shape is called a hockey stick.
+            Ours is mostly handle.
+          </figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="stretch-heading">
+      <p class="eyebrow">## Stretch goals</p>
+      <h2 id="stretch-heading">In case we overshoot.</h2>
+      <ol class="stretch">
+        {stretchGoals.map(({ amount, text }) => (
+          <li>
+            <span class="stretch-amount">{amount}</span>
+            <span>{text}</span>
+          </li>
+        ))}
+      </ol>
+    </section>
+
+    <section class="section" aria-labelledby="risks-heading">
+      <p class="eyebrow">## Risks and challenges</p>
+      <h2 id="risks-heading">We disclose the following.</h2>
+      <dl class="risks">
+        {risks.map(({ risk, mitigation }) => (
+          <div>
+            <dt>{risk}</dt>
+            <dd>
+              <span class="line-label">Mitigation:</span> {mitigation}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+
+    <section class="section log-grid" aria-label="Updates and comments">
+      <div>
+        <p class="eyebrow">## Creator updates</p>
+        <h2>Moved again. Nobody told him why.</h2>
+        <ol class="updates">
+          {updates.map((update, index) => (
+            <li>
+              <h3>Update {index + 1}: 30 days to go</h3>
+              <p>{update}</p>
+            </li>
+          ))}
+        </ol>
+      </div>
+      <div>
+        <p class="eyebrow">## Comments</p>
+        <h2>Only backers can comment.</h2>
+        <p class="section-lead">
+          There is one backer, so we invented these. We could not find any real
+          ones.
+        </p>
+        <ul class="comments">
+          {comments.map(({ text, author }) => (
+            <li>
+              <blockquote>{text}</blockquote>
+              <p class="comment-author">{author}</p>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="faq-heading">
+      <p class="eyebrow">## FAQ</p>
+      <h2 id="faq-heading">Frequently asked, by Peter.</h2>
+      <dl class="faq">
+        <div>
+          <dt>Is this a real crowdfunding campaign?</dt>
+          <dd>
+            No. Nobody can pledge, and no money is collected. The real pricing
+            is in the large print at the top of this page.
+          </dd>
+        </div>
+        <div>
+          <dt>What happens if the goal is not reached?</dt>
+          <dd>Nothing happens. Nothing also happens if it is reached.</dd>
+        </div>
+        <div>
+          <dt>Can I pay more to speed things up?</dt>
+          <dd>No. There is one plan, and we admire the impulse.</dd>
+        </div>
+        <div>
+          <dt>Will Milton still be around in February 85,360?</dt>
+          <dd>
+            The source is public, and you can run Milton yourself. We recommend
+            starting soon.
+          </dd>
+        </div>
+      </dl>
+    </section>
+
+    <section class="closing" aria-labelledby="closing-heading">
+      <p class="eyebrow">
+        ## Five dollars for Milton. One cent for accounting.
+      </p>
+      <h2 id="closing-heading">Milton stays in basement storage either way.</h2>
+      <p>
+        Milton is free during early access, and no credit card is required. The
+        planned price is $5.01 USD/month after a 30-day free trial.
+      </p>
+      <a class="button" href={loginUrl}>
+        Try Milton free <span aria-hidden="true">↗</span>
+      </a>
+    </section>
+  </div>
+</SiteLayout>
+
+<style>
+  :where(.campaign) :where(h1, h2, h3, p, figure, blockquote, dl, dd, ul, ol) {
+    margin: 0;
+  }
+  .campaign :where(p, li, dt, dd, figcaption, blockquote) {
+    text-wrap: pretty;
+  }
+  .campaign-head {
+    padding-block: var(--space-16) var(--space-8);
+  }
+  h1 {
+    margin-top: var(--space-4);
+    font-size: var(--text-hero);
+    line-height: 1.18;
+    letter-spacing: -0.05em;
+    text-wrap: balance;
+  }
+  .intro {
+    margin-top: var(--space-4);
+    font-size: var(--text-lead);
+    line-height: var(--leading-body);
+  }
+  .byline {
+    margin-top: var(--space-3);
+    color: var(--muted);
+    font: var(--text-caption) / var(--leading-label) var(--font-mono);
+  }
+
+  /* The plain block: a form in large type, ahead of every joke. */
+  .truth-body {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+    gap: var(--space-10);
+  }
+  .truth h2 {
+    font-size: var(--text-section);
+    letter-spacing: -0.045em;
+  }
+  .truth-price {
+    display: grid;
+    align-content: start;
+    justify-items: start;
+    gap: var(--space-4);
+  }
+  .price {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-3);
+  }
+  .price strong {
+    font: var(--font-display-weight) var(--text-hero) / var(--leading-heading)
+      var(--font-display);
+  }
+  .price span {
+    color: var(--muted);
+    font-size: var(--text-small);
+  }
+  .truth-list {
+    display: grid;
+    gap: var(--space-3);
+    padding-inline-start: var(--space-5);
+    font-size: var(--text-lead);
+    line-height: var(--leading-body);
+  }
+
+  /* Video on the left, status on the right, as these pages always are. */
+  .pitch {
+    display: grid;
+    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+    gap: var(--space-8);
+    align-items: start;
+    padding-block: var(--space-10) var(--space-16);
+    border-bottom: 1px solid var(--hairline);
+  }
+  .video-frame {
+    position: relative;
+    display: grid;
+    place-items: center;
+    aspect-ratio: 16 / 9;
+    padding: var(--space-6);
+    border-bottom: 1px solid var(--ink);
+    background: var(--ground);
+    font: var(--text-body) / var(--leading-label) var(--font-mono);
+    text-align: center;
+  }
+  .video figcaption {
+    color: var(--muted);
+  }
+  .video figcaption strong,
+  .altitude figcaption strong {
+    color: var(--ink);
+    font-weight: 600;
+  }
+  .status .sheet-content {
+    display: grid;
+    gap: var(--space-4);
+    justify-items: stretch;
+  }
+  .status .sheet-content > p {
+    margin: 0;
+  }
+  progress {
+    display: block;
+    width: 100%;
+    height: var(--space-4);
+    appearance: none;
+    border: 1px solid var(--ink);
+    border-radius: 0;
+    background: var(--ground);
+  }
+  progress::-webkit-progress-bar {
+    background: var(--ground);
+  }
+  progress::-webkit-progress-value {
+    background: var(--ink);
+  }
+  progress::-moz-progress-bar {
+    background: var(--ink);
+  }
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-5);
+    padding-block: var(--space-4);
+    border-block: 1px solid var(--hairline);
+  }
+  .stats dt {
+    color: var(--muted);
+    font: var(--text-caption) / var(--leading-label) var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .stats dd {
+    display: grid;
+    gap: var(--space-2);
+  }
+  .stats strong {
+    font: var(--font-display-weight) var(--text-section) /
+      var(--leading-heading) var(--font-display);
+  }
+  .stats span {
+    color: var(--muted);
+    font-size: var(--text-small);
+  }
+
+  .section {
+    padding-block: var(--space-16);
+    border-bottom: 1px solid var(--hairline);
+  }
+  .section h2 {
+    margin-block: var(--space-4) var(--space-6);
+    font-size: var(--text-section);
+    letter-spacing: -0.045em;
+  }
+  .section-lead {
+    margin-bottom: var(--space-8);
+    font-size: var(--text-lead);
+  }
+
+  /* The real tier is a clean sheet; the rest are voided forms. */
+  .tiers {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-6);
+    margin-top: var(--space-8);
+    padding: 0;
+    list-style: none;
+  }
+  .tier {
+    display: flex;
+    flex-direction: column;
+  }
+  .tier .sheet-content {
+    position: relative;
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-3);
+  }
+  .tier .sheet-content > p {
+    margin: 0;
+  }
+  .tier h3 {
+    font-size: var(--text-title);
+    letter-spacing: -0.045em;
+    padding-right: var(--space-16);
+  }
+  .tier-price {
+    font: var(--font-display-weight) var(--text-section) /
+      var(--leading-heading) var(--font-display);
+  }
+  .tier .tier-meta {
+    margin-top: auto;
+    padding-top: var(--space-3);
+    color: var(--muted);
+    font: var(--text-caption) / var(--leading-label) var(--font-mono);
+  }
+  .tier-real {
+    grid-column: 1 / -1;
+  }
+  .tier-void {
+    box-shadow: none;
+    border-style: dashed;
+  }
+  .tier-void .tier-price {
+    color: var(--muted);
+  }
+
+  /* The rubber stamp from the routing slip. Decorative only. */
+  .stamp {
+    position: absolute;
+    right: var(--space-4);
+    bottom: var(--space-4);
+    padding: var(--space-2) var(--space-4);
+    border: 2px solid currentColor;
+    outline: 1px solid currentColor;
+    outline-offset: calc(var(--space-2) / 2);
+    color: var(--ink);
+    opacity: 0.45;
+    transform: rotate(-8deg);
+    font: var(--text-section) / 1 var(--font-mono);
+    letter-spacing: 0.2em;
+    pointer-events: none;
+    user-select: none;
+  }
+  .stamp-small {
+    top: var(--space-5);
+    right: var(--space-4);
+    bottom: auto;
+    padding: calc(var(--space-2) / 2) var(--space-2);
+    font-size: var(--text-small);
+  }
+
+  .funds-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: var(--space-8);
+    align-items: start;
+  }
+  .funds {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--text-small);
+  }
+  .funds th,
+  .funds td {
+    padding: var(--space-3) var(--space-2);
+    border-bottom: 1px solid var(--hairline);
+    text-align: left;
+    vertical-align: baseline;
+    font-weight: 400;
+  }
+  .funds th:first-child {
+    padding-left: 0;
+  }
+  .funds td,
+  .funds thead th:not(:first-child) {
+    text-align: right;
+    font-family: var(--font-mono);
+    font-variant-ligatures: none;
+    white-space: nowrap;
+  }
+  .funds td:last-child,
+  .funds thead th:last-child {
+    padding-right: 0;
+  }
+  .funds thead th {
+    color: var(--muted);
+    font: var(--text-caption) / var(--leading-label) var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .funds tfoot th,
+  .funds tfoot td {
+    border-bottom: 0;
+    border-top: 1px solid var(--ink);
+  }
+  .funds tfoot th {
+    font-weight: 600;
+  }
+
+  /* The labels are real text at real sizes; only the line stretches. */
+  .chart {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-rows: calc(var(--space-20) * 2) auto;
+    gap: var(--space-2) var(--space-3);
+    padding: var(--sheet-padding);
+    border-bottom: 1px solid var(--ink);
+    font: var(--text-caption) / var(--leading-label) var(--font-mono);
+  }
+  .chart-floors {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    color: var(--muted);
+    text-align: right;
+  }
+  .chart-plot {
+    position: relative;
+    border-bottom: 1px solid var(--hairline);
+    border-left: 1px solid var(--hairline);
+  }
+  .chart-plot svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+  .chart-plot polyline {
+    fill: none;
+    stroke: var(--ink);
+    stroke-width: 2px;
+  }
+  .chart-here {
+    position: absolute;
+    left: var(--space-2);
+    bottom: var(--space-4);
+  }
+  .chart-years {
+    grid-column: 2;
+    display: flex;
+    justify-content: space-between;
+    color: var(--muted);
+  }
+  .altitude figcaption {
+    color: var(--muted);
+  }
+
+  .stretch {
+    padding: 0;
+    list-style: none;
+    border-top: 1px solid var(--hairline);
+  }
+  .stretch li {
+    display: grid;
+    grid-template-columns: minmax(0, 14rem) minmax(0, 1fr);
+    gap: var(--space-2) var(--space-6);
+    padding-block: var(--space-3);
+    border-bottom: 1px solid var(--hairline);
+  }
+  .stretch-amount {
+    font: var(--text-small) / var(--leading-body) var(--font-mono);
+    color: var(--muted);
+  }
+
+  .risks {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-6) var(--space-8);
+  }
+  .risks dt,
+  .faq dt {
+    font-weight: 600;
+  }
+  .risks dd,
+  .faq dd {
+    margin-top: var(--space-2);
+    color: var(--muted);
+  }
+  .line-label {
+    color: var(--ink);
+    font-family: var(--font-mono);
+    font-size: var(--text-small);
+  }
+
+  .log-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    gap: var(--space-12);
+  }
+  .updates {
+    display: grid;
+    gap: var(--space-5);
+    padding: 0;
+    list-style: none;
+  }
+  .updates h3 {
+    font: var(--text-small) / var(--leading-label) var(--font-mono);
+    letter-spacing: 0;
+    color: var(--muted);
+  }
+  .updates p {
+    margin-top: var(--space-2);
+  }
+  .comments {
+    display: grid;
+    gap: var(--space-4);
+    padding: 0;
+    list-style: none;
+  }
+  .comments li {
+    padding-bottom: var(--space-4);
+    border-bottom: 1px dashed var(--hairline);
+  }
+  .comments li:last-child {
+    border-bottom: 0;
+    padding-bottom: 0;
+  }
+  .comment-author {
+    margin-top: var(--space-2);
+    color: var(--muted);
+    font: var(--text-caption) / var(--leading-label) var(--font-mono);
+  }
+
+  .faq {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-6) var(--space-8);
+  }
+
+  .closing {
+    padding-block: var(--space-20);
+    text-align: center;
+  }
+  .closing h2 {
+    margin-block: var(--space-4);
+    font-size: var(--text-section);
+    letter-spacing: -0.045em;
+  }
+  .closing p:not(.eyebrow) {
+    margin-bottom: var(--space-6);
+    color: var(--muted);
+  }
+
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  @media (max-width: 1000px) {
+    .tiers {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .funds-grid,
+    .pitch {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+  @media (max-width: 860px) {
+    .truth-body,
+    .log-grid,
+    .risks,
+    .faq {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .truth-body {
+      gap: var(--space-6);
+    }
+  }
+  @media (max-width: 767px) {
+    .campaign-head {
+      padding-block: var(--space-10) var(--space-6);
+    }
+    .section,
+    .closing {
+      padding-block: var(--space-12);
+    }
+    .pitch {
+      padding-block: var(--space-8) var(--space-12);
+      gap: var(--space-6);
+    }
+    .intro,
+    .section-lead,
+    .truth-list {
+      font-size: var(--text-body);
+    }
+    .truth-list {
+      padding-inline-start: var(--space-4);
+    }
+  }
+  @media (max-width: 600px) {
+    .tiers {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .stretch li {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 0;
+    }
+    .stats {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .stamp {
+      font-size: var(--text-subtitle);
+    }
+    .stamp-small {
+      font-size: var(--text-small);
+    }
+  }
+</style>

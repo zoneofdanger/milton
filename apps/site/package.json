@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@milton/theme": "workspace:*",
+    "@vercel/analytics": "2.0.1",
     "astro": "7.3.5"
   },
   "devDependencies": {

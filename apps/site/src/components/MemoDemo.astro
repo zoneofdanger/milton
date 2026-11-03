@@ -12,56 +12,32 @@ import { memoExample } from "./memo-example";
     <span>Did you get that memo?</span>
   </div>
   <div class="scene-stage sheet-content">
-    <section
-      class="scene"
-      id="memo-scene-0"
-      data-scene
-      aria-label="The reminder"
-    >
-      <ol class="chat">
-        <li>
-          <span class="speaker">You</span>
-          <p>{memoExample.request}</p>
-        </li>
-        <li>
-          <span class="speaker">Assistant</span>
-          <p>{memoExample.reply}</p>
-        </li>
-        <li>
-          <span class="speaker">You</span>
-          <p>You just did it.</p>
-        </li>
-        <li>
-          <span class="speaker">Assistant</span>
-          <p>Fair pushback. That’s on me.</p>
-        </li>
-      </ol>
-    </section>
-    <section
-      class="scene"
-      id="memo-scene-1"
-      data-scene
-      aria-label="File the memo and read it next time"
-    >
-      <ol class="chat">
-        <li>
-          <span class="speaker">You</span>
-          <p>Milton, go ahead and file this: no em dashes.</p>
-        </li>
-        <li>
-          <span class="speaker">Assistant</span>
-          <p>Milton got the memo. {memoExample.preference}</p>
-        </li>
-        <li>
-          <span class="speaker">You · new chat</span>
-          <p>Did you get that memo?</p>
-        </li>
-        <li class="received">
-          <span class="speaker">Assistant</span>
-          <p>Got it. {memoExample.preference}</p>
-        </li>
-      </ol>
-    </section>
+    {memoExample.scenes.map((scene, index) => (
+      <section
+        class="scene"
+        id={`memo-scene-${index}`}
+        data-scene
+        aria-labelledby={`memo-scene-${index}-label`}
+      >
+        <p class="scene-label eyebrow" id={`memo-scene-${index}-label`}>
+          {scene.label}
+        </p>
+        <ol class="chat">
+          {scene.turns.map((turn) => (
+            <li>
+              <span class="speaker">{turn.speaker}</span>
+              {turn.text && <p data-stream>{turn.text}</p>}
+              {turn.excerpt && (
+                <blockquote class="excerpt">
+                  <p data-stream>{turn.excerpt.body}</p>
+                  <p data-stream>{turn.excerpt.signature}</p>
+                </blockquote>
+              )}
+            </li>
+          ))}
+        </ol>
+      </section>
+    ))}
   </div>
 </figure>
 
@@ -75,35 +51,41 @@ import { memoExample } from "./memo-example";
     const messages = panels.map((panel) =>
       Array.from(panel.querySelectorAll<HTMLElement>(".chat > li")).map(
         (unit) => {
-          const paragraph = unit.querySelector("p");
-          const text =
-            paragraph?.textContent?.replace(/\s+/g, " ").trim() ?? "";
-          let visual: HTMLSpanElement | null = null;
-          if (paragraph) {
+          // A message types its lines in order: its text, then any excerpt's body
+          // and signature.
+          const lines = Array.from(
+            unit.querySelectorAll<HTMLElement>("[data-stream]"),
+          ).map((paragraph) => {
+            const text =
+              paragraph.textContent?.replace(/\s+/g, " ").trim() ?? "";
             // Keep the complete text for layout and assistive technology. Only its
             // aria-hidden visual copy types in, so line wrapping never moves the card.
             const source = document.createElement("span");
             source.className = "stream-source";
             source.textContent = text;
-            visual = document.createElement("span");
+            const visual = document.createElement("span");
             visual.className = "stream-visual";
             visual.setAttribute("aria-hidden", "true");
             paragraph.classList.add("stream-line");
             paragraph.replaceChildren(source, visual);
-          }
-          return { unit, text, visual };
+            return { text, visual };
+          });
+          return { unit, lines };
         },
       ),
     );
+    // One typing speed for every character: main's 900 ms per message averaged
+    // 30.6 ms per character, rounded up. The holds follow each message.
     const timing = {
-      type: 900,
-      between: 600,
-      scene: 1200,
-      end: 2000,
+      character: 31,
+      between: 300,
+      scene: 1000,
+      end: 1600,
       entrance: 350,
     };
     let scene = 0;
     let message = 0;
+    let line = 0;
     let character = 0;
     let sceneComplete = false;
     let inView = false;
@@ -121,11 +103,12 @@ import { memoExample } from "./memo-example";
     };
     const resetScene = () => {
       message = 0;
+      line = 0;
       character = 0;
       sceneComplete = false;
-      messages[scene].forEach(({ unit, visual }) => {
+      messages[scene].forEach(({ unit, lines }) => {
         unit.classList.add("pending");
-        if (visual) visual.textContent = "";
+        lines.forEach(({ visual }) => (visual.textContent = ""));
       });
       render();
     };
@@ -141,12 +124,18 @@ import { memoExample } from "./memo-example";
       }
       const current = messages[scene][message];
       current.unit.classList.remove("pending");
-      if (current.visual && character < current.text.length) {
+      const typing = current.lines[line];
+      if (typing) {
         character += 1;
-        current.visual.textContent = current.text.slice(0, character);
-        delay = timing.type / current.text.length;
+        typing.visual.textContent = typing.text.slice(0, character);
+        if (character >= typing.text.length) {
+          line += 1;
+          character = 0;
+        }
+        delay = timing.character;
       } else if (message < messages[scene].length - 1) {
         message += 1;
+        line = 0;
         character = 0;
         delay = timing.between;
       } else {
@@ -214,7 +203,7 @@ import { memoExample } from "./memo-example";
     transition: opacity 160ms ease;
     display: flex;
     flex-direction: column;
-    justify-content: center;
+    justify-content: flex-start;
   }
   .enhanced .scene.active {
     visibility: visible;
@@ -231,9 +220,23 @@ import { memoExample } from "./memo-example";
     border-left: 2px solid var(--hairline);
     padding: var(--space-3) var(--space-4);
   }
-  .chat > .received {
+  .scene-label {
+    margin-bottom: var(--space-3);
+  }
+  /* A saved-report excerpt, set like a sample on a report: typed text in a
+     dashed box on the ground, apart from the chat turns around it. */
+  .excerpt {
+    margin: 0;
+    padding: var(--space-3) var(--space-4);
+    border: 1px dashed var(--hairline);
     background: var(--ground);
-    border-color: var(--ink);
+    font: var(--text-small) / var(--leading-body) var(--font-mono);
+  }
+  p + .excerpt {
+    margin-top: var(--space-3);
+  }
+  .excerpt > p + p {
+    margin-top: var(--space-2);
   }
   .speaker {
     display: block;

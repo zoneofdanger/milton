@@ -6,6 +6,7 @@ import {
 } from "drizzle-orm/neon-serverless";
 import type { SQL } from "drizzle-orm";
 import { StoreError } from "./errors";
+import { logUnexpected } from "../error-log";
 
 export interface StoreSession {
   query<Row extends Record<string, unknown> = Record<string, unknown>>(
@@ -122,10 +123,13 @@ export const triggerRefusals = new Map<
 
 export function databaseFailure(error: unknown): StoreError {
   if (error instanceof StoreError) return error;
+  // Logged when unrecognized: the innermost error that carries a code.
+  let logged = error;
   const seen = new Set<object>();
   while (typeof error === "object" && error !== null && !seen.has(error)) {
     seen.add(error);
     if ("code" in error) {
+      logged = error;
       if (error.code === "23505")
         return new StoreError(
           "unique_violation",
@@ -150,6 +154,7 @@ export function databaseFailure(error: unknown): StoreError {
     }
     error = "cause" in error ? error.cause : undefined;
   }
+  logUnexpected("store", logged);
   return new StoreError(
     "store_unavailable",
     "The memo store is unavailable. Try again.",

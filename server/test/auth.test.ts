@@ -1955,3 +1955,31 @@ test("an unexpected error on a page logs one line with its class and code, never
     failing.mockRestore();
   }
 });
+
+test("an unrecognized database failure logs its class and code once, never its message", async () => {
+  const { databaseFailure } = await import("../src/store/database");
+  const logged = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    const failure = databaseFailure(
+      Object.assign(new TypeError("postgres://user:pw@db.private.example"), {
+        code: "57P01",
+      }),
+    );
+    expect(failure.code).toBe("store_unavailable");
+    // Already typed: no second line.
+    databaseFailure(failure);
+    // A mapped trigger refusal is an answer, not a failure.
+    databaseFailure({ code: "P0001", message: "sample_is_append_only" });
+    expect(logged).toHaveBeenCalledTimes(1);
+    const line = String(logged.mock.calls[0]![0]);
+    expect(JSON.parse(line)).toEqual({
+      event: "unexpected_error",
+      where: "store",
+      class: "TypeError",
+      code: "57P01",
+    });
+    expect(line).not.toContain("private.example");
+  } finally {
+    logged.mockRestore();
+  }
+});

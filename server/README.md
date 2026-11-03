@@ -264,6 +264,14 @@ outcome without another memo-update charge. That receipt's version may be
 older than the current report. Reusing an ID with different arguments is rejected.
 For a conflict, reread the cover sheet and reconsider a new request. No blind retry.
 
+Replay does not depend on the phase. Account gates checked before a claim (trial
+access, the memo-update allowance) answer without a receipt, so the same request can
+succeed once the gate opens. Every outcome decided after them completes a receipt,
+whether found while claiming (a version conflict, `request_too_large`,
+`memo_body_limit`) or while applying (a conflict, an edit, move, sample or size
+refusal, or a trial that ended mid-save): the same request ID and input replay that
+outcome, and different input under that ID is `request_id_reused`.
+
 Every save needs at least one structured field; a save with only `text` is refused
 with `invalid_input`: "Name the report and send the rule's text in rules." `text` is
 the stated purpose for every save: recorded with the accepted change, never stored or
@@ -318,6 +326,9 @@ there, in any letter case, files under that kind (including a kind whose samples
 all retired, which reads no longer list); otherwise it creates one. `replaces` names an active sample of the
 same kind, retired as `replaced`. `retire_samples` lists active sample IDs, retired as
 `removed`. After an insert the oldest beyond two per kind is retired as `evicted`.
+A `sample` whose text is byte-identical to an active sample of the same kind inserts
+nothing and evicts nothing (a `replaces` naming another sample still retires it); a
+save that then changes nothing returns `unchanged` and charges nothing.
 Sample errors fail with `sample_conflict`. A `saved` result carries
 `samples_retired: [{id, reason}]` whenever a sample was retired, and replay returns
 it unchanged. Report reads list each active sample as `{id, kind_id, kind, context,

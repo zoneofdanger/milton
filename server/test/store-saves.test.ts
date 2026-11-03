@@ -1075,3 +1075,57 @@ test("accepted change evidence replays once and rolls back with an over-quota sa
     await local.dispose();
   }
 });
+
+test("a conflict or refusal in the claim phase stores a receipt and replays like one found in the apply phase", async () => {
+  const local = await localStore();
+  try {
+    await seedUsers(local.pg, "replay");
+    const store = fixtureStore(local.db, "replay");
+    const initial = await store.getTpsReport();
+    const rule = (text: string, expected_version = initial.version) => ({
+      text: "A fictional rule.",
+      rules: [{ report: "cover" as const, text }],
+      request_id: crypto.randomUUID(),
+      expected_version,
+    });
+    expect((await store.saveMemo(rule("First."))).status).toBe("saved");
+    const stale = rule("Stale.");
+    const conflict = await store.saveMemo(stale);
+    expect(conflict).toMatchObject({ status: "conflict" });
+    // The account moves on; the same request still replays its first outcome.
+    const current = await store.getTpsReport();
+    expect(
+      (await store.saveMemo(rule("Second.", current.version))).status,
+    ).toBe("saved");
+    expect(await store.saveMemo(stale)).toEqual(conflict);
+    await expect(
+      store.saveMemo({ ...stale, text: "Different input." }),
+    ).rejects.toMatchObject({ code: "request_id_reused" });
+    // A refusal decided against the request replays the same way.
+    const oversized = {
+      ...rule("Large.", (await store.getTpsReport()).version),
+      rules: ["a", "b", "c"].map((c) => ({
+        report: "cover" as const,
+        text: c.repeat(30000),
+      })),
+    };
+    const refused = await store.saveMemo(oversized);
+    expect(refused).toMatchObject({
+      status: "failed",
+      error: "request_too_large",
+    });
+    expect(await store.saveMemo(oversized)).toEqual(refused);
+    await expect(
+      store.saveMemo({ ...oversized, text: "Different input." }),
+    ).rejects.toMatchObject({ code: "request_id_reused" });
+    expect(
+      (
+        await local.pg.query<{ status: string }>(
+          "SELECT result_json->>'status' AS status FROM save_requests WHERE user_id='replay' AND completed ORDER BY created_at",
+        )
+      ).rows.map((row) => row.status),
+    ).toEqual(["saved", "conflict", "saved", "failed"]);
+  } finally {
+    await local.dispose();
+  }
+});

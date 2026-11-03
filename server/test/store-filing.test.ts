@@ -1019,3 +1019,37 @@ test("an account has no card count limit: 120 creates and 60 removals all save",
     await local.dispose();
   }
 }, 30000);
+
+test("a sample identical to an active one of its kind is unchanged: no copy, no eviction, no charge", async () => {
+  const f = await filingFixture("same-sample");
+  try {
+    await f.local.pg.exec(enableMemoUpdates);
+    const sample = (text: string, kind: object) => ({
+      sample: { report: "email", context: "after a call", text, ...kind },
+    });
+    await f.save(sample("One", { new_kind: "Follow-up" }));
+    const kind = (await f.report("email")).samples[0]!;
+    await f.save(sample("Two", { kind_id: kind.kind_id }));
+    const before = (await f.report("email")).samples;
+    const version = (await f.store.getTpsReport()).version;
+    for (const repeat of [
+      sample("One", { kind_id: kind.kind_id }),
+      sample("One", { new_kind: "follow-UP" }),
+    ])
+      expect(await f.save(repeat)).toMatchObject({
+        status: "unchanged",
+        memo_update: { state: "released", charged: 0 },
+      });
+    expect((await f.report("email")).samples).toEqual(before);
+    expect((await f.store.getTpsReport()).version).toBe(version);
+    // Bytes, not meaning: any other text still files.
+    expect(
+      await f.save(sample("One.", { kind_id: kind.kind_id })),
+    ).toMatchObject({
+      status: "saved",
+      samples_retired: [{ id: kind.id, reason: "evicted" }],
+    });
+  } finally {
+    await f.local.dispose();
+  }
+});

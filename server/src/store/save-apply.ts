@@ -159,6 +159,22 @@ export async function applySave(
         await tx.query(sql`UPDATE samples SET retired_at=clock_timestamp(),retire_reason=${reason},retired_request_id=${input.request_id}
           WHERE user_id=${userId} AND id=${id} AND retired_at IS NULL ${kindId === undefined ? sql`` : sql`AND kind_id=${kindId}`} RETURNING id`)
       ).length > 0;
+    // A sample whose bytes equal an active sample of its kind files nothing:
+    // no copy, no eviction. A replacement of some other sample still applies.
+    const sampleReport = input.sample && resolveReportId(input.sample.report)!;
+    const duplicate =
+      input.sample &&
+      (
+        await tx.query<{ id: string }>(sql`SELECT s.id FROM samples s
+          JOIN sample_kinds k ON k.user_id=s.user_id AND k.id=s.kind_id
+          WHERE s.user_id=${userId} AND s.report=${sampleReport} AND s.retired_at IS NULL AND s.body=${input.sample.text}
+          AND ${input.sample.kind_id === undefined ? sql`lower(k.label)=lower(${input.sample.new_kind!})` : sql`k.id=${input.sample.kind_id}`}
+          LIMIT 1`)
+      )[0]?.id;
+    const sampleSkipped =
+      duplicate !== undefined &&
+      (input.sample!.replaces === undefined ||
+        input.sample!.replaces === duplicate);
     const applySamples = async () => {
       for (const id of input.retire_samples ?? []) {
         if (!(await retireSample(id, "removed")))
@@ -168,8 +184,8 @@ export async function applySave(
         retired.push({ id, reason: "removed" });
       }
       const sample = input.sample;
-      if (!sample) return;
-      const report = resolveReportId(sample.report)!;
+      if (!sample || sampleSkipped) return;
+      const report = sampleReport!;
       let kindId = sample.kind_id;
       if (kindId === undefined) {
         // A label already used in this report, in any letter case, is
@@ -202,6 +218,7 @@ export async function applySave(
           );
         retired.push({ id: sample.replaces, reason: "replaced" });
       }
+      if (duplicate !== undefined) return;
       await tx.query(sql`INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,replaces_id)
         VALUES (${userId},${randomUUID()},${report},${kindId},${sample.context},${sample.text},${attribution},${sample.replaces ?? null})`);
       // Newest two per kind stay; every eviction is reported.
@@ -251,7 +268,8 @@ export async function applySave(
         .map((m) => [m.id, m.report]),
     );
     const samplesChanged =
-      input.sample !== undefined || input.retire_samples !== undefined;
+      (input.sample !== undefined && !sampleSkipped) ||
+      input.retire_samples !== undefined;
     const unchanged =
       !samplesChanged &&
       moveTo.size === 0 &&

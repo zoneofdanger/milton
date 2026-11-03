@@ -406,14 +406,6 @@ test("tenants with overlapping card, sample and request IDs never read, edit or 
         }),
       ),
     ).toMatchObject({ status: "conflict", version: betaVersion });
-    // (a) Alpha's exact request from Beta gets Beta's refusal, never Alpha's receipt.
-    const copied = read(await beta.tools.create_memo(alphaRule));
-    expect(copied).toMatchObject({
-      status: "conflict",
-      request_id: alphaRule.request_id,
-      version: betaVersion,
-    });
-    expect(JSON.stringify(copied)).not.toContain(alphaSaved.version);
     // (a) Alpha's request ID with Beta's own input files fresh for Beta.
     const betaReuse = {
       ...emailRule("- Beta keeps it short."),
@@ -423,6 +415,11 @@ test("tenants with overlapping card, sample and request IDs never read, edit or 
     const betaSaved = read(await beta.tools.create_memo(betaReuse));
     expect(betaSaved.status).toBe("saved");
     expect(betaSaved.version).not.toBe(alphaSaved.version);
+    // (a) Alpha's exact request from Beta meets Beta's own receipt for that
+    // request ID, never Alpha's.
+    const copied = read(await beta.tools.create_memo(alphaRule));
+    expect(copied.error).toBe("request_id_reused");
+    expect(JSON.stringify(copied)).not.toContain(alphaSaved.version);
     const betaSample = {
       ...alphaSample,
       expected_version: betaSaved.version,

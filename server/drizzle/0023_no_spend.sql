@@ -7,6 +7,10 @@
 -- rollback/0023_no_spend.sql restores the empty shape.
 SET LOCAL lock_timeout = '10s';
 --> statement-breakpoint
+-- Lock in the save path's order (store_config, then save_requests) so a live
+-- save cannot deadlock with this transaction.
+LOCK TABLE "store_config", "save_requests" IN ACCESS EXCLUSIVE MODE;
+--> statement-breakpoint
 DROP TRIGGER save_foreground_reservation ON save_requests;
 --> statement-breakpoint
 DROP FUNCTION milton_foreground_reservation();

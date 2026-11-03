@@ -34,7 +34,7 @@ const schemaCatalog = async (pg: PGlite) => {
       "SELECT tgname,pg_get_triggerdef(oid) AS definition FROM pg_trigger WHERE NOT tgisinternal ORDER BY tgname",
     ),
     functions: await rows(
-      "SELECT proname,pg_get_functiondef(oid) AS definition FROM pg_proc WHERE pronamespace='public'::regnamespace AND proname LIKE 'milton_%' ORDER BY proname",
+      "SELECT proname,pg_get_functiondef(oid) AS definition FROM pg_proc WHERE pronamespace='public'::regnamespace AND (proname LIKE 'milton_%' OR proname LIKE 'guard_%') ORDER BY proname",
     ),
     extensions: await rows(
       "SELECT extname FROM pg_extension WHERE extname<>'plpgsql' ORDER BY extname",

@@ -767,8 +767,12 @@ accounting, the daily call limit, replay, fences and trials are unchanged.
 
 Release order: the new image references no dropped object and runs on either schema.
 
-1. Export the five spend tables and `store_config.spend_feed_key_hash` to private
-   release storage (no personal data: daily totals, alert rows, alert envelopes).
+1. Export `spend_alert_emails` only, as the record Peter keeps, to
+   `~/code/milton-archive/` on his machine (owner: Peter; it holds the operator
+   recipient address and alert envelopes, no account rows). The usage ledgers are
+   keyed by account identifier, including deleted accounts, so they are not
+   exported; the pre-0023 snapshot is their only copy and expires with Neon's
+   retention.
 2. Release the image to MCP and app from the manifests in this directory.
 3. Pause `projects/milton-510506/locations/us-east1/jobs/milton-gardening` and wait
    180 seconds.

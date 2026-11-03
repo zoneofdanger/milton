@@ -24,7 +24,7 @@ export type UpdateReceipt = {
   memo_updates_enabled: boolean;
 };
 
-// Call only after both locks. A materialized expression evaluates the DB clock once.
+// Call only after the account lock. A materialized expression evaluates the DB clock once.
 export async function claimClock(tx: StoreSession): Promise<ClaimClock> {
   return (
     await tx.query<ClaimClock>(sql`WITH stamp AS MATERIALIZED (SELECT clock_timestamp() AS at)

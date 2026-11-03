@@ -822,7 +822,8 @@ derivation columns with their checks, and the `vector` extension. `gardening_usa
 and `derivation_usage` stay as frozen ledgers because spend totals read them; a later
 migration drops them no earlier than 31 days after their newest row. The 0018 rollback
 script recreates the dropped objects empty; their data is recoverable only from the
-pre-migration snapshot. Release the code before applying 0018; see
+pre-migration snapshot; since 0022, run `rollback/0022_no_model_gate.sql` first, because the
+0018 rollback re-adds a check on `global_spend_policy`. Release the code before applying 0018; see
 [the hosting runbook](deploy/README.md#derived-systems-removal-0018). The
 [research note](../docs/research/derived-systems-2026.md) records what was measured and
 what would justify rebuilding any of it.

@@ -223,6 +223,8 @@ export function pageContext(
     url,
     csrfName,
     loopName,
+    // Set by the sign-in routes; the error page links back to it.
+    loginRecovery: undefined as string | undefined,
     cookies,
     writeCookie,
     csrfField,

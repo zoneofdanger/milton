@@ -10,7 +10,7 @@ history, the current report snapshot and request receipts; Neon Auth handles sig
 ## Prerequisites
 
 - Bun, using the version pinned in the repository's root `package.json`, and Node 26 LTS.
-- A Neon project with Auth and its OAuth provider plugin enabled. Create a Postgres database named `milton`. The migration and import commands require the `neondb_owner` role, and database connections require TLS.
+- A Neon project with Auth and its OAuth provider plugin enabled. Create a Postgres database named `milton`. The migration and import commands require the `neondb_owner` role; the app and MCP connect as a login role in `milton_runtime` (0024), never the owner. Database connections require TLS.
 - A Google OAuth app, a GitHub OAuth app, or both. Configure their credentials in Neon Auth for your branch.
 - A Google Cloud project for Cloud Run, Artifact Registry, Secret Manager and an HTTPS load balancer.
 - An HTTPS origin for the browser app and an HTTPS URL ending in `/mcp` for assistants. They can share one hostname. The public service uses `app.meetmilton.com` and `mcp.meetmilton.com`; use your own addresses for your installation.
@@ -77,7 +77,7 @@ Set these in the runtime's platform configuration or dotenvx payload before depl
 | `MCP_RESOURCE`            | The exact public MCP resource URL, ending in `/mcp`. Tokens must include this resource in their audience.                                         |
 | `NEON_AUTH_BASE_URL`      | The exact branch Auth URL copied from Neon, including its database and Auth path, without a trailing slash. It is also the expected token issuer. |
 | `NEON_AUTH_COOKIE_SECRET` | A fresh random server-only secret of at least 32 characters for browser session cookies.                                                          |
-| `DATABASE_URL`            | The TLS connection string for the `milton` database. Use the owner connection for migrations and imports.                                         |
+| `DATABASE_URL`            | The TLS connection string for the `milton` database. Services use the runtime role's connection (0024); migrations and imports use the owner's.   |
 | `MILTON_SUPPORT_EMAIL`    | Optional. The support address the account pages give; `support@meetmilton.com` when unset. The MCP address pages show is `MCP_RESOURCE`.          |
 
 Saves are model-free: Milton stores the exact text the assistant sends and calls no
@@ -771,3 +771,43 @@ route fails, closed, with 503. `drizzle/rollback/0023_no_spend.sql` recreates ev
 dropped object empty (feed key NULL); the data returns only from the pre-0023 snapshot
 or the export. Run it before any older rollback script that touches these objects
 (0015, 0009, 0007). See [the hosting runbook](deploy/README.md#spend-subsystem-removal-0023).
+
+### Runtime role (0024)
+
+The app and MCP do not connect as the database owner. Migration 0024 creates
+`milton_runtime`, a NOLOGIN group role, and the services connect as `milton_app`, a
+login role created with SQL whose only membership is `milton_runtime` (membership
+inherits, so no `SET ROLE`). Each table gets only the statements the runtime, or a
+trigger it fires, runs on it:
+
+| Grant                          | Tables and why                                                                                                                                                                                    |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| SELECT, INSERT, UPDATE, DELETE | `users`: sign-up, the account lock, retained bytes kept by triggers, and account deletion (its cascades run as the table owner)                                                                   |
+| SELECT, INSERT, DELETE         | `assistant_disconnects`: disconnect, the refusal check, reconnect on Allow                                                                                                                        |
+| SELECT, INSERT, UPDATE         | `save_requests` (claims and receipts), `samples` (retirement), `tps_reports` (snapshot upsert), `trial_accounts` (notice stage), `usage_daily` (daily call upsert)                                |
+| SELECT, INSERT                 | `identities`, `deleted_identities`, `instruction_cards`, `instruction_card_versions`, `sample_kinds`, and the legacy `memos`, `memo_versions` and `memo_cards` (the signup seed and its triggers) |
+| INSERT                         | `accepted_changes`: provenance, written once per save and never read by the runtime                                                                                                               |
+| SELECT, UPDATE (`singleton`)   | `store_config`: settings are read under `FOR UPDATE`, which needs one updatable column; no setting can be changed                                                                                 |
+| USAGE                          | the `instruction_card_position` sequence (new card positions) and schema `public`; CONNECT on the database                                                                                        |
+
+The role owns nothing, so it cannot alter, drop or truncate a table, disable a
+trigger, set `session_replication_role`, create objects in `public` or read the
+`drizzle` journal. The triggers guard updates and deletes on the tables the runtime
+may change; where no trigger guards a row, the grant is what protects it. The runtime
+cannot delete from `save_requests` (which would erase memo-update accounting),
+`deleted_identities` or `trial_accounts` (which would let a deleted identity start a
+second trial) or `usage_daily` (which would reset the daily call count), and cannot
+change any `store_config` setting. Default privileges give tables later migrations
+create SELECT, INSERT and UPDATE and sequences USAGE; a migration grants DELETE itself
+where the runtime needs it. Trigger functions run as the caller and need no EXECUTE
+grant; the runtime calls no function directly and runs no statement that needs
+ownership (`SET LOCAL` timeouts, `FOR UPDATE` and `ON CONFLICT` need only these
+grants).
+
+Migrations, imports and `scripts/memo-updates.ts` keep the owner connection and refuse
+any other role; changing `store_config` settings is an owner operation.
+`drizzle/rollback/0024_runtime_role.sql` revokes every grant and drops the group role;
+it refuses while a login role is still a member. See
+[the hosting runbook](deploy/README.md#runtime-role-0024) for creating `milton_app`
+(with SQL, because Neon puts console and API roles in `neon_superuser`) and switching
+the services' secrets.

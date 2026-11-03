@@ -1,5 +1,12 @@
 import { expect, test } from "bun:test";
-import { drizzleSql, migratedThrough, migrationsThrough } from "./local-store";
+import {
+  drizzleSql,
+  migratedThrough,
+  migrationsThrough,
+  storeDatabase,
+} from "./local-store";
+import { fixtureStore, seedUsers } from "./store-fixtures";
+import { checkRuntimeRole } from "../scripts/check-runtime-role";
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
@@ -41,6 +48,246 @@ const schemaCatalog = async (pg: PGlite) => {
     ),
   };
 };
+
+test("0024 runtime role saves through its grants, cannot change the schema or bypass a trigger, and rolls back", async () => {
+  const base = await migratedThrough(23);
+  const pg = await migratedThrough(23);
+  const post = await migratedThrough(24);
+  try {
+    const up = await drizzleSql("0024_runtime_role.sql");
+    const down = await drizzleSql("rollback/0024_runtime_role.sql");
+    const roles = async (db: PGlite) =>
+      (
+        await db.query(
+          "SELECT rolname,rolcanlogin,rolsuper,rolcreatedb,rolcreaterole,rolreplication,rolbypassrls FROM pg_roles WHERE rolname LIKE 'milton_%' ORDER BY rolname",
+        )
+      ).rows;
+    // What the role may do: object privileges in public and drizzle, the
+    // schema and database grants, and default privileges for later objects.
+    const grants = async (db: PGlite) => ({
+      objects: (
+        await db.query(
+          `SELECT c.relname,c.relkind::text,string_agg(a.privilege_type,',' ORDER BY a.privilege_type) AS privileges
+           FROM pg_class c CROSS JOIN LATERAL aclexplode(c.relacl) a
+           WHERE a.grantee='milton_runtime'::regrole AND c.relnamespace IN ('public'::regnamespace,'drizzle'::regnamespace)
+           GROUP BY 1,2 ORDER BY 1`,
+        )
+      ).rows,
+      columns: (
+        await db.query(
+          `SELECT c.relname,t.attname,string_agg(a.privilege_type,',' ORDER BY a.privilege_type) AS privileges
+           FROM pg_attribute t JOIN pg_class c ON c.oid=t.attrelid CROSS JOIN LATERAL aclexplode(t.attacl) a
+           WHERE a.grantee='milton_runtime'::regrole AND c.relnamespace IN ('public'::regnamespace,'drizzle'::regnamespace)
+           GROUP BY 1,2 ORDER BY 1,2`,
+        )
+      ).rows,
+      schemas: (
+        await db.query(
+          `SELECT nspname,has_schema_privilege('milton_runtime',oid,'USAGE') AS usage,has_schema_privilege('milton_runtime',oid,'CREATE') AS create
+           FROM pg_namespace WHERE nspname IN ('public','drizzle') ORDER BY 1`,
+        )
+      ).rows,
+      connect: (
+        await db.query(
+          "SELECT has_database_privilege('milton_runtime',current_database(),'CONNECT') AS connect",
+        )
+      ).rows,
+      defaults: (
+        await db.query(
+          `SELECT d.defaclobjtype::text AS kind,string_agg(a.privilege_type,',' ORDER BY a.privilege_type) AS privileges
+           FROM pg_default_acl d CROSS JOIN LATERAL aclexplode(d.defaclacl) a
+           WHERE a.grantee='milton_runtime'::regrole AND d.defaclnamespace='public'::regnamespace
+           GROUP BY 1 ORDER BY 1`,
+        )
+      ).rows,
+    });
+    // What the runtime and the triggers it fires run on each table. DELETE
+    // only where the runtime deletes; store_config is locked FOR UPDATE, which
+    // needs one updatable column.
+    const used: Record<string, string> = {
+      accepted_changes: "INSERT",
+      assistant_disconnects: "DELETE,INSERT,SELECT",
+      deleted_identities: "INSERT,SELECT",
+      identities: "INSERT,SELECT",
+      instruction_card_versions: "INSERT,SELECT",
+      instruction_cards: "INSERT,SELECT",
+      memo_cards: "INSERT,SELECT",
+      memo_versions: "INSERT,SELECT",
+      memos: "INSERT,SELECT",
+      sample_kinds: "INSERT,SELECT",
+      samples: "INSERT,SELECT,UPDATE",
+      save_requests: "INSERT,SELECT,UPDATE",
+      store_config: "SELECT",
+      tps_reports: "INSERT,SELECT,UPDATE",
+      trial_accounts: "INSERT,SELECT,UPDATE",
+      usage_daily: "INSERT,SELECT,UPDATE",
+      users: "DELETE,INSERT,SELECT,UPDATE",
+    };
+    const forward = async () => {
+      await pg.exec("BEGIN;" + up + "COMMIT;");
+      expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(post));
+      expect(await roles(pg)).toEqual(await roles(post));
+      expect(await roles(pg)).toEqual([
+        {
+          rolname: "milton_runtime",
+          rolcanlogin: false,
+          rolsuper: false,
+          rolcreatedb: false,
+          rolcreaterole: false,
+          rolreplication: false,
+          rolbypassrls: false,
+        },
+      ]);
+      const granted = await grants(pg);
+      expect(granted).toEqual(await grants(post));
+      // Every application table is listed; the sequence, USAGE only; nothing
+      // in drizzle; no CREATE anywhere.
+      expect(Object.keys(used)).toEqual(await publicTables(pg));
+      expect(granted.objects).toEqual(
+        [
+          ...Object.entries(used).map(([relname, privileges]) => ({
+            relname,
+            relkind: "r",
+            privileges,
+          })),
+          {
+            relname: "instruction_card_position",
+            relkind: "S",
+            privileges: "USAGE",
+          },
+        ].sort((a, b) => (a.relname < b.relname ? -1 : 1)),
+      );
+      expect(granted.columns).toEqual([
+        { relname: "store_config", attname: "singleton", privileges: "UPDATE" },
+      ]);
+      expect(granted.schemas).toEqual([
+        { nspname: "drizzle", usage: false, create: false },
+        { nspname: "public", usage: true, create: false },
+      ]);
+      expect(granted.connect).toEqual([{ connect: true }]);
+      expect(granted.defaults).toEqual([
+        { kind: "S", privileges: "USAGE" },
+        { kind: "r", privileges: "INSERT,SELECT,UPDATE" },
+      ]);
+    };
+    await forward();
+    // Re-running the forward script by hand is a no-op.
+    await pg.exec("BEGIN;" + up + "COMMIT;");
+    expect(await grants(pg)).toEqual(await grants(post));
+
+    await seedUsers(pg, "runtime");
+    // A login role in the group, as milton_app is in Neon. Membership
+    // inherits: the session needs no SET ROLE milton_runtime. PGlite's session
+    // user is a superuser, so SET ROLE stands in for logging in; what is checked
+    // here is the current role's privileges, not the login itself.
+    await pg.exec(
+      "CREATE ROLE milton_app_fixture LOGIN IN ROLE milton_runtime; SET ROLE milton_app_fixture",
+    );
+    const store = fixtureStore(storeDatabase(pg), "runtime", "assistant");
+    try {
+      expect((await pg.query("SELECT current_user AS role")).rows).toEqual([
+        { role: "milton_app_fixture" },
+      ]);
+      // The release check passes for the member and fails for any other role.
+      expect(
+        await checkRuntimeRole(storeDatabase(pg), "milton_app_fixture"),
+      ).toBe(true);
+      expect(await checkRuntimeRole(storeDatabase(pg))).toBe(false);
+      const empty = await store.getTpsReport();
+      const rule = await store.saveMemo({
+        text: "Add a rule.",
+        rules: [{ report: "cover", text: "Be concise." }],
+        expected_version: empty.version,
+        request_id: crypto.randomUUID(),
+      });
+      expect(rule.status).toBe("saved");
+      const sample = await store.saveMemo({
+        text: "Keep this approved email.",
+        expected_version: rule.version!,
+        request_id: crypto.randomUUID(),
+        sample: {
+          report: "email",
+          new_kind: "follow-up",
+          context: "runtime context",
+          text: "Runtime sample body.",
+        },
+      });
+      expect(sample.status).toBe("saved");
+      expect((await store.getTpsReport()).text).toContain("Be concise.");
+      // Owner-only statements are refused.
+      for (const statement of [
+        "ALTER TABLE samples DISABLE TRIGGER samples_guard",
+        "ALTER TABLE samples DISABLE TRIGGER ALL",
+        "ALTER TABLE users DROP COLUMN status",
+        "DROP TABLE samples",
+        "DROP FUNCTION milton_sample_guard() CASCADE",
+        "TRUNCATE samples",
+        "CREATE TABLE public.runtime_made (id int)",
+        "SELECT * FROM drizzle.__drizzle_migrations",
+        "SET session_replication_role = replica",
+        "GRANT milton_runtime TO milton_app_fixture",
+        // Deletes and updates no trigger guards, outside the runtime's grants.
+        "DELETE FROM save_requests",
+        "DELETE FROM usage_daily",
+        "DELETE FROM trial_accounts",
+        "DELETE FROM deleted_identities",
+        "DELETE FROM identities",
+        "UPDATE identities SET user_id=user_id",
+        "UPDATE store_config SET memo_updates_enabled=true",
+        "SELECT * FROM accepted_changes",
+      ])
+        await expect(pg.query(statement)).rejects.toThrow(
+          /must be owner|permission denied/,
+        );
+      // A write a trigger forbids is refused by that trigger, as for the owner.
+      const edit = "UPDATE samples SET body='Edited' WHERE user_id='runtime'";
+      await expect(pg.query(edit)).rejects.toThrow("sample_is_append_only");
+      await pg.exec("RESET ROLE");
+      await expect(pg.query(edit)).rejects.toThrow("sample_is_append_only");
+      // The owner session is a superuser here, not a runtime member.
+      expect(
+        await checkRuntimeRole(storeDatabase(pg), "milton_app_fixture"),
+      ).toBe(false);
+      expect(
+        (await pg.query("SELECT body FROM samples WHERE user_id='runtime'"))
+          .rows,
+      ).toEqual([{ body: "Runtime sample body." }]);
+      // A table a later migration creates gets SELECT, INSERT and UPDATE by
+      // default; DELETE only if that migration grants it.
+      await pg.exec(
+        "CREATE TABLE later_table (id int); SET ROLE milton_app_fixture; INSERT INTO later_table VALUES (1); UPDATE later_table SET id=2",
+      );
+      await expect(pg.query("DELETE FROM later_table")).rejects.toThrow(
+        "permission denied",
+      );
+      await pg.exec("RESET ROLE; DROP TABLE later_table");
+    } finally {
+      await pg.exec("RESET ROLE");
+    }
+
+    // Rollback refuses while a login role is still in the group.
+    await expect(pg.exec(down)).rejects.toThrow(
+      "milton_runtime_has_login_members",
+    );
+    await pg.exec("ROLLBACK");
+    expect(await grants(pg)).toEqual(await grants(post));
+    await pg.exec("DROP ROLE milton_app_fixture");
+    await pg.exec(down);
+    expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(base));
+    expect(await roles(pg)).toEqual([]);
+    expect(
+      (await pg.query("SELECT count(*)::int AS n FROM pg_default_acl")).rows,
+    ).toEqual([{ n: 0 }]);
+    expect(
+      (await pg.query("SELECT body FROM samples WHERE user_id='runtime'")).rows,
+    ).toEqual([{ body: "Runtime sample body." }]);
+    await forward();
+  } finally {
+    await post.close();
+    await pg.close();
+    await base.close();
+  }
+}, 30000);
 
 test("0023 drops the spend subsystem, keeps memo-update accounting, and rolls back to the empty 0022 shape", async () => {
   const base = await migratedThrough(22);

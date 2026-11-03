@@ -10,6 +10,8 @@ interface Props {
 }
 const { title, description, legal = false } = Astro.props;
 const canonical = new URL(Astro.url.pathname, Astro.site);
+/* Astro.url may carry a trailing slash; footer hrefs never do. */
+const currentPath = Astro.url.pathname.replace(/(.)\/$/, "$1");
 
 /* The forty-link footer, for a company of one. Entries without an href are
    plain text and must not look like links. Privacy and Terms live only here
@@ -19,7 +21,7 @@ const footerColumns: {
   entries: { label: string; href?: string }[];
 }[] = [
   { heading: "Product", entries: [{ label: "Milton", href: "/" }] },
-  { heading: "Company", entries: [{ label: "Peter" }] },
+  { heading: "Company", entries: [{ label: "Peter", href: "/about" }] },
   { heading: "Careers", entries: [{ label: "No" }] },
   {
     heading: "Resources",
@@ -99,7 +101,16 @@ const footerColumns: {
               <ul>
                 {entries.map(({ label, href }) => (
                   <li>
-                    {href ? <a href={href}>{label}</a> : <span>{label}</span>}
+                    {href ? (
+                      <a
+                        href={href}
+                        aria-current={href === currentPath ? "page" : undefined}
+                      >
+                        {label}
+                      </a>
+                    ) : (
+                      <span>{label}</span>
+                    )}
                   </li>
                 ))}
               </ul>

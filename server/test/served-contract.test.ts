@@ -137,7 +137,10 @@ test("setup renders from its catalog, per report while empty, under the agent ki
           expect(FILINGS).toContain(report as Filing);
           expect(text).toStartWith("Baseline: ");
           // Served with the report the catalog files it to.
-          expect(setupCatalog).toContainEqual({ report, text });
+          expect(setupCatalog).toContainEqual({
+            report: report as Filing,
+            text: text!,
+          });
           offered.add(JSON.stringify([report, text]));
         }
     }

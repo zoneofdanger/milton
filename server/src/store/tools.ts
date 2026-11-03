@@ -14,7 +14,7 @@ import {
   type Documents,
   type ReportDocument,
 } from "./reports";
-import { setupScript } from "./setup";
+import { noRules, reportSetup, setupHint, SETUP_HOOK_POINTER } from "./setup";
 
 export const coverSheetInput = z.strictObject({
   hook_event: z
@@ -40,16 +40,21 @@ export function storeResult(value: unknown, isError = false): ToolResult {
   };
 }
 /** The cover sheet envelope: rules true of all writing, the version every save
- * fences on, and the fixed index. `is_empty` means the whole account is empty. */
+ * fences on, and the fixed index. `is_empty` means the whole account is empty.
+ * While no rules exist anywhere (samples do not count), `setup` carries the
+ * first setup: the opening lines and email's block with the cover questions. */
 export function coverSheet(documents: Documents & { version: string }) {
   return {
     text: documents.cover,
     version: documents.version,
     is_empty: documents.is_empty,
     reports: documents.index,
-    ...(documents.is_empty ? { setup: setupScript } : {}),
+    ...(noRules(documents) ? { setup: reportSetup(documents, "email") } : {}),
   };
 }
+/** The cover sheet for a lifecycle hook: the script becomes a pointer. */
+export const hookSheet = (sheet: ReturnType<typeof coverSheet>) =>
+  sheet.setup === undefined ? sheet : { ...sheet, setup: SETUP_HOOK_POINTER };
 /** Active samples without their bodies (those stay in text), newest first, so
  * an assistant can reuse a kind or name a sample to replace or remove. */
 const sampleIndex = (report: ReportDocument) =>
@@ -60,6 +65,11 @@ const sampleIndex = (report: ReportDocument) =>
     context: s.context,
     date: s.date,
   }));
+/** A report's setup block, served only while that report has no rules. */
+const setupField = (documents: Documents, id: (typeof REPORT_IDS)[number]) => {
+  const setup = reportSetup(documents, id);
+  return setup === undefined ? {} : { setup };
+};
 export const reportEnvelope = (
   documents: Documents & { version: string },
   id: (typeof REPORT_IDS)[number],
@@ -71,6 +81,7 @@ export const reportEnvelope = (
     version: documents.version,
     is_empty: report.is_empty,
     samples: sampleIndex(report),
+    ...setupField(documents, id),
   };
 };
 export const reportList = (documents: Documents & { version: string }) => ({
@@ -79,6 +90,8 @@ export const reportList = (documents: Documents & { version: string }) => ({
     text: r.body,
     is_empty: r.is_empty,
     samples: sampleIndex(r),
+    // A one-line pointer, so the list stays small; get_report serves the block.
+    ...(r.rules.length === 0 ? { setup: setupHint(r.id) } : {}),
   })),
   version: documents.version,
 });
@@ -136,7 +149,7 @@ export function createStoreMemoTools(store: TenantStore) {
         const sheet = coverSheet(await store.readDocuments());
         return storeResult(
           input?.hook_event
-            ? hookOutput(sheet, input.hook_event)
+            ? hookOutput(hookSheet(sheet), input.hook_event)
             : await withNotice(sheet),
         );
       }),

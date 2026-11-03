@@ -96,8 +96,19 @@ const quote = (body: string) =>
     .map((line) => (line === "" ? ">" : `> ${line}`))
     .join("\n");
 
+/** The prefix setup gives every rule it files. */
+export const BASELINE = "Baseline: ";
+/** Printed first on the cover sheet whenever any active rule is a baseline,
+ * so every assistant reads what the prefix means. Never stored. */
+export const BASELINE_NOTE =
+  "Rules marked Baseline: came from setup picks, not the person's writing; samples and unmarked rules outrank them.";
 export const coverSheetText = (active: CardHead[]) =>
-  rules(active, "cover").map(bullet).join("\n\n");
+  [
+    ...(active.some((h) => ruleText(h.body).startsWith(BASELINE))
+      ? [BASELINE_NOTE]
+      : []),
+    ...rules(active, "cover").map(bullet),
+  ].join("\n\n");
 export const reportIndex = () =>
   REPORTS.map((r) => ({ id: r.id, when: r.when }));
 /** Heading, the when line, samples newest first (context line, quoted body),

@@ -9,6 +9,7 @@ import { exactEditsProposal, exactMoves } from "../exact-edits";
 import { assertTrialAccess } from "./trials";
 import { withMemoUpdate } from "./memo-updates";
 import { publishSave } from "./save-publish";
+import { closestBaseline, knownBaseline } from "./setup";
 import {
   outcomeSchema,
   retiredSample,
@@ -115,6 +116,23 @@ export async function applySave(
     if (onFile.has(printed)) continue;
     onFile.add(printed);
     creates.push({ report, text: rule.text });
+  }
+  // A rule stored with the setup prefix must be a setup rule byte for byte,
+  // in the report it is served for, whether filed new or changed by an exact
+  // edit or a move.
+  const unknown = [
+    ...creates,
+    ...after
+      .filter((card) => card.changed)
+      .map((card) => ({ report: card.report, text: card.body })),
+  ].find((rule) => !knownBaseline(rule.text, rule.report));
+  if (unknown !== undefined) {
+    const closest = closestBaseline(unknown.text);
+    throw new StoreError(
+      "baseline_unknown",
+      `"${describe(unknown.text, 120)}" in ${unknown.report} starts with "Baseline: " but is not a setup rule for that report. Copy the rule and its report exactly from the setup text, or send a rule in the person's own words without "Baseline: ". Closest setup rule: [${closest.report}] "${closest.text}". Nothing was changed.`,
+      422,
+    );
   }
   return await db.transaction(async (tx) => {
     await lock(tx);

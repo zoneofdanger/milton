@@ -41,7 +41,7 @@ const oneLine = (max: number) =>
     .refine((v) => v.isWellFormed() && !/[\r\n\0]/.test(v));
 const oneKind = "A sample needs kind_id or new_kind, not both.";
 const badRules =
-  "rules takes 1–20 entries, each with a report (one of the five, doc or cover) and non-blank text. Nothing was changed.";
+  "rules takes 1–25 entries, each with a report (one of the five, doc or cover) and non-blank text. Nothing was changed.";
 export const saveMemoInput = z.strictObject({
   text: text
     .refine((v) => v.trim().length > 0)
@@ -64,7 +64,7 @@ export const saveMemoInput = z.strictObject({
       }),
     )
     .min(1)
-    .max(20)
+    .max(25)
     .optional()
     .describe(
       "New rules, one entry each. A rule already on file in that report with the same text is skipped.",

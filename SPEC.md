@@ -18,7 +18,8 @@ reports (`email`, `chat`, `post`, `document`, `speech`) or to the cover sheet, t
 rules true of all writing. Approved samples are stored exactly as sent in their own
 append-only table, newest per kind winning and at most two per kind staying active.
 Assembly is deterministic and runs on read: the cover sheet is its rules in
-write-once insertion order; each report prints its heading, its when line, its
+write-once insertion order, after one fixed note on the `Baseline: ` prefix while any
+active rule carries it; each report prints its heading, its when line, its
 samples newest first, then its rules (0017). Every rule prints as one bullet, with
 one stored leading `- ` dropped first so rules filed by the retired compiler and rules
 stored as sent read alike. Card text cannot contain Markdown
@@ -47,7 +48,7 @@ repeated correction, each only with the person's yes; no automatic capture. Clos
 spilling and actual instruction adherence remain outside the server's guarantee.
 
 Every save is exact. `create_memo` needs at least one structured field: `rules`
-(1 to 20 entries of `{ report, text }`, `report` one of the five or `cover`),
+(1 to 25 entries of `{ report, text }`, `report` one of the five or `cover`),
 `exact_edits`, `moves`, `sample` or `retire_samples`. A save with none is refused
 with `invalid_input` ("Name the report and send the rule's text in rules."). Each
 `rules` entry becomes one new card stored byte for byte; its description is its first
@@ -55,7 +56,9 @@ non-blank line, trimmed and cut to the description cap, with no model. An entry 
 text prints like an active card in the same report, or an earlier entry in the same
 request, is skipped; a save that then changes nothing returns `unchanged` and charges
 nothing. `text` is the stated purpose: recorded with the accepted change, never stored
-as a rule. Corrections go through `exact_edits`; an edit whose `before` is a whole rule
+as a rule. A rule stored starting with `Baseline: ` must match the first-setup
+catalog byte for byte, in the report it is served for (`baseline_unknown` otherwise); the setup script served on the
+cover sheet and on each report without rules is rendered from the same data. Corrections go through `exact_edits`; an edit whose `before` is a whole rule
 and whose `after` is empty retires it. All fields resolve against one claimed snapshot
 and apply atomically. Anchors resolve uniquely within active card bodies, never
 against generated text; overlapping edits fail. The source/report fences, receipt and

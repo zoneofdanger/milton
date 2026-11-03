@@ -240,12 +240,12 @@ Clients may need to reconnect to load updated guidance.
 
 Exactly four tools are exposed:
 
-| Tool                                                     | Contract                                                                                                                                                                                                       |
-| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `get_cover_sheet({hook_event?})`                         | Returns `{text, version, is_empty, reports}`: the rules true of all writing, the save fence, whether the whole account is empty, and the index of five reports with their situations. No model call, no write. |
-| `get_report({report_id})`                                | One of `email`, `chat`, `post`, `document` (`doc` accepted), `speech`. Returns `{report_id, text, version, is_empty, samples}`: heading, when line, samples newest first, then rules; see below for `samples`. |
-| `list_reports()`                                         | All five reports as `{reports: [{report_id, text, is_empty, samples}], version}`, without the cover sheet.                                                                                                     |
-| `create_memo({text, request_id, expected_version, ...})` | An exact save with at least one of `rules`, `exact_edits`, `moves`, `sample`, `retire_samples`; `text` states its purpose. UUID for the logical request and version from the cover sheet.                      |
+| Tool                                                     | Contract                                                                                                                                                                                                                                                                                                                                                    |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `get_cover_sheet({hook_event?})`                         | Returns `{text, version, is_empty, reports}`: the rules true of all writing, the save fence, whether the whole account is empty, and the index of five reports with their situations; while no rules exist yet (samples do not count), `setup` carries the first-setup script. No model call, no write.                                                     |
+| `get_report({report_id})`                                | One of `email`, `chat`, `post`, `document` (`doc` accepted), `speech`. Returns `{report_id, text, version, is_empty, samples}`: heading, when line, samples newest first, then rules; see below for `samples`. While the report has no rules, `setup` carries that report's setup block, with the cover-sheet questions while the cover sheet has no rules. |
+| `list_reports()`                                         | All five reports as `{reports: [{report_id, text, is_empty, samples, setup?}], version}`, without the cover sheet; a report without rules has a one-line `setup` pointer to `get_report`.                                                                                                                                                                   |
+| `create_memo({text, request_id, expected_version, ...})` | An exact save with at least one of `rules`, `exact_edits`, `moves`, `sample`, `retire_samples`; `text` states its purpose. UUID for the logical request and version from the cover sheet.                                                                                                                                                                   |
 
 `hook_event` on `get_cover_sheet` returns the cover sheet and report index in
 `hookSpecificOutput.additionalContext` instead of the normal envelope. Supported
@@ -278,7 +278,7 @@ with `invalid_input`: "Name the report and send the rule's text in rules." `text
 the stated purpose for every save: recorded with the accepted change, never stored or
 stored as a rule. Milton runs no model, rewrites nothing and reserves no budget.
 
-New rules go in `rules`, 1-20 entries of `{report, text}`. `report` is one of the five
+New rules go in `rules`, 1-25 entries of `{report, text}`. `report` is one of the five
 reports (`doc` accepted) or `cover`. Each entry becomes one new card holding `text`
 byte for byte; its description is the first non-blank line, trimmed and cut to the
 description cap. Each body must fit the body limit and contain no Markdown heading line
@@ -288,7 +288,10 @@ entry that prints identically to an active card in the same report (compared as
 printed, so `Be concise.` matches a stored `- Be concise.`), or to an earlier entry in
 the request, is skipped; when nothing else changes the save returns
 `unchanged` and charges nothing. Duplicates by meaning are not detected. The assistant
-picks the report and the wording; a wrong report is fixable with `moves`.
+picks the report and the wording; a wrong report is fixable with `moves`. A rule
+that would be stored starting with `Baseline: `, new or after an exact edit or move, must
+equal a rule of the setup catalog byte for byte in the report it is served for, or the save fails with `baseline_unknown`
+naming the closest catalog rule; rules without the prefix are unaffected.
 
 Corrections and removals of existing rules use `exact_edits`, a nonempty array of
 `{before, after}`. Copy each nonempty `before` verbatim from a current rule as printed,
@@ -337,7 +340,13 @@ date}`, newest first; kind labels never appear in report text.
 
 The assistant offers first setup once when empty, uses available explicit
 instructions or asks questions, and shows the full draft for approval before
-saving. Milton cannot inspect other assistants' memories. It stores instructions,
+saving. The setup script is text rendered from one data file (`src/store/setup.ts`)
+that also yields the baseline catalog: paste one piece first, confirm what it shows,
+then pick among exact snippets, each pick filing listed `Baseline: ` rules. While any
+active rule starts with `Baseline: `, the cover sheet text opens with one fixed,
+unstored line saying what the prefix means. Only the first run (no rules anywhere) is offered;
+later blocks run on request, and the memo page tells the person what to ask for each
+report without rules. Milton cannot inspect other assistants' memories. It stores instructions,
 not factual/project memory. The assistant applies the rules and samples to its drafts itself.
 
 Two offers follow from drafting. When the person approves a draft to send, post,

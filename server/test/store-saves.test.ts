@@ -4,6 +4,7 @@ import { expect, test } from "bun:test";
 import { sql } from "drizzle-orm";
 import { databaseFailure } from "../src/store/database";
 import { StoreError } from "../src/store/errors";
+import { BASELINE_NOTE } from "../src/store/reports";
 import { localStore } from "./local-store";
 import { betweenPhases, fixtureStore, seedUsers } from "./store-fixtures";
 
@@ -1130,6 +1131,86 @@ test("a conflict or refusal in the claim phase stores a receipt and replays like
         )
       ).rows.map((row) => row.status),
     ).toEqual(["saved", "conflict", "saved", "failed"]);
+  } finally {
+    await local.dispose();
+  }
+});
+
+test("a Baseline: rule must be a setup rule byte for byte in its report, filed new, edited or moved", async () => {
+  const local = await localStore();
+  try {
+    await seedUsers(local.pg, "baseline");
+    await local.pg.exec(
+      "UPDATE store_config SET global_spend_policy='alerts_only',foreground_accounting_ready=true,memo_updates_enabled=true",
+    );
+    const store = fixtureStore(local.db, "baseline");
+    const charged = async () =>
+      (
+        await local.pg.query<{ n: number }>(
+          "SELECT count(*)::int AS n FROM save_requests WHERE user_id='baseline' AND memo_update_state='charged'",
+        )
+      ).rows[0]!.n;
+    const save = async (change: Partial<SaveMemoInput>) =>
+      store.saveMemo({
+        text: "Setup baseline",
+        request_id: crypto.randomUUID(),
+        expected_version: (await store.getTpsReport()).version,
+        ...change,
+      });
+    const near = 'Baseline: Sign off with "Cheers," and my first name.';
+    const refused = await save({ rules: [{ report: "email", text: near }] });
+    expect(refused).toMatchObject({
+      status: "failed",
+      error: "baseline_unknown",
+    });
+    expect(refused.message).toContain(
+      'Closest setup rule: [email] "Baseline: Sign off with "Thanks," and my first name."',
+    );
+    expect((await store.getTpsReport()).text).toBe("");
+    const rule = 'Baseline: Sign off with "Best," and my first name.';
+    // A catalog text counts only in the report it is served for.
+    expect(
+      await save({ rules: [{ report: "chat", text: rule }] }),
+    ).toMatchObject({ error: "baseline_unknown" });
+    expect(
+      (
+        await save({
+          rules: [
+            { report: "cover", text: "Lead with the answer." },
+            { report: "email", text: rule },
+          ],
+        })
+      ).status,
+    ).toBe("saved");
+    expect(
+      (await cardHeads(local.db, "baseline")).map((h) => [h.report, h.body]),
+    ).toEqual([
+      ["cover", "Lead with the answer."],
+      ["email", rule],
+    ]);
+    // The cover sheet explains the prefix itself; nothing stores the note.
+    expect((await store.getTpsReport()).text).toStartWith(
+      BASELINE_NOTE + "\n\n- Lead with the answer.",
+    );
+    // An edit may not leave a prefixed rule outside the catalog; dropping the
+    // prefix makes it the person's own rule.
+    const edit = (after: string) =>
+      save({ exact_edits: [{ before: rule, after }] });
+    // A refusal leaves the rule as filed and charges no memo update.
+    const used = await charged();
+    expect(await edit(near)).toMatchObject({
+      status: "failed",
+      error: "baseline_unknown",
+      memo_update: { state: "released", charged: 0 },
+    });
+    expect((await cardHeads(local.db, "baseline")).at(-1)!.body).toBe(rule);
+    expect(await charged()).toBe(used);
+    expect(
+      await save({ moves: [{ before: rule, report: "chat" }] }),
+    ).toMatchObject({ error: "baseline_unknown" });
+    const own = 'Sign off with "Cheers," and my first name.';
+    expect((await edit(own)).status).toBe("saved");
+    expect((await cardHeads(local.db, "baseline")).at(-1)!.body).toBe(own);
   } finally {
     await local.dispose();
   }

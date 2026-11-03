@@ -228,7 +228,7 @@ test("two authenticated clients isolate tenants, save once and reject retired to
     expect(second.text).toBe("");
     // An empty account carries the first-setup script; it leaves after the first save.
     expect(first.is_empty).toBe(true);
-    expect(String(first.setup)).toContain("Which sign-off is yours?");
+    expect(String(first.setup)).toContain("Show exactly:");
     expect(String(first.setup)).toContain(
       '"Milton keeps the writing you approve, word for word. It never rewrites a rule or a sample, and it never reads your inbox."',
     );
@@ -246,6 +246,8 @@ test("two authenticated clients isolate tenants, save once and reject retired to
     // So does the scripted rules entry, under each report the script names.
     const ruleShape = /rules \[\{ ([^}]*) \}\]/.exec(String(first.setup))![1]!;
     expect(ruleShape.split(", ")).toEqual(["report", "text"]);
+    for (const report of ["cover", "email"])
+      expect(String(first.setup)).toContain(`[${report}] Baseline: `);
     for (const report of [
       "cover",
       "email",
@@ -254,7 +256,6 @@ test("two authenticated clients isolate tenants, save once and reject retired to
       "document",
       "speech",
     ]) {
-      expect(String(first.setup)).toContain(report);
       expect(
         saveMemoInput.shape.rules.safeParse([
           { report, text: "Fictional value" },

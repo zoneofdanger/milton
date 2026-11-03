@@ -76,6 +76,7 @@ export const loggedErrorCodes = new Set([
   "edit_conflict",
   "move_conflict",
   "sample_conflict",
+  "baseline_unknown",
   "card_heading",
   "tps_body_limit",
   "card_version_conflict",

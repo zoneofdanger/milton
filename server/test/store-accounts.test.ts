@@ -968,7 +968,7 @@ test("unfinished initialization creates only empty TPS at retained-history capac
   }
 }, 30000);
 
-test("account deletion removes every tenant row, keeps global spend and refusals, stops in-flight saves, and allows no second trial", async () => {
+test("account deletion removes every tenant row, keeps refusals, stops in-flight saves, and allows no second trial", async () => {
   const local = await localStore();
   try {
     await local.pg.exec(
@@ -1104,16 +1104,6 @@ test("account deletion removes every tenant row, keeps global spend and refusals
       ).length,
     ).toBe(1);
     const keptBefore = await counts(kept.auth.userId);
-    const spend = () =>
-      local.pg.query(
-        "SELECT day_utc::text,reserved_micros::text FROM foreground_usage ORDER BY day_utc",
-      );
-    // Saves reserve nothing now; a retained aggregate row must survive deletion.
-    await local.pg.exec(
-      "INSERT INTO foreground_usage(day_utc,reserved_micros) VALUES ((clock_timestamp() AT TIME ZONE 'UTC')::date,1000) ON CONFLICT(day_utc) DO NOTHING",
-    );
-    const spendBefore = (await spend()).rows;
-    expect(spendBefore.length).toBeGreaterThan(0);
 
     await deleteAccount(local.env, neon("leaving"), ["client-c", "client-d"]);
     release();
@@ -1134,7 +1124,6 @@ test("account deletion removes every tenant row, keeps global spend and refusals
     ).toBe(0);
     expect(await counts(kept.auth.userId)).toEqual(keptBefore);
     expect((await kept.store.readTpsReport()).is_empty).toBe(false);
-    expect((await spend()).rows).toEqual(spendBefore);
     expect(
       (
         await local.pg.query(

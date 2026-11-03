@@ -19,10 +19,10 @@ decommission on 2026-11-01. Hosting rollback now uses Cloud Run revisions.
 
 Project `milton-510506`, Cloud Run/Artifact Registry region `us-east4`. Service manifests in this directory pin an immutable image and
 secret versions. They contain configuration and secret references, never values.
-The manifests pin what is serving now: app `milton-app-savelock-712c7c1`
-(`sha256:e879f531…`, env 1, key 1) and MCP `milton-mcp-savelock-712c7c1`
-(`sha256:e879f531…`, env 2, key 1); see the release records below. The worker
-manifest is gone: the spend worker is removed in 0023 (see
+The manifests pin what is serving now: app `milton-app-nospend-41de4f6`
+(`sha256:2eb49f6e…`, env 1, key 1) and MCP `milton-mcp-nospend-41de4f6`
+(`sha256:2eb49f6e…`, env 2, key 1); see the release records below. The spend worker,
+its scheduler job, service accounts and manifest were removed with 0023 (see
 [spend subsystem removal](#spend-subsystem-removal-0023)). `memo_updates_enabled` and
 `memo_updates_daily_limit` in `store_config` control admission. Existing positive
 account safeguards remain in effect. Trials and billing remain disabled.
@@ -194,14 +194,61 @@ gcloud run services update-traffic milton-mcp --to-revisions=milton-mcp-derived-
 gcloud run services update-traffic milton-worker --to-revisions=milton-worker-env4-cba4f6c=100 --project=milton-510506 --region=us-east4
 ```
 
-Now serving (since 2026-11-03 06:31:58Z): MCP `milton-mcp-savelock-712c7c1`, app
-`milton-app-savelock-712c7c1`, worker `milton-worker-savelock-712c7c1`; each is recorded below.
+Now serving (since 2026-11-03 07:13:55Z): MCP `milton-mcp-nospend-41de4f6`, app
+`milton-app-nospend-41de4f6`; each is recorded below. There is no worker service.
 
-Current release savelock-712c7c1: MCP, app and worker, then migration 0022. Revisions
+Current release nospend-41de4f6: MCP and app, then migration 0023, then the worker
+removal. Revisions `milton-mcp-nospend-41de4f6` and `milton-app-nospend-41de4f6`, deployed
+without a zero-traffic soak at Peter's word (no users yet); a release agent switched MCP at
+2026-11-03 07:13:11Z and the app at 07:13:55Z, and each serves 100%. Both run image
+`sha256:2eb49f6eb9ef107fac21bcc2298ddade458a4b28350ff536ffa0102c3fbae395` (amd64
+`sha256:b941afc9bef44b52e64dd08c2ce913efe59724919f2bd2cd0765217c406b2054`; uid 1000, Node 26,
+no env, key or pem files; build stage `oven/bun:1.4.4`), built from main `41de4f6`, the merge
+of `agent/no-spend`; it also carries the hook context ceiling from `6ab3221`. Configuration is
+identical to the savelock-712c7c1 revisions apart from the image and the removed
+`MILTON_GLOBAL_SPEND_POLICY` variable (app `milton-app-env:1`, `milton-app-key:1`; MCP
+`milton-mcp-env:2`, `milton-mcp-key:1`). Before the release, `spend_alert_emails` was exported
+to Peter's archive outside the repository; it held 0 rows. On the 0022 schema the new revisions
+answered the canonical checks (unauthenticated `/mcp` 401 with resource metadata, discovery
+and health 200, app `/` and `/login` 200 with its CSRF field, signed-out `/assistants`,
+`/account/delete` and `/download` 403, HTTP 308, `run.app` 404), an authenticated
+`get_cover_sheet` returned 200 with an unchanged version, a `SessionStart` hook read returned
+the full cover sheet, and `bun scripts/probe-forms.ts` printed `PASS`. The scheduler was
+paused at 07:14:29Z (last tick 07:14:02Z) and drained 180 seconds; then Neon snapshot
+`before-0023-no-spend` (`snap-hidden-bread-b8hh2t6u`, 07:17:48Z) and 0023 applied at 07:18:00Z
+to 07:18:03Z through `migrateStore` from the `41de4f6` tree (Drizzle journal 23 to 24). The
+five spend tables (4 rows: `foreground_usage` 3, `derivation_usage` 1), both trigger
+functions with their triggers, and `store_config.spend_feed_key_hash` (it was set) with its
+check are gone; 16 of 17 retained tables kept identical hashes, and `store_config` changed only
+by losing that column, keeping `memo_updates_enabled` true and `memo_updates_daily_limit` 100.
+After the migration `get_cover_sheet` and `list_reports` returned 200 with an unchanged
+version, the canonical checks and the probe passed again, and from 07:12Z to 07:21:14Z the new
+revisions logged no error, no `unexpected_error` and no 5xx. Then the release agent deleted
+Cloud Scheduler job `milton-gardening`, service `milton-worker` with its 19 revisions, the
+scheduler's invoker binding, the worker's secret accessor grants, and service accounts
+`milton-scheduler` and `milton-worker` (neither had other bindings), and disabled, not
+destroyed, `milton-worker-env` versions 1 to 4 and `milton-worker-key` version 1. The Resend
+sending key was left alone. No save ran in production.
+
+Rollback: app and MCP roll back by traffic alone on either schema (savelock-712c7c1 reads no
+dropped object; its feed route fails closed with 503). To restore the dropped objects, run
+`server/drizzle/rollback/0023_no_spend.sql` offline; it recreates them empty, and the 0023
+journal row stays. The worker cannot be restored from Cloud Run: it needs the rollback script,
+re-enabled secret versions, recreated service accounts (or `gcloud iam service-accounts
+undelete` within 30 days), and a fresh deploy from the pre-`41de4f6` worker manifest in git
+history. Never restore the `before-0023-no-spend` snapshot to roll back code.
+
+```sh
+gcloud run services update-traffic milton-mcp --to-revisions=milton-mcp-savelock-712c7c1=100 --project=milton-510506 --region=us-east4
+gcloud run services update-traffic milton-app --to-revisions=milton-app-savelock-712c7c1=100 --project=milton-510506 --region=us-east4
+```
+
+Release savelock-712c7c1: MCP, app and worker, then migration 0022. Revisions
 `milton-mcp-savelock-712c7c1`, `milton-app-savelock-712c7c1` and
 `milton-worker-savelock-712c7c1`, deployed without a zero-traffic soak at Peter's word (no
 users yet); a release agent switched MCP at 2026-11-03 06:30:51Z, the app at 06:31:33Z and the
-worker at 06:31:58Z, and each serves 100%. All three run image
+worker at 06:31:58Z; app and MCP served 100% until nospend-41de4f6, and the worker until
+its deletion in that release. All three run image
 `sha256:e879f531ee6033d4364e3575b2cd8b8462a7875e55cdb1d767ea7a4e6a84622e` (amd64
 `sha256:6d91c008e0749a1a58d7a860c23a62d736da74617ef39d794a8505a62bd5b1a3`; uid 1000, Node 26,
 no env, key or pem files; build stage `oven/bun:1.4.4`), built from main `712c7c1`, the merge
@@ -756,7 +803,10 @@ The worker, scheduler, spend alerts and their email, the spend ledgers and the u
 
 ## Spend subsystem removal (0023)
 
-Not yet released. This release deletes the spend-alert worker role, alert email, the
+Applied 2026-11-03 07:18:00Z (journal 24, snapshot `before-0023-no-spend`,
+`snap-hidden-bread-b8hh2t6u`), after the nospend-41de4f6 code served app and MCP; the worker
+resources below were deleted at 07:23Z and its secret versions disabled (see the release
+records). This release deletes the spend-alert worker role, alert email, the
 `/operator/spend-alerts/` feed and `scripts/spend-feed.ts`, and drops the
 `MILTON_GLOBAL_SPEND_POLICY` variable from the app and MCP manifests. Migration 0023
 drops `foreground_usage`, `gardening_usage`, `derivation_usage`, `spend_alerts`,

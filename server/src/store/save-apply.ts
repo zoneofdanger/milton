@@ -222,12 +222,6 @@ export async function applySave(
         "A rule this save removes cannot also move. Nothing was changed.",
         409,
       );
-    if (current.active.length - retire.length + creates.length > limits.memos)
-      throw new StoreError(
-        "memo_count_limit",
-        "The memo count limit has been reached. Nothing was changed.",
-        422,
-      );
     if (
       [...updates, ...creates].some(
         (m) => utf8Bytes(m.text) > limits.body_bytes,

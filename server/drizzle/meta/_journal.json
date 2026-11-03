@@ -148,6 +148,13 @@
       "when": 1793651128111,
       "tag": "0020_filing_kinds",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1793651728111,
+      "tag": "0021_no_card_count",
+      "breakpoints": true
     }
   ]
 }

@@ -500,21 +500,16 @@ test("targeted saves preserve omitted memos and reject invalid changes atomicall
         })
       ).status,
     ).toBe("unchanged");
-    await local.pg.exec(
-      `UPDATE store_config SET limits_json=limits_json || '{"memos":3}'::jsonb`,
-    );
     expect(
       (
         await send({
           rules: [
-            {
-              report: "cover",
-              text: "Exceeds the resulting active memo limit.",
-            },
+            { report: "cover", text: "A valid fictional rule." },
+            { report: "cover", text: "# A fictional heading" },
           ],
         })
       ).error,
-    ).toBe("memo_count_limit");
+    ).toBe("card_heading");
     expect(await store.getTpsReport()).toEqual(current);
     expect(
       await local.pg.query(
@@ -697,13 +692,14 @@ test("exact caller edits preserve conditions and scope without a model, with ato
   }
 });
 
-test("Postgres enforces separate UTF-8 field and memo caps and counts recovery bytes", async () => {
+test("Postgres enforces separate UTF-8 field caps, no memo count, and counts recovery bytes", async () => {
   const local = await localStore();
   try {
     await seedUsers(local.pg, "m_caps");
     await local.pg.exec(
       `UPDATE store_config SET limits_json=limits_json || '{"memos":1}'::jsonb;`,
     );
+    // limits_json.memos is unread since 0021: memos have no count limit.
     await local.pg.query(
       "INSERT INTO memos (user_id,id,name) VALUES ('m_caps','memo',$1)",
       ["a".repeat(64)],
@@ -720,7 +716,6 @@ test("Postgres enforces separate UTF-8 field and memo caps and counts recovery b
         [version, description, body, reason, JSON.stringify({ kind })],
       );
     await append(1, "é".repeat(250), "é".repeat(16384), "x".repeat(500));
-    // Vibes remains available even when the ordinary memo allowance is full.
     await local.pg.query(
       "INSERT INTO memos (user_id,id,name) VALUES ('m_caps','vibes','vibes')",
     );
@@ -733,11 +728,9 @@ test("Postgres enforces separate UTF-8 field and memo caps and counts recovery b
         ["a".repeat(65)],
       ),
     ).rejects.toThrow("memo_name_limit");
-    await expect(
-      local.pg.query(
-        "INSERT INTO memos (user_id,id,name) VALUES ('m_caps','second','second')",
-      ),
-    ).rejects.toThrow("memo_count_limit");
+    await local.pg.query(
+      "INSERT INTO memos (user_id,id,name) VALUES ('m_caps','second','second')",
+    );
     await expect(append(2, "é".repeat(250) + "x", "", "")).rejects.toThrow(
       "memo_description_limit",
     );
@@ -794,17 +787,9 @@ test("Postgres enforces separate UTF-8 field and memo caps and counts recovery b
     expect(
       (await local.pg.query("SELECT retained_bytes FROM users")).rows,
     ).toEqual([{ retained_bytes: 67570 }]);
-    await local.pg.exec(
-      `UPDATE store_config SET limits_json=limits_json || '{"memos":2}'::jsonb`,
-    );
     await local.pg.query(
-      "INSERT INTO memos (user_id,id,name) VALUES ('m_caps','second','second')",
+      "INSERT INTO memos (user_id,id,name) VALUES ('m_caps','third','third')",
     );
-    await expect(
-      local.pg.query(
-        "INSERT INTO memos (user_id,id,name) VALUES ('m_caps','third','third')",
-      ),
-    ).rejects.toThrow("memo_count_limit");
   } finally {
     await local.dispose();
   }

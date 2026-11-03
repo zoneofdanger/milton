@@ -59,7 +59,7 @@ as a rule. Corrections go through `exact_edits`; an edit whose `before` is a who
 and whose `after` is empty retires it. All fields resolve against one claimed snapshot
 and apply atomically. Anchors resolve uniquely within active card bodies, never
 against generated text; overlapping edits fail. The source/report fences, receipt and
-replay, history, size, heading and memo-count limits and the single memo-update
+replay, history, size and heading limits and the single memo-update
 charge still apply; reservation is always zero. A report exceeding its bound refuses the
 entire save; source instructions are never truncated. Count one successful logical
 save against the 100/day memo-update cap; no-ops, failures and replays charge

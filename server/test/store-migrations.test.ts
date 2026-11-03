@@ -42,6 +42,67 @@ const schemaCatalog = async (pg: PGlite) => {
   };
 };
 
+test("0021 removes the card and memo count limits, keeps every other guard, and rolls back to the 0020 guards", async () => {
+  const base = await migratedThrough(20);
+  const pg = await migratedThrough(20);
+  try {
+    const up = await drizzleSql("0021_no_card_count.sql");
+    const down = await drizzleSql("rollback/0021_no_card_count.sql");
+    await pg.exec(`UPDATE store_config SET limits_json=limits_json || '{"memos":1}'::jsonb;
+      INSERT INTO users(id) VALUES ('count');
+      INSERT INTO users(id,status) VALUES ('leaving','deleting');
+      INSERT INTO instruction_cards(user_id,id) VALUES ('count','c1');`);
+    const card = (id: string, user = "count") =>
+      pg.query("INSERT INTO instruction_cards(user_id,id) VALUES ($1,$2)", [
+        user,
+        id,
+      ]);
+    const memo = (id: string, name = id) =>
+      pg.query("INSERT INTO memos(user_id,id,name) VALUES ('count',$1,$2)", [
+        id,
+        name,
+      ]);
+    await memo("m1");
+    await expect(card("c2")).rejects.toThrow("memo_count_limit");
+    await expect(memo("m2")).rejects.toThrow("memo_count_limit");
+    const forward = async () => {
+      await pg.exec("BEGIN;" + up + "COMMIT;");
+      expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(post));
+    };
+    const post = await migratedThrough(21);
+    try {
+      await forward();
+      await card("c2");
+      await card("c3");
+      await memo("m2");
+      // The other checks still hold.
+      await expect(
+        pg.query("UPDATE instruction_cards SET id='c9' WHERE id='c1'"),
+      ).rejects.toThrow("card_identity_is_immutable");
+      await expect(card("c4", "leaving")).rejects.toThrow(
+        "account_unavailable",
+      );
+      await expect(memo("m3", "a".repeat(65))).rejects.toThrow(
+        "memo_name_limit",
+      );
+      await pg.exec(down);
+      expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(base));
+      expect(
+        (await pg.query("SELECT id FROM instruction_cards ORDER BY id")).rows,
+      ).toEqual([{ id: "c1" }, { id: "c2" }, { id: "c3" }]);
+      await expect(card("c4")).rejects.toThrow("memo_count_limit");
+      await expect(memo("m3")).rejects.toThrow("memo_count_limit");
+      await forward();
+      await card("c4");
+    } finally {
+      await post.close();
+    }
+  } finally {
+    await pg.close();
+    await base.close();
+  }
+}, 30000);
+
 test("filing-kinds migration files every version and gives samples kinds; rollback restores the previous shape", async () => {
   const pg = await migratedThrough(19);
   try {

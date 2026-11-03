@@ -92,10 +92,6 @@ const triggerRefusals = new Map<string, { message: string; status: number }>([
     { message: "The memo name exceeds its size limit.", status: 422 },
   ],
   [
-    "memo_count_limit",
-    { message: "The memo count limit has been reached.", status: 422 },
-  ],
-  [
     "account_unavailable",
     { message: "This Milton account is unavailable.", status: 403 },
   ],

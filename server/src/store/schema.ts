@@ -21,7 +21,8 @@ const createdAt = () =>
 // Changing this default needs a migration, so retired keys stay. Triggers still
 // read name_bytes (memos) and reason_bytes (memo and card versions); no
 // application code reads them, page_size or daily_writes (the technical write
-// cap is retired; the memo-update allowance is the daily save cap).
+// cap is retired; the memo-update allowance is the daily save cap). Nothing
+// reads memos since 0021 removed the count limit.
 const limits = {
   memos: 100,
   body_bytes: 32768,

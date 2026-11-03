@@ -35,7 +35,6 @@ function database(bindings: StoreBindings): StoreDatabase {
 }
 const positiveLimit = z.number().int().positive();
 const limitsSchema = z.object({
-  memos: positiveLimit,
   body_bytes: positiveLimit,
   description_bytes: positiveLimit,
   history_bytes: positiveLimit,

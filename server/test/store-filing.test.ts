@@ -974,3 +974,48 @@ test("a sample and exact edits in one save apply together or not at all", async 
     await f.local.dispose();
   }
 });
+
+test("an account has no card count limit: 120 creates and 60 removals all save", async () => {
+  const local = await localStore();
+  try {
+    await seedUsers(local.pg, "many");
+    const store = fixtureStore(local.db, "many");
+    const rule = (n: number) => `Fictional rule ${n}.`;
+    const save = async (change: Partial<SaveMemoInput>) =>
+      (
+        await store.saveMemo({
+          text: "A fictional change.",
+          request_id: crypto.randomUUID(),
+          expected_version: (await store.getTpsReport()).version,
+          ...change,
+        })
+      ).status;
+    for (let batch = 0; batch < 6; batch++)
+      expect(
+        await save({
+          rules: Array.from({ length: 20 }, (_, i) => ({
+            report: "cover" as const,
+            text: rule(batch * 20 + i),
+          })),
+        }),
+      ).toBe("saved");
+    for (let batch = 0; batch < 3; batch++)
+      expect(
+        await save({
+          exact_edits: Array.from({ length: 20 }, (_, i) => ({
+            before: rule(batch * 20 + i),
+            after: "",
+          })),
+        }),
+      ).toBe("saved");
+    expect(
+      (
+        await local.pg.query(
+          "SELECT count(*)::int AS cards, count(*) FILTER (WHERE NOT archived)::int AS active FROM (SELECT DISTINCT ON (card_id) archived FROM instruction_card_versions WHERE user_id='many' ORDER BY card_id,version DESC) h",
+        )
+      ).rows,
+    ).toEqual([{ cards: 120, active: 60 }]);
+  } finally {
+    await local.dispose();
+  }
+}, 30000);

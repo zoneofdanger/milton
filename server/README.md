@@ -272,8 +272,9 @@ stored as a rule. Milton runs no model, rewrites nothing and reserves no budget.
 New rules go in `rules`, 1-20 entries of `{report, text}`. `report` is one of the five
 reports (`doc` accepted) or `cover`. Each entry becomes one new card holding `text`
 byte for byte; its description is the first non-blank line, trimmed and cut to the
-description cap. Each body must fit the body limit, contain no Markdown heading line
-(`card_heading`) and keep the account within its memo count (`memo_count_limit`). An
+description cap. Each body must fit the body limit and contain no Markdown heading line
+(`card_heading`). There is no count limit on rules (0021 removed it; archived cards
+are kept, so a count capped an account's lifetime saves). An
 entry that prints identically to an active card in the same report (compared as
 printed, so `Be concise.` matches a stored `- Be concise.`), or to an earlier entry in
 the request, is skipped; when nothing else changes the save returns
@@ -795,3 +796,15 @@ pre-migration snapshot. Release the code before applying 0018; see
 [the hosting runbook](deploy/README.md#derived-systems-removal-0018). The
 [research note](../docs/research/derived-systems-2026.md) records what was measured and
 what would justify rebuilding any of it.
+
+### No count limit (0021)
+
+Migration 0021 replaces `milton_card_guard` and `milton_memo_guard` without their count
+checks; card identity stays immutable, writes still need an active account and memo
+names keep their byte cap. `limits_json.memos` stays in the row, unread. Saves stay
+bounded by the daily memo-update cap (hosted), the tool-call rate limit and the byte
+caps. Apply 0021 before releasing the code: the previous runtime runs on either guard,
+while the current one without 0021 would hit the old lifetime count as
+`store_unavailable`. `drizzle/rollback/0021_no_card_count.sql` restores both previous
+functions and changes no rows; an account already past the old limit keeps its cards
+and cannot add more until it is back under it.

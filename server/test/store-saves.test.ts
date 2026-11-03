@@ -4,6 +4,7 @@ import { expect, test } from "bun:test";
 import { sql } from "drizzle-orm";
 import { databaseFailure } from "../src/store/database";
 import { StoreError } from "../src/store/errors";
+import { SETUP_MARKER } from "../src/store/setup";
 import { localStore } from "./local-store";
 import { betweenPhases, fixtureStore, seedUsers } from "./store-fixtures";
 
@@ -1130,6 +1131,58 @@ test("a conflict or refusal in the claim phase stores a receipt and replays like
         )
       ).rows.map((row) => row.status),
     ).toEqual(["saved", "conflict", "saved", "failed"]);
+  } finally {
+    await local.dispose();
+  }
+});
+
+test("a Baseline: rule must be a setup rule byte for byte, filed new or by an exact edit", async () => {
+  const local = await localStore();
+  try {
+    await seedUsers(local.pg, "baseline");
+    const store = fixtureStore(local.db, "baseline");
+    const save = async (change: Partial<SaveMemoInput>) =>
+      store.saveMemo({
+        text: "Setup baseline",
+        request_id: crypto.randomUUID(),
+        expected_version: (await store.getTpsReport()).version,
+        ...change,
+      });
+    const near = 'Baseline: Sign off with "Cheers," and my first name.';
+    const refused = await save({ rules: [{ report: "email", text: near }] });
+    expect(refused).toMatchObject({
+      status: "failed",
+      error: "baseline_unknown",
+    });
+    expect(refused.message).toContain(
+      'Closest setup rule: "Baseline: Sign off with "Thanks," and my first name."',
+    );
+    expect((await store.getTpsReport()).text).toBe("");
+    const rule = 'Baseline: Sign off with "Best," and my first name.';
+    expect(
+      (
+        await save({
+          rules: [
+            { report: "cover", text: SETUP_MARKER },
+            { report: "email", text: rule },
+          ],
+        })
+      ).status,
+    ).toBe("saved");
+    expect(
+      (await cardHeads(local.db, "baseline")).map((h) => [h.report, h.body]),
+    ).toEqual([
+      ["cover", SETUP_MARKER],
+      ["email", rule],
+    ]);
+    // An edit may not leave a prefixed rule outside the catalog; dropping the
+    // prefix makes it the person's own rule.
+    const edit = (after: string) =>
+      save({ exact_edits: [{ before: rule, after }] });
+    expect(await edit(near)).toMatchObject({ error: "baseline_unknown" });
+    const own = 'Sign off with "Cheers," and my first name.';
+    expect((await edit(own)).status).toBe("saved");
+    expect((await cardHeads(local.db, "baseline")).at(-1)!.body).toBe(own);
   } finally {
     await local.dispose();
   }

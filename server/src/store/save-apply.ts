@@ -9,6 +9,7 @@ import { exactEditsProposal, exactMoves } from "../exact-edits";
 import { assertTrialAccess } from "./trials";
 import { withMemoUpdate } from "./memo-updates";
 import { publishSave } from "./save-publish";
+import { closestBaseline, knownBaseline } from "./setup";
 import {
   outcomeSchema,
   retiredSample,
@@ -116,6 +117,19 @@ export async function applySave(
     onFile.add(printed);
     creates.push({ report, text: rule.text });
   }
+  // A rule stored with the setup prefix must be a setup rule byte for byte,
+  // whether filed new or produced by an exact edit.
+  const claimed = new Map(claim.current.active.map((h) => [h.id, h.body]));
+  const unknown = [
+    ...creates.map((c) => c.text),
+    ...updates.filter((u) => claimed.get(u.id) !== u.text).map((u) => u.text),
+  ].find((text) => !knownBaseline(text));
+  if (unknown !== undefined)
+    throw new StoreError(
+      "baseline_unknown",
+      `"${describe(unknown, 120)}" starts with "Baseline: " but is not a setup rule. Copy the rule exactly from the setup text, or send a rule in the person's own words without "Baseline: ". Closest setup rule: "${closestBaseline(unknown)}". Nothing was changed.`,
+      422,
+    );
   return await db.transaction(async (tx) => {
     await lock(tx);
     const pending = await receipt(tx, input.request_id);

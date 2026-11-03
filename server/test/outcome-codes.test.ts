@@ -6,9 +6,9 @@ import { localStore } from "./local-store";
 
 const src = new URL("../src/", import.meta.url).pathname;
 
-// Every code a save or read can return is either logged by name or mapped from
-// the trigger that raises it; anything else would log as tool_error or surface
-// as store_unavailable.
+// Every StoreError code in src is logged by name or mapped from a trigger, and
+// every installed trigger refusal is one or the other, so none surfaces as
+// store_unavailable. A code that is only mapped still logs as tool_error.
 test("every StoreError code and every live trigger refusal is logged or mapped", async () => {
   const known = (code: string) =>
     loggedErrorCodes.has(code) || triggerRefusals.has(code);

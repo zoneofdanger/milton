@@ -66,7 +66,8 @@ replay, history, size and heading limits and the single memo-update
 charge still apply; reservation is always zero. A report exceeding its bound refuses the
 entire save; source instructions are never truncated. Count one successful logical
 save against the 100/day memo-update cap; no-ops, failures and replays charge
-nothing. Keep the separate 1,000 attempted-call and retained-history limits.
+nothing. A save's claim takes only the account lock and reads the cap without locking
+`store_config`. Keep the separate 1,000 attempted-call and retained-history limits.
 
 Removing the model removes paraphrase drift, not interpretation risk: the assistant
 picks the report and wording, and a free-text correction sent as a new rule leaves

@@ -1140,9 +1140,7 @@ test("a Baseline: rule must be a setup rule byte for byte in its report, filed n
   const local = await localStore();
   try {
     await seedUsers(local.pg, "baseline");
-    await local.pg.exec(
-      "UPDATE store_config SET global_spend_policy='alerts_only',foreground_accounting_ready=true,memo_updates_enabled=true",
-    );
+    await local.pg.exec("UPDATE store_config SET memo_updates_enabled=true");
     const store = fixtureStore(local.db, "baseline");
     const charged = async () =>
       (
@@ -1211,6 +1209,36 @@ test("a Baseline: rule must be a setup rule byte for byte in its report, filed n
     const own = 'Sign off with "Cheers," and my first name.';
     expect((await edit(own)).status).toBe("saved");
     expect((await cardHeads(local.db, "baseline")).at(-1)!.body).toBe(own);
+  } finally {
+    await local.dispose();
+  }
+});
+
+test("memo updates need only their own setting: a save charges one without the model-era spend fields", async () => {
+  const local = await localStore();
+  try {
+    await seedUsers(local.pg, "model-era");
+    // Before 0022 this state refused every save with "Memo updates are not
+    // ready." unless global_spend_policy and foreground_accounting_ready were set.
+    await local.pg.exec("UPDATE store_config SET memo_updates_enabled=true");
+    const store = fixtureStore(local.db, "model-era");
+    const saved = await store.saveMemo({
+      text: "Add a rule.",
+      rules: [{ report: "cover", text: "Lead with the answer." }],
+      expected_version: (await store.getTpsReport()).version,
+      request_id: crypto.randomUUID(),
+    });
+    expect(saved).toMatchObject({
+      status: "saved",
+      memo_update: { state: "charged", charged: 1 },
+    });
+    expect(
+      (
+        await local.pg.query(
+          "SELECT count(*)::int AS n FROM save_requests WHERE user_id='model-era' AND memo_update_state='charged'",
+        )
+      ).rows,
+    ).toEqual([{ n: 1 }]);
   } finally {
     await local.dispose();
   }

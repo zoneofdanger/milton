@@ -1721,9 +1721,6 @@ test("capability feed is direct bounded JSON with protected rotation, immediate 
       }),
     );
   try {
-    await local.pg.exec(
-      "UPDATE store_config SET global_spend_policy='alerts_only'",
-    );
     const missing = await send(config.appOrigin + "/operator/spend-alerts/");
     expect(missing.status).toBe(404);
     expect(await missing.json()).toEqual({ error: "feed_unavailable" });

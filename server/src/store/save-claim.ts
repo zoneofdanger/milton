@@ -4,7 +4,6 @@ import { StoreError } from "./errors";
 import { readLimits, utf8Bytes } from "./index";
 import { MAX_REQUEST_BYTES } from "../http";
 import { assertTrialAccess } from "./trials";
-import { lockSpendPolicy } from "./spend-policy";
 import { admitMemoUpdate, claimClock, withMemoUpdate } from "./memo-updates";
 import {
   outcomeSchema,
@@ -31,8 +30,7 @@ export async function claimSave(ctx: SaveContext, structured: boolean) {
   } = ctx;
   const claim = await db
     .transaction(async (tx) => {
-      // One short shared lock for memo-update admission, then the account lock.
-      const policy = await lockSpendPolicy(tx);
+      // Saves take only the account lock; store_config is read unlocked.
       await lock(tx);
       const existing = await receipt(tx, input.request_id);
       if (existing) {
@@ -96,7 +94,7 @@ export async function claimSave(ctx: SaveContext, structured: boolean) {
             message: "The submitted memo is too large. Nothing was changed.",
           }),
         );
-      const updateDay = await admitMemoUpdate(tx, userId, policy, clock);
+      const updateDay = await admitMemoUpdate(tx, userId, clock);
       await claimReceipt(updateDay);
       return { current };
     })

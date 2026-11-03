@@ -717,7 +717,7 @@ test("final outcomes include early refusal/read failure and advisory/logging fai
     client: Client | undefined;
   try {
     await local.pg.exec(
-      "UPDATE store_config SET signup_mode='open',global_spend_policy='alerts_only',foreground_accounting_ready=true,memo_updates_enabled=true,memo_updates_daily_limit=2",
+      "UPDATE store_config SET signup_mode='open',memo_updates_enabled=true,memo_updates_daily_limit=2",
     );
     await resolveIdentityAccount(local.env, {
       provider: "neon",

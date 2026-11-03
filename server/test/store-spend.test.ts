@@ -27,7 +27,7 @@ test("memo updates charge committed source batches only and recover original cha
     ).toEqual([{ memo_updates_enabled: false, memo_updates_daily_limit: 100 }]);
     await seedUsers(local.pg, "updates");
     await local.pg.exec(
-      "UPDATE store_config SET global_spend_policy='alerts_only',foreground_accounting_ready=true,memo_updates_enabled=true,memo_updates_daily_limit=2",
+      "UPDATE store_config SET memo_updates_enabled=true,memo_updates_daily_limit=2",
     );
     let calls = 0;
     const store = fixtureStore(
@@ -181,7 +181,7 @@ test("memo-update holds fence last-slot dispatch, expired claims, activation and
     const pendingLegacy = legacy.saveMemo(legacyInput);
     await legacyStarted;
     await local.pg.exec(
-      "UPDATE store_config SET global_spend_policy='alerts_only',foreground_accounting_ready=true,memo_updates_enabled=true,memo_updates_daily_limit=1",
+      "UPDATE store_config SET memo_updates_enabled=true,memo_updates_daily_limit=1",
     );
     releases.get("hold-legacy")!();
     expect((await pendingLegacy).memo_update).toMatchObject({
@@ -378,7 +378,7 @@ test("alerts-only spending continues through every threshold, counts the frozen 
     // Legacy ledgers have no writers; their rows still count toward today's total.
     await seedUsers(local.pg, "alerts");
     await local.pg.exec(
-      `UPDATE store_config SET global_spend_policy='alerts_only',foreground_accounting_ready=true,memo_updates_enabled=true;
+      `UPDATE store_config SET memo_updates_enabled=true;
       INSERT INTO gardening_usage(user_id,day_utc,reserved_micros) VALUES ('alerts',(clock_timestamp() AT TIME ZONE 'UTC')::date,1000000);
       INSERT INTO derivation_usage(user_id,day_utc,reserved_micros) VALUES ('alerts',(clock_timestamp() AT TIME ZONE 'UTC')::date,2000000);`,
     );
@@ -569,8 +569,7 @@ test("the worker ignores stale model flags, publishes and emails spend alerts, r
       MILTON_SPEND_ALERT_EMAIL_TO: "operator@example.com",
     };
     await local.pg.exec(
-      `UPDATE store_config SET global_spend_policy='alerts_only';
-      INSERT INTO foreground_usage(day_utc,reserved_micros) VALUES ((clock_timestamp() AT TIME ZONE 'UTC')::date,142000000);
+      `INSERT INTO foreground_usage(day_utc,reserved_micros) VALUES ((clock_timestamp() AT TIME ZONE 'UTC')::date,142000000);
       CREATE FUNCTION reject_alert_fixture() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'Fictional observer failure'; END $$;
       CREATE TRIGGER reject_alert_fixture BEFORE INSERT ON spend_alerts FOR EACH ROW EXECUTE FUNCTION reject_alert_fixture()`,
     );
@@ -661,26 +660,22 @@ test("the worker ignores stale model flags, publishes and emails spend alerts, r
   }
 });
 
-test("alerts-only policy marks compatible writers and changes the daily limit only when given", async () => {
+test("the policy command changes the daily limit only when given", async () => {
   const { configureMemoUpdatePolicy } = await import("../scripts/memo-updates");
   const local = await localStore();
   try {
     const state = async () =>
       (
         await local.db.query<{
-          policy: string;
-          ready: boolean;
           limit: number;
           enabled: boolean;
         }>(
-          sql`SELECT global_spend_policy AS policy,foreground_accounting_ready AS ready,memo_updates_daily_limit AS "limit",memo_updates_enabled AS enabled FROM store_config`,
+          sql`SELECT memo_updates_daily_limit AS "limit",memo_updates_enabled AS enabled FROM store_config`,
         )
       )[0]!;
     const initial = await state();
     await configureMemoUpdatePolicy(local.db);
     expect(await state()).toEqual({
-      policy: "alerts_only",
-      ready: true,
       limit: initial.limit,
       enabled: false,
     });
@@ -698,9 +693,6 @@ test("new spend alerts email once with the fixed prefix; retries preserve the en
     await import("../src/store/spend-alert-email");
   const local = await localStore();
   try {
-    await local.db.query(
-      sql`UPDATE store_config SET global_spend_policy='alerts_only'`,
-    );
     await local.db.query(
       sql`INSERT INTO foreground_usage(day_utc,reserved_micros) VALUES ((clock_timestamp() AT TIME ZONE 'UTC')::date,142000000)`,
     );
@@ -760,9 +752,6 @@ test("ambiguous email acceptance retries its frozen request only within the prov
   const { PgDialect } = await import("drizzle-orm/pg-core");
   const local = await localStore();
   try {
-    await local.db.query(
-      sql`UPDATE store_config SET global_spend_policy='alerts_only'`,
-    );
     await local.db.query(
       sql`INSERT INTO foreground_usage(day_utc,reserved_micros) VALUES ((clock_timestamp() AT TIME ZONE 'UTC')::date,142000000)`,
     );

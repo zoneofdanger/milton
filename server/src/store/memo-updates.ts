@@ -1,7 +1,6 @@
 import { sql } from "drizzle-orm";
 import type { StoreDatabase, StoreSession } from "./database";
 import { StoreError } from "./errors";
-import type { SpendPolicy } from "./spend-policy";
 
 export type ClaimClock = { at: string; day: string };
 export type MemoUpdateState = "none" | "held" | "charged" | "released";
@@ -25,7 +24,7 @@ export type UpdateReceipt = {
   memo_updates_enabled: boolean;
 };
 
-// Call only after both locks. A materialized expression evaluates the DB clock once.
+// Call only after the account lock. A materialized expression evaluates the DB clock once.
 export async function claimClock(tx: StoreSession): Promise<ClaimClock> {
   return (
     await tx.query<ClaimClock>(sql`WITH stamp AS MATERIALIZED (SELECT clock_timestamp() AS at)
@@ -60,18 +59,25 @@ async function usage(
   };
 }
 
+// Call under the account lock. A plain read: saves take no lock on store_config.
 export async function admitMemoUpdate(
   tx: StoreSession,
   userId: string,
-  policy: SpendPolicy,
   clock: ClaimClock,
 ) {
+  const policy = (
+    await tx.query<{
+      memo_updates_enabled: boolean;
+      memo_updates_daily_limit: number;
+    }>(sql`SELECT memo_updates_enabled,memo_updates_daily_limit
+    FROM store_config WHERE singleton=1`)
+  )[0];
+  if (!policy)
+    throw new StoreError(
+      "configuration",
+      "The memo store configuration is missing.",
+    );
   if (!policy.memo_updates_enabled) return null;
-  if (
-    !policy.foreground_accounting_ready ||
-    policy.global_spend_policy !== "alerts_only"
-  )
-    throw new StoreError("configuration", "Memo updates are not ready.");
   const balance = await usage(
     tx,
     userId,

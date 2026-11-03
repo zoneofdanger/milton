@@ -42,6 +42,49 @@ const schemaCatalog = async (pg: PGlite) => {
   };
 };
 
+test("0022 drops the model-era spend fields, keeps the memo-update settings, and rolls back to the 0021 shape", async () => {
+  const base = await migratedThrough(21);
+  const pg = await migratedThrough(21);
+  const post = await migratedThrough(22);
+  try {
+    const up = await drizzleSql("0022_no_model_gate.sql");
+    const down = await drizzleSql("rollback/0022_no_model_gate.sql");
+    const settings =
+      "SELECT memo_updates_enabled AS enabled,memo_updates_daily_limit AS lim FROM store_config";
+    // Production's shape: alerts_only, ready, memo updates on.
+    await pg.exec(`UPDATE store_config SET global_spend_policy='alerts_only',foreground_accounting_ready=true,
+      memo_updates_enabled=true,memo_updates_daily_limit=80`);
+    const forward = async () => {
+      await pg.exec("BEGIN;" + up + "COMMIT;");
+      expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(post));
+      expect((await pg.query(settings)).rows).toEqual([
+        { enabled: true, lim: 80 },
+      ]);
+    };
+    await forward();
+    // Memo updates switch on and off without the readiness flag.
+    await pg.exec("UPDATE store_config SET memo_updates_enabled=false");
+    await pg.exec("UPDATE store_config SET memo_updates_enabled=true");
+    await expect(
+      pg.exec("UPDATE store_config SET memo_updates_daily_limit=0"),
+    ).rejects.toThrow("config_memo_updates");
+    await pg.exec(down);
+    expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(base));
+    expect(
+      (
+        await pg.query(
+          "SELECT global_spend_policy AS policy,foreground_accounting_ready AS ready,memo_updates_enabled AS enabled,memo_updates_daily_limit AS lim FROM store_config",
+        )
+      ).rows,
+    ).toEqual([{ policy: "alerts_only", ready: true, enabled: true, lim: 80 }]);
+    await forward();
+  } finally {
+    await post.close();
+    await pg.close();
+    await base.close();
+  }
+}, 30000);
+
 test("0021 removes the card and memo count limits, keeps every other guard, and rolls back to the 0020 guards", async () => {
   const base = await migratedThrough(20);
   const pg = await migratedThrough(20);

@@ -85,8 +85,9 @@ Set these in the runtime's platform configuration or dotenvx payload before depl
 Saves are model-free: Milton stores the exact text the assistant sends and calls no
 model on any read or save, so it needs no model credential, project or budget. The
 runtime no longer reads `MILTON_GEMINI_*` or `MILTON_MODEL_*_BUDGET_USD`;
-`MILTON_GLOBAL_SPEND_POLICY` is no longer read either. The SQL policy in
-`store_config` still gates memo-update admission (0014). Every claim reserves 0.
+`MILTON_GLOBAL_SPEND_POLICY` is no longer read either, and 0022 dropped the SQL spend
+policy and readiness columns: memo updates depend only on `memo_updates_enabled` and
+`memo_updates_daily_limit` in `store_config`. Every claim reserves 0.
 
 Use separate Neon branches and matching environment settings for development and previews. Redeploy after changing runtime configuration.
 
@@ -665,17 +666,17 @@ See [deployment and rollback](deploy/README.md).
 ### Memo-update allowance and reservation alerts (0014)
 
 Migration 0014 is additive and defaults off. It preserves existing receipt JSON,
-source/history, the report snapshot and trials. After every writer and worker
-runs compatible code, the operator can select explicit SQL alerts-only policy and
-mark that boundary ready. From `server/`, with the protected database/dotenvx setup:
+source/history, the report snapshot and trials. `memo_updates_enabled` alone turns the
+allowance on (0022 removed the spend policy and readiness flag it once also needed).
+From `server/`, with the protected database/dotenvx setup:
 
 ```sh
-bun --no-env-file scripts/memo-updates.ts policy --compatible-writers
+bun --no-env-file scripts/memo-updates.ts policy --daily-limit 100
 bun --no-env-file scripts/memo-updates.ts enable
 ```
 
-`policy` does not enable updates; `--daily-limit` makes a deliberate override.
-Configure every runtime for the selected SQL policy before enabling. No command activates trials, billing or model
+`policy --daily-limit COUNT` changes the daily limit and does not enable updates.
+No command activates trials, billing or model
 work. `disable` stops allowance enforcement without erasing holds
 or charges; drain mutating traffic/holds before a compatible rollback.
 
@@ -691,7 +692,9 @@ cannot publish late.
 A new potentially mutating request at zero available updates is refused before it
 claims. `memo_updates_exhausted` differs from `memo_updates_pending`; the retired
 `model_budget_reached` appears only in older receipts. Reads retain existing
-access/trial policy. Concurrent claims serialize before dispatch. Same-ID recovery
+access/trial policy. Concurrent claims for one account serialize on the account lock
+before dispatch; a save takes only that lock and reads the memo-update settings from
+`store_config` without locking the row. Same-ID recovery
 wins over a new quota check; an uncertain claim is not redispatched or refunded,
 and an uncertain publication recovers the original receipt.
 
@@ -805,7 +808,8 @@ drained holds and retains receipt/charge history, counters, events, triggers and
 current key/revocation state. Reforward restores readiness but never enables the
 allowance or restores an older key. After activation use only a runtime compatible
 with accounting, alerts-only policy and capability prefix/hash checks; keeping the
-schema does not make an older runtime compatible.
+schema does not make an older runtime compatible. Since 0022, run
+`rollback/0022_no_model_gate.sql` first: it restores the policy columns 0014 expects.
 
 ### Derived-systems removal (0018)
 
@@ -818,7 +822,8 @@ derivation columns with their checks, and the `vector` extension. `gardening_usa
 and `derivation_usage` stay as frozen ledgers because spend totals read them; a later
 migration drops them no earlier than 31 days after their newest row. The 0018 rollback
 script recreates the dropped objects empty; their data is recoverable only from the
-pre-migration snapshot. Release the code before applying 0018; see
+pre-migration snapshot; since 0022, run `rollback/0022_no_model_gate.sql` first, because the
+0018 rollback re-adds a check on `global_spend_policy`. Release the code before applying 0018; see
 [the hosting runbook](deploy/README.md#derived-systems-removal-0018). The
 [research note](../docs/research/derived-systems-2026.md) records what was measured and
 what would justify rebuilding any of it.
@@ -834,3 +839,18 @@ while the current one without 0021 would hit the old lifetime count as
 `store_unavailable`. `drizzle/rollback/0021_no_card_count.sql` restores both previous
 functions and changes no rows; an account already past the old limit keeps its cards
 and cannot add more until it is back under it.
+
+### No model-era gate (0022)
+
+Migration 0022 drops `store_config.global_spend_policy` and
+`foreground_accounting_ready` with the `config_global_spend_policy` check, and narrows
+`config_memo_updates` to a positive daily limit. Both columns had one valid value
+(`alerts_only`, ready) since saves went model-free. Saves no longer lock `store_config`
+or refuse with "Memo updates are not ready."; the spend worker observes alerts without
+a policy check. The daily limit, `memo_updates_enabled`, holds, charges and refusals are
+unchanged. Release the code before applying 0022: the current runtime reads neither
+column and runs on either schema, while a pre-0022 runtime fails every save and worker
+tick once the columns are gone. `drizzle/rollback/0022_no_model_gate.sql` re-adds both
+columns with their 0014 defaults (`'capped'`, `false`) and both checks, sets the row to
+`alerts_only` and ready as production held before 0022, and leaves the memo-update
+settings untouched; run it before moving code back to a pre-0022 revision.

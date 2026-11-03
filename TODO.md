@@ -69,11 +69,6 @@ reports, memos) and plain text on security screens and anything an assistant rea
 
 ## From the audit of 2026-11-02 (`.agents/tmp/audit/report.md`)
 
-- [ ] #14 (ops, med, founder) **Run the services as a limited database role.** The Neon project has
-      only neondb_owner, so runtime SQL could disable the triggers that keep samples append-only and
-      history immutable (A3). Create a runtime role with table-level grants and no DDL, rehearse on a
-      Neon branch, ship a new secret payload per service, keep the owner for migrations.
-
 - [ ] #15 (server, med) **Measure, then pool, database connections.** Each transaction opens its own
       Neon serverless client (A7, database.ts "no global connections", a Workers-era rule); one read
       is several HTTP queries and WebSocket connects. Measure latency first; if it pays, a process

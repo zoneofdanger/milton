@@ -416,6 +416,8 @@ Chosen: B, as one Postgres database on Neon (decided 2026-10-29, after a first l
 D1 the same evening). Peter's reason for B was rapid iteration on the data model; Neon adds real
 transactions, branches to try a schema change on a copy, Drizzle migrations and the Neon tooling the
 team already uses. The Worker reaches it over the network with a connection string held as a secret.
+The services connect as a role that reads and writes rows but owns nothing, so the triggers that guard
+the data hold against them; only migrations run as the owner (0024).
 The tenant access layer is the wall, and the same layer makes a later move to A mechanical. The
 stateless MCP handler stays. Neon Functions were looked at and left for later: in beta, and Milton's
 sign-in rests on Cloudflare's OAuth provider.

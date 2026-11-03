@@ -184,42 +184,6 @@ import FilingComparison from "../components/FilingComparison.astro";
     </div>
   </section>
   <section
-    class="section control-section"
-    id="your-preferences"
-    aria-labelledby="control-heading"
-  >
-    <div>
-      <p class="eyebrow">## You stay in control</p>
-      <h2 id="control-heading">We won’t take your stapler.</h2>
-      <p class="portability-copy">
-        Check it yourself. The source is public, and you can run Milton
-        yourself. Download TPS.md to see what your AI reads. Disconnect an AI
-        and Milton refuses it at once.
-      </p>
-      <p class="portability-aside">
-        We’d prefer you keep paying us, but apparently that’s not a retention
-        strategy.
-      </p>
-      <p>
-        <a href="https://github.com/zoneofdanger/milton">Read the source ↗</a>
-      </p>
-    </div>
-    <figure class="employee-testimonial" id="employee-testimonial">
-      <p class="eyebrow">## Fictional employee testimonial</p>
-      <blockquote>
-        “Milton lets me say ‘Did you get that memo?’ to software. I have never
-        felt more qualified for management.”
-      </blockquote>
-      <figcaption>
-        <strong>Michael Bolton</strong>
-        <span>Senior Founding AI Forward Deployed Product Engineer</span>
-      </figcaption>
-      <p class="carousel-count">
-        <span class="carousel-dot" aria-hidden="true"></span>1 of 1
-      </p>
-    </figure>
-  </section>
-  <section
     class="section pricing"
     id="pricing"
     aria-labelledby="pricing-heading"
@@ -273,6 +237,18 @@ import FilingComparison from "../components/FilingComparison.astro";
         the rules you ask for, stored as your AI sends them. Milton never
         rewrites a rule or a sample. It never reads your inbox, your files, or
         your conversations.
+      </p>
+    </details>
+    <details>
+      <summary>Can I take my writing and leave?</summary>
+      <p>
+        We won’t take your stapler. The source is public, and you can run Milton
+        yourself. Download TPS.md to see what your AI reads. Disconnect an AI
+        and Milton refuses it at once. We’d prefer you keep paying us, but
+        apparently that’s not a retention strategy.
+      </p>
+      <p>
+        <a href="https://github.com/zoneofdanger/milton">Read the source ↗</a>
       </p>
     </details>
     <details>
@@ -768,18 +744,6 @@ import FilingComparison from "../components/FilingComparison.astro";
   .where-to-start p:not(.eyebrow) {
     color: var(--muted);
   }
-  .control-section {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--space-16);
-  }
-  .portability-copy {
-    font-size: var(--text-lead);
-  }
-  .portability-aside {
-    color: var(--muted);
-    margin-block: var(--space-5);
-  }
   .faq details {
     border-top: 1px solid var(--hairline);
     padding-block: var(--space-3);
@@ -822,10 +786,6 @@ import FilingComparison from "../components/FilingComparison.astro";
     .intro {
       max-width: 45ch;
     }
-
-    .control-section {
-      gap: var(--space-8);
-    }
   }
   @media (max-width: 860px) {
     .hero {
@@ -835,10 +795,6 @@ import FilingComparison from "../components/FilingComparison.astro";
     }
   }
   @media (max-width: 767px) {
-    .control-section {
-      grid-template-columns: 1fr;
-      gap: var(--space-10);
-    }
     .assistant-strip {
       display: grid;
       gap: var(--space-2);

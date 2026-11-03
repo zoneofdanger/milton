@@ -39,6 +39,8 @@
     "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui,
     sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  /* The printed-form serif of the signed-in cover sheet; system fonts only. */
+  --font-form: "Times New Roman", Times, Georgia, serif;
   --space-2: 0.5rem;
   --space-3: 0.75rem;
   --space-4: 1rem;

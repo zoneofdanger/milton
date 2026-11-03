@@ -45,6 +45,27 @@ test("context replacement preserves complete rules and other messages; hook outp
   expect(status).not.toContain(rule);
 });
 
+test("a cover sheet past the 9,500 hook ceiling becomes a pointer to get_cover_sheet", () => {
+  const context = (text: string) =>
+    hookOutput({ ...fixture(), text }, "SessionStart").hookSpecificOutput
+      .additionalContext;
+  const size = (s: string) => Math.max(s.length, Buffer.byteLength(s));
+  const overhead = context("").length;
+  // At the ceiling the whole cover sheet goes through.
+  const fits = "x".repeat(9500 - overhead);
+  expect(context(fits)).toContain(fits);
+  expect(size(context(fits))).toBe(9500);
+  // One character over, and over in UTF-8 bytes only, the hook points instead.
+  for (const text of [fits + "x", "é".repeat(9500 - overhead)]) {
+    const pointer = context(text);
+    expect(pointer).not.toContain(text.slice(0, 100));
+    expect(pointer).toContain(version);
+    expect(pointer).toContain("Applies when drafting an email.");
+    expect(pointer).toContain("call get_cover_sheet");
+    expect(size(pointer)).toBeLessThanOrEqual(9500);
+  }
+});
+
 test("parseReport accepts text up to the server's 256 KB body cap", () => {
   const text = "x".repeat(262144);
   expect(parseReport({ text, version, is_empty: false }).text).toBe(text);

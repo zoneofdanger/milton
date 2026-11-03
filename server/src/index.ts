@@ -9,6 +9,7 @@ import {
 import { browserPages } from "./auth";
 import { boundRequest } from "./http";
 import { logUnexpected } from "./error-log";
+import { unavailablePage } from "./pages";
 import { Hono } from "hono";
 
 export function createMiltonApp(config: RuntimeConfig, browserOnly = false) {
@@ -27,6 +28,21 @@ export function createMcpApp(config: McpConfig) {
   };
 }
 
+// A browser asking for a page: GET or HEAD, Accept lists text/html, and not
+// the MCP endpoint, the health check or resource discovery (all JSON).
+function isPageRequest(request: Request) {
+  const path = new URL(request.url).pathname;
+  return (
+    (request.method === "GET" || request.method === "HEAD") &&
+    path !== "/mcp" &&
+    path !== "/health" &&
+    !path.startsWith("/.well-known/") &&
+    (request.headers.get("Accept") ?? "")
+      .split(",")
+      .some((type) => type.split(";")[0]!.trim().toLowerCase() === "text/html")
+  );
+}
+
 function createHttpApp(
   config: McpConfig,
   pages?: ReturnType<typeof browserPages>,
@@ -34,8 +50,9 @@ function createHttpApp(
 ) {
   const mcp = createMiltonHandler(config);
   const app = new Hono();
-  app.onError((error) => {
+  app.onError((error, context) => {
     logUnexpected("http", error);
+    if (isPageRequest(context.req.raw)) return unavailablePage();
     return Response.json(
       {
         error: "server_unavailable",

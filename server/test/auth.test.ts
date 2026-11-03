@@ -1737,6 +1737,63 @@ test("an unexpected error on a page logs one line with its class and code, never
   }
 });
 
+test("an unexpected error shows a browser page PC LOAD LETTER and answers everything else with the same JSON", async () => {
+  // The host check runs before every route; a throwing Host read reaches onError.
+  const failing = (path: string, init: RequestInit) => {
+    const request = new Request(appOrigin + path, init);
+    const get = request.headers.get.bind(request.headers);
+    request.headers.get = (name) => {
+      if (name.toLowerCase() === "host") throw new RangeError("Fixture");
+      return get(name);
+    };
+    return request;
+  };
+  const logged = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    const app = appFor({});
+    const shown = await app(
+      failing("/tps-report", {
+        headers: { Accept: "text/html,application/xhtml+xml,*/*;q=0.8" },
+      }),
+    );
+    expect(shown.status).toBe(503);
+    expect(shown.headers.get("Content-Type")).toBe("text/html; charset=utf-8");
+    expect(shown.headers.get("Cache-Control")).toBe("no-store");
+    const html = await shown.text();
+    expect(html).toContain("<h1>PC LOAD LETTER</h1>");
+    expect(html).toContain(
+      "<p>Something went wrong on our side. Your cover sheet and reports are unchanged. Try again in a moment.</p></div></main>",
+    );
+    for (const request of [
+      failing("/tps-report", { headers: { Accept: "application/json" } }),
+      failing("/health", { headers: { Accept: "text/html" } }),
+      failing("/.well-known/oauth-protected-resource", {
+        headers: { Accept: "text/html" },
+      }),
+      failing("/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+        },
+        body: "{}",
+      }),
+    ]) {
+      const response = await app(request);
+      expect(response.status).toBe(503);
+      expect(response.headers.get("Cache-Control")).toBe("no-store");
+      expect(await response.text()).toBe(
+        '{"error":"server_unavailable","message":"Milton is unavailable. Try again."}',
+      );
+    }
+    expect(
+      logged.mock.calls.map(([line]) => JSON.parse(String(line)).where),
+    ).toEqual(["http", "http", "http", "http"]);
+  } finally {
+    logged.mockRestore();
+  }
+});
+
 test("an unrecognized database failure logs its class and code once, never its message", async () => {
   const { databaseFailure } = await import("../src/store/database");
   const logged = spyOn(console, "error").mockImplementation(() => {});

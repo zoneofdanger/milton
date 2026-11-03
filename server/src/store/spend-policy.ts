@@ -10,7 +10,7 @@ export type SpendPolicy = {
   foreground_accounting_ready: boolean;
 };
 
-// Global before account, on every path that admits paid or user-update work.
+// The spend worker and the memo-update admin script; saves never lock store_config.
 export async function lockSpendPolicy(tx: StoreSession): Promise<SpendPolicy> {
   const row = (
     await tx.query<SpendPolicy>(sql`SELECT global_spend_policy,

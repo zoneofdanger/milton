@@ -1215,3 +1215,37 @@ test("a Baseline: rule must be a setup rule byte for byte in its report, filed n
     await local.dispose();
   }
 });
+
+test("a save neither reads nor waits on the model-era spend fields", async () => {
+  const local = await localStore();
+  try {
+    await seedUsers(local.pg, "model-era");
+    // The config_memo_updates check still ties enabled updates to these
+    // fields until #18 drops them; drop it here to reach the state that
+    // formerly refused every save with "Memo updates are not ready."
+    await local.pg.exec(
+      `ALTER TABLE store_config DROP CONSTRAINT config_memo_updates;
+      UPDATE store_config SET memo_updates_enabled=true,foreground_accounting_ready=false,global_spend_policy='capped'`,
+    );
+    const store = fixtureStore(local.db, "model-era");
+    const saved = await store.saveMemo({
+      text: "Add a rule.",
+      rules: [{ report: "cover", text: "Lead with the answer." }],
+      expected_version: (await store.getTpsReport()).version,
+      request_id: crypto.randomUUID(),
+    });
+    expect(saved).toMatchObject({
+      status: "saved",
+      memo_update: { state: "charged", charged: 1 },
+    });
+    expect(
+      (
+        await local.pg.query(
+          "SELECT count(*)::int AS n FROM save_requests WHERE user_id='model-era' AND memo_update_state='charged'",
+        )
+      ).rows,
+    ).toEqual([{ n: 1 }]);
+  } finally {
+    await local.dispose();
+  }
+});

@@ -21,8 +21,8 @@ decommission on 2026-11-01. Hosting rollback now uses Cloud Run revisions.
 Project `milton-510506`, Cloud Run/Artifact Registry region `us-east4`, Scheduler
 region `us-east1`. Service manifests in this directory pin an immutable image and
 secret versions. They contain configuration and secret references, never values.
-The manifests pin what is serving now: app `milton-app-splits-31f39cc`
-(`sha256:c41e1651…`, env 1, key 1), MCP `milton-mcp-splits-31f39cc`
+The manifests pin what is serving now: app `milton-app-design-9a3da59`
+(`sha256:663ff9ed…`, env 1, key 1), MCP `milton-mcp-splits-31f39cc`
 (`sha256:c41e1651…`, env 2, key 1) and worker `milton-worker-filing-f505745`
 (`sha256:a370b7c3…`, env 4, key 1); see the release records below. The app and MCP
 manifests still set `MILTON_GLOBAL_SPEND_POLICY=alerts_only`, which the runtime no
@@ -210,13 +210,43 @@ gcloud run services update-traffic milton-mcp --to-revisions=milton-mcp-derived-
 gcloud run services update-traffic milton-worker --to-revisions=milton-worker-env4-cba4f6c=100 --project=milton-510506 --region=us-east4
 ```
 
-Now serving (since 2026-11-03 00:12:13Z): MCP `milton-mcp-splits-31f39cc`, app
-`milton-app-splits-31f39cc`, worker `milton-worker-filing-f505745`; each is recorded below.
+Now serving (since 2026-11-03 00:34:06Z): MCP `milton-mcp-splits-31f39cc`, app
+`milton-app-design-9a3da59`, worker `milton-worker-filing-f505745`; each is recorded below.
 
-Current release splits-31f39cc: app and MCP. Revisions `milton-app-splits-31f39cc` and
+Current release design-9a3da59: app only. Revision `milton-app-design-9a3da59`, staged with
+`--no-traffic`; at milton-lead's assignment under Peter's go, a release agent switched the app
+at 2026-11-03 00:34:06Z, and it serves 100%. MCP stays on `milton-mcp-splits-31f39cc` and the
+worker on `milton-worker-filing-f505745`. It runs image
+`sha256:663ff9edb3744dfaeff38093896e072750bfaea7824057b7d7e468de8d511d9f` (amd64
+`sha256:d4ebee2c30a56d1ac6540a9ecdda494f442e5423d64994add9b11e497ab7f039`; uid 1000, Node 26,
+no env, key or pem files; build stage `oven/bun:1.4.4`), built from main `9a3da59`, the merge
+of `agent/app-design`. Configuration is identical to `milton-app-splits-31f39cc` apart from the
+image (`milton-app-env:1`, `milton-app-key:1`). No migration and no schema change; no store,
+MCP or download change. Change: the signed-in web app's pages share one page shell with an
+account menu (email, switch account, sign out, delete account), setup steps move to Connected
+assistants, and the cover sheet renders as a T.P.S. report form; the theme gains
+`--font-form` and `--text-form-title`. The sign-in and public pages use the same shell. After
+the switch, the app and `/login` returned 200, the login page rendered its sign-in form with a
+CSRF field, `bun scripts/probe-forms.ts` printed `PASS`, signed-out `/assistants`,
+`/account/delete` and `/download` returned the 403 sign-in refusal, and the served
+`milton.css` carried both new tokens. Headless Chromium loaded `/login` at 1440, 390 and 320
+px in light and dark with no horizontal overflow, Geist and JetBrains Mono loaded, and no
+console errors. An authenticated `get_cover_sheet` returned 200 with an unchanged version.
+From 00:33Z to 00:44Z the new revision logged no "runtime configuration unavailable", no
+ReferenceError or TypeError, no error logs and no 5xx across 57 requests (53 x 200; 4 x 403,
+the checks' signed-out refusals), MCP and the worker kept their revisions, and 12 worker ticks
+returned 200. Signed-in pages were not viewed in production.
+
+Rollback (image `sha256:c41e1651…`; no schema change; restores the previous page layout):
+
+```sh
+gcloud run services update-traffic milton-app --to-revisions=milton-app-splits-31f39cc=100 --project=milton-510506 --region=us-east4
+```
+
+Release splits-31f39cc: app and MCP. Revisions `milton-app-splits-31f39cc` and
 `milton-mcp-splits-31f39cc`, staged with `--no-traffic`; at milton-lead's assignment under
-Peter's go, a release agent switched MCP at 2026-11-03 00:11:14Z and the app at 00:12:13Z,
-and each serves 100%. The worker stays on `milton-worker-filing-f505745`. Both run image
+Peter's go, a release agent switched MCP at 2026-11-03 00:11:14Z and the app at 00:12:13Z.
+MCP serves 100%; the app served 100% until design-9a3da59. The worker stays on `milton-worker-filing-f505745`. Both run image
 `sha256:c41e165167fc1b21eed977157cd185394e2cc08b3ac6b83dc454966bc9291ca3` (amd64
 `sha256:45588511e32dec36b5e8580275014bf361658a2fc8437bb1e0a2c44bd703436e`; uid 1000, Node 26,
 no env, key or pem files; build stage `oven/bun:1.4.4`), built from main `31f39cc`, whose

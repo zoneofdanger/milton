@@ -11,3 +11,4 @@ server/public/fonts/
 server/drizzle/meta/
 **/fonts/*LICENSE*
 .worktrees/
+.agents/

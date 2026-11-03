@@ -4,6 +4,7 @@ import { mcpRuntimeConfig, runtimeConfig } from "./config";
 import { createMcpApp } from "./index";
 import { createCloudApp } from "./cloud-app";
 import { createSpendAlertHandler } from "./spend-alert-worker";
+import { logUnexpected } from "./error-log";
 
 try {
   const env = loadEnvironment();
@@ -26,7 +27,8 @@ try {
   };
   process.once("SIGTERM", shutdown);
   process.once("SIGINT", shutdown);
-} catch {
-  console.error("Milton failed to start: runtime configuration unavailable.");
+} catch (error) {
+  // Runtime configuration unavailable or invalid; never log its values.
+  logUnexpected("startup", error);
   process.exitCode = 1;
 }

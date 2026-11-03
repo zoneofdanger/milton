@@ -1887,3 +1887,28 @@ test("multiply encoded capability prefixes fail closed while unrelated MCP redir
     expect(response.headers.get("Location")).toBe(appOrigin + path);
   }
 });
+
+test("an unexpected error on a page logs one line with its class and code, never its message", async () => {
+  const secret = "token=fixture-secret https://private.example/path";
+  const failing = fakeNeon(() => {
+    throw Object.assign(new RangeError(secret), { code: "E_FIXTURE" });
+  });
+  const logged = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    const response = await browser(appFor({}))("/login?" + signedQuery);
+    expect(response.status).toBe(503);
+    expect(logged).toHaveBeenCalledTimes(1);
+    const line = String(logged.mock.calls[0]![0]);
+    expect(JSON.parse(line)).toEqual({
+      event: "unexpected_error",
+      where: "page",
+      class: "RangeError",
+      code: "E_FIXTURE",
+    });
+    expect(line).not.toContain("fixture-secret");
+    expect(line).not.toContain("private.example");
+  } finally {
+    logged.mockRestore();
+    failing.mockRestore();
+  }
+});

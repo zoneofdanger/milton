@@ -8,6 +8,7 @@ import {
 } from "./handler";
 import { browserPages } from "./auth";
 import { boundRequest } from "./http";
+import { logUnexpected } from "./error-log";
 import { Hono } from "hono";
 import {
   feedDenied,
@@ -38,8 +39,9 @@ function createHttpApp(
 ) {
   const mcp = createMiltonHandler(config);
   const app = new Hono();
-  app.onError(() =>
-    Response.json(
+  app.onError((error) => {
+    logUnexpected("http", error);
+    return Response.json(
       {
         error: "server_unavailable",
         message: "Milton is unavailable. Try again.",
@@ -48,8 +50,8 @@ function createHttpApp(
         status: 503,
         headers: { "Cache-Control": "no-store" },
       },
-    ),
-  );
+    );
+  });
   // MCP owns its protocol, body bounds and bearer authentication.
   app.all("/mcp", (context) =>
     browserOnly ? new Response(null, { status: 404 }) : mcp(context.req.raw),

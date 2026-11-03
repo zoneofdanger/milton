@@ -9,6 +9,7 @@ import { pageContext } from "./auth-session";
 import { assistants } from "./auth-assistants";
 import { accountDeletion } from "./auth-account";
 import { signInRoutes } from "./auth-login";
+import { logUnexpected } from "./error-log";
 
 export function browserPages(config: RuntimeConfig) {
   const secure = !isLoopback(new URL(config.appOrigin).hostname);
@@ -44,14 +45,15 @@ export function browserPages(config: RuntimeConfig) {
     try {
       response = await perform();
     } catch (error) {
-      const failure =
-        error instanceof AuthError || error instanceof StoreError
-          ? error
-          : new AuthError(
-              "auth_unavailable",
-              "Sign-in is unavailable. Try again.",
-              503,
-            );
+      const known = error instanceof AuthError || error instanceof StoreError;
+      if (!known) logUnexpected("page", error);
+      const failure = known
+        ? error
+        : new AuthError(
+            "auth_unavailable",
+            "Sign-in is unavailable. Try again.",
+            503,
+          );
       response = page(
         "Unable to continue",
         <>

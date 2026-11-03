@@ -10,7 +10,7 @@ landed and the item is still open), `blocked: <why or #id>`. A bolded headline o
 or fewer states the task; one item is one landing. **A section heading and its preamble are
 shared context for every item beneath it.**
 
-**next-id: 23.** Ids are never reused, so this counter survives deleting the newest item.
+**next-id: 24.** Ids are never reused, so this counter survives deleting the newest item.
 
 ## MVP
 
@@ -66,6 +66,13 @@ reports, memos) and plain text on security screens and anything an assistant rea
       access. Built and reviewed as merge f2ea867 (setup.ts question 6, test, README), reverted
       unreleased; reapply by reverting the revert, then run first setup on an empty test account
       through Claude Code with a mail connector (#8) before release.
+
+- [ ] #23 (ops, low, founder) **Billing mailbox: accountspayable@meetmilton.com.** Decided
+      2026-11-03: subscription and payment issues go to accountspayable@ (the Nina nod), a real,
+      read mailbox, not support@. Create the alias when paid subscriptions launch, route it to
+      whoever handles billing, and name it on the pricing section, the FAQ "Will I be charged"
+      answer, and the subscription_required message. Until then it does not exist; the landing
+      page's unread joke address is a different alias.
 
 ## From the audit of 2026-11-02 (`.agents/tmp/audit/report.md`)
 

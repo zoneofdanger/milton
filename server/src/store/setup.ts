@@ -721,3 +721,6 @@ export function reportSetup(documents: Documents, report: ReportId) {
       .map((r) => r.id),
   });
 }
+/** list_reports carries this one line, not the block, for each empty report. */
+export const setupHint = (report: ReportId) =>
+  `Setup available: call get_report ${report} and run its setup as written.`;

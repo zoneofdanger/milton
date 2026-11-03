@@ -14,7 +14,7 @@ import {
   type Documents,
   type ReportDocument,
 } from "./reports";
-import { reportSetup } from "./setup";
+import { reportSetup, setupHint } from "./setup";
 
 export const coverSheetInput = z.strictObject({
   hook_event: z
@@ -86,7 +86,8 @@ export const reportList = (documents: Documents & { version: string }) => ({
     text: r.body,
     is_empty: r.is_empty,
     samples: sampleIndex(r),
-    ...setupField(documents, r.id),
+    // A one-line pointer, so the list stays small; get_report serves the block.
+    ...(r.is_empty ? { setup: setupHint(r.id) } : {}),
   })),
   version: documents.version,
 });

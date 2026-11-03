@@ -8,6 +8,7 @@ import {
   FIRST_SETUP_POINTER,
   SETUP_MARKER,
   setupCatalog,
+  setupHint,
 } from "../src/store/setup";
 import { coverSheet, reportEnvelope, reportList } from "../src/store/tools";
 
@@ -153,12 +154,13 @@ test("setup renders from its catalog, per report while empty, under the agent ki
   );
   expect(reportEnvelope(filed, "post").setup).not.toContain("Your email");
   expect(email).toContain("Next: Post, Document, Speech, or stop here?");
-  expect(reportList(filed).reports.map((r) => r.setup === undefined)).toEqual([
-    false,
-    true,
-    false,
-    false,
-    false,
+  // list_reports carries one line per empty report, never a block.
+  expect(reportList(filed).reports.map((r) => r.setup)).toEqual([
+    setupHint("email"),
+    undefined,
+    setupHint("post"),
+    setupHint("document"),
+    setupHint("speech"),
   ]);
 });
 

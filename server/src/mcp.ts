@@ -143,7 +143,7 @@ export function createMiltonServer(
     "list_reports",
     {
       description:
-        "Read all five reports at once, without the cover sheet. Returns reports (report_id, text, is_empty, samples and setup as in get_report) and version. For clients that want everything loaded after get_cover_sheet. No model call, no write.",
+        "Read all five reports at once, without the cover sheet. Returns reports (report_id, text, is_empty, samples as in get_report, and while a report is empty a one-line setup pointing to get_report for its setup) and version. For clients that want everything loaded after get_cover_sheet. No model call, no write.",
       inputSchema: listReportsInput,
       annotations: readOnly,
     },

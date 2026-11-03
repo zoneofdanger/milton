@@ -216,6 +216,9 @@ test("two authenticated clients isolate tenants, save once and reject retired to
     // An empty account carries the first-setup script; it leaves after the first save.
     expect(first.is_empty).toBe(true);
     expect(String(first.setup)).toContain("Which sign-off is yours?");
+    expect(String(first.setup)).toContain(
+      '"Milton keeps the writing you approve, word for word. It never rewrites a rule or a sample, and it never reads your inbox."',
+    );
     // The scripted sample names only fields that form a valid sample.
     const scripted = /sample \{ ([^}]*) \}/.exec(String(first.setup))![1]!;
     const fields = [...scripted.matchAll(/(\w+):/g)].map((m) => m[1]!);

@@ -938,15 +938,15 @@ repository (`umask 077; cd "$(mktemp -d)"`).
      | awk '/^DATABASE_URL=/ { sub(/:\/\/[^@]*@/, "://milton_app:" ENVIRON["MILTON_APP_PASSWORD"] "@") } { print }' \
      > app-next.env
    dotenvx encrypt -f app-next.env
-   grep -c '^DATABASE_URL=encrypted:' app-next.env
+   grep -c '^DATABASE_URL="encrypted:' app-next.env
    ```
 
    `app-next.env` is mode 600 because of the `umask`, and it holds plaintext only
    between the `awk` and the `encrypt`. It keeps the same keypair, because the public
    key comes across in the decrypted header, so `milton-app-key:1` stays valid. Only
    the user and password change; the host, `/milton` and `sslmode` are the service's
-   own. The `grep` must print `1`. A local rehearsal with fake values kept the public
-   key and changed only `DATABASE_URL`.
+   own. The `grep` must print `1` (dotenvx quotes encrypted values). A local rehearsal
+   with fake values kept the public key and changed only `DATABASE_URL`.
 
 5. Check the minted payload before any service uses it, with `DOTENV_PRIVATE_KEY`
    still exported:

@@ -3,10 +3,14 @@ import { storeInstructions } from "../src/mcp";
 import { saveMemoInput } from "../src/store/compiled";
 import { parseReport } from "../../packages/agent-kit/src/report";
 import type { CardHead } from "../src/store/cards";
-import { assembleDocuments, FILINGS, type Filing } from "../src/store/reports";
+import {
+  assembleDocuments,
+  BASELINE_NOTE,
+  FILINGS,
+  type Filing,
+} from "../src/store/reports";
 import {
   SETUP_HOOK_POINTER,
-  SETUP_MARKER,
   setupCatalog,
   setupHint,
 } from "../src/store/setup";
@@ -62,7 +66,9 @@ test("setup renders from its catalog, per report while empty, under the agent ki
   // The cover sheet serves the opening lines and email's block, cover questions included.
   expect(sheet.setup).toBe(reportEnvelope(empty, "email").setup!);
   expect(sheet.setup).toContain('Then say: "First, paste one email');
-  expect(sheet.setup).toContain(`[cover] ${SETUP_MARKER}`);
+  // Nothing to file explains the prefix: the cover sheet prints a fixed note
+  // while any baseline is active.
+  expect(sheet.setup).not.toContain("Rules marked Baseline:");
   // Setup keys on rules: samples alone keep every block, and the cover
   // questions ride with whichever block runs while the cover sheet has none.
   const sampled = {
@@ -95,7 +101,7 @@ test("setup renders from its catalog, per report while empty, under the agent ki
   expect(chat).not.toContain("[email]");
   // After a first save, each empty report serves its full block.
   const started = {
-    ...assembleDocuments([head("cover", SETUP_MARKER)], []),
+    ...assembleDocuments([head("cover", "Lead with the answer.")], []),
     version,
   };
   const served = [
@@ -136,9 +142,7 @@ test("setup renders from its catalog, per report while empty, under the agent ki
     }
   }
   // Every catalog baseline is offered, and only those.
-  expect([...offered].sort()).toEqual(
-    setupCatalog.filter((rule) => rule !== SETUP_MARKER).sort(),
-  );
+  expect([...offered].sort()).toEqual([...setupCatalog].sort());
   // The scripted saves parse against saveMemoInput.
   expect(between(sheet.setup!, "rules [{ ", " }]").split(", ")).toEqual([
     "report",
@@ -148,8 +152,7 @@ test("setup renders from its catalog, per report while empty, under the agent ki
     ...envelope(),
     text: between(sheet.setup!, 'create_memo once: text "', '"'),
     rules: [
-      { report: "cover", text: SETUP_MARKER },
-      ...setupCatalog.slice(1, 20).map((text) => ({ report: "email", text })),
+      ...setupCatalog.slice(0, 20).map((text) => ({ report: "email", text })),
     ],
   });
   // The approved paste is filed first, so an abandoned block keeps it.
@@ -174,11 +177,11 @@ test("setup renders from its catalog, per report while empty, under the agent ki
     },
   });
   // Once rules exist, a report with rules serves no setup; with cover rules on
-  // file, email's block loses the cover questions and the marker leaves the save.
+  // file, email's block loses the cover questions.
   const filed = {
     ...assembleDocuments(
       [
-        head("cover", SETUP_MARKER),
+        head("cover", "Lead with the answer."),
         head("chat", "Baseline: No emoji in chat."),
       ],
       [],
@@ -186,6 +189,8 @@ test("setup renders from its catalog, per report while empty, under the agent ki
     version,
   };
   expect(coverSheet(filed).setup).toBeUndefined();
+  expect(filed.cover).toBe(BASELINE_NOTE + "\n\n- Lead with the answer.");
+  expect(started.cover).toBe("- Lead with the answer.");
   expect(reportEnvelope(filed, "chat").setup).toBeUndefined();
   const email = reportEnvelope(filed, "email").setup!;
   expect(email).toStartWith("Setup: Email. Offer it once");

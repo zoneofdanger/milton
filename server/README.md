@@ -342,7 +342,9 @@ The assistant offers first setup once when empty, uses available explicit
 instructions or asks questions, and shows the full draft for approval before
 saving. The setup script is text rendered from one data file (`src/store/setup.ts`)
 that also yields the baseline catalog: paste one piece first, confirm what it shows,
-then pick among exact snippets, each pick filing listed `Baseline: ` rules. Milton cannot inspect other assistants' memories. It stores instructions,
+then pick among exact snippets, each pick filing listed `Baseline: ` rules. While any
+active rule starts with `Baseline: `, the cover sheet text opens with one fixed,
+unstored line saying what the prefix means. Milton cannot inspect other assistants' memories. It stores instructions,
 not factual/project memory. The assistant applies the rules and samples to its drafts itself.
 
 Two offers follow from drafting. When the person approves a draft to send, post,

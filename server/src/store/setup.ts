@@ -4,6 +4,7 @@
  * approved proposal; "⏎" marks a line break and " • " a bullet on its own line,
  * as there. Every rule is filed as "Baseline: " + its text here. */
 import {
+  BASELINE,
   REPORTS,
   ruleText,
   type Documents,
@@ -572,12 +573,6 @@ export const setupBlocks: Block[] = [
   },
 ];
 
-export const BASELINE = "Baseline: ";
-/** Filed to the cover sheet with the first setup save, so every assistant
- * reads what the prefix means. It carries no prefix itself. */
-export const SETUP_MARKER =
-  "Rules marked Baseline: came from my setup picks, not my writing; my samples outrank them.";
-
 const isTells = (q: Pick | Tells): q is Tells => "tells" in q;
 /** Every rule a block can file, each once, as filed. */
 const blockRules = (block: Block) =>
@@ -586,12 +581,11 @@ const blockRules = (block: Block) =>
       ? q.tells.map((t) => BASELINE + t.rule)
       : q.options.flatMap((o) => o.rules.map((r) => BASELINE + r)),
   );
-/** The marker and every baseline rule the setup text can file, each once. */
+/** Every baseline rule the setup text can file, each once. */
 export const setupCatalog: readonly string[] = [
-  SETUP_MARKER,
   ...new Set(setupBlocks.flatMap(blockRules)),
 ];
-const baselines = new Set(setupCatalog.filter((r) => r.startsWith(BASELINE)));
+const baselines = new Set(setupCatalog);
 /** A rule's text passes unless it starts with "Baseline: " (after one
  * leading "- ") without being a catalog entry byte for byte. */
 export const knownBaseline = (text: string) =>
@@ -666,16 +660,11 @@ const coverQuestions = () =>
 /** The setup script for one report's block. `first` (no rules anywhere yet)
  * adds the opening lines; `cover` (the cover sheet has no rules) attaches the
  * cover-sheet questions, inline in email's block and after any other's;
- * `marker` adds the marker rule to the save; `next` names the reports still
+ * `next` names the reports still
  * without rules to offer afterwards. */
 export function setupText(
   report: ReportId,
-  {
-    first,
-    cover,
-    marker,
-    next,
-  }: { first: boolean; cover: boolean; marker: boolean; next: ReportId[] },
+  { first, cover, next }: { first: boolean; cover: boolean; next: ReportId[] },
 ) {
   const block = setupBlocks.find((b) => b.report === report)!;
   const name = title(report);
@@ -712,7 +701,7 @@ export function setupText(
     `1. The paste. Show it back exactly as pasted, with a proposed kind of one or two words and a one-line context, and ask to keep it as a sample, unchanged. On yes, file it right away with its own create_memo: text "Setup sample", sample { report: "${report}", new_kind: a label of one or two words such as "${block.kind}", context: one line on the situation, text: the paste exactly as pasted }, expected_version from this read and a new request_id. Milton keeps the newest two samples per kind. Names stay unless the person asks for placeholders. Skipping the paste gives every pick.`,
     `2. Confirmations. For each habit a Files line says a paste can confirm, if the paste plainly shows it and one listed option matches, ask one line instead of the pick${report === "email" ? `, such as "Your email opens with 'Hi [first name],'. Is that usual?"` : `: name the habit you saw in the ${block.piece} and ask whether it is usual.`} Yes files that option's rule for the habit; no, or "sometimes", asks the pick, which then files only the rules not already filed.`,
     `3. The questions, in order, one at a time. Say the Ask line, then show the Show exactly block as written, every option with its letter. A letter files exactly the rules on its Files line, each to the report in brackets. Mixed answers ("a, but with b's sign-off") are fine: read back the exact rules chosen. "Neither" files nothing. An answer in the person's own words ("it depends", "Cheers,") is read back and filed in their words, without "${BASELINE}". The block stops at its end, on "stop", or after two consecutive skips.`,
-    `4. Approval. Show the complete list of rules grouped under ${groups}${marker ? `, with this cover rule first, which tells every assistant what the marker means: [cover] ${SETUP_MARKER}` : "."} Wait for approval; the person can strike or change any line.`,
+    `4. Approval. Show the complete list of rules grouped under ${groups}. Wait for approval; the person can strike or change any line.`,
     `5. Save. Call create_memo once: text "Setup baseline", rules [{ report, text }] with one entry per approved rule, report from its brackets, text copied byte for byte from its Files line (or the person's own words exactly as approved), expected_version from the sample save's result (from this read when no sample was filed) and a new request_id. Milton refuses any rule starting "${BASELINE}" that is not a Files rule byte for byte.`,
     `6. End. Say, with the counts actually filed, the sample from step 1 included: "Filed to ${name}: [n] sample and [n] baseline rules${cover ? ", plus [n] on your cover sheet" : ""}. Read them back any time, here or on your Milton page. To change one, tell me or any connected assistant ("change the sign-off rule to Best"); it is replaced word for word. Samples outrank baselines.${next.length ? ` Next: ${next.map(title).join(", ")}, or stop here?` : ""}"${next.length ? " On a pick, call get_report for that report and run its setup." : ""}`,
   ];
@@ -736,7 +725,6 @@ export function reportSetup(documents: Documents, report: ReportId) {
   return setupText(report, {
     first: noRules(documents),
     cover: documents.cover_rules.length === 0,
-    marker: !documents.cover_rules.some((r) => ruleText(r) === SETUP_MARKER),
     next: documents.reports
       .filter((r) => r.rules.length === 0 && r.id !== report)
       .map((r) => r.id),

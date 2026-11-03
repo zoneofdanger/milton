@@ -18,7 +18,8 @@ reports (`email`, `chat`, `post`, `document`, `speech`) or to the cover sheet, t
 rules true of all writing. Approved samples are stored exactly as sent in their own
 append-only table, newest per kind winning and at most two per kind staying active.
 Assembly is deterministic and runs on read: the cover sheet is its rules in
-write-once insertion order; each report prints its heading, its when line, its
+write-once insertion order, after one fixed note on the `Baseline: ` prefix while any
+active rule carries it; each report prints its heading, its when line, its
 samples newest first, then its rules (0017). Every rule prints as one bullet, with
 one stored leading `- ` dropped first so rules filed by the retired compiler and rules
 stored as sent read alike. Card text cannot contain Markdown

@@ -4,7 +4,7 @@ import { expect, test } from "bun:test";
 import { sql } from "drizzle-orm";
 import { databaseFailure } from "../src/store/database";
 import { StoreError } from "../src/store/errors";
-import { SETUP_MARKER } from "../src/store/setup";
+import { BASELINE_NOTE } from "../src/store/reports";
 import { localStore } from "./local-store";
 import { betweenPhases, fixtureStore, seedUsers } from "./store-fixtures";
 
@@ -1163,7 +1163,7 @@ test("a Baseline: rule must be a setup rule byte for byte, filed new or by an ex
       (
         await save({
           rules: [
-            { report: "cover", text: SETUP_MARKER },
+            { report: "cover", text: "Lead with the answer." },
             { report: "email", text: rule },
           ],
         })
@@ -1172,9 +1172,13 @@ test("a Baseline: rule must be a setup rule byte for byte, filed new or by an ex
     expect(
       (await cardHeads(local.db, "baseline")).map((h) => [h.report, h.body]),
     ).toEqual([
-      ["cover", SETUP_MARKER],
+      ["cover", "Lead with the answer."],
       ["email", rule],
     ]);
+    // The cover sheet explains the prefix itself; nothing stores the note.
+    expect((await store.getTpsReport()).text).toStartWith(
+      BASELINE_NOTE + "\n\n- Lead with the answer.",
+    );
     // An edit may not leave a prefixed rule outside the catalog; dropping the
     // prefix makes it the person's own rule.
     const edit = (after: string) =>

@@ -54,9 +54,9 @@ workspace's TypeScript 7 yet.
 
 Production publishes from main only. The Vercel project is linked to the GitHub
 repository `zoneofdanger/milton` with `main` as the production branch: every push to
-main builds and publishes the site, and a commit that touches none of `apps/site`,
-`packages/theme`, the root `package.json` or `bun.lock` is skipped by the project's
-ignored-build-step command. A branch can only produce a preview: build one with
+main builds and publishes the site, whatever it touches (an ignored-build-step command
+was tried on 2026-11-03 and failed: git is not available to that step on this project,
+so every push builds; a build takes about a minute). A branch can only produce a preview: build one with
 `vercel deploy --project milton-site --scope zoneofdanger` (never `--prod`) from the
 repository root, where `.vercelignore` allowlists `apps/site`, `packages/theme` and the
 workspace manifests. Never promote a branch build; land it and let the push publish.

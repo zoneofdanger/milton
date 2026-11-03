@@ -216,17 +216,35 @@ test("two authenticated clients isolate tenants, save once and reject retired to
     // An empty account carries the first-setup script; it leaves after the first save.
     expect(first.is_empty).toBe(true);
     expect(String(first.setup)).toContain("Which sign-off is yours?");
-    // The scripted sample names only fields that form a valid sample.
-    const scripted = /sample \{ ([^}]*) \}/.exec(String(first.setup))![1]!;
-    const fields = [...scripted.matchAll(/(\w+):/g)].map((m) => m[1]!);
-    expect(fields).toEqual(["report", "new_kind", "context", "text"]);
-    expect(
-      saveMemoInput.shape.sample.safeParse(
-        Object.fromEntries(
-          fields.map((f) => [f, f === "report" ? "email" : "Fictional value"]),
-        ),
-      ).success,
-    ).toBe(true);
+    // The optional sent-mail step asks before reading and files only approved samples.
+    const sentMail = String(first.setup)
+      .split("\n")
+      .find((line) => line.includes("sent mail"));
+    expect(sentMail).toContain("optional");
+    expect(sentMail).toContain("approve");
+    expect(sentMail).toContain("kind_id");
+    // Every scripted sample, the sent-mail one included, names only fields that
+    // form a valid sample, with new_kind or with an existing kind_id.
+    const scripted = [
+      ...String(first.setup).matchAll(/sample \{ ([^}]*) \}/g),
+    ].map((m) => m[1]!);
+    expect(scripted.length).toBe(2);
+    expect(scripted.some((s) => sentMail!.includes(s))).toBe(true);
+    for (const shape of scripted) {
+      const fields = [...shape.matchAll(/(\w+):/g)].map((m) => m[1]!);
+      expect(fields).toEqual(["report", "new_kind", "context", "text"]);
+      for (const kind of ["new_kind", "kind_id"])
+        expect(
+          saveMemoInput.shape.sample.safeParse(
+            Object.fromEntries(
+              fields.map((f) => [
+                f === "new_kind" ? kind : f,
+                f === "report" ? "email" : "Fictional value",
+              ]),
+            ),
+          ).success,
+        ).toBe(true);
+    }
     // So does the scripted rules entry, under each report the script names.
     const ruleShape = /rules \[\{ ([^}]*) \}\]/.exec(String(first.setup))![1]!;
     expect(ruleShape.split(", ")).toEqual(["report", "text"]);

@@ -327,6 +327,17 @@ instructions or asks questions, and shows the full draft for approval before
 saving. Milton cannot inspect other assistants' memories. It stores instructions,
 not factual/project memory. The assistant applies the rules and samples to its drafts itself.
 
+The served setup script (the cover sheet's `setup` field, separate from the server
+instructions and not under their 4,096-character cap) includes one optional step
+after the Email questions: learn from sent mail. Milton has no mail integration. With
+the person's permission, an assistant that has its own mail connector reads about the
+last 20 sent messages, skips newsletters, automatic replies, forwards, and one-line
+messages, and proposes up to five covering different kinds of email, each shown in
+full exactly as sent with a proposed kind and one line of context. Only the ones the
+person approves are filed, one `create_memo` sample per save, unsummarized and
+unrewritten. The assistant skips the step without comment when it has no mail
+access or the person declines, and reads chat only when the person offers messages.
+
 Two offers follow from drafting. When the person approves a draft to send, post,
 or say, the assistant offers once to save it as a sample under the report that
 applies, quoted exactly with one line of context; a no is final for that draft and

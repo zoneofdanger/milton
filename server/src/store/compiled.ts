@@ -170,7 +170,6 @@ export function compiledMemos(
   db: StoreDatabase,
   userId: string,
   actor?: { issuer: string; clientId: string },
-  appOrigin?: string,
 ) {
   const version = (revision: number) => hash(["tps", userId, revision]);
   async function lock(tx: StoreSession) {
@@ -222,7 +221,7 @@ export function compiledMemos(
   }
   async function readTpsSession(tx: StoreSession) {
     await lock(tx);
-    if (actor) await assertTrialAccess(tx, userId, appOrigin);
+    if (actor) await assertTrialAccess(tx, userId);
     let current = await snapshot(tx);
     // Assembly is deterministic, so a compiled snapshot that lags its sources is
     // rebuilt here instead of reported. An empty account without a snapshot is
@@ -344,7 +343,6 @@ export function compiledMemos(
         db,
         userId,
         actor,
-        appOrigin,
         input,
         inputHash,
         result,

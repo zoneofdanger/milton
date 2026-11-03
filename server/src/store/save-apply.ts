@@ -46,7 +46,6 @@ export async function applySave(
     db,
     userId,
     actor,
-    appOrigin,
     input,
     inputHash,
     result,
@@ -134,7 +133,7 @@ export async function applySave(
       );
     if (!pending.live)
       return complete(tx, result("failed", { error: "request_expired" }));
-    await assertTrialAccess(tx, userId, appOrigin);
+    await assertTrialAccess(tx, userId);
     const current = await snapshot(tx);
     if (
       current.fingerprint !== claim.current.fingerprint ||

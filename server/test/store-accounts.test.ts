@@ -236,6 +236,8 @@ test("trial transition preserves saves and TPS while notices and access follow t
       retryable: false,
     });
     expect(racingSave).not.toHaveProperty("subscription_url");
+    // The instructions say to give no link, so the refusal carries none.
+    expect(JSON.stringify(racingSave)).not.toMatch(/_url|https?:/);
     expect(await person.readTpsReport()).toEqual(report);
     const denied = await tools.get_cover_sheet();
     expect(denied.isError).toBe(true);
@@ -244,6 +246,7 @@ test("trial transition preserves saves and TPS while notices and access follow t
       retryable: false,
     });
     expect(result(denied).text).toBeUndefined();
+    expect(JSON.stringify(result(denied))).not.toMatch(/_url|https?:/);
     const beforeCalls = calls;
     expect(
       result(

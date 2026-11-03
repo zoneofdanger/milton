@@ -21,7 +21,6 @@ export async function claimSave(ctx: SaveContext, structured: boolean) {
   const {
     db,
     userId,
-    appOrigin,
     input,
     inputHash,
     result,
@@ -67,7 +66,7 @@ export async function claimSave(ctx: SaveContext, structured: boolean) {
         throw new StoreError("invalid_input", nameTheReport, 400);
       // Account gates answer without a receipt, so the same request can
       // succeed once the gate opens.
-      await assertTrialAccess(tx, userId, appOrigin);
+      await assertTrialAccess(tx, userId);
       const current = await snapshot(tx);
       const clock = await claimClock(tx);
       const claimReceipt = async (updateDay: string | null) => {

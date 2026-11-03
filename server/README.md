@@ -595,7 +595,7 @@ reads return instruction context only and do not consume billing notices.
 Report text, version, downloads and saved receipts contain no billing notices.
 
 Expired unsubscribed accounts receive a tool error `subscription_required` with
-`retryable:false`, a subscription URL and a web-preferences URL. This is not an
+`retryable:false` and no link, as the instructions say. This is not an
 authentication failure or an empty successful report. New saves are checked when
 claimed and again under the publication lock; a save that crosses expiry fails
 without publishing. Exact replay still

@@ -55,7 +55,6 @@ export type SaveContext = {
   db: StoreDatabase;
   userId: string;
   actor: { issuer: string; clientId: string };
-  appOrigin: string | undefined;
   input: SaveMemoInput;
   inputHash: string;
   result: (

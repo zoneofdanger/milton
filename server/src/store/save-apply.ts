@@ -160,6 +160,7 @@ export async function applySave(
       ).length > 0;
     // A sample whose bytes equal an active sample of its kind files nothing:
     // no copy, no eviction. A replacement of some other sample still applies.
+    // Samples this save retires are not on file for this check.
     const sampleReport = input.sample && resolveReportId(input.sample.report)!;
     const duplicate =
       input.sample &&
@@ -167,6 +168,7 @@ export async function applySave(
         await tx.query<{ id: string }>(sql`SELECT s.id FROM samples s
           JOIN sample_kinds k ON k.user_id=s.user_id AND k.id=s.kind_id
           WHERE s.user_id=${userId} AND s.report=${sampleReport} AND s.retired_at IS NULL AND s.body=${input.sample.text}
+          AND s.id NOT IN (SELECT jsonb_array_elements_text(${JSON.stringify(input.retire_samples ?? [])}::jsonb))
           AND ${input.sample.kind_id === undefined ? sql`lower(k.label)=lower(${input.sample.new_kind!})` : sql`k.id=${input.sample.kind_id}`}
           LIMIT 1`)
       )[0]?.id;

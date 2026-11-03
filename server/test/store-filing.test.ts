@@ -1091,3 +1091,37 @@ test("a sample identical to an active one of its kind is unchanged: no copy, no 
     await f.local.dispose();
   }
 });
+
+test("retiring a sample and re-adding its text in one save keeps one active copy", async () => {
+  const f = await filingFixture("readd-sample");
+  try {
+    await f.save({
+      sample: {
+        report: "email",
+        new_kind: "Follow-up",
+        context: "after a call",
+        text: "One",
+      },
+    });
+    const [old] = (await f.report("email")).samples;
+    expect(
+      await f.save({
+        retire_samples: [old!.id],
+        sample: {
+          report: "email",
+          kind_id: old!.kind_id,
+          context: "after a call",
+          text: "One",
+        },
+      }),
+    ).toMatchObject({
+      status: "saved",
+      samples_retired: [{ id: old!.id, reason: "removed" }],
+    });
+    const samples = (await f.report("email")).samples;
+    expect(samples.map((s) => s.body)).toEqual(["One"]);
+    expect(samples[0]!.id).not.toBe(old!.id);
+  } finally {
+    await f.local.dispose();
+  }
+});

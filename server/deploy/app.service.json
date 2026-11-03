@@ -51,10 +51,6 @@
                     "key": "1"
                   }
                 }
-              },
-              {
-                "name": "MILTON_GLOBAL_SPEND_POLICY",
-                "value": "alerts_only"
               }
             ],
             "volumeMounts": [

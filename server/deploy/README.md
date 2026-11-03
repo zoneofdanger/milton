@@ -7,33 +7,29 @@ Milton uses Bun for installs, builds and tests, and Node 26 LTS in production.
 | `meetmilton.com`, `www.meetmilton.com` | Static Astro, Vercel `milton-site`                                    |
 | `app.meetmilton.com`                   | Hono JSX, Vite theme assets, Cloud Run `milton-app`                   |
 | `mcp.meetmilton.com`                   | Hono MCP, Cloud Run `milton-mcp`, Google external HTTPS load balancer |
-| Spend-alert worker                     | Private Cloud Run `milton-worker`, Cloud Scheduler `milton-gardening` |
 
 Neon PostgreSQL and Neon Auth remain the source of truth.
 
-The app, MCP and worker are live on GCP. Vercel hosts only the static Astro site.
+The app and MCP are live on GCP. Vercel hosts only the static Astro site.
 The retired combined Vercel `milton-mcp` project, deployments, aliases, project
 secrets and firewall configuration were removed during the authorized hosting
 decommission on 2026-11-01. Hosting rollback now uses Cloud Run revisions.
 
 ## Cloud resources
 
-Project `milton-510506`, Cloud Run/Artifact Registry region `us-east4`, Scheduler
-region `us-east1`. Service manifests in this directory pin an immutable image and
+Project `milton-510506`, Cloud Run/Artifact Registry region `us-east4`. Service manifests in this directory pin an immutable image and
 secret versions. They contain configuration and secret references, never values.
 The manifests pin what is serving now: app `milton-app-savelock-712c7c1`
-(`sha256:e879f531…`, env 1, key 1), MCP `milton-mcp-savelock-712c7c1`
-(`sha256:e879f531…`, env 2, key 1) and worker `milton-worker-savelock-712c7c1`
-(`sha256:e879f531…`, env 4, key 1); see the release records below. The app and MCP
-manifests still set `MILTON_GLOBAL_SPEND_POLICY=alerts_only`, which the runtime no
-longer reads; `memo_updates_enabled` and `memo_updates_daily_limit` in `store_config`
-control admission (0022 dropped the SQL spend policy). Existing positive account safeguards
-remain in effect. Trials and billing remain disabled.
-Each image includes all roles and browser assets. Validate manifests before applying:
+(`sha256:e879f531…`, env 1, key 1) and MCP `milton-mcp-savelock-712c7c1`
+(`sha256:e879f531…`, env 2, key 1); see the release records below. The worker
+manifest is gone: the spend worker is removed in 0023 (see
+[spend subsystem removal](#spend-subsystem-removal-0023)). `memo_updates_enabled` and
+`memo_updates_daily_limit` in `store_config` control admission. Existing positive
+account safeguards remain in effect. Trials and billing remain disabled.
+Each image includes both roles and browser assets. Validate manifests before applying:
 
 ```sh
 gcloud run services replace server/deploy/mcp.service.json --dry-run --project=milton-510506 --region=us-east4
-gcloud run services replace server/deploy/worker.service.json --dry-run --project=milton-510506 --region=us-east4
 gcloud run services replace server/deploy/app.service.json --dry-run --project=milton-510506 --region=us-east4
 ```
 
@@ -47,10 +43,8 @@ Do not copy local dependencies, environment files or private keys into the image
 The app and MCP services accept ingress only from internal sources and Google's load
 balancer. Its platform invoker policy permits external MCP clients; Milton still
 requires a valid Neon access JWT for each tool request, and checks the canonical
-host. Direct public `run.app` access is refused. The worker uses internal ingress
-and grants `roles/run.invoker` only to
-`milton-scheduler@milton-510506.iam.gserviceaccount.com`. Never make it public or
-trust an arbitrary Authorization header inside the application.
+host. Direct public `run.app` access is refused. Never trust an arbitrary
+Authorization header inside the application.
 
 Each runtime service account can read only its own `milton-<role>-env` and
 `milton-<role>-key` secrets. Only the app receives its browser cookie secret.
@@ -89,7 +83,7 @@ before importing them.
 
 ## Secrets
 
-Use separate dotenvx keypairs for app, MCP and worker. Store encrypted payloads in
+Use separate dotenvx keypairs for app and MCP. Store encrypted payloads in
 private, versioned release storage and the corresponding private keys in platform
 secret stores. Keep `.env*` and `.env.keys` out of git, images, command arguments
 and logs. Never add an application endpoint to extract nonexportable secrets.
@@ -99,7 +93,7 @@ and logs. Never add an application endpoint to extract nonexportable secrets.
   its own key secret. Pin numeric secret versions; changing `latest` would make
   rollback ambiguous.
 - The static Vercel `milton-site` project has no runtime secrets. Do not copy
-  app, MCP or worker credentials into its build settings. The deleted combined
+  app or MCP credentials into its build settings. The deleted combined
   Vercel project's environment is no longer a recovery source.
 - Cloud Run's app payload has a fresh cookie cache-signing key. Milton filters out
   the SDK's session-data cache and asks Neon to validate the existing session token;
@@ -115,46 +109,31 @@ outside the working directory. Pass secret values to platform CLIs through stdin
 or protected files, never `--value` or shell arguments. Preserve each rollback
 revision's image and numeric secret versions together with its configuration.
 
-## Scheduler operations
-
-The production job is
-`projects/milton-510506/locations/us-east1/jobs/milton-gardening`. It invokes
-`https://milton-worker-419545871671.us-east4.run.app/api/garden` with method GET,
-OIDC audience `https://milton-worker-419545871671.us-east4.run.app`, and the dedicated
-scheduler service account. Use a 180-second attempt deadline, a UTC schedule of
-`* * * * *`, and zero retries. The worker has concurrency 1 and maximum 1 instance;
-the database remains the correctness boundary.
-
-Verify actual scheduled 200 responses in Cloud Logging and public worker refusal.
-Only one production scheduler should be enabled. Before replacing a scheduler,
-prepare the new job paused, pause the old job, and wait for its 180-second
-execution/lease window to drain before enabling the replacement.
-
 ## Release verification and rollback
 
-For an incompatible coordinated schema release, stage the image with `gcloud run deploy --no-traffic`,
-pause the scheduler, and temporarily set app/MCP ingress to `internal`. Confirm the
+For an incompatible coordinated schema release, stage the image with `gcloud run deploy --no-traffic`
+and temporarily set app/MCP ingress to `internal`. Confirm the
 canonical endpoints refuse traffic, then drain the longest request/lease window
 (at least 180 seconds for this configuration). Take a Neon snapshot and record exact
 table hashes before using the normal migration runner. Keep traffic closed until
-parity checks pass and all three matching runtime revisions are ready and selected.
-Restore app/MCP ingress to `internal-and-cloud-load-balancing`, verify canonical
-reads, then resume and verify the scheduler. This stops saves by closing their entry
+parity checks pass and both matching runtime revisions are ready and selected.
+Restore app/MCP ingress to `internal-and-cloud-load-balancing` and verify canonical
+reads. This stops saves by closing their entry
 points without changing the pinned encrypted settings.
 For an additive, backward-compatible migration, foreground traffic may stay open when
-source publication remains atomic and version-fenced. Pause background dispatch, take a
+source publication remains atomic and version-fenced. Take a
 backup, check source parity, and verify the old runtime can still serve the resulting
 source schema before selecting the new revisions.
 
 Zero-traffic revisions may report `Ready=True` with `Retired`; inspect the specific
 revision and its imported image, then verify startup again when assigning traffic.
 
-1. Validate the app and private worker with fictional data in an explicitly
+1. Validate the app and MCP with fictional data in an explicitly
    isolated environment. Never copy personal memos into staging.
 2. Record the current revision IDs, image digests and numeric secret versions
    before a release. Preserve those resources for rollback.
 3. Verify canonical app/MCP TLS and health, MCP discovery and unauthenticated 401,
-   CORS, HTTP 308 redirects, direct `run.app` refusal, and worker scheduling.
+   CORS, HTTP 308 redirects and direct `run.app` refusal.
    Keep both canonical DNS A records at `35.227.244.36`, DNS-only, TTL 60, and
    preserve the certificate authorization CNAMEs. Never bypass TLS verification.
 4. Verify an authenticated MCP read and the affected browser behavior when
@@ -170,7 +149,7 @@ database schema, accounting policy and job payloads, then send traffic to its re
 healthy Cloud Run revision. Migration 0021 is compatible with every 0020 revision, so rolling
 back code needs no database step; roll the code back before running the 0021 rollback script
 (see [no count limit](#no-count-limit-0021)). Once 0022 is applied, no earlier revision
-can save or run the worker until its rollback script runs (see
+can save until its rollback script runs (see
 [no model-era gate](#no-model-era-gate-0022)). Since migration 0020 no earlier app or MCP revision can serve
 reads or saves, so every release before `filing-f505745` is reachable only after the
 offline 0020 rollback script; see the 0020, 0019 and 0018 boundaries below. Do not
@@ -613,8 +592,8 @@ remains on any service account. Rollback of the secret change returns to
 gcloud run services update-traffic milton-mcp --to-revisions=milton-mcp-rules-e3f2f67=100 --project=milton-510506 --region=us-east4
 ```
 
-Roll back only affected services, preserve ingress/IAM and the enabled production
-scheduler, then repeat the canonical security and scheduled worker checks. If a
+Roll back only affected services, preserve ingress/IAM, then repeat the canonical
+security checks. If a
 revision is no longer available, restore its saved service manifest with its
 pinned image and matching secret versions using the release procedure above.
 **Do not restore or reset the database.** Do not restore the old Vercel CNAME:
@@ -643,11 +622,7 @@ its failure cannot stop service. Global thresholds are alerts-only, with existin
 per-account safeguards retained. No new retrieval enrollment or trial activation
 is part of this release. See the operator commands in [server README](../README.md).
 
-The capability feed remains unprovisioned until applicable platform, ingress and
-inherited logging routes are verified not to persist its bearer URL. An accepted
-local route or project-only log exclusion does not establish that condition.
-Do not run `spend-feed rotate --logging-verified` without that evidence. Stored
-alert publication does not prove Duet polling, notification or delivery.
+The observer, the capability feed and its `spend-feed` command were removed in 0023.
 
 ## Spend-alert email activation (0015)
 
@@ -665,13 +640,8 @@ was delivered, and an identical retry returned the same provider email ID.
 Scheduled requests on the new worker returned 200; canonical production checks
 passed. A genuine spending-threshold crossing was not manufactured for this test.
 
-To stop new email dispatch, publish a worker secret version without the three Resend
-variables (see [server README](../README.md)); neither `milton-worker-email-db37798`
-nor `milton-worker-allowance-552396e` is a rollback target after 0018. Keep the additive email ledger, frozen payloads,
-provider account, numeric secret versions and alert history. Do not restore the
-database or delete delivery rows to retry an alert. The down migration refuses a
-populated ledger; uncertain sends past the bounded retry window require manual
-reconciliation rather than a fresh idempotency key.
+Removed in 0023: the worker, the alert email and its ledger are gone (see
+[spend subsystem removal](#spend-subsystem-removal-0023)).
 
 ## Derived-systems removal (0018)
 
@@ -707,9 +677,7 @@ rollback targets after 0018. The 0018 rollback script recreates the dropped obje
 empty, extension included; the enrollment row, graph and link text, and caches are
 recoverable only from the pre-0018 snapshot. Do not restore the database to roll back code.
 
-A later release removes the spend-total branch that reads `gardening_usage` and
-`derivation_usage`, and a migration then drops both, no earlier than 31 days after
-their newest row. That ledger drop is the remaining follow-up.
+Migration 0023 drops both ledgers with the rest of the spend subsystem.
 
 Done: the `miltonModelPredict` grant was removed from the worker and MCP service accounts
 on 2026-11-02 at 20:18Z (role definition kept), and `milton-worker-env:4`, without the
@@ -783,6 +751,47 @@ previous 0020 MCP revision; no pre-0020 revision is a target. Receipts from that
 revision replay on this one, but a save that sent `rules` cannot replay there, because
 its input schema refuses the field.
 
-The worker, scheduler, spend alerts and their email, `foreground_usage` and the now
-unread `MILTON_GLOBAL_SPEND_POLICY` manifest variables stay until the cleanup release
-timed with the 0018 ledger drop; 0022 drops the global spend policy column.
+The worker, scheduler, spend alerts and their email, the spend ledgers and the unread
+`MILTON_GLOBAL_SPEND_POLICY` manifest variables are removed in 0023.
+
+## Spend subsystem removal (0023)
+
+Not yet released. This release deletes the spend-alert worker role, alert email, the
+`/operator/spend-alerts/` feed and `scripts/spend-feed.ts`, and drops the
+`MILTON_GLOBAL_SPEND_POLICY` variable from the app and MCP manifests. Migration 0023
+drops `foreground_usage`, `gardening_usage`, `derivation_usage`, `spend_alerts`,
+`spend_alert_emails`, the `save_foreground_reservation` trigger with
+`milton_foreground_reservation`, `guard_spend_alert_email`, and
+`store_config.spend_feed_key_hash` with its check (see the server README). Memo-update
+accounting, the daily call limit, replay, fences and trials are unchanged.
+
+Release order: the new image references no dropped object and runs on either schema.
+
+1. Export the five spend tables and `store_config.spend_feed_key_hash` to private
+   release storage (no personal data: daily totals, alert rows, alert envelopes).
+2. Release the image to MCP and app from the manifests in this directory.
+3. Pause `projects/milton-510506/locations/us-east1/jobs/milton-gardening` and wait
+   180 seconds.
+4. Take a Neon snapshot, record table hashes, apply 0023 with the normal runner, and
+   confirm every retained table is unchanged.
+5. Delete the production resources that existed only for the worker:
+   - Cloud Scheduler job `milton-gardening` (us-east1).
+   - Cloud Run service `milton-worker` (us-east4), with its revisions.
+   - The `roles/run.invoker` binding for
+     `milton-scheduler@milton-510506.iam.gserviceaccount.com` goes with the service;
+     delete that service account if nothing else uses it.
+   - Service account `milton-worker@milton-510506.iam.gserviceaccount.com` and its
+     project and secret IAM bindings (its secret accessor grants on
+     `milton-worker-env` and `milton-worker-key`).
+   - Secrets `milton-worker-env` (versions 1 to 4) and `milton-worker-key`, after the
+     final export in step 1.
+   - Optionally, revoke the Resend sending key; nothing else uses Resend.
+
+**Rollback boundary.** App and MCP roll back by traffic alone, before or after 0023:
+savelock-712c7c1 reads no dropped object except its feed route, which fails closed
+with 503. To restore the shape, run `server/drizzle/rollback/0023_no_spend.sql` offline
+with writers stopped; it recreates every object empty, and rows come back only from
+the pre-0023 snapshot or the export. The 0023 journal row stays, so re-forwarding
+means running `0023_no_spend.sql` by hand. Once its service is deleted, the worker
+returns only by recreating it from a saved manifest, which needs the rollback script
+first.

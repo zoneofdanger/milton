@@ -347,6 +347,44 @@ test("the report cap measures the printed text, bullets included", async () => {
   }
 });
 
+test("a read that rebuilds a lagging snapshot serves it whatever the save-time cap", async () => {
+  const local = await localStore();
+  try {
+    await seedUsers(local.pg, "lagging");
+    const store = fixtureStore(local.db, "lagging");
+    const rule = "Keep it short. ".repeat(20).trim();
+    expect(
+      await store.saveMemo({
+        text: "Fictional change.",
+        request_id: crypto.randomUUID(),
+        expected_version: (await store.getTpsReport()).version,
+        rules: [{ report: "cover", text: rule }],
+      }),
+    ).toMatchObject({ status: "saved" });
+    // The cap drops below the stored report, then the sources move on
+    // without a save (as an administrative fix would), so the next read rebuilds.
+    await local.pg.exec(
+      `UPDATE store_config SET limits_json=limits_json || '{"report_body_bytes":16}'::jsonb;
+      INSERT INTO instruction_card_versions(user_id,card_id,version,description,body,report,reason,actor_json)
+        SELECT user_id,card_id,2,description,body || ' Always.',report,'Fixture','{}' FROM instruction_card_versions WHERE user_id='lagging';`,
+    );
+    const read = await store.getTpsReport();
+    expect(read.text).toBe("- " + rule + " Always.");
+    expect((await store.readDocuments()).cover).toBe(read.text);
+    // Saves still enforce the cap.
+    expect(
+      await store.saveMemo({
+        text: "Fictional change.",
+        request_id: crypto.randomUUID(),
+        expected_version: read.version,
+        rules: [{ report: "cover", text: "Another rule." }],
+      }),
+    ).toMatchObject({ status: "failed", error: "tps_body_limit" });
+  } finally {
+    await local.dispose();
+  }
+});
+
 test("an exact duplicate rule is skipped as unchanged without a charge", async () => {
   const local = await localStore();
   try {

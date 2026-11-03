@@ -225,9 +225,10 @@ export function compiledMemos(
     let current = await snapshot(tx);
     // Assembly is deterministic, so a compiled snapshot that lags its sources is
     // rebuilt here instead of reported. An empty account without a snapshot is
-    // ready as it is and stays unwritten until its first save.
+    // ready as it is and stays unwritten until its first save. The size cap
+    // bounds saves; a read serves what is already on file.
     if (!current.ready) {
-      await publish(tx, current, await assemble(tx, current.documents));
+      await publish(tx, current, current.documents.full);
       current = await snapshot(tx);
     }
     return {

@@ -10,3 +10,4 @@ server/public/milton.css
 server/public/fonts/
 server/drizzle/meta/
 **/fonts/*LICENSE*
+.worktrees/

@@ -27,9 +27,7 @@ import SiteLayout from "../layouts/SiteLayout.astro";
     receipts used to prevent duplicate saves; internal records of accepted
     changes, including the exact submitted rules, edits or samples, authorship
     and affected versions; connected assistants and the assistants you
-    disconnect; and counts of tool calls and of memo updates you make each day,
-    and older records of model spending from before Milton stopped using AI
-    models.
+    disconnect; and counts of tool calls and of memo updates you make each day.
   </p>
 
   <h2>How we use it</h2>
@@ -72,9 +70,9 @@ import SiteLayout from "../layouts/SiteLayout.astro";
   <h2>Where it is kept</h2>
   <p>
     The database and sign-in run on Neon (United States). The public website
-    runs on Vercel; the app, MCP server and background worker run on Google
-    Cloud Run (United States). DNS is on Cloudflare. Google and GitHub also
-    handle your sign-in with them.
+    runs on Vercel; the app and MCP server run on Google Cloud Run (United
+    States). DNS is on Cloudflare. Google and GitHub also handle your sign-in
+    with them.
   </p>
 
   <h2>Cookies</h2>
@@ -90,14 +88,6 @@ import SiteLayout from "../layouts/SiteLayout.astro";
   </p>
   <p>These records remain after deletion:</p>
   <ul>
-    <li>
-      Daily totals of reserved model spending, which are not linked to your
-      account.
-    </li>
-    <li>
-      Daily model-spending counters from retired features, stored under an
-      account identifier until a later cleanup removes them.
-    </li>
     <li>
       A record of each assistant you connected (your sign-in ID and the
       assistant’s ID, with no content), so its earlier access cannot reach a new

@@ -57,38 +57,6 @@ import FilingComparison from "../components/FilingComparison.astro";
       </ul>
     </nav>
   </div>
-  <section class="section" aria-labelledby="scope-heading">
-    <p class="eyebrow">## Less rewriting</p>
-    <h2 id="scope-heading">
-      Your AI should write like you before it writes for you.
-    </h2>
-    <p class="section-lead">
-      Save something you actually wrote, and every AI you connect writes the
-      next one like you. Yeah, that’d be great.
-    </p>
-    <div class="use-cases">
-      <article class="use-case">
-        <h3>The voice you carry.</h3>
-        <p>
-          Samples you approved: the follow-up you actually sent, the connection
-          note that worked.
-        </p>
-        <p class="sample-rule">
-          “Use at most one exclamation point, in the opening line.”
-        </p>
-      </article>
-      <article class="use-case">
-        <h3>Every kind of writing.</h3>
-        <p>
-          Emails, messages, posts, docs, and the toast you give once a year.
-          Each gets its own samples and rules.
-        </p>
-        <p class="sample-rule">
-          “Docs: say ‘I recommend,’ not ‘it is recommended.’”
-        </p>
-      </article>
-    </div>
-  </section>
   <section class="section" id="why-milton" aria-labelledby="why-heading">
     <p class="eyebrow">## Why not a memory app</p>
     <h2 id="why-heading">
@@ -415,7 +383,7 @@ import FilingComparison from "../components/FilingComparison.astro";
 </SiteLayout>
 
 <style>
-  :where(h1, h2:not(.sheet-heading), h3, p, figure) {
+  :where(h1, h2:not(.sheet-heading), p, figure) {
     margin: 0;
   }
   /* No paragraph ends on a lone word. Scoped to this page, so the demo's
@@ -506,41 +474,6 @@ import FilingComparison from "../components/FilingComparison.astro";
   .section-lead {
     margin-bottom: var(--space-8);
     font-size: var(--text-lead);
-  }
-  .use-cases {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--space-8);
-  }
-  .use-case {
-    background: var(--surface);
-    border: 1px solid var(--hairline);
-    padding: var(--space-8);
-    border-radius: var(--radius-card);
-  }
-  @media (min-width: 768px) {
-    .use-cases {
-      row-gap: 0;
-    }
-    .use-case {
-      display: grid;
-      grid-template-rows: subgrid;
-      grid-row: span 3;
-    }
-  }
-  h3 {
-    font-size: var(--text-title);
-    margin-bottom: var(--space-3);
-  }
-  .use-case p {
-    color: var(--muted);
-  }
-  .use-case .sample-rule {
-    margin-top: var(--space-6);
-    padding-top: var(--space-5);
-    border-top: 1px solid var(--hairline);
-    color: var(--ink);
-    font-size: var(--text-body);
   }
   /* How it works: an interoffice routing slip across the container. */
   .slip-wrap {
@@ -823,10 +756,6 @@ import FilingComparison from "../components/FilingComparison.astro";
     .closing {
       padding-block: var(--space-12);
     }
-    .use-cases {
-      grid-template-columns: 1fr;
-      gap: var(--space-6);
-    }
     .pricing-grid {
       grid-template-columns: 1fr;
       gap: var(--space-10);
@@ -844,9 +773,6 @@ import FilingComparison from "../components/FilingComparison.astro";
     }
     .section-lead {
       font-size: var(--text-body);
-    }
-    .use-case {
-      padding: var(--space-6);
     }
   }
   .employee-testimonial {

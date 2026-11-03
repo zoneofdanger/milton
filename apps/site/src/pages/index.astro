@@ -98,44 +98,77 @@ import FilingComparison from "../components/FilingComparison.astro";
     <FilingComparison />
   </section>
   <section class="section" id="how-it-works" aria-labelledby="how-heading">
-    <p class="eyebrow">## Less repeating. Less paperwork.</p>
+    <p class="eyebrow">## How it works</p>
     <h2 id="how-heading">Tell it once. Keep it on file.</h2>
-    <ol class="steps">
-      <li>
-        <h3>Connect your AI.</h3>
-        <p>
-          Add Milton through your AI’s MCP or connector settings and sign in to
-          your Milton account.
-        </p>
-        <p>
-          <a href="/setup">Find your setup instructions →</a>
-        </p>
-      </li>
-      <li>
-        <h3>Approve a draft. Keep it.</h3>
-        <p>
-          When a draft is right, say so. Your AI shows you the exact text and
-          asks before saving it as a sample. Correct the same thing twice and it
-          proposes a rule for your yes. Starting from scratch? Paste one email
-          you sent, then pick between short examples, one question at a time.
-          One approved email is enough to start.
-        </p>
-      </li>
-      <li>
-        <h3>Bring it to the next chat.</h3>
-        <p>
-          Ask “did you get that memo?” to load your cover sheet and the report
-          that fits: email, chat, post, document, or speech. Tell your AI what
-          to add, correct, or remove as your writing changes.
-        </p>
-      </li>
-    </ol>
-    <p class="reading-note small-note">
-      <strong class="memo-limit">
-        We distribute the memo. We cannot make everyone read it.
-      </strong>
-      Ask your AI to read your Milton cover sheet when you start work. It isn’t
-      automatically included in every chat, and following it is still up to the
+    <div class="slip-wrap">
+      <figure class="sheet slip" aria-labelledby="slip-title">
+        <div class="sheet-bar">
+          <span id="slip-title">INTEROFFICE ROUTING SLIP</span>
+        </div>
+        <dl class="slip-fields">
+          <div>
+            <dt>To:</dt>
+            <dd>Every AI you connect</dd>
+          </div>
+          <div>
+            <dt>From:</dt>
+            <dd>You</dd>
+          </div>
+          <div>
+            <dt>Re:</dt>
+            <dd>How you write</dd>
+          </div>
+        </dl>
+        <ol class="slip-rows">
+          <li class="slip-row">
+            <span class="slip-box" aria-hidden="true">
+              ✓
+            </span>
+            <p class="slip-text">
+              <strong>Connect.</strong> Add Milton to your AI’s connector
+              settings and sign in.
+            </p>
+            <p class="slip-initials">
+              <span class="slip-initials-label">Initials</span>
+              <span class="slip-initials-value">You</span>
+            </p>
+          </li>
+          <li class="slip-row">
+            <span class="slip-box" aria-hidden="true">
+              ✓
+            </span>
+            <p class="slip-text">
+              <strong>File.</strong> When a draft is right, your AI asks “Save
+              this as a sample?” You say yes.
+            </p>
+            <p class="slip-initials">
+              <span class="slip-initials-label">Initials</span>
+              <span class="slip-initials-value">You</span>
+            </p>
+          </li>
+          <li class="slip-row">
+            <span class="slip-box" aria-hidden="true">
+              ✓
+            </span>
+            <p class="slip-text">
+              <strong>Distribute.</strong> In any new chat, ask “Did you get
+              that memo?” Your AI reads your cover sheet and the report that
+              fits.
+            </p>
+            <p class="slip-initials">
+              <span class="slip-initials-label">Initials</span>
+              <span class="slip-initials-value">AI</span>
+            </p>
+          </li>
+        </ol>
+      </figure>
+      <span class="stamp" aria-hidden="true">
+        FILED
+      </span>
+    </div>
+    <p class="fine-print small-note">
+      We distribute the memo. We cannot make everyone read it. Ask your AI to
+      read your cover sheet when you start work; following it is still up to the
       AI.
     </p>
     <div class="where-to-start" id="where-to-start">
@@ -509,36 +542,176 @@ import FilingComparison from "../components/FilingComparison.astro";
     color: var(--ink);
     font-size: var(--text-body);
   }
-  .steps {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: var(--space-8);
-    padding: 0;
-    margin: var(--space-8) 0;
+  /* How it works: an interoffice routing slip across the container. */
+  .slip-wrap {
+    position: relative;
+    margin-top: var(--space-8);
+    padding-bottom: var(--space-6);
+  }
+  .slip {
+    margin: 0;
+  }
+  .slip-fields {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-3);
+    margin: 0;
+    padding: var(--space-3) var(--sheet-padding);
+    border-bottom: 1px solid var(--ink);
+    font: var(--text-small) / var(--leading-label) var(--font-mono);
+  }
+  .slip-fields > div {
+    display: flex;
+    gap: var(--space-2);
+  }
+  /* The dot between fields is decoration, not read aloud. */
+  .slip-fields > div:not(:last-child)::after {
+    content: "·";
+    content: "·" / "";
+    margin-left: var(--space-2);
+    color: var(--muted);
+  }
+  .slip-fields dt {
+    color: var(--muted);
+  }
+  .slip-fields dd {
+    margin: 0;
+  }
+  .slip-rows {
     list-style: none;
-    counter-reset: step;
+    margin: 0;
+    padding: 0;
+    counter-reset: slip;
   }
-  .steps li {
-    counter-increment: step;
+  .slip-row {
+    counter-increment: slip;
+    display: grid;
+    grid-template-columns: auto auto minmax(0, 1fr) calc(
+        var(--space-16) * 1.75
+      );
+    grid-template-areas: "num box text initials";
+    align-items: stretch;
+    border-bottom: 1px solid var(--hairline);
   }
-  .steps li::before {
-    content: "0" counter(step);
+  .slip-row:last-child {
+    border-bottom: 0;
+  }
+  .slip-row::before {
+    grid-area: num;
+    content: "0" counter(slip);
+    align-self: center;
+    padding-inline: var(--sheet-padding) var(--space-4);
+    color: var(--muted);
     font: var(--text-caption) / var(--leading-label) var(--font-mono);
+  }
+  .slip-box {
+    grid-area: box;
+    align-self: center;
+    display: inline-grid;
+    place-items: center;
+    width: var(--space-6);
+    height: var(--space-6);
+    border: 1px solid var(--ink);
+    background: var(--surface);
+    font: var(--text-body) / 1 var(--font-mono);
+  }
+  .slip-text {
+    grid-area: text;
+    align-self: center;
+    padding: var(--space-5) var(--space-6) var(--space-5) var(--space-5);
     color: var(--muted);
   }
-  .steps h3 {
-    margin-top: var(--space-4);
+  .slip-text strong {
+    color: var(--ink);
+    font-weight: 600;
   }
-  .steps p {
+  .slip-initials {
+    grid-area: initials;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4);
+    border-left: 1px solid var(--hairline);
+  }
+  .slip-initials-label {
     color: var(--muted);
+    font: var(--text-caption) / var(--leading-label) var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .slip-initials-value {
+    font: italic var(--text-lead) / var(--leading-heading) var(--font-form);
+  }
+  /* A rubber stamp across the slip's lower edge, below the "AI" initials.
+     Decorative only. */
+  .stamp {
+    position: absolute;
+    right: var(--space-3);
+    bottom: calc(-1 * var(--space-5));
+    padding: var(--space-2) var(--space-5);
+    border: 2px solid currentColor;
+    outline: 1px solid currentColor;
+    outline-offset: calc(var(--space-2) / 2);
+    color: var(--ink);
+    opacity: 0.45;
+    transform: rotate(-8deg);
+    font: var(--text-section) / 1 var(--font-mono);
+    letter-spacing: 0.2em;
+    pointer-events: none;
+    user-select: none;
+  }
+  /* A two-sentence note: no width cap, it uses the container. */
+  .fine-print {
+    margin-top: var(--space-8);
+  }
+  @media (max-width: 600px) {
+    .slip-fields {
+      flex-direction: column;
+      gap: 0;
+    }
+    .slip-fields > div:not(:last-child)::after {
+      display: none;
+    }
+    .slip-row {
+      grid-template-columns: auto minmax(0, 1fr);
+      grid-template-areas:
+        "box text"
+        "box initials";
+      column-gap: var(--space-4);
+      padding: var(--space-4) var(--sheet-padding);
+    }
+    .slip-row::before {
+      display: none;
+    }
+    .slip-box {
+      align-self: start;
+    }
+    .slip-text {
+      padding: 0;
+    }
+    .slip-text::before {
+      content: "0" counter(slip) " ";
+      color: var(--muted);
+      font: var(--text-caption) / var(--leading-label) var(--font-mono);
+    }
+    .slip-initials {
+      flex-direction: row;
+      align-items: baseline;
+      gap: var(--space-3);
+      margin-top: var(--space-3);
+      padding: var(--space-2) 0 0;
+      border-left: 0;
+      border-top: 1px dashed var(--hairline);
+    }
+    .stamp {
+      font-size: var(--text-subtitle);
+    }
   }
   .pricing {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: var(--space-8);
-  }
-  .steps p + p {
-    margin-top: var(--space-3);
   }
   .pricing {
     align-items: start;
@@ -678,7 +851,6 @@ import FilingComparison from "../components/FilingComparison.astro";
       padding-block: var(--space-12);
     }
     .use-cases,
-    .steps,
     .pricing {
       grid-template-columns: 1fr;
       gap: var(--space-6);
@@ -704,13 +876,6 @@ import FilingComparison from "../components/FilingComparison.astro";
       flex-direction: column;
       align-items: flex-start;
     }
-  }
-  .memo-limit {
-    display: block;
-    margin-bottom: var(--space-3);
-    color: var(--ink);
-    font: var(--font-display-weight) var(--text-title) / var(--leading-heading)
-      var(--font-display);
   }
   .employee-testimonial {
     margin: 0;

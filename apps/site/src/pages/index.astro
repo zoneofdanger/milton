@@ -232,9 +232,6 @@ import MemoDemo from "../components/MemoDemo.astro";
             </span>
           </li>
         </ul>
-        <p class="small-note checklist-note">
-          A founder who has mistaken this for a company.
-        </p>
         <a class="button" href="https://app.meetmilton.com/login">
           Try free early access <span aria-hidden="true">↗</span>
         </a>
@@ -575,7 +572,7 @@ import MemoDemo from "../components/MemoDemo.astro";
   .checklist {
     display: grid;
     gap: var(--space-3);
-    margin: var(--space-6) 0 0;
+    margin: var(--space-6) 0;
     padding: 0;
     list-style: none;
   }
@@ -602,9 +599,6 @@ import MemoDemo from "../components/MemoDemo.astro";
     overflow: hidden;
     clip-path: inset(50%);
     white-space: nowrap;
-  }
-  .price-card .checklist-note {
-    margin-block: var(--space-3) var(--space-6);
   }
 
   .reading-note {

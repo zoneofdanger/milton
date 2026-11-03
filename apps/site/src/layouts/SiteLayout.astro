@@ -118,15 +118,10 @@ const footerColumns: {
             <a href="/terms">Terms</a>
           </nav>
         )}
-        <a href="mailto:support@meetmilton.com">
-          Contact: support@meetmilton.com
-        </a>
-      </div>
-      {!legal && (
         <p class="footer-aside">
           A small website with strong feelings about punctuation.
         </p>
-      )}
+      </div>
     </footer>
     <Analytics />
   </body>
@@ -239,11 +234,10 @@ const footerColumns: {
     align-items: center;
     min-height: var(--touch-target);
   }
-  .footer-links > a {
-    margin-left: auto;
-  }
+  /* The tagline sits at the row's right end; on phones it stacks under the
+     copyright. */
   .footer-aside {
-    margin: var(--space-3) 0 0;
+    margin: 0 0 0 auto;
     color: var(--muted);
     font: var(--text-caption) / var(--leading-label) var(--font-mono);
   }
@@ -265,7 +259,7 @@ const footerColumns: {
     .legal {
       padding-block: var(--space-10) 56px;
     }
-    .footer-links > a {
+    .footer-aside {
       margin-left: 0;
     }
   }

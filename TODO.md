@@ -10,7 +10,7 @@ landed and the item is still open), `blocked: <why or #id>`. A bolded headline o
 or fewer states the task; one item is one landing. **A section heading and its preamble are
 shared context for every item beneath it.**
 
-**next-id: 11.** Ids are never reused, so this counter survives deleting the newest item.
+**next-id: 12.** Ids are never reused, so this counter survives deleting the newest item.
 
 ## MVP
 
@@ -49,3 +49,7 @@ reports, memos) and plain text on security screens and anything an assistant rea
       first save from every stale client fails until it reconnects. Send the MCP
       notifications/tools/list_changed on connection resume after a contract change, and say
       "reconnect your assistant" in the invalid_input message when the shape is unknown.
+
+- [ ] #11 (server, low) **Make the spend test independent of UTC midnight.** A store-spend test
+      reads the current UTC day twice and fails when a run crosses midnight (seen 2026-11-03
+      00:00Z on a parallel run; passes on rerun). Inject the clock or compute the day once.

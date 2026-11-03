@@ -267,6 +267,11 @@ codex mcp login milton`}</code></pre>
 </SiteLayout>
 
 <style>
+  /* No paragraph ends on a lone word. */
+  p,
+  blockquote {
+    text-wrap: pretty;
+  }
   .guided-setup {
     margin-top: var(--space-6);
     width: fit-content;

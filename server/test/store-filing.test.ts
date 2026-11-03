@@ -6,8 +6,7 @@ import { localStore } from "./local-store";
 import { fixtureStore, seedUsers } from "./store-fixtures";
 import { coverSheet, reportEnvelope } from "../src/store/tools";
 
-const enableMemoUpdates =
-  "UPDATE store_config SET global_spend_policy='alerts_only',foreground_accounting_ready=true,memo_updates_enabled=true";
+const enableMemoUpdates = "UPDATE store_config SET memo_updates_enabled=true";
 
 test("rules are stored byte for byte, one card each, with one charge", async () => {
   const local = await localStore();
@@ -657,9 +656,7 @@ test("reports print a heading, when line, samples newest first and rules; sample
     expect(documents.is_empty).toBe(false);
     // A third sample of one kind retires the oldest; retirement is the only change.
     // A saved sample is a user-directed filing, so it charges one memo update.
-    await local.pg.exec(
-      "UPDATE store_config SET global_spend_policy='alerts_only',foreground_accounting_ready=true,memo_updates_enabled=true",
-    );
+    await local.pg.exec("UPDATE store_config SET memo_updates_enabled=true");
     expect(await sample("follow-up", "Third follow-up")).toMatchObject({
       status: "saved",
       memo_update: { state: "charged", charged: 1 },

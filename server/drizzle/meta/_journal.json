@@ -155,6 +155,13 @@
       "when": 1793651728111,
       "tag": "0021_no_card_count",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1793686555879,
+      "tag": "0022_no_model_gate",
+      "breakpoints": true
     }
   ]
 }

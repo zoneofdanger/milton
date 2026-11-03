@@ -43,10 +43,6 @@ export const storeConfig = pgTable(
     singleton: integer("singleton").primaryKey(),
     signupMode: text("signup_mode").notNull().default("closed"),
     trialsEnabled: boolean("trials_enabled").notNull().default(false),
-    globalSpendPolicy: text("global_spend_policy").notNull().default("capped"),
-    foregroundAccountingReady: boolean("foreground_accounting_ready")
-      .notNull()
-      .default(false),
     memoUpdatesEnabled: boolean("memo_updates_enabled")
       .notNull()
       .default(false),
@@ -71,14 +67,7 @@ export const storeConfig = pgTable(
       sql`jsonb_typeof(${t.allowedIdentities}) = 'array'`,
     ),
     check("config_limits_object", sql`jsonb_typeof(${t.limits}) = 'object'`),
-    check(
-      "config_global_spend_policy",
-      sql`${t.globalSpendPolicy} IN ('capped','alerts_only')`,
-    ),
-    check(
-      "config_memo_updates",
-      sql`${t.memoUpdatesDailyLimit}>0 AND (NOT ${t.memoUpdatesEnabled} OR (${t.foregroundAccountingReady} AND ${t.globalSpendPolicy}='alerts_only'))`,
-    ),
+    check("config_memo_updates", sql`${t.memoUpdatesDailyLimit}>0`),
     check(
       "config_spend_feed_key",
       sql`${t.spendFeedKeyHash} IS NULL OR ${t.spendFeedKeyHash} ~ '^[a-f0-9]{64}$'`,

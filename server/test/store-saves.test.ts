@@ -1140,9 +1140,7 @@ test("a Baseline: rule must be a setup rule byte for byte in its report, filed n
   const local = await localStore();
   try {
     await seedUsers(local.pg, "baseline");
-    await local.pg.exec(
-      "UPDATE store_config SET global_spend_policy='alerts_only',foreground_accounting_ready=true,memo_updates_enabled=true",
-    );
+    await local.pg.exec("UPDATE store_config SET memo_updates_enabled=true");
     const store = fixtureStore(local.db, "baseline");
     const charged = async () =>
       (
@@ -1216,17 +1214,13 @@ test("a Baseline: rule must be a setup rule byte for byte in its report, filed n
   }
 });
 
-test("a save neither reads nor waits on the model-era spend fields", async () => {
+test("memo updates need only their own setting: a save charges one without the model-era spend fields", async () => {
   const local = await localStore();
   try {
     await seedUsers(local.pg, "model-era");
-    // The config_memo_updates check still ties enabled updates to these
-    // fields until #18 drops them; drop it here to reach the state that
-    // formerly refused every save with "Memo updates are not ready."
-    await local.pg.exec(
-      `ALTER TABLE store_config DROP CONSTRAINT config_memo_updates;
-      UPDATE store_config SET memo_updates_enabled=true,foreground_accounting_ready=false,global_spend_policy='capped'`,
-    );
+    // Before 0022 this state refused every save with "Memo updates are not
+    // ready." unless global_spend_policy and foreground_accounting_ready were set.
+    await local.pg.exec("UPDATE store_config SET memo_updates_enabled=true");
     const store = fixtureStore(local.db, "model-era");
     const saved = await store.saveMemo({
       text: "Add a rule.",

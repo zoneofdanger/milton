@@ -972,7 +972,7 @@ test("account deletion removes every tenant row, keeps global spend and refusals
   const local = await localStore();
   try {
     await local.pg.exec(
-      "UPDATE store_config SET signup_mode='open',trials_enabled=true,global_spend_policy='alerts_only',foreground_accounting_ready=true,memo_updates_enabled=true",
+      "UPDATE store_config SET signup_mode='open',trials_enabled=true,memo_updates_enabled=true",
     );
     const neon = (subject: string) => ({ provider: "neon", subject });
     let hold: { entered: () => void; gate: Promise<void> } | undefined;

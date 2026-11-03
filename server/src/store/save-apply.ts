@@ -118,18 +118,22 @@ export async function applySave(
     creates.push({ report, text: rule.text });
   }
   // A rule stored with the setup prefix must be a setup rule byte for byte,
-  // whether filed new or produced by an exact edit.
-  const claimed = new Map(claim.current.active.map((h) => [h.id, h.body]));
+  // in the report it is served for, whether filed new or changed by an exact
+  // edit or a move.
   const unknown = [
-    ...creates.map((c) => c.text),
-    ...updates.filter((u) => claimed.get(u.id) !== u.text).map((u) => u.text),
-  ].find((text) => !knownBaseline(text));
-  if (unknown !== undefined)
+    ...creates,
+    ...after
+      .filter((card) => card.changed)
+      .map((card) => ({ report: card.report, text: card.body })),
+  ].find((rule) => !knownBaseline(rule.text, rule.report));
+  if (unknown !== undefined) {
+    const closest = closestBaseline(unknown.text);
     throw new StoreError(
       "baseline_unknown",
-      `"${describe(unknown, 120)}" starts with "Baseline: " but is not a setup rule. Copy the rule exactly from the setup text, or send a rule in the person's own words without "Baseline: ". Closest setup rule: "${closestBaseline(unknown)}". Nothing was changed.`,
+      `"${describe(unknown.text, 120)}" in ${unknown.report} starts with "Baseline: " but is not a setup rule for that report. Copy the rule and its report exactly from the setup text, or send a rule in the person's own words without "Baseline: ". Closest setup rule: [${closest.report}] "${closest.text}". Nothing was changed.`,
       422,
     );
+  }
   return await db.transaction(async (tx) => {
     await lock(tx);
     const pending = await receipt(tx, input.request_id);

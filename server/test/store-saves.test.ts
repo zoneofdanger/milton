@@ -1136,7 +1136,7 @@ test("a conflict or refusal in the claim phase stores a receipt and replays like
   }
 });
 
-test("a Baseline: rule must be a setup rule byte for byte, filed new or by an exact edit", async () => {
+test("a Baseline: rule must be a setup rule byte for byte in its report, filed new, edited or moved", async () => {
   const local = await localStore();
   try {
     await seedUsers(local.pg, "baseline");
@@ -1155,10 +1155,14 @@ test("a Baseline: rule must be a setup rule byte for byte, filed new or by an ex
       error: "baseline_unknown",
     });
     expect(refused.message).toContain(
-      'Closest setup rule: "Baseline: Sign off with "Thanks," and my first name."',
+      'Closest setup rule: [email] "Baseline: Sign off with "Thanks," and my first name."',
     );
     expect((await store.getTpsReport()).text).toBe("");
     const rule = 'Baseline: Sign off with "Best," and my first name.';
+    // A catalog text counts only in the report it is served for.
+    expect(
+      await save({ rules: [{ report: "chat", text: rule }] }),
+    ).toMatchObject({ error: "baseline_unknown" });
     expect(
       (
         await save({
@@ -1184,6 +1188,9 @@ test("a Baseline: rule must be a setup rule byte for byte, filed new or by an ex
     const edit = (after: string) =>
       save({ exact_edits: [{ before: rule, after }] });
     expect(await edit(near)).toMatchObject({ error: "baseline_unknown" });
+    expect(
+      await save({ moves: [{ before: rule, report: "chat" }] }),
+    ).toMatchObject({ error: "baseline_unknown" });
     const own = 'Sign off with "Cheers," and my first name.';
     expect((await edit(own)).status).toBe("saved");
     expect((await cardHeads(local.db, "baseline")).at(-1)!.body).toBe(own);

@@ -289,8 +289,8 @@ printed, so `Be concise.` matches a stored `- Be concise.`), or to an earlier en
 the request, is skipped; when nothing else changes the save returns
 `unchanged` and charges nothing. Duplicates by meaning are not detected. The assistant
 picks the report and the wording; a wrong report is fixable with `moves`. A rule
-that would be stored starting with `Baseline: `, new or after an exact edit, must equal
-a rule of the setup catalog byte for byte, or the save fails with `baseline_unknown`
+that would be stored starting with `Baseline: `, new or after an exact edit or move, must
+equal a rule of the setup catalog byte for byte in the report it is served for, or the save fails with `baseline_unknown`
 naming the closest catalog rule; rules without the prefix are unaffected.
 
 Corrections and removals of existing rules use `exact_edits`, a nonempty array of

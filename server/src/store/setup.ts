@@ -574,31 +574,39 @@ export const setupBlocks: Block[] = [
 ];
 
 const isTells = (q: Pick | Tells): q is Tells => "tells" in q;
-/** Every rule a block can file, each once, as filed. */
-const blockRules = (block: Block) =>
+type Baseline = { report: Filing; text: string };
+/** Every rule a block can file, as filed, with the report it is served for. */
+const blockRules = (block: Block): Baseline[] =>
   block.questions.flatMap((q) =>
     isTells(q)
-      ? q.tells.map((t) => BASELINE + t.rule)
-      : q.options.flatMap((o) => o.rules.map((r) => BASELINE + r)),
+      ? q.tells.map((t) => ({ report: t.report, text: BASELINE + t.rule }))
+      : q.options.flatMap((o) =>
+          o.rules.map((r, at) => ({
+            report: q.dims[at]!.report,
+            text: BASELINE + r,
+          })),
+        ),
   );
-/** Every baseline rule the setup text can file, each once. */
-export const setupCatalog: readonly string[] = [
-  ...new Set(setupBlocks.flatMap(blockRules)),
-];
-const baselines = new Set(setupCatalog);
-/** A rule's text passes unless it starts with "Baseline: " (after one
- * leading "- ") without being a catalog entry byte for byte. */
-export const knownBaseline = (text: string) =>
-  !ruleText(text).startsWith(BASELINE) || baselines.has(ruleText(text));
+const key = (report: Filing, text: string) => JSON.stringify([report, text]);
+const baselines = new Map(
+  setupBlocks.flatMap(blockRules).map((b) => [key(b.report, b.text), b]),
+);
+/** Every baseline rule the setup text can file, each once per report. */
+export const setupCatalog: readonly Baseline[] = [...baselines.values()];
+/** A rule passes unless its text starts with "Baseline: " (after one leading
+ * "- ") without being a catalog entry byte for byte, for that report. */
+export const knownBaseline = (text: string, report: Filing) =>
+  !ruleText(text).startsWith(BASELINE) ||
+  baselines.has(key(report, ruleText(text)));
 const words = (text: string) =>
   new Set(text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []);
 /** The catalog baseline sharing the most words with `text`; the first wins a tie. */
 export function closestBaseline(text: string) {
   const own = words(text);
-  let best = "";
+  let best = setupCatalog[0]!;
   let score = -1;
-  for (const rule of baselines) {
-    const shared = [...words(rule)].filter((w) => own.has(w)).length;
+  for (const rule of setupCatalog) {
+    const shared = [...words(rule.text)].filter((w) => own.has(w)).length;
     if (shared > score) [best, score] = [rule, shared];
   }
   return best;

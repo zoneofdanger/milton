@@ -136,13 +136,16 @@ test("setup renders from its catalog, per report while empty, under the agent ki
           const [, report, text] = /^\[(\w+)\] (.+)$/.exec(rule)!;
           expect(FILINGS).toContain(report as Filing);
           expect(text).toStartWith("Baseline: ");
-          expect(setupCatalog).toContain(text!);
-          offered.add(text!);
+          // Served with the report the catalog files it to.
+          expect(setupCatalog).toContainEqual({ report, text });
+          offered.add(JSON.stringify([report, text]));
         }
     }
   }
   // Every catalog baseline is offered, and only those.
-  expect([...offered].sort()).toEqual([...setupCatalog].sort());
+  expect([...offered].sort()).toEqual(
+    setupCatalog.map((b) => JSON.stringify([b.report, b.text])).sort(),
+  );
   // The scripted saves parse against saveMemoInput.
   expect(between(sheet.setup!, "rules [{ ", " }]").split(", ")).toEqual([
     "report",
@@ -151,9 +154,7 @@ test("setup renders from its catalog, per report while empty, under the agent ki
   parses({
     ...envelope(),
     text: between(sheet.setup!, 'create_memo once: text "', '"'),
-    rules: [
-      ...setupCatalog.slice(0, 20).map((text) => ({ report: "email", text })),
-    ],
+    rules: [...setupCatalog.slice(0, 20)],
   });
   // The approved paste is filed first, so an abandoned block keeps it.
   expect(sheet.setup!.indexOf("sample { ")).toBeLessThan(

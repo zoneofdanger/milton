@@ -45,6 +45,10 @@ the [README](README.md) says what is here, and [TODO.md](TODO.md) is the backlog
   contrast test passing.
 - One branch per task in its own worktree under `.worktrees/`; one change per commit, by
   explicit path. Never `git add -A`, `reset --hard`, `stash`, `clean` or `rebase`.
+- Landed means deleted: when Lead merges a branch to main, Lead removes its worktree and
+  deletes the branch in the same step. A branch is only ever a preview; nothing is
+  published, promoted or released from one. Before any history rewrite, list every
+  branch not merged into main and settle each one first.
 
 ## Coordination
 

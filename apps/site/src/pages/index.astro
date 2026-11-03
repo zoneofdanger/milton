@@ -349,7 +349,12 @@ import FilingComparison from "../components/FilingComparison.astro";
   blockquote {
     text-wrap: pretty;
   }
+  /* The hero is its own layer above the sections that follow, so the setup
+     popover is never drawn under the filing comparison's notes and cabinet
+     (their highest layer is 10). */
   .hero {
+    position: relative;
+    z-index: 11;
     display: grid;
     grid-template-columns: 1.15fr 1fr;
     gap: var(--space-16);

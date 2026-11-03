@@ -6,7 +6,7 @@ import {
 } from "@neondatabase/auth/server";
 import { createMiltonApp } from "../src/index";
 import { navigation, page } from "../src/pages";
-import { memoPages } from "../src/memo-pages";
+import { COVER_COMMENTS, memoPages } from "../src/memo-pages";
 import {
   resolveIdentityAccount,
   lookupIdentityAccount,
@@ -451,7 +451,7 @@ test("Neon server adapter preserves signed queries, cookies, sign-in admission a
     ).toBe(400);
     const home = await send("/");
     const homeHtml = await home.text();
-    expect(homeHtml).toContain("<h1>Cover sheet</h1>");
+    expect(homeHtml).toContain("<h1>T.P.S. Report</h1>");
     expect(homeHtml).not.toContain("Version history");
     expect(homeHtml).not.toContain("Your memos");
     // Moving hosts can rotate the cache-signing key without replacing Neon's
@@ -474,7 +474,7 @@ test("Neon server adapter preserves signed queries, cookies, sign-in admission a
       }),
     );
     expect(migratedHome.status).toBe(200);
-    expect(await migratedHome.text()).toContain("<h1>Cover sheet</h1>");
+    expect(await migratedHome.text()).toContain("<h1>T.P.S. Report</h1>");
     expect(
       calls
         .slice(callsBeforeMigration)
@@ -911,10 +911,21 @@ test("signed-in email shows only in authenticated chrome; switch account signs o
   try {
     for (const path of ["/", "/tps-report", "/assistants"]) {
       const html = await (await send(path)).text();
-      expect(html).toContain(`Signed in as ${email}`);
+      expect(html).toContain(`Signed in as <strong>${email}</strong>`);
       if (path !== "/assistants") expect(html).toContain('href="/assistants"');
     }
     const report = await (await send("/")).text();
+    // The cover sheet form is prepared for the signed-in email; the download is not.
+    expect(report).toContain(
+      `<dt>Prepared for:</dt><dd class="fill">${email}</dd>`,
+    );
+    // Setup steps moved to Connected assistants, still keyed to the empty account.
+    const assistants = await (await send("/assistants")).text();
+    expect(assistants).toContain(
+      '<pre class="setup-copy"><code>https://mcp.meetmilton.com/mcp</code></pre>',
+    );
+    expect(assistants).toContain("It is empty, so run the setup questions");
+    expect(report).not.toContain("https://mcp.meetmilton.com/mcp");
     expect(report).toContain('name="next" value="login"');
     expect(report).toContain(
       "Signing out of this browser does not disconnect your assistants.",
@@ -1310,7 +1321,7 @@ test("web shows only current TPS and rejects all retired history and mutation ro
   try {
     const empty = await (await fixture.send("/")).text();
     expect(empty).toContain("No instructions on file.");
-    expect(empty).toContain('<details class="connection-help" open');
+    expect(empty).toContain('href="/assistants#connect"');
     expect(
       (
         await fixture.app(
@@ -1338,12 +1349,10 @@ test("web shows only current TPS and rejects all retired history and mutation ro
       expect(html).toContain(
         `<link rel="preload" href="/fonts/${font}.woff2" as="font" type="font/woff2" crossorigin="anonymous"`,
       );
-    expect(html).toContain('<ul class="instruction-list">');
+    expect(html).toContain('<ol class="ruled">');
     expect(html).toContain(
-      "<li>Lead with the answer.\n\nUnless clarification is needed, keep the reply brief. &lt;script&gt;",
+      '<li class="line"><span class="typed">Lead with the answer.\n\nUnless clarification is needed, keep the reply brief. &lt;script&gt;',
     );
-    expect(html).toContain('<details class="connection-help">');
-    expect(html).toContain("https://mcp.meetmilton.com/mcp");
     for (const absent of [
       "Version history",
       "Restore",
@@ -1504,6 +1513,11 @@ test("report bullets require exact revision and complete text parity; optional l
     full: report.text,
     is_empty: false,
   };
+  // The date and comment are fixed here; a request uses today and a random one.
+  const options = {
+    now: () => new Date("2026-11-02T12:00:00Z"),
+    comment: () => COVER_COMMENTS[2],
+  };
   const render = (
     readDocuments?: () => Promise<typeof exact | null>,
     path = "/tps-report",
@@ -1512,22 +1526,29 @@ test("report bullets require exact revision and complete text parity; optional l
       new Request(appOrigin + path),
       { ...base, readDocuments: readDocuments as never },
       () => "",
+      "you@example.com",
+      options,
     );
   const html = await (await render(async () => exact)).text();
-  expect(html).toContain("2 of 100 memo updates used today. 1 pending.");
-  expect(html).toContain("Resets at 00:00 UTC.");
-  expect(html.indexOf('aria-label="Memo updates"')).toBeLessThan(
-    html.indexOf('<article class="sheet tps-sheet"'),
+  for (const [label, value] of [
+    ["Prepared for", "you@example.com"],
+    ["Date", "2026-11-02"],
+    ["Reports", "None"],
+    ["Rules", "2"],
+    ["Samples", "0"],
+    ["Memo updates today", "2 of 100"],
+  ])
+    expect(html).toContain(`<dt>${label}:</dt><dd class="fill">${value}</dd>`);
+  expect(html).toContain(
+    '<p class="line typed comment">Red stapler located. Returned to owner.</p>',
   );
   balanceUnavailable = true;
   const withoutBalance = await render(async () => exact);
   expect(withoutBalance.status).toBe(200);
-  expect(await withoutBalance.text()).not.toContain(
-    'aria-label="Memo updates"',
-  );
+  expect(await withoutBalance.text()).not.toContain("Memo updates today");
   balanceUnavailable = false;
   expect(html).toContain(
-    '<ul class="instruction-list"><li>  Keep fictional units explicit.\n\nUnless a condition applies, preserve &lt;tag&gt; &amp; wording.  </li><li>Do the second instruction after the first.\nKeep this exception attached.\n</li></ul>',
+    '<ol class="ruled"><li class="line"><span class="typed">  Keep fictional units explicit.\n\nUnless a condition applies, preserve &lt;tag&gt; &amp; wording.  </span></li><li class="line"><span class="typed">Do the second instruction after the first.\nKeep this exception attached.\n</span></li></ol>',
   );
   // A multi-line compiler-era rule drops its stored dash, as in MCP and TPS.md.
   expect(
@@ -1538,10 +1559,10 @@ test("report bullets require exact revision and complete text parity; optional l
       }))
     ).text(),
   ).toContain(
-    '<ul class="instruction-list"><li>Fictional older rule.\nIts second line.</li></ul>',
+    '<ol class="ruled"><li class="line"><span class="typed">Fictional older rule.\nIts second line.</span></li></ol>',
   );
-  expect(html.indexOf("<h1>Cover sheet</h1>")).toBeLessThan(
-    html.indexOf('<ul class="instruction-list">'),
+  expect(html.indexOf("<h1>T.P.S. Report</h1>")).toBeLessThan(
+    html.indexOf('<ol class="ruled">'),
   );
   for (const lookup of [
     undefined,
@@ -1555,7 +1576,7 @@ test("report bullets require exact revision and complete text parity; optional l
     expect(response.status).toBe(200);
     const fallback = await response.text();
     expect(fallback).toContain('<pre class="memo-text"><span>');
-    expect(fallback).not.toContain('<ul class="instruction-list">');
+    expect(fallback).not.toContain('<ol class="ruled">');
     expect(fallback).toContain(
       "Unless a condition applies, preserve &lt;tag&gt; &amp; wording.",
     );
@@ -1606,7 +1627,7 @@ test("report bullets require exact revision and complete text parity; optional l
     () => "",
   );
   expect(await titled.text()).toContain(
-    '<h2 class="instruction-group">Email</h2><p class="small-note">Applies when fictional.</p><figure class="sample"><figcaption>Approved, after a call, 2026-11-02</figcaption><blockquote><pre class="memo-text"><span>Hi &lt;there&gt;,\n\nThanks.</span></pre></blockquote></figure><ul class="instruction-list"><li>One.</li><li>Two\nlines.</li></ul>',
+    '<section class="form-section"><h2>Email</h2><p class="applies">Applies when fictional.</p><p class="sub-label">Approved samples:</p><details class="form-sample"><summary><span class="box" aria-hidden="true">☑</span><span class="typed">After a call</span><span class="date">2026-11-02</span></summary><pre class="memo-text"><span>Hi &lt;there&gt;,\n\nThanks.</span></pre></details><p class="sub-label">Rules:</p><ol class="ruled"><li class="line"><span class="typed">One.</span></li><li class="line"><span class="typed">Two\nlines.</span></li></ol></section>',
   );
 });
 

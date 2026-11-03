@@ -63,23 +63,30 @@ const plain = (text: string) => (
     <span>{text}</span>
   </pre>
 );
-function sheet(content: Child) {
+
+/** The Comments line on the signed-in cover sheet: page decoration only. */
+export const COVER_COMMENTS = [
+  "Did you get the memo about the new cover sheets?",
+  "Cover sheet attached. Please use it from now on.",
+  "Red stapler located. Returned to owner.",
+  "Please file in storage room B.",
+  "Reviewed by both Bobs.",
+  "Reminder: Hawaiian shirt day is Friday.",
+  "Do not move desk without approval.",
+  "Cake not received. Please advise.",
+  "PC LOAD LETTER resolved.",
+  "Copies sent to all eight bosses.",
+  "Filed without a case of the Mondays.",
+  "Minimum flair requirement met.",
+] as const;
+const randomComment = () =>
+  COVER_COMMENTS[Math.floor(Math.random() * COVER_COMMENTS.length)]!;
+
+/** The two setup steps, shown on Connected assistants. */
+export function connectSteps(empty: boolean) {
   return (
-    <article class="sheet tps-sheet" aria-label="Cover sheet">
-      <div class="sheet-bar">Milton</div>
-      <header class="tps-title">
-        <h1>Cover sheet</h1>
-        <p class="cover-subtitle">How you write</p>
-      </header>
-      {content}
-      <div class="document-end" aria-hidden="true"></div>
-    </article>
-  );
-}
-function connectionHelp(empty: boolean) {
-  return (
-    <details class="connection-help" open={empty}>
-      <summary>Connect an assistant</summary>
+    <section class="connect-steps" id="connect" aria-labelledby="connect-h">
+      <h2 id="connect-h">Connect an assistant</h2>
       <ol class="setup-steps">
         <li>
           <h3>Add Milton in your assistant’s settings.</h3>
@@ -108,130 +115,157 @@ function connectionHelp(empty: boolean) {
           instructions, or leave it empty.
         </p>
       )}
-    </details>
+    </section>
   );
 }
-/**
- * Authenticated page chrome: navigation, the signed-in account (never shown on
- * public pages or in downloads), and sign-out. "Switch account" signs out to
- * the sign-in page; signing out never disconnects assistants.
- */
-export function accountChrome(
-  csrf: () => Child,
-  email: string | undefined,
-  here: "report" | "assistants" | "delete",
-) {
+
+const field = (label: string, value: Child, grow = false) => (
+  <div class={grow ? "field grow" : "field"}>
+    <dt>{label}:</dt>
+    <dd class="fill">{value}</dd>
+  </div>
+);
+// The list supplies the number; ruleText drops a stored "- " as assembly does.
+const ruled = (bodies: string[]) => (
+  <ol class="ruled">
+    {bodies.map((body) => (
+      <li class="line">
+        <span class="typed">{ruleText(body)}</span>
+      </li>
+    ))}
+  </ol>
+);
+const capitalised = (text: string) =>
+  text.charAt(0).toUpperCase() + text.slice(1);
+
+type SheetView = {
+  report: CompiledReport;
+  documents?: (Documents & { version: string }) | null;
+  email?: string;
+  date: string;
+  usage?: { used: number; limit: number };
+  comment: string;
+};
+/** The signed-in cover sheet as a T.P.S. report form. Page only: the download
+ * and MCP serve the report text unchanged. */
+function sheet({ report, documents, email, date, usage, comment }: SheetView) {
+  const docs = documents?.version === report.version ? documents : null;
+  const filed = docs?.reports.filter((r) => !r.is_empty) ?? [];
+  const counts = report.is_empty
+    ? { reports: "None", rules: 0, samples: 0 }
+    : docs && {
+        reports: filed.map((r) => r.title).join(", ") || "None",
+        rules:
+          docs.cover_rules.length +
+          filed.reduce((n, r) => n + r.rules.length, 0),
+        samples: filed.reduce((n, r) => n + r.samples.length, 0),
+      };
   return (
-    <>
-      <nav aria-label={here === "report" ? "Report" : "Account"}>
-        {here === "report" ? (
-          <>
-            <a href="/download">Download TPS.md</a>
-            <a href="/assistants">Connected assistants</a>
-          </>
-        ) : (
-          <a href="/">Cover sheet</a>
+    <article class="sheet tps-form" aria-label="Cover sheet">
+      <header class="form-title">
+        <h1>T.P.S. Report</h1>
+        <p>Cover Sheet</p>
+      </header>
+      <div class="form-fields">
+        <dl class="row">
+          {field("Prepared for", email ?? "", true)}
+          {field("Date", date)}
+        </dl>
+        {counts && (
+          <dl class="row">
+            {field("Reports", counts.reports, true)}
+            {field("Rules", counts.rules)}
+            {field("Samples", counts.samples)}
+          </dl>
         )}
-        <form class="signout" method="post" action="/logout">
-          {csrf()}
-          <button
-            class="secondary"
-            name="next"
-            value="login"
-            aria-describedby="signout-note"
-          >
-            Switch account
-          </button>
-          <button class="secondary" aria-describedby="signout-note">
-            Sign out
-          </button>
-        </form>
-      </nav>
-      <p class="small-note" id="signout-note">
-        {email && <>Signed in as {email}. </>}
-        Signing out of this browser does not disconnect your assistants.
-        {here === "report" && (
-          <>
-            {" "}
-            To disconnect one, use{" "}
-            <a href="/assistants">Connected assistants</a>.
-          </>
-        )}
-      </p>
-      {here !== "delete" && (
-        <p class="small-note">
-          <a href="/account/delete">Delete account</a>
-        </p>
+        <dl class="row">
+          {field("Approved by", "Milton", true)}
+          {usage &&
+            field("Memo updates today", `${usage.used} of ${usage.limit}`)}
+        </dl>
+      </div>
+      {report.is_empty ? (
+        <div class="form-empty">
+          <p class="empty-placeholder">No instructions on file.</p>
+          <p>
+            <a href="/assistants#connect">Follow the setup steps</a> to connect
+            an assistant and start your cover sheet.
+          </p>
+        </div>
+      ) : docs ? (
+        <>
+          {docs.cover_rules.length > 0 && (
+            <section class="form-section">
+              <h2>Always</h2>
+              <p class="applies">Applies to everything you write.</p>
+              {ruled(docs.cover_rules)}
+            </section>
+          )}
+          {filed.map((r) => (
+            <section class="form-section">
+              <h2>{r.title}</h2>
+              <p class="applies">Applies when {r.when}.</p>
+              {r.samples.length > 0 && (
+                <>
+                  <p class="sub-label">Approved samples:</p>
+                  {r.samples.map((s) => (
+                    <details class="form-sample">
+                      <summary>
+                        <span class="box" aria-hidden="true">
+                          ☑
+                        </span>
+                        <span class="typed">{capitalised(s.context)}</span>
+                        <span class="date">{s.date}</span>
+                      </summary>
+                      {plain(s.body)}
+                    </details>
+                  ))}
+                </>
+              )}
+              {r.rules.length > 0 && (
+                <>
+                  <p class="sub-label">Rules:</p>
+                  {ruled(r.rules)}
+                </>
+              )}
+            </section>
+          ))}
+        </>
+      ) : (
+        <div class="form-section">{plain(report.text)}</div>
       )}
-    </>
+      <section class="form-section">
+        <h2>Comments</h2>
+        <p class="line typed comment">{comment}</p>
+        <div class="line" aria-hidden="true"></div>
+        <div class="line" aria-hidden="true"></div>
+      </section>
+      <footer class="confidential">Confidential</footer>
+    </article>
   );
 }
 
 function current(
-  report: CompiledReport,
+  view: SheetView,
   csrf: () => Child,
   notice: Child = null,
   status = 200,
-  documents?: (Documents & { version: string }) | null,
   assistantPaused = false,
-  email?: string,
 ) {
-  const docs = documents?.version === report.version ? documents : null;
-  // The list supplies the bullet; ruleText drops a stored "- " as assembly does.
-  const rules = (bodies: string[]) =>
-    bodies.length > 0 && (
-      <ul class="instruction-list">
-        {bodies.map((body) => (
-          <li>{ruleText(body)}</li>
-        ))}
-      </ul>
-    );
   return page(
     "Cover sheet",
     <>
-      {accountChrome(csrf, email, "report")}
       {notice}
-      {connectionHelp(report.is_empty)}
-      {!report.is_empty && !assistantPaused && (
-        <p class="small-note">
-          To change these instructions, ask a connected assistant to save the
-          update with Milton.
+      {!view.report.is_empty && !assistantPaused && (
+        <p class="small-note sheet-meta">
+          To change these, ask a connected assistant.
         </p>
       )}
-      {sheet(
-        <div class="document-body">
-          {report.is_empty ? (
-            <p class="empty-placeholder">No instructions on file.</p>
-          ) : docs ? (
-            <>
-              {rules(docs.cover_rules)}
-              {docs.reports
-                .filter((r) => !r.is_empty)
-                .map((r) => (
-                  <>
-                    <h2 class="instruction-group">{r.title}</h2>
-                    <p class="small-note">Applies when {r.when}.</p>
-                    {r.samples.map((s) => (
-                      <figure class="sample">
-                        <figcaption>
-                          Approved, {s.context}, {s.date}
-                        </figcaption>
-                        <blockquote>{plain(s.body)}</blockquote>
-                      </figure>
-                    ))}
-                    {rules(r.rules)}
-                  </>
-                ))}
-            </>
-          ) : (
-            plain(report.text)
-          )}
-        </div>,
-      )}
+      {sheet(view)}
     </>,
     status,
     reportFonts,
-    "tps",
+    { account: { csrf, email: view.email, here: "report" }, sheet: true },
   );
 }
 export async function memoPages(
@@ -239,6 +273,9 @@ export async function memoPages(
   store: PageStore,
   csrf: () => Child,
   email?: string,
+  /** Fixed values for tests; a request otherwise uses today (UTC) and a
+   * random comment. */
+  options: { now?: () => Date; comment?: () => string } = {},
 ): Promise<Response> {
   async function showCurrent(
     report: CompiledReport,
@@ -254,32 +291,25 @@ export async function memoPages(
         // Optional presentation must never prevent canonical report access.
       }
     }
-    let usage: Child = null;
+    let usage: SheetView["usage"];
     try {
-      const balance = await store.memoUpdates?.();
-      if (balance) {
-        usage = (
-          <p class="small-note" aria-label="Memo updates">
-            {balance.used} of {balance.limit} memo updates used today.
-            {balance.pending > 0 ? ` ${balance.pending} pending.` : ""} Resets
-            at 00:00 UTC.
-          </p>
-        );
-      }
+      usage = await store.memoUpdates?.();
     } catch {
       // Advisory usage must not prevent viewing or downloading saved instructions.
     }
     return current(
-      report,
+      {
+        report,
+        documents,
+        email,
+        usage,
+        date: (options.now?.() ?? new Date()).toISOString().slice(0, 10),
+        comment: (options.comment ?? randomComment)(),
+      },
       csrf,
-      <>
-        {notice}
-        {usage}
-      </>,
+      notice,
       status,
-      documents,
       assistantPaused,
-      email,
     );
   }
   const path = new URL(request.url).pathname;

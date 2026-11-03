@@ -22,7 +22,7 @@ import {
   personStoreForCurrentRequest,
   type VerifiedStoreAuth,
 } from "./store";
-import { accountChrome, memoPages, isMemoRoute } from "./memo-pages";
+import { connectSteps, memoPages, isMemoRoute } from "./memo-pages";
 import type { Child } from "hono/jsx";
 import { AuthError } from "./token";
 import { navigation, page } from "./pages";
@@ -286,6 +286,19 @@ export function browserPages(config: RuntimeConfig) {
       const store = await personStoreForCurrentRequest(config, verified);
       return memoPages(request, store, csrfField, user.email);
     };
+    // Picks the setup prompt only, so a failed read shows the general prompt.
+    const accountEmpty = async (user: SessionUser) => {
+      try {
+        const verified = await lookupIdentityAccount(config, {
+          provider: "neon",
+          subject: user.id,
+        });
+        const store = await personStoreForCurrentRequest(config, verified);
+        return (await store.readTpsReport()).is_empty;
+      } catch {
+        return false;
+      }
+    };
     const assistantsUnavailable = () =>
       new AuthError(
         "assistants_unavailable",
@@ -335,53 +348,65 @@ export function browserPages(config: RuntimeConfig) {
         provider: "neon",
         subject: user.id,
       });
-      const names = await Promise.all(
-        consents.map((consent, index) =>
-          index < NAMED_ASSISTANTS ? clientName(consent.clientId) : undefined,
+      const [names, empty] = await Promise.all([
+        Promise.all(
+          consents.map((consent, index) =>
+            index < NAMED_ASSISTANTS ? clientName(consent.clientId) : undefined,
+          ),
         ),
-      );
+        accountEmpty(user),
+      ]);
       return page(
         "Connected assistants",
         <>
-          {accountChrome(csrfField, user.email, "assistants")}
           {notice}
-          <p>
-            These assistants can read and change your memos. Disconnecting one
-            makes Milton refuse it immediately, including sign-in tokens it
-            already holds. To use it again, reconnect it from the assistant and
-            approve it.
-          </p>
-          {consents.length === 0 ? (
-            <p>No assistants are connected.</p>
-          ) : (
-            <ul class="assistant-list">
-              {consents.map((consent, index) => {
-                const incomplete = disconnected.has(consent.clientId);
-                const host = clientHost(consent.clientId);
-                return (
-                  <li>
-                    <p>
-                      <strong>{names[index] || consent.clientId}</strong>
-                      {host ? `, from ${host}` : " (name not verified)"}
-                    </p>
-                    <p class="small-note">
-                      Connected {consent.createdAt.toISOString().slice(0, 10)}
-                      {incomplete && " · Disconnect incomplete"}
-                    </p>
-                    <form method="post" action="/assistants/disconnect">
-                      {csrfField()}
-                      <input type="hidden" name="consent" value={consent.id} />
-                      <button class="secondary">
-                        {incomplete ? "Retry" : "Disconnect"}
-                      </button>
-                    </form>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+          {connectSteps(empty)}
+          <section aria-labelledby="connected-h">
+            <h2 id="connected-h">Connected</h2>
+            <p>
+              These assistants can read and change your memos. Disconnecting one
+              makes Milton refuse it immediately, including sign-in tokens it
+              already holds. To use it again, reconnect it from the assistant
+              and approve it.
+            </p>
+            {consents.length === 0 ? (
+              <p>No assistants are connected.</p>
+            ) : (
+              <ul class="assistant-list">
+                {consents.map((consent, index) => {
+                  const incomplete = disconnected.has(consent.clientId);
+                  const host = clientHost(consent.clientId);
+                  return (
+                    <li>
+                      <p>
+                        <strong>{names[index] || consent.clientId}</strong>
+                        {host ? `, from ${host}` : " (name not verified)"}
+                      </p>
+                      <p class="small-note">
+                        Connected {consent.createdAt.toISOString().slice(0, 10)}
+                        {incomplete && " · Disconnect incomplete"}
+                      </p>
+                      <form method="post" action="/assistants/disconnect">
+                        {csrfField()}
+                        <input
+                          type="hidden"
+                          name="consent"
+                          value={consent.id}
+                        />
+                        <button class="secondary">
+                          {incomplete ? "Retry" : "Disconnect"}
+                        </button>
+                      </form>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
         </>,
         status,
+        null,
+        { account: { csrf: csrfField, email: user.email, here: "assistants" } },
       );
     };
     const assistants = async (): Promise<Response> => {
@@ -480,7 +505,6 @@ export function browserPages(config: RuntimeConfig) {
       page(
         "Delete your account",
         <>
-          {accountChrome(csrfField, user.email, "delete")}
           {notice}
           <p>
             Deleting your Milton account cannot be undone. To keep a copy of
@@ -536,6 +560,8 @@ export function browserPages(config: RuntimeConfig) {
           </form>
         </>,
         status,
+        null,
+        { account: { csrf: csrfField, email: user.email } },
       );
     const accountDeletion = async (): Promise<Response> => {
       if (request.method !== "GET" && request.method !== "POST")

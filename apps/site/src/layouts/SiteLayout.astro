@@ -10,6 +10,33 @@ interface Props {
 }
 const { title, description, legal = false } = Astro.props;
 const canonical = new URL(Astro.url.pathname, Astro.site);
+
+/* The forty-link footer, for a company of one. Entries without an href are
+   plain text and must not look like links. Privacy and Terms live only here
+   on these pages; the legal pages keep the plain footer. */
+const footerColumns: {
+  heading: string;
+  entries: { label: string; href?: string }[];
+}[] = [
+  { heading: "Product", entries: [{ label: "Milton", href: "/" }] },
+  { heading: "Company", entries: [{ label: "Peter" }] },
+  { heading: "Careers", entries: [{ label: "No" }] },
+  {
+    heading: "Resources",
+    entries: [
+      { label: "Setup guide", href: "/setup" },
+      { label: "Source", href: "https://github.com/zoneofdanger/milton" },
+    ],
+  },
+  {
+    heading: "Legal",
+    entries: [
+      { label: "Privacy", href: "/privacy" },
+      { label: "Terms", href: "/terms" },
+    ],
+  },
+  { heading: "Status", entries: [{ label: "Filed" }] },
+];
 ---
 
 <!doctype html>
@@ -64,12 +91,30 @@ const canonical = new URL(Astro.url.pathname, Astro.site);
       <slot />
     </main>
     <footer class="wrap">
+      {!legal && (
+        <nav class="footer-grid" aria-label="Footer">
+          {footerColumns.map(({ heading, entries }) => (
+            <div class="footer-column">
+              <p class="eyebrow">{heading}</p>
+              <ul>
+                {entries.map(({ label, href }) => (
+                  <li>
+                    {href ? <a href={href}>{label}</a> : <span>{label}</span>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </nav>
+      )}
       <div class="footer-links">
         <span>© 2026 Zone of Danger, LLC</span>
-        <nav aria-label="Legal">
-          <a href="/privacy">Privacy</a>
-          <a href="/terms">Terms</a>
-        </nav>
+        {legal && (
+          <nav aria-label="Legal">
+            <a href="/privacy">Privacy</a>
+            <a href="/terms">Terms</a>
+          </nav>
+        )}
         <a href="mailto:support@meetmilton.com">
           Contact: support@meetmilton.com
         </a>
@@ -144,6 +189,34 @@ const canonical = new URL(Astro.url.pathname, Astro.site);
   footer {
     padding-block: var(--space-6) var(--space-8);
   }
+  .footer-grid {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: var(--space-6);
+    border-top: 1px solid var(--hairline);
+    padding-block: var(--space-8);
+  }
+  .footer-grid ul {
+    margin: var(--space-2) 0 0;
+    padding: 0;
+    list-style: none;
+  }
+  .footer-grid li {
+    display: flex;
+    align-items: center;
+    min-height: var(--touch-target);
+  }
+  .footer-grid a {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--touch-target);
+  }
+  /* Plain entries: muted, never underlined, no pointer. Links keep the
+     site's underline in ink. */
+  .footer-grid span {
+    color: var(--muted);
+    cursor: default;
+  }
   .footer-links {
     display: flex;
     align-items: center;
@@ -191,6 +264,31 @@ const canonical = new URL(Astro.url.pathname, Astro.site);
     }
     .footer-links > a {
       margin-left: 0;
+    }
+  }
+  @media (max-width: 860px) {
+    .footer-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+  /* Phones: six short rows, heading then entries, in the same order. */
+  @media (max-width: 600px) {
+    .footer-grid {
+      grid-template-columns: 1fr;
+      gap: 0;
+      padding-block: var(--space-4);
+    }
+    .footer-column {
+      display: grid;
+      grid-template-columns: 7rem minmax(0, 1fr);
+      align-items: center;
+      gap: var(--space-4);
+    }
+    .footer-grid ul {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0 var(--space-5);
+      margin: 0;
     }
   }
 </style>

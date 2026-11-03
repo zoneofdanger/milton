@@ -72,6 +72,14 @@ test("0024 runtime role saves through its grants, cannot change the schema or by
            GROUP BY 1,2 ORDER BY 1`,
         )
       ).rows,
+      columns: (
+        await db.query(
+          `SELECT c.relname,t.attname,string_agg(a.privilege_type,',' ORDER BY a.privilege_type) AS privileges
+           FROM pg_attribute t JOIN pg_class c ON c.oid=t.attrelid CROSS JOIN LATERAL aclexplode(t.attacl) a
+           WHERE a.grantee='milton_runtime'::regrole AND c.relnamespace IN ('public'::regnamespace,'drizzle'::regnamespace)
+           GROUP BY 1,2 ORDER BY 1,2`,
+        )
+      ).rows,
       schemas: (
         await db.query(
           `SELECT nspname,has_schema_privilege('milton_runtime',oid,'USAGE') AS usage,has_schema_privilege('milton_runtime',oid,'CREATE') AS create
@@ -92,7 +100,28 @@ test("0024 runtime role saves through its grants, cannot change the schema or by
         )
       ).rows,
     });
-    const dml = "DELETE,INSERT,SELECT,UPDATE";
+    // What the runtime and the triggers it fires run on each table. DELETE
+    // only where the runtime deletes; store_config is locked FOR UPDATE, which
+    // needs one updatable column.
+    const used: Record<string, string> = {
+      accepted_changes: "INSERT",
+      assistant_disconnects: "DELETE,INSERT,SELECT",
+      deleted_identities: "INSERT,SELECT",
+      identities: "INSERT,SELECT",
+      instruction_card_versions: "INSERT,SELECT",
+      instruction_cards: "INSERT,SELECT",
+      memo_cards: "INSERT,SELECT",
+      memo_versions: "INSERT,SELECT",
+      memos: "INSERT,SELECT",
+      sample_kinds: "INSERT,SELECT",
+      samples: "INSERT,SELECT,UPDATE",
+      save_requests: "INSERT,SELECT,UPDATE",
+      store_config: "SELECT",
+      tps_reports: "INSERT,SELECT,UPDATE",
+      trial_accounts: "INSERT,SELECT,UPDATE",
+      usage_daily: "INSERT,SELECT,UPDATE",
+      users: "DELETE,INSERT,SELECT,UPDATE",
+    };
     const forward = async () => {
       await pg.exec("BEGIN;" + up + "COMMIT;");
       expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(post));
@@ -110,14 +139,15 @@ test("0024 runtime role saves through its grants, cannot change the schema or by
       ]);
       const granted = await grants(pg);
       expect(granted).toEqual(await grants(post));
-      // Every application table, DML only; the sequence, USAGE only; nothing
+      // Every application table is listed; the sequence, USAGE only; nothing
       // in drizzle; no CREATE anywhere.
+      expect(Object.keys(used)).toEqual(await publicTables(pg));
       expect(granted.objects).toEqual(
         [
-          ...(await publicTables(pg)).map((relname) => ({
+          ...Object.entries(used).map(([relname, privileges]) => ({
             relname,
             relkind: "r",
-            privileges: dml,
+            privileges,
           })),
           {
             relname: "instruction_card_position",
@@ -126,6 +156,9 @@ test("0024 runtime role saves through its grants, cannot change the schema or by
           },
         ].sort((a, b) => (a.relname < b.relname ? -1 : 1)),
       );
+      expect(granted.columns).toEqual([
+        { relname: "store_config", attname: "singleton", privileges: "UPDATE" },
+      ]);
       expect(granted.schemas).toEqual([
         { nspname: "drizzle", usage: false, create: false },
         { nspname: "public", usage: true, create: false },
@@ -133,7 +166,7 @@ test("0024 runtime role saves through its grants, cannot change the schema or by
       expect(granted.connect).toEqual([{ connect: true }]);
       expect(granted.defaults).toEqual([
         { kind: "S", privileges: "USAGE" },
-        { kind: "r", privileges: dml },
+        { kind: "r", privileges: "INSERT,SELECT,UPDATE" },
       ]);
     };
     await forward();
@@ -187,6 +220,15 @@ test("0024 runtime role saves through its grants, cannot change the schema or by
         "SELECT * FROM drizzle.__drizzle_migrations",
         "SET session_replication_role = replica",
         "GRANT milton_runtime TO milton_app_fixture",
+        // Deletes and updates no trigger guards, outside the runtime's grants.
+        "DELETE FROM save_requests",
+        "DELETE FROM usage_daily",
+        "DELETE FROM trial_accounts",
+        "DELETE FROM deleted_identities",
+        "DELETE FROM identities",
+        "UPDATE identities SET user_id=user_id",
+        "UPDATE store_config SET memo_updates_enabled=true",
+        "SELECT * FROM accepted_changes",
       ])
         await expect(pg.query(statement)).rejects.toThrow(
           /must be owner|permission denied/,
@@ -200,10 +242,15 @@ test("0024 runtime role saves through its grants, cannot change the schema or by
         (await pg.query("SELECT body FROM samples WHERE user_id='runtime'"))
           .rows,
       ).toEqual([{ body: "Runtime sample body." }]);
-      // A table a later migration creates is open to the runtime by default.
+      // A table a later migration creates gets SELECT, INSERT and UPDATE by
+      // default; DELETE only if that migration grants it.
       await pg.exec(
-        "CREATE TABLE later_table (id int); SET ROLE milton_app_fixture; INSERT INTO later_table VALUES (1); RESET ROLE; DROP TABLE later_table",
+        "CREATE TABLE later_table (id int); SET ROLE milton_app_fixture; INSERT INTO later_table VALUES (1); UPDATE later_table SET id=2",
       );
+      await expect(pg.query("DELETE FROM later_table")).rejects.toThrow(
+        "permission denied",
+      );
+      await pg.exec("RESET ROLE; DROP TABLE later_table");
     } finally {
       await pg.exec("RESET ROLE");
     }

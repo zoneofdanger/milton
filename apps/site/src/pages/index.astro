@@ -119,33 +119,6 @@ import MemoDemo from "../components/MemoDemo.astro";
         </p>
       </li>
     </ol>
-    <figure class="conversation sheet">
-      <div class="sheet-bar">
-        <span>One sample, two conversations</span>
-        <span>Illustrative example</span>
-      </div>
-      <div class="conversation-steps sheet-content">
-        <div>
-          <p class="eyebrow">You, today</p>
-          <blockquote>
-            “Send it.” Your AI: “Save this as a sample?” You: “Yes.”
-          </blockquote>
-          <p class="conversation-note small-note">
-            Milton files the email, exactly as approved, under your email
-            report.
-          </p>
-        </div>
-        <div>
-          <p class="eyebrow">You, next time</p>
-          <blockquote>
-            “Did you get that memo? Draft a reply to this thread.”
-          </blockquote>
-          <p class="conversation-note small-note">
-            Your AI reads the email report: your sample first, then your rules.
-          </p>
-        </div>
-      </div>
-    </figure>
     <p class="reading-note small-note">
       <strong class="memo-limit">
         We distribute the memo. We cannot make everyone read it.
@@ -527,15 +500,10 @@ import MemoDemo from "../components/MemoDemo.astro";
   .steps p {
     color: var(--muted);
   }
-  .conversation-steps,
   .pricing {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: var(--space-8);
-  }
-  .conversation blockquote {
-    margin: var(--space-4) 0;
-    font-size: var(--text-lead);
   }
   .steps p + p {
     margin-top: var(--space-3);
@@ -657,8 +625,7 @@ import MemoDemo from "../components/MemoDemo.astro";
     }
     .use-cases,
     .steps,
-    .pricing,
-    .conversation-steps {
+    .pricing {
       grid-template-columns: 1fr;
       gap: var(--space-6);
     }

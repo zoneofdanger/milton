@@ -107,7 +107,9 @@ test("an SDK client receives instructions, discovers the four tools, and reads t
     expect(text).toContain("does not authorize saving or session capture");
     expect(
       tools.find((tool) => tool.name === "get_cover_sheet")?.description,
-    ).toContain("The server instructions say when the 'Did you get the memo?'");
+    ).toContain(
+      "'Did you get the memo?' means reread the cover sheet and the matching reports: a read, never a save.",
+    );
     // The memo cue and the correction rules are stated once across everything
     // served; tool and field descriptions point to the instructions.
     const served = JSON.stringify([client.getInstructions(), tools]);
@@ -217,6 +219,9 @@ test("two authenticated clients isolate tenants, save once and reject retired to
     expect(
       discovered.find((t) => t.name === "create_memo")?.description,
     ).toContain("approves a sample you offered");
+    expect(
+      discovered.find((t) => t.name === "create_memo")?.description,
+    ).toContain("Change a rule only through exact_edits, never by adding one");
     const first = (await call(0, "get_cover_sheet")).value;
     const second = (await call(1, "get_cover_sheet")).value;
     expect(first.text).toBe("");

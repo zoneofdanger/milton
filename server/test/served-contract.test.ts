@@ -48,9 +48,9 @@ test("setup renders from its catalog, per report while empty, within 32 KB", () 
   expect(sheet.setup).toContain('Then say: "First, paste one email');
   // The first block ends by offering the standing line, after the save.
   const stick = [
-    "7. Last step: make it stick. Offer to keep this line in your own standing instructions, so you read Milton without being asked:",
+    "7. Before the next report or stopping, make it stick: offer to keep this line in your own standing instructions, so you read Milton without being asked:",
     "Show exactly: Before writing anything for me, call Milton's get_cover_sheet, then get_report for the matching report.",
-    "Where you can edit a startup instructions file (CLAUDE.md, AGENTS.md), add it there after the person approves, in the home directory so it covers every project. Where you have custom instructions, project instructions or memory, keep it there instead. If you have none of these, show the line and say where the person can paste it. Then say setup is complete.",
+    "Where you can edit a startup instructions file, add it there after the person approves: ~/.claude/CLAUDE.md for Claude Code, ~/.codex/AGENTS.md for Codex, User Rules in Cursor's settings. Where you have custom instructions, project instructions or memory, keep it there instead. If you have none of these, show the line and say where the person can paste it. Then say setup is complete.",
   ].join("\n");
   expect(between(sheet.setup!, "\n6. End. ", "\n\n")).toEndWith("\n" + stick);
   // Nothing to file explains the prefix: the cover sheet prints a fixed note

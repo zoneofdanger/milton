@@ -10,7 +10,7 @@ landed and the item is still open), `blocked: <why or #id>`. A bolded headline o
 or fewer states the task; one item is one landing. **A section heading and its preamble are
 shared context for every item beneath it.**
 
-**next-id: 14.** Ids are never reused, so this counter survives deleting the newest item.
+**next-id: 23.** Ids are never reused, so this counter survives deleting the newest item.
 
 ## MVP
 
@@ -66,3 +66,42 @@ reports, memos) and plain text on security screens and anything an assistant rea
       access. Built and reviewed as merge f2ea867 (setup.ts question 6, test, README), reverted
       unreleased; reapply by reverting the revert, then run first setup on an empty test account
       through Claude Code with a mail connector (#8) before release.
+
+## From the audit of 2026-11-02 (`.agents/tmp/audit/report.md`)
+
+- [ ] #14 (ops, med, founder) **Run the services as a limited database role.** The Neon project has
+      only neondb_owner, so runtime SQL could disable the triggers that keep samples append-only and
+      history immutable (A3). Create a runtime role with table-level grants and no DDL, rehearse on a
+      Neon branch, ship a new secret payload per service, keep the owner for migrations.
+
+- [ ] #15 (server, med) **Measure, then pool, database connections.** Each transaction opens its own
+      Neon serverless client (A7, database.ts "no global connections", a Workers-era rule); one read
+      is several HTTP queries and WebSocket connects. Measure latency first; if it pays, a process
+      pool closed on SIGTERM.
+
+- [ ] #16 (server, med, founder) **Decouple memo updates from the global config lock.** Every save
+      claim locks the single store_config row and memo updates are gated by model-era spend fields
+      (A9). Prerequisite for #17 and #18.
+
+- [ ] #17 (ops, low, founder) **Slow the scheduler from every minute to hourly** once #16 lands, so
+      Neon compute can idle; alerts keep working (A8).
+
+- [ ] #18 (server, med, founder) **Delete the spend subsystem** after 2026-12-03 UTC: ledgers, alerts,
+      feed, worker, scheduler, IAM, worker secrets, about 830 source lines (A13). Peter decides whether
+      spend_alert_emails is kept as a record.
+
+- [ ] #19 (server, low) **Document two known limits.** Exact-edit anchors are not Unicode-normalized,
+      so a quote typed with composed accents misses decomposed stored text (A26); the token's scope
+      claim is parsed but never enforced and clock tolerance does not apply to expiry (A27). Both
+      harmless today; write them into server/README.
+
+- [ ] #20 (server, low) **Trim the agent kit to what has callers** (A20): keep hook events and output;
+      retire working-style checks; declare the workspace dependency the server imports by path.
+
+- [ ] #21 (server, low) **Squash migrations for fresh installs** (A22): 21 migrations create and drop
+      the derived systems and need pgvector mid-way; 0004-0017 rollbacks are unreachable. Also
+      revisit @neondatabase/auth 0.7.0-beta once GA (A21: React, Radix, Tailwind in the install).
+
+- [ ] #22 (docs, low) **Shorten the docs** (A30): about 600 lines of repeated release history across
+      server/README, deploy/README and SPEC; move records to git notes or one archive file. Router and
+      Vite simplification (A31) only when touching the build.

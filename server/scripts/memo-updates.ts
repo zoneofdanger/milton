@@ -2,10 +2,6 @@ import { sql } from "drizzle-orm";
 import { loadEnvironment } from "../src/environment";
 import { neonDatabase } from "../src/store/database";
 import type { StoreDatabase } from "../src/store/database";
-import {
-  configuredAlertThresholds,
-  observeSpendAlerts,
-} from "../src/store/spend-alerts";
 import { verifyDatabaseTarget } from "./database-config";
 
 export async function configureMemoUpdatePolicy(
@@ -19,15 +15,14 @@ export async function configureMemoUpdatePolicy(
 
 const usage = `Usage:
   bun --no-env-file scripts/memo-updates.ts policy --daily-limit COUNT
-  bun --no-env-file scripts/memo-updates.ts enable | disable | observe
+  bun --no-env-file scripts/memo-updates.ts enable | disable
 
 Uses explicit DATABASE_URL, or a dotenvx payload file in MILTON_ENCRYPTED_ENV_FILE
 with DOTENV_PRIVATE_KEY. policy sets the daily memo-update limit. It does
 not enable memo updates, trials or model work.
 enable is a separate prospective rollout step. disable retains existing holds and charges;
-drain mutating traffic/holds before compatible runtime rollback. observe publishes
-the bounded private feed only; it sends no notification. Provision the capability
-separately after its logging gate. No command changes instructions or calls a model.`;
+drain mutating traffic/holds before compatible runtime rollback. No command
+changes instructions or calls a model.`;
 
 export async function memoUpdatesCommand(
   args: string[],
@@ -38,10 +33,7 @@ export async function memoUpdatesCommand(
     return;
   }
   const [operation, ...rest] = args;
-  if (
-    !operation ||
-    !["policy", "enable", "disable", "observe"].includes(operation)
-  )
+  if (!operation || !["policy", "enable", "disable"].includes(operation))
     throw new Error();
   let limit: number | null = null;
   const seen = new Set<string>();
@@ -61,14 +53,6 @@ export async function memoUpdatesCommand(
   if (!resolved.DATABASE_URL) throw new Error();
   const db = neonDatabase(resolved.DATABASE_URL);
   await verifyDatabaseTarget(db);
-  if (operation === "observe") {
-    const result = await observeSpendAlerts(
-      db,
-      configuredAlertThresholds(resolved.MILTON_SPEND_ALERT_THRESHOLDS_USD),
-    );
-    console.log(JSON.stringify(result));
-    return;
-  }
   if (operation === "policy")
     await configureMemoUpdatePolicy(db, { dailyLimit: limit });
   else

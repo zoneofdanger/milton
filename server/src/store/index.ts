@@ -299,7 +299,7 @@ export async function listAssistantDisconnects(
  * transaction. First records a disconnect for every given assistant (so their
  * unexpired tokens cannot reach a later account for this identity) and the
  * identity fingerprint (so that account gets no second trial). Every tenant
- * table cascades from users; global spend counters have no account link.
+ * table cascades from users.
  */
 export async function deleteAccount(
   bindings: StoreBindings,

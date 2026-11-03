@@ -50,7 +50,6 @@ const deletionPage = (
       </p>
       <h2>Kept</h2>
       <ul>
-        <li>Daily spending totals that are not linked to your account.</li>
         <li>
           A record of the assistants you connected (sign-in ID and assistant ID,
           no content), so their old tokens cannot reach a new account.

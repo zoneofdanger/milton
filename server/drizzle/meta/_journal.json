@@ -169,6 +169,13 @@
       "when": 1793688971143,
       "tag": "0023_no_spend",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1793689677406,
+      "tag": "0024_runtime_role",
+      "breakpoints": true
     }
   ]
 }

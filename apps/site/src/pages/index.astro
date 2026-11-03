@@ -173,6 +173,9 @@ import MemoDemo from "../components/MemoDemo.astro";
         <strong>Michael Bolton</strong>
         <span>Senior Founding AI Forward Deployed Product Engineer</span>
       </figcaption>
+      <p class="carousel-count">
+        <span class="carousel-dot" aria-hidden="true"></span>1 of 1
+      </p>
     </figure>
   </section>
   <section
@@ -696,5 +699,21 @@ import MemoDemo from "../components/MemoDemo.astro";
   }
   .employee-testimonial figcaption span {
     color: var(--muted);
+  }
+  /* Where a carousel puts its dots: one testimonial, one dot. Nothing to click. */
+  .carousel-count {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin-top: var(--space-6);
+    color: var(--muted);
+    font: var(--text-caption) / var(--leading-label) var(--font-mono);
+  }
+  .carousel-dot {
+    flex: none;
+    width: var(--space-2);
+    height: var(--space-2);
+    border-radius: 50%;
+    background: var(--ink);
   }
 </style>

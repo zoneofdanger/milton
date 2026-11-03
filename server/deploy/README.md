@@ -21,9 +21,9 @@ decommission on 2026-11-01. Hosting rollback now uses Cloud Run revisions.
 Project `milton-510506`, Cloud Run/Artifact Registry region `us-east4`, Scheduler
 region `us-east1`. Service manifests in this directory pin an immutable image and
 secret versions. They contain configuration and secret references, never values.
-The manifests pin what is serving now: app `milton-app-design-9a3da59`
-(`sha256:663ff9ed…`, env 1, key 1), MCP `milton-mcp-served-c0ccaab`
-(`sha256:13b8951b…`, env 2, key 1) and worker `milton-worker-filing-f505745`
+The manifests pin what is serving now: app `milton-app-audit4-4623c9d`
+(`sha256:537f8078…`, env 1, key 1), MCP `milton-mcp-audit4-4623c9d`
+(`sha256:537f8078…`, env 2, key 1) and worker `milton-worker-filing-f505745`
 (`sha256:a370b7c3…`, env 4, key 1); see the release records below. The app and MCP
 manifests still set `MILTON_GLOBAL_SPEND_POLICY=alerts_only`, which the runtime no
 longer reads; the SQL policy in `store_config` controls admission. Existing positive account safeguards
@@ -166,7 +166,9 @@ revision and its imported image, then verify startup again when assigning traffi
 
 To roll back a release, first verify the selected runtime supports the current
 database schema, accounting policy and job payloads, then send traffic to its recorded
-healthy Cloud Run revision. Since migration 0020 no earlier app or MCP revision can serve
+healthy Cloud Run revision. Migration 0021 is compatible with every 0020 revision, so rolling
+back code needs no database step; roll the code back before running the 0021 rollback script
+(see [no count limit](#no-count-limit-0021)). Since migration 0020 no earlier app or MCP revision can serve
 reads or saves, so every release before `filing-f505745` is reachable only after the
 offline 0020 rollback script; see the 0020, 0019 and 0018 boundaries below. Do not
 restore a database snapshot to roll back application code. An existing revision retains
@@ -210,13 +212,56 @@ gcloud run services update-traffic milton-mcp --to-revisions=milton-mcp-derived-
 gcloud run services update-traffic milton-worker --to-revisions=milton-worker-env4-cba4f6c=100 --project=milton-510506 --region=us-east4
 ```
 
-Now serving (since 2026-11-03 01:22:03Z): MCP `milton-mcp-served-c0ccaab`, app
-`milton-app-design-9a3da59`, worker `milton-worker-filing-f505745`; each is recorded below.
+Now serving (since 2026-11-03 02:04:43Z): MCP `milton-mcp-audit4-4623c9d`, app
+`milton-app-audit4-4623c9d`, worker `milton-worker-filing-f505745`; each is recorded below.
 
-Current release served-c0ccaab: MCP only. Revision `milton-mcp-served-c0ccaab`, staged with
+Current release audit4-4623c9d: migration 0021, then app and MCP. Revisions
+`milton-mcp-audit4-4623c9d` and `milton-app-audit4-4623c9d`, staged with `--no-traffic`; at
+milton-lead's assignment under Peter's approval of audit batch 4, a release agent applied 0021
+and then switched MCP at 2026-11-03 02:04:19Z and the app at 02:04:43Z, and each serves 100%.
+The worker stays on `milton-worker-filing-f505745`. Both run image
+`sha256:537f8078fe4a371722ec9496e8580c0f9c35ed7ad7968cea177fbe0016193ab8` (amd64
+`sha256:2fb5a14df3641a5324f397c47433fc32261b90fb4063efea6b8716637ed58ce6`; uid 1000, Node 26,
+no env, key or pem files; build stage `oven/bun:1.4.4`), built from main `4623c9d`, the merge
+of `agent/audit-4`. Configuration is identical to `milton-app-design-9a3da59` and
+`milton-mcp-served-c0ccaab` apart from the image (app `milton-app-env:1`, `milton-app-key:1`;
+MCP `milton-mcp-env:2`, `milton-mcp-key:1`). Change: no count limit on cards or legacy memos,
+claim-phase outcomes completing a receipt in either phase, one-line `unexpected_error` logs
+(class and code only; the startup failure line is now
+`{"event":"unexpected_error","where":"startup",…}` instead of "runtime configuration
+unavailable"), the memo cue moved to the server instructions with one-line pointers, and copy
+updates. The bundle keeps `memo_count_limit` only in the logged-outcome list, for stored
+receipts. Release order: 0021 first, because this runtime on the old guard would turn the old
+lifetime count into `store_unavailable`; the previous runtime runs on either guard. Migration
+0021 was applied at 02:01:33Z (Drizzle journal 21 to 22) through `migrateStore` from the
+`4623c9d` tree, after Neon snapshot `before-0021-audit4` (`snap-nameless-mouse-b807avlu`,
+02:01:22Z). It is additive and changes no rows, so the scheduler kept running. All 22 tables
+kept identical counts and hashes (269 rows); columns, constraints, triggers and indexes are
+unchanged; `pg_get_functiondef` shows only the count blocks removed from `milton_card_guard`
+(with its `lim` declaration) and `milton_memo_guard`. A read on the old MCP revision after the
+migration returned an unchanged version. After the switch, unauthenticated `/mcp` returned 401,
+discovery 200, an authenticated `get_cover_sheet` 200 with an unchanged version and bulleted
+rules, and `get_report("email")` 200 unchanged; the app and `/login` returned 200, the login form
+carried its CSRF field, `bun scripts/probe-forms.ts` printed `PASS`, and signed-out
+`/assistants`, `/account/delete` and `/download` returned the 403 sign-in refusal. From 02:04Z to 02:15Z the two new revisions logged no "runtime configuration unavailable", no `unexpected_error`, no ReferenceError or TypeError, no error logs and no 5xx across 17 requests (app 4 x 200 and 4 x 403, the checks' signed-out refusals and the probe; MCP 7 x 200, 1 x 401 from the check and 1 x 308 from an outside scanner), the previous revisions logged no errors or 5xx, and 12 worker ticks returned 200 on `milton-worker-filing-f505745`.
+No save ran in production, so the lifted count, the replay rule and the new logs were not
+exercised there.
+
+Rollback (image `sha256:663ff9ed…` for the app, `sha256:13b8951b…` for MCP). The database stays
+on 0021, which the previous runtimes serve; it keeps its own active-count check of 100. Only
+after the code is back, and only if the old guard is wanted, run
+`server/drizzle/rollback/0021_no_card_count.sql` (no row changes). Never restore the
+`before-0021-audit4` snapshot to roll back code.
+
+```sh
+gcloud run services update-traffic milton-mcp --to-revisions=milton-mcp-served-c0ccaab=100 --project=milton-510506 --region=us-east4
+gcloud run services update-traffic milton-app --to-revisions=milton-app-design-9a3da59=100 --project=milton-510506 --region=us-east4
+```
+
+Release served-c0ccaab: MCP only. Revision `milton-mcp-served-c0ccaab`, staged with
 `--no-traffic`; at milton-lead's assignment under Peter's decision, a release agent switched MCP
-at 2026-11-03 01:22:03Z, and it serves 100%. The app stays on `milton-app-design-9a3da59` and the
-worker on `milton-worker-filing-f505745`. It runs image
+at 2026-11-03 01:22:03Z, and it served 100% until audit4-4623c9d. The app stayed on
+`milton-app-design-9a3da59` and the worker on `milton-worker-filing-f505745`. It runs image
 `sha256:13b8951b7328bdce997bc1b658a4a61a280b0105fadd0ed60ed7a25ce9ea6262` (amd64
 `sha256:ea6981de9c0e2839d2a5878dfcc3690673c18c68153c33c006eac04d2617f2eb`; uid 1000, Node 26,
 no env, key or pem files; build stage `oven/bun:1.4.4`), built from main `c0ccaab`, the merge
@@ -242,7 +287,7 @@ gcloud run services update-traffic milton-mcp --to-revisions=milton-mcp-splits-3
 
 Release design-9a3da59: app only. Revision `milton-app-design-9a3da59`, staged with
 `--no-traffic`; at milton-lead's assignment under Peter's go, a release agent switched the app
-at 2026-11-03 00:34:06Z, and it serves 100%. MCP stays on `milton-mcp-splits-31f39cc` and the
+at 2026-11-03 00:34:06Z, and it served 100% until audit4-4623c9d. MCP stayed on `milton-mcp-splits-31f39cc` and the
 worker on `milton-worker-filing-f505745`. It runs image
 `sha256:663ff9edb3744dfaeff38093896e072750bfaea7824057b7d7e468de8d511d9f` (amd64
 `sha256:d4ebee2c30a56d1ac6540a9ecdda494f442e5423d64994add9b11e497ab7f039`; uid 1000, Node 26,
@@ -607,6 +652,19 @@ keeps only its latest version's report, and retirement reasons, retiring request
 and replacement lineage are dropped (see the server README). It leaves the 0020
 journal row in place, so re-forwarding means running `0020_filing_kinds.sql` by hand,
 not the normal runner.
+
+## No count limit (0021)
+
+Applied 2026-11-03 02:01:33Z (journal 22, snapshot `before-0021-audit4`,
+`snap-nameless-mouse-b807avlu`). Migration 0021 replaces `milton_card_guard` and
+`milton_memo_guard` without their count checks and changes no rows (see the server README).
+Release order: apply 0021, then the code; the scheduler may keep running.
+
+**Rollback boundary.** Every 0020 revision runs on 0021, so code rolls back by traffic alone.
+To restore the old guard, first move the code back, then run
+`server/drizzle/rollback/0021_no_card_count.sql`; the 0021 journal row stays, so re-forwarding
+means running `0021_no_card_count.sql` by hand. An account already past the old limit keeps its
+cards and cannot add more until it is back under it.
 
 ## Model-free saves
 

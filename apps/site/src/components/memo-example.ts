@@ -7,7 +7,7 @@ export interface MemoExcerpt {
 }
 
 export interface MemoTurn {
-  speaker: "You" | "Assistant";
+  speaker: "You" | "AI";
   text?: string;
   excerpt?: MemoExcerpt;
 }
@@ -20,7 +20,7 @@ export interface MemoScene {
 const signature = "Peter";
 
 const sample: MemoExcerpt = {
-  body: "Bill, Saturday doesn’t work. The TPS reports will be on your desk Monday, cover sheets and all.",
+  body: "Bill, Saturday doesn’t work. TPS reports on your desk Monday, cover sheets and all.",
   signature,
 };
 
@@ -39,16 +39,16 @@ export const memoExample: { scenes: MemoScene[] } = {
           text: "Reply to Lumbergh. I’m not coming in on Saturday.",
         },
         {
-          speaker: "Assistant",
-          text: "Hi Bill! Thanks so much for reaching out. Unfortunately I won’t be able to make it this weekend, but I truly appreciate...",
+          speaker: "AI",
+          text: "Hi Bill! Thanks so much for reaching out. Unfortunately I won’t be able to...",
         },
         {
           speaker: "You",
-          text: "That’s not me. Here’s what I actually sent. Keep it as my email sample.",
+          text: "Not me. Here’s what I sent. Keep it as my email sample.",
           excerpt: sample,
         },
         {
-          speaker: "Assistant",
+          speaker: "AI",
           text: "Milton got the memo. Filed under email, word for word.",
         },
       ],
@@ -57,9 +57,9 @@ export const memoExample: { scenes: MemoScene[] } = {
       label: "New chat, next week",
       turns: [
         { speaker: "You", text: "Did you get that memo?" },
-        { speaker: "Assistant", text: "Got it. One email sample on file." },
+        { speaker: "AI", text: "Got it. One email sample on file." },
         { speaker: "You", text: "Tell the Bobs I’ll miss the 2:15." },
-        { speaker: "Assistant", excerpt: draft },
+        { speaker: "AI", excerpt: draft },
       ],
     },
   ],

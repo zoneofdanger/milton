@@ -1,12 +1,12 @@
 ---
 const prompt =
-  "Help me set up Milton using https://www.meetmilton.com/setup. Guide me through connecting it to this assistant. Then read my Milton cover sheet. If it is empty, run the setup it returns exactly as written, one question at a time, starting with an email I paste. Show me the complete list of rules and wait for my approval before saving any rules. If Milton already has rules or samples, preserve them and ask what I want to change. Do not import conversation history or assume access to another service’s memory.";
+  "Help me set up Milton using https://www.meetmilton.com/setup. Guide me through connecting it to this AI. Then read my Milton cover sheet. If it is empty, run the setup it returns exactly as written, one question at a time, starting with an email I paste. Show me the complete list of rules and wait for my approval before saving any rules. If Milton already has rules or samples, preserve them and ask what I want to change. Do not import conversation history or assume access to another service’s memory.";
 const encodedPrompt = encodeURIComponent(prompt);
 ---
 
 <details class="assistant-setup" data-assistant-setup>
   <summary class="button secondary">
-    Set up with your assistant
+    Set up with your AI
     <svg
       class="setup-caret"
       width="16"
@@ -24,7 +24,7 @@ const encodedPrompt = encodeURIComponent(prompt);
     </svg>
   </summary>
   <div class="setup-panel">
-    <p class="eyebrow">// Start with a prompt</p>
+    <p class="eyebrow">## Start with a prompt</p>
     <a
       class="launch-link"
       href={`https://claude.ai/new?q=${encodedPrompt}`}
@@ -80,7 +80,7 @@ const encodedPrompt = encodeURIComponent(prompt);
     button.addEventListener("click", async () => {
       try {
         await navigator.clipboard.writeText(prompt.value);
-        status.textContent = "Copied. Paste it into your assistant.";
+        status.textContent = "Copied. Paste it into your AI.";
       } catch {
         fallback.open = true;
         prompt.focus();

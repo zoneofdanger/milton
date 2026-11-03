@@ -8,7 +8,7 @@ import AssistantSetup from "../components/AssistantSetup.astro";
   description="Connect Milton to your assistant with MCP. Setup guidance for Claude, ChatGPT, Claude Code, Codex, and Cursor, plus unverified guides for Grok Bot, Muse, and Claude Duet."
   legal
 >
-  <p class="eyebrow">// A little paperwork. Once.</p>
+  <p class="eyebrow">## A little paperwork. Once.</p>
   <h1>Connect your assistant.</h1>
   <p>
     <strong>Connect Milton. Ask “did you get that memo?”</strong>
@@ -267,6 +267,11 @@ codex mcp login milton`}</code></pre>
 </SiteLayout>
 
 <style>
+  /* No paragraph ends on a lone word. */
+  p,
+  blockquote {
+    text-wrap: pretty;
+  }
   .guided-setup {
     margin-top: var(--space-6);
     width: fit-content;

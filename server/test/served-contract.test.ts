@@ -128,6 +128,11 @@ test("setup renders from its catalog, per report while empty, under the agent ki
   const email = reportEnvelope(filed, "email").setup!;
   expect(email).toStartWith("Setup: Email. Offer it once");
   expect(email).not.toContain("[cover]");
+  // Only email's confirmation example names an email.
+  expect(reportEnvelope(filed, "post").setup).toContain(
+    "name the habit you saw in the post and ask whether it is usual.",
+  );
+  expect(reportEnvelope(filed, "post").setup).not.toContain("Your email");
   expect(email).toContain("Next: Post, Document, Speech, or stop here?");
   expect(reportList(filed).reports.map((r) => r.setup === undefined)).toEqual([
     false,

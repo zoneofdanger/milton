@@ -17,7 +17,10 @@ export interface StoreDatabase extends StoreSession {
   withConnection<T>(work: (db: StoreDatabase) => Promise<T>): Promise<T>;
 }
 
-const triggerRefusals = new Map<string, { message: string; status: number }>([
+export const triggerRefusals = new Map<
+  string,
+  { message: string; status: number }
+>([
   [
     "card_version_conflict",
     {
@@ -98,6 +101,22 @@ const triggerRefusals = new Map<string, { message: string; status: number }>([
   [
     "user_id_is_immutable",
     { message: "The Milton user id cannot be changed.", status: 409 },
+  ],
+  [
+    "sample_is_append_only",
+    { message: "Stored samples cannot be changed.", status: 409 },
+  ],
+  [
+    "sample_kind_is_immutable",
+    { message: "Sample kinds cannot be changed.", status: 409 },
+  ],
+  [
+    "save_receipt_is_immutable",
+    { message: "A completed save receipt cannot be changed.", status: 409 },
+  ],
+  [
+    "memo_update_is_immutable",
+    { message: "A recorded memo update cannot be changed.", status: 409 },
   ],
 ]);
 

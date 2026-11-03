@@ -80,7 +80,7 @@ export const saveMemoInput = z.strictObject({
     .max(100)
     .optional()
     .describe(
-      "Corrections and removals of existing rules. Copy each before verbatim from a current rule; it must occur exactly once across all rules and fit within one rule. after is the exact replacement, or empty to remove it; a rule left empty is removed. All edits use the original snapshot and must not overlap. Preserve complete conditions, subjects and scope.",
+      "Corrections and removals of existing rules, sent as Corrections in the server instructions says. All edits use the original snapshot. Preserve complete conditions, subjects and scope.",
     ),
   moves: z
     .array(

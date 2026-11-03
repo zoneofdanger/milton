@@ -228,9 +228,9 @@ Add your configured `MCP_RESOURCE` URL as a remote HTTP MCP server. Complete
 browser sign-in and consent. Connect Milton. Ask “did you get that memo?”
 “Did you get the memo?” works too.
 
-The server instructions and `get_cover_sheet` description guide the assistant to
-reread the cover sheet for this request, even after an earlier read, fetch the
-report whose situation matches, apply relevant conditions and exceptions, and confirm
+The server instructions (the `get_cover_sheet` description points to them) guide
+the assistant to reread the cover sheet for this request, even after an earlier read,
+fetch the report whose situation matches, apply relevant conditions and exceptions, and confirm
 only after success. Empty accounts retain first-setup approval; errors and access
 failures must be reported honestly. Quoting or discussing the phrase does not invoke
 it, and the cue grants no save or session-capture consent. This is assistant

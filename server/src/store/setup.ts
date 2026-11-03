@@ -742,7 +742,3 @@ export function reportSetup(documents: Documents, report: ReportId) {
  * without rules. */
 export const setupHint = (report: ReportId) =>
   `Setup available on request while this report has no rules: when the person asks to set up ${report}, call get_report ${report} and run its setup as written.`;
-/** Hook reads carry this line instead of the script, so injected context
- * stays far under client limits (Claude Code's is 10,000 characters). */
-export const SETUP_HOOK_POINTER =
-  "First setup available: call get_cover_sheet and run its setup as written.";

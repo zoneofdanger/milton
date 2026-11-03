@@ -1,7 +1,6 @@
 import { expect, test } from "bun:test";
 import { storeInstructions } from "../src/mcp";
 import { saveMemoInput } from "../src/store/compiled";
-import { parseReport } from "../../packages/agent-kit/src/report";
 import type { CardHead } from "../src/store/cards";
 import {
   assembleDocuments,
@@ -9,21 +8,8 @@ import {
   FILINGS,
   type Filing,
 } from "../src/store/reports";
-import {
-  SETUP_HOOK_POINTER,
-  setupCatalog,
-  setupHint,
-} from "../src/store/setup";
-import {
-  coverSheet,
-  hookSheet,
-  reportEnvelope,
-  reportList,
-} from "../src/store/tools";
-import {
-  HOOK_CONTEXT_CEILING,
-  hookOutput,
-} from "../../packages/agent-kit/src/context";
+import { setupCatalog, setupHint } from "../src/store/setup";
+import { coverSheet, reportEnvelope, reportList } from "../src/store/tools";
 
 // Fields every save carries, as the instructions name them.
 const envelope = () => ({
@@ -53,17 +39,10 @@ const head = (report: Filing, body: string, id = body): CardHead => ({
   report,
 });
 
-test("setup renders from its catalog, per report while empty, under the agent kit cap", () => {
+test("setup renders from its catalog, per report while empty, within 32 KB", () => {
   const version = "a".repeat(64);
   const empty = { ...assembleDocuments([], []), version };
   const sheet = coverSheet(empty);
-  // A hook read carries a setup pointer, keeping the whole cover sheet within
-  // the agent kit's hook ceiling (under Claude Code's 10,000 characters and
-  // Codex's roughly 10,000 bytes); only the whole form carries setup.
-  const hooked = hookOutput(hookSheet(sheet), "SessionStart");
-  const injected = hooked.hookSpecificOutput.additionalContext;
-  expect(injected).toContain(SETUP_HOOK_POINTER);
-  expect(Buffer.byteLength(injected)).toBeLessThanOrEqual(HOOK_CONTEXT_CEILING);
   // The cover sheet serves the opening lines and email's block, cover questions included.
   expect(sheet.setup).toBe(reportEnvelope(empty, "email").setup!);
   expect(sheet.setup).toContain('Then say: "First, paste one email');
@@ -113,8 +92,9 @@ test("setup renders from its catalog, per report while empty, under the agent ki
   ];
   const offered = new Set<string>();
   for (const setup of served) {
-    // The agent kit accepts each served string (it caps setup at 32 KB).
-    expect(parseReport({ ...sheet, setup }).setup).toBe(setup);
+    // Each served script is well-formed text of at most 32 KB.
+    expect(setup.isWellFormed() && !setup.includes("\0")).toBe(true);
+    expect(Buffer.byteLength(setup)).toBeLessThanOrEqual(32768);
     const questions = setup
       .split("\n\n")
       .filter((block) => /^[A-Z]\d\. /.test(block));

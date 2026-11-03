@@ -127,7 +127,7 @@ export function createMiltonServer(
       inputSchema: coverSheetInput,
       annotations: readOnly,
     },
-    (input) => storeTools.get_cover_sheet(input),
+    () => storeTools.get_cover_sheet(),
   );
   server.registerTool(
     "get_report",

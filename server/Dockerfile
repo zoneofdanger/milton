@@ -3,7 +3,6 @@ WORKDIR /repo
 COPY package.json bun.lock ./
 COPY server/package.json server/package.json
 COPY packages/theme/package.json packages/theme/package.json
-COPY packages/agent-kit/package.json packages/agent-kit/package.json
 COPY apps/site/package.json apps/site/package.json
 RUN bun install --frozen-lockfile --filter @milton/server
 COPY server/src server/src
@@ -11,7 +10,6 @@ COPY server/scripts/build.ts server/scripts/build.ts
 COPY server/vite.config.ts server/vite.config.ts
 COPY server/tsconfig.json server/tsconfig.json
 COPY packages/theme packages/theme
-COPY packages/agent-kit/src packages/agent-kit/src
 RUN bun run --cwd server build
 
 FROM node:26-bookworm-slim

@@ -1,8 +1,4 @@
 import { z } from "zod";
-import {
-  hookEvents,
-  hookOutput,
-} from "../../../packages/agent-kit/src/context";
 import type { ToolResult } from "../tools";
 import { StoreError, type TenantStore } from "./index";
 import type { SaveMemoInput } from "./compiled";
@@ -14,16 +10,9 @@ import {
   type Documents,
   type ReportDocument,
 } from "./reports";
-import { noRules, reportSetup, setupHint, SETUP_HOOK_POINTER } from "./setup";
+import { noRules, reportSetup, setupHint } from "./setup";
 
-export const coverSheetInput = z.strictObject({
-  hook_event: z
-    .enum(hookEvents)
-    .optional()
-    .describe(
-      "Supported client lifecycle adapters only; returns hook-compatible context instead of the ordinary envelope.",
-    ),
-});
+export const coverSheetInput = z.strictObject({});
 export const reportInput = z.strictObject({
   report_id: z
     .enum([...REPORT_IDS, "doc"])
@@ -52,9 +41,6 @@ export function coverSheet(documents: Documents & { version: string }) {
     ...(noRules(documents) ? { setup: reportSetup(documents, "email") } : {}),
   };
 }
-/** The cover sheet for a lifecycle hook: the script becomes a pointer. */
-export const hookSheet = (sheet: ReturnType<typeof coverSheet>) =>
-  sheet.setup === undefined ? sheet : { ...sheet, setup: SETUP_HOOK_POINTER };
 /** Active samples without their bodies (those stay in text), newest first, so
  * an assistant can reuse a kind or name a sample to replace or remove. */
 const sampleIndex = (report: ReportDocument) =>
@@ -144,15 +130,10 @@ export function createStoreMemoTools(store: TenantStore) {
     }
   }
   return {
-    get_cover_sheet: (input?: z.infer<typeof coverSheetInput>) =>
-      run(async () => {
-        const sheet = coverSheet(await store.readDocuments());
-        return storeResult(
-          input?.hook_event
-            ? hookOutput(hookSheet(sheet), input.hook_event)
-            : await withNotice(sheet),
-        );
-      }),
+    get_cover_sheet: () =>
+      run(async () =>
+        storeResult(await withNotice(coverSheet(await store.readDocuments()))),
+      ),
     get_report: (input: z.infer<typeof reportInput>) =>
       run(async () =>
         storeResult(

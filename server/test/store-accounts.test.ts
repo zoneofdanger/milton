@@ -191,12 +191,6 @@ test("trial transition preserves saves and TPS while notices and access follow t
     await local.db.query(
       sql`UPDATE trial_accounts SET started_at=clock_timestamp()-interval '24 days' WHERE user_id=${auth.userId}`,
     );
-    // Background lifecycle context does not surface billing notices or consume them.
-    const hook = result(
-      await tools.get_cover_sheet({ hook_event: "SessionStart" }),
-    );
-    expect(hook.hookSpecificOutput.additionalContext).toContain(report.text);
-    expect((await account()).notice_stage).toBe(0);
     const otherTools = createStoreMemoTools(
       await storeForCurrentRequest(local.env, auth, {
         issuer: "fixture",
@@ -695,7 +689,7 @@ test("the signup seed's empty legacy card changes no read or save", async () => 
     expect(await cards("m_bare")).toEqual([{ n: 0 }]);
     const tools = { seeded: await open("seeded"), bare: await open("bare") };
     const read = async (t: typeof tools.bare) => {
-      const sheet = JSON.parse((await t.get_cover_sheet({})).content[0].text);
+      const sheet = JSON.parse((await t.get_cover_sheet()).content[0].text);
       const all = JSON.parse((await t.list_reports()).content[0].text);
       return { sheet, all };
     };

@@ -71,7 +71,7 @@ import AssistantSetup from "../components/AssistantSetup.astro";
     </figure>
   </section>
   <div class="assistant-strip">
-    <span>One assistant or several.</span>
+    <span class="assistant-label">Works with:</span>
     <div class="assistant-guides">
       <nav aria-label="Assistant setup guides">
         <span>
@@ -153,10 +153,11 @@ import AssistantSetup from "../components/AssistantSetup.astro";
       <li>
         <h3>Approve a draft. Keep it.</h3>
         <p>
-          When a draft is right, say so. Your assistant offers to save it as a
-          sample. Correct the same thing twice and it proposes a rule. Starting
-          from scratch? A short setup asks which greeting, sign-off, and length
-          are yours.
+          When a draft is right, say so. Your assistant shows you the exact text
+          and asks before saving it as a sample. Correct the same thing twice
+          and it proposes a rule for your yes. Starting from scratch? A short
+          quiz asks which greeting, sign-off, and length are yours. One approved
+          email is enough to start.
         </p>
       </li>
       <li>
@@ -214,8 +215,9 @@ import AssistantSetup from "../components/AssistantSetup.astro";
       <p class="eyebrow">// You stay in control</p>
       <h2 id="control-heading">We won’t take your stapler.</h2>
       <p class="portability-copy">
-        Read your cover sheet and reports. Download them as TPS.md. Run Milton
-        yourself.
+        Check it yourself. The source is public, and you can run Milton
+        yourself. Download TPS.md to see what your assistants read. Disconnect
+        an assistant and Milton refuses it at once.
       </p>
       <p class="portability-aside">
         We’d prefer you keep paying us, but apparently that’s not a retention
@@ -305,7 +307,16 @@ import AssistantSetup from "../components/AssistantSetup.astro";
         Memory tools store facts and preferences. Milton stores how you write:
         writing you approved, quoted exactly, and the rules you asked for, in a
         form every assistant can read. Keep facts, documents, and project
-        history in the tools you already use.
+        history in the tools you already use. Milton is the voice layer beside
+        whatever remembers your work.
+      </p>
+    </details>
+    <details>
+      <summary>Does Milton build a profile of my voice?</summary>
+      <p>
+        No. Your assistant reads your samples exactly as you approved them, then
+        your rules. Nothing summarizes or paraphrases them, so there is no
+        profile to drift away from what you wrote.
       </p>
     </details>
     <details>
@@ -324,6 +335,14 @@ import AssistantSetup from "../components/AssistantSetup.astro";
         sign-in, and both reading and saving through tools. Availability depends
         on your assistant, plan, and workspace settings.{" "}
         <a href="/setup">Check the setup guide before signing up.</a>
+      </p>
+    </details>
+    <details>
+      <summary>What can an assistant do with Milton?</summary>
+      <p>
+        Four things: read your cover sheet, read a report, list your reports,
+        and save what you approve. It can’t send anything, read any other
+        account, or browse on your behalf.
       </p>
     </details>
     <details>
@@ -461,14 +480,18 @@ import AssistantSetup from "../components/AssistantSetup.astro";
   }
   .assistant-strip {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
+    align-items: flex-start;
     flex-wrap: wrap;
-    gap: var(--space-3) var(--space-6);
+    gap: var(--space-3);
     border-block: 1px solid var(--hairline);
     padding-block: var(--space-6);
     font-size: var(--text-small);
     color: var(--muted);
+  }
+  .assistant-label {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--touch-target);
   }
   .assistant-guides {
     display: grid;
@@ -690,6 +713,9 @@ import AssistantSetup from "../components/AssistantSetup.astro";
     .assistant-strip {
       display: grid;
       gap: var(--space-2);
+    }
+    .assistant-label {
+      min-height: auto;
     }
     .section,
     .closing {

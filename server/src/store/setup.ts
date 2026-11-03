@@ -342,7 +342,7 @@ export const setupBlocks: Block[] = [
       {
         id: "H4",
         title: "Length",
-        ask: 'Someone asks "where are we on [project]?" Which reply is closest to yours?',
+        ask: "Someone asks 'where are we on [project]?' Which reply is closest to yours?",
         dims: [dim("chat", "length")],
         options: [
           {

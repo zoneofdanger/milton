@@ -57,7 +57,8 @@ test("setup renders from its catalog, per report while empty, under the agent ki
     expect(questions.length).toBeGreaterThan(1);
     for (const block of questions) {
       const lines = block.split("\n");
-      expect(lines[1]).toStartWith('Ask: "');
+      // One quoted line: any quote inside it is single.
+      expect(lines[1]).toMatch(/^Ask: "[^"]+"$/);
       expect(lines[2]).toBe("Show exactly:");
       const at = lines.findIndex((line) => line.startsWith("Files"));
       const shown = lines.slice(3, at);

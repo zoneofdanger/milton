@@ -20,7 +20,7 @@ export interface MemoScene {
 const signature = "Peter";
 
 const sample: MemoExcerpt = {
-  body: "Bill, Saturday doesn’t work. The TPS reports will be on your desk Monday, cover sheets and all.",
+  body: "Bill, Saturday doesn’t work. TPS reports on your desk Monday, cover sheets and all.",
   signature,
 };
 
@@ -40,11 +40,11 @@ export const memoExample: { scenes: MemoScene[] } = {
         },
         {
           speaker: "Assistant",
-          text: "Hi Bill! Thanks so much for reaching out. Unfortunately I won’t be able to make it this weekend, but I truly appreciate...",
+          text: "Hi Bill! Thanks so much for reaching out. Unfortunately I won’t be able to...",
         },
         {
           speaker: "You",
-          text: "That’s not me. Here’s what I actually sent. Keep it as my email sample.",
+          text: "Not me. Here’s what I sent. Keep it as my email sample.",
           excerpt: sample,
         },
         {

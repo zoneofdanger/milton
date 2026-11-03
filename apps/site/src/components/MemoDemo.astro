@@ -9,7 +9,22 @@ import { memoExample } from "./memo-example";
   aria-label="Example conversation."
 >
   <div class="sheet-bar">
-    <span>Did you get that memo?</span>
+    <span>
+      Did you get that memo?
+      {/* A visual copy of the active scene's label. Each scene keeps its own
+          label as its accessible name, so this copy stays aria-hidden. */}
+      <span class="scene-names" aria-hidden="true">
+        {" "}
+        <span>·</span>{" "}
+        <span class="scene-name-stack">
+          {memoExample.scenes.map((scene) => (
+            <span class="scene-name" data-scene-name>
+              {scene.label}
+            </span>
+          ))}
+        </span>
+      </span>
+    </span>
   </div>
   <div class="scene-stage sheet-content">
     {memoExample.scenes.map((scene, index) => (
@@ -46,6 +61,9 @@ import { memoExample } from "./memo-example";
   if (demo) {
     const panels = Array.from(
       demo.querySelectorAll<HTMLElement>("[data-scene]"),
+    );
+    const names = Array.from(
+      demo.querySelectorAll<HTMLElement>("[data-scene-name]"),
     );
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
     const messages = panels.map((panel) =>
@@ -99,6 +117,9 @@ import { memoExample } from "./memo-example";
         panel.inert = inactive;
         panel.setAttribute("aria-hidden", String(inactive));
       });
+      names.forEach((name, index) =>
+        name.classList.toggle("active", index === scene),
+      );
       demo.classList.toggle("enhanced", !reduced.matches);
     };
     const resetScene = () => {
@@ -196,6 +217,32 @@ import { memoExample } from "./memo-example";
   .enhanced .scene-stage {
     gap: 0;
   }
+  /* Animated, the header names the active scene and each scene's own label is
+     kept for assistive technology only. Static, each scene shows its label. */
+  .scene-names {
+    display: none;
+  }
+  .enhanced .scene-names {
+    display: inline;
+  }
+  .scene-name-stack {
+    display: inline-grid;
+  }
+  .scene-name {
+    grid-area: 1 / 1;
+    visibility: hidden;
+  }
+  .scene-name.active {
+    visibility: visible;
+  }
+  .enhanced .scene-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
   .enhanced .scene {
     grid-area: 1 / 1;
     visibility: hidden;
@@ -214,7 +261,7 @@ import { memoExample } from "./memo-example";
     margin: 0;
     padding: 0;
     display: grid;
-    gap: var(--space-3);
+    gap: var(--space-2);
   }
   .chat > li {
     border-left: 2px solid var(--hairline);
@@ -227,7 +274,7 @@ import { memoExample } from "./memo-example";
      dashed box on the ground, apart from the chat turns around it. */
   .excerpt {
     margin: 0;
-    padding: var(--space-3) var(--space-4);
+    padding: var(--space-2) var(--space-3);
     border: 1px dashed var(--hairline);
     background: var(--ground);
     font: var(--text-small) / var(--leading-body) var(--font-mono);

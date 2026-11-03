@@ -123,7 +123,7 @@ export function createMiltonServer(
     "get_cover_sheet",
     {
       description:
-        "Read the person's cover sheet at the start of work and after saving: text holds the rules true of all their writing; version is the fence every save passes as expected_version; reports is the index of the five reports with the situation each covers; is_empty means the account holds no rules and no samples anywhere, and setup then carries the first-setup script: offer it once (a request for setup is a yes) and on yes run it as written, one question at a time, showing each snippet exactly, before any other writing. Apply the rules, then call get_report for each report whose situation matches the task. No model call, no write. 'Did you get the memo?' means reread the cover sheet and the matching reports: a read, never a save.",
+        "Read the person's cover sheet at the start of work and after saving: text holds the rules true of all their writing; version is the fence every save passes as expected_version; reports is the index of the five reports with the situation each covers; is_empty means the account holds no rules and no samples anywhere; while there are no rules yet, setup carries the first-setup script: offer it once (a request for setup is a yes) and on yes run it as written, one question at a time, showing each snippet exactly, before any other writing. Apply the rules, then call get_report for each report whose situation matches the task. No model call, no write. 'Did you get the memo?' means reread the cover sheet and the matching reports: a read, never a save.",
       inputSchema: coverSheetInput,
       annotations: readOnly,
     },
@@ -133,7 +133,7 @@ export function createMiltonServer(
     "get_report",
     {
       description:
-        "Read one report by report_id: email, chat, post, document (doc is accepted) or speech. Returns report_id, text (the heading, the situation it applies to, approved samples quoted exactly and newest first, then rules), version, is_empty and samples (id, kind_id, kind, context and date of each sample in text, newest first) for reusing a kind or naming a sample to replace or remove. While the report is empty, setup carries that report's setup script (while the whole account is empty, a pointer to the cover sheet's): offer it once and on yes run it as written, one question at a time, showing each snippet exactly, before any other writing. Imitate the samples; use the rules for what a sample cannot show. An empty report means no guidance yet; do not guess at one. No model call, no write.",
+        "Read one report by report_id: email, chat, post, document (doc is accepted) or speech. Returns report_id, text (the heading, the situation it applies to, approved samples quoted exactly and newest first, then rules), version, is_empty and samples (id, kind_id, kind, context and date of each sample in text, newest first) for reusing a kind or naming a sample to replace or remove. While the report has no rules yet, setup carries that report's setup script, with the cover-sheet questions while the cover sheet has no rules: offer it once and on yes run it as written, one question at a time, showing each snippet exactly, before any other writing. Imitate the samples; use the rules for what a sample cannot show. An empty report means no guidance yet; do not guess at one. No model call, no write.",
       inputSchema: reportInput,
       annotations: readOnly,
     },
@@ -143,7 +143,7 @@ export function createMiltonServer(
     "list_reports",
     {
       description:
-        "Read all five reports at once, without the cover sheet. Returns reports (report_id, text, is_empty, samples as in get_report, and while a report is empty a one-line setup pointing to get_report for its setup) and version. For clients that want everything loaded after get_cover_sheet. No model call, no write.",
+        "Read all five reports at once, without the cover sheet. Returns reports (report_id, text, is_empty, samples as in get_report, and while a report has no rules yet a one-line setup pointing to get_report for its setup) and version. For clients that want everything loaded after get_cover_sheet. No model call, no write.",
       inputSchema: listReportsInput,
       annotations: readOnly,
     },

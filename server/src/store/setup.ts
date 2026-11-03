@@ -649,39 +649,57 @@ function question(q: Pick | Tells, lineBreak: string) {
   ].join("\n");
 }
 
-/** The setup script for one report's block. `first` (the whole account is
- * empty; served for email only) adds the opening lines and, for email, the
- * cover-sheet questions;
+/** The cover-sheet questions, kept in email's block: the picks that file
+ * only to cover and the cover tells. */
+const coverQuestions = () =>
+  setupBlocks[0]!.questions
+    .map((q) =>
+      isTells(q)
+        ? { ...q, tells: q.tells.filter((t) => t.report === "cover") }
+        : q,
+    )
+    .filter((q) =>
+      isTells(q)
+        ? q.tells.length > 0
+        : q.dims.every((d) => d.report === "cover"),
+    );
+/** The setup script for one report's block. `first` (no rules anywhere yet)
+ * adds the opening lines; `cover` (the cover sheet has no rules) attaches the
+ * cover-sheet questions, inline in email's block and after any other's;
  * `marker` adds the marker rule to the save; `next` names the reports still
- * empty to offer afterwards. */
+ * without rules to offer afterwards. */
 export function setupText(
   report: ReportId,
   {
     first,
+    cover,
     marker,
     next,
-  }: { first: boolean; marker: boolean; next: ReportId[] },
+  }: { first: boolean; cover: boolean; marker: boolean; next: ReportId[] },
 ) {
   const block = setupBlocks.find((b) => b.report === report)!;
   const name = title(report);
-  const withCover = first && report === "email";
   // Without the cover-sheet questions, a block keeps only its own rules.
-  const questions = withCover
-    ? block.questions
-    : block.questions
-        .map((q) =>
-          isTells(q)
-            ? { ...q, tells: q.tells.filter((t) => t.report !== "cover") }
-            : q,
-        )
-        .filter((q) =>
-          isTells(q)
-            ? q.tells.length > 0
-            : q.dims.some((d) => d.report !== "cover"),
-        );
-  const groups = withCover
-    ? `"All writing" (cover) and "${name}"`
-    : `"${name}"`;
+  const own = block.questions
+    .map((q) =>
+      isTells(q)
+        ? { ...q, tells: q.tells.filter((t) => t.report !== "cover") }
+        : q,
+    )
+    .filter((q) =>
+      isTells(q)
+        ? q.tells.length > 0
+        : q.dims.some((d) => d.report !== "cover"),
+    );
+  const questions: [Pick | Tells, string][] = !cover
+    ? own.map((q) => [q, block.lineBreak])
+    : report === "email"
+      ? block.questions.map((q) => [q, block.lineBreak])
+      : [
+          ...own.map((q): [Pick | Tells, string] => [q, block.lineBreak]),
+          ...coverQuestions().map((q): [Pick | Tells, string] => [q, "\n"]),
+        ];
+  const groups = cover ? `"All writing" (cover) and "${name}"` : `"${name}"`;
   const start =
     report === "email"
       ? "First, paste one email you sent and were happy with, exactly as sent, or say skip. I'll show you what would be stored before anything is saved. Then a few short choices, two to four pieces of writing each: pick the one that sounds like you, or say neither. Each becomes one rule, marked as a baseline until your real writing replaces it. About four minutes."
@@ -696,31 +714,35 @@ export function setupText(
     `3. The questions, in order, one at a time. Say the Ask line, then show the Show exactly block as written, every option with its letter. A letter files exactly the rules on its Files line, each to the report in brackets. Mixed answers ("a, but with b's sign-off") are fine: read back the exact rules chosen. "Neither" files nothing. An answer in the person's own words ("it depends", "Cheers,") is read back and filed in their words, without "${BASELINE}". The block stops at its end, on "stop", or after two consecutive skips.`,
     `4. Approval. Show the complete list of rules grouped under ${groups}${marker ? `, with this cover rule first, which tells every assistant what the marker means: [cover] ${SETUP_MARKER}` : "."} Wait for approval; the person can strike or change any line.`,
     `5. Save. Call create_memo once: text "Setup baseline", rules [{ report, text }] with one entry per approved rule, report from its brackets, text copied byte for byte from its Files line (or the person's own words exactly as approved), expected_version from the sample save's result (from this read when no sample was filed) and a new request_id. Milton refuses any rule starting "${BASELINE}" that is not a Files rule byte for byte.`,
-    `6. End. Say, with the counts actually filed, the sample from step 1 included: "Filed to ${name}: [n] sample and [n] baseline rules${withCover ? ", plus [n] on your cover sheet" : ""}. Read them back any time, here or on your Milton page. To change one, tell me or any connected assistant ("change the sign-off rule to Best"); it is replaced word for word. Samples outrank baselines.${next.length ? ` Next: ${next.map(title).join(", ")}, or stop here?` : ""}"${next.length ? " On a pick, call get_report for that report and run its setup." : ""}`,
+    `6. End. Say, with the counts actually filed, the sample from step 1 included: "Filed to ${name}: [n] sample and [n] baseline rules${cover ? ", plus [n] on your cover sheet" : ""}. Read them back any time, here or on your Milton page. To change one, tell me or any connected assistant ("change the sign-off rule to Best"); it is replaced word for word. Samples outrank baselines.${next.length ? ` Next: ${next.map(title).join(", ")}, or stop here?` : ""}"${next.length ? " On a pick, call get_report for that report and run its setup." : ""}`,
   ];
   return [
     opening,
     how.join("\n"),
-    ...questions.map((q) => question(q, block.lineBreak)),
+    ...questions.map(([q, lineBreak]) => question(q, lineBreak)),
   ].join("\n\n");
 }
 
-/** Served instead of another block while the account is empty, so the
- * cover-sheet questions in email's block always come first. */
-export const FIRST_SETUP_POINTER =
-  "First setup starts with Email: call get_cover_sheet and run its setup as written; then come back here.";
-/** A report's setup while it is empty: the cover sheet serves email's. */
+/** Setup keys on rules, not samples: a report's block is served while that
+ * report has no rules, with the cover-sheet questions while the cover sheet
+ * has none. The cover sheet serves email's while no rules exist anywhere. */
+const ruleless = (documents: Documents, report: ReportId) =>
+  documents.reports.find((r) => r.id === report)!.rules.length === 0;
+export const noRules = (documents: Documents) =>
+  documents.cover_rules.length === 0 &&
+  documents.reports.every((r) => r.rules.length === 0);
 export function reportSetup(documents: Documents, report: ReportId) {
-  if (!documents.reports.find((r) => r.id === report)?.is_empty) return;
-  if (documents.is_empty && report !== "email") return FIRST_SETUP_POINTER;
+  if (!ruleless(documents, report)) return;
   return setupText(report, {
-    first: documents.is_empty,
+    first: noRules(documents),
+    cover: documents.cover_rules.length === 0,
     marker: !documents.cover_rules.some((r) => ruleText(r) === SETUP_MARKER),
     next: documents.reports
-      .filter((r) => r.is_empty && r.id !== report)
+      .filter((r) => r.rules.length === 0 && r.id !== report)
       .map((r) => r.id),
   });
 }
-/** list_reports carries this one line, not the block, for each empty report. */
+/** list_reports carries this one line, not the block, for each report
+ * without rules. */
 export const setupHint = (report: ReportId) =>
-  `Setup available: call get_report ${report} and run its setup as written.`;
+  `Setup available while this report has no rules: call get_report ${report} and run its setup as written.`;

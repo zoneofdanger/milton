@@ -6,8 +6,8 @@ export type Report = {
   is_empty: boolean;
   /** The cover sheet's index: one "when" line per report. */
   reports?: { id: string; when: string }[];
-  /** Setup script: on the cover sheet while the account is empty, on a
-   * report while that report is empty. */
+  /** Setup script: on the cover sheet while the account has no rules, on a
+   * report while that report has no rules. */
   setup?: string;
 };
 export class MiltonReadError extends Error {

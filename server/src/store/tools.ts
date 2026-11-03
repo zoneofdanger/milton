@@ -14,7 +14,7 @@ import {
   type Documents,
   type ReportDocument,
 } from "./reports";
-import { reportSetup, setupHint } from "./setup";
+import { noRules, reportSetup, setupHint } from "./setup";
 
 export const coverSheetInput = z.strictObject({
   hook_event: z
@@ -40,15 +40,16 @@ export function storeResult(value: unknown, isError = false): ToolResult {
   };
 }
 /** The cover sheet envelope: rules true of all writing, the version every save
- * fences on, and the fixed index. `is_empty` means the whole account is empty,
- * and `setup` then carries the first setup: the opening lines and email's block. */
+ * fences on, and the fixed index. `is_empty` means the whole account is empty.
+ * While no rules exist anywhere (samples do not count), `setup` carries the
+ * first setup: the opening lines and email's block with the cover questions. */
 export function coverSheet(documents: Documents & { version: string }) {
   return {
     text: documents.cover,
     version: documents.version,
     is_empty: documents.is_empty,
     reports: documents.index,
-    ...(documents.is_empty ? { setup: reportSetup(documents, "email") } : {}),
+    ...(noRules(documents) ? { setup: reportSetup(documents, "email") } : {}),
   };
 }
 /** Active samples without their bodies (those stay in text), newest first, so
@@ -61,7 +62,7 @@ const sampleIndex = (report: ReportDocument) =>
     context: s.context,
     date: s.date,
   }));
-/** A report's setup block, served only while that report is empty. */
+/** A report's setup block, served only while that report has no rules. */
 const setupField = (documents: Documents, id: (typeof REPORT_IDS)[number]) => {
   const setup = reportSetup(documents, id);
   return setup === undefined ? {} : { setup };
@@ -87,7 +88,7 @@ export const reportList = (documents: Documents & { version: string }) => ({
     is_empty: r.is_empty,
     samples: sampleIndex(r),
     // A one-line pointer, so the list stays small; get_report serves the block.
-    ...(r.is_empty ? { setup: setupHint(r.id) } : {}),
+    ...(r.rules.length === 0 ? { setup: setupHint(r.id) } : {}),
   })),
   version: documents.version,
 });

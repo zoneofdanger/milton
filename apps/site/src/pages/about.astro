@@ -91,7 +91,7 @@ import SiteLayout from "../layouts/SiteLayout.astro";
 
           <div class="comments">
             <p class="line">
-              <span class="line-label">Comments:</span>
+              <span class="line-label">Comments:</span>{" "}
               <span class="typed comment">
                 Did you get the memo about the new cover sheets?
               </span>
@@ -118,7 +118,8 @@ import SiteLayout from "../layouts/SiteLayout.astro";
 </SiteLayout>
 
 <style>
-  .about :where(h1, h2, p, figure, blockquote) {
+  /* Zero specificity beyond the page class, so the rules below set margins. */
+  :where(.about) :where(h1, h2, p, figure, blockquote) {
     margin: 0;
   }
   /* Full-width text: no measure caps; no paragraph ends on a lone word. */
@@ -167,7 +168,7 @@ import SiteLayout from "../layouts/SiteLayout.astro";
   }
   /* Set like the signed-in cover sheet's "Applies when" line. */
   .applies {
-    margin-top: var(--space-2);
+    margin-top: var(--space-3);
     color: var(--muted);
     font: italic var(--text-body) / var(--leading-label) var(--font-form);
   }

@@ -278,7 +278,7 @@ with `invalid_input`: "Name the report and send the rule's text in rules." `text
 the stated purpose for every save: recorded with the accepted change, never stored or
 stored as a rule. Milton runs no model, rewrites nothing and reserves no budget.
 
-New rules go in `rules`, 1-20 entries of `{report, text}`. `report` is one of the five
+New rules go in `rules`, 1-25 entries of `{report, text}`. `report` is one of the five
 reports (`doc` accepted) or `cover`. Each entry becomes one new card holding `text`
 byte for byte; its description is the first non-blank line, trimmed and cut to the
 description cap. Each body must fit the body limit and contain no Markdown heading line

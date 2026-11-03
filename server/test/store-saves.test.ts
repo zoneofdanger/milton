@@ -1140,7 +1140,16 @@ test("a Baseline: rule must be a setup rule byte for byte in its report, filed n
   const local = await localStore();
   try {
     await seedUsers(local.pg, "baseline");
+    await local.pg.exec(
+      "UPDATE store_config SET global_spend_policy='alerts_only',foreground_accounting_ready=true,memo_updates_enabled=true",
+    );
     const store = fixtureStore(local.db, "baseline");
+    const charged = async () =>
+      (
+        await local.pg.query<{ n: number }>(
+          "SELECT count(*)::int AS n FROM save_requests WHERE user_id='baseline' AND memo_update_state='charged'",
+        )
+      ).rows[0]!.n;
     const save = async (change: Partial<SaveMemoInput>) =>
       store.saveMemo({
         text: "Setup baseline",
@@ -1187,7 +1196,15 @@ test("a Baseline: rule must be a setup rule byte for byte in its report, filed n
     // prefix makes it the person's own rule.
     const edit = (after: string) =>
       save({ exact_edits: [{ before: rule, after }] });
-    expect(await edit(near)).toMatchObject({ error: "baseline_unknown" });
+    // A refusal leaves the rule as filed and charges no memo update.
+    const used = await charged();
+    expect(await edit(near)).toMatchObject({
+      status: "failed",
+      error: "baseline_unknown",
+      memo_update: { state: "released", charged: 0 },
+    });
+    expect((await cardHeads(local.db, "baseline")).at(-1)!.body).toBe(rule);
+    expect(await charged()).toBe(used);
     expect(
       await save({ moves: [{ before: rule, report: "chat" }] }),
     ).toMatchObject({ error: "baseline_unknown" });

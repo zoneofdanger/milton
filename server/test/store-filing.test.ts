@@ -524,7 +524,7 @@ test("malformed rules are refused with a message that says how to fix them", asy
     };
     const rule = { report: "chat", text: "Keep it short." };
     for (const rules of [
-      Array.from({ length: 21 }, (_, i) => ({ ...rule, text: `Rule ${i}.` })),
+      Array.from({ length: 26 }, (_, i) => ({ ...rule, text: `Rule ${i}.` })),
       [],
       [{ ...rule, report: "linkedin" }],
       [{ ...rule, text: " \n " }],
@@ -534,7 +534,7 @@ test("malformed rules are refused with a message that says how to fix them", asy
       ).rejects.toMatchObject({
         code: "invalid_input",
         message:
-          "rules takes 1–20 entries, each with a report (one of the five, doc or cover) and non-blank text. Nothing was changed.",
+          "rules takes 1–25 entries, each with a report (one of the five, doc or cover) and non-blank text. Nothing was changed.",
       });
     // Other malformed input names text as the purpose, not as instruction text.
     await expect(

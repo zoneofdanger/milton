@@ -1,0 +1,325 @@
+---
+import SiteLayout from "../layouts/SiteLayout.astro";
+---
+
+<SiteLayout
+  title="About Milton"
+  description="Who made Milton, and why. Filed as a TPS report, cover sheet not attached."
+>
+  <div class="about">
+    <header class="page-head">
+      <h1>About Milton</h1>
+      <p class="page-note">TPS report. Cover sheet not attached.</p>
+    </header>
+
+    <div class="report-wrap">
+      <article class="sheet report" aria-labelledby="report-title">
+        <div class="sheet-content">
+          <h2 class="report-heading" id="report-title">
+            # About
+          </h2>
+          <p class="applies">
+            Applies when someone asks who made this, and why.
+          </p>
+
+          <div class="samples">
+            <figure class="sample">
+              <figcaption class="folder-tab">
+                Approved, how it started, 2026:
+              </figcaption>
+              <div class="folder">
+                <div class="folder-page">
+                  <blockquote class="excerpt">
+                    <p>
+                      Every new chat, the same explanation. No em dashes. One
+                      exclamation point, in the opening line. Sign off with the
+                      first name. Then an apology nobody asked for. Peter wanted
+                      his AIs to write like him. Somehow he ended up building
+                      them a filing department.
+                    </p>
+                  </blockquote>
+                  <p class="approved">
+                    Approved by: <span class="sig">Peter</span>
+                  </p>
+                </div>
+              </div>
+            </figure>
+
+            <figure class="sample">
+              <figcaption class="folder-tab">
+                Approved, built by, 2026:
+              </figcaption>
+              <div class="folder">
+                <div class="folder-page">
+                  <blockquote class="excerpt">
+                    <p>Peter. Founder. Writes the code, answers the mail.</p>
+                    <p>
+                      Michael Bolton. Senior Founding AI Forward Deployed
+                      Product Engineer. Fictional. Does not answer the mail.
+                    </p>
+                  </blockquote>
+                  <p class="approved">
+                    Approved by: <span class="sig">Peter</span>
+                  </p>
+                </div>
+              </div>
+            </figure>
+
+            <figure class="sample">
+              <figcaption class="folder-tab">
+                Approved, funded by, 2026:
+              </figcaption>
+              <div class="folder">
+                <div class="folder-page">
+                  <blockquote class="excerpt">
+                    <p>Crippling credit card debt.</p>
+                  </blockquote>
+                  <p class="approved">
+                    Approved by: <span class="sig">Peter</span>
+                  </p>
+                </div>
+              </div>
+            </figure>
+          </div>
+
+          <ul class="instruction-list">
+            <li>Careers: no.</li>
+            <li>Press: this report.</li>
+            <li>
+              Why the name: He got moved to the basement and kept filing. We
+              related.
+            </li>
+          </ul>
+
+          <div class="comments">
+            <p class="line">
+              <span class="line-label">Comments:</span>{" "}
+              <span class="typed comment">
+                Did you get the memo about the new cover sheets?
+              </span>
+            </p>
+            <div class="line" aria-hidden="true"></div>
+            <div class="line" aria-hidden="true"></div>
+          </div>
+        </div>
+      </article>
+      <span class="stamp" aria-hidden="true">
+        FILED
+      </span>
+    </div>
+
+    <section class="closing" aria-labelledby="closing-title">
+      <h2 id="closing-title">Let’s put that in a memo.</h2>
+      <div class="actions action-row">
+        <a class="button" href="https://app.meetmilton.com/login">
+          Try Milton free <span aria-hidden="true">↗</span>
+        </a>
+      </div>
+    </section>
+  </div>
+</SiteLayout>
+
+<style>
+  /* Zero specificity beyond the page class, so the rules below set margins. */
+  :where(.about) :where(h1, h2, p, figure, blockquote) {
+    margin: 0;
+  }
+  /* Full-width text: no measure caps; no paragraph ends on a lone word. */
+  .about p,
+  .about li,
+  .about blockquote {
+    text-wrap: pretty;
+  }
+  .about {
+    padding-top: var(--space-16);
+  }
+
+  /* The page's header row: the form's name left, its note right, over the
+     cover sheet form's 2px rule. Wraps to two lines on narrow screens. */
+  .page-head {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: var(--space-2) var(--space-6);
+    padding-bottom: var(--space-3);
+    border-bottom: 2px solid var(--sheet-rule);
+  }
+  .page-head h1 {
+    font-size: var(--text-page);
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+  }
+  .page-note {
+    color: var(--muted);
+    font: var(--text-small) / var(--leading-label) var(--font-mono);
+  }
+
+  /* The report: a filed page, no cover sheet. */
+  .report-wrap {
+    position: relative;
+    margin-top: var(--space-10);
+    padding-bottom: var(--space-6);
+  }
+  .report > .sheet-content {
+    padding-block: var(--space-8) var(--space-6);
+  }
+  .report-heading {
+    font-size: var(--text-section);
+    letter-spacing: -0.045em;
+  }
+  /* Set like the signed-in cover sheet's "Applies when" line. */
+  .applies {
+    margin-top: var(--space-3);
+    color: var(--muted);
+    font: italic var(--text-body) / var(--leading-label) var(--font-form);
+  }
+
+  /* Each approved sample is the cabinet's pulled-out folder: a tan tab with
+     its label, a tan folder, a page, and the dashed sample box. */
+  .samples {
+    display: grid;
+    gap: var(--space-8);
+    margin-top: var(--space-8);
+  }
+  .sample {
+    min-width: 0;
+    filter: drop-shadow(var(--shadow-sheet));
+  }
+  .folder-tab {
+    display: inline-block;
+    max-width: calc(100% - var(--space-4));
+    margin-left: var(--space-4);
+    padding: calc(var(--space-2) / 4) var(--space-3) 0;
+    border: 1px solid var(--ink);
+    border-bottom: 0;
+    border-radius: var(--radius-control) var(--radius-control) 0 0;
+    background: var(--sheet-bar);
+    color: var(--sheet-bar-ink);
+    font: var(--text-caption) / var(--leading-label) var(--font-mono);
+    vertical-align: bottom;
+  }
+  .folder {
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--ink);
+    background: var(--sheet-bar);
+  }
+  .folder-page {
+    padding: var(--space-3);
+    border: 1px solid var(--hairline);
+    background: var(--surface);
+  }
+  .excerpt {
+    padding: var(--space-2) var(--space-3);
+    border: 1px dashed var(--hairline);
+    background: var(--ground);
+    font: var(--text-small) / var(--leading-body) var(--font-mono);
+  }
+  .excerpt > p + p {
+    margin-top: var(--space-2);
+  }
+  /* The sign-off: printed label, signature in the form's italic serif. */
+  .approved {
+    margin-top: var(--space-3);
+    font: var(--text-body) / var(--leading-label) var(--font-form);
+  }
+  .approved .sig {
+    display: inline-block;
+    min-width: calc(var(--space-16) * 1.75);
+    padding: 0 var(--space-2) 1px;
+    border-bottom: 1px solid var(--sheet-rule);
+    font: italic var(--text-lead) / var(--leading-heading) var(--font-form);
+  }
+
+  .report .instruction-list {
+    margin-top: var(--space-8);
+  }
+
+  /* Comments: the signed-in cover sheet's ruled lines, the comment typed in
+     italic mono, two blank lines after it. */
+  .comments {
+    margin-top: var(--space-8);
+  }
+  .line {
+    min-height: var(--space-8);
+    padding: var(--space-2) 0 3px;
+    border-bottom: 1px solid var(--sheet-rule);
+  }
+  .line-label {
+    margin-right: var(--space-2);
+    font: var(--text-body) / var(--leading-label) var(--font-form);
+  }
+  .typed {
+    font: var(--text-small) / var(--leading-body) var(--font-mono);
+    overflow-wrap: anywhere;
+  }
+  .comment {
+    font-style: italic;
+  }
+
+  /* The routing slip's FILED stamp, at the report's lower-right corner.
+     Decorative only. */
+  .stamp {
+    position: absolute;
+    right: var(--space-3);
+    bottom: calc(-1 * var(--space-5));
+    padding: var(--space-2) var(--space-5);
+    border: 2px solid currentColor;
+    outline: 1px solid currentColor;
+    outline-offset: calc(var(--space-2) / 2);
+    color: var(--ink);
+    opacity: 0.45;
+    transform: rotate(-8deg);
+    font: var(--text-section) / 1 var(--font-mono);
+    letter-spacing: 0.2em;
+    pointer-events: none;
+    user-select: none;
+  }
+
+  /* The landing page's closing, with the hero's button. */
+  .closing {
+    text-align: center;
+    padding-block: var(--space-20);
+  }
+  .closing h2 {
+    font-size: var(--text-section);
+    letter-spacing: -0.045em;
+    margin-bottom: var(--space-6);
+  }
+  .actions {
+    justify-content: center;
+  }
+
+  @media (max-width: 767px) {
+    .about {
+      padding-top: var(--space-10);
+    }
+    .closing {
+      padding-block: var(--space-12);
+    }
+    .actions .button {
+      padding-inline: var(--space-5);
+    }
+    .samples {
+      gap: var(--space-6);
+    }
+  }
+  @media (max-width: 600px) {
+    .folder-tab {
+      margin-left: var(--space-3);
+      max-width: calc(100% - var(--space-3));
+    }
+    /* Fewer nested insets, so the sample keeps a usable line length. */
+    .folder,
+    .folder-page,
+    .excerpt {
+      padding: var(--space-2);
+    }
+    .approved .sig {
+      min-width: var(--space-16);
+    }
+    .stamp {
+      font-size: var(--text-subtitle);
+    }
+  }
+</style>

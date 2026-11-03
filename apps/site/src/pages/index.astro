@@ -782,6 +782,11 @@ import FilingComparison from "../components/FilingComparison.astro";
     margin-block: var(--space-2) var(--space-3);
     color: var(--muted);
   }
+  /* The section's divider closes the last item, as the next item's border
+     closes the others, so the list ends on the item rhythm. */
+  .section.faq {
+    padding-bottom: 0;
+  }
   .closing {
     text-align: center;
     padding-block: var(--space-20);

@@ -55,7 +55,9 @@ non-blank line, trimmed and cut to the description cap, with no model. An entry 
 text prints like an active card in the same report, or an earlier entry in the same
 request, is skipped; a save that then changes nothing returns `unchanged` and charges
 nothing. `text` is the stated purpose: recorded with the accepted change, never stored
-as a rule. Corrections go through `exact_edits`; an edit whose `before` is a whole rule
+as a rule. A rule stored starting with `Baseline: ` must match the first-setup
+catalog byte for byte (`baseline_unknown` otherwise); the setup script served on the
+cover sheet and on each empty report is rendered from the same data. Corrections go through `exact_edits`; an edit whose `before` is a whole rule
 and whose `after` is empty retires it. All fields resolve against one claimed snapshot
 and apply atomically. Anchors resolve uniquely within active card bodies, never
 against generated text; overlapping edits fail. The source/report fences, receipt and

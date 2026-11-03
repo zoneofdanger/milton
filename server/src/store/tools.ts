@@ -14,7 +14,7 @@ import {
   type Documents,
   type ReportDocument,
 } from "./reports";
-import { setupScript } from "./setup";
+import { reportSetup } from "./setup";
 
 export const coverSheetInput = z.strictObject({
   hook_event: z
@@ -40,14 +40,15 @@ export function storeResult(value: unknown, isError = false): ToolResult {
   };
 }
 /** The cover sheet envelope: rules true of all writing, the version every save
- * fences on, and the fixed index. `is_empty` means the whole account is empty. */
+ * fences on, and the fixed index. `is_empty` means the whole account is empty,
+ * and `setup` then carries the first setup: the opening lines and email's block. */
 export function coverSheet(documents: Documents & { version: string }) {
   return {
     text: documents.cover,
     version: documents.version,
     is_empty: documents.is_empty,
     reports: documents.index,
-    ...(documents.is_empty ? { setup: setupScript } : {}),
+    ...(documents.is_empty ? { setup: reportSetup(documents, "email") } : {}),
   };
 }
 /** Active samples without their bodies (those stay in text), newest first, so
@@ -60,6 +61,11 @@ const sampleIndex = (report: ReportDocument) =>
     context: s.context,
     date: s.date,
   }));
+/** A report's setup block, served only while that report is empty. */
+const setupField = (documents: Documents, id: (typeof REPORT_IDS)[number]) => {
+  const setup = reportSetup(documents, id);
+  return setup === undefined ? {} : { setup };
+};
 export const reportEnvelope = (
   documents: Documents & { version: string },
   id: (typeof REPORT_IDS)[number],
@@ -71,6 +77,7 @@ export const reportEnvelope = (
     version: documents.version,
     is_empty: report.is_empty,
     samples: sampleIndex(report),
+    ...setupField(documents, id),
   };
 };
 export const reportList = (documents: Documents & { version: string }) => ({
@@ -79,6 +86,7 @@ export const reportList = (documents: Documents & { version: string }) => ({
     text: r.body,
     is_empty: r.is_empty,
     samples: sampleIndex(r),
+    ...setupField(documents, r.id),
   })),
   version: documents.version,
 });

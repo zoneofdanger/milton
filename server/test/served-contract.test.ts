@@ -1,7 +1,11 @@
 import { expect, test } from "bun:test";
 import { storeInstructions } from "../src/mcp";
 import { saveMemoInput } from "../src/store/compiled";
-import { setupScript } from "../src/store/setup";
+import { parseReport } from "../../packages/agent-kit/src/report";
+import type { CardHead } from "../src/store/cards";
+import { assembleDocuments, FILINGS, type Filing } from "../src/store/reports";
+import { SETUP_MARKER, setupCatalog } from "../src/store/setup";
+import { coverSheet, reportEnvelope, reportList } from "../src/store/tools";
 
 // Fields every save carries, as the instructions name them.
 const envelope = () => ({
@@ -21,35 +25,82 @@ const between = (text: string, start: string, end: string) => {
   return text.slice(at + start.length, text.indexOf(end, at + start.length));
 };
 
-test("the setup script's create_memo examples parse against saveMemoInput", () => {
-  // "rules [{ report, text }]": one entry per rule, report cover or a block's report.
-  expect(between(setupScript, "rules [{ ", " }]").split(", ")).toEqual([
+// A rule as a test fixture: an active card head.
+const head = (report: Filing, body: string, id = body): CardHead => ({
+  id,
+  version: 1,
+  description: body,
+  body,
+  archived: false,
+  report,
+});
+
+test("setup renders from its catalog, per report while empty, under the agent kit cap", () => {
+  const version = "a".repeat(64);
+  const empty = { ...assembleDocuments([], []), version };
+  const sheet = coverSheet(empty);
+  // The cover sheet serves the opening lines and email's block, cover questions included.
+  expect(sheet.setup).toBe(reportEnvelope(empty, "email").setup!);
+  expect(sheet.setup).toContain('Then say: "First, paste one email');
+  expect(sheet.setup).toContain(`[cover] ${SETUP_MARKER}`);
+  const served = [
+    sheet.setup!,
+    ...reportList(empty).reports.map((r) => r.setup!),
+  ];
+  const offered = new Set<string>();
+  for (const setup of served) {
+    // The agent kit accepts each served string (it caps setup at 32 KB).
+    expect(parseReport({ ...sheet, setup }).setup).toBe(setup);
+    const questions = setup
+      .split("\n\n")
+      .filter((block) => /^[A-Z]\d\. /.test(block));
+    expect(questions.length).toBeGreaterThan(1);
+    for (const block of questions) {
+      const lines = block.split("\n");
+      expect(lines[1]).toStartWith('Ask: "');
+      expect(lines[2]).toBe("Show exactly:");
+      const at = lines.findIndex((line) => line.startsWith("Files"));
+      const shown = lines.slice(3, at);
+      const files = lines.slice(at + 1);
+      // Every option shown has one Files line; a tells list files one rule per item.
+      const letters = shown.filter((line) => /^\([a-z]\)$/.test(line));
+      if (letters.length)
+        expect(files.map((line) => line.slice(0, 3))).toEqual(letters);
+      else expect(files.length).toBe(shown.length);
+      for (const line of files)
+        for (const rule of line.replace(/^\([a-z]\) /, "").split(" | ")) {
+          const [, report, text] = /^\[(\w+)\] (.+)$/.exec(rule)!;
+          expect(FILINGS).toContain(report as Filing);
+          expect(text).toStartWith("Baseline: ");
+          expect(setupCatalog).toContain(text!);
+          offered.add(text!);
+        }
+    }
+  }
+  // Every catalog baseline is offered, and only those.
+  expect([...offered].sort()).toEqual(
+    setupCatalog.filter((rule) => rule !== SETUP_MARKER).sort(),
+  );
+  // The scripted saves parse against saveMemoInput.
+  expect(between(sheet.setup!, "rules [{ ", " }]").split(", ")).toEqual([
     "report",
     "text",
   ]);
-  const reports = [
-    "cover",
-    ...between(setupScript, "the block's report (", ")")
-      .split(/, | or /)
-      .map((r) => r.trim()),
-  ];
-  expect(reports).toEqual([
-    "cover",
-    "email",
-    "chat",
-    "post",
-    "document",
-    "speech",
-  ]);
   parses({
     ...envelope(),
-    text: between(setupScript, 'create_memo: text "', '"'),
-    rules: reports.map((report) => ({ report, text: "A fictional rule." })),
+    text: between(sheet.setup!, 'create_memo once: text "', '"'),
+    rules: [
+      { report: "cover", text: SETUP_MARKER },
+      ...setupCatalog.slice(1, 20).map((text) => ({ report: "email", text })),
+    ],
   });
-  // "sample { report: "email", new_kind: ..., context: ..., text: ... }".
-  const sample = between(setupScript, "sample { ", " }");
-  const fields = [...sample.matchAll(/(\w+):/g)].map((m) => m[1]!);
-  expect(fields).toEqual(["report", "new_kind", "context", "text"]);
+  const sample = between(sheet.setup!, "sample { ", " }");
+  expect([...sample.matchAll(/(\w+):/g)].map((m) => m[1]!)).toEqual([
+    "report",
+    "new_kind",
+    "context",
+    "text",
+  ]);
   parses({
     ...envelope(),
     sample: {
@@ -59,6 +110,31 @@ test("the setup script's create_memo examples parse against saveMemoInput", () =
       text: "A fictional email.",
     },
   });
+  // After a save, a filled report serves no setup; email's block alone loses
+  // the cover questions, and the marker already on file leaves the save.
+  const filed = {
+    ...assembleDocuments(
+      [
+        head("cover", SETUP_MARKER),
+        head("chat", "Baseline: No emoji in chat."),
+      ],
+      [],
+    ),
+    version,
+  };
+  expect(coverSheet(filed).setup).toBeUndefined();
+  expect(reportEnvelope(filed, "chat").setup).toBeUndefined();
+  const email = reportEnvelope(filed, "email").setup!;
+  expect(email).toStartWith("Setup: Email. Offer it once");
+  expect(email).not.toContain("[cover]");
+  expect(email).toContain("Next: Post, Document, Speech, or stop here?");
+  expect(reportList(filed).reports.map((r) => r.setup === undefined)).toEqual([
+    false,
+    true,
+    false,
+    false,
+    false,
+  ]);
 });
 
 test("every create_memo shape the server instructions describe parses against saveMemoInput", () => {

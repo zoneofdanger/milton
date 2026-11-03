@@ -52,13 +52,13 @@ not need the Vercel Astro adapter.
 The site pins TypeScript 6 because `astro check` does not support the root
 workspace's TypeScript 7 yet.
 
-Deploy from the repository root with the project and team explicitly selected.
-The root `.vercelignore` allowlists `apps/site`, `packages/theme`, and the workspace
-manifests (the root `package.json`, `bun.lock`, `tsconfig.base.json`, and
-`server/package.json`), so nothing else is uploaded.
-
-```sh
-vercel deploy --prod --project milton-site --scope zoneofdanger
-```
+Production publishes from main only. The Vercel project is linked to the GitHub
+repository `zoneofdanger/milton` with `main` as the production branch: every push to
+main builds and publishes the site, and a commit that touches none of `apps/site`,
+`packages/theme`, the root `package.json` or `bun.lock` is skipped by the project's
+ignored-build-step command. A branch can only produce a preview: build one with
+`vercel deploy --project milton-site --scope zoneofdanger` (never `--prod`) from the
+repository root, where `.vercelignore` allowlists `apps/site`, `packages/theme` and the
+workspace manifests. Never promote a branch build; land it and let the push publish.
 
 Do not reuse the web app's project link or copy its environment variables.

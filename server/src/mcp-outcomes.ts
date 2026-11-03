@@ -53,11 +53,13 @@ const response = z.object({
     })
     .optional(),
 });
-const errorCodes = new Set([
+// Logged by name. memo_count_limit is retired but may sit in stored receipts.
+export const loggedErrorCodes = new Set([
   "rate_limited",
   "store_unavailable",
   "configuration",
   "account_unavailable",
+  "admission_refused",
   "subscription_required",
   "invalid_input",
   "request_too_large",
@@ -71,18 +73,12 @@ const errorCodes = new Set([
   "assistant_required",
   "memo_updates_exhausted",
   "memo_updates_pending",
-  "model_budget_reached",
-  "compiler_unavailable",
-  "compiler_timeout",
-  "compiler_output_invalid",
-  "compiler_output_limit",
-  "compiler_input_limit",
-  "compiler_provider_failed",
-  "compiler_failed",
   "edit_conflict",
-  "tps_report_unavailable",
+  "move_conflict",
+  "sample_conflict",
+  "card_heading",
+  "tps_body_limit",
   "card_version_conflict",
-  "card_group_conflict",
   "unique_violation",
   "check_violation",
   "invalid_token",
@@ -101,7 +97,6 @@ const refusals = new Set([
   "assistant_required",
   "memo_updates_exhausted",
   "memo_updates_pending",
-  "model_budget_reached",
   "invalid_token",
   "session_required",
 ]);
@@ -152,7 +147,7 @@ export function finalToolCall(
   }
   if (details?.status) event.outcome = details.status;
   if (details?.error) {
-    event.error_code = errorCodes.has(details.error)
+    event.error_code = loggedErrorCodes.has(details.error)
       ? details.error
       : "tool_error";
     if (!details.status)

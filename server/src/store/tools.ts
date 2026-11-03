@@ -159,7 +159,7 @@ export function createStoreMemoTools(store: TenantStore) {
       run(async () => {
         const outcome = await store.saveMemo(input);
         if (outcome.error === "subscription_required") {
-          const error = subscriptionRequired(store.appOrigin);
+          const error = subscriptionRequired();
           return storeResult(
             { ...outcome, ...error.details, message: error.message },
             true,

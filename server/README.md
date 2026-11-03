@@ -80,6 +80,7 @@ Set these in the runtime's platform configuration or dotenvx payload before depl
 | `NEON_AUTH_BASE_URL`      | The exact branch Auth URL copied from Neon, including its database and Auth path, without a trailing slash. It is also the expected token issuer. |
 | `NEON_AUTH_COOKIE_SECRET` | A fresh random server-only secret of at least 32 characters for browser session cookies.                                                          |
 | `DATABASE_URL`            | The TLS connection string for the `milton` database. Use the owner connection for migrations and imports.                                         |
+| `MILTON_SUPPORT_EMAIL`    | Optional. The support address the account pages give; `support@meetmilton.com` when unset. The MCP address pages show is `MCP_RESOURCE`.          |
 
 Saves are model-free: Milton stores the exact text the assistant sends and calls no
 model on any read or save, so it needs no model credential, project or budget. The
@@ -228,9 +229,9 @@ Add your configured `MCP_RESOURCE` URL as a remote HTTP MCP server. Complete
 browser sign-in and consent. Connect Milton. Ask “did you get that memo?”
 “Did you get the memo?” works too.
 
-The server instructions and `get_cover_sheet` description guide the assistant to
-reread the cover sheet for this request, even after an earlier read, fetch the
-report whose situation matches, apply relevant conditions and exceptions, and confirm
+The server instructions (the `get_cover_sheet` description points to them) guide
+the assistant to reread the cover sheet for this request, even after an earlier read,
+fetch the report whose situation matches, apply relevant conditions and exceptions, and confirm
 only after success. Empty accounts retain first-setup approval; errors and access
 failures must be reported honestly. Quoting or discussing the phrase does not invoke
 it, and the cue grants no save or session-capture consent. This is assistant
@@ -264,6 +265,14 @@ outcome without another memo-update charge. That receipt's version may be
 older than the current report. Reusing an ID with different arguments is rejected.
 For a conflict, reread the cover sheet and reconsider a new request. No blind retry.
 
+Replay does not depend on the phase. Account gates checked before a claim (trial
+access, the memo-update allowance) answer without a receipt, so the same request can
+succeed once the gate opens. Every outcome decided after them completes a receipt,
+whether found while claiming (a version conflict, `request_too_large`,
+`memo_body_limit`) or while applying (a conflict, an edit, move, sample or size
+refusal, or a trial that ended mid-save): the same request ID and input replay that
+outcome, and different input under that ID is `request_id_reused`.
+
 Every save needs at least one structured field; a save with only `text` is refused
 with `invalid_input`: "Name the report and send the rule's text in rules." `text` is
 the stated purpose for every save: recorded with the accepted change, never stored or
@@ -272,8 +281,9 @@ stored as a rule. Milton runs no model, rewrites nothing and reserves no budget.
 New rules go in `rules`, 1-20 entries of `{report, text}`. `report` is one of the five
 reports (`doc` accepted) or `cover`. Each entry becomes one new card holding `text`
 byte for byte; its description is the first non-blank line, trimmed and cut to the
-description cap. Each body must fit the body limit, contain no Markdown heading line
-(`card_heading`) and keep the account within its memo count (`memo_count_limit`). An
+description cap. Each body must fit the body limit and contain no Markdown heading line
+(`card_heading`). There is no count limit on rules (0021 removed it; archived cards
+are kept, so a count capped an account's lifetime saves). An
 entry that prints identically to an active card in the same report (compared as
 printed, so `Be concise.` matches a stored `- Be concise.`), or to an earlier entry in
 the request, is skipped; when nothing else changes the save returns
@@ -317,6 +327,9 @@ there, in any letter case, files under that kind (including a kind whose samples
 all retired, which reads no longer list); otherwise it creates one. `replaces` names an active sample of the
 same kind, retired as `replaced`. `retire_samples` lists active sample IDs, retired as
 `removed`. After an insert the oldest beyond two per kind is retired as `evicted`.
+A `sample` whose text is byte-identical to an active sample of the same kind inserts
+nothing and evicts nothing (a `replaces` naming another sample still retires it); a
+save that then changes nothing returns `unchanged` and charges nothing.
 Sample errors fail with `sample_conflict`. A `saved` result carries
 `samples_retired: [{id, reason}]` whenever a sample was retired, and replay returns
 it unchanged. Report reads list each active sample as `{id, kind_id, kind, context,
@@ -510,8 +523,13 @@ without a snapshot stays unwritten.
 Each body has its own cap (`report_body_bytes`, 256 KB by default); the full text is
 bounded at six bodies. Caps measure the printed text, bullets included. A save that
 would exceed a cap is refused with `tps_body_limit` and nothing is truncated or
-published. Reads are not rechecked: a snapshot last published before rules printed as
-bullets can read up to two bytes per bare rule over the cap until its next save. Card text still cannot contain a Markdown
+published. Reads are not rechecked, including a read that rebuilds a lagging snapshot:
+it publishes what is on file even above a cap lowered since, and only the next save is
+refused. Known limit: the database still holds `tps_reports.body` to 1,572,864 bytes,
+so a lagging snapshot whose full text is larger (reachable only through an
+administrative or migration change, since saves enforce the caps) fails that read with
+`check_violation`. A snapshot last published before rules printed as bullets can read up to two
+bytes per bare rule over the cap until its next save. Card text still cannot contain a Markdown
 heading line (`card_heading`). Each `rules` entry names its card's report; since 0020
 a card moves only through an explicit `moves` list.
 
@@ -583,7 +601,7 @@ reads return instruction context only and do not consume billing notices.
 Report text, version, downloads and saved receipts contain no billing notices.
 
 Expired unsubscribed accounts receive a tool error `subscription_required` with
-`retryable:false`, a subscription URL and a web-preferences URL. This is not an
+`retryable:false` and no link, as the instructions say. This is not an
 authentication failure or an empty successful report. New saves are checked when
 claimed and again under the publication lock; a save that crosses expiry fails
 without publishing. Exact replay still
@@ -795,3 +813,15 @@ pre-migration snapshot. Release the code before applying 0018; see
 [the hosting runbook](deploy/README.md#derived-systems-removal-0018). The
 [research note](../docs/research/derived-systems-2026.md) records what was measured and
 what would justify rebuilding any of it.
+
+### No count limit (0021)
+
+Migration 0021 replaces `milton_card_guard` and `milton_memo_guard` without their count
+checks; card identity stays immutable, writes still need an active account and memo
+names keep their byte cap. `limits_json.memos` stays in the row, unread. Saves stay
+bounded by the daily memo-update cap (hosted), the tool-call rate limit and the byte
+caps. Apply 0021 before releasing the code: the previous runtime runs on either guard,
+while the current one without 0021 would hit the old lifetime count as
+`store_unavailable`. `drizzle/rollback/0021_no_card_count.sql` restores both previous
+functions and changes no rows; an account already past the old limit keeps its cards
+and cannot add more until it is back under it.

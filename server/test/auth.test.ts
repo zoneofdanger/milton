@@ -369,7 +369,9 @@ test("Neon server adapter preserves signed queries, cookies, sign-in admission a
     ).toEqual([{ n: 1 }]);
     const consent = await send("/consent?" + signedQuery);
     const consentHtml = await consent.text();
-    expect(consentHtml).toContain("read and change your memos");
+    expect(consentHtml).toContain(
+      "read your cover sheet and reports and save rules and samples to them",
+    );
     expect(consentHtml).toContain("&lt;script&gt;");
     expect(consentHtml).not.toContain("<script>");
     expect(consentHtml).toContain("(name not verified)");
@@ -598,7 +600,9 @@ test("consent shows an escaped, unverified client ID when the client has no name
   }
 }, 30000);
 
-async function accountFixture() {
+async function accountFixture(
+  extra: Partial<Parameters<typeof createMiltonApp>[0]> = {},
+) {
   const local = await localStore();
   const subject = "neon-account";
   const state = {
@@ -678,7 +682,7 @@ async function accountFixture() {
     state,
     rows,
     jar,
-    send: browser(appFor(local.env), jar),
+    send: browser(appFor({ ...local.env, ...extra }), jar),
     async dispose() {
       upstream.mockRestore();
       await local.dispose();
@@ -807,6 +811,45 @@ test("connected assistants: list the session's consents, disconnect in order, re
   }
 }, 30000);
 
+test("served pages take the MCP address and support address from configuration", async () => {
+  const { runtimeConfig } = await import("../src/config");
+  const env = {
+    APP_ORIGIN: "https://app.example",
+    MCP_RESOURCE: "https://mcp.example/mcp",
+    NEON_AUTH_BASE_URL: "https://auth.example/auth",
+    NEON_AUTH_COOKIE_SECRET: "x".repeat(32),
+  };
+  expect(runtimeConfig(env).supportEmail).toBeUndefined();
+  expect(
+    runtimeConfig({ ...env, MILTON_SUPPORT_EMAIL: "help@example.invalid" })
+      .supportEmail,
+  ).toBe("help@example.invalid");
+  expect(() =>
+    runtimeConfig({ ...env, MILTON_SUPPORT_EMAIL: "not an address" }),
+  ).toThrow();
+  const configured = await accountFixture({
+    supportEmail: "help@example.invalid",
+  });
+  try {
+    const assistants = await (await configured.send("/assistants")).text();
+    expect(assistants).toContain(`<code>${resource}</code>`);
+    expect(assistants).not.toContain("meetmilton.com");
+    const deletion = await (await configured.send("/account/delete")).text();
+    expect(deletion).toContain('href="mailto:help@example.invalid"');
+    expect(deletion).not.toContain("meetmilton.com");
+  } finally {
+    await configured.dispose();
+  }
+  const hosted = await accountFixture();
+  try {
+    expect(await (await hosted.send("/account/delete")).text()).toContain(
+      'href="mailto:support@meetmilton.com"',
+    );
+  } finally {
+    await hosted.dispose();
+  }
+});
+
 test("account deletion: confirmed, same-origin, consents recorded first, then disconnect all, sign out and a public page", async () => {
   const fixture = await accountFixture();
   const { state, send, local } = fixture;
@@ -924,7 +967,7 @@ test("signed-in email shows only in authenticated chrome; switch account signs o
     // Setup steps moved to Connected assistants, still keyed to the empty account.
     const assistants = await (await send("/assistants")).text();
     expect(assistants).toContain(
-      '<pre class="setup-copy"><code>https://mcp.meetmilton.com/mcp</code></pre>',
+      `<pre class="setup-copy"><code>${resource}</code></pre>`,
     );
     expect(assistants).toContain("It is empty, so run the setup questions");
     expect(report).not.toContain("https://mcp.meetmilton.com/mcp");
@@ -1885,5 +1928,58 @@ test("multiply encoded capability prefixes fail closed while unrelated MCP redir
     const response = await request(path);
     expect(response.status).toBe(308);
     expect(response.headers.get("Location")).toBe(appOrigin + path);
+  }
+});
+
+test("an unexpected error on a page logs one line with its class and code, never its message", async () => {
+  const secret = "token=fixture-secret https://private.example/path";
+  const failing = fakeNeon(() => {
+    throw Object.assign(new RangeError(secret), { code: "E_FIXTURE" });
+  });
+  const logged = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    const response = await browser(appFor({}))("/login?" + signedQuery);
+    expect(response.status).toBe(503);
+    expect(logged).toHaveBeenCalledTimes(1);
+    const line = String(logged.mock.calls[0]![0]);
+    expect(JSON.parse(line)).toEqual({
+      event: "unexpected_error",
+      where: "page",
+      class: "RangeError",
+      code: "E_FIXTURE",
+    });
+    expect(line).not.toContain("fixture-secret");
+    expect(line).not.toContain("private.example");
+  } finally {
+    logged.mockRestore();
+    failing.mockRestore();
+  }
+});
+
+test("an unrecognized database failure logs its class and code once, never its message", async () => {
+  const { databaseFailure } = await import("../src/store/database");
+  const logged = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    const failure = databaseFailure(
+      Object.assign(new TypeError("postgres://user:pw@db.private.example"), {
+        code: "57P01",
+      }),
+    );
+    expect(failure.code).toBe("store_unavailable");
+    // Already typed: no second line.
+    databaseFailure(failure);
+    // A mapped trigger refusal is an answer, not a failure.
+    databaseFailure({ code: "P0001", message: "sample_is_append_only" });
+    expect(logged).toHaveBeenCalledTimes(1);
+    const line = String(logged.mock.calls[0]![0]);
+    expect(JSON.parse(line)).toEqual({
+      event: "unexpected_error",
+      where: "store",
+      class: "TypeError",
+      code: "57P01",
+    });
+    expect(line).not.toContain("private.example");
+  } finally {
+    logged.mockRestore();
   }
 });

@@ -25,7 +25,6 @@ export interface StoreBindings {
   DATABASE_URL?: string;
   // Private dependency injection for the embedded fixture; never populated from a request.
   storeDatabase?: StoreDatabase;
-  appOrigin?: string;
 }
 function database(bindings: StoreBindings): StoreDatabase {
   if (bindings.storeDatabase) return bindings.storeDatabase;
@@ -35,7 +34,6 @@ function database(bindings: StoreBindings): StoreDatabase {
 }
 const positiveLimit = z.number().int().positive();
 const limitsSchema = z.object({
-  memos: positiveLimit,
   body_bytes: positiveLimit,
   description_bytes: positiveLimit,
   history_bytes: positiveLimit,
@@ -346,7 +344,6 @@ export async function deleteAccount(
 export type CallAllowance =
   { allowed: true } | { allowed: false; retry_at_ms: number; limit: "day" };
 export interface TenantStore {
-  appOrigin?: string;
   trialNotice?(): Promise<TrialNotice | undefined>;
   memoUpdates?(): Promise<import("./memo-updates").MemoUpdates | undefined>;
   readTpsReport(): Promise<CompiledReport>;
@@ -380,9 +377,8 @@ export async function storeForCurrentRequest(
   const db = database(bindings);
   const limits = await readLimits(db);
   await resolveActiveUser(db, userId);
-  const compiled = compiledMemos(db, userId, assistant, bindings.appOrigin);
+  const compiled = compiledMemos(db, userId, assistant);
   return {
-    appOrigin: bindings.appOrigin,
     trialNotice: () =>
       db.transaction(async (tx) => {
         await tx.query(sql`SET LOCAL lock_timeout='250ms'`);

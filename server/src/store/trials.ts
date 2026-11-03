@@ -53,26 +53,19 @@ export async function trialStatus(
   };
 }
 
-export function subscriptionRequired(appOrigin = "https://app.meetmilton.com") {
+// No link: billing has no route yet, and the instructions say to give none.
+export function subscriptionRequired() {
   return new StoreError(
     "subscription_required",
     "Your Milton trial has ended. Subscribe for $5.01/month to resume assistant reads and saves. Your preferences are still available to view and download.",
     402,
-    {
-      retryable: false,
-      // No subscription link until billing exists: /billing has no route.
-      preferences_url: `${appOrigin}/tps-report`,
-    },
+    { retryable: false },
   );
 }
 
-export async function assertTrialAccess(
-  db: StoreSession,
-  userId: string,
-  appOrigin?: string,
-) {
+export async function assertTrialAccess(db: StoreSession, userId: string) {
   if ((await trialStatus(db, userId)).status === "expired")
-    throw subscriptionRequired(appOrigin);
+    throw subscriptionRequired();
 }
 
 export async function claimTrialNotice(

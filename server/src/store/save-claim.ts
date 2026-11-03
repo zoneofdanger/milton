@@ -6,7 +6,11 @@ import { MAX_REQUEST_BYTES } from "../http";
 import { assertTrialAccess } from "./trials";
 import { lockSpendPolicy } from "./spend-policy";
 import { admitMemoUpdate, claimClock, withMemoUpdate } from "./memo-updates";
-import { outcomeSchema, type SaveContext } from "./save-context";
+import {
+  outcomeSchema,
+  type SaveContext,
+  type SaveOutcome,
+} from "./save-context";
 
 const nameTheReport = "Name the report and send the rule's text in rules.";
 const deadlineSeconds = 40;
@@ -17,7 +21,6 @@ export async function claimSave(ctx: SaveContext, structured: boolean) {
   const {
     db,
     userId,
-    appOrigin,
     input,
     inputHash,
     result,
@@ -36,7 +39,7 @@ export async function claimSave(ctx: SaveContext, structured: boolean) {
         if (existing.input_hash !== inputHash)
           throw new StoreError(
             "request_id_reused",
-            "This request ID belongs to different input. Reuse the exact original request to recover its result.",
+            "This request ID belongs to different input. A changed save needs a new request_id; the original arguments replay the same outcome.",
             409,
           );
         if (existing.completed)
@@ -61,29 +64,40 @@ export async function claimSave(ctx: SaveContext, structured: boolean) {
       // After replay, so a receipt from before exact-only saves still recovers.
       if (!structured)
         throw new StoreError("invalid_input", nameTheReport, 400);
-      await assertTrialAccess(tx, userId, appOrigin);
+      // Account gates answer without a receipt, so the same request can
+      // succeed once the gate opens.
+      await assertTrialAccess(tx, userId);
       const current = await snapshot(tx);
+      const clock = await claimClock(tx);
+      const claimReceipt = async (updateDay: string | null) => {
+        await tx.query(sql`INSERT INTO save_requests(user_id,request_id,input_hash,source_hash,reserved_micros,deadline,claimed_at,created_at,memo_update_day,memo_update_state)
+        VALUES (${userId},${input.request_id},${inputHash},${current.fingerprint},0,${clock.at}::timestamptz+${deadlineSeconds}*interval '1 second',${clock.at}::timestamptz,${clock.at}::timestamptz,${updateDay}::date,${updateDay ? "held" : "none"})`);
+      };
+      // A conflict or refusal decided against the request completes a receipt
+      // here as in the apply phase: the same request replays the same outcome.
+      const decided = async (outcome: SaveOutcome) => {
+        await claimReceipt(null);
+        return { outcome: await complete(tx, outcome) };
+      };
       if (input.expected_version !== current.version)
-        return {
-          outcome: result("conflict", { version: current.version }),
-        };
+        return decided(result("conflict", { version: current.version }));
       const limits = await readLimits(tx);
       if (utf8Bytes(JSON.stringify(input)) > MAX_REQUEST_BYTES)
-        throw new StoreError(
-          "request_too_large",
-          "The save request is too large.",
-          413,
+        return decided(
+          result("failed", {
+            error: "request_too_large",
+            message: "The save request is too large. Nothing was changed.",
+          }),
         );
       if (utf8Bytes(input.text) > limits.body_bytes)
-        throw new StoreError(
-          "memo_body_limit",
-          "The submitted memo is too large.",
-          422,
+        return decided(
+          result("failed", {
+            error: "memo_body_limit",
+            message: "The submitted memo is too large. Nothing was changed.",
+          }),
         );
-      const clock = await claimClock(tx);
       const updateDay = await admitMemoUpdate(tx, userId, policy, clock);
-      await tx.query(sql`INSERT INTO save_requests(user_id,request_id,input_hash,source_hash,reserved_micros,deadline,claimed_at,created_at,memo_update_day,memo_update_state)
-      VALUES (${userId},${input.request_id},${inputHash},${current.fingerprint},0,${clock.at}::timestamptz+${deadlineSeconds}*interval '1 second',${clock.at}::timestamptz,${clock.at}::timestamptz,${updateDay}::date,${updateDay ? "held" : "none"})`);
+      await claimReceipt(updateDay);
       return { current };
     })
     .catch(async (error) => {
@@ -98,7 +112,7 @@ export async function claimSave(ctx: SaveContext, structured: boolean) {
           if (existing && existing.input_hash !== inputHash)
             throw new StoreError(
               "request_id_reused",
-              "This request ID belongs to different input.",
+              "This request ID belongs to different input. A changed save needs a new request_id; the original arguments replay the same outcome.",
               409,
             );
           if (existing?.completed)

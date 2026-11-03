@@ -347,6 +347,44 @@ test("the report cap measures the printed text, bullets included", async () => {
   }
 });
 
+test("a read that rebuilds a lagging snapshot serves it whatever the save-time cap", async () => {
+  const local = await localStore();
+  try {
+    await seedUsers(local.pg, "lagging");
+    const store = fixtureStore(local.db, "lagging");
+    const rule = "Keep it short. ".repeat(20).trim();
+    expect(
+      await store.saveMemo({
+        text: "Fictional change.",
+        request_id: crypto.randomUUID(),
+        expected_version: (await store.getTpsReport()).version,
+        rules: [{ report: "cover", text: rule }],
+      }),
+    ).toMatchObject({ status: "saved" });
+    // The cap drops below the stored report, then the sources move on
+    // without a save (as an administrative fix would), so the next read rebuilds.
+    await local.pg.exec(
+      `UPDATE store_config SET limits_json=limits_json || '{"report_body_bytes":16}'::jsonb;
+      INSERT INTO instruction_card_versions(user_id,card_id,version,description,body,report,reason,actor_json)
+        SELECT user_id,card_id,2,description,body || ' Always.',report,'Fixture','{}' FROM instruction_card_versions WHERE user_id='lagging';`,
+    );
+    const read = await store.getTpsReport();
+    expect(read.text).toBe("- " + rule + " Always.");
+    expect((await store.readDocuments()).cover).toBe(read.text);
+    // Saves still enforce the cap.
+    expect(
+      await store.saveMemo({
+        text: "Fictional change.",
+        request_id: crypto.randomUUID(),
+        expected_version: read.version,
+        rules: [{ report: "cover", text: "Another rule." }],
+      }),
+    ).toMatchObject({ status: "failed", error: "tps_body_limit" });
+  } finally {
+    await local.dispose();
+  }
+});
+
 test("an exact duplicate rule is skipped as unchanged without a charge", async () => {
   const local = await localStore();
   try {
@@ -970,6 +1008,119 @@ test("a sample and exact edits in one save apply together or not at all", async 
         )
       ).rows,
     ).toEqual([{ n: 0 }]);
+  } finally {
+    await f.local.dispose();
+  }
+});
+
+test("an account has no card count limit: 120 creates and 60 removals all save", async () => {
+  const local = await localStore();
+  try {
+    await seedUsers(local.pg, "many");
+    const store = fixtureStore(local.db, "many");
+    const rule = (n: number) => `Fictional rule ${n}.`;
+    const save = async (change: Partial<SaveMemoInput>) =>
+      (
+        await store.saveMemo({
+          text: "A fictional change.",
+          request_id: crypto.randomUUID(),
+          expected_version: (await store.getTpsReport()).version,
+          ...change,
+        })
+      ).status;
+    for (let batch = 0; batch < 6; batch++)
+      expect(
+        await save({
+          rules: Array.from({ length: 20 }, (_, i) => ({
+            report: "cover" as const,
+            text: rule(batch * 20 + i),
+          })),
+        }),
+      ).toBe("saved");
+    for (let batch = 0; batch < 3; batch++)
+      expect(
+        await save({
+          exact_edits: Array.from({ length: 20 }, (_, i) => ({
+            before: rule(batch * 20 + i),
+            after: "",
+          })),
+        }),
+      ).toBe("saved");
+    expect(
+      (
+        await local.pg.query(
+          "SELECT count(*)::int AS cards, count(*) FILTER (WHERE NOT archived)::int AS active FROM (SELECT DISTINCT ON (card_id) archived FROM instruction_card_versions WHERE user_id='many' ORDER BY card_id,version DESC) h",
+        )
+      ).rows,
+    ).toEqual([{ cards: 120, active: 60 }]);
+  } finally {
+    await local.dispose();
+  }
+}, 30000);
+
+test("a sample identical to an active one of its kind is unchanged: no copy, no eviction, no charge", async () => {
+  const f = await filingFixture("same-sample");
+  try {
+    await f.local.pg.exec(enableMemoUpdates);
+    const sample = (text: string, kind: object) => ({
+      sample: { report: "email", context: "after a call", text, ...kind },
+    });
+    await f.save(sample("One", { new_kind: "Follow-up" }));
+    const kind = (await f.report("email")).samples[0]!;
+    await f.save(sample("Two", { kind_id: kind.kind_id }));
+    const before = (await f.report("email")).samples;
+    const version = (await f.store.getTpsReport()).version;
+    for (const repeat of [
+      sample("One", { kind_id: kind.kind_id }),
+      sample("One", { new_kind: "follow-UP" }),
+    ])
+      expect(await f.save(repeat)).toMatchObject({
+        status: "unchanged",
+        memo_update: { state: "released", charged: 0 },
+      });
+    expect((await f.report("email")).samples).toEqual(before);
+    expect((await f.store.getTpsReport()).version).toBe(version);
+    // Bytes, not meaning: any other text still files.
+    expect(
+      await f.save(sample("One.", { kind_id: kind.kind_id })),
+    ).toMatchObject({
+      status: "saved",
+      samples_retired: [{ id: kind.id, reason: "evicted" }],
+    });
+  } finally {
+    await f.local.dispose();
+  }
+});
+
+test("retiring a sample and re-adding its text in one save keeps one active copy", async () => {
+  const f = await filingFixture("readd-sample");
+  try {
+    await f.save({
+      sample: {
+        report: "email",
+        new_kind: "Follow-up",
+        context: "after a call",
+        text: "One",
+      },
+    });
+    const [old] = (await f.report("email")).samples;
+    expect(
+      await f.save({
+        retire_samples: [old!.id],
+        sample: {
+          report: "email",
+          kind_id: old!.kind_id,
+          context: "after a call",
+          text: "One",
+        },
+      }),
+    ).toMatchObject({
+      status: "saved",
+      samples_retired: [{ id: old!.id, reason: "removed" }],
+    });
+    const samples = (await f.report("email")).samples;
+    expect(samples.map((s) => s.body)).toEqual(["One"]);
+    expect(samples[0]!.id).not.toBe(old!.id);
   } finally {
     await f.local.dispose();
   }

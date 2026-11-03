@@ -95,21 +95,31 @@ test("an SDK client receives instructions, discovers the four tools, and reads t
     // Assistants see cover sheet and reports, never the retired TPS name.
     for (const served of [client.getInstructions(), ...tools])
       expect(JSON.stringify(served)).not.toMatch(/TPS|tps_report/);
-    const guidance = [
-      client.getInstructions(),
+    const text = client.getInstructions();
+    expect(text).toContain('"Did you get the memo?"');
+    expect(text).toContain('"Did you get that memo?"');
+    expect(text).toContain("even if you already read it");
+    expect(text).toContain("conditions and exceptions");
+    expect(text).toContain("Confirm receipt only after a successful read");
+    expect(text).toContain(
+      "Quoting or discussing the phrase is not an invocation",
+    );
+    expect(text).toContain("does not authorize saving or session capture");
+    expect(
       tools.find((tool) => tool.name === "get_cover_sheet")?.description,
-    ];
-    for (const text of guidance) {
-      expect(text).toContain('"Did you get the memo?"');
-      expect(text).toContain('"Did you get that memo?"');
-      expect(text).toContain("even if you already read it");
-      expect(text).toContain("conditions and exceptions");
-      expect(text).toContain("Confirm receipt only after a successful read");
-      expect(text).toContain(
-        "Quoting or discussing the phrase is not an invocation",
-      );
-      expect(text).toContain("does not authorize saving or session capture");
-    }
+    ).toContain(
+      "'Did you get the memo?' means reread the cover sheet and the matching reports: a read, never a save.",
+    );
+    // The memo cue and the correction rules are stated once across everything
+    // served; tool and field descriptions point to the instructions.
+    const served = JSON.stringify([client.getInstructions(), tools]);
+    for (const once of [
+      "even if you already read it",
+      "Quoting or discussing the phrase is not an invocation",
+      "before verbatim, occurring once, within one rule",
+      "Edits cannot overlap",
+    ])
+      expect(served.split(once).length - 1).toBe(1);
   } finally {
     await client.close();
     await server.close();
@@ -209,6 +219,9 @@ test("two authenticated clients isolate tenants, save once and reject retired to
     expect(
       discovered.find((t) => t.name === "create_memo")?.description,
     ).toContain("approves a sample you offered");
+    expect(
+      discovered.find((t) => t.name === "create_memo")?.description,
+    ).toContain("Change a rule only through exact_edits, never by adding one");
     const first = (await call(0, "get_cover_sheet")).value;
     const second = (await call(1, "get_cover_sheet")).value;
     expect(first.text).toBe("");

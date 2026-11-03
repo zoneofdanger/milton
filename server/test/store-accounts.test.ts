@@ -236,6 +236,8 @@ test("trial transition preserves saves and TPS while notices and access follow t
       retryable: false,
     });
     expect(racingSave).not.toHaveProperty("subscription_url");
+    // The instructions say to give no link, so the refusal carries none.
+    expect(JSON.stringify(racingSave)).not.toMatch(/_url|https?:/);
     expect(await person.readTpsReport()).toEqual(report);
     const denied = await tools.get_cover_sheet();
     expect(denied.isError).toBe(true);
@@ -244,6 +246,7 @@ test("trial transition preserves saves and TPS while notices and access follow t
       retryable: false,
     });
     expect(result(denied).text).toBeUndefined();
+    expect(JSON.stringify(result(denied))).not.toMatch(/_url|https?:/);
     const beforeCalls = calls;
     expect(
       result(
@@ -406,14 +409,6 @@ test("tenants with overlapping card, sample and request IDs never read, edit or 
         }),
       ),
     ).toMatchObject({ status: "conflict", version: betaVersion });
-    // (a) Alpha's exact request from Beta gets Beta's refusal, never Alpha's receipt.
-    const copied = read(await beta.tools.create_memo(alphaRule));
-    expect(copied).toMatchObject({
-      status: "conflict",
-      request_id: alphaRule.request_id,
-      version: betaVersion,
-    });
-    expect(JSON.stringify(copied)).not.toContain(alphaSaved.version);
     // (a) Alpha's request ID with Beta's own input files fresh for Beta.
     const betaReuse = {
       ...emailRule("- Beta keeps it short."),
@@ -423,6 +418,11 @@ test("tenants with overlapping card, sample and request IDs never read, edit or 
     const betaSaved = read(await beta.tools.create_memo(betaReuse));
     expect(betaSaved.status).toBe("saved");
     expect(betaSaved.version).not.toBe(alphaSaved.version);
+    // (a) Alpha's exact request from Beta meets Beta's own receipt for that
+    // request ID, never Alpha's.
+    const copied = read(await beta.tools.create_memo(alphaRule));
+    expect(copied.error).toBe("request_id_reused");
+    expect(JSON.stringify(copied)).not.toContain(alphaSaved.version);
     const betaSample = {
       ...alphaSample,
       expected_version: betaSaved.version,

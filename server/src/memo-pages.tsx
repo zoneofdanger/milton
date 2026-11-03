@@ -82,8 +82,9 @@ export const COVER_COMMENTS = [
 const randomComment = () =>
   COVER_COMMENTS[Math.floor(Math.random() * COVER_COMMENTS.length)]!;
 
-/** The two setup steps, shown on Connected assistants. */
-export function connectSteps(empty: boolean) {
+/** The two setup steps, shown on Connected assistants; `mcpUrl` is this
+ * deployment's MCP resource. */
+export function connectSteps(empty: boolean, mcpUrl: string) {
   return (
     <section class="connect-steps" id="connect" aria-labelledby="connect-h">
       <h2 id="connect-h">Connect an assistant</h2>
@@ -96,7 +97,7 @@ export function connectSteps(empty: boolean) {
             assistant and plan.
           </p>
           <pre class="setup-copy">
-            <code>https://mcp.meetmilton.com/mcp</code>
+            <code>{mcpUrl}</code>
           </pre>
         </li>
         <li>

@@ -80,7 +80,7 @@ export const saveMemoInput = z.strictObject({
     .max(100)
     .optional()
     .describe(
-      "Corrections and removals of existing rules. Copy each before verbatim from a current rule; it must occur exactly once across all rules and fit within one rule. after is the exact replacement, or empty to remove it; a rule left empty is removed. All edits use the original snapshot and must not overlap. Preserve complete conditions, subjects and scope.",
+      "Corrections and removals of existing rules, sent as Corrections in the server instructions says. All edits use the original snapshot. Preserve complete conditions, subjects and scope.",
     ),
   moves: z
     .array(
@@ -135,7 +135,7 @@ export const saveMemoInput = z.strictObject({
     })
     .optional()
     .describe(
-      "Optional approved sample to file under a report, offered once when the person approves a draft and sent only after they say yes. At most two stay per kind; Milton retires the oldest beyond that and reports it in samples_retired.",
+      "Optional approved sample to file under a report, offered once when the person approves a draft and sent only after they say yes. At most two stay per kind; Milton retires the oldest beyond that and reports it in samples_retired. Text identical to an active sample of the kind files nothing.",
     ),
   retire_samples: z
     .array(z.string().min(1).max(256))
@@ -170,7 +170,6 @@ export function compiledMemos(
   db: StoreDatabase,
   userId: string,
   actor?: { issuer: string; clientId: string },
-  appOrigin?: string,
 ) {
   const version = (revision: number) => hash(["tps", userId, revision]);
   async function lock(tx: StoreSession) {
@@ -222,13 +221,14 @@ export function compiledMemos(
   }
   async function readTpsSession(tx: StoreSession) {
     await lock(tx);
-    if (actor) await assertTrialAccess(tx, userId, appOrigin);
+    if (actor) await assertTrialAccess(tx, userId);
     let current = await snapshot(tx);
     // Assembly is deterministic, so a compiled snapshot that lags its sources is
     // rebuilt here instead of reported. An empty account without a snapshot is
-    // ready as it is and stays unwritten until its first save.
+    // ready as it is and stays unwritten until its first save. The size cap
+    // bounds saves; a read serves what is already on file.
     if (!current.ready) {
-      await publish(tx, current, await assemble(tx, current.documents));
+      await publish(tx, current, current.documents.full);
       current = await snapshot(tx);
     }
     return {
@@ -344,7 +344,6 @@ export function compiledMemos(
         db,
         userId,
         actor,
-        appOrigin,
         input,
         inputHash,
         result,

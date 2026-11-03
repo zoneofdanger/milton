@@ -6,6 +6,7 @@ import {
 } from "drizzle-orm/neon-serverless";
 import type { SQL } from "drizzle-orm";
 import { StoreError } from "./errors";
+import { logUnexpected } from "../error-log";
 
 export interface StoreSession {
   query<Row extends Record<string, unknown> = Record<string, unknown>>(
@@ -17,7 +18,10 @@ export interface StoreDatabase extends StoreSession {
   withConnection<T>(work: (db: StoreDatabase) => Promise<T>): Promise<T>;
 }
 
-const triggerRefusals = new Map<string, { message: string; status: number }>([
+export const triggerRefusals = new Map<
+  string,
+  { message: string; status: number }
+>([
   [
     "card_version_conflict",
     {
@@ -92,10 +96,6 @@ const triggerRefusals = new Map<string, { message: string; status: number }>([
     { message: "The memo name exceeds its size limit.", status: 422 },
   ],
   [
-    "memo_count_limit",
-    { message: "The memo count limit has been reached.", status: 422 },
-  ],
-  [
     "account_unavailable",
     { message: "This Milton account is unavailable.", status: 403 },
   ],
@@ -103,14 +103,33 @@ const triggerRefusals = new Map<string, { message: string; status: number }>([
     "user_id_is_immutable",
     { message: "The Milton user id cannot be changed.", status: 409 },
   ],
+  [
+    "sample_is_append_only",
+    { message: "Stored samples cannot be changed.", status: 409 },
+  ],
+  [
+    "sample_kind_is_immutable",
+    { message: "Sample kinds cannot be changed.", status: 409 },
+  ],
+  [
+    "save_receipt_is_immutable",
+    { message: "A completed save receipt cannot be changed.", status: 409 },
+  ],
+  [
+    "memo_update_is_immutable",
+    { message: "A recorded memo update cannot be changed.", status: 409 },
+  ],
 ]);
 
 export function databaseFailure(error: unknown): StoreError {
   if (error instanceof StoreError) return error;
+  // Logged when unrecognized: the innermost error that carries a code.
+  let logged = error;
   const seen = new Set<object>();
   while (typeof error === "object" && error !== null && !seen.has(error)) {
     seen.add(error);
     if ("code" in error) {
+      logged = error;
       if (error.code === "23505")
         return new StoreError(
           "unique_violation",
@@ -135,6 +154,7 @@ export function databaseFailure(error: unknown): StoreError {
     }
     error = "cause" in error ? error.cause : undefined;
   }
+  logUnexpected("store", logged);
   return new StoreError(
     "store_unavailable",
     "The memo store is unavailable. Try again.",

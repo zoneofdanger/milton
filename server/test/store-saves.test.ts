@@ -500,21 +500,16 @@ test("targeted saves preserve omitted memos and reject invalid changes atomicall
         })
       ).status,
     ).toBe("unchanged");
-    await local.pg.exec(
-      `UPDATE store_config SET limits_json=limits_json || '{"memos":3}'::jsonb`,
-    );
     expect(
       (
         await send({
           rules: [
-            {
-              report: "cover",
-              text: "Exceeds the resulting active memo limit.",
-            },
+            { report: "cover", text: "A valid fictional rule." },
+            { report: "cover", text: "# A fictional heading" },
           ],
         })
       ).error,
-    ).toBe("memo_count_limit");
+    ).toBe("card_heading");
     expect(await store.getTpsReport()).toEqual(current);
     expect(
       await local.pg.query(
@@ -697,13 +692,14 @@ test("exact caller edits preserve conditions and scope without a model, with ato
   }
 });
 
-test("Postgres enforces separate UTF-8 field and memo caps and counts recovery bytes", async () => {
+test("Postgres enforces separate UTF-8 field caps, no memo count, and counts recovery bytes", async () => {
   const local = await localStore();
   try {
     await seedUsers(local.pg, "m_caps");
     await local.pg.exec(
       `UPDATE store_config SET limits_json=limits_json || '{"memos":1}'::jsonb;`,
     );
+    // limits_json.memos is unread since 0021: memos have no count limit.
     await local.pg.query(
       "INSERT INTO memos (user_id,id,name) VALUES ('m_caps','memo',$1)",
       ["a".repeat(64)],
@@ -720,7 +716,6 @@ test("Postgres enforces separate UTF-8 field and memo caps and counts recovery b
         [version, description, body, reason, JSON.stringify({ kind })],
       );
     await append(1, "é".repeat(250), "é".repeat(16384), "x".repeat(500));
-    // Vibes remains available even when the ordinary memo allowance is full.
     await local.pg.query(
       "INSERT INTO memos (user_id,id,name) VALUES ('m_caps','vibes','vibes')",
     );
@@ -733,11 +728,9 @@ test("Postgres enforces separate UTF-8 field and memo caps and counts recovery b
         ["a".repeat(65)],
       ),
     ).rejects.toThrow("memo_name_limit");
-    await expect(
-      local.pg.query(
-        "INSERT INTO memos (user_id,id,name) VALUES ('m_caps','second','second')",
-      ),
-    ).rejects.toThrow("memo_count_limit");
+    await local.pg.query(
+      "INSERT INTO memos (user_id,id,name) VALUES ('m_caps','second','second')",
+    );
     await expect(append(2, "é".repeat(250) + "x", "", "")).rejects.toThrow(
       "memo_description_limit",
     );
@@ -794,17 +787,9 @@ test("Postgres enforces separate UTF-8 field and memo caps and counts recovery b
     expect(
       (await local.pg.query("SELECT retained_bytes FROM users")).rows,
     ).toEqual([{ retained_bytes: 67570 }]);
-    await local.pg.exec(
-      `UPDATE store_config SET limits_json=limits_json || '{"memos":2}'::jsonb`,
-    );
     await local.pg.query(
-      "INSERT INTO memos (user_id,id,name) VALUES ('m_caps','second','second')",
+      "INSERT INTO memos (user_id,id,name) VALUES ('m_caps','third','third')",
     );
-    await expect(
-      local.pg.query(
-        "INSERT INTO memos (user_id,id,name) VALUES ('m_caps','third','third')",
-      ),
-    ).rejects.toThrow("memo_count_limit");
   } finally {
     await local.dispose();
   }
@@ -1086,6 +1071,65 @@ test("accepted change evidence replays once and rolls back with an over-quota sa
     expect(
       (await local.pg.query("SELECT * FROM instruction_card_versions")).rows,
     ).toHaveLength(2);
+  } finally {
+    await local.dispose();
+  }
+});
+
+test("a conflict or refusal in the claim phase stores a receipt and replays like one found in the apply phase", async () => {
+  const local = await localStore();
+  try {
+    await seedUsers(local.pg, "replay");
+    const store = fixtureStore(local.db, "replay");
+    const initial = await store.getTpsReport();
+    const rule = (text: string, expected_version = initial.version) => ({
+      text: "A fictional rule.",
+      rules: [{ report: "cover" as const, text }],
+      request_id: crypto.randomUUID(),
+      expected_version,
+    });
+    expect((await store.saveMemo(rule("First."))).status).toBe("saved");
+    const stale = rule("Stale.");
+    const conflict = await store.saveMemo(stale);
+    expect(conflict).toMatchObject({ status: "conflict" });
+    // The account moves on; the same request still replays its first outcome.
+    const current = await store.getTpsReport();
+    expect(
+      (await store.saveMemo(rule("Second.", current.version))).status,
+    ).toBe("saved");
+    expect(await store.saveMemo(stale)).toEqual(conflict);
+    // A refreshed retry under the same ID is told to take a new one.
+    await expect(
+      store.saveMemo({ ...stale, expected_version: current.version }),
+    ).rejects.toMatchObject({
+      code: "request_id_reused",
+      message:
+        "This request ID belongs to different input. A changed save needs a new request_id; the original arguments replay the same outcome.",
+    });
+    // A refusal decided against the request replays the same way.
+    const oversized = {
+      ...rule("Large.", (await store.getTpsReport()).version),
+      rules: ["a", "b", "c"].map((c) => ({
+        report: "cover" as const,
+        text: c.repeat(30000),
+      })),
+    };
+    const refused = await store.saveMemo(oversized);
+    expect(refused).toMatchObject({
+      status: "failed",
+      error: "request_too_large",
+    });
+    expect(await store.saveMemo(oversized)).toEqual(refused);
+    await expect(
+      store.saveMemo({ ...oversized, text: "Different input." }),
+    ).rejects.toMatchObject({ code: "request_id_reused" });
+    expect(
+      (
+        await local.pg.query<{ status: string }>(
+          "SELECT result_json->>'status' AS status FROM save_requests WHERE user_id='replay' AND completed ORDER BY created_at",
+        )
+      ).rows.map((row) => row.status),
+    ).toEqual(["saved", "conflict", "saved", "failed"]);
   } finally {
     await local.dispose();
   }

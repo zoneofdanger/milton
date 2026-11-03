@@ -27,6 +27,11 @@ instruction. Call `withoutMiltonContext` if
 the fresh read fails. Supply the resulting messages to the model only after a
 successful read; old context in an already-running request cannot be withdrawn.
 
+`hookOutput(report, event)` wraps the same context for a client lifecycle hook; past
+9,500 characters or UTF-8 bytes (`HOOK_CONTEXT_CEILING`) it sends the version, the
+report index and an instruction to call `get_cover_sheet` instead, because Claude Code
+files hook text over 10,000 characters and Codex spills it over about 10,000 bytes.
+
 ## Check objective rules locally
 
 ```sh

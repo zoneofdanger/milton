@@ -251,7 +251,9 @@ Exactly four tools are exposed:
 `hook_event` on `get_cover_sheet` returns the cover sheet and report index in
 `hookSpecificOutput.additionalContext` instead of the normal envelope. Supported
 events are `SessionStart`, `SubagentStart`, `UserPromptSubmit`, `PostCompact` and
-`PostToolUse`; client support differs. The [agent kit](../packages/agent-kit/README.md)
+`PostToolUse`; client support differs. When the context would pass 9,500 characters
+or UTF-8 bytes, it carries only the version, the index and an instruction to call
+`get_cover_sheet`, because clients file or spill longer hook text. The [agent kit](../packages/agent-kit/README.md)
 provides context replacement, local objective checks and correction preparation.
 It cannot establish adherence or force unsupported clients to retrieve instructions.
 

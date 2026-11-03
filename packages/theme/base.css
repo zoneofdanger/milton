@@ -61,6 +61,8 @@
   --text-report: clamp(1.8rem, 3.6vw, 2.6rem);
   --text-section: clamp(1.5rem, 2.8vw, 2.1rem);
   --text-hero: clamp(1.85rem, 3.8vw, 3rem);
+  /* The cover sheet form's title: large on paper, still fits a 320px phone. */
+  --text-form-title: clamp(1.75rem, 8vw, 4.2rem);
   --leading-body: 1.6;
   --leading-heading: 1.2;
   --leading-label: 1.5;

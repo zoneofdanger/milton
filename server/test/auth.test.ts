@@ -451,7 +451,7 @@ test("Neon server adapter preserves signed queries, cookies, sign-in admission a
     ).toBe(400);
     const home = await send("/");
     const homeHtml = await home.text();
-    expect(homeHtml).toContain("<h1>T.P.S. Report</h1>");
+    expect(homeHtml).toContain('<h1 aria-label="T.P.S. Report, cover sheet">');
     expect(homeHtml).not.toContain("Version history");
     expect(homeHtml).not.toContain("Your memos");
     // Moving hosts can rotate the cache-signing key without replacing Neon's
@@ -474,7 +474,9 @@ test("Neon server adapter preserves signed queries, cookies, sign-in admission a
       }),
     );
     expect(migratedHome.status).toBe(200);
-    expect(await migratedHome.text()).toContain("<h1>T.P.S. Report</h1>");
+    expect(await migratedHome.text()).toContain(
+      '<h1 aria-label="T.P.S. Report, cover sheet">',
+    );
     expect(
       calls
         .slice(callsBeforeMigration)
@@ -1532,20 +1534,26 @@ test("report bullets require exact revision and complete text parity; optional l
   const html = await (await render(async () => exact)).text();
   for (const [label, value] of [
     ["Prepared for", "you@example.com"],
-    ["Date", "2026-11-02"],
+    ["Date", "2026-11-02 UTC"],
     ["Reports", "None"],
     ["Rules", "2"],
     ["Samples", "0"],
     ["Memo updates today", "2 of 100"],
   ])
     expect(html).toContain(`<dt>${label}:</dt><dd class="fill">${value}</dd>`);
+  // Pending and reset sit on the line above the sheet; used is only in the form.
+  expect(html).toContain(
+    "To change your cover sheet, tell a connected assistant what to change. Memo updates reset at 00:00 UTC. 1 pending.</p>",
+  );
   expect(html).toContain(
     '<p class="line typed comment">Red stapler located. Returned to owner.</p>',
   );
   balanceUnavailable = true;
   const withoutBalance = await render(async () => exact);
   expect(withoutBalance.status).toBe(200);
-  expect(await withoutBalance.text()).not.toContain("Memo updates today");
+  const unmetered = await withoutBalance.text();
+  expect(unmetered).not.toContain("Memo updates today");
+  expect(unmetered).toContain("tell a connected assistant what to change.</p>");
   balanceUnavailable = false;
   expect(html).toContain(
     '<ol class="ruled"><li class="line"><span class="typed">  Keep fictional units explicit.\n\nUnless a condition applies, preserve &lt;tag&gt; &amp; wording.  </span></li><li class="line"><span class="typed">Do the second instruction after the first.\nKeep this exception attached.\n</span></li></ol>',
@@ -1561,9 +1569,9 @@ test("report bullets require exact revision and complete text parity; optional l
   ).toContain(
     '<ol class="ruled"><li class="line"><span class="typed">Fictional older rule.\nIts second line.</span></li></ol>',
   );
-  expect(html.indexOf("<h1>T.P.S. Report</h1>")).toBeLessThan(
-    html.indexOf('<ol class="ruled">'),
-  );
+  expect(
+    html.indexOf('<h1 aria-label="T.P.S. Report, cover sheet">'),
+  ).toBeLessThan(html.indexOf('<ol class="ruled">'));
   for (const lookup of [
     undefined,
     async () => null,

@@ -143,7 +143,7 @@ type SheetView = {
   documents?: (Documents & { version: string }) | null;
   email?: string;
   date: string;
-  usage?: { used: number; limit: number };
+  usage?: { used: number; limit: number; pending: number };
   comment: string;
 };
 /** The signed-in cover sheet as a T.P.S. report form. Page only: the download
@@ -163,13 +163,16 @@ function sheet({ report, documents, email, date, usage, comment }: SheetView) {
   return (
     <article class="sheet tps-form" aria-label="Cover sheet">
       <header class="form-title">
-        <h1>T.P.S. Report</h1>
-        <p>Cover Sheet</p>
+        {/* One heading, read as "T.P.S. Report, cover sheet". */}
+        <h1 aria-label="T.P.S. Report, cover sheet">
+          T.P.S. Report
+          <span class="form-subtitle">Cover sheet</span>
+        </h1>
       </header>
       <div class="form-fields">
         <dl class="row">
           {field("Prepared for", email ?? "", true)}
-          {field("Date", date)}
+          {field("Date", `${date} UTC`)}
         </dl>
         {counts && (
           <dl class="row">
@@ -258,7 +261,11 @@ function current(
       {notice}
       {!view.report.is_empty && !assistantPaused && (
         <p class="small-note sheet-meta">
-          To change these, ask a connected assistant.
+          To change your cover sheet, tell a connected assistant what to change.
+          {view.usage && " Memo updates reset at 00:00 UTC."}
+          {view.usage && view.usage.pending > 0
+            ? ` ${view.usage.pending} pending.`
+            : ""}
         </p>
       )}
       {sheet(view)}

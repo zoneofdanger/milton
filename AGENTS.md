@@ -44,6 +44,8 @@ the [README](README.md) says what is here, and [TODO.md](TODO.md) is the backlog
   to served text comes with the contract test that parses it.
 - Keep Milton's look: build pages and screens from `packages/theme`, and keep the
   contrast test passing.
+- [docs/how-milton-works.md](docs/how-milton-works.md) lists Milton's logic, one line
+  each. A change to behavior updates its line in the same commit.
 - One branch per task in its own worktree under `.worktrees/`; one change per commit, by
   explicit path. Never `git add -A`, `reset --hard`, `stash`, `clean` or `rebase`.
 - Landed means deleted: when Lead merges a branch to main, Lead removes its worktree and

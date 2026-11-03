@@ -369,7 +369,9 @@ test("Neon server adapter preserves signed queries, cookies, sign-in admission a
     ).toEqual([{ n: 1 }]);
     const consent = await send("/consent?" + signedQuery);
     const consentHtml = await consent.text();
-    expect(consentHtml).toContain("read and change your memos");
+    expect(consentHtml).toContain(
+      "read your cover sheet and reports and save rules and samples to them",
+    );
     expect(consentHtml).toContain("&lt;script&gt;");
     expect(consentHtml).not.toContain("<script>");
     expect(consentHtml).toContain("(name not verified)");

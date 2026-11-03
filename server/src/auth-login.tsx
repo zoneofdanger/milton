@@ -122,10 +122,10 @@ export const signInRoutes = async (ctx: PageContext): Promise<Response> => {
       const user = await session();
       if (!user)
         return page(
-          "Your instructions, in every assistant.",
+          "How you write, in every assistant.",
           <>
             <p>
-              Keep how you like things done in one place, ready for the
+              Keep your cover sheet and reports in one place, ready for the
               assistants you connect.
             </p>
             <p>
@@ -229,7 +229,10 @@ export const signInRoutes = async (ctx: PageContext): Promise<Response> => {
           {host ? `, from ${host}` : " (name not verified)"}
         </p>
         {!host && <p>Only allow this if you just started connecting it.</p>}
-        <p>This assistant will be able to read and change your memos.</p>
+        <p>
+          This assistant will be able to read your cover sheet and reports and
+          save rules and samples to them.
+        </p>
         <p>Return destination: {destination}</p>
         <form method="post" action="/consent">
           {csrfField()}

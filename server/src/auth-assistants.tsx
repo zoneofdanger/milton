@@ -115,10 +115,10 @@ const assistantsPage = async (
       <section aria-labelledby="connected-h">
         <h2 id="connected-h">Connected</h2>
         <p>
-          These assistants can read and change your memos. Disconnecting one
-          makes Milton refuse it immediately, including sign-in tokens it
-          already holds. To use it again, reconnect it from the assistant and
-          approve it.
+          These assistants can read your cover sheet and reports and save rules
+          and samples to them. Disconnecting one makes Milton refuse it
+          immediately, including sign-in tokens it already holds. To use it
+          again, reconnect it from the assistant and approve it.
         </p>
         {consents.length === 0 ? (
           <p>No assistants are connected.</p>

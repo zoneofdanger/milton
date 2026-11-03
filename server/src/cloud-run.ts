@@ -21,8 +21,8 @@ try {
   const server = serve({ fetch, port, hostname: "0.0.0.0" });
   const shutdown = () => {
     server.close(() => process.exit(0));
-    // Cloud Run grants ten seconds. Interrupted work retains its durable lease
-    // and reservation; we never start a replacement paid attempt on shutdown.
+    // Cloud Run grants ten seconds. An interrupted save keeps its claimed
+    // receipt, which expires at its deadline; replay then reports the outcome.
     setTimeout(() => process.exit(0), 8000).unref();
   };
   process.once("SIGTERM", shutdown);

@@ -703,7 +703,7 @@ export function setupText(
       : `Paste one ${block.piece} you sent and were happy with, exactly as sent, or say skip. I'll show you what would be stored before anything is saved.`;
   const opening = first
     ? `First setup: ${name}. Run it as written before any other writing. Before anything else, tell the person: "Milton keeps the writing you approve, word for word. It never rewrites a rule or a sample, and it never reads your inbox." Then say: "${start}"`
-    : `Setup: ${name}. Offer it once; a no is final. On yes, run it as written before any other writing, starting with: "${start}"`;
+    : `Setup for ${name}, on request only: run it when the person asks to set up ${report}, or picks ${name} at the end of another block. Do not offer it otherwise. Run it as written before any other writing, starting with: "${start}"`;
   const how = [
     "Run it in chat, one step at a time. Never reword, shorten or fill in a snippet, a rule or a skipped answer.",
     `1. The paste. Show it back exactly as pasted, with a proposed kind of one or two words and a one-line context, and ask to keep it as a sample, unchanged. On yes, file it right away with its own create_memo: text "Setup sample", sample { report: "${report}", new_kind: a label of one or two words such as "${block.kind}", context: one line on the situation, text: the paste exactly as pasted }, expected_version from this read and a new request_id. Milton keeps the newest two samples per kind. Names stay unless the person asks for placeholders. Skipping the paste gives every pick.`,
@@ -741,7 +741,7 @@ export function reportSetup(documents: Documents, report: ReportId) {
 /** list_reports carries this one line, not the block, for each report
  * without rules. */
 export const setupHint = (report: ReportId) =>
-  `Setup available while this report has no rules: call get_report ${report} and run its setup as written.`;
+  `Setup available on request while this report has no rules: when the person asks to set up ${report}, call get_report ${report} and run its setup as written.`;
 /** Hook reads carry this line instead of the script, so injected context
  * stays far under client limits (Claude Code's is 10,000 characters). */
 export const SETUP_HOOK_POINTER =

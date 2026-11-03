@@ -194,7 +194,7 @@ test("setup renders from its catalog, per report while empty, under the agent ki
   expect(started.cover).toBe("- Lead with the answer.");
   expect(reportEnvelope(filed, "chat").setup).toBeUndefined();
   const email = reportEnvelope(filed, "email").setup!;
-  expect(email).toStartWith("Setup: Email. Offer it once");
+  expect(email).toStartWith("Setup for Email, on request only: ");
   expect(email).not.toContain("[cover]");
   // Only email's confirmation example names an email.
   expect(reportEnvelope(filed, "post").setup).toContain(

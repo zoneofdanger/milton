@@ -344,7 +344,9 @@ saving. The setup script is text rendered from one data file (`src/store/setup.t
 that also yields the baseline catalog: paste one piece first, confirm what it shows,
 then pick among exact snippets, each pick filing listed `Baseline: ` rules. While any
 active rule starts with `Baseline: `, the cover sheet text opens with one fixed,
-unstored line saying what the prefix means. Milton cannot inspect other assistants' memories. It stores instructions,
+unstored line saying what the prefix means. Only the first run (no rules anywhere) is offered;
+later blocks run on request, and the memo page tells the person what to ask for each
+report without rules. Milton cannot inspect other assistants' memories. It stores instructions,
 not factual/project memory. The assistant applies the rules and samples to its drafts itself.
 
 Two offers follow from drafting. When the person approves a draft to send, post,

@@ -133,7 +133,7 @@ export function createMiltonServer(
     "get_report",
     {
       description:
-        "Read one report by report_id: email, chat, post, document (doc is accepted) or speech. Returns report_id, text (the heading, the situation it applies to, approved samples quoted exactly and newest first, then rules), version, is_empty and samples (id, kind_id, kind, context and date of each sample in text, newest first) for reusing a kind or naming a sample to replace or remove. While the report has no rules yet, setup carries that report's setup script, with the cover-sheet questions while the cover sheet has no rules: offer it once and on yes run it as written, one question at a time, showing each snippet exactly, before any other writing. Imitate the samples; use the rules for what a sample cannot show. An empty report means no guidance yet; do not guess at one. No model call, no write.",
+        "Read one report by report_id: email, chat, post, document (doc is accepted) or speech. Returns report_id, text (the heading, the situation it applies to, approved samples quoted exactly and newest first, then rules), version, is_empty and samples (id, kind_id, kind, context and date of each sample in text, newest first) for reusing a kind or naming a sample to replace or remove. While the report has no rules yet, setup carries that report's setup script, with the cover-sheet questions while the cover sheet has no rules. Its opening says when to run it: offered once while no rules exist anywhere, otherwise only when the person asks or picks it. Run it as written, one question at a time, showing each snippet exactly, before any other writing. Imitate the samples; use the rules for what a sample cannot show. An empty report means no guidance yet; do not guess at one. No model call, no write.",
       inputSchema: reportInput,
       annotations: readOnly,
     },
@@ -143,7 +143,7 @@ export function createMiltonServer(
     "list_reports",
     {
       description:
-        "Read all five reports at once, without the cover sheet. Returns reports (report_id, text, is_empty, samples as in get_report, and while a report has no rules yet a one-line setup pointing to get_report for its setup) and version. For clients that want everything loaded after get_cover_sheet. No model call, no write.",
+        "Read all five reports at once, without the cover sheet. Returns reports (report_id, text, is_empty, samples as in get_report, and while a report has no rules yet a one-line setup saying its setup is available on request through get_report) and version. For clients that want everything loaded after get_cover_sheet. No model call, no write.",
       inputSchema: listReportsInput,
       annotations: readOnly,
     },

@@ -234,6 +234,19 @@ function sheet({ report, documents, email, date, usage, comment }: SheetView) {
               )}
             </section>
           ))}
+          {/* Later setup blocks run on request only, so say how to ask. */}
+          {docs.reports.some((r) => r.rules.length === 0) && (
+            <section class="form-section">
+              <h2>Not set up yet</h2>
+              {docs.reports
+                .filter((r) => r.rules.length === 0)
+                .map((r) => (
+                  <p class="applies">
+                    {`Tell any connected assistant: set up my ${r.id} report.`}
+                  </p>
+                ))}
+            </section>
+          )}
         </>
       ) : (
         <div class="form-section">{plain(report.text)}</div>

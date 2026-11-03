@@ -10,7 +10,7 @@ landed and the item is still open), `blocked: <why or #id>`. A bolded headline o
 or fewer states the task; one item is one landing. **A section heading and its preamble are
 shared context for every item beneath it.**
 
-**next-id: 12.** Ids are never reused, so this counter survives deleting the newest item.
+**next-id: 13.** Ids are never reused, so this counter survives deleting the newest item.
 
 ## MVP
 
@@ -53,3 +53,8 @@ reports, memos) and plain text on security screens and anything an assistant rea
 - [ ] #11 (server, low) **Make the spend test independent of UTC midnight.** A store-spend test
       reads the current UTC day twice and fails when a run crosses midnight (seen 2026-11-03
       00:00Z on a parallel run; passes on rerun). Inject the clock or compute the day once.
+
+- [ ] #12 (server, low) **Break the store import cycle.** store/index.ts and compiled.ts import
+      each other, now also through save-claim.ts and save-apply.ts. Nothing reads those imports
+      at load time, so it works today; a top-level use of utf8Bytes in a save module would crash
+      startup. Move readLimits and utf8Bytes into a module with no store imports.

@@ -2,7 +2,6 @@
 import { z } from "zod";
 import type { Child } from "hono/jsx";
 import { deleteAccount, lookupIdentityAccount, StoreError } from "./store";
-import { accountChrome } from "./memo-pages";
 import { AuthError } from "./token";
 import { page } from "./pages";
 import { timed, type PageContext, type SessionUser } from "./auth-session";
@@ -37,7 +36,6 @@ const deletionPage = (
   page(
     "Delete your account",
     <>
-      {accountChrome(csrfField, user.email, "delete")}
       {notice}
       <p>
         Deleting your Milton account cannot be undone. To keep a copy of your
@@ -92,6 +90,8 @@ const deletionPage = (
       </form>
     </>,
     status,
+    null,
+    { account: { csrf: csrfField, email: user.email } },
   );
 export const accountDeletion = async (ctx: PageContext): Promise<Response> => {
   const {

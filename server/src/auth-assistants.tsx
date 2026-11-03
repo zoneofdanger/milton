@@ -1,8 +1,13 @@
 /** @jsxImportSource hono/jsx */
 import { z } from "zod";
 import type { Child } from "hono/jsx";
-import { listAssistantDisconnects, recordAssistantDisconnect } from "./store";
-import { accountChrome } from "./memo-pages";
+import {
+  listAssistantDisconnects,
+  lookupIdentityAccount,
+  personStoreForCurrentRequest,
+  recordAssistantDisconnect,
+} from "./store";
+import { connectSteps } from "./memo-pages";
 import { AuthError } from "./token";
 import { page } from "./pages";
 import { timed, type PageContext, type SessionUser } from "./auth-session";
@@ -67,6 +72,19 @@ const clientName = async (ctx: PageContext, clientId: string) => {
     return undefined;
   }
 };
+// Picks the setup prompt only, so a failed read shows the general prompt.
+const accountEmpty = async ({ config }: PageContext, user: SessionUser) => {
+  try {
+    const verified = await lookupIdentityAccount(config, {
+      provider: "neon",
+      subject: user.id,
+    });
+    const store = await personStoreForCurrentRequest(config, verified);
+    return (await store.readTpsReport()).is_empty;
+  } catch {
+    return false;
+  }
+};
 const assistantsPage = async (
   ctx: PageContext,
   user: SessionUser,
@@ -79,52 +97,63 @@ const assistantsPage = async (
     provider: "neon",
     subject: user.id,
   });
-  const names = await Promise.all(
-    consents.map((consent, index) =>
-      index < NAMED_ASSISTANTS ? clientName(ctx, consent.clientId) : undefined,
+  const [names, empty] = await Promise.all([
+    Promise.all(
+      consents.map((consent, index) =>
+        index < NAMED_ASSISTANTS
+          ? clientName(ctx, consent.clientId)
+          : undefined,
+      ),
     ),
-  );
+    accountEmpty(ctx, user),
+  ]);
   return page(
     "Connected assistants",
     <>
-      {accountChrome(csrfField, user.email, "assistants")}
       {notice}
-      <p>
-        These assistants can read and change your memos. Disconnecting one makes
-        Milton refuse it immediately, including sign-in tokens it already holds.
-        To use it again, reconnect it from the assistant and approve it.
-      </p>
-      {consents.length === 0 ? (
-        <p>No assistants are connected.</p>
-      ) : (
-        <ul class="assistant-list">
-          {consents.map((consent, index) => {
-            const incomplete = disconnected.has(consent.clientId);
-            const host = clientHost(consent.clientId);
-            return (
-              <li>
-                <p>
-                  <strong>{names[index] || consent.clientId}</strong>
-                  {host ? `, from ${host}` : " (name not verified)"}
-                </p>
-                <p class="small-note">
-                  Connected {consent.createdAt.toISOString().slice(0, 10)}
-                  {incomplete && " · Disconnect incomplete"}
-                </p>
-                <form method="post" action="/assistants/disconnect">
-                  {csrfField()}
-                  <input type="hidden" name="consent" value={consent.id} />
-                  <button class="secondary">
-                    {incomplete ? "Retry" : "Disconnect"}
-                  </button>
-                </form>
-              </li>
-            );
-          })}
-        </ul>
-      )}
+      {connectSteps(empty)}
+      <section aria-labelledby="connected-h">
+        <h2 id="connected-h">Connected</h2>
+        <p>
+          These assistants can read and change your memos. Disconnecting one
+          makes Milton refuse it immediately, including sign-in tokens it
+          already holds. To use it again, reconnect it from the assistant and
+          approve it.
+        </p>
+        {consents.length === 0 ? (
+          <p>No assistants are connected.</p>
+        ) : (
+          <ul class="assistant-list">
+            {consents.map((consent, index) => {
+              const incomplete = disconnected.has(consent.clientId);
+              const host = clientHost(consent.clientId);
+              return (
+                <li>
+                  <p>
+                    <strong>{names[index] || consent.clientId}</strong>
+                    {host ? `, from ${host}` : " (name not verified)"}
+                  </p>
+                  <p class="small-note">
+                    Connected {consent.createdAt.toISOString().slice(0, 10)}
+                    {incomplete && " · Disconnect incomplete"}
+                  </p>
+                  <form method="post" action="/assistants/disconnect">
+                    {csrfField()}
+                    <input type="hidden" name="consent" value={consent.id} />
+                    <button class="secondary">
+                      {incomplete ? "Retry" : "Disconnect"}
+                    </button>
+                  </form>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
     </>,
     status,
+    null,
+    { account: { csrf: csrfField, email: user.email, here: "assistants" } },
   );
 };
 export const assistants = async (ctx: PageContext): Promise<Response> => {

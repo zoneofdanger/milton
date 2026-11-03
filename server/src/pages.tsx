@@ -5,12 +5,74 @@ import { faviconLinks, folderMark } from "@milton/theme/brand";
 import type { Child } from "hono/jsx";
 import { raw } from "hono/html";
 
+/**
+ * The signed-in account chrome: the header's account menu and the links row.
+ * The email shows only here, never on public pages or in downloads. "Switch
+ * account" signs out to the sign-in page; signing out never disconnects
+ * assistants.
+ */
+export type Account = {
+  csrf: () => Child;
+  email?: string;
+  /** The current page in the links row, if it is one of them. */
+  here?: "report" | "assistants";
+};
+const links = [
+  ["report", "/", "Cover sheet"],
+  ["assistants", "/assistants", "Connected assistants"],
+  [null, "/download", "Download TPS.md"],
+] as const;
+function accountMenu({ csrf, email }: Account) {
+  // A <details> menu: pages run no scripts.
+  return (
+    <div class="header-actions">
+      <a class="button header-cta" href="/assistants">
+        Connect an assistant
+      </a>
+      <details class="account-menu">
+        <summary>Account</summary>
+        <div class="menu-panel">
+          {email && (
+            <p class="small-note menu-who">
+              Signed in as <strong>{email}</strong>
+            </p>
+          )}
+          <form method="post" action="/logout">
+            {csrf()}
+            <button
+              class="menu-item"
+              name="next"
+              value="login"
+              aria-describedby="signout-note"
+            >
+              Switch account
+            </button>
+            <button class="menu-item" aria-describedby="signout-note">
+              Sign out
+            </button>
+          </form>
+          <p class="small-note" id="signout-note">
+            Signing out of this browser does not disconnect your assistants.
+          </p>
+          <a class="menu-item danger" href="/account/delete">
+            Delete account
+          </a>
+        </div>
+      </details>
+    </div>
+  );
+}
+
+/**
+ * One shell for every page. A sheet page (the cover sheet) brings its own
+ * title; every other page gets an h1 and a readable-width body.
+ */
 export function page(
   title: string,
   content: Child,
   status = 200,
   head: Child = null,
-  layout: "narrow" | "memo" | "tps" = "narrow",
+  { account, sheet = false }: { account?: Account; sheet?: boolean } = {},
 ) {
   const document = (
     <html lang="en">
@@ -26,16 +88,37 @@ export function page(
         <a class="skip-link" href="#main">
           Skip to content
         </a>
-        <div class={`app-shell ${layout}`}>
+        <div class="app-shell">
           <header class="app-header">
             <a class="brand" href="/" aria-label="Milton home">
               {raw(folderMark)}
               <span>Milton</span>
             </a>
+            {account && accountMenu(account)}
           </header>
           <main id="main" tabindex={-1}>
-            {layout !== "tps" && <h1>{title}</h1>}
-            {content}
+            {account && (
+              <nav aria-label="Account">
+                {links.map(([id, href, label]) => (
+                  <a
+                    href={href}
+                    aria-current={
+                      id && id === account.here ? "page" : undefined
+                    }
+                  >
+                    {label}
+                  </a>
+                ))}
+              </nav>
+            )}
+            {sheet ? (
+              content
+            ) : (
+              <div class="page-body">
+                <h1>{title}</h1>
+                {content}
+              </div>
+            )}
           </main>
         </div>
       </body>

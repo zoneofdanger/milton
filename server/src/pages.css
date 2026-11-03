@@ -3,11 +3,14 @@
   margin: 0 auto;
   padding: var(--space-8) var(--space-10) var(--space-16);
 }
-.app-shell.narrow {
-  max-width: 38rem;
-  padding-top: var(--space-16);
-}
+/* One shell for every page; the brand on the left, signed-in actions right. */
 .app-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3) var(--space-4);
+  min-height: var(--control-height);
   margin-bottom: var(--space-3);
 }
 main {
@@ -15,8 +18,12 @@ main {
   flex-direction: column;
   min-width: 0;
 }
-main > nav {
-  order: -1;
+/* Text pages keep a readable measure, left-aligned with the header. */
+.page-body {
+  max-width: 38rem;
+}
+.page-body h1 {
+  margin: var(--space-8) 0 var(--space-6);
 }
 h1 {
   margin: var(--space-6) 0 var(--space-6);
@@ -42,13 +49,17 @@ nav a {
   align-items: center;
   min-height: var(--touch-target);
 }
+nav a[aria-current="page"] {
+  font-weight: 600;
+  text-decoration: none;
+}
 form {
   display: grid;
   justify-items: start;
   gap: var(--space-3);
   margin-top: var(--space-6);
 }
-.narrow form {
+.page-body > form {
   justify-items: stretch;
 }
 form p {
@@ -72,43 +83,6 @@ pre {
 section {
   margin-top: var(--space-8);
 }
-.tps-title {
-  text-align: center;
-  padding: var(--space-8) var(--sheet-padding) var(--space-6);
-}
-.tps-title h1,
-.tps-title h2 {
-  margin: 0;
-  font-size: var(--text-report);
-  text-transform: uppercase;
-  letter-spacing: -0.03em;
-  line-height: 1.06;
-}
-.cover-subtitle {
-  display: inline-block;
-  margin: var(--space-4) 0 0;
-  padding-bottom: var(--space-2);
-  border-bottom: 1px solid var(--ink);
-  font: var(--font-display-weight) var(--text-body) / var(--leading-heading)
-    var(--font-display);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-.document-body {
-  padding: var(--space-6) var(--sheet-padding) var(--space-8);
-}
-.document-body .instruction-list > li {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.instruction-group {
-  margin: var(--space-6) 0 var(--space-3);
-  font: var(--font-display-weight) var(--text-subtitle) / var(--leading-heading)
-    var(--font-display);
-}
-.instruction-group:first-child {
-  margin-top: 0;
-}
 .empty-placeholder {
   max-width: 27ch;
   margin: 0 auto;
@@ -116,21 +90,16 @@ section {
   color: var(--muted);
   font: var(--text-small) / var(--leading-body) var(--font-mono);
 }
-.document-end {
-  height: 4px;
-  border-block: 1px solid var(--input);
-  margin: 0 var(--sheet-padding) var(--space-6);
-}
-.connection-help {
-  margin-bottom: var(--space-6);
+.connect-steps {
+  margin-top: 0;
+  padding: var(--space-5) var(--space-6);
+  border: 1px solid var(--input);
+  background: var(--surface);
   font-size: var(--text-small);
 }
-.connection-help summary {
+.page-body section h2 {
   font: var(--font-display-weight) var(--text-subtitle) / var(--leading-heading)
     var(--font-display);
-}
-.connection-help p {
-  max-width: 60ch;
 }
 .setup-steps {
   padding-left: var(--space-6);
@@ -155,12 +124,6 @@ section {
 .setup-copy code {
   font-size: inherit;
 }
-nav .signout {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-3);
-  margin: 0 0 0 auto;
-}
 .assistant-list {
   list-style: none;
   padding: 0;
@@ -174,16 +137,10 @@ nav .signout {
 .assistant-list form {
   margin: 0 0 var(--space-2);
 }
-#signout-note {
-  margin-top: var(--space-3);
-}
 summary {
   cursor: pointer;
   padding-block: var(--space-2);
   min-height: var(--touch-target);
-}
-.sheet + h2 {
-  margin-top: var(--space-8);
 }
 [role="status"],
 [role="alert"] {
@@ -196,20 +153,331 @@ summary {
 [role="alert"] {
   border-left: 4px solid var(--ink);
 }
+
+/* Account menu: a <details> disclosure, since pages run no scripts. */
+.header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+/* Both header controls share one height; each label stays on one line and
+   the pair wraps as a row on narrow screens. */
+.header-cta,
+.account-menu > summary {
+  min-height: var(--control-height);
+  white-space: nowrap;
+}
+.account-menu {
+  position: relative;
+  font-size: var(--text-small);
+}
+.account-menu > summary {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--space-4);
+  border: 1px solid var(--ink);
+  list-style: none;
+}
+.account-menu > summary::-webkit-details-marker {
+  display: none;
+}
+.account-menu > summary::after {
+  content: "▾";
+  margin-left: var(--space-2);
+}
+.menu-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + var(--space-2));
+  z-index: 10;
+  width: 18rem;
+  padding: var(--space-2) 0;
+  border: 1px solid var(--ink);
+  background: var(--surface);
+  box-shadow: var(--shadow-sheet);
+}
+.menu-panel form {
+  display: block;
+  margin: 0;
+}
+.menu-item,
+button.menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+  min-height: var(--touch-target);
+  padding: 0 var(--space-4);
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: var(--text-small) / var(--leading-label) var(--font-sans);
+  text-decoration: none;
+}
+.menu-item:hover,
+button.menu-item:hover {
+  background: var(--ground);
+}
+.menu-panel .small-note {
+  margin: 0;
+  padding: var(--space-2) var(--space-4) var(--space-3);
+  font-size: var(--text-caption);
+  border-bottom: 1px solid var(--hairline);
+}
+.menu-panel .menu-who {
+  padding-top: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+.menu-who strong {
+  color: var(--ink);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.menu-item.danger {
+  margin-top: var(--space-2);
+  color: var(--muted);
+}
+main > nav {
+  min-height: calc(var(--touch-target) + var(--space-3));
+  align-items: center;
+  padding-bottom: var(--space-3);
+}
+.sheet-meta {
+  margin: var(--space-5) 0 var(--space-4);
+}
+main > nav + .tps-form {
+  margin-top: var(--space-6);
+}
+
+/* The signed-in cover sheet as a printed T.P.S. report form. */
+.tps-form {
+  --sheet-padding: var(--space-16);
+  padding: var(--space-12) var(--sheet-padding) var(--space-10);
+  font-family: var(--font-form);
+  color: var(--ink);
+}
+.form-title {
+  text-align: center;
+  margin-bottom: var(--space-8);
+}
+.form-title h1 {
+  margin: 0;
+  font: var(--text-form-title) / var(--leading-heading) var(--font-form);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+/* Trailing letter-spacing is balanced with equal left padding. */
+.form-subtitle {
+  display: block;
+  margin-top: var(--space-3);
+  padding-left: 0.3em;
+  font: var(--text-lead) / var(--leading-heading) var(--font-form);
+  letter-spacing: 0.3em;
+}
+.form-fields {
+  display: grid;
+  gap: var(--space-4);
+  margin-bottom: var(--space-8);
+}
+.form-fields .row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-8);
+  margin: 0;
+}
+.field {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex: 0 1 auto;
+  min-width: 9rem;
+}
+.field.grow {
+  flex: 1 1 14rem;
+}
+.field dt {
+  white-space: nowrap;
+}
+.fill {
+  flex: 1;
+  min-width: 4rem;
+  margin: 0;
+  padding: 0 var(--space-2) 1px;
+  border-bottom: 1px solid var(--sheet-rule);
+  font: var(--text-small) / var(--leading-body) var(--font-mono);
+  overflow-wrap: anywhere;
+}
+.form-section {
+  margin-top: var(--space-8);
+}
+.form-section h2 {
+  margin: 0;
+  padding-bottom: var(--space-2);
+  border-bottom: 2px solid var(--sheet-rule);
+  font: var(--text-title) / var(--leading-heading) var(--font-form);
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+}
+.applies {
+  margin: var(--space-2) 0 var(--space-3);
+  font: italic var(--text-body) / var(--leading-label) var(--font-form);
+  color: var(--muted);
+}
+.sub-label {
+  margin: var(--space-4) 0 0;
+}
+.ruled {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  counter-reset: rule;
+}
+.line {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  min-height: var(--space-8);
+  margin: 0;
+  padding: var(--space-2) 0 3px;
+  border-bottom: 1px solid var(--sheet-rule);
+}
+.ruled > .line {
+  counter-increment: rule;
+}
+.ruled > .line::before {
+  content: counter(rule) ".";
+  min-width: var(--space-6);
+  font: var(--text-body) / var(--leading-label) var(--font-form);
+}
+.typed {
+  min-width: 0;
+  font: var(--text-small) / var(--leading-body) var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.comment {
+  font-style: italic;
+}
+.form-sample {
+  border-bottom: 1px solid var(--sheet-rule);
+}
+.form-sample > summary {
+  display: flex;
+  align-items: flex-end;
+  min-height: var(--touch-target);
+  gap: var(--space-3);
+  padding: var(--space-2) 0 3px;
+  list-style: none;
+}
+.form-sample > summary::-webkit-details-marker {
+  display: none;
+}
+.form-sample .box {
+  min-width: var(--space-6);
+  font: var(--text-body) / var(--leading-label) var(--font-form);
+}
+.form-sample .typed {
+  flex: 1;
+}
+.form-sample .date {
+  color: var(--muted);
+  font: var(--text-caption) var(--font-mono);
+}
+.form-sample > summary::after {
+  content: "show";
+  color: var(--muted);
+  font: italic var(--text-small) / var(--leading-label) var(--font-form);
+}
+.form-sample[open] > summary::after {
+  content: "hide";
+}
+.form-sample pre,
+.form-section > pre {
+  padding: var(--space-4);
+  border: 1px dashed var(--hairline);
+  background: var(--ground);
+}
+.form-sample pre {
+  /* Aligned with the sample title: the box column plus the gap. */
+  margin: var(--space-2) 0 var(--space-4) calc(var(--space-6) + var(--space-3));
+}
+.form-empty {
+  margin-top: var(--space-8);
+  text-align: center;
+  font-family: var(--font-sans);
+}
+.form-empty .empty-placeholder {
+  margin-bottom: var(--space-3);
+}
+.confidential {
+  margin-top: var(--space-12);
+  padding-left: 0.6em;
+  text-align: center;
+  font: var(--text-section) / var(--leading-heading) var(--font-form);
+  text-transform: uppercase;
+  letter-spacing: 0.6em;
+}
+/* Letter-spaced lines may break rather than push the page sideways. */
+.form-title h1,
+.confidential {
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 600px) {
-  .app-shell,
-  .app-shell.narrow {
+  .app-shell {
     padding: var(--space-5) var(--space-5) var(--space-10);
   }
   nav {
     gap: 0 var(--space-5);
     font-size: var(--text-small);
   }
-  .tps-title {
-    padding-block: var(--space-6);
+  .header-cta {
+    padding-inline: var(--space-4);
   }
-  .cover-subtitle {
-    font-size: var(--text-small);
-    letter-spacing: 0.05em;
+  /* The menu drops below the whole header, wherever Account has wrapped. */
+  .app-header {
+    position: relative;
+  }
+  .account-menu {
+    position: static;
+  }
+  .menu-panel {
+    left: 0;
+    right: 0;
+    top: calc(100% + var(--space-2));
+    width: auto;
+  }
+  .form-sample pre {
+    margin-left: 0;
+  }
+  /* On a phone the sample title gets the full width; date and show go below. */
+  .form-sample > summary {
+    display: grid;
+    grid-template-columns: var(--space-6) 1fr auto;
+    column-gap: var(--space-3);
+    align-items: baseline;
+  }
+  .form-sample .typed {
+    grid-column: 2 / 4;
+  }
+  .form-sample .date {
+    grid-column: 2;
+  }
+  .form-subtitle {
+    font-size: var(--text-body);
+    letter-spacing: 0.2em;
+    padding-left: 0.2em;
+  }
+  .confidential {
+    font-size: var(--text-lead);
+    letter-spacing: 0.3em;
+    padding-left: 0.3em;
+  }
+}
+@media (max-width: 767px) {
+  .tps-form {
+    --sheet-padding: var(--space-5);
   }
 }

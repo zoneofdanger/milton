@@ -32,7 +32,7 @@ const draft: MemoExcerpt = {
 export const memoExample: { scenes: MemoScene[] } = {
   scenes: [
     {
-      label: "Monday",
+      label: "Monday · Claude",
       turns: [
         {
           speaker: "You",
@@ -54,7 +54,7 @@ export const memoExample: { scenes: MemoScene[] } = {
       ],
     },
     {
-      label: "New chat, next week",
+      label: "Next week · ChatGPT",
       turns: [
         { speaker: "You", text: "Did you get that memo?" },
         { speaker: "AI", text: "Got it. One email sample on file." },

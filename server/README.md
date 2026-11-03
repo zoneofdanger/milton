@@ -80,6 +80,7 @@ Set these in the runtime's platform configuration or dotenvx payload before depl
 | `NEON_AUTH_BASE_URL`      | The exact branch Auth URL copied from Neon, including its database and Auth path, without a trailing slash. It is also the expected token issuer. |
 | `NEON_AUTH_COOKIE_SECRET` | A fresh random server-only secret of at least 32 characters for browser session cookies.                                                          |
 | `DATABASE_URL`            | The TLS connection string for the `milton` database. Use the owner connection for migrations and imports.                                         |
+| `MILTON_SUPPORT_EMAIL`    | Optional. The support address the account pages give; `support@meetmilton.com` when unset. The MCP address pages show is `MCP_RESOURCE`.          |
 
 Saves are model-free: Milton stores the exact text the assistant sends and calls no
 model on any read or save, so it needs no model credential, project or budget. The

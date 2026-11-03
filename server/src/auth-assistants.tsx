@@ -111,7 +111,7 @@ const assistantsPage = async (
     "Connected assistants",
     <>
       {notice}
-      {connectSteps(empty)}
+      {connectSteps(empty, config.resource)}
       <section aria-labelledby="connected-h">
         <h2 id="connected-h">Connected</h2>
         <p>

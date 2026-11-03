@@ -7,7 +7,12 @@ export interface RuntimeConfig extends StoreBindings {
   resource: string;
   appOrigin: string;
   cookieSecret: string;
+  /** The address pages give for support; the hosted one when unset. */
+  supportEmail?: string;
 }
+const HOSTED_SUPPORT_EMAIL = "support@meetmilton.com";
+export const supportEmail = (config: Pick<RuntimeConfig, "supportEmail">) =>
+  config.supportEmail ?? HOSTED_SUPPORT_EMAIL;
 export const isLoopback = (hostname: string) =>
   ["localhost", "127.0.0.1", "[::1]"].includes(hostname);
 
@@ -59,5 +64,20 @@ export function runtimeConfig(
       "configuration",
       "Milton's server configuration is unavailable.",
     );
-  return { ...config, cookieSecret: env.NEON_AUTH_COOKIE_SECRET };
+  const support = env.MILTON_SUPPORT_EMAIL;
+  if (
+    support !== undefined &&
+    !/^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,63}$/.test(
+      support,
+    )
+  )
+    throw new StoreError(
+      "configuration",
+      "Milton's server configuration is unavailable.",
+    );
+  return {
+    ...config,
+    cookieSecret: env.NEON_AUTH_COOKIE_SECRET,
+    ...(support === undefined ? {} : { supportEmail: support }),
+  };
 }

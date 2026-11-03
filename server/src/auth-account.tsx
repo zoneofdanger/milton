@@ -4,6 +4,7 @@ import type { Child } from "hono/jsx";
 import { deleteAccount, lookupIdentityAccount, StoreError } from "./store";
 import { AuthError } from "./token";
 import { page } from "./pages";
+import { supportEmail } from "./config";
 import { timed, type PageContext, type SessionUser } from "./auth-session";
 import { consentList, readConsents } from "./auth-assistants";
 
@@ -28,7 +29,7 @@ const activeAccount = async (ctx: PageContext, user: SessionUser) => {
   }
 };
 const deletionPage = (
-  { csrfField }: PageContext,
+  { csrfField, config }: PageContext,
   user: SessionUser,
   notice: Child = null,
   status = 200,
@@ -65,7 +66,7 @@ const deletionPage = (
         <li>
           Your sign-in record (email, name, Google or GitHub link) stays with
           our sign-in provider. To remove it, email{" "}
-          <a href="mailto:support@meetmilton.com">support@meetmilton.com</a>.
+          <a href={`mailto:${supportEmail(config)}`}>{supportEmail(config)}</a>.
         </li>
         <li>
           Copies in database backups are not erased immediately; they are
@@ -174,7 +175,7 @@ export const accountDeletion = async (ctx: PageContext): Promise<Response> => {
         Copies in database backups are not erased immediately; they are removed
         when those backups expire or are deleted. Your sign-in record stays with
         our sign-in provider. To remove it, email{" "}
-        <a href="mailto:support@meetmilton.com">support@meetmilton.com</a>.
+        <a href={`mailto:${supportEmail(config)}`}>{supportEmail(config)}</a>.
       </p>
       <p>
         <a href="/">Milton home</a>

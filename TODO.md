@@ -60,7 +60,7 @@ reports, memos) and plain text on security screens and anything an assistant rea
       startup. Move readLimits and utf8Bytes into a module with no store imports.
 
 - [ ] #13 (server, med, founder) **Optional learn-from-sent-mail step in first setup.** Decided
-      2026-11-03, then parked the same day: the assistant, with permission, reads about twenty
+      2026-11-03, then parked the same day because people will not trust a new product reading their mail, even through the assistant's own connector: the assistant, with permission, reads about twenty
       recent sent emails through its own mail connector, proposes up to five of different kinds
       with the full text, and files only the approved ones as exact samples; Milton gets no mail
       access. Built and reviewed as merge f2ea867 (setup.ts question 6, test, README), reverted

@@ -1098,9 +1098,14 @@ test("a conflict or refusal in the claim phase stores a receipt and replays like
       (await store.saveMemo(rule("Second.", current.version))).status,
     ).toBe("saved");
     expect(await store.saveMemo(stale)).toEqual(conflict);
+    // A refreshed retry under the same ID is told to take a new one.
     await expect(
-      store.saveMemo({ ...stale, text: "Different input." }),
-    ).rejects.toMatchObject({ code: "request_id_reused" });
+      store.saveMemo({ ...stale, expected_version: current.version }),
+    ).rejects.toMatchObject({
+      code: "request_id_reused",
+      message:
+        "This request ID belongs to different input. A changed save needs a new request_id; the original arguments replay the same outcome.",
+    });
     // A refusal decided against the request replays the same way.
     const oversized = {
       ...rule("Large.", (await store.getTpsReport()).version),

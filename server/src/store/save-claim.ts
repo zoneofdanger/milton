@@ -39,7 +39,7 @@ export async function claimSave(ctx: SaveContext, structured: boolean) {
         if (existing.input_hash !== inputHash)
           throw new StoreError(
             "request_id_reused",
-            "This request ID belongs to different input. Reuse the exact original request to recover its result.",
+            "This request ID belongs to different input. A changed save needs a new request_id; the original arguments replay the same outcome.",
             409,
           );
         if (existing.completed)
@@ -112,7 +112,7 @@ export async function claimSave(ctx: SaveContext, structured: boolean) {
           if (existing && existing.input_hash !== inputHash)
             throw new StoreError(
               "request_id_reused",
-              "This request ID belongs to different input.",
+              "This request ID belongs to different input. A changed save needs a new request_id; the original arguments replay the same outcome.",
               409,
             );
           if (existing?.completed)

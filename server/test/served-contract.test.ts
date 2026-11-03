@@ -20,7 +20,10 @@ import {
   reportEnvelope,
   reportList,
 } from "../src/store/tools";
-import { hookOutput } from "../../packages/agent-kit/src/context";
+import {
+  HOOK_CONTEXT_CEILING,
+  hookOutput,
+} from "../../packages/agent-kit/src/context";
 
 // Fields every save carries, as the instructions name them.
 const envelope = () => ({
@@ -54,15 +57,13 @@ test("setup renders from its catalog, per report while empty, under the agent ki
   const version = "a".repeat(64);
   const empty = { ...assembleDocuments([], []), version };
   const sheet = coverSheet(empty);
-  // A hook read carries a pointer, keeping injected text under Claude Code's
-  // 10,000-character limit.
+  // A hook read carries a setup pointer, keeping the whole cover sheet within
+  // the agent kit's hook ceiling (under Claude Code's 10,000 characters and
+  // Codex's roughly 10,000 bytes); only the whole form carries setup.
   const hooked = hookOutput(hookSheet(sheet), "SessionStart");
-  expect(hooked.hookSpecificOutput.additionalContext).toContain(
-    SETUP_HOOK_POINTER,
-  );
-  expect(hooked.hookSpecificOutput.additionalContext.length).toBeLessThan(
-    10000,
-  );
+  const injected = hooked.hookSpecificOutput.additionalContext;
+  expect(injected).toContain(SETUP_HOOK_POINTER);
+  expect(Buffer.byteLength(injected)).toBeLessThanOrEqual(HOOK_CONTEXT_CEILING);
   // The cover sheet serves the opening lines and email's block, cover questions included.
   expect(sheet.setup).toBe(reportEnvelope(empty, "email").setup!);
   expect(sheet.setup).toContain('Then say: "First, paste one email');

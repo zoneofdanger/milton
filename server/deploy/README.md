@@ -463,6 +463,10 @@ variables, never as command arguments. The script prints no value.
     bun --no-env-file scripts/backfill-subscriptions.ts          # dry run
     bun --no-env-file scripts/backfill-subscriptions.ts --apply
 
+Compare the dry run's `total` to the accounts named for this release, and stop before `--apply` if
+it differs. Sign-ups are open, so an account nobody named would get a customer with no email and
+fall outside the step below.
+
 It prints only counts (total, created, skipped, failed, still NULL), at about 5 accounts a second,
 and refuses without `trials_enabled` and a live key. `--allow-test-key` is for disposable
 databases only. With `--apply` it exits nonzero if any account still has no status; rerun it, since
@@ -470,3 +474,7 @@ rows with a status are skipped. It also applies the data statement's rule, so a 
 identity's row is canceled and counted as skipped, but the rerun above still comes first. A row left at NULL is free until a browser sign-in: an approval
 Neon already holds refreshes without any Milton page. Customers it creates have no email, so
 Stripe sends them no receipts or payment reminders.
+
+Right after the backfill, set the email by hand on each named account's Stripe customer. Not
+before: a customer made by hand is not linked to its Milton row, so the backfill would make a second
+one.

@@ -18,11 +18,7 @@
         <li class="note tan">Writing style: professional, friendly.</li>
       </ul>
     </div>
-    <p class="facts">
-      <span class="k">Kept:</span>&nbsp;what it guessed.{" "}
-      <span class="k">Decided&nbsp;by:</span>&nbsp;the app.{" "}
-      <span class="k">Works&nbsp;in:</span>&nbsp;that app.
-    </p>
+    <p class="facts">Facts, preferences and context about you.</p>
   </section>
   <section class="panel" aria-labelledby="milton-label">
     <div class="cabinet">
@@ -97,10 +93,7 @@
       </ul>
     </div>
     <p class="facts">
-      <span class="k">Kept:</span>&nbsp;what you sent, word for word.{" "}
-      <span class="k">Decided&nbsp;by:</span>&nbsp;you.{" "}
-      <span class="k">Works&nbsp;in:</span>&nbsp;every AI you connect. Never
-      reads your inbox.
+      Writing samples and rules you approve, kept word for word.
     </p>
   </section>
 </div>
@@ -346,16 +339,12 @@
     border-radius: 0 0 var(--space-6) var(--space-6);
   }
 
-  /* Under each panel, one flowing caption; values in ink, labels muted and
-     inline. */
+  /* Under each panel, one flowing caption. */
   .facts {
     align-self: start;
     margin-top: var(--space-4);
     color: var(--ink);
     font: var(--text-body) / var(--leading-label) var(--font-mono);
-  }
-  .facts .k {
-    color: var(--muted);
   }
 
   @media (max-width: 960px) {

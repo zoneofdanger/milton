@@ -14,12 +14,9 @@ const PAIRS: [text: string, background: string][] = [
   ["muted", "ground"],
   ["ink", "surface"],
   ["muted", "surface"],
-  ["on-ink", "ink"],
   ["on-accent", "accent"],
   ["on-accent", "accent-hover"],
   ["sheet-bar-ink", "sheet-bar"],
-  ["on-band", "band"],
-  ["band-muted", "band"],
 ];
 /** Hairlines and sheet rules are decorative; inputs are functional boundaries. */
 const LINES = ["hairline", "input", "sheet-rule"];

@@ -20,8 +20,8 @@ carry the office-paperwork treatment across both products.
   uses its real regular weight. `--radius-button` keeps square buttons separate from rounded text fields.
 - `--leading-*`, `--radius-*`, `--control-height`, `--touch-target` and
   `--shadow-sheet` keep rhythm, controls and surfaces consistent.
-- `.eyebrow`, `.button`/`button`, `input`, `.sheet`, `.sheet-bar`, `.sheet-content`
-  and `.sheet-heading` are reusable CSS pieces. A sheet owns `--sheet-padding`,
+- `.eyebrow`, `.button`/`button`, `input`, `.sheet`, `.sheet-bar` and `.sheet-content`
+  are reusable CSS pieces. A sheet owns `--sheet-padding`,
   including its mobile value, so its bar, title and body can share aligned edges.
 
 Shared components use ordinary HTML classes, so Astro and Hono JSX consume the
@@ -33,7 +33,7 @@ same CSS without a client runtime or framework-specific wrapper library:
 | Helper text | `.small-note` supplies muted, small text, including inside sheets.                | Position and margins; add `role="status"` only for an actual status update. |
 | Text fields | `input` and `textarea` share borders, surface, padding, and inherited typography. | Labels, validation, field width, and textarea resizing.                     |
 | Buttons     | `.button` or `button`, optionally `.secondary`.                                   | Link destinations, form actions, and labels.                                |
-| Documents   | `.sheet`, `.sheet-bar`, `.sheet-content`, `.sheet-heading`.                       | Document semantics and app-specific cover-sheet layout.                     |
+| Documents   | `.sheet`, `.sheet-bar`, `.sheet-content`.                                         | Document semantics and app-specific cover-sheet layout.                     |
 
 Use a local class alongside these shared classes when positioning a component.
 For example, the site's `class="access-note small-note"` sets its margin locally;

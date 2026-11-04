@@ -218,6 +218,13 @@
       "when": 1793775278132,
       "tag": "0030_no_history_cap",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1793776034031,
+      "tag": "0031_fingerprint_versions",
+      "breakpoints": true
     }
   ]
 }

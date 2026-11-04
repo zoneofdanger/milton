@@ -8,7 +8,7 @@ differ, the note wins. Its vocabulary applies here: a memo is anything sent to M
 (a rule, a correction or an approved sample), a report is one assembled document per
 writing situation, and the cover sheet carries the rules true of all writing plus the
 report index. "TPS Report" and "group" are retired words; they survive only as code
-identifiers such as `tps_reports`, `TPS.md` and `tps_body_limit`. This section records
+identifiers such as `TPS.md` and `tps_body_limit`. This section records
 the contracts as built. Agents use only `get_cover_sheet`, `get_report`, `list_reports` and
 `create_memo`. Saves are model-free: the assistant names each rule's
 report and sends its exact approved wording, and Milton stores those bytes. Complete

@@ -111,7 +111,7 @@ This command explicitly reads `.dev.vars`, unless a release sets `MILTON_OWNER_D
 The migrations create the application tables defined in `src/store/schema.ts`.
 Every successful sign-in creates or finds its account; there is no sign-up setting (0025).
 
-Migration `0006_compiled_memos.sql` adds the current report snapshot (`tps_reports`)
+Migration `0006_compiled_memos.sql` adds the report snapshot (`tps_reports`, dropped by 0031)
 and durable save receipts. It preserves existing memos and their version history,
 including content formerly stored under the legacy `vibes` name, which participates
 as an ordinary internal memo. Reads assemble the cover sheet and reports from cards
@@ -458,13 +458,13 @@ the web page) is the cover sheet plus every non-empty report.
 A read takes the card heads, the active samples and the account's status in one
 statement, without a transaction or lock, so a concurrent save shows whole or not at
 all; it writes nothing. An assistant read adds the trial gate: two queries and no
-database connection, where the earlier read opened a connection and a transaction
+database connection, where the read before 0031 opened a connection and a transaction
 with the account lock and wrote a lagging snapshot. The version every
 read returns and every save fences on is a fingerprint of what is served: SHA-256 of
 the user ID, the cover sheet, and each report's text with its samples' IDs, kind IDs
 and kind labels. The same cards and samples always give the same version, an empty
 account included, and a save that changes what is served changes it. Versions from
-before fingerprints hashed a stored revision, so a client holding one conflicts once on its
+before 0031 hashed a stored revision, so a client holding one conflicts once on its
 next save (`conflict` with the current version), rereads and saves normally.
 
 Each body has its own cap (`report_body_bytes`, 256 KB by default); the full text is
@@ -583,6 +583,18 @@ foreign keys, immutability guards and byte charges in `milton_rollback`; forward
 restores them exactly. Stop writers during schema rollback and keep them stopped until
 forward recovery: an older runtime cannot guarantee provenance for new saves.
 
+### Fingerprint versions (0031)
+
+The version is the fingerprint of the assembled documents (see "Reports, samples and the
+cover sheet (0017)" above), so the stored snapshot, which no read served, is gone. The
+code stops reading and writing `tps_reports`; migration 0031 drops it with its keys, its
+checks `tps_revision_positive`, `tps_body_limit` and `tps_source_hash`, and the runtime's
+grant. The `tps_body_limit` error code stays for saves over a cap. A connected client
+conflicts once on its first save after the release and rereads. Release the code first;
+see [the hosting runbook](deploy/README.md#fingerprint-versions-0031).
+`drizzle/rollback/0031_fingerprint_versions.sql` recreates the table empty, which an
+earlier revision needs to read at all.
+
 ### No history cap (0030)
 
 History rows never shrink short of account deletion, so the 64-MiB lifetime cap
@@ -657,7 +669,7 @@ trigger it fires, runs on it:
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | SELECT, INSERT, UPDATE, DELETE | `users`: sign-up, the account lock and account deletion (its cascades run as the table owner)                                                                                                     |
 | SELECT, INSERT, DELETE         | `assistant_disconnects`: disconnect, the refusal check, reconnect on Allow                                                                                                                        |
-| SELECT, INSERT, UPDATE         | `save_requests` (receipts; the save guard refuses every update), `samples` (retirement), `tps_reports` (snapshot upsert), `trial_accounts` (notice stage), `usage_daily` (daily call upsert)      |
+| SELECT, INSERT, UPDATE         | `save_requests` (receipts; the save guard refuses every update), `samples` (retirement), `trial_accounts` (notice stage), `usage_daily` (daily call upsert)                                       |
 | SELECT, INSERT                 | `identities`, `deleted_identities`, `instruction_cards`, `instruction_card_versions`, `sample_kinds`, and the legacy `memos`, `memo_versions` and `memo_cards` (the signup seed and its triggers) |
 | INSERT                         | `accepted_changes`: provenance, written once per save and never read by the runtime                                                                                                               |
 | SELECT                         | `store_config`: settings are read without a lock; 0028 revoked the `UPDATE (singleton)` the retired sign-in `FOR UPDATE` lock needed, so no setting can be changed                                |

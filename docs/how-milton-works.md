@@ -73,8 +73,7 @@ Files: `server/src/store/tools.ts`, `server/src/mcp.ts`.
 
 - `get_cover_sheet` returns the cover rules, version, report index, and `is_empty`, plus
   the setup script while no rules exist.
-- With `hook_event`, it returns hook-shaped context, capped at 9,500 characters and
-  replaced by a pointer past that.
+- `get_cover_sheet` takes no arguments and refuses any argument it is sent.
 - `get_report` returns one report's text, sample list, and version, plus setup while that
   report has no rules.
 - `doc` is accepted as an alias for `document`.
@@ -180,6 +179,9 @@ Files: `server/src/store/setup.ts`.
 - `setupCatalog` lists every baseline rule the script can file, which is how saves check
   them.
 - Setup is triggered by missing rules, not missing samples.
+- The first block, served while no rules exist anywhere, ends with the standing-line step:
+  the assistant offers one line for the person's own standing instructions. It saves
+  nothing to Milton and is left out of later blocks.
 
 ## Sign-in and accounts
 
@@ -269,18 +271,6 @@ Files: `apps/site/`.
 - The setup widget copies a prompt, falls back to manual selection, and closes on Escape
   or an outside click.
 - The joke tiers on `/pricing` are static data.
-
-## Agent kit
-
-Files: `packages/agent-kit/src/`. It runs locally and makes no network calls.
-
-- `parseReport` strictly validates a Milton response.
-- Context helpers insert or replace Milton's own message, and never edit conversation
-  text.
-- CLI checks cover word limits, forbidden or required phrases, new dependencies, and the
-  package manager.
-- `prepare-correction` builds `create_memo` arguments only for a unique anchor and
-  explicit user direction.
 
 ## Theme, scripts, and CI
 

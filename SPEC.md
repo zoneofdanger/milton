@@ -40,12 +40,9 @@ were built, measured and removed; migration 0018 drops their schema. What they s
 and what would justify rebuilding any of them is in
 [the research note](docs/research/derived-systems-2026.md).
 
-The companion [agent kit](packages/agent-kit/README.md) provides owned-context
-replacement, explicit local checks and correction preparation. `hook_event` on `get_cover_sheet`
-adapts that read to supported lifecycle context responses, carrying the cover sheet
-and report index. Assistants offer to save a sample on approval and a rule on
-repeated correction, each only with the person's yes; no automatic capture. Closed-client execution, long-output
-spilling and actual instruction adherence remain outside the server's guarantee.
+Assistants offer to save a sample on approval and a rule on repeated correction, each
+only with the person's yes; no automatic capture. Closed-client execution and actual
+instruction adherence remain outside the server's guarantee.
 
 Every save is exact. `create_memo` needs at least one structured field: `rules`
 (1 to 25 entries of `{ report, text }`, `report` one of the five or `cover`),

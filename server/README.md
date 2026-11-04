@@ -241,19 +241,10 @@ Exactly four tools are exposed:
 
 | Tool                                                     | Contract                                                                                                                                                                                                                                                                                                                                                    |
 | -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `get_cover_sheet({hook_event?})`                         | Returns `{text, version, is_empty, reports}`: the rules true of all writing, the save fence, whether the whole account is empty, and the index of five reports with their situations; while no rules exist yet (samples do not count), `setup` carries the first-setup script. No model call, no write.                                                     |
+| `get_cover_sheet()`                                      | Returns `{text, version, is_empty, reports}`: the rules true of all writing, the save fence, whether the whole account is empty, and the index of five reports with their situations; while no rules exist yet (samples do not count), `setup` carries the first-setup script. No model call, no write.                                                     |
 | `get_report({report_id})`                                | One of `email`, `chat`, `post`, `document` (`doc` accepted), `speech`. Returns `{report_id, text, version, is_empty, samples}`: heading, when line, samples newest first, then rules; see below for `samples`. While the report has no rules, `setup` carries that report's setup block, with the cover-sheet questions while the cover sheet has no rules. |
 | `list_reports()`                                         | All five reports as `{reports: [{report_id, text, is_empty, samples, setup?}], version}`, without the cover sheet; a report without rules has a one-line `setup` pointer to `get_report`.                                                                                                                                                                   |
 | `create_memo({text, request_id, expected_version, ...})` | An exact save with at least one of `rules`, `exact_edits`, `moves`, `sample`, `retire_samples`; `text` states its purpose. UUID for the logical request and version from the cover sheet.                                                                                                                                                                   |
-
-`hook_event` on `get_cover_sheet` returns the cover sheet and report index in
-`hookSpecificOutput.additionalContext` instead of the normal envelope. Supported
-events are `SessionStart`, `SubagentStart`, `UserPromptSubmit`, `PostCompact` and
-`PostToolUse`; client support differs. When the context would pass 9,500 characters
-or UTF-8 bytes, it carries only the version, the index and an instruction to call
-`get_cover_sheet`, because clients file or spill longer hook text. The [agent kit](../packages/agent-kit/README.md)
-provides context replacement, local objective checks and correction preparation.
-It cannot establish adherence or force unsupported clients to retrieve instructions.
 
 `create_memo` returns `saved`, `unchanged`, `conflict`, `in_progress`, or `failed`,
 with the request ID and relevant version/error. (`needs_clarification` appears only
@@ -605,8 +596,7 @@ most once across assistants and tools; returning during the last day skips
 the earlier reminder. A lost response or timed-out notice lookup can lose that
 reminder. Delivery does not establish display or acknowledgment. Lookup is bounded
 to one second, with short database lock/statement limits, and never turns a
-confirmed save into failure. The website banner does not consume MCP reminders. Background lifecycle hook
-reads return instruction context only and do not consume billing notices.
+confirmed save into failure. The website banner does not consume MCP reminders.
 Report text, version, downloads and saved receipts contain no billing notices.
 
 Expired unsubscribed accounts receive a tool error `subscription_required` with

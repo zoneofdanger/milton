@@ -36,6 +36,20 @@ import AssistantSetup from "../components/AssistantSetup.astro";
       <code>https://mcp.meetmilton.com/mcp</code>
     </div>
   </div>
+  <div id="standing-line" class="standing">
+    <p>
+      Setup ends with one line for your assistant’s standing instructions, so it
+      reads Milton without being asked:
+    </p>
+    <blockquote>
+      Before writing anything for me, call Milton's get_cover_sheet, then
+      get_report for the matching report.
+    </blockquote>
+    <p>
+      Your assistant offers to add it for you. If you set up before this or
+      skipped setup, add it yourself; each assistant below says where it goes.
+    </p>
+  </div>
   <nav class="clients" aria-label="Choose your assistant">
     <a href="#claude">Claude</a>
     <a href="#claude-duet">Claude Duet</a>
@@ -70,6 +84,11 @@ import AssistantSetup from "../components/AssistantSetup.astro";
         Claude’s current connector guide ↗
       </a>
     </p>
+    <p>
+      Keep <a href="#standing-line">the standing line</a> in your profile
+      preferences, a project’s instructions, or a memory. One entry also covers
+      Claude Duet.
+    </p>
   </section>
   <section id="claude-duet" aria-labelledby="claude-duet-heading">
     <h2 id="claude-duet-heading">Claude Duet</h2>
@@ -100,6 +119,11 @@ import AssistantSetup from "../components/AssistantSetup.astro";
       for current availability. If Milton is unavailable in Duet, use the
       connected Claude client while compatibility is being checked.
     </p>
+    <p>
+      Duet runs on the same Claude account, so{" "}
+      <a href="#standing-line">the standing line</a> you keep in Claude covers
+      Duet too.
+    </p>
   </section>
   <section id="chatgpt" aria-labelledby="chatgpt-heading">
     <h2 id="chatgpt-heading">ChatGPT</h2>
@@ -121,6 +145,10 @@ import AssistantSetup from "../components/AssistantSetup.astro";
         official connection guide ↗
       </a>{" "}
       before signing up for a different plan.
+    </p>
+    <p>
+      Keep <a href="#standing-line">the standing line</a> in your custom
+      instructions or a memory.
     </p>
   </section>
   <section id="grok-bot" aria-labelledby="grok-bot-heading">
@@ -152,6 +180,11 @@ import AssistantSetup from "../components/AssistantSetup.astro";
       </a>
       .
     </p>
+    <p>
+      If Grok Bot has standing instructions or memory, keep{" "}
+      <a href="#standing-line">the standing line</a> there. Otherwise, ask “Did
+      you get that memo?” each time.
+    </p>
   </section>
   <section id="muse" aria-labelledby="muse-heading">
     <h2 id="muse-heading">Muse</h2>
@@ -170,7 +203,7 @@ import AssistantSetup from "../components/AssistantSetup.astro";
       </li>
       <li>
         Ask “Did you get that memo?” and confirm Muse reads the current cover
-        Report.
+        sheet.
       </li>
       <li>
         Once the connection works, use the{" "}
@@ -186,6 +219,11 @@ import AssistantSetup from "../components/AssistantSetup.astro";
         Meta’s connector guide ↗
       </a>
     </p>
+    <p>
+      If Muse has standing instructions or memory, keep{" "}
+      <a href="#standing-line">the standing line</a> there. Otherwise, ask “Did
+      you get that memo?” each time.
+    </p>
   </section>
   <section id="claude-code" aria-labelledby="claude-code-heading">
     <h2 id="claude-code-heading">Claude Code</h2>
@@ -197,6 +235,11 @@ import AssistantSetup from "../components/AssistantSetup.astro";
       <a href="https://code.claude.com/docs/en/mcp">
         Claude Code’s MCP guide ↗
       </a>
+    </p>
+    <p>
+      <a href="#standing-line">The standing line</a> lives in CLAUDE.md in your
+      home directory (<code>~/.claude/CLAUDE.md</code>), so it covers every
+      project. Claude Code adds it during setup once you approve.
     </p>
   </section>
   <section id="codex" aria-labelledby="codex-heading">
@@ -210,6 +253,11 @@ codex mcp login milton`}</code></pre>
       tools aren’t available in the current one.{" "}
       <a href="https://developers.openai.com/codex/mcp">Codex’s MCP guide ↗</a>
     </p>
+    <p>
+      <a href="#standing-line">The standing line</a> lives in AGENTS.md in your
+      Codex home directory (<code>~/.codex/AGENTS.md</code>), so it covers every
+      project. Codex adds it during setup once you approve.
+    </p>
   </section>
   <section id="cursor" aria-labelledby="cursor-heading">
     <h2 id="cursor-heading">Cursor</h2>
@@ -220,6 +268,10 @@ codex mcp login milton`}</code></pre>
       <a href="https://cursor.com/docs/mcp">
         Cursor’s setup and configuration guide ↗
       </a>
+    </p>
+    <p>
+      Paste <a href="#standing-line">the standing line</a> into User Rules in
+      Cursor’s settings, so it covers every project.
     </p>
   </section>
   <section id="first-preference" aria-labelledby="first-heading">
@@ -282,8 +334,12 @@ codex mcp login milton`}</code></pre>
   section {
     scroll-margin-top: var(--space-6);
   }
-  .connection {
+  .connection,
+  .standing {
     margin-top: var(--space-6);
+  }
+  .standing {
+    scroll-margin-top: var(--space-6);
   }
   .clients {
     display: flex;

@@ -665,11 +665,18 @@ const coverQuestions = () =>
         ? q.tells.length > 0
         : q.dims.every((d) => d.report === "cover"),
     );
+/** The last step of the first block: one line for the person's standing
+ * instructions, so assistants read Milton without being asked. Saves nothing. */
+const STICK = [
+  "7. Before the next report or stopping, make it stick: offer to keep this line in your own standing instructions, so you read Milton without being asked:",
+  "Show exactly: Before writing anything for me, call Milton's get_cover_sheet, then get_report for the matching report.",
+  "Where you can edit a startup instructions file, add it there after the person approves: ~/.claude/CLAUDE.md for Claude Code, ~/.codex/AGENTS.md for Codex, User Rules in Cursor's settings. Where you have custom instructions, project instructions or memory, keep it there instead. If you have none of these, show the line and say where the person can paste it. Then, on a pick, run that report's setup; otherwise say setup is complete.",
+].join("\n");
 /** The setup script for one report's block. `first` (no rules anywhere yet)
  * adds the opening lines; `cover` (the cover sheet has no rules) attaches the
  * cover-sheet questions, inline in email's block and after any other's;
  * `next` names the reports still
- * without rules to offer afterwards. */
+ * without rules to offer afterwards. Only a `first` block ends with STICK. */
 export function setupText(
   report: ReportId,
   { first, cover, next }: { first: boolean; cover: boolean; next: ReportId[] },
@@ -712,6 +719,8 @@ export function setupText(
     `4. Approval. Show the complete list of rules grouped under ${groups}. Wait for approval; the person can strike or change any line.`,
     `5. Save. Call create_memo once: text "Setup baseline", rules [{ report, text }] with one entry per approved rule, report from its brackets, text copied byte for byte from its Files line (or the person's own words exactly as approved), expected_version from the sample save's result (from this read when no sample was filed) and a new request_id. Milton refuses any rule starting "${BASELINE}" that is not a Files rule byte for byte.`,
     `6. End. Say, with the counts actually filed, the sample from step 1 included: "Filed to ${name}: [n] sample and [n] baseline rules${cover ? ", plus [n] on your cover sheet" : ""}. Read them back any time, here or on your Milton page. To change one, tell me or any connected assistant ("change the sign-off rule to Best"); it is replaced word for word. Samples outrank baselines.${next.length ? ` Next: ${next.map(title).join(", ")}, or stop here?` : ""}"${next.length ? " On a pick, call get_report for that report and run its setup." : ""}`,
+    // Once per account: the first block ends by offering the standing line.
+    ...(first ? [STICK] : []),
   ];
   return [
     opening,
@@ -742,7 +751,3 @@ export function reportSetup(documents: Documents, report: ReportId) {
  * without rules. */
 export const setupHint = (report: ReportId) =>
   `Setup available on request while this report has no rules: when the person asks to set up ${report}, call get_report ${report} and run its setup as written.`;
-/** Hook reads carry this line instead of the script, so injected context
- * stays far under client limits (Claude Code's is 10,000 characters). */
-export const SETUP_HOOK_POINTER =
-  "First setup available: call get_cover_sheet and run its setup as written.";

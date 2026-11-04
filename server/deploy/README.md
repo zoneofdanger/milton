@@ -277,7 +277,7 @@ without a zero-traffic soak at Peter's word (no users yet); a release agent swit
 `sha256:2eb49f6eb9ef107fac21bcc2298ddade458a4b28350ff536ffa0102c3fbae395` (amd64
 `sha256:b941afc9bef44b52e64dd08c2ce913efe59724919f2bd2cd0765217c406b2054`; uid 1000, Node 26,
 no env, key or pem files; build stage `oven/bun:1.4.4`), built from main `41de4f6`, the merge
-of `agent/no-spend`; it also carries the hook context ceiling from `6ab3221`. Configuration is
+of `agent/no-spend`. Configuration is
 identical to the savelock-712c7c1 revisions apart from the image and the removed
 `MILTON_GLOBAL_SPEND_POLICY` variable (app `milton-app-env:1`, `milton-app-key:1`; MCP
 `milton-mcp-env:2`, `milton-mcp-key:1`). Before the release, `spend_alert_emails` was exported
@@ -285,8 +285,8 @@ to Peter's archive outside the repository; it held 0 rows. On the 0022 schema th
 answered the canonical checks (unauthenticated `/mcp` 401 with resource metadata, discovery
 and health 200, app `/` and `/login` 200 with its CSRF field, signed-out `/assistants`,
 `/account/delete` and `/download` 403, HTTP 308, `run.app` 404), an authenticated
-`get_cover_sheet` returned 200 with an unchanged version, a `SessionStart` hook read returned
-the full cover sheet, and `bun scripts/probe-forms.ts` printed `PASS`. The scheduler was
+`get_cover_sheet` returned 200 with an unchanged version, and `bun scripts/probe-forms.ts`
+printed `PASS`. The scheduler was
 paused at 07:14:29Z (last tick 07:14:02Z) and drained 180 seconds; then Neon snapshot
 `before-0023-no-spend` (`snap-hidden-bread-b8hh2t6u`, 07:17:48Z) and 0023 applied at 07:18:00Z
 to 07:18:03Z through `migrateStore` from the `41de4f6` tree (Drizzle journal 23 to 24). The
@@ -374,7 +374,7 @@ of `agent/quiz`. Configuration is identical to the audit4-4623c9d revisions apar
 (app `milton-app-env:1`, `milton-app-key:1`; MCP `milton-mcp-env:2`, `milton-mcp-key:1`). No
 migration and no schema change (Drizzle journal unchanged at 22, ending at 0021). Change: the
 paste-first setup quiz is served per report while it has no rules (get_report serves the block,
-list_reports and hook reads a one-line pointer), tool descriptions say to run the setup as
+list_reports a one-line pointer), tool descriptions say to run the setup as
 written, a save refuses a `Baseline: ` rule outside its report's catalog with `baseline_unknown`
 (charging nothing), a save takes up to 25 rules, and the memo page asks for approval before
 saving any rules and lists reports not set up yet. Server instructions are unchanged. After the

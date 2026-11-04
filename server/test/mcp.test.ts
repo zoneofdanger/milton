@@ -274,20 +274,20 @@ test("two authenticated clients isolate tenants, save once and reject retired to
     const filed = (await call(0, "get_cover_sheet")).value;
     expect(filed.text).toBe("- " + input.text);
     expect(filed.setup).toBeUndefined();
-    const lifecycle = await call(0, "get_cover_sheet", {
-      hook_event: "UserPromptSubmit",
+    // get_cover_sheet takes no arguments: any argument is refused.
+    const stale = await clients[0]!.callTool({
+      name: "get_cover_sheet",
+      arguments: { event: "start" },
     });
-    expect(lifecycle.isError).not.toBe(true);
-    expect(lifecycle.value.hookSpecificOutput).toMatchObject({
-      hookEventName: "UserPromptSubmit",
+    expect(stale).toEqual({
+      isError: true,
+      content: [
+        {
+          type: "text",
+          text: 'Input validation error: Invalid arguments for tool get_cover_sheet: Unrecognized key: "event"',
+        },
+      ],
     });
-    expect(JSON.stringify(lifecycle.value.hookSpecificOutput)).toContain(
-      input.text,
-    );
-    // The index rides along with the cover sheet, so hooks deliver it too.
-    expect(JSON.stringify(lifecycle.value.hookSpecificOutput)).toContain(
-      "drafting an email I'll send",
-    );
     // Reports read by id (doc is an alias); an empty one is a heading and a when line.
     const document = (await call(0, "get_report", { report_id: "doc" })).value;
     expect(document).toMatchObject({

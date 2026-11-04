@@ -14,8 +14,7 @@ const canonical = new URL(Astro.url.pathname, Astro.site);
 const currentPath = Astro.url.pathname.replace(/(.)\/$/, "$1");
 
 /* The forty-link footer, for a company of one. Entries without an href are
-   plain text and must not look like links. Privacy and Terms live only here
-   on these pages; the legal pages keep the plain footer. */
+   plain text and must not look like links. Every static page shares this footer. */
 const footerColumns: {
   heading: string;
   entries: { label: string; href?: string }[];
@@ -32,7 +31,7 @@ const footerColumns: {
   {
     heading: "Resources",
     entries: [
-      { label: "Setup guide", href: "/setup" },
+      { label: "Setup", href: "/setup" },
       { label: "Notes", href: "/notes" },
       { label: "Source", href: "https://github.com/zoneofdanger/milton" },
     ],
@@ -100,42 +99,34 @@ const footerColumns: {
       <slot />
     </main>
     <footer class="wrap">
-      {!legal && (
-        <nav class="footer-grid" aria-label="Footer">
-          {footerColumns.map(({ heading, entries }) => (
-            <div class="footer-column">
-              <p class="eyebrow">{heading}</p>
-              <ul>
-                {entries.map(({ label, href }) => (
-                  <li>
-                    {href ? (
-                      <a
-                        href={href}
-                        aria-current={href === currentPath ? "page" : undefined}
-                      >
-                        {label}
-                      </a>
-                    ) : (
-                      <span>{label}</span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </nav>
-      )}
+      <nav class="footer-grid" aria-label="Footer">
+        {footerColumns.map(({ heading, entries }) => (
+          <div class="footer-column">
+            <p class="eyebrow">{heading}</p>
+            <ul>
+              {entries.map(({ label, href }) => (
+                <li>
+                  {href ? (
+                    <a
+                      href={href}
+                      aria-current={href === currentPath ? "page" : undefined}
+                    >
+                      {label}
+                    </a>
+                  ) : (
+                    <span>{label}</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </nav>
       <div class="footer-links">
         <span>
           © 2026 Zone of Danger, LLC. A founder who has mistaken this for a
           company.
         </span>
-        {legal && (
-          <nav aria-label="Legal">
-            <a href="/privacy">Privacy</a>
-            <a href="/terms">Terms</a>
-          </nav>
-        )}
         <p class="footer-aside">
           A small website with strong feelings about punctuation.
         </p>
@@ -242,15 +233,6 @@ const footerColumns: {
     padding-top: var(--space-4);
     font-size: var(--text-caption);
     color: var(--muted);
-  }
-  .footer-links nav {
-    display: flex;
-    gap: var(--space-5);
-  }
-  .footer-links a {
-    display: inline-flex;
-    align-items: center;
-    min-height: var(--touch-target);
   }
   /* The tagline sits at the row's right end; on phones it stacks under the
      copyright. */

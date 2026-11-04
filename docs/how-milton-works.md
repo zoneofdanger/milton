@@ -397,6 +397,7 @@ Files: `server/drizzle/`, `server/src/store/schema.ts`, `server/src/store/databa
 Files: `apps/site/`.
 
 - Astro builds static pages and copies shared fonts from the theme.
+- Every static page, including 404, shows the same shared footer navigation.
 - The hero demo loops its eight-turn conversation on one clock, holding the final draft
   for 2,150 ms before repeating every 10,500 ms; requests and the approved email appear
   whole, and AI replies type, with no playback controls or status announcements.

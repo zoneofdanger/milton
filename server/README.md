@@ -630,7 +630,6 @@ The daily count is read from `save_requests` (`memo_update_state`,
 `memo_update_day`) under the account lock. `save_requests.reserved_micros` stays,
 always 0, because the save guard covers it.
 
-
 ### No count limit (0021)
 
 Migration 0021 replaces `milton_card_guard` and `milton_memo_guard` without their count

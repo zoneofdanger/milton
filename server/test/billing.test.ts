@@ -126,6 +126,7 @@ test("Stripe webhook refuses unsigned, stale, forged, oversized and non-JSON req
       [forged, "another secret"],
       [sign(updated.replace("active", "trialing")), "a different body"],
       ["t=abc,v1=00", "malformed"],
+      [`t=${Math.floor(Date.now() / 1000)},v1`, "bare v1"],
     ] as const)
       expect([why, ...(await post(updated, signature))]).toEqual([
         why,

@@ -488,11 +488,12 @@ export function stripeWebhook(config: RuntimeConfig) {
         SIGNATURE_TOLERANCE_SECONDS,
       );
     } catch (error) {
+      // Only a signed body that is not JSON is event_invalid; every other
+      // failure, including the SDK's own argument errors on a malformed
+      // header, is a bad signature.
       return answer(400, {
         error:
-          error instanceof Stripe.errors.StripeSignatureVerificationError
-            ? "signature_invalid"
-            : "event_invalid",
+          error instanceof SyntaxError ? "event_invalid" : "signature_invalid",
       });
     }
     let event: z.infer<typeof stripeEvent>;

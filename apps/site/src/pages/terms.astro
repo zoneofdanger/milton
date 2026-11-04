@@ -34,9 +34,15 @@ import SiteLayout from "../layouts/SiteLayout.astro";
     download.
   </p>
   <p>
+    If a renewal payment fails, Stripe retries it. Assistant reads and saves
+    continue for 3 days after the renewal date, then pause until the payment
+    succeeds. If every retry fails, your subscription is canceled.
+  </p>
+  <p>
     You can cancel at any time in Stripe’s billing portal, which you open from
     the account menu in the Milton app. Cancellation takes effect at the end of
-    the current billing period.
+    the current billing period. Payments are not refunded, including for a
+    partial month, except where the law requires a refund.
   </p>
   <p>
     Deleting your account deletes your Stripe customer record, which ends any

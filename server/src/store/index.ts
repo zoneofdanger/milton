@@ -14,6 +14,7 @@ import {
   linkStripeCustomer,
   lockStripeCustomer,
   recordStripeEvent,
+  saveStripeSubscription,
   stripeEventRecorded,
   type StripeEvent,
   type StripeSubscriptionState,
@@ -450,11 +451,8 @@ export type PersonStore = Awaited<
   ReturnType<typeof personStoreForCurrentRequest>
 >;
 
-/** The signed-in account's billing state, for the checkout and portal routes. */
-export function billingForAccount(
-  bindings: StoreBindings,
-  auth: VerifiedStoreAuth,
-) {
+/** One account's billing state, for sign-in and the checkout and portal routes. */
+export function billingForAccount(bindings: StoreBindings, userId: string) {
   const db = database(bindings);
   const wrap = async <T>(work: Promise<T>) => {
     try {
@@ -464,10 +462,12 @@ export function billingForAccount(
     }
   };
   return {
-    userId: auth.userId,
-    account: () => wrap(billingAccount(db, auth.userId)),
+    userId,
+    account: () => wrap(billingAccount(db, userId)),
     linkCustomer: (customer: string) =>
-      wrap(linkStripeCustomer(db, auth.userId, customer)),
+      wrap(linkStripeCustomer(db, userId, customer)),
+    saveSubscription: (state: StripeSubscriptionState) =>
+      wrap(saveStripeSubscription(db, userId, state)),
   };
 }
 

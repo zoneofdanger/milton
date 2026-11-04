@@ -9,6 +9,7 @@ import {
   resolveIdentityAccount,
 } from "./store";
 import { AuthError } from "./token";
+import { ensureSubscription } from "./billing";
 import { navigation, page } from "./pages";
 import {
   cookieValue,
@@ -145,10 +146,11 @@ export const signInRoutes = async (ctx: PageContext): Promise<Response> => {
         : "/login";
       const user = await session();
       if (user) {
-        await resolveIdentityAccount(config, {
+        const { miltonUserId } = await resolveIdentityAccount(config, {
           provider: "neon",
           subject: user.id,
         });
+        await ensureSubscription(config, miltonUserId, user.email);
         rotateCsrf();
         if (!query) return Response.redirect(config.appOrigin + "/", 302);
         const params = new URLSearchParams(query);

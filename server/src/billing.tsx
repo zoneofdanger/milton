@@ -80,7 +80,11 @@ async function stripeAnswer<T>(response: Response, shape: z.ZodType<T>) {
 
 const stripePost = async <T,>(
   billing: BillingConfig,
-  path: "customers" | "checkout/sessions" | "billing_portal/sessions",
+  path:
+    | "customers"
+    | "subscriptions"
+    | "checkout/sessions"
+    | "billing_portal/sessions",
   params: Record<string, string>,
   shape: z.ZodType<T>,
   idempotencyKey?: string,
@@ -154,6 +158,72 @@ const redirectTo = (origin: string) =>
       .refine((url) => url.startsWith(origin + "/")),
   });
 
+// The key makes a repeated or concurrent first call reuse one customer. Stored
+// before anything else happens with it, so a later failure leaves it findable.
+async function createCustomer(
+  billing: BillingConfig,
+  store: ReturnType<typeof billingForAccount>,
+  email?: string,
+) {
+  const created = await stripePost(
+    billing,
+    "customers",
+    {
+      "metadata[milton_user_id]": store.userId,
+      ...(email ? { email } : {}),
+    },
+    stripeCustomer,
+    `milton-customer-${store.userId}`,
+  );
+  const customer = await store.linkCustomer(created.id);
+  if (!customer) throw stripeFailed();
+  return customer;
+}
+
+/** Gives an enrolled account with no subscription its 30-day Stripe trial; a
+ * no-op for any other account or without billing. A stored customer is listed
+ * first, so a retry stores what exists rather than starting a second trial. Never
+ * throws: a sign-up that hits a Stripe failure heals at the next sign-in, and the
+ * gate allows the account meanwhile. Each Stripe call is bound by its timeout. */
+export async function ensureSubscription(
+  config: RuntimeConfig,
+  userId: string,
+  email?: string,
+) {
+  const billing = config.billing;
+  if (!billing) return;
+  try {
+    const store = billingForAccount(config, userId);
+    const account = await store.account();
+    if (!account.enrolled || account.status !== null) return;
+    if (account.customer) {
+      const found = decidingSubscription(
+        await listSubscriptions(billing, account.customer),
+      );
+      if (found) return await store.saveSubscription(found);
+    }
+    const customer =
+      account.customer ?? (await createCustomer(billing, store, email));
+    await store.saveSubscription(
+      await stripePost(
+        billing,
+        "subscriptions",
+        {
+          customer,
+          "items[0][price]": billing.priceId,
+          trial_period_days: "30",
+          "payment_settings[save_default_payment_method]": "on_subscription",
+          "trial_settings[end_behavior][missing_payment_method]": "cancel",
+        },
+        stripeSubscription,
+        `milton-subscription-${userId}`,
+      ),
+    );
+  } catch (error) {
+    logUnexpected("billing", error);
+  }
+}
+
 /** POST /billing/checkout and POST /billing/portal: signed-in forms with the
  * page CSRF check. Checkout finds or creates the account's Stripe customer,
  * stores it on the clock row, and redirects to a subscription Checkout for the
@@ -172,7 +242,12 @@ export async function billingRoutes(ctx: PageContext): Promise<Response> {
   const user = await signedIn();
   const store = billingForAccount(
     config,
-    await lookupIdentityAccount(config, { provider: "neon", subject: user.id }),
+    (
+      await lookupIdentityAccount(config, {
+        provider: "neon",
+        subject: user.id,
+      })
+    ).userId,
   );
   const account = await store.account();
   const home = config.appOrigin + "/";
@@ -204,19 +279,8 @@ export async function billingRoutes(ctx: PageContext): Promise<Response> {
       409,
     );
   if (account.paid && account.customer) return portal(account.customer);
-  let customer = account.customer;
-  if (!customer) {
-    // The key makes a repeated or concurrent first checkout reuse one customer.
-    const created = await stripePost(
-      billing,
-      "customers",
-      { "metadata[milton_user_id]": store.userId },
-      stripeCustomer,
-      `milton-customer-${store.userId}`,
-    );
-    customer = (await store.linkCustomer(created.id)) ?? null;
-    if (!customer) throw stripeFailed();
-  }
+  const customer =
+    account.customer ?? (await createCustomer(billing, store, user.email));
   const session = await stripePost(
     billing,
     "checkout/sessions",

@@ -19,14 +19,18 @@ const subscriptionColumns = (state: StripeSubscriptionState) =>
 
 export async function billingAccount(db: StoreSession, userId: string) {
   const row = (
-    await db.query<{ customer: string | null; paid: boolean }>(sql`
-    SELECT stripe_customer_id AS customer,
+    await db.query<{
+      customer: string | null;
+      status: string | null;
+      paid: boolean;
+    }>(sql`
+    SELECT stripe_customer_id AS customer, subscription_status AS status,
       coalesce(paid_through > clock_timestamp(),false) AS paid
     FROM trial_accounts WHERE user_id=${userId}`)
   )[0];
   return row
-    ? { enrolled: true, customer: row.customer, paid: row.paid }
-    : { enrolled: false, customer: null, paid: false };
+    ? { enrolled: true, ...row }
+    : { enrolled: false, customer: null, status: null, paid: false };
 }
 
 /** Stores the customer on the clock row unless one is already stored; returns
@@ -41,6 +45,17 @@ export async function linkStripeCustomer(
     UPDATE trial_accounts SET stripe_customer_id=coalesce(stripe_customer_id,${customer})
     WHERE user_id=${userId} RETURNING stripe_customer_id AS customer`)
   )[0]?.customer;
+}
+
+/** Stores the first subscription found for a row that has none. A webhook that
+ * got there first holds a state at least as current, so it stays. */
+export async function saveStripeSubscription(
+  db: StoreSession,
+  userId: string,
+  state: StripeSubscriptionState,
+) {
+  await db.query(sql`UPDATE trial_accounts SET ${subscriptionColumns(state)}
+    WHERE user_id=${userId} AND subscription_status IS NULL`);
 }
 
 /** Locks the row holding this customer, if any, for the rest of the transaction.

@@ -203,6 +203,12 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
   blocks them otherwise.
 - New accounts obey `signup_mode`: closed, allowlist, or open.
 - A new account starts empty, with a trial row if trials are on.
+- Every `/login` with a session gives a trial row with no status a Stripe customer and a
+  30-day Stripe trial with no card, which cancels at the end if no card was added.
+- A stored customer is listed first, so a retry stores the subscription rather than
+  starting a second trial.
+- Stripe being unset or failing never blocks sign-in; the row stays allowed and heals at
+  the next sign-in.
 - A returning deleted identity gets a row already marked canceled, found through its hash,
   so it reads as expired and gets no Stripe trial.
 - Disconnecting writes Milton's refusal first, then removes the consent at Neon.

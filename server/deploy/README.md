@@ -24,7 +24,7 @@ The manifests pin what is serving now: app `milton-app-simp-893d0ce`
 (`sha256:622c2142…`, env 3, key 1), both connecting as `milton_app`; see the current
 release below. There is no worker service or scheduler job. There is no memo-update
 allowance; the daily call cap bounds saves. Existing positive account safeguards remain
-in effect. Trials and billing remain disabled.
+in effect. Trials and billing are live (since 2026-11-04).
 Each image includes both roles and browser assets. Validate manifests before applying:
 
 ```sh
@@ -910,7 +910,7 @@ Release order (it replaces 0028's: 0028's check runs at step 5 and one runner pa
 both):
 
 1. As the owner, while the current revision serves, apply the pre-step:
-   `psql "$MILTON_OWNER_DATABASE_URL" -v ON_ERROR_STOP=1 -f server/drizzle/pre/0029_one_transaction.sql`.
+   `psql -v ON_ERROR_STOP=1 -f server/drizzle/pre/0029_one_transaction.sql`, with the owner login supplied through `PGHOST`, `PGDATABASE`, `PGUSER`, `PGPASSWORD` and `PGSSLMODE` in the process environment rather than a URL on the command line (a command argument shows in process listings and shell history).
    It replaces `milton_claim_clock` so a receipt inserted with its result is filled in as
    complete, its deadline its claim time. Every earlier revision inserts claims without a
    result and is unaffected, and either revision replays the other's receipts, so code

@@ -759,8 +759,9 @@ Release order:
 2. Only once both services are fully on the new revision (traffic at 100% and the old
    revision idle), take a Neon snapshot, then, with the owner connection, run the check
    below. Expect `functions` to be `milton_memo_update_guard` only, `views` 0 and
-   `runtime_update` `singleton`. `held` may be nonzero: claims that expired while held keep
-   that state, and 0028 drops it with the column.
+   `runtime_update` `singleton`. Record `enabled` and `daily_limit`: the rollback restores
+   neither. `held` may be nonzero: claims that expired while held keep that state, and
+   0028 drops it with the column.
 
    ```sql
    SELECT
@@ -773,7 +774,8 @@ Release order:
        WHERE t.attrelid = 'store_config'::regclass AND a.grantee = 'milton_runtime'::regrole
          AND a.privilege_type = 'UPDATE') AS runtime_update,
      (SELECT count(*) FROM save_requests WHERE memo_update_state = 'held')::int AS held,
-     (SELECT memo_updates_enabled FROM store_config WHERE singleton = 1) AS enabled;
+     (SELECT memo_updates_enabled FROM store_config WHERE singleton = 1) AS enabled,
+     (SELECT memo_updates_daily_limit FROM store_config WHERE singleton = 1) AS daily_limit;
    ```
 
 3. Apply 0028 with the normal runner.
@@ -782,9 +784,10 @@ Release order:
 an earlier revision cannot save or read through MCP: first run
 `server/drizzle/rollback/0028_no_memo_updates.sql` offline with writers stopped, then shift
 traffic. The rollback re-adds both config columns at their 0014 defaults (the allowance comes
-back **off**; set `memo_updates_enabled` again as the owner if that revision should enforce
-it), both receipt columns with every receipt at `none`, the check, the index, the 0014 guard,
-the 0026 save guard and the runtime's `UPDATE (singleton)` grant, which a revision from before
+back **off** at a limit of 100; set `memo_updates_enabled` and `memo_updates_daily_limit`
+to the recorded values as the owner if that revision should enforce it), both receipt
+columns with every receipt at `none`, the check, the index, the 0014 guard, the 0026 save
+guard and the runtime's `UPDATE (singleton)` grant, which a revision from before
 the sign-in lock removal needs. It restores shape, not data. The 0028 journal row stays, so
 re-forwarding means running `0028_no_memo_updates.sql` by hand, as one transaction that stops
 on the first error: `psql -1 -v ON_ERROR_STOP=1 -f server/drizzle/0028_no_memo_updates.sql`.

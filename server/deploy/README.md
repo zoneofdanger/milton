@@ -443,8 +443,12 @@ answered for:
     FROM users u WHERE u.id = t.user_id AND t.started_at < u.created_at
     AND t.subscription_status IS NULL;
 
-**Backfill.** After `trials_enabled` is flipped, give every existing account its trial, with
-the app's settings:
+**Backfill.** After `trials_enabled` is flipped, give every existing account its trial. Peter or
+the release agent runs it from a checkout of the released commit, in `server/` after
+`bun install --frozen-lockfile`. The runtime image cannot run it: it is Node with one bundled
+file, no `bun` and no `server/scripts`. Settings arrive as for `scripts/memo-updates.ts`: the app's
+dotenvx payload in `MILTON_ENCRYPTED_ENV_FILE` with `DOTENV_PRIVATE_KEY`, or explicit environment
+variables, never as command arguments. The script prints no value.
 
     bun --no-env-file scripts/backfill-subscriptions.ts          # dry run
     bun --no-env-file scripts/backfill-subscriptions.ts --apply

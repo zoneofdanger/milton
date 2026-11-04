@@ -83,9 +83,11 @@ if (import.meta.main) {
     console.error(`Usage:
   bun --no-env-file scripts/backfill-subscriptions.ts [--apply] [--allow-test-key]
 
-Uses the app's settings. Dry run unless --apply is passed. Requires trials_enabled
-and a live Stripe key; --allow-test-key is for disposable databases only. Prints
-counts only, and exits nonzero if --apply leaves any account with no status.`);
+Run from a checkout, not the image. Uses the app's settings: explicit environment
+variables, or a dotenvx payload file in MILTON_ENCRYPTED_ENV_FILE with
+DOTENV_PRIVATE_KEY. Dry run unless --apply is passed. Requires trials_enabled and a
+live Stripe key; --allow-test-key is for disposable databases only. Prints counts
+only, and exits nonzero if --apply leaves any account with no status.`);
     process.exit(2);
   }
   const apply = args.includes("--apply");

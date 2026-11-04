@@ -24,7 +24,7 @@ export interface BillingConfig {
 
 // All unset leaves billing off: the billing routes answer 503 and the rest of the
 // app runs. Any one set means all three must be valid, or startup fails: a typo
-// must not silently switch off the rule that no assistant connects without a
+// must not silently switch off the rule that no new approval lands without a
 // subscription. Values are never logged or echoed.
 export function billingConfig(
   env: NodeJS.ProcessEnv,

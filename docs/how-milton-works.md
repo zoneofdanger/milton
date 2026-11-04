@@ -205,8 +205,10 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
 - A new account starts empty, with a trial row if trials are on.
 - With billing configured, a trial row with no status gets a Stripe customer and a 30-day
   Stripe trial with no card, which cancels at the end if no card was added.
-- No assistant connects until then: `/login`, the consent page, and an Allow on the consent
+- No new approval lands until then: `/login`, the consent page, and an Allow on the consent
   form each ensure it first, and denying needs nothing.
+- An approval Neon already holds skips those pages and refreshes without Milton, so existing
+  accounts depend on the backfill.
 - A Stripe failure stops that step with a 503 saying to try again, and charges nothing;
   repeating the sign-in is the retry.
 - On a plain web sign-in, with no assistant involved, that page also links to Milton home.

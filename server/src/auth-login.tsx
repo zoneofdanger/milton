@@ -87,10 +87,12 @@ export const signInRoutes = async (ctx: PageContext): Promise<Response> => {
     csrfName,
     loopName,
   } = ctx;
-  // No assistant connects until the account has a subscription. Every step that
-  // can lead to an approval comes through here: /login with a session, and the
-  // consent page and form, which a live session reaches without /login. A failure
-  // stops the step with a 503 and a way back to sign-in, which is the retry.
+  // No new approval lands until the account has a subscription. Every Milton step
+  // that can lead to one comes through here: /login with a session, and the consent
+  // page and form, which a live session reaches without /login. A failure stops the
+  // step with a 503 and a way back to sign-in, which is the retry. An approval Neon
+  // already holds skips these pages and refreshes without Milton, so existing
+  // accounts depend on the backfill.
   const requireSubscription = async (
     userId: string,
     email: string | undefined,

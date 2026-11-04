@@ -93,7 +93,8 @@ export const users = pgTable(
   ],
 );
 // No row means existing early access. Only an explicitly enabled new-account
-// enrollment creates a row; a subscription provider will own paidThrough.
+// enrollment creates a row. Stripe owns paidThrough through the signed webhook;
+// stripeCustomerId is set by checkout before Stripe sees the account.
 export const trialAccounts = pgTable(
   "trial_accounts",
   {
@@ -103,9 +104,14 @@ export const trialAccounts = pgTable(
     startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
     paidThrough: timestamp("paid_through", { withTimezone: true }),
     noticeStage: integer("notice_stage").notNull().default(0),
+    stripeCustomerId: text("stripe_customer_id").unique(),
   },
   (t) => [
     check("trial_notice_stage", sql`${t.noticeStage} BETWEEN 0 AND 2`),
+    check(
+      "trial_stripe_customer",
+      sql`${t.stripeCustomerId} IS NULL OR ${t.stripeCustomerId} ~ '^cus_[A-Za-z0-9]{1,251}$'`,
+    ),
     check(
       "trial_finite_dates",
       sql`(${t.startedAt} IS NULL OR isfinite(${t.startedAt})) AND (${t.paidThrough} IS NULL OR isfinite(${t.paidThrough}))`,
@@ -545,6 +551,26 @@ export const acceptedChanges = pgTable(
     check(
       "accepted_change_hashes",
       sql`${t.beforeTps} ~ '^[a-f0-9]{64}$' AND ${t.afterTps} ~ '^[a-f0-9]{64}$' AND ${t.beforeSource} ~ '^[a-f0-9]{64}$' AND ${t.afterSource} ~ '^[a-f0-9]{64}$'`,
+    ),
+  ],
+);
+
+// Stripe webhook events already applied, by event id: a redelivery changes
+// nothing. Holds the id, type and a sha256 of the raw body, never the payload.
+export const stripeEvents = pgTable(
+  "stripe_events",
+  {
+    id: text("id").primaryKey(),
+    type: text("type").notNull(),
+    receivedAt: timestamp("received_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    payloadSha256: text("payload_sha256").notNull(),
+  },
+  (t) => [
+    check(
+      "stripe_event_shape",
+      sql`${t.id} ~ '^evt_[A-Za-z0-9]{1,251}$' AND char_length(${t.type}) BETWEEN 1 AND 128 AND ${t.payloadSha256} ~ '^[a-f0-9]{64}$'`,
     ),
   ],
 );

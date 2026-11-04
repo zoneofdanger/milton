@@ -7,6 +7,7 @@ import {
 } from "./local-store";
 import { fixtureStore, seedUsers } from "./store-fixtures";
 import { checkRuntimeRole } from "../scripts/check-runtime-role";
+import { linkStripeCustomer, recordStripeEvent } from "../src/store/billing";
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
@@ -48,6 +49,116 @@ const schemaCatalog = async (pg: PGlite) => {
     ),
   };
 };
+
+test("0025 adds the Stripe ledger and customer column, the runtime applies an event once, and rollback refuses until both are empty", async () => {
+  const base = await migratedThrough(24);
+  const pg = await migratedThrough(24);
+  const post = await migratedThrough(25);
+  try {
+    const up = await drizzleSql("0025_stripe_billing.sql");
+    const down = await drizzleSql("rollback/0025_stripe_billing.sql");
+    await pg.exec(`INSERT INTO users(id) VALUES ('billing');
+      INSERT INTO trial_accounts(user_id,started_at) VALUES ('billing','2026-11-01T00:00:00Z')`);
+    const clock = async () =>
+      (
+        await pg.query(
+          "SELECT user_id,started_at::text,paid_through::text,notice_stage FROM trial_accounts",
+        )
+      ).rows;
+    const kept = await clock();
+    // The runtime's privileges on the new objects, through 0024's defaults.
+    const grants = async () =>
+      (
+        await pg.query(
+          `SELECT c.relname,string_agg(a.privilege_type,',' ORDER BY a.privilege_type) AS privileges
+           FROM pg_class c CROSS JOIN LATERAL aclexplode(c.relacl) a
+           WHERE a.grantee='milton_runtime'::regrole AND c.relname IN ('stripe_events','trial_accounts')
+           GROUP BY 1 ORDER BY 1`,
+        )
+      ).rows;
+    const forward = async () => {
+      await pg.exec("BEGIN;" + up + "COMMIT;");
+      expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(post));
+      expect(await grants()).toEqual([
+        { relname: "stripe_events", privileges: "INSERT,SELECT,UPDATE" },
+        { relname: "trial_accounts", privileges: "INSERT,SELECT,UPDATE" },
+      ]);
+    };
+    await forward();
+    expect(await clock()).toEqual(kept);
+    expect(
+      (await pg.query("SELECT stripe_customer_id FROM trial_accounts")).rows,
+    ).toEqual([{ stripe_customer_id: null }]);
+
+    await pg.exec(
+      "CREATE ROLE milton_app_fixture LOGIN IN ROLE milton_runtime; SET ROLE milton_app_fixture",
+    );
+    const db = storeDatabase(pg);
+    try {
+      expect(await linkStripeCustomer(db, "billing", "cus_fixture")).toBe(
+        "cus_fixture",
+      );
+      // A second customer never replaces the stored one.
+      expect(await linkStripeCustomer(db, "billing", "cus_other")).toBe(
+        "cus_fixture",
+      );
+      const paid = {
+        id: "evt_fixture",
+        type: "invoice.paid",
+        payloadSha256: "a".repeat(64),
+        action: {
+          kind: "paid_through" as const,
+          customer: "cus_fixture",
+          periodEnd: Date.parse("2026-12-01T00:00:00Z") / 1000,
+        },
+      };
+      expect(await recordStripeEvent(db, paid)).toEqual({
+        recorded: true,
+        updated: 1,
+      });
+      // The same event id again changes nothing, whatever it carries.
+      expect(
+        await recordStripeEvent(db, {
+          ...paid,
+          action: { kind: "clear", customer: "cus_fixture" },
+        }),
+      ).toEqual({ recorded: false, updated: 0 });
+      for (const statement of [
+        "DELETE FROM stripe_events",
+        "DELETE FROM trial_accounts",
+      ])
+        await expect(pg.query(statement)).rejects.toThrow("permission denied");
+    } finally {
+      await pg.exec("RESET ROLE");
+    }
+    await pg.exec("DROP ROLE milton_app_fixture");
+    expect(
+      (
+        await pg.query(
+          "SELECT stripe_customer_id,paid_through=timestamptz '2026-12-04T00:00:00Z' AS grace FROM trial_accounts",
+        )
+      ).rows,
+    ).toEqual([{ stripe_customer_id: "cus_fixture", grace: true }]);
+
+    await expect(pg.exec(down)).rejects.toThrow(
+      "stripe_billing_rollback_requires_no_customers",
+    );
+    await pg.exec("ROLLBACK");
+    await pg.exec("UPDATE trial_accounts SET stripe_customer_id=NULL");
+    await expect(pg.exec(down)).rejects.toThrow(
+      "stripe_billing_rollback_requires_no_events",
+    );
+    await pg.exec("ROLLBACK");
+    await pg.exec("DELETE FROM stripe_events");
+    await pg.exec(down);
+    expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(base));
+    await forward();
+  } finally {
+    await post.close();
+    await pg.close();
+    await base.close();
+  }
+}, 30000);
 
 test("0024 runtime role saves through its grants, cannot change the schema or bypass a trigger, and rolls back", async () => {
   const base = await migratedThrough(23);

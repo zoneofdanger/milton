@@ -95,6 +95,10 @@ test("an SDK client receives instructions, discovers the four tools, and reads t
     // Assistants see cover sheet and reports, never the retired TPS name.
     for (const served of [client.getInstructions(), ...tools])
       expect(JSON.stringify(served)).not.toMatch(/TPS|tps_report/);
+    // Nothing served mentions the retired memo-update allowance.
+    expect(JSON.stringify([client.getInstructions(), tools])).not.toMatch(
+      /memo.update|counts once/i,
+    );
     const text = client.getInstructions();
     expect(text).toContain('"Did you get the memo?"');
     expect(text).toContain('"Did you get that memo?"');
@@ -678,21 +682,18 @@ test("tool dispatch logs bounded final outcomes, invalid arguments, and unknown 
       {
         tool: "get_cover_sheet",
         outcome: "read",
-        memo_update: "none",
         elapsed_ms: expect.any(Number),
       },
       {
         tool: "create_memo",
         outcome: "refused",
         error_code: "invalid_arguments",
-        memo_update: "none",
         elapsed_ms: expect.any(Number),
       },
       {
         tool: "unknown",
         outcome: "refused",
         error_code: "unknown_tool",
-        memo_update: "none",
         elapsed_ms: expect.any(Number),
       },
     ]);
@@ -702,7 +703,7 @@ test("tool dispatch logs bounded final outcomes, invalid arguments, and unknown 
   }
 });
 
-test("final outcomes include early refusal/read failure and advisory/logging failures cannot reverse a save", async () => {
+test("final outcomes include early refusal/read failure and a logging failure cannot reverse a save", async () => {
   const { StoreError, lookupIdentityAccount, storeForCurrentRequest } =
     await import("../src/store");
   const local = await localStore(),
@@ -710,9 +711,6 @@ test("final outcomes include early refusal/read failure and advisory/logging fai
   let server: ReturnType<typeof createMiltonServer> | undefined,
     client: Client | undefined;
   try {
-    await local.pg.exec(
-      "UPDATE store_config SET memo_updates_enabled=true,memo_updates_daily_limit=2",
-    );
     await resolveIdentityAccount(local.env, {
       provider: "neon",
       subject: "outcome-fixture",
@@ -752,9 +750,6 @@ test("final outcomes include early refusal/read failure and advisory/logging fai
         );
       return originalDocuments();
     };
-    store.memoUpdates = async () => {
-      throw new Error("Fictional balance failure");
-    };
     server = createMiltonServer(store, (event) => {
       events.push(event);
       if (throwLog) throw new Error("Fictional logger failure");
@@ -785,9 +780,7 @@ test("final outcomes include early refusal/read failure and advisory/logging fai
     });
     const data = JSON.parse((saved.content as { text: string }[])[0]!.text);
     expect(data.status).toBe("saved");
-    expect(data.memo_update.charged).toBe(1);
-    expect(data.memo_updates).toBeUndefined();
-    store.memoUpdates = () => new Promise(() => {});
+    expect(data.memo_update).toBeUndefined();
     throwLog = true;
     const unchanged = await client.callTool({
       name: "create_memo",
@@ -802,17 +795,12 @@ test("final outcomes include early refusal/read failure and advisory/logging fai
       JSON.parse((unchanged.content as { text: string }[])[0]!.text).status,
     ).toBe("unchanged");
     expect(
-      events.map((e) => [
-        e.tool,
-        e.outcome,
-        e.error_code ?? null,
-        e.memo_update,
-      ]),
+      events.map((e) => [e.tool, e.outcome, e.error_code ?? null]),
     ).toEqual([
-      ["get_cover_sheet", "refused", "rate_limited", "none"],
-      ["get_cover_sheet", "failed", "store_unavailable", "none"],
-      ["create_memo", "saved", null, "charged"],
-      ["create_memo", "unchanged", null, "released"],
+      ["get_cover_sheet", "refused", "rate_limited"],
+      ["get_cover_sheet", "failed", "store_unavailable"],
+      ["create_memo", "saved", null],
+      ["create_memo", "unchanged", null],
     ]);
     expect(JSON.stringify(events)).not.toContain("private-client");
     expect(JSON.stringify(events)).not.toContain("Fictional");

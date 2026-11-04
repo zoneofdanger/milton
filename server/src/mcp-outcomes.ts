@@ -17,8 +17,6 @@ export type ToolCall = {
     | "refused"
     | "failed";
   elapsed_ms: number;
-  memo_update:
-    "none" | "held" | "charged" | "released" | "replayed" | "unknown";
   error_code?: string;
 };
 export const knownTool = (name: unknown): ToolCall["tool"] =>
@@ -33,12 +31,6 @@ const statuses = z.enum([
 const payload = z.object({
   status: statuses.optional(),
   error: z.string().max(64).optional(),
-  memo_update: z
-    .object({
-      state: z.enum(["none", "held", "charged", "released"]),
-      replayed: z.boolean(),
-    })
-    .optional(),
 });
 const response = z.object({
   error: z.object({ code: z.number() }).optional(),
@@ -67,8 +59,6 @@ export const loggedErrorCodes = new Set([
   "request_unavailable",
   "save_outcome_unknown",
   "assistant_required",
-  "memo_updates_exhausted",
-  "memo_updates_pending",
   "edit_conflict",
   "move_conflict",
   "sample_conflict",
@@ -92,8 +82,6 @@ const refusals = new Set([
   "request_too_large",
   "request_id_reused",
   "assistant_required",
-  "memo_updates_exhausted",
-  "memo_updates_pending",
   "invalid_token",
   "session_required",
 ]);
@@ -118,7 +106,6 @@ export function finalToolCall(
       0,
       Math.min(3_600_000, Math.round(performance.now() - started)),
     ),
-    memo_update: "none",
   };
   const parsed = response.safeParse(message);
   if (!parsed.success)
@@ -149,7 +136,6 @@ export function finalToolCall(
       : "tool_error";
     if (!details.status)
       event.outcome = refusals.has(details.error) ? "refused" : "failed";
-    if (details.error === "save_outcome_unknown") event.memo_update = "unknown";
   } else if (value.result?.isError) {
     event.outcome = "refused";
     event.error_code =
@@ -164,9 +150,5 @@ export function finalToolCall(
           ? "invalid_arguments"
           : "tool_error";
   }
-  if (details?.memo_update)
-    event.memo_update = details.memo_update.replayed
-      ? "replayed"
-      : details.memo_update.state;
   return event;
 }

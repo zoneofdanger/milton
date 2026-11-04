@@ -71,6 +71,80 @@ test("a release passes the owner URL in its own variable, checked, and an empty 
   }
 });
 
+test("0028 drops the memo-update columns, guard and the runtime's store_config UPDATE, keeps every receipt, and rolls back to the 0027 shape", async () => {
+  const base = await migratedThrough(27);
+  const pg = await migratedThrough(27);
+  const post = await migratedThrough(28);
+  try {
+    const up = await drizzleSql("0028_no_memo_updates.sql");
+    const down = await drizzleSql("rollback/0028_no_memo_updates.sql");
+    const id = (n: number) => `00000000-0000-4000-8000-0000000000${n}`;
+    // Receipts as the pre-0028 code wrote them: charged, released, held, none.
+    await pg.exec(`INSERT INTO users(id) VALUES ('memo');
+      INSERT INTO save_requests(user_id,request_id,input_hash,source_hash,deadline,completed,result_json,memo_update_day,memo_update_state) VALUES
+      ('memo','${id(10)}',repeat('a',64),repeat('c',64),now(),true,'{"status":"saved"}','2026-11-01','charged'),
+      ('memo','${id(11)}',repeat('a',64),repeat('c',64),now(),true,'{"status":"unchanged"}','2026-11-01','released'),
+      ('memo','${id(12)}',repeat('a',64),repeat('c',64),now(),false,'{}','2026-11-02','held'),
+      ('memo','${id(13)}',repeat('a',64),repeat('c',64),now(),false,'{}',NULL,'none');
+      UPDATE store_config SET memo_updates_enabled=true;`);
+    const rows = async () =>
+      (
+        await pg.query(
+          `SELECT (SELECT retained_bytes FROM users WHERE id='memo') AS bytes,
+            (SELECT jsonb_agg(jsonb_build_array(request_id,completed,result_json,claimed_at=created_at) ORDER BY request_id) FROM save_requests) AS saves,
+            (SELECT limits_json FROM store_config) AS limits`,
+        )
+      ).rows;
+    const kept = await rows();
+    const configUpdate = async () =>
+      (
+        await pg.query(
+          `SELECT t.attname FROM pg_attribute t CROSS JOIN LATERAL aclexplode(t.attacl) a
+           WHERE t.attrelid='store_config'::regclass AND a.grantee='milton_runtime'::regrole AND a.privilege_type='UPDATE'`,
+        )
+      ).rows;
+    // An open receipt's claim time stays fixed under either guard.
+    const reclaim = (message: string) =>
+      expect(
+        pg.exec(
+          `UPDATE save_requests SET claimed_at=NULL WHERE request_id='${id(12)}'`,
+        ),
+      ).rejects.toThrow(message);
+    const forward = async () => {
+      await pg.exec("BEGIN;" + up + "COMMIT;");
+      expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(post));
+      expect(await rows()).toEqual(kept);
+      expect(await configUpdate()).toEqual([]);
+      await reclaim("save_receipt_is_immutable");
+    };
+    await forward();
+    // The current code's claim and completion, on a receipt removed after.
+    await pg.exec(`INSERT INTO save_requests(user_id,request_id,input_hash,source_hash,deadline,claimed_at,created_at)
+      VALUES ('memo','${id(14)}',repeat('b',64),repeat('c',64),now(),now(),now());
+      UPDATE save_requests SET completed=true,result_json='{"status":"saved"}' WHERE request_id='${id(14)}';
+      DELETE FROM save_requests WHERE request_id='${id(14)}';`);
+    expect(await rows()).toEqual(kept);
+    await pg.exec(down);
+    expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(base));
+    expect(await rows()).toEqual(kept);
+    expect(await configUpdate()).toEqual([{ attname: "singleton" }]);
+    // Shape, not data: the allowance comes back off and every receipt uncharged.
+    expect(
+      (
+        await pg.query(
+          "SELECT (SELECT memo_updates_enabled FROM store_config) AS enabled,(SELECT jsonb_agg(DISTINCT memo_update_state) FROM save_requests) AS states",
+        )
+      ).rows,
+    ).toEqual([{ enabled: false, states: ["none"] }]);
+    await reclaim("memo_update_is_immutable");
+    await forward();
+  } finally {
+    await post.close();
+    await pg.close();
+    await base.close();
+  }
+}, 30000);
+
 test("0027 adds the Stripe ledger and subscription columns, marks returning deleted identities canceled, the runtime applies an event once, and rollback refuses until nothing is recorded", async () => {
   const base = await migratedThrough(26);
   const pg = await migratedThrough(26);
@@ -383,8 +457,8 @@ test("0024 runtime role saves through its grants, cannot change the schema or by
       ).rows,
     });
     // What the runtime and the triggers it fires run on each table. DELETE
-    // only where the runtime deletes; store_config is locked FOR UPDATE, which
-    // needs one updatable column.
+    // only where the runtime deletes; store_config was then locked FOR UPDATE,
+    // which needed one updatable column (0028 revokes it).
     const used: Record<string, string> = {
       accepted_changes: "INSERT",
       assistant_disconnects: "DELETE,INSERT,SELECT",

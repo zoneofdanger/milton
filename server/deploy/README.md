@@ -22,9 +22,9 @@ secret versions. They contain configuration and secret references, never values.
 The manifests pin what is serving now: app `milton-app-dead-d03de23`
 (`sha256:29489483…`, env 2, key 1) and MCP `milton-mcp-dead-d03de23`
 (`sha256:29489483…`, env 3, key 1), both connecting as `milton_app`; see the current
-release below. There is no worker service or scheduler job. `memo_updates_enabled` and
-`memo_updates_daily_limit` in `store_config` control admission. Existing positive
-account safeguards remain in effect. Trials and billing remain disabled.
+release below. There is no worker service or scheduler job. There is no memo-update
+allowance; the daily call cap bounds saves. Existing positive account safeguards remain
+in effect. Trials and billing remain disabled.
 Each image includes both roles and browser assets. Validate manifests before applying:
 
 ```sh
@@ -392,14 +392,14 @@ Applied 2026-11-03 07:41:10Z (journal 25, snapshot `before-0024-runtime-role`,
 `snap-green-smoke-b8z8gpou`); app and MCP connect as `milton_app` since the role-0851a8c
 release. Migration 0024 creates `milton_runtime`, a NOLOGIN group role with
 only the statements the runtime runs on each table (DELETE only on `users` and
-`assistant_disconnects`; `store_config` read-only apart from the lock), USAGE on the
+`assistant_disconnects`; `store_config` read-only, its lock grant revoked by 0028), USAGE on the
 `instruction_card_position` sequence and schema `public`, CONNECT on the database, and
 SELECT, INSERT and UPDATE by default on tables later migrations create (see the server
 README for the table list). It owns nothing, so it cannot alter, drop or truncate a
 table, disable a trigger or read the Drizzle journal. App and MCP then connect as
 `milton_app`, a login role whose only membership is `milton_runtime`. Membership
-inherits; the runtime needs no `SET ROLE` and no code change. The migration runner and
-`scripts/memo-updates.ts` keep the `neondb_owner` connection and refuse any other role.
+inherits; the runtime needs no `SET ROLE` and no code change. The migration runner
+keeps the `neondb_owner` connection and refuses any other role.
 
 **Create `milton_app` with SQL, not the console or API.** Neon makes every role created
 in the console, CLI or API a member of `neon_superuser`, which brings
@@ -739,3 +739,63 @@ until its person first opens billing, when Milton copies their sign-in email to 
 who can add a card or pay passes through there, so nobody is charged without one unless the copy
 fails or sign-in supplied no address; until then Stripe sends that person nothing, including its
 trial-ending reminder.
+
+## No memo updates (0028)
+
+Migration 0028 drops the memo-update allowance: `store_config.memo_updates_enabled` and
+`memo_updates_daily_limit` with `config_memo_updates`; `save_requests.memo_update_day` and
+`memo_update_state` with `save_request_memo_update` and the partial index
+`save_requests_memo_updates`; and the 0014 trigger `save_memo_update_guard` with
+`milton_memo_update_guard`. The save guard takes `claimed_at` into its immutable tuple first,
+so a receipt's claim time still cannot change. It also revokes `milton_runtime`'s
+`UPDATE (singleton)` on `store_config`, which only the retired sign-in `FOR UPDATE` lock
+used; the role keeps SELECT, and `check-runtime-role` now reads the row without locking it.
+Every revision before this release reads and writes the receipt columns on each save and
+reads the config columns on each tool call; this release touches none of them.
+
+Release order:
+
+1. Ship MCP and app from the same image.
+2. Wait until both services, not one, serve 100% on the new image and the old revisions
+   are idle. An older revision writes the dropped columns on every save and, before the
+   sign-in lock removal, locks `store_config` at a first sign-in, which 0028's revoke refuses.
+3. Take a Neon snapshot.
+4. With the owner connection, run the check below. Expect `functions` to be
+   `milton_memo_update_guard` only, `views` 0 and `runtime_update` `singleton`. Record
+   `enabled` and `daily_limit`: the rollback restores neither. `held` may be nonzero: claims
+   that expired while held keep that state, and 0028 drops it with the column.
+
+   ```sql
+   SELECT
+     (SELECT string_agg(proname, ',') FROM pg_proc
+       WHERE pronamespace = 'public'::regnamespace AND prosrc ~ 'memo_update') AS functions,
+     (SELECT count(*) FROM pg_views
+       WHERE schemaname = 'public' AND definition ~ 'memo_update')::int AS views,
+     (SELECT string_agg(t.attname, ',') FROM pg_attribute t
+       CROSS JOIN LATERAL aclexplode(t.attacl) a
+       WHERE t.attrelid = 'store_config'::regclass AND a.grantee = 'milton_runtime'::regrole
+         AND a.privilege_type = 'UPDATE') AS runtime_update,
+     (SELECT count(*) FROM save_requests WHERE memo_update_state = 'held')::int AS held,
+     (SELECT memo_updates_enabled FROM store_config WHERE singleton = 1) AS enabled,
+     (SELECT memo_updates_daily_limit FROM store_config WHERE singleton = 1) AS daily_limit;
+   ```
+
+5. Apply 0028 with the normal runner, promptly. Between the deploy and 0028, a replay of a
+   claim an old revision left `held` and that has since expired gets a 422 `check_violation`
+   instead of `request_expired`: the new code completes the receipt without moving it out of
+   `held`, which the 0014 check refuses. Nothing is written, and 0028 ends it by dropping the
+   check. If 0028 fails on a deadlock, rerun it; it rolls back as a whole.
+6. Smoke test through MCP as `milton_app`: a save, a replay of that save (same request ID
+   and input, same outcome), and a first sign-in of a new identity.
+
+**Rollback boundary.** Before 0028 is applied, code rolls back by traffic alone. After it,
+an earlier revision cannot save or read through MCP: first run
+`server/drizzle/rollback/0028_no_memo_updates.sql` offline with writers stopped, then shift
+traffic. The rollback re-adds both config columns at their 0014 defaults (the allowance comes
+back **off** at a limit of 100; set `memo_updates_enabled` and `memo_updates_daily_limit`
+to the recorded values as the owner if that revision should enforce it), both receipt
+columns with every receipt at `none`, the check, the index, the 0014 guard, the 0026 save
+guard and the runtime's `UPDATE (singleton)` grant, which a revision from before
+the sign-in lock removal needs. It restores shape, not data. The 0028 journal row stays, so
+re-forwarding means running `0028_no_memo_updates.sql` by hand, as one transaction that stops
+on the first error: `psql -1 -v ON_ERROR_STOP=1 -f server/drizzle/0028_no_memo_updates.sql`.

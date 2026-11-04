@@ -316,7 +316,6 @@ export interface TenantStore {
   /** The app's origin, for the one link served to assistants. */
   appOrigin: string;
   trialNotice?(): Promise<TrialNotice | undefined>;
-  memoUpdates?(): Promise<import("./memo-updates").MemoUpdates | undefined>;
   readTpsReport(): Promise<CompiledReport>;
   /** The cover sheet and the five reports at one version; rebuilds a stale snapshot. */
   readDocuments(): Promise<Documents & { version: string }>;
@@ -357,7 +356,6 @@ export async function storeForCurrentRequest(
         await tx.query(sql`SET LOCAL statement_timeout='500ms'`);
         return claimTrialNotice(tx, userId, bindings.appOrigin);
       }),
-    memoUpdates: compiled.memoUpdates,
     readTpsReport: compiled.getTpsReport,
     readDocuments: compiled.readDocuments,
     saveMemo: compiled.saveMemo,

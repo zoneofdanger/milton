@@ -14,11 +14,6 @@ import { databaseFailure } from "./database";
 import { StoreError } from "./errors";
 import { readLimits, utf8Bytes } from "./index";
 import { assertTrialAccess } from "./trials";
-import {
-  memoUpdates,
-  withMemoUpdate,
-  type UpdateReceipt,
-} from "./memo-updates";
 import type { Receipt, Report, SaveContext, SaveOutcome } from "./save-context";
 import { claimSave } from "./save-claim";
 import { applySave } from "./save-apply";
@@ -243,24 +238,25 @@ export function compiledMemos(
   async function receipt(tx: StoreSession, id: string) {
     return (
       await tx.query<Receipt>(
-        sql`SELECT input_hash,source_hash,completed,deadline>clock_timestamp() AS live,result_json,
-        memo_update_state,memo_update_day::text,(SELECT memo_updates_enabled FROM store_config WHERE singleton=1) AS memo_updates_enabled
+        sql`SELECT input_hash,source_hash,completed,deadline>clock_timestamp() AS live,result_json
         FROM save_requests WHERE user_id=${userId} AND request_id=${id}`,
       )
     )[0];
   }
-  async function complete(
-    tx: StoreSession,
-    result: SaveOutcome,
-    changed = false,
-  ) {
-    const rows = await tx.query<UpdateReceipt>(
-      sql`UPDATE save_requests SET completed=true,result_json=${JSON.stringify(result)}::jsonb,
-      memo_update_state=CASE WHEN memo_update_state='held' THEN CASE WHEN ${changed} THEN 'charged' ELSE 'released' END ELSE memo_update_state END
+  async function complete(tx: StoreSession, result: SaveOutcome) {
+    const rows = await tx.query(
+      sql`UPDATE save_requests SET completed=true,result_json=${JSON.stringify(result)}::jsonb
       WHERE user_id=${userId} AND request_id=${result.request_id} AND NOT completed
-      RETURNING memo_update_state,memo_update_day::text,(SELECT memo_updates_enabled FROM store_config WHERE singleton=1) AS memo_updates_enabled`,
+      RETURNING request_id`,
     );
-    return withMemoUpdate(result, rows[0]!);
+    // Callers hold the account lock and complete only an open receipt.
+    if (!rows.length)
+      throw new StoreError(
+        "request_unavailable",
+        "The save request is unavailable.",
+        503,
+      );
+    return result;
   }
   async function assemble(tx: StoreSession, documents: Documents) {
     // Every source byte is preserved; only headings, when lines, sample context
@@ -301,7 +297,6 @@ export function compiledMemos(
           throw databaseFailure(error);
         });
     },
-    memoUpdates: () => memoUpdates(db, userId),
     async getTpsReport(): Promise<CompiledReport> {
       return db
         .transaction(async (tx) => (await readTpsSession(tx)).report)

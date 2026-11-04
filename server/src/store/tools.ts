@@ -2,7 +2,6 @@ import { z } from "zod";
 import { StoreError, type TenantStore } from "./index";
 import type { SaveMemoInput } from "./compiled";
 import { subscriptionRequired } from "./trials";
-import { advisory } from "./memo-updates";
 import {
   REPORT_IDS,
   resolveReportId,
@@ -101,24 +100,7 @@ export function createStoreMemoTools(store: TenantStore) {
   }
   async function run(operation: () => Promise<ToolResult>) {
     try {
-      const result = await operation();
-      return (
-        (await advisory(async () => {
-          const balance = await store.memoUpdates?.();
-          if (balance && result.content[0]?.type === "text") {
-            const value: unknown = JSON.parse(result.content[0].text);
-            if (
-              typeof value === "object" &&
-              value !== null &&
-              !Array.isArray(value)
-            )
-              return storeResult(
-                { ...value, memo_updates: balance },
-                result.isError,
-              );
-          }
-        })) ?? result
-      );
+      return await operation();
     } catch (thrown) {
       const error =
         thrown instanceof StoreError && thrown.code === "subscription_required"

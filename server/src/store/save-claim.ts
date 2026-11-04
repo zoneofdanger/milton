@@ -1,10 +1,9 @@
 import { sql } from "drizzle-orm";
-import { databaseFailure } from "./database";
+import { databaseFailure, type StoreSession } from "./database";
 import { StoreError } from "./errors";
 import { readLimits, utf8Bytes } from "./index";
 import { MAX_REQUEST_BYTES } from "../http";
 import { assertTrialAccess } from "./trials";
-import { admitMemoUpdate, claimClock, withMemoUpdate } from "./memo-updates";
 import {
   outcomeSchema,
   type SaveContext,
@@ -14,8 +13,18 @@ import {
 const nameTheReport = "Name the report and send the rule's text in rules.";
 const deadlineSeconds = 40;
 
+// Call only after the account lock. A materialized expression evaluates the DB clock once.
+async function claimClock(tx: StoreSession): Promise<string> {
+  return (
+    await tx.query<{
+      at: string;
+    }>(sql`WITH stamp AS MATERIALIZED (SELECT clock_timestamp() AS at)
+    SELECT to_char(at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS at FROM stamp`)
+  )[0]!.at;
+}
+
 /** Claim and reserve: replay a known request ID, or check the version and size
- * limits, admit the memo update and write the save receipt. */
+ * limits and write the save receipt. */
 export async function claimSave(ctx: SaveContext, structured: boolean) {
   const {
     db,
@@ -42,16 +51,9 @@ export async function claimSave(ctx: SaveContext, structured: boolean) {
           );
         if (existing.completed)
           return {
-            outcome: withMemoUpdate(
-              outcomeSchema.parse(existing.result_json),
-              existing,
-              true,
-            ),
+            outcome: outcomeSchema.parse(existing.result_json),
           };
-        if (existing.live)
-          return {
-            outcome: withMemoUpdate(result("in_progress"), existing, true),
-          };
+        if (existing.live) return { outcome: result("in_progress") };
         return {
           outcome: await complete(
             tx,
@@ -66,15 +68,15 @@ export async function claimSave(ctx: SaveContext, structured: boolean) {
       // succeed once the gate opens.
       await assertTrialAccess(tx, userId);
       const current = await snapshot(tx);
-      const clock = await claimClock(tx);
-      const claimReceipt = async (updateDay: string | null) => {
-        await tx.query(sql`INSERT INTO save_requests(user_id,request_id,input_hash,source_hash,deadline,claimed_at,created_at,memo_update_day,memo_update_state)
-        VALUES (${userId},${input.request_id},${inputHash},${current.fingerprint},${clock.at}::timestamptz+${deadlineSeconds}*interval '1 second',${clock.at}::timestamptz,${clock.at}::timestamptz,${updateDay}::date,${updateDay ? "held" : "none"})`);
+      const at = await claimClock(tx);
+      const claimReceipt = async () => {
+        await tx.query(sql`INSERT INTO save_requests(user_id,request_id,input_hash,source_hash,deadline,claimed_at,created_at)
+        VALUES (${userId},${input.request_id},${inputHash},${current.fingerprint},${at}::timestamptz+${deadlineSeconds}*interval '1 second',${at}::timestamptz,${at}::timestamptz)`);
       };
       // A conflict or refusal decided against the request completes a receipt
       // here as in the apply phase: the same request replays the same outcome.
       const decided = async (outcome: SaveOutcome) => {
-        await claimReceipt(null);
+        await claimReceipt();
         return { outcome: await complete(tx, outcome) };
       };
       if (input.expected_version !== current.version)
@@ -94,15 +96,14 @@ export async function claimSave(ctx: SaveContext, structured: boolean) {
             message: "The submitted memo is too large. Nothing was changed.",
           }),
         );
-      const updateDay = await admitMemoUpdate(tx, userId, clock);
-      await claimReceipt(updateDay);
+      await claimReceipt();
       return { current };
     })
     .catch(async (error) => {
       const failure = databaseFailure(error);
       if (failure.code !== "store_unavailable") throw failure;
       // A claim may have committed without its acknowledgment. Never dispatch
-      // from an uncertain claim or release a live hold on a failed lookup.
+      // from an uncertain claim or fail a live one on a failed lookup.
       try {
         return await db.transaction(async (tx) => {
           await lock(tx);
@@ -114,17 +115,8 @@ export async function claimSave(ctx: SaveContext, structured: boolean) {
               409,
             );
           if (existing?.completed)
-            return {
-              outcome: withMemoUpdate(
-                outcomeSchema.parse(existing.result_json),
-                existing,
-                true,
-              ),
-            };
-          if (existing?.live)
-            return {
-              outcome: withMemoUpdate(result("in_progress"), existing, true),
-            };
+            return { outcome: outcomeSchema.parse(existing.result_json) };
+          if (existing?.live) return { outcome: result("in_progress") };
           if (existing)
             return {
               outcome: await complete(

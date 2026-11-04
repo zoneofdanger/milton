@@ -413,7 +413,7 @@ test("saves anchor in every active memo, never archived or foreign text, and hav
       (await send("Instruction m-51", "Instruction m-51 changed")).status,
     ).toBe("saved");
     base = (await store.getTpsReport()).version;
-    // Saves leave no per-day write counter. The memo-update cap is the save cap.
+    // Saves leave no per-day write counter.
     expect(
       (await send("Instruction m-50", "Instruction m-50 changed")).status,
     ).toBe("saved");
@@ -1122,18 +1122,123 @@ test("a conflict or refusal in the claim phase stores a receipt and replays like
   }
 });
 
+test("an expired open claim completes as request_expired, and a lost claim acknowledgment dispatches nothing and replays in_progress", async () => {
+  const local = await localStore();
+  try {
+    await seedUsers(local.pg, "expired", "uncertain");
+    let calls = 0;
+    let paused: { entered: () => void; gate: Promise<void> } | undefined;
+    const store = (id: string, db = local.db) =>
+      fixtureStore(
+        betweenPhases(db, async () => {
+          calls++;
+          const hold = paused;
+          paused = undefined;
+          if (hold) {
+            hold.entered();
+            await hold.gate;
+          }
+        }),
+        id,
+        "assistant",
+      );
+    const input = async (s: ReturnType<typeof store>, text: string) => ({
+      text,
+      rules: [{ report: "cover" as const, text }],
+      request_id: crypto.randomUUID(),
+      expected_version: (await s.getTpsReport()).version,
+    });
+    // The receipt guard forbids moving a deadline, so the fixture lifts it.
+    const expire = async (requestId: string) => {
+      await local.pg.exec(
+        "ALTER TABLE save_requests DISABLE TRIGGER save_request_guard",
+      );
+      await local.db.query(
+        sql`UPDATE save_requests SET deadline=clock_timestamp()-interval '1 second' WHERE request_id=${requestId}`,
+      );
+      await local.pg.exec(
+        "ALTER TABLE save_requests ENABLE TRIGGER save_request_guard",
+      );
+    };
+    // Apply phase: a claim that outlives its deadline publishes nothing.
+    const expired = store("expired");
+    const expiredInput = await input(expired, "Expired rule.");
+    let release!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      paused = {
+        entered: resolve,
+        gate: new Promise<void>((done) => (release = done)),
+      };
+    });
+    const pending = expired.saveMemo(expiredInput);
+    await entered;
+    expect((await expired.saveMemo(expiredInput)).status).toBe("in_progress");
+    await expire(expiredInput.request_id);
+    release();
+    expect(await pending).toMatchObject({
+      status: "failed",
+      error: "request_expired",
+    });
+    expect((await expired.getTpsReport()).is_empty).toBe(true);
+    expect(await expired.saveMemo(expiredInput)).toMatchObject({
+      status: "failed",
+      error: "request_expired",
+    });
+    // Claim phase: the claim commits but its acknowledgment and the recovery
+    // lookup are both lost, so nothing is dispatched.
+    let loseClaim = true,
+      loseRecovery = true;
+    const uncertainClaim = {
+      ...local.db,
+      async transaction<T>(
+        work: Parameters<typeof local.db.transaction<T>>[0],
+      ) {
+        if (!loseClaim && loseRecovery) {
+          loseRecovery = false;
+          throw new Error("Fictional unavailable recovery");
+        }
+        const result = await local.db.transaction(work);
+        if (
+          loseClaim &&
+          typeof result === "object" &&
+          result !== null &&
+          "current" in result
+        ) {
+          loseClaim = false;
+          throw new Error("Fictional lost claim acknowledgment");
+        }
+        return result;
+      },
+    };
+    const uncertain = store("uncertain", uncertainClaim);
+    const claimInput = await input(uncertain, "Uncertain rule.");
+    const before = calls;
+    await expect(uncertain.saveMemo(claimInput)).rejects.toMatchObject({
+      code: "save_outcome_unknown",
+    });
+    expect(calls).toBe(before);
+    expect((await store("uncertain").saveMemo(claimInput)).status).toBe(
+      "in_progress",
+    );
+    // Its replay past the deadline completes the receipt in the claim phase.
+    await expire(claimInput.request_id);
+    for (let i = 0; i < 2; i++)
+      expect(await store("uncertain").saveMemo(claimInput)).toMatchObject({
+        status: "failed",
+        error: "request_expired",
+      });
+    expect(calls).toBe(before);
+    expect((await store("uncertain").getTpsReport()).is_empty).toBe(true);
+  } finally {
+    await local.dispose();
+  }
+});
+
 test("a Baseline: rule must be a setup rule byte for byte in its report, filed new, edited or moved", async () => {
   const local = await localStore();
   try {
     await seedUsers(local.pg, "baseline");
-    await local.pg.exec("UPDATE store_config SET memo_updates_enabled=true");
     const store = fixtureStore(local.db, "baseline");
-    const charged = async () =>
-      (
-        await local.pg.query<{ n: number }>(
-          "SELECT count(*)::int AS n FROM save_requests WHERE user_id='baseline' AND memo_update_state='charged'",
-        )
-      ).rows[0]!.n;
     const save = async (change: Partial<SaveMemoInput>) =>
       store.saveMemo({
         text: "Setup baseline",
@@ -1180,51 +1285,18 @@ test("a Baseline: rule must be a setup rule byte for byte in its report, filed n
     // prefix makes it the person's own rule.
     const edit = (after: string) =>
       save({ exact_edits: [{ before: rule, after }] });
-    // A refusal leaves the rule as filed and charges no memo update.
-    const used = await charged();
+    // A refusal leaves the rule as filed.
     expect(await edit(near)).toMatchObject({
       status: "failed",
       error: "baseline_unknown",
-      memo_update: { state: "released", charged: 0 },
     });
     expect((await cardHeads(local.db, "baseline")).at(-1)!.body).toBe(rule);
-    expect(await charged()).toBe(used);
     expect(
       await save({ moves: [{ before: rule, report: "chat" }] }),
     ).toMatchObject({ error: "baseline_unknown" });
     const own = 'Sign off with "Cheers," and my first name.';
     expect((await edit(own)).status).toBe("saved");
     expect((await cardHeads(local.db, "baseline")).at(-1)!.body).toBe(own);
-  } finally {
-    await local.dispose();
-  }
-});
-
-test("memo updates need only their own setting: a save charges one without the model-era spend fields", async () => {
-  const local = await localStore();
-  try {
-    await seedUsers(local.pg, "model-era");
-    // Before 0022 this state refused every save with "Memo updates are not
-    // ready." unless global_spend_policy and foreground_accounting_ready were set.
-    await local.pg.exec("UPDATE store_config SET memo_updates_enabled=true");
-    const store = fixtureStore(local.db, "model-era");
-    const saved = await store.saveMemo({
-      text: "Add a rule.",
-      rules: [{ report: "cover", text: "Lead with the answer." }],
-      expected_version: (await store.getTpsReport()).version,
-      request_id: crypto.randomUUID(),
-    });
-    expect(saved).toMatchObject({
-      status: "saved",
-      memo_update: { state: "charged", charged: 1 },
-    });
-    expect(
-      (
-        await local.pg.query(
-          "SELECT count(*)::int AS n FROM save_requests WHERE user_id='model-era' AND memo_update_state='charged'",
-        )
-      ).rows,
-    ).toEqual([{ n: 1 }]);
   } finally {
     await local.dispose();
   }

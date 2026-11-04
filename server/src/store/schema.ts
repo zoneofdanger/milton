@@ -34,18 +34,11 @@ export const storeConfig = pgTable(
   {
     singleton: integer("singleton").primaryKey(),
     trialsEnabled: boolean("trials_enabled").notNull().default(false),
-    memoUpdatesEnabled: boolean("memo_updates_enabled")
-      .notNull()
-      .default(false),
-    memoUpdatesDailyLimit: integer("memo_updates_daily_limit")
-      .notNull()
-      .default(100),
     limits: jsonb("limits_json").notNull().default(limits),
   },
   (t) => [
     check("config_singleton", sql`${t.singleton} = 1`),
     check("config_limits_object", sql`jsonb_typeof(${t.limits}) = 'object'`),
-    check("config_memo_updates", sql`${t.memoUpdatesDailyLimit}>0`),
   ],
 );
 export const users = pgTable(
@@ -285,8 +278,6 @@ export const saveRequests = pgTable(
     completed: boolean("completed").notNull().default(false),
     deadline: timestamp("deadline", { withTimezone: true }).notNull(),
     claimedAt: timestamp("claimed_at", { withTimezone: true }),
-    memoUpdateDay: date("memo_update_day"),
-    memoUpdateState: text("memo_update_state").notNull().default("none"),
     createdAt: createdAt(),
     payloadBytes: bigint("payload_bytes", { mode: "number" })
       .notNull()
@@ -296,16 +287,9 @@ export const saveRequests = pgTable(
   },
   (t) => [
     primaryKey({ columns: [t.userId, t.requestId] }),
-    index("save_requests_memo_updates")
-      .on(t.userId, t.memoUpdateDay)
-      .where(sql`${t.memoUpdateState} IN ('held','charged')`),
     check(
       "save_request_claim_clock",
       sql`${t.claimedAt} IS NULL OR (isfinite(${t.claimedAt}) AND ${t.claimedAt}=${t.createdAt})`,
-    ),
-    check(
-      "save_request_memo_update",
-      sql`(${t.memoUpdateState}='none' AND ${t.memoUpdateDay} IS NULL) OR (${t.memoUpdateDay} IS NOT NULL AND isfinite(${t.memoUpdateDay}) AND ((${t.memoUpdateState}='held' AND NOT ${t.completed}) OR (${t.memoUpdateState} IN ('charged','released') AND ${t.completed})))`,
     ),
     check(
       "save_request_hashes",

@@ -13,9 +13,13 @@
 -- grant, with every receipt at 'none'.
 SET LOCAL lock_timeout = '10s';
 --> statement-breakpoint
--- Lock in the save path's order (save_requests through the receipt lookup,
--- then store_config through the trial gate, limits and the save guard) so a
--- live save cannot deadlock with this transaction.
+-- Lock in the save path's order (users through the account lock, save_requests
+-- through the receipt lookup, then store_config through the trial gate, limits
+-- and the save guard) so a live save cannot deadlock with this transaction, or
+-- with 0029 when one runner pass applies both. EXCLUSIVE on users lets reads
+-- continue while account locks wait.
+LOCK TABLE "users" IN EXCLUSIVE MODE;
+--> statement-breakpoint
 LOCK TABLE "save_requests", "store_config" IN ACCESS EXCLUSIVE MODE;
 --> statement-breakpoint
 CREATE OR REPLACE FUNCTION milton_save_request_guard() RETURNS trigger LANGUAGE plpgsql VOLATILE SET search_path = pg_catalog, public AS $$

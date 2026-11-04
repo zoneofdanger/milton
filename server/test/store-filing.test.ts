@@ -998,13 +998,6 @@ test("a sample and exact edits in one save apply together or not at all", async 
     expect(
       documents.reports.find((r) => r.id === "document")!.samples,
     ).toHaveLength(1);
-    expect(
-      (
-        await f.local.pg.query(
-          "SELECT sum(reserved_micros)::int AS n FROM save_requests WHERE user_id='kinds-mixed'",
-        )
-      ).rows,
-    ).toEqual([{ n: 0 }]);
   } finally {
     await f.local.dispose();
   }

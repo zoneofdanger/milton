@@ -178,49 +178,15 @@ includes the Vite-built CSS, fonts and favicons. Keep the previous runtime artif
 and secret versions; never roll back memo data with a hosting release.
 
 Check `/health` on both canonical deployments and open `/login` on the browser app
-origin. Finish admission before connecting an assistant. Preserve Cloud Run revisions,
+origin. Sign in once before connecting an assistant. Preserve Cloud Run revisions,
 pinned images and numeric secret versions for recovery; never replace newer source
 or report data when changing a runtime release. The old Vercel app/MCP project is retired.
 
-## Admit the first user
+## The first user
 
-Neon sign-in and Milton admission are separate. With the default closed configuration, a successful social sign-in can create a Neon Auth user but end with “New Milton accounts are closed.” (`admission_refused`) in Milton. Existing admitted users can still sign in when new sign-ups are closed.
+Every successful social sign-in creates or finds a Milton account; there is no admission setting and no account-count cap.
 
-Choose one admission mode. Run the SQL in Neon's SQL editor against the `milton` database.
-
-### Allow only yourself
-
-For a private installation, use allow-list mode. After signing in once, copy your user ID from Neon Auth's Users list. It must be the Neon Auth user ID, not your email, Google or GitHub account ID, or Milton account ID. Replace `YOUR_NEON_AUTH_USER_ID` below:
-
-```sql
-UPDATE store_config
-SET signup_mode = 'allowlist',
-    allowed_identities_json = jsonb_build_array(
-      jsonb_build_object(
-        'provider', 'neon',
-        'subject', 'YOUR_NEON_AUTH_USER_ID'
-      )
-    ),
-    updated_at = now()
-WHERE singleton = 1;
-```
-
-This replaces the allow-list with that one identity. To admit more people, include an object with `provider` and `subject` for each Neon Auth user. Return to `/login` after applying the update to finish admission.
-
-### Allow new users
-
-To accept anyone who can complete your configured social sign-in:
-
-```sql
-UPDATE store_config
-SET signup_mode = 'open',
-    updated_at = now()
-WHERE singleton = 1;
-```
-
-You can apply this before anyone signs in. There is no account-count cap. Setting `signup_mode` back to `closed` stops new admissions without locking out existing users.
-
-The first admitted sign-in starts with an empty cover sheet, empty reports and no active rules. Existing memo bodies and history are preserved. The browser views the current report; connected assistants submit user-directed changes.
+The first sign-in starts with an empty cover sheet, empty reports and no active rules. Existing memo bodies and history are preserved. The browser views the current report; connected assistants submit user-directed changes.
 
 ## Connect an assistant
 
@@ -381,7 +347,7 @@ assistant follows them. Validate a real setup/save/read flow per supported clien
 do not infer adherence from successful MCP discovery alone.
 
 Access tokens require a valid signature, exact issuer/resource audience and expiry.
-Only the verified account supplies tenant identity. MCP calls do not admit users.
+Only the verified account supplies tenant identity. MCP calls do not create accounts.
 Browser viewing requires a live session; sign-in/consent/logout retain their CSRF
 protections. Signing out of the browser does not disconnect assistants, and an
 already-issued access token can remain valid until expiry. Disconnecting an
@@ -397,7 +363,7 @@ consents and signs out, best effort; the Neon Auth user record is not deleted.
 
 ## Local development and checks
 
-Use a development Neon branch. Put the runtime environment variables in ignored `server/.env.local`, and configure the app and MCP URLs for your chosen loopback origin and port. Enable loopback access in that branch's Neon Auth settings and set its login, consent, and trusted-origin settings consistently. Apply migrations and configure admission for that database too.
+Use a development Neon branch. Put the runtime environment variables in ignored `server/.env.local`, and configure the app and MCP URLs for your chosen loopback origin and port. Enable loopback access in that branch's Neon Auth settings and set its login, consent, and trusted-origin settings consistently. Apply migrations to that database too.
 
 The local server uses port 3001 unless you override it with `PORT`. Check that the port is unused before starting. From the repository root:
 
@@ -580,7 +546,7 @@ credentials or live subscription actions. Until `/billing` exists, the trial not
 the page banner and the `subscription_required` refusal carry no subscription link;
 the banner names the price as plain text. Existing early access must not acquire a payment gate implicitly.
 
-When explicitly enabled, only newly admitted accounts get a `trial_accounts` row.
+When explicitly enabled, only newly created accounts get a `trial_accounts` row.
 Existing accounts without a row remain early access, including on later sign-ins.
 The account-creation transaction starts a 720-hour trial using the new Milton
 account's `created_at` timestamp. The start is required for every enrolled account;

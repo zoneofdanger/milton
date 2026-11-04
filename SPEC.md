@@ -349,7 +349,7 @@ supplies no default preferences. Missing/archived TPS must be read through
 
 For the MVP every assistant the person connects can read and write (Peter, 2026-10-29). Neon Auth's
 managed OAuth provider has fixed scopes (`openid`, `profile`, `email`, `offline_access`), so there is
-no `read` or `write` scope to grant: a valid access token for Milton's resource from an admitted user
+no `read` or `write` scope to grant: a valid access token for Milton's resource from a signed-in user
 is the permission. Assistants still cannot delete or revert, every write is a kept version, and the
 page shows each write with its client. Per-client permissions, stored in Milton and switched on the
 page, are the later answer if they are wanted. Cutting a disconnected assistant off before its
@@ -366,9 +366,9 @@ The registry maps (provider, subject) to a user uniquely and transactionally: co
 sign-ins cannot create two accounts or link one identity to two users; seeding
 the templates is repeatable. The OAuth provider's token carries the Milton user id, and every tool
 reads the caller from it. Sign-in is split in two: the provider step proves an identity; the account
-step looks it up or admits it. A second identity is linked only by a signed-in user from the page,
+step looks it up or creates it. A second identity is linked only by a signed-in user from the page,
 with the provider, the session and the intended account held server-side during the flow; an identity
-already owned by another user is refused. Closing sign-ups never locks out an existing user.
+already owned by another user is refused.
 
 ### Tenant boundary
 
@@ -432,7 +432,7 @@ isolation, concurrent edits with conflicts, uncertain writes, stored recovery, A
 Neon is already on a paid plan (Peter, 2026-10-29), and the server runs on an existing Vercel plan, so
 sign-ups add no new bill. Workers Paid is not needed: the Worker and its key-value store retire with
 the moves to Neon Auth and Vercel, both before sign-ups open.
-No sign-up cap anywhere, hosted or self-hosted (Peter, 2026-10-30). Admission modes remain closed, allow-list, or open; fresh installs default to closed.
+No sign-up cap anywhere, hosted or self-hosted (Peter, 2026-10-30). Sign-ups are open and the only mode; the allow-list and closed modes are gone (Peter, 2026-11-03).
 
 ### Sign-in moves to Neon Auth
 
@@ -444,7 +444,7 @@ project beside the memos; GitHub login is a provider toggle there, Google anothe
 becomes a resource server: it checks each access token's signature, issuer and audience and reads
 the user from it; the OAuth provider library, the KV namespace, the GitHub upstream code and the
 consent handshake go. Milton hosts the two pages Neon does not provide, login and consent, on the
-Worker, in Milton's look. Admission stays in Milton, keyed on the Neon user id.
+Worker, in Milton's look. Accounts stay in Milton, keyed on the Neon user id.
 Every client re-authorizes once. The previous sign-in code stays in git as the fallback while the
 beta settles.
 

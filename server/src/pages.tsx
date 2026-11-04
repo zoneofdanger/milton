@@ -4,6 +4,7 @@ import { isLoopback } from "./config";
 import { faviconLinks, folderMark } from "@milton/theme/brand";
 import type { Child } from "hono/jsx";
 import { raw } from "hono/html";
+import type { TrialStatus } from "./store/trials";
 
 /**
  * The signed-in account chrome: the header's account menu and the links row.
@@ -16,13 +17,25 @@ export type Account = {
   email?: string;
   /** The current page in the links row, if it is one of them. */
   here?: "report" | "assistants";
+  billing?: BillingItem;
 };
+export type BillingItem = { action: "checkout" | "portal"; label: string };
+
+/** The one billing action a status offers. Early access has none. */
+export function billingItem(status?: TrialStatus): BillingItem | undefined {
+  if (status?.status === "trial")
+    return { action: "checkout", label: "Add a card" };
+  if (status?.status === "expired")
+    return { action: "checkout", label: "Subscribe" };
+  if (status?.status === "paid")
+    return { action: "portal", label: "Manage billing" };
+}
 const links = [
   ["report", "/", "Cover sheet"],
   ["assistants", "/assistants", "Connected assistants"],
   [null, "/download", "Download TPS.md"],
 ] as const;
-function accountMenu({ csrf, email }: Account) {
+function accountMenu({ csrf, email, billing }: Account) {
   // A <details> menu: pages run no scripts.
   return (
     <div class="header-actions">
@@ -36,6 +49,12 @@ function accountMenu({ csrf, email }: Account) {
             <p class="small-note menu-who">
               Signed in as <strong>{email}</strong>
             </p>
+          )}
+          {billing && (
+            <form method="post" action={`/billing/${billing.action}`}>
+              {csrf()}
+              <button class="menu-item">{billing.label}</button>
+            </form>
           )}
           <form method="post" action="/logout">
             {csrf()}

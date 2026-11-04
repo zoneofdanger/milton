@@ -1,5 +1,5 @@
 /** @jsxImportSource hono/jsx */
-import { page } from "./pages";
+import { billingItem, page, type BillingItem } from "./pages";
 import type { Child } from "hono/jsx";
 import type { PersonStore } from "./store";
 import type { TrialStatus } from "./store/trials";
@@ -17,42 +17,35 @@ type PageStore = Pick<PersonStore, "readTpsReport"> &
     >;
   };
 
-// What a person sees about paying. Worded for everyone in the status: a paying
-// person past grace reads the paused line, and someone with a card the trial line.
-function billingBanner(
+// The note above the report, only when paying is pressing: a trial's last 7 days
+// or a pause. The account menu always holds the action. Worded for everyone in the
+// status: a paying person past grace reads the paused line, and someone with a card
+// the trial line.
+function billingNote(
   csrf: () => Child,
   billing: boolean,
   status?: TrialStatus,
 ) {
-  if (!status || status.status === "early_access") return null;
-  const button = (action: "checkout" | "portal", label: string) =>
-    billing && (
-      <form method="post" action={`/billing/${action}`}>
-        {csrf()}
-        <button class="secondary">{label}</button>
-      </form>
-    );
-  const days = status.days_left;
-  const banner = (message: string | null, form: Child) => (
+  const item = billing ? billingItem(status) : undefined;
+  const banner = (message: string) => (
     <aside class="small-note billing-note" aria-label="Milton subscription">
-      {message && <p>{message}</p>}
-      {form}
+      <p>{message}</p>
+      {item && (
+        <form method="post" action={`/billing/${item.action}`}>
+          {csrf()}
+          <button class="secondary">{item.label}</button>
+        </form>
+      )}
     </aside>
   );
-  if (status.status === "paid")
-    return billing ? banner(null, button("portal", "Manage billing")) : null;
-  if (status.status === "expired")
+  if (status?.status === "expired")
     return banner(
       "Assistant reads and saves are paused until you subscribe for $5.01/month. Your rules and samples are still here to view and download.",
-      button("checkout", "Subscribe"),
     );
-  // Without billing there is nothing to press, so only the last week shows.
-  if (!billing && !status.reminder_stage) return null;
+  const days = status?.days_left;
+  if (status?.status !== "trial" || days === undefined || days > 7) return null;
   return banner(
-    days === undefined
-      ? null
-      : `${days} ${days === 1 ? "day" : "days"} left in your Milton trial, then it's $5.01/month. Unless you've already added a card, add one by then.`,
-    button("checkout", "Add a card"),
+    `${days} ${days === 1 ? "day" : "days"} left in your Milton trial, then it's $5.01/month. Unless you've already added a card, add one by then.`,
   );
 }
 
@@ -285,6 +278,7 @@ function current(
   notice: Child = null,
   status = 200,
   assistantPaused = false,
+  billing?: BillingItem,
 ) {
   return page(
     "Cover sheet",
@@ -303,7 +297,10 @@ function current(
     </>,
     status,
     reportFonts,
-    { account: { csrf, email: view.email, here: "report" }, sheet: true },
+    {
+      account: { csrf, email: view.email, here: "report", billing },
+      sheet: true,
+    },
   );
 }
 export async function memoPages(
@@ -320,6 +317,7 @@ export async function memoPages(
     notice: Child = null,
     status = 200,
     assistantPaused = false,
+    billing?: BillingItem,
   ) {
     let documents: (Documents & { version: string }) | null = null;
     if (!report.is_empty && store.readDocuments) {
@@ -348,6 +346,7 @@ export async function memoPages(
       notice,
       status,
       assistantPaused,
+      billing,
     );
   }
   const path = new URL(request.url).pathname;
@@ -371,8 +370,9 @@ export async function memoPages(
   const trial = await store.trialStatus?.().catch(() => undefined);
   return showCurrent(
     report,
-    billingBanner(csrf, options.billing ?? false, trial),
+    billingNote(csrf, options.billing ?? false, trial),
     200,
     trial?.status === "expired",
+    options.billing ? billingItem(trial) : undefined,
   );
 }

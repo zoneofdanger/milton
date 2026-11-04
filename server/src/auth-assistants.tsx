@@ -97,7 +97,7 @@ const assistantsPage = async (
     provider: "neon",
     subject: user.id,
   });
-  const [names, empty] = await Promise.all([
+  const [names, empty, billing] = await Promise.all([
     Promise.all(
       consents.map((consent, index) =>
         index < NAMED_ASSISTANTS
@@ -106,6 +106,7 @@ const assistantsPage = async (
       ),
     ),
     accountEmpty(ctx, user),
+    ctx.accountBilling(user),
   ]);
   return page(
     "Connected assistants",
@@ -153,7 +154,14 @@ const assistantsPage = async (
     </>,
     status,
     null,
-    { account: { csrf: csrfField, email: user.email, here: "assistants" } },
+    {
+      account: {
+        csrf: csrfField,
+        email: user.email,
+        here: "assistants",
+        billing,
+      },
+    },
   );
 };
 export const assistants = async (ctx: PageContext): Promise<Response> => {

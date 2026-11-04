@@ -1839,56 +1839,96 @@ test("billing checkout and portal: 503 without config; signed-in CSRF forms; the
   }
 }, 30000);
 
-test("the cover sheet offers the way to pay for each status, only with billing configured", async () => {
+test("the account menu offers the way to pay on every signed-in page, and the note shows only near the end or when paused", async () => {
   const { billing } = fakeStripe();
   const fixture = await accountFixture({ billing });
   const { local, send } = fixture;
-  const set = (status: string, renewed = "1 day") =>
+  const set = (status: string, left = "11 days 12 hours", renewed = "1 day") =>
     local.db.query(sql`UPDATE trial_accounts SET subscription_status=${status},
-      trial_end=clock_timestamp()+interval '11 days 12 hours',
+      trial_end=clock_timestamp()+${left}::interval,
       current_period_start=clock_timestamp()-${renewed}::interval`);
-  const form = (action: string, label: string) =>
-    new RegExp(
-      `<form method="post" action="/billing/${action}"><input type="hidden" name="csrf"[^>]*/?><button[^>]*>${label}</button></form>`,
+  // The two places billing can appear on a page, cut out of its HTML.
+  const read = async (path = "/") => {
+    const html = await (await send(path)).text();
+    const panel = html.slice(
+      html.indexOf('<div class="menu-panel">'),
+      html.indexOf("</details>"),
     );
+    const start = html.indexOf('aria-label="Milton subscription"');
+    return {
+      menu: /<form method="post" action="\/billing\/(\w+)">.*?<button class="menu-item">([^<]+)</
+        .exec(panel)
+        ?.slice(1),
+      csrf: /action="\/billing\/\w+"><input type="hidden" name="csrf"/.test(
+        panel,
+      ),
+      note:
+        start < 0 ? null : html.slice(start, html.indexOf("</aside>", start)),
+    };
+  };
+  const quiet = spyOn(console, "error").mockImplementation(() => {});
   try {
-    // Early access: nothing, even with billing on.
-    expect(await (await send("/")).text()).not.toContain("Milton subscription");
+    // Early access: nothing anywhere, even with billing on.
+    expect(await read()).toMatchObject({ menu: undefined, note: null });
     await local.db.query(sql`UPDATE store_config SET trials_enabled=true`);
     await local.db.query(
       sql`INSERT INTO trial_accounts(user_id,started_at) SELECT id,created_at FROM users`,
     );
+    // Every signed-in page carries the menu item, with its own CSRF field.
     await set("trialing");
-    const trial = await (await send("/")).text();
-    expect(trial).toContain("12 days left in your Milton trial");
-    expect(trial).toContain("Unless you&#39;ve already added a card");
-    expect(trial).toMatch(form("checkout", "Add a card"));
-    await local.db.query(
-      sql`UPDATE trial_accounts SET trial_end=clock_timestamp()+interval '2 hours'`,
-    );
-    expect(await (await send("/")).text()).toContain(
-      "1 day left in your Milton trial",
-    );
+    for (const path of ["/", "/tps-report", "/assistants", "/account/delete"])
+      expect([path, await read(path)]).toEqual([
+        path,
+        { menu: ["checkout", "Add a card"], csrf: true, note: null },
+      ]);
+    // Seven days or fewer: the note joins the menu, with its button.
+    await set("trialing", "6 days 12 hours");
+    const ending = await read();
+    expect(ending.menu).toEqual(["checkout", "Add a card"]);
+    expect(ending.note).toContain("7 days left in your Milton trial");
+    expect(ending.note).toContain("Unless you&#39;ve already added a card");
+    expect(ending.note).toContain('action="/billing/checkout"');
+    expect(ending.note).toContain(">Add a card</button>");
+    await set("trialing", "2 hours");
+    expect((await read()).note).toContain("1 day left in your Milton trial");
+    // Eight days rounds up past the line: nothing above the report.
+    await set("trialing", "7 days 1 hour");
+    expect((await read()).note).toBeNull();
     for (const status of ["canceled", "unpaid"]) {
       await set(status);
-      const paused = await (await send("/")).text();
-      expect(paused).toContain("paused until you subscribe for $5.01/month");
-      expect(paused).toMatch(form("checkout", "Subscribe"));
-      expect(paused).not.toContain("trial has ended");
+      const paused = await read();
+      expect(paused.menu).toEqual(["checkout", "Subscribe"]);
+      expect(paused.note).toContain(
+        "paused until you subscribe for $5.01/month",
+      );
+      expect(paused.note).toContain(">Subscribe</button>");
+      expect(paused.note).not.toContain("trial has ended");
     }
     // Past grace reads as expired, inside it as paid.
-    await set("past_due", "4 days");
-    expect(await (await send("/")).text()).toMatch(
-      form("checkout", "Subscribe"),
-    );
+    await set("past_due", "1 day", "4 days");
+    expect((await read()).menu).toEqual(["checkout", "Subscribe"]);
     for (const status of ["active", "past_due"]) {
       await set(status);
-      const paid = await (await send("/")).text();
-      expect(paid).toMatch(form("portal", "Manage billing"));
-      expect(paid).not.toContain("$5.01");
-      expect(paid).not.toContain("/billing/checkout");
+      expect(await read()).toEqual({
+        menu: ["portal", "Manage billing"],
+        csrf: true,
+        note: null,
+      });
     }
+    // A failed status read costs the item, never the page.
+    await local.db.query(
+      sql`ALTER TABLE trial_accounts RENAME TO hidden_clock`,
+    );
+    for (const path of ["/", "/assistants", "/account/delete"]) {
+      const response = await send(path);
+      expect([path, response.status]).toEqual([path, 200]);
+      expect(await response.text()).not.toContain('action="/billing');
+    }
+    await local.db.query(
+      sql`ALTER TABLE hidden_clock RENAME TO trial_accounts`,
+    );
   } finally {
+    quiet.mockRestore();
     await fixture.dispose();
   }
 }, 30000);

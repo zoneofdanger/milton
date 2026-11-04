@@ -398,6 +398,9 @@ export async function personStoreForCurrentRequest(
   const db = database(bindings);
   return { ...store, trialStatus: () => trialStatus(db, auth.userId) };
 }
+/** The account's billing status, for the menu on pages with no person store. */
+export const accountTrialStatus = (bindings: StoreBindings, userId: string) =>
+  trialStatus(database(bindings), userId);
 export type PersonStore = Awaited<
   ReturnType<typeof personStoreForCurrentRequest>
 >;

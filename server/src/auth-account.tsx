@@ -36,13 +36,15 @@ const activeAccount = async (ctx: PageContext, user: SessionUser) => {
     throw error;
   }
 };
-const deletionPage = (
-  { csrfField, config }: PageContext,
+const deletionPage = async (
+  ctx: PageContext,
   user: SessionUser,
   notice: Child = null,
   status = 200,
-) =>
-  page(
+) => {
+  const { csrfField, config } = ctx;
+  const billing = await ctx.accountBilling(user);
+  return page(
     "Delete your account",
     <>
       {notice}
@@ -102,8 +104,9 @@ const deletionPage = (
     </>,
     status,
     null,
-    { account: { csrf: csrfField, email: user.email } },
+    { account: { csrf: csrfField, email: user.email, billing } },
   );
+};
 export const accountDeletion = async (ctx: PageContext): Promise<Response> => {
   const {
     config,

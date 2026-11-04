@@ -16,7 +16,7 @@
 -- 0024 default privileges and no DELETE; its table grant on trial_accounts
 -- (SELECT, INSERT, UPDATE) covers the new columns. Code that reads any of this
 -- ships after this migration; code before it ignores all of it.
--- rollback/0025_stripe_billing.sql drops it all while nothing is recorded.
+-- rollback/0026_stripe_billing.sql drops it all while nothing is recorded.
 SET LOCAL lock_timeout = '10s';
 --> statement-breakpoint
 CREATE TABLE "stripe_events" (

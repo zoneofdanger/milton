@@ -180,8 +180,15 @@
     {
       "idx": 25,
       "version": "7",
-      "when": 1793753946861,
-      "tag": "0025_stripe_billing",
+      "when": 1793754400730,
+      "tag": "0025_open_signup",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1793754786172,
+      "tag": "0026_stripe_billing",
       "breakpoints": true
     }
   ]

@@ -54,13 +54,13 @@ const schemaCatalog = async (pg: PGlite) => {
   };
 };
 
-test("0025 adds the Stripe ledger and subscription columns, marks returning deleted identities canceled, the runtime applies an event once, and rollback refuses until nothing is recorded", async () => {
-  const base = await migratedThrough(24);
-  const pg = await migratedThrough(24);
-  const post = await migratedThrough(25);
+test("0026 adds the Stripe ledger and subscription columns, marks returning deleted identities canceled, the runtime applies an event once, and rollback refuses until nothing is recorded", async () => {
+  const base = await migratedThrough(25);
+  const pg = await migratedThrough(25);
+  const post = await migratedThrough(26);
   try {
-    const up = await drizzleSql("0025_stripe_billing.sql");
-    const down = await drizzleSql("rollback/0025_stripe_billing.sql");
+    const up = await drizzleSql("0026_stripe_billing.sql");
+    const down = await drizzleSql("rollback/0026_stripe_billing.sql");
     // A plain clock starts at created_at; a returning deleted identity's before it.
     await pg.exec(`INSERT INTO users(id) VALUES ('billing'),('returned');
       INSERT INTO trial_accounts(user_id,started_at) SELECT id,created_at FROM users WHERE id='billing';
@@ -338,10 +338,10 @@ test("0024 runtime role saves through its grants, cannot change the schema or by
     expect(await grants(pg)).toEqual(await grants(post));
 
     await seedUsers(pg, "runtime");
-    // The store's trial gate reads 0025's columns, so the runtime checks below
-    // run with them in place; 0025 comes back out before 0024's rollback.
+    // The store's trial gate reads 0026's columns, so the runtime checks below
+    // run with them in place; 0026 comes back out before 0024's rollback.
     await pg.exec(
-      "BEGIN;" + (await drizzleSql("0025_stripe_billing.sql")) + "COMMIT;",
+      "BEGIN;" + (await drizzleSql("0026_stripe_billing.sql")) + "COMMIT;",
     );
     // A login role in the group, as milton_app is in Neon. Membership
     // inherits: the session needs no SET ROLE milton_runtime. PGlite's session
@@ -431,7 +431,7 @@ test("0024 runtime role saves through its grants, cannot change the schema or by
     } finally {
       await pg.exec("RESET ROLE");
     }
-    await pg.exec(await drizzleSql("rollback/0025_stripe_billing.sql"));
+    await pg.exec(await drizzleSql("rollback/0026_stripe_billing.sql"));
 
     // Rollback refuses while a login role is still in the group.
     await expect(pg.exec(down)).rejects.toThrow(

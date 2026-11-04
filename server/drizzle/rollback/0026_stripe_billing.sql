@@ -1,12 +1,12 @@
--- Rollback of 0025_stripe_billing. Offline; stop writers first. A runtime
--- rollback does not need this: code before 0025 ignores the ledger and the new
+-- Rollback of 0026_stripe_billing. Offline; stop writers first. A runtime
+-- rollback does not need this: code before 0026 ignores the ledger and the new
 -- columns, so keep them and their rows. Dropping them loses every link from an
 -- account to its Stripe customer and subscription and the record of applied
 -- events, so refuse while any customer id or event is recorded. The 'canceled'
 -- marks on returning deleted identities go too; started_at still records them
--- for the code before 0025, and re-forwarding marks them again. Run as
--- neondb_owner. The 0025 journal row stays, so re-forwarding means running
--- 0025_stripe_billing.sql by hand.
+-- for the code before 0026, and re-forwarding marks them again. Run as
+-- neondb_owner. The 0026 journal row stays, so re-forwarding means running
+-- 0026_stripe_billing.sql by hand.
 BEGIN;
 SET LOCAL lock_timeout = '10s';
 LOCK TABLE trial_accounts, stripe_events IN ACCESS EXCLUSIVE MODE;

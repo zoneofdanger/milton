@@ -101,42 +101,21 @@ export async function resolveIdentityAccount(
       WHERE i.provider = ${provider} AND i.subject = ${subject} FOR UPDATE OF u`);
       let account = (await lookup())[0];
       if (!account) {
-        const config = (
-          await tx.query<{
-            signup_mode: string;
-            allowed_identities_json: unknown;
-          }>(sql`
-        SELECT signup_mode, allowed_identities_json FROM store_config WHERE singleton = 1 FOR UPDATE`)
-        )[0];
-        // A separate READ COMMITTED statement sees an admission that committed while this request waited.
+        // Every sign-in creates or finds its account. Locking the config row
+        // serializes first sign-ins; a separate READ COMMITTED statement then
+        // sees an account that committed while this request waited.
+        await tx.query(
+          sql`SELECT 1 FROM store_config WHERE singleton = 1 FOR UPDATE`,
+        );
         account = (await lookup())[0];
         if (!account) {
-          const allowed = z
-            .array(z.object({ provider: z.string(), subject: z.string() }))
-            .parse(config?.allowed_identities_json);
-          if (
-            !config ||
-            !(
-              config.signup_mode === "open" ||
-              (config.signup_mode === "allowlist" &&
-                allowed.some(
-                  (item) =>
-                    item.provider === provider && item.subject === subject,
-                ))
-            )
-          )
-            throw new StoreError(
-              "admission_refused",
-              "New Milton accounts are closed.",
-              403,
-            );
           const id = `m_${crypto.randomUUID()}`;
           await tx.query(sql`INSERT INTO users (id) VALUES (${id})`);
           // A sign-in identity whose account was deleted gets no second trial:
           // its row starts canceled, so it reads as expired whenever trials are
           // enabled (now or later), has no effect while they are off, and sign-up
           // creates no subscription for it. started_at still marks it for code
-          // before 0025.
+          // before 0026.
           await tx.query(sql`INSERT INTO trial_accounts(user_id,started_at,subscription_status)
             SELECT u.id,CASE WHEN d.identity_hash IS NULL THEN u.created_at
               ELSE u.created_at - interval '720 hours' END,

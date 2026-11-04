@@ -101,6 +101,13 @@ export function connectSteps(empty: boolean, mcpUrl: string) {
             sign-in and approve the connection. Availability depends on your
             assistant and plan.
           </p>
+          <p>
+            <a href="https://www.meetmilton.com/setup">
+              Setup instructions for your assistant
+            </a>
+            . Follow the guide to connect Milton and set the instruction for
+            future chats.
+          </p>
           <pre class="setup-copy">
             <code>{mcpUrl}</code>
           </pre>

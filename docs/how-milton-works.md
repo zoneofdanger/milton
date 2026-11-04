@@ -298,6 +298,8 @@ Files: `server/src/pages.tsx`, `server/src/memo-pages.tsx`, `server/src/auth.tsx
 - `/download` returns the report as `TPS.md`.
 - `/assistants` lists live consents and looks up at most 20 names per view.
 - The setup prompt changes depending on whether the account is empty.
+- Account opens a native popover; Escape closes it and returns focus to Account, and
+  clicking outside closes it.
 - With billing configured, the account menu on every signed-in page offers Add a card in a
   trial, Subscribe when expired, and Manage billing when paid; early access shows nothing.
 - If the status read fails, the page still renders, with no billing item.

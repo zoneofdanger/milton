@@ -171,6 +171,33 @@ test("page content is text unless explicitly rendered as a component", async () 
   expect(html).toContain("&amp;");
 });
 
+test("plain and assistant sign-in explain the new-account offer and link to pricing and policies", async () => {
+  const upstream = fakeNeon(() => Response.json(null));
+  const send = browser(appFor({}));
+  try {
+    for (const path of ["/login", "/login?" + signedQuery]) {
+      const response = await send(path);
+      expect(response.status).toBe(200);
+      const html = await response.text();
+      expect(html).toContain("Continue with Google");
+      expect(html).toContain("Continue with GitHub");
+      expect(html).toContain(
+        "New to Milton? Try it free for 30 days. No credit card required. Then $5.01 USD/month if you add a card.",
+      );
+      for (const [slug, label] of [
+        ["pricing", "Pricing"],
+        ["privacy", "Privacy"],
+        ["terms", "Terms"],
+      ])
+        expect(html).toContain(
+          `href="https://www.meetmilton.com/${slug}">${label}</a>`,
+        );
+    }
+  } finally {
+    upstream.mockRestore();
+  }
+});
+
 test("page fonts and favicons are local while other browser restrictions stay closed", async () => {
   const response = page("Example", "<p>Example</p>");
   expect(response.headers.get("Content-Security-Policy")).toBe(
@@ -860,7 +887,8 @@ test("served pages take the MCP address and support address from configuration",
   try {
     const assistants = await (await configured.send("/assistants")).text();
     expect(assistants).toContain(`<code>${resource}</code>`);
-    expect(assistants).not.toContain("meetmilton.com");
+    // The public guide is shared; the MCP address still belongs to this deployment.
+    expect(assistants).not.toContain("https://mcp.meetmilton.com/mcp");
     const deletion = await (await configured.send("/account/delete")).text();
     expect(deletion).toContain('href="mailto:help@example.invalid"');
     expect(deletion).not.toContain("meetmilton.com");
@@ -998,6 +1026,12 @@ test("signed-in email shows only in authenticated chrome; switch account signs o
     );
     expect(assistants).toContain(
       "It is empty, so run the setup it returns exactly as written",
+    );
+    expect(assistants).toContain(
+      'href="https://www.meetmilton.com/setup">Setup instructions for your assistant</a>',
+    );
+    expect(assistants).toContain(
+      "Follow the guide to connect Milton and set the instruction for future chats.",
     );
     expect(report).not.toContain("https://mcp.meetmilton.com/mcp");
     expect(report).toContain('name="next" value="login"');
@@ -1851,8 +1885,8 @@ test("the account menu offers the way to pay on every signed-in page, and the no
   const read = async (path = "/") => {
     const html = await (await send(path)).text();
     const panel = html.slice(
-      html.indexOf('<div class="menu-panel">'),
-      html.indexOf("</details>"),
+      html.indexOf('<div class="menu-panel"'),
+      html.indexOf("</header>"),
     );
     const start = html.indexOf('aria-label="Milton subscription"');
     return {

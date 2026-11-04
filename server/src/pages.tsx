@@ -36,48 +36,53 @@ const links = [
   [null, "/download", "Download TPS.md"],
 ] as const;
 function accountMenu({ csrf, email, billing }: Account) {
-  // A <details> menu: pages run no scripts.
+  // Native popover dismissal and focus handling keep these pages script-free.
   return (
     <div class="header-actions">
       <a class="button header-cta" href="/assistants">
         Connect an assistant
       </a>
-      <details class="account-menu">
-        <summary>Account</summary>
-        <div class="menu-panel">
-          {email && (
-            <p class="small-note menu-who">
-              Signed in as <strong>{email}</strong>
-            </p>
-          )}
-          {billing && (
-            <form method="post" action={`/billing/${billing.action}`}>
-              {csrf()}
-              <button class="menu-item">{billing.label}</button>
-            </form>
-          )}
-          <form method="post" action="/logout">
-            {csrf()}
-            <button
-              class="menu-item"
-              name="next"
-              value="login"
-              aria-describedby="signout-note"
-            >
-              Switch account
-            </button>
-            <button class="menu-item" aria-describedby="signout-note">
-              Sign out
-            </button>
-          </form>
-          <p class="small-note" id="signout-note">
-            Signing out of this browser does not disconnect your assistants.
+      <button
+        type="button"
+        class="account-menu secondary"
+        popovertarget="account-panel"
+      >
+        Account
+        <span aria-hidden="true">▾</span>
+      </button>
+      <div class="menu-panel" id="account-panel" popover="auto">
+        {email && (
+          <p class="small-note menu-who">
+            Signed in as <strong>{email}</strong>
           </p>
-          <a class="menu-item danger" href="/account/delete">
-            Delete account
-          </a>
-        </div>
-      </details>
+        )}
+        {billing && (
+          <form method="post" action={`/billing/${billing.action}`}>
+            {csrf()}
+            <button class="menu-item">{billing.label}</button>
+          </form>
+        )}
+        <form method="post" action="/logout">
+          {csrf()}
+          <button
+            class="menu-item"
+            name="next"
+            value="login"
+            aria-describedby="signout-note"
+          >
+            Switch account
+          </button>
+          <button class="menu-item" aria-describedby="signout-note">
+            Sign out
+          </button>
+        </form>
+        <p class="small-note" id="signout-note">
+          Signing out of this browser does not disconnect your assistants.
+        </p>
+        <a class="menu-item danger" href="/account/delete">
+          Delete account
+        </a>
+      </div>
     </div>
   );
 }

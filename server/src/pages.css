@@ -62,6 +62,10 @@ form {
 .page-body > form {
   justify-items: stretch;
 }
+.sign-in-context {
+  margin-top: var(--space-6);
+  font-size: var(--text-small);
+}
 form p {
   margin: 0;
 }
@@ -154,7 +158,7 @@ summary {
   border-left: 4px solid var(--ink);
 }
 
-/* Account menu: a <details> disclosure, since pages run no scripts. */
+/* Native popovers handle dismissal and focus without app scripts. */
 .header-actions {
   display: flex;
   flex-wrap: wrap;
@@ -165,38 +169,50 @@ summary {
 /* Both header controls share one height; each label stays on one line and
    the pair wraps as a row on narrow screens. */
 .header-cta,
-.account-menu > summary {
+.account-menu {
   min-height: var(--control-height);
   white-space: nowrap;
 }
 .account-menu {
-  position: relative;
   font-size: var(--text-small);
-}
-.account-menu > summary {
-  display: inline-flex;
-  align-items: center;
+  font-weight: 400;
+  gap: var(--space-2);
   padding: 0 var(--space-4);
-  border: 1px solid var(--ink);
-  list-style: none;
-}
-.account-menu > summary::-webkit-details-marker {
-  display: none;
-}
-.account-menu > summary::after {
-  content: "▾";
-  margin-left: var(--space-2);
 }
 .menu-panel {
-  position: absolute;
-  right: 0;
-  top: calc(100% + var(--space-2));
-  z-index: 10;
+  /* A constrained, centered fallback when anchor positioning is unavailable. */
+  position: fixed;
+  inset: var(--space-4);
+  margin: auto;
   width: 18rem;
+  height: fit-content;
+  max-width: calc(100vw - var(--space-8));
+  max-height: calc(100dvh - var(--space-8));
+  overflow-y: auto;
   padding: var(--space-2) 0;
   border: 1px solid var(--ink);
   background: var(--surface);
+  color: var(--ink);
   box-shadow: var(--shadow-sheet);
+}
+@supports (position-area: bottom span-left) and (max-height: stretch) {
+  .menu-panel {
+    position-area: bottom span-left;
+    inset: var(--space-2) 0 var(--space-4) var(--space-4);
+    margin: 0;
+    align-self: start;
+    justify-self: end;
+    max-height: stretch;
+  }
+  @media (max-width: 600px) {
+    .menu-panel {
+      position-area: bottom span-all;
+      inset-inline: var(--space-5);
+      width: auto;
+      max-width: none;
+      justify-self: stretch;
+    }
+  }
 }
 .menu-panel form {
   display: block;
@@ -437,34 +453,28 @@ main > nav + .tps-form {
   .header-cta {
     padding-inline: var(--space-4);
   }
-  /* The menu drops below the whole header, wherever Account has wrapped. */
-  .app-header {
-    position: relative;
-  }
-  .account-menu {
-    position: static;
-  }
-  .menu-panel {
-    left: 0;
-    right: 0;
-    top: calc(100% + var(--space-2));
-    width: auto;
-  }
   .form-sample pre {
     margin-left: 0;
   }
-  /* On a phone the sample title gets the full width; date and show go below. */
+  /* Labels get the title width; date and show share a separate row below. */
   .form-sample > summary {
     display: grid;
-    grid-template-columns: var(--space-6) 1fr auto;
+    grid-template-columns: var(--space-6) minmax(0, 1fr) auto;
     column-gap: var(--space-3);
     align-items: baseline;
   }
-  .form-sample .typed {
+  .form-sample .typed,
+  .form-sample .labels {
     grid-column: 2 / 4;
+  }
+  .form-sample .labels {
+    overflow-wrap: anywhere;
   }
   .form-sample .date {
     grid-column: 2;
+  }
+  .form-sample > summary::after {
+    grid-column: 3;
   }
   .form-subtitle {
     font-size: var(--text-body);

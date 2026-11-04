@@ -216,6 +216,17 @@ export const signInRoutes = async (ctx: PageContext): Promise<Response> => {
               Continue with GitHub
             </button>
           </form>
+          <p class="sign-in-context">
+            New to Milton? Try it free for 30 days. No credit card required.
+            Then $5.01 USD/month if you add a card.
+          </p>
+          <p class="small-note">
+            <a href="https://www.meetmilton.com/pricing">Pricing</a>
+            {" · "}
+            <a href="https://www.meetmilton.com/privacy">Privacy</a>
+            {" · "}
+            <a href="https://www.meetmilton.com/terms">Terms</a>
+          </p>
         </>,
       );
     }

@@ -62,7 +62,6 @@ async function webhookFixture(configured = true) {
   const app = createMiltonApp({
     issuer: "https://auth.example/milton/auth",
     resource: appOrigin + "/mcp",
-    appOrigin,
     cookieSecret: crypto.randomUUID(),
     ...local.env,
     ...(configured ? { billing } : {}),
@@ -195,12 +194,12 @@ test("the gate follows the subscription status: unknown or missing is allowed, p
       sql`UPDATE trial_accounts SET trial_end=clock_timestamp()-interval '1 hour'`,
     );
     expect(await status()).toBe("trial");
-    expect(await claimTrialNotice(local.db, userId)).toBeUndefined();
+    expect(await claimTrialNotice(local.db, userId, appOrigin)).toBeUndefined();
     // Reminders run from trial_end, and only while trialing.
     await set("active");
-    expect(await claimTrialNotice(local.db, userId)).toBeUndefined();
+    expect(await claimTrialNotice(local.db, userId, appOrigin)).toBeUndefined();
     await set("trialing");
-    expect((await claimTrialNotice(local.db, userId))?.code).toBe(
+    expect((await claimTrialNotice(local.db, userId, appOrigin))?.code).toBe(
       "trial_ending_7_days",
     );
     await local.db.query(

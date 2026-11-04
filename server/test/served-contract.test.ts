@@ -10,6 +10,7 @@ import {
 } from "../src/store/reports";
 import { setupCatalog, setupHint } from "../src/store/setup";
 import { coverSheet, reportEnvelope, reportList } from "../src/store/tools";
+import { subscriptionRequired, trialEndingMessage } from "../src/store/trials";
 
 // Fields every save carries, as the instructions name them.
 const envelope = () => ({
@@ -259,4 +260,27 @@ test("every create_memo shape the server instructions describe parses against sa
     ...envelope(),
     moves: [{ before: "A fictional rule.", report: "cover" }],
   });
+});
+
+test("the refusal, both reminders and the instructions give the one link, true for everyone who reads them", () => {
+  const app = "https://app.example";
+  const refusal = subscriptionRequired(app);
+  expect(refusal.message).toBe(
+    "Milton is paused until you subscribe for $5.01/month. Your rules and samples stay available to view and download. Subscribe at https://app.example/",
+  );
+  expect(refusal.details).toEqual({ retryable: false });
+  // A paying person past grace reads this too.
+  expect(refusal.message).not.toContain("trial");
+  // The two reminders share one text, and someone who added a card reads it.
+  expect(trialEndingMessage("2026-12-03T00:00:00.000Z", app)).toBe(
+    "Your Milton trial ends 2026-12-03 (UTC), then it's $5.01/month. Unless you've already added a card, add one by then to keep using Milton: https://app.example/",
+  );
+  const account = storeInstructions.split("\n\n").at(-1)!;
+  expect(account).toContain(
+    "Mention a trial-ending notice and its link once, after the task.",
+  );
+  expect(account).toContain(
+    "On subscription_required, say so and give its link once, do not retry, continue other work.",
+  );
+  expect(account).not.toContain("no link");
 });

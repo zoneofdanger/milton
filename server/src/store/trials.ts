@@ -68,15 +68,22 @@ export async function trialStatus(
   };
 }
 
-// No link: billing has no route yet, and the instructions say to give none.
-export function subscriptionRequired() {
+// Read by everyone Milton stopped, a paying person past grace included, so it does
+// not say the trial ended. The one link is the signed-in app home, where the button
+// lives. Only tools.ts serves this, with the origin; the gate throws it without.
+export function subscriptionRequired(appOrigin?: string) {
   return new StoreError(
     "subscription_required",
-    "Your Milton trial has ended. Subscribe for $5.01/month to resume assistant reads and saves. Your preferences are still available to view and download.",
+    "Milton is paused until you subscribe for $5.01/month. Your rules and samples stay available to view and download." +
+      (appOrigin ? ` Subscribe at ${appOrigin}/` : ""),
     402,
     { retryable: false },
   );
 }
+
+// Both reminders. Someone who already added a card reads this too.
+export const trialEndingMessage = (endsAt: string, appOrigin: string) =>
+  `Your Milton trial ends ${endsAt.slice(0, 10)} (UTC), then it's $5.01/month. Unless you've already added a card, add one by then to keep using Milton: ${appOrigin}/`;
 
 export async function assertTrialAccess(db: StoreSession, userId: string) {
   if ((await trialStatus(db, userId)).status === "expired")
@@ -86,6 +93,7 @@ export async function assertTrialAccess(db: StoreSession, userId: string) {
 export async function claimTrialNotice(
   db: StoreSession,
   userId: string,
+  appOrigin: string,
 ): Promise<TrialNotice | undefined> {
   // One SQL update arbitrates concurrent clients. Only the current milestone is
   // offered: an inactive account returning on day29 gets one reminder, not two.
@@ -107,6 +115,6 @@ export async function claimTrialNotice(
   return {
     code: row.stage === 2 ? "trial_ending_1_day" : "trial_ending_7_days",
     trial_ends_at: ends,
-    message: `Your Milton trial ends ${ends.slice(0, 10)} (UTC). Keep using Milton for $5.01/month. Your preferences remain available to view and download after expiry.`,
+    message: trialEndingMessage(ends, appOrigin),
   };
 }

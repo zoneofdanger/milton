@@ -264,8 +264,9 @@ Files: `server/src/store/index.ts`, `server/src/store/trials.ts`,
 - No row, no status, or a status Milton does not know reads as early access, so a Stripe
   outage never cuts off a connected assistant, and reads never call Stripe.
 - A trial notice is claimed once per stage, 7 days and 1 day before `trial_end`, only
-  while trialing.
-- Expired accounts are blocked for assistants, while the web view and download stay open.
+  while trialing, and carries the one link, the signed-in app home.
+- Expired accounts are blocked for assistants with a refusal carrying that link, while the
+  web view and download stay open.
 - The three Stripe settings are all or nothing: any one set means all three must be valid,
   or the app fails at startup.
 - The Stripe webhook verifies the signature, then takes only a customer ID from the six

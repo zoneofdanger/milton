@@ -304,6 +304,8 @@ export async function deleteAccount(
 type CallAllowance =
   { allowed: true } | { allowed: false; retry_at_ms: number; limit: "day" };
 export interface TenantStore {
+  /** The app's origin, for the one link served to assistants. */
+  appOrigin: string;
   trialNotice?(): Promise<TrialNotice | undefined>;
   memoUpdates?(): Promise<import("./memo-updates").MemoUpdates | undefined>;
   readTpsReport(): Promise<CompiledReport>;
@@ -329,7 +331,7 @@ async function resolveActiveUser(db: StoreSession, userId: string) {
 }
 
 export async function storeForCurrentRequest(
-  bindings: StoreBindings,
+  bindings: StoreBindings & { appOrigin: string },
   auth: VerifiedStoreAuth,
   assistant?: { issuer: string; clientId: string },
 ): Promise<TenantStore> {
@@ -339,11 +341,12 @@ export async function storeForCurrentRequest(
   await resolveActiveUser(db, userId);
   const compiled = compiledMemos(db, userId, assistant);
   return {
+    appOrigin: bindings.appOrigin,
     trialNotice: () =>
       db.transaction(async (tx) => {
         await tx.query(sql`SET LOCAL lock_timeout='250ms'`);
         await tx.query(sql`SET LOCAL statement_timeout='500ms'`);
-        return claimTrialNotice(tx, userId);
+        return claimTrialNotice(tx, userId, bindings.appOrigin);
       }),
     memoUpdates: compiled.memoUpdates,
     readTpsReport: compiled.getTpsReport,
@@ -386,7 +389,7 @@ export async function storeForCurrentRequest(
 
 // The web app reads with the person's own session: no assistant, so no saves.
 export async function personStoreForCurrentRequest(
-  bindings: StoreBindings,
+  bindings: StoreBindings & { appOrigin: string },
   auth: VerifiedStoreAuth,
 ) {
   const store = await storeForCurrentRequest(bindings, auth);

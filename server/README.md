@@ -545,7 +545,8 @@ confirmed save into failure. The website banner does not consume MCP reminders.
 Report text, version, downloads and saved receipts contain no billing notices.
 
 Expired unsubscribed accounts receive a tool error `subscription_required` with
-`retryable:false` and no link, as the instructions say. This is not an
+`retryable:false` and the signed-in app home as the one link in its message, as the
+instructions say. This is not an
 authentication failure or an empty successful report. New saves are checked when
 claimed and again under the publication lock; a save that crosses expiry fails
 without publishing. Exact replay still

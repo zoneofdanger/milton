@@ -2051,7 +2051,7 @@ test("pages and download show only the session account, whatever the query names
   // The browser session belongs to page-fixes; a second account shares the store.
   const fixture = await memoPageFixture();
   try {
-    const bindings = { storeDatabase: fixture.db };
+    const bindings = { storeDatabase: fixture.db, appOrigin };
     const identity = { provider: "neon", subject: "page-alpha" };
     await resolveIdentityAccount(bindings, identity);
     const alpha = await lookupIdentityAccount(bindings, identity);

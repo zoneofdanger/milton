@@ -49,6 +49,7 @@ test("trial transition preserves saves and TPS while notices and access follow t
       expireWhileSaving = false;
     const store = await storeForCurrentRequest(
       {
+        appOrigin: "http://localhost:3001",
         storeDatabase: betweenPhases(local.db, async () => {
           calls++;
           if (expireWhileSaving)
@@ -233,9 +234,9 @@ test("trial transition preserves saves and TPS while notices and access follow t
       error: "subscription_required",
       retryable: false,
     });
+    // The one link is in the message, the signed-in app home.
     expect(racingSave).not.toHaveProperty("subscription_url");
-    // The instructions say to give no link, so the refusal carries none.
-    expect(JSON.stringify(racingSave)).not.toMatch(/_url|https?:/);
+    expect(racingSave.message).toEndWith("Subscribe at http://localhost:3001/");
     expect(await person.readTpsReport()).toEqual(report);
     const denied = await tools.get_cover_sheet();
     expect(denied.isError).toBe(true);
@@ -244,7 +245,7 @@ test("trial transition preserves saves and TPS while notices and access follow t
       retryable: false,
     });
     expect(result(denied).text).toBeUndefined();
-    expect(JSON.stringify(result(denied))).not.toMatch(/_url|https?:/);
+    expect(result(denied).message).toBe(racingSave.message);
     const beforeCalls = calls;
     expect(
       result(
@@ -309,7 +310,7 @@ async function tenantPair(
     await resolveIdentityAccount(local.env, identity);
     const auth = await lookupIdentityAccount(local.env, identity);
     const tools = createStoreMemoTools(
-      await storeForCurrentRequest({ storeDatabase }, auth, {
+      await storeForCurrentRequest({ ...local.env, storeDatabase }, auth, {
         issuer: "fixture",
         clientId: subject,
       }),
@@ -782,10 +783,14 @@ test("account deletion removes every tenant row, keeps refusals, stops in-flight
     const open = async (subject: string) => {
       await resolveIdentityAccount(local.env, neon(subject));
       const auth = await lookupIdentityAccount(local.env, neon(subject));
-      const store = await storeForCurrentRequest({ storeDatabase }, auth, {
-        issuer: "fixture",
-        clientId: "client-c",
-      });
+      const store = await storeForCurrentRequest(
+        { ...local.env, storeDatabase },
+        auth,
+        {
+          issuer: "fixture",
+          clientId: "client-c",
+        },
+      );
       const save = async (extra: Record<string, unknown> = {}) =>
         store.saveMemo({
           text: "Fictional rule, with its exception.",

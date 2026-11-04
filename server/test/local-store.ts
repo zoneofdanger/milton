@@ -125,7 +125,7 @@ export async function localStore() {
   return {
     pg,
     db,
-    env: { storeDatabase: db },
+    env: { storeDatabase: db, appOrigin: "http://localhost:3001" },
     async dispose() {
       await pg.close();
     },

@@ -4,28 +4,28 @@ import AssistantSetup from "../components/AssistantSetup.astro";
 ---
 
 <SiteLayout
-  title="Connect your assistant — Milton"
-  description="Connect Milton to your assistant with MCP. Setup guidance for Claude, ChatGPT, Claude Code, Codex, and Cursor, plus unverified guides for Grok Bot, Muse, and Claude Duet."
+  title="Connect your AI — Milton"
+  description="Connect Milton to your AI with MCP. Setup guidance for Claude, ChatGPT, Claude Code, Codex, and Cursor, plus unverified guides for Grok Bot, Muse, and Claude Duet."
   legal
 >
   <p class="eyebrow">## A little paperwork. Once.</p>
-  <h1>Connect your assistant.</h1>
+  <h1>Connect your AI.</h1>
   <p>
-    <strong>Connect Milton. Ask “did you get that memo?”</strong>
+    <strong>Connect Milton. Say “set up Milton.”</strong>
   </p>
   <p>
-    Your assistant gets the writing you approved, word for word. Milton never
-    rewrites a rule or a sample, and it never reads your inbox.
+    Your AI gets the writing you approved, word for word. Milton never rewrites
+    a rule or a sample, and it never reads your inbox.
   </p>
   <p>
-    Milton connects through MCP, a standard that lets assistants use tools. You
-    need a client that supports remote MCP, OAuth sign-in, and tools that read
-    and save. Your plan or workspace administrator may restrict these features.
+    Milton connects through MCP, a standard that lets AIs use tools. You need a
+    client that supports remote MCP, OAuth sign-in, and tools that read and
+    save. Your plan or workspace administrator may restrict these features.
   </p>
   <p>
     First, <a href="https://app.meetmilton.com/login">sign in to Milton</a> with
-    Google or GitHub. Use the same account when your assistant asks you to
-    authorize the connection. Early access is free; no credit card is required.
+    Google or GitHub. Use the same account when your AI asks you to authorize
+    the connection. Early access is free; no credit card is required.
   </p>
   <div class="guided-setup">
     <AssistantSetup />
@@ -38,19 +38,19 @@ import AssistantSetup from "../components/AssistantSetup.astro";
   </div>
   <div id="standing-line" class="standing">
     <p>
-      Setup ends with one line for your assistant’s standing instructions, so it
-      reads Milton without being asked:
+      Setup ends with one line for your AI’s standing instructions, so it reads
+      Milton without being asked:
     </p>
     <blockquote>
       Before writing anything for me, call Milton's get_cover_sheet, then
       get_report for the matching report.
     </blockquote>
     <p>
-      Your assistant offers to add it for you. If you set up before this or
-      skipped setup, add it yourself; each assistant below says where it goes.
+      Your AI offers to add it for you. If you set up before this or skipped
+      setup, add it yourself; each AI below says where it goes.
     </p>
   </div>
-  <nav class="clients" aria-label="Choose your assistant">
+  <nav class="clients" aria-label="Choose your AI">
     <a href="#claude">Claude</a>
     <a href="#claude-duet">Claude Duet</a>
     <a href="#chatgpt">ChatGPT</a>
@@ -134,13 +134,13 @@ import AssistantSetup from "../components/AssistantSetup.astro";
       </li>
       <li>
         Make Milton available in your conversation before asking ChatGPT to read
-        or save preferences.
+        or save rules and samples.
       </li>
     </ol>
     <p>
       Custom MCP access depends on your plan and workspace settings. You need
-      both read and write tools; a search-only connection won’t save
-      preferences. If the option is missing, check the{" "}
+      both read and write tools; a search-only connection won’t save rules and
+      samples. If the option is missing, check the{" "}
       <a href="https://developers.openai.com/plugins/build/app-quickstart">
         official connection guide ↗
       </a>{" "}
@@ -159,8 +159,8 @@ import AssistantSetup from "../components/AssistantSetup.astro";
     </p>
     <blockquote>
       Add Milton as a remote MCP server at https://mcp.meetmilton.com/mcp. Use
-      OAuth browser sign-in, then list its tools. Do not save or change
-      preferences during setup.
+      OAuth browser sign-in, then list its tools. Do not save or change rules
+      and samples during setup.
     </blockquote>
     <ol>
       <li>Complete the browser sign-in using your Milton account.</li>
@@ -193,8 +193,8 @@ import AssistantSetup from "../components/AssistantSetup.astro";
     <blockquote>
       Create a Custom Connector named Milton for the remote MCP server at
       https://mcp.meetmilton.com/mcp. It uses Streamable HTTP and OAuth browser
-      sign-in. List its tools after connecting. Do not save or change
-      preferences during setup.
+      sign-in. List its tools after connecting. Do not save or change rules and
+      samples during setup.
     </blockquote>
     <ol>
       <li>
@@ -275,7 +275,7 @@ codex mcp login milton`}</code></pre>
     </p>
   </section>
   <section id="first-preference" aria-labelledby="first-heading">
-    <h2 id="first-heading">Put your first preference on file.</h2>
+    <h2 id="first-heading">Put your first rules on file.</h2>
     <p>
       Your account starts empty. The setup prompt above runs a short quiz: paste
       one email you sent, then pick between short examples, one question at a
@@ -286,21 +286,21 @@ codex mcp login milton`}</code></pre>
       concise unless I ask for detail.”
     </blockquote>
     <p>
-      Or ask your assistant to help draft your preferences, then approve the
-      complete draft before saving.{" "}
+      Setup does this for you: your AI runs the setup questions, shows you the
+      complete list of rules, and files them only after you approve.{" "}
       <a href="https://app.meetmilton.com/">Open Milton</a> to check the report.
     </p>
     <p>In your next conversation, ask:</p>
     <blockquote>“Did you get that memo?”</blockquote>
     <p>“Did you get the memo?” also works.</p>
     <p>
-      Use this to ask your assistant to fetch your latest cover sheet, even if
-      it read an earlier copy. It should confirm only after a successful read.
-      This requests a read, not a save.
+      Use this to ask your AI to fetch your latest cover sheet, even if it read
+      an earlier copy. It should confirm only after a successful read. This
+      requests a read, not a save.
     </p>
     <p>
-      Connecting Milton doesn’t automatically load the report into every chat.
-      Ask for a read when you start work. All connected assistants can read the
+      Your AI reads your cover sheet at the start of each chat once setup
+      finishes. Connecting alone doesn’t do this. All connected AIs can read the
       whole report, so keep private project context in its own tools.
     </p>
   </section>
@@ -308,8 +308,8 @@ codex mcp login milton`}</code></pre>
     <h2 id="help-heading">Not connecting?</h2>
     <p>
       Check the server URL, sign in with the same Milton account, and confirm
-      your assistant allows the connector in this conversation. Workspace
-      policies may require administrator approval. For help, email{" "}
+      your AI allows the connector in this conversation. Workspace policies may
+      require administrator approval. For help, email{" "}
       <a href="mailto:support@meetmilton.com">support@meetmilton.com</a>.
     </p>
     <p>

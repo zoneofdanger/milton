@@ -7,6 +7,7 @@ import {
   billingForAccount,
   lookupIdentityAccount,
   StoreError,
+  type StoreBindings,
   type StripeSubscriptionState,
 } from "./store";
 import { boundRequest } from "./http";
@@ -194,7 +195,7 @@ async function createCustomer(
  * stored rather than starting a second trial. A failure throws a 503 that says to
  * try again, and repeating the attempt is the retry. */
 export async function ensureSubscription(
-  config: RuntimeConfig,
+  config: StoreBindings & Pick<RuntimeConfig, "billing">,
   userId: string,
   email?: string,
 ) {

@@ -10,8 +10,10 @@ import {
 import { StoreError } from "./errors";
 import { claimTrialNotice, trialStatus, type TrialNotice } from "./trials";
 import {
+  backfillAccounts,
   billingAccount,
   clearStripeCustomer,
+  enrollForBackfill,
   linkStripeCustomer,
   lockStripeCustomer,
   lockWaitingSubscription,
@@ -454,6 +456,21 @@ export function billingForAccount(bindings: StoreBindings, userId: string) {
       });
       if (failed) throw failed.error;
     },
+  };
+}
+
+/** What server/scripts/backfill-subscriptions.ts reads and writes. */
+export function subscriptionBackfill(bindings: StoreBindings) {
+  const db = database(bindings);
+  return {
+    trialsEnabled: async () =>
+      (
+        await db.query<{ enabled: boolean }>(
+          sql`SELECT trials_enabled AS enabled FROM store_config WHERE singleton=1`,
+        )
+      )[0]?.enabled === true,
+    accounts: () => backfillAccounts(db),
+    enroll: (userId: string) => enrollForBackfill(db, userId),
   };
 }
 

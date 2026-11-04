@@ -434,6 +434,19 @@ expired and Checkout will not sell over it, and nothing confirms the portal can 
 Payment methods come from the Dashboard's default payment method configuration, which is
 Peter's. No code sets payment method types.
 
+**Backfill.** After `trials_enabled` is flipped, give every existing account its trial, with
+the app's settings:
+
+    bun --no-env-file scripts/backfill-subscriptions.ts          # dry run
+    bun --no-env-file scripts/backfill-subscriptions.ts --apply
+
+It prints only counts (total, created, skipped, failed, still NULL), at about 5 accounts a second,
+and refuses without `trials_enabled` and a live key. `--allow-test-key` is for disposable
+databases only. With `--apply` it exits nonzero if any account still has no status; rerun it, since
+rows with a status are skipped. A row left at NULL is free until a browser sign-in: an approval
+Neon already holds refreshes without any Milton page. Customers it creates have no email, so
+Stripe sends them no receipts or payment reminders.
+
 **Data statement.** An older image still serving after 0026 can write a returning deleted
 identity's row with no status. Once the new image has all traffic, rerun 0026's statement. It
 only touches rows with no status, so it never changes one Stripe has answered for:

@@ -116,3 +116,18 @@ export async function recordStripeEvent(
   )[0]!;
   return { recorded: row.recorded === 1, updated: row.updated };
 }
+
+/** Every active account and its status, null with no row or no status yet. */
+export async function backfillAccounts(db: StoreSession) {
+  return db.query<{ id: string; status: string | null }>(sql`
+    SELECT u.id, t.subscription_status AS status FROM users u
+    LEFT JOIN trial_accounts t ON t.user_id=u.id
+    WHERE u.status='active' ORDER BY u.id`);
+}
+
+/** Gives an active account a clock row with no status, if it has none. */
+export async function enrollForBackfill(db: StoreSession, userId: string) {
+  await db.query(sql`INSERT INTO trial_accounts(user_id,started_at)
+    SELECT id,created_at FROM users WHERE id=${userId} AND status='active'
+    ON CONFLICT (user_id) DO NOTHING`);
+}

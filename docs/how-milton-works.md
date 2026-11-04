@@ -216,6 +216,9 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
 - The row stays locked across customer, list, and create, so a concurrent attempt finds the
   result rather than making a second customer or trial.
 - What Stripe already has is listed first, so a retry stores it rather than starting again.
+- `scripts/backfill-subscriptions.ts` does the same for every active account, paced at about
+  5 a second: a dry run unless told otherwise, it skips rows with a status, sends no email,
+  prints only counts, and refuses without `trials_enabled` and a live key.
 - A reply lost after Stripe made a customer can leave an orphan: never charged, may hold an
   email, removed by hand in Stripe if ever needed.
 - Idempotency keys carry the UTC minute, because Stripe replays a stored error for a day.

@@ -1,8 +1,12 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { createHmac } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { createMiltonApp } from "../src/index";
 import { claimTrialNotice, trialStatus } from "../src/store/trials";
+import {
+  backfillExitCode,
+  backfillSubscriptions,
+} from "../scripts/backfill-subscriptions";
 import { localStore } from "./local-store";
 
 const appOrigin = "http://localhost:3001";
@@ -360,3 +364,138 @@ test("a verified event only triggers a re-read: the list decides, a replay and a
     await local.dispose();
   }
 });
+
+test("the backfill refuses without trials or a live key, dry-runs, creates, leaves failures at NULL, and reruns as a no-op", async () => {
+  const local = await localStore();
+  const { billing } = fakeStripe();
+  const calls: string[] = [];
+  let failing = false;
+  const stripe = {
+    ...billing,
+    fetch: async (url: string, init: RequestInit) => {
+      const { pathname } = new URL(url);
+      calls.push(`${init.method} ${pathname}`);
+      if (failing) return Response.json({}, { status: 500 });
+      if (init.method === "GET") return Response.json({ data: [] });
+      const fixture = String(calls.length).padStart(4, "0");
+      return Response.json(
+        pathname === "/v1/customers"
+          ? { id: `cus_backfill${fixture}` }
+          : { ...subscription("trialing"), id: `sub_backfill${fixture}` },
+      );
+    },
+  };
+  const config = { ...local.env, billing: stripe };
+  const pause = async () => {};
+  const rows = () =>
+    local.db.query<Record<string, unknown>>(
+      sql`SELECT u.id,t.subscription_status AS status,t.stripe_customer_id AS customer
+        FROM users u LEFT JOIN trial_accounts t ON t.user_id=u.id ORDER BY u.id`,
+    );
+  try {
+    await local.db.query(
+      sql`INSERT INTO users(id) VALUES ('a-no-row'),('b-null'),('c-canceled'),('d-gone')`,
+    );
+    await local.db.query(
+      sql`UPDATE users SET status='deleting' WHERE id='d-gone'`,
+    );
+    await local.db.query(
+      sql`INSERT INTO trial_accounts(user_id,started_at) SELECT id,created_at FROM users WHERE id='b-null'`,
+    );
+    await local.db.query(
+      sql`INSERT INTO trial_accounts(user_id,started_at,subscription_status) SELECT id,created_at,'canceled' FROM users WHERE id='c-canceled'`,
+    );
+    const refused = (
+      target: Parameters<typeof backfillSubscriptions>[0],
+      options = {},
+    ) =>
+      expect(
+        backfillSubscriptions(target, options, pause),
+      ).rejects.toMatchObject({ code: "configuration" });
+    await refused(config, { allowTestKey: true }); // trials off
+    await local.db.query(sql`UPDATE store_config SET trials_enabled=true`);
+    await refused(local.env, { allowTestKey: true }); // billing unset
+    await refused(config); // a test key without the flag
+    expect(calls).toEqual([]);
+    const before = await rows();
+    // A live key passes the check; the dry run writes and calls nothing.
+    const live = {
+      ...config,
+      billing: { ...stripe, secretKey: "rk_live_fixtureNotAKey" },
+    };
+    const dry = await backfillSubscriptions(live, {}, pause);
+    expect(dry).toEqual({
+      total: 3,
+      created: 0,
+      skipped: 1,
+      failed: 0,
+      still_null: 2,
+    });
+    expect(backfillExitCode(dry, false)).toBe(0);
+    expect(await rows()).toEqual(before);
+    expect(calls).toEqual([]);
+    // A Stripe failure leaves the rows at NULL and exits nonzero.
+    failing = true;
+    const quiet = spyOn(console, "error").mockImplementation(() => {});
+    let pauses = 0;
+    const failed = await backfillSubscriptions(
+      config,
+      { apply: true, allowTestKey: true },
+      async () => {
+        pauses++;
+      },
+    );
+    quiet.mockRestore();
+    expect(failed).toEqual({
+      total: 3,
+      created: 0,
+      skipped: 1,
+      failed: 2,
+      still_null: 2,
+    });
+    expect(backfillExitCode(failed, true)).toBe(1);
+    expect(pauses).toBe(2);
+    // Healthy: every waiting account gets a trial, no email, and exit 0.
+    failing = false;
+    calls.length = 0;
+    const done = await backfillSubscriptions(
+      config,
+      { apply: true, allowTestKey: true },
+      pause,
+    );
+    expect(done).toEqual({
+      total: 3,
+      created: 2,
+      skipped: 1,
+      failed: 0,
+      still_null: 0,
+    });
+    expect(backfillExitCode(done, true)).toBe(0);
+    expect(calls).toHaveLength(6);
+    const after = await rows();
+    expect(after.map(({ id, status }) => [id, status])).toEqual([
+      ["a-no-row", "trialing"],
+      ["b-null", "trialing"],
+      ["c-canceled", "canceled"],
+      ["d-gone", null],
+    ]);
+    // A rerun touches nothing.
+    calls.length = 0;
+    const rerun = await backfillSubscriptions(
+      config,
+      { apply: true, allowTestKey: true },
+      pause,
+    );
+    expect(rerun).toEqual({
+      total: 3,
+      created: 0,
+      skipped: 3,
+      failed: 0,
+      still_null: 0,
+    });
+    expect(calls).toEqual([]);
+    expect(await rows()).toEqual(after);
+  } finally {
+    await local.dispose();
+  }
+}, 30000);

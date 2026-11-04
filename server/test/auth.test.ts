@@ -1355,13 +1355,13 @@ test("trial reminders stay outside TPS and expired accounts retain web view and 
     );
     await fixture.db.query(sql`UPDATE store_config SET trials_enabled=true`);
     await fixture.db.query(
-      sql`INSERT INTO trial_accounts(user_id,started_at) SELECT id,created_at FROM users`,
+      sql`INSERT INTO trial_accounts(user_id,started_at,subscription_status,trial_end) SELECT id,created_at,'trialing',clock_timestamp()+interval '30 days' FROM users`,
     );
     const freshTrial = await (await fixture.send("/")).text();
     expect(freshTrial).not.toContain("trial starts");
     expect(freshTrial).not.toContain("Subscribe for $5.01/month");
     await fixture.db.query(
-      sql`UPDATE trial_accounts SET started_at=clock_timestamp()-interval '24 days'`,
+      sql`UPDATE trial_accounts SET trial_end=clock_timestamp()+interval '6 days'`,
     );
     const warning = await fixture.send("/");
     expect(warning.status).toBe(200);
@@ -1374,7 +1374,7 @@ test("trial reminders stay outside TPS and expired accounts retain web view and 
         .notice_stage,
     ).toBe(0);
     await fixture.db.query(
-      sql`UPDATE trial_accounts SET started_at=clock_timestamp()-interval '31 days'`,
+      sql`UPDATE trial_accounts SET subscription_status='canceled'`,
     );
     const expired = await fixture.send("/tps-report");
     expect(expired.status).toBe(200);
@@ -1414,7 +1414,7 @@ test("no served page, trial notice or subscription refusal links to a route that
     });
     await fixture.db.query(sql`UPDATE store_config SET trials_enabled=true`);
     await fixture.db.query(
-      sql`INSERT INTO trial_accounts(user_id,started_at) SELECT id,clock_timestamp()-interval '24 days' FROM users`,
+      sql`INSERT INTO trial_accounts(user_id,started_at,subscription_status,trial_end) SELECT id,created_at,'trialing',clock_timestamp()+interval '6 days' FROM users`,
     );
     // Every link Milton serves: page hrefs, and URL fields in the notice and
     // the refusal assistants receive. Only same-origin paths are checked.
@@ -1468,7 +1468,7 @@ test("no served page, trial notice or subscription refusal links to a route that
     expect(notice?.code).toBe("trial_ending_7_days");
     collect(notice);
     await fixture.db.query(
-      sql`UPDATE trial_accounts SET started_at=clock_timestamp()-interval '31 days'`,
+      sql`UPDATE trial_accounts SET subscription_status='canceled'`,
     );
     await visit();
     const refused = await fixture.author

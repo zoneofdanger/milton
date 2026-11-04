@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { createHmac } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { createMiltonApp } from "../src/index";
-import { trialStatus } from "../src/store/trials";
+import { claimTrialNotice, trialStatus } from "../src/store/trials";
 import { localStore } from "./local-store";
 
 const appOrigin = "http://localhost:3001";
@@ -18,10 +18,11 @@ async function webhookFixture(configured = true) {
   const local = await localStore();
   await local.db.query(sql`UPDATE store_config SET trials_enabled=true`);
   await local.db.query(sql`INSERT INTO users(id) VALUES (${userId})`);
-  // A clock that ran out yesterday, linked to its Stripe customer by checkout.
-  await local.db
-    .query(sql`INSERT INTO trial_accounts(user_id,started_at,stripe_customer_id)
-    VALUES (${userId},clock_timestamp()-interval '31 days','cus_fixture')`);
+  // An ended subscription on its Stripe customer.
+  await local.db.query(
+    sql`INSERT INTO trial_accounts(user_id,started_at,stripe_customer_id,stripe_subscription_id,subscription_status)
+    VALUES (${userId},clock_timestamp()-interval '31 days','cus_fixture','sub_fixture','canceled')`,
+  );
   const app = createMiltonApp({
     issuer: "https://auth.example/milton/auth",
     resource: appOrigin + "/mcp",
@@ -124,8 +125,59 @@ test("Stripe webhook refuses unsigned, stale, forged, oversized and non-JSON req
   }
 });
 
+test("the gate follows the subscription status: unknown or missing is allowed, past_due has three days from the renewal, and only trialing gets reminders", async () => {
+  const { local, status } = await webhookFixture();
+  const set = (status: string | null, sinceRenewal = "1 day") =>
+    local.db.query(sql`UPDATE trial_accounts SET subscription_status=${status},
+      trial_end=clock_timestamp()+interval '6 days',
+      current_period_start=clock_timestamp()-${sinceRenewal}::interval,
+      current_period_end=clock_timestamp()+interval '29 days'
+      WHERE user_id=${userId}`);
+  try {
+    for (const [stripe, expected] of [
+      ["trialing", "trial"],
+      ["active", "paid"],
+      ["canceled", "expired"],
+      ["unpaid", "expired"],
+      ["incomplete", "expired"],
+      ["incomplete_expired", "expired"],
+      ["paused", "expired"],
+      ["a_status_stripe_adds_later", "early_access"],
+      [null, "early_access"],
+    ] as const) {
+      await set(stripe);
+      expect([stripe, await status()]).toEqual([stripe, expected]);
+    }
+    // The period end is a month ahead here, so grace runs from the renewal.
+    await set("past_due", "2 days 23 hours");
+    expect(await status()).toBe("paid");
+    await set("past_due", "3 days 1 minute");
+    expect(await status()).toBe("expired");
+    // A trial_end in the past never expires a trial: Stripe's status decides.
+    await set("trialing");
+    await local.db.query(
+      sql`UPDATE trial_accounts SET trial_end=clock_timestamp()-interval '1 hour'`,
+    );
+    expect(await status()).toBe("trial");
+    expect(await claimTrialNotice(local.db, userId)).toBeUndefined();
+    // Reminders run from trial_end, and only while trialing.
+    await set("active");
+    expect(await claimTrialNotice(local.db, userId)).toBeUndefined();
+    await set("trialing");
+    expect((await claimTrialNotice(local.db, userId))?.code).toBe(
+      "trial_ending_7_days",
+    );
+    await local.db.query(
+      sql`DELETE FROM trial_accounts WHERE user_id=${userId}`,
+    );
+    expect(await status()).toBe("early_access");
+  } finally {
+    await local.dispose();
+  }
+});
+
 test("a signed Stripe event sets paid_through once, a replay is ignored, deletion clears it, and unknown events are recorded only", async () => {
-  const { local, post, ledger, status } = await webhookFixture();
+  const { local, post, ledger } = await webhookFixture();
   const paidThrough = async () =>
     (
       await local.db.query<{ paid_through: Date | string | null }>(
@@ -133,13 +185,11 @@ test("a signed Stripe event sets paid_through once, a replay is ignored, deletio
       )
     )[0]!.paid_through;
   try {
-    expect(await status()).toBe("expired");
     expect(await post(updated)).toEqual([200, '{"received":true}']);
-    // The period end plus three days of grace; the expired clock reads as paid.
+    // The period end plus three days of grace.
     expect(new Date(String(await paidThrough())).getTime()).toBe(
       (periodEnd + 3 * 86400) * 1000,
     );
-    expect(await status()).toBe("paid");
     expect(await post(updated)).toEqual([
       200,
       '{"received":true,"duplicate":true}',
@@ -162,14 +212,12 @@ test("a signed Stripe event sets paid_through once, a replay is ignored, deletio
     expect(
       await post(event("evt_unknown", "customer.created", { id: "cus_x" })),
     ).toEqual([200, '{"received":true}']);
-    expect(await status()).toBe("paid");
     const deleted = event("evt_deleted", "customer.subscription.deleted", {
       customer: "cus_fixture",
       status: "canceled",
     });
     expect(await post(deleted)).toEqual([200, '{"received":true}']);
     expect(await paidThrough()).toBeNull();
-    expect(await status()).toBe("expired");
     expect((await ledger()).map((row) => row.id).sort()).toEqual([
       "evt_deleted",
       "evt_oldInvoice",

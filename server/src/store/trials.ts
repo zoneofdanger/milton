@@ -13,6 +13,16 @@ export type TrialNotice = {
   message: string;
 };
 
+// Stripe statuses that end access. Anything Milton does not recognize allows it,
+// so a new Stripe status or an outage never locks anyone out.
+const ENDED = new Set([
+  "canceled",
+  "unpaid",
+  "incomplete",
+  "incomplete_expired",
+  "paused",
+]);
+
 export async function trialStatus(
   db: StoreSession,
   userId: string,
@@ -20,32 +30,37 @@ export async function trialStatus(
   const row = (
     await db.query<{
       enabled: boolean;
-      enrolled: boolean;
-      ends_at: Date | string | null;
+      status: string | null;
+      trial_end: Date | string | null;
       now: Date | string;
-      paid: boolean;
-    }>(sql`SELECT c.trials_enabled AS enabled, t.user_id IS NOT NULL AS enrolled,
-    t.started_at + interval '720 hours' AS ends_at, clock_timestamp() AS now,
-    coalesce(t.paid_through > clock_timestamp(),false) AS paid
+      in_grace: boolean;
+    }>(sql`SELECT c.trials_enabled AS enabled, t.subscription_status AS status,
+    t.trial_end, clock_timestamp() AS now,
+    coalesce(clock_timestamp() < t.current_period_start + interval '3 days',true) AS in_grace
     FROM store_config c LEFT JOIN trial_accounts t ON t.user_id=${userId}
     WHERE c.singleton=1`)
   )[0];
   if (!row)
     throw new StoreError("configuration", "Account access is unavailable.");
-  if (!row.enabled || !row.enrolled)
+  const { status } = row;
+  if (!row.enabled || !status)
     return { status: "early_access", reminder_stage: 0 };
-  if (!row.ends_at)
-    throw new StoreError(
-      "configuration",
-      "Account trial clock is unavailable.",
-    );
-  const end = new Date(row.ends_at);
+  // A failed renewal's period end is already a month ahead, so past_due's grace
+  // runs from the renewal, the start of the unpaid period.
+  if (status === "active" || (status === "past_due" && row.in_grace))
+    return { status: "paid", reminder_stage: 0 };
+  if (status === "past_due" || ENDED.has(status))
+    return { status: "expired", reminder_stage: 0 };
+  if (status !== "trialing")
+    return { status: "early_access", reminder_stage: 0 };
+  if (!row.trial_end) return { status: "trial", reminder_stage: 0 };
+  const end = new Date(row.trial_end);
   const remaining = end.getTime() - new Date(row.now).getTime();
   return {
-    status: row.paid ? "paid" : remaining <= 0 ? "expired" : "trial",
+    status: "trial",
     trial_ends_at: end.toISOString(),
     reminder_stage:
-      row.paid || remaining <= 0 || remaining > 7 * 86400000
+      remaining <= 0 || remaining > 7 * 86400000
         ? 0
         : remaining <= 86400000
           ? 2
@@ -77,15 +92,15 @@ export async function claimTrialNotice(
   const row = (
     await db.query<{ stage: number; ends_at: string | Date }>(sql`
     UPDATE trial_accounts t SET notice_stage=CASE
-      WHEN t.started_at + interval '720 hours' <= clock_timestamp()+interval '24 hours' THEN 2 ELSE 1 END
+      WHEN t.trial_end <= clock_timestamp()+interval '24 hours' THEN 2 ELSE 1 END
     WHERE t.user_id=${userId}
       AND EXISTS (SELECT 1 FROM users u WHERE u.id=t.user_id AND u.status='active')
       AND EXISTS (SELECT 1 FROM store_config WHERE singleton=1 AND trials_enabled)
-      AND (t.paid_through IS NULL OR t.paid_through<=clock_timestamp())
-      AND t.started_at + interval '720 hours' > clock_timestamp()
-      AND t.started_at + interval '720 hours' <= clock_timestamp()+interval '168 hours'
-      AND t.notice_stage < CASE WHEN t.started_at + interval '720 hours' <= clock_timestamp()+interval '24 hours' THEN 2 ELSE 1 END
-    RETURNING notice_stage AS stage, started_at + interval '720 hours' AS ends_at`)
+      AND t.subscription_status='trialing'
+      AND t.trial_end > clock_timestamp()
+      AND t.trial_end <= clock_timestamp()+interval '168 hours'
+      AND t.notice_stage < CASE WHEN t.trial_end <= clock_timestamp()+interval '24 hours' THEN 2 ELSE 1 END
+    RETURNING notice_stage AS stage, trial_end AS ends_at`)
   )[0];
   if (!row) return;
   const ends = new Date(row.ends_at).toISOString();

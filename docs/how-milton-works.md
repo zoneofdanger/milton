@@ -203,8 +203,8 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
   blocks them otherwise.
 - New accounts obey `signup_mode`: closed, allowlist, or open.
 - A new account starts empty, with a trial row if trials are on.
-- A returning deleted identity gets a trial that has already ended, found through its
-  hash.
+- A returning deleted identity gets a row already marked canceled, found through its hash,
+  so it reads as expired and gets no Stripe trial.
 - Disconnecting writes Milton's refusal first, then removes the consent at Neon.
 - If the Neon removal fails, the page offers Retry while the refusal stands.
 - Approving an assistant again clears its refusal, retrying once.
@@ -235,10 +235,16 @@ Files: `server/src/store/index.ts`, `server/src/store/trials.ts`,
 `server/src/store/memo-updates.ts`.
 
 - Limits live in a single `store_config` row and are validated on read.
-- Trials last 720 hours and are switched by `trials_enabled`, and when off, everyone is
-  early access.
-- A trial notice is claimed once per stage, 7 days and 1 day before the end.
-- Expired trials block assistants, while the web view and download stay open.
+- Trials are switched by `trials_enabled`, and when off, everyone is early access.
+- With trials on, access follows the Stripe subscription status held on the trial row:
+  trialing reads as trial, active as paid, and past_due as paid for 3 days from the renewal.
+- Past that grace, canceled, unpaid, incomplete, incomplete_expired, and paused read as
+  expired.
+- No row, no status, or a status Milton does not know reads as early access, so a Stripe
+  outage locks nobody out.
+- A trial notice is claimed once per stage, 7 days and 1 day before `trial_end`, only
+  while trialing.
+- Expired accounts are blocked for assistants, while the web view and download stay open.
 - Daily memo updates count charged and held saves, reset at 00:00 UTC, and are enforced
   only when enabled.
 

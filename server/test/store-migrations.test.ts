@@ -323,6 +323,11 @@ test("0024 runtime role saves through its grants, cannot change the schema or by
     expect(await grants(pg)).toEqual(await grants(post));
 
     await seedUsers(pg, "runtime");
+    // The store's trial gate reads 0025's columns, so the runtime checks below
+    // run with them in place; 0025 comes back out before 0024's rollback.
+    await pg.exec(
+      "BEGIN;" + (await drizzleSql("0025_stripe_billing.sql")) + "COMMIT;",
+    );
     // A login role in the group, as milton_app is in Neon. Membership
     // inherits: the session needs no SET ROLE milton_runtime. PGlite's session
     // user is a superuser, so SET ROLE stands in for logging in; what is checked
@@ -411,6 +416,7 @@ test("0024 runtime role saves through its grants, cannot change the schema or by
     } finally {
       await pg.exec("RESET ROLE");
     }
+    await pg.exec(await drizzleSql("rollback/0025_stripe_billing.sql"));
 
     // Rollback refuses while a login role is still in the group.
     await expect(pg.exec(down)).rejects.toThrow(

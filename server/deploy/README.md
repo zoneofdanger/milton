@@ -314,7 +314,7 @@ repository (`umask 077; cd "$(mktemp -d)"`).
    already hold the owner's rights, and go on.
 
 4. Mint the next payload version for each service from the encrypted version it mounted
-   then (`milton-app-env:1`, `milton-mcp-env:2`). For the app (repeat for MCP with its
+   then (`milton-app-env:1`, `milton-mcp-env:1`, `milton-mcp-env:2`). For the app (repeat for MCP with its
    own secrets and key):
 
    ```sh
@@ -372,8 +372,8 @@ repository (`umask 077; cd "$(mktemp -d)"`).
    `permission denied`.
 
 **Later, not in this release: retire the owner credential from the services.** Each
-service account can read every version of its own secret, so `milton-app-env:1` and
-`milton-mcp-env:2` still give the running services the owner connection. Once the new
+service account can read every version of its own secret, so `milton-app-env:1`,
+`milton-mcp-env:1` and `milton-mcp-env:2` still give the running services the owner connection. Once the new
 role has served for a full day without `store_unavailable` or `permission denied` (no
 sooner than 24 hours after step 8), reset `neondb_owner`'s password in Neon, update
 the owner connection kept for migrations, and disable both old versions

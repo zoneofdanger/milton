@@ -252,15 +252,16 @@ export async function endStripeCustomer(config: RuntimeConfig, userId: string) {
   if (!response.ok && response.status !== 404) throw stripeFailed();
 }
 
-// A subscription that exists and can still be paid: its person manages it in the
-// portal, and a second Checkout would double-bill them.
-const MANAGED = new Set(["trialing", "active", "past_due"]);
+// A subscription its person manages in the portal: a second Checkout would
+// double-bill them. Stripe counts active, past_due, unpaid and paused as an
+// existing subscription (Limit customers to one subscription); a trial is one too.
+const MANAGED = new Set(["trialing", "active", "past_due", "unpaid", "paused"]);
 
 /** POST /billing/checkout and POST /billing/portal: signed-in forms with the
- * page CSRF check. Checkout sends a live subscription to the portal, and anything
- * else to a subscription Checkout for the one price, card required, no trial. An
- * account still waiting on its trial takes it first: paying now would lose the
- * 30 days. */
+ * page CSRF check. Checkout sends an existing subscription to the portal, stored
+ * or found at Stripe, and anything else to a subscription Checkout for the one
+ * price, card required, no trial. An account still waiting on its trial takes it
+ * first: paying now would lose the 30 days. */
 export async function billingRoutes(ctx: PageContext): Promise<Response> {
   const { config, request, url, readForm, signedIn } = ctx;
   const billing = config.billing;
@@ -319,6 +320,20 @@ export async function billingRoutes(ctx: PageContext): Promise<Response> {
   }
   if (account.customer && MANAGED.has(account.status))
     return portal(account.customer);
+  // The stored status can lag a payment by hours, when a webhook is retrying, so
+  // ask Stripe before selling a second subscription. Two sessions opened before
+  // either is paid stay possible.
+  if (account.customer) {
+    const { customer } = account;
+    const live = await store.syncSubscription(customer, async () =>
+      decidingSubscription(
+        (await listSubscriptions(billing, customer)).filter(({ status }) =>
+          MANAGED.has(status),
+        ),
+      ),
+    );
+    if (live) return portal(customer);
+  }
   const session = await stripePost(
     billing,
     "checkout/sessions",

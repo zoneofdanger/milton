@@ -56,15 +56,15 @@ export async function lockWaitingSubscription(
   );
 }
 
-/** Stores the first subscription found for a row that has none. A webhook that
- * got there first holds a state at least as current, so it stays. */
+/** Writes what Stripe answered. Callers hold the row, so an older read cannot
+ * land after a newer one. */
 export async function saveStripeSubscription(
   db: StoreSession,
   userId: string,
   state: StripeSubscriptionState,
 ) {
   await db.query(sql`UPDATE trial_accounts SET ${subscriptionColumns(state)}
-    WHERE user_id=${userId} AND subscription_status IS NULL`);
+    WHERE user_id=${userId}`);
 }
 
 /** Locks the row holding this customer, if any, for the rest of the transaction.

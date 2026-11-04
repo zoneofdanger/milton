@@ -1201,9 +1201,23 @@ async function memoPageFixture(
   };
 }
 
+const stripeSubscription = (status: string, created?: number) => {
+  const now = Math.floor(Date.now() / 1000);
+  return {
+    id: "sub_fixture",
+    status,
+    created: created ?? now,
+    trial_end: now + 30 * 86400,
+    items: {
+      data: [
+        { current_period_start: now, current_period_end: now + 30 * 86400 },
+      ],
+    },
+  };
+};
+
 // Answers Stripe's API with fixture objects; each call is recorded.
 function fakeStripe() {
-  const now = Math.floor(Date.now() / 1000);
   const stripe = {
     // A path or "METHOD path" answers 500; true fails every call.
     down: false as boolean | string,
@@ -1240,20 +1254,7 @@ function fakeStripe() {
       if (path === "/v1/subscriptions" && method === "GET")
         return Response.json({ data: stripe.subscriptions });
       if (path === "/v1/subscriptions") {
-        const created = {
-          id: "sub_fixture",
-          status: "trialing",
-          created: now,
-          trial_end: now + 30 * 86400,
-          items: {
-            data: [
-              {
-                current_period_start: now,
-                current_period_end: now + 30 * 86400,
-              },
-            ],
-          },
-        };
+        const created = stripeSubscription("trialing");
         stripe.subscriptions = [created];
         return Response.json(created);
       }
@@ -1631,22 +1632,59 @@ test("billing checkout and portal: 503 without config; signed-in CSRF forms; the
       "POST /v1/subscriptions",
       "POST /v1/billing_portal/sessions",
     ]);
-    // Trialing, active and past_due manage; anything else subscribes, no trial.
-    for (const [status, location, call] of [
-      ["trialing", portalUrl, portalCall],
-      ["active", portalUrl, portalCall],
-      ["past_due", portalUrl, portalCall],
-      ["canceled", checkoutUrl, sessionCall],
-      ["unpaid", checkoutUrl, sessionCall],
-      ["incomplete_expired", checkoutUrl, sessionCall],
+    // Any subscription Stripe counts as existing, plus a trial, is managed in
+    // the portal; anything else subscribes, no trial, after Stripe confirms it.
+    const listCall = stripeCall(
+      "GET /v1/subscriptions?customer=cus_fixture&status=all&limit=10",
+    );
+    stripe.subscriptions = [];
+    for (const [status, location, calls] of [
+      ["trialing", portalUrl, [portalCall]],
+      ["active", portalUrl, [portalCall]],
+      ["past_due", portalUrl, [portalCall]],
+      ["unpaid", portalUrl, [portalCall]],
+      ["paused", portalUrl, [portalCall]],
+      ["canceled", checkoutUrl, [listCall, sessionCall]],
+      ["incomplete_expired", checkoutUrl, [listCall, sessionCall]],
     ] as const) {
       await local.db.query(
         sql`UPDATE trial_accounts SET subscription_status=${status}`,
       );
       stripe.calls.length = 0;
       await leavesFor(await send("/billing/checkout", {}), location);
-      expect([status, stripe.calls]).toEqual([status, [call]]);
+      expect([status, stripe.calls]).toEqual([status, [...calls]]);
     }
+    // A webhook that has not landed: the stored copy says canceled, Stripe has a
+    // live one. No second subscription, and the row catches up.
+    for (const status of [
+      "active",
+      "trialing",
+      "past_due",
+      "unpaid",
+      "paused",
+    ]) {
+      await local.db.query(
+        sql`UPDATE trial_accounts SET subscription_status='canceled'`,
+      );
+      stripe.subscriptions = [
+        stripeSubscription("canceled", 2_000_000_000),
+        stripeSubscription(status, 1_900_000_000),
+      ];
+      stripe.calls.length = 0;
+      await leavesFor(await send("/billing/checkout", {}), portalUrl);
+      expect([status, stripe.calls]).toEqual([status, [listCall, portalCall]]);
+      expect((await clock())?.status).toBe(status);
+    }
+    // A failed read is not "nothing to find": no session is created.
+    await local.db.query(
+      sql`UPDATE trial_accounts SET subscription_status='canceled'`,
+    );
+    stripe.down = "GET /v1/subscriptions";
+    stripe.calls.length = 0;
+    expect((await send("/billing/checkout", {})).status).toBe(503);
+    expect(stripe.calls).toEqual([listCall]);
+    stripe.down = false;
+    stripe.subscriptions = [];
     // A returning deleted identity has no customer yet.
     await local.db.query(
       sql`UPDATE trial_accounts SET stripe_customer_id=NULL,subscription_status='canceled'`,

@@ -266,10 +266,17 @@ Files: `server/src/store/index.ts`, `server/src/store/trials.ts`,
 - Any non-2xx from Stripe's list, 404 included, is a failed read: the webhook answers 503
   unrecorded so Stripe retries, and sign-in stops with try again.
 - A replayed event, an unknown type, or a customer Milton does not hold calls nothing.
-- `/billing/checkout` sends trialing, active, and past_due to the Stripe portal.
+- `/billing/checkout` sends trialing, active, past_due, unpaid, and paused to the Stripe
+  portal.
+- With a stored customer, it lists Stripe first and goes to the portal if any such
+  subscription exists, storing it, so a late webhook cannot sell a second subscription.
 - An account still waiting on its trial takes it first, then the portal, or a 503 if it did
   not start, so paying early cannot lose the 30 days.
 - Any other status gets Checkout in subscription mode, card required, no trial.
+- `/billing/portal` sends an account with a stored customer to the Stripe portal, and
+  answers 409 without one.
+- Both routes leave through a page that navigates, because `form-action 'self'` blocks an
+  external redirect after a form.
 - Daily memo updates count charged and held saves, reset at 00:00 UTC, and are enforced
   only when enabled.
 

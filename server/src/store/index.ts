@@ -446,6 +446,18 @@ export function billingForAccount(bindings: StoreBindings, userId: string) {
     account: () => wrap(billingAccount(db, userId)),
     linkCustomer: (customer: string) =>
       wrap(linkStripeCustomer(db, userId, customer)),
+    /** Reads Stripe holding the customer's row, as the webhook does, and stores
+     * what the read returns, if anything. */
+    syncSubscription: (
+      customer: string,
+      read: () => Promise<StripeSubscriptionState | undefined>,
+    ) =>
+      db.transaction(async (tx) => {
+        await lockStripeCustomer(tx, customer);
+        const state = await read();
+        if (state) await saveStripeSubscription(tx, userId, state);
+        return state;
+      }),
     /** Runs `work` holding the row, only while it has no subscription. */
     whileWaiting: (
       work: (

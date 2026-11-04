@@ -15,7 +15,6 @@ import {
 test("trial transition preserves saves and TPS while notices and access follow the account clock", async () => {
   const local = await localStore();
   try {
-    await local.pg.exec("UPDATE store_config SET signup_mode='open'");
     const identity = (subject: string) => ({ provider: "neon", subject });
     await resolveIdentityAccount(local.env, identity("early"));
     await local.pg.exec("UPDATE store_config SET trials_enabled=true");
@@ -293,7 +292,6 @@ async function tenantPair(
   local: Awaited<ReturnType<typeof localStore>>,
   between: () => Promise<unknown> = async () => {},
 ) {
-  await local.db.query(sql`UPDATE store_config SET signup_mode='open'`);
   const storeDatabase = betweenPhases(local.db, between);
   const tenant = async (subject: string) => {
     const identity = { provider: "neon", subject };
@@ -572,16 +570,12 @@ test("identity lookup never admits or seeds an MCP caller", async () => {
   const identity = { provider: "neon", subject: "lookup-fixture" };
   try {
     await expect(
-      resolveIdentityAccount(local.env, identity),
-    ).rejects.toMatchObject({ code: "admission_refused", status: 403 });
-    await local.db.query(sql`UPDATE store_config SET signup_mode='open'`);
-    await expect(
       lookupIdentityAccount(local.env, identity),
     ).rejects.toMatchObject({ code: "account_unavailable", status: 403 });
     expect(
       await local.db.query(sql`SELECT count(*)::integer AS n FROM users`),
     ).toEqual([{ n: 0 }]);
-    // Preserve concurrent admission, repeatable seeding, and failed-admission rollback.
+    // Preserve concurrent sign-up, repeatable seeding, and failed sign-up rollback.
     const same = await Promise.all([
       resolveIdentityAccount(local.env, identity),
       resolveIdentityAccount(local.env, identity),
@@ -615,7 +609,6 @@ test("identity lookup never admits or seeds an MCP caller", async () => {
       "fulfilled",
       "fulfilled",
     ]);
-    await local.db.query(sql`UPDATE store_config SET signup_mode='closed'`);
     expect(
       (await resolveIdentityAccount(local.env, identity)).miltonUserId,
     ).toBe(admitted.miltonUserId);
@@ -625,7 +618,7 @@ test("identity lookup never admits or seeds an MCP caller", async () => {
       ),
     ).toEqual([{ n: 3 }]);
     await local.db.query(
-      sql`UPDATE store_config SET signup_mode='open', limits_json=limits_json || '{"description_bytes":1}'::jsonb`,
+      sql`UPDATE store_config SET limits_json=limits_json || '{"description_bytes":1}'::jsonb`,
     );
     await expect(
       resolveIdentityAccount(local.env, {
@@ -667,8 +660,9 @@ test("the signup seed's empty legacy card changes no read or save", async () => 
   const local = await localStore();
   try {
     await seedUsers(local.pg, "m_bare");
-    await local.pg.exec(`UPDATE store_config SET signup_mode='open';
-      INSERT INTO identities (provider,subject,user_id) VALUES ('neon','bare','m_bare');`);
+    await local.pg.exec(
+      `INSERT INTO identities (provider,subject,user_id) VALUES ('neon','bare','m_bare');`,
+    );
     const seeded = { provider: "neon", subject: "seeded" };
     await resolveIdentityAccount(local.env, seeded);
     const open = async (subject: string) =>
@@ -739,7 +733,7 @@ test("closing an account refuses its reads, saves and replays, fences a pending 
       await closeDuringSave?.();
     });
     // Tools are built while Alpha is active, so every refusal below comes from
-    // the per-call account lock, not from admission.
+    // the per-call account lock, not from sign-in.
     const accepted = {
       ...emailRule("- Alpha signs as Ada."),
       request_id: crypto.randomUUID(),
@@ -966,7 +960,7 @@ test("account deletion removes every tenant row, keeps refusals, stops in-flight
   const local = await localStore();
   try {
     await local.pg.exec(
-      "UPDATE store_config SET signup_mode='open',trials_enabled=true,memo_updates_enabled=true",
+      "UPDATE store_config SET trials_enabled=true,memo_updates_enabled=true",
     );
     const neon = (subject: string) => ({ provider: "neon", subject });
     let hold: { entered: () => void; gate: Promise<void> } | undefined;

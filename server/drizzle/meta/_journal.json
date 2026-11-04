@@ -176,6 +176,13 @@
       "when": 1793689677406,
       "tag": "0024_runtime_role",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1793754400730,
+      "tag": "0025_open_signup",
+      "breakpoints": true
     }
   ]
 }

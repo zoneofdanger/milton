@@ -59,7 +59,6 @@ export const loggedErrorCodes = new Set([
   "store_unavailable",
   "configuration",
   "account_unavailable",
-  "admission_refused",
   "subscription_required",
   "invalid_input",
   "request_too_large",

@@ -78,7 +78,7 @@ export function validateMcpTransport(
       ),
     );
   // The Host check stops DNS rebinding and tokens authenticate every call.
-  // Origin is deliberately not allowlisted, so web clients reach auth.
+  // Origin is deliberately not restricted, so web clients reach auth.
   const refused = hostHeaderValidationResponse(request, allowedHosts(config));
   if (refused) return withMcpCors(refused);
   if (request.method === "OPTIONS")

@@ -41,7 +41,6 @@ export const storeConfig = pgTable(
   "store_config",
   {
     singleton: integer("singleton").primaryKey(),
-    signupMode: text("signup_mode").notNull().default("closed"),
     trialsEnabled: boolean("trials_enabled").notNull().default(false),
     memoUpdatesEnabled: boolean("memo_updates_enabled")
       .notNull()
@@ -49,7 +48,6 @@ export const storeConfig = pgTable(
     memoUpdatesDailyLimit: integer("memo_updates_daily_limit")
       .notNull()
       .default(100),
-    allowedIdentities: jsonb("allowed_identities_json").notNull().default([]),
     limits: jsonb("limits_json").notNull().default(limits),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
@@ -57,14 +55,6 @@ export const storeConfig = pgTable(
   },
   (t) => [
     check("config_singleton", sql`${t.singleton} = 1`),
-    check(
-      "config_signup_mode",
-      sql`${t.signupMode} IN ('closed','allowlist','open')`,
-    ),
-    check(
-      "config_allowlist_array",
-      sql`jsonb_typeof(${t.allowedIdentities}) = 'array'`,
-    ),
     check("config_limits_object", sql`jsonb_typeof(${t.limits}) = 'object'`),
     check("config_memo_updates", sql`${t.memoUpdatesDailyLimit}>0`),
   ],

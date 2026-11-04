@@ -67,8 +67,11 @@ export const users = pgTable(
     ),
   ],
 );
-// No row means existing early access. Only an explicitly enabled new-account
-// enrollment creates a row. Stripe owns the trial and the subscription: the
+// No row, or a row with no status, reads as early access. Rows are created by
+// first sign-in, with no status while trials_enabled is on, or canceled for a
+// sign-in identity in deleted_identities whether trials are on or off; and by
+// the subscription backfill script (enrollForBackfill), with no status, for an
+// active account that has none. Stripe owns the trial and the subscription: the
 // stripe_* columns and subscription_status mirror what Stripe last answered, and
 // the gate reads only those. startedAt and paidThrough stay in place, unread by
 // the gate. subscriptionStatus holds any value Stripe sends; NULL means no

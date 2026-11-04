@@ -1203,6 +1203,141 @@ async function memoPageFixture(
   };
 }
 
+test("billing checkout and portal: 503 without config; signed-in CSRF forms; one stored customer; redirects to Stripe", async () => {
+  const off = await accountFixture();
+  try {
+    await off.send("/");
+    const refused = await off.send("/billing/checkout", {});
+    expect(refused.status).toBe(503);
+    expect(await refused.text()).toBe(
+      '{"error":"billing_unavailable","message":"Billing is not available yet."}',
+    );
+    expect((await off.send("/billing/portal", {})).status).toBe(503);
+  } finally {
+    await off.dispose();
+  }
+  // Answers Stripe's API with fixture objects; each call is recorded.
+  const stripe = { down: false, calls: [] as Record<string, unknown>[] };
+  const billing = {
+    secretKey: "rk_test_fixtureNotAKey",
+    webhookSecret: "whsec_fixtureNotASecret",
+    priceId: "price_fixture",
+    fetch: async (url: string, init: RequestInit) => {
+      const path = new URL(url).pathname;
+      const headers = new Headers(init.headers);
+      stripe.calls.push({
+        path,
+        idempotency: headers.get("Idempotency-Key"),
+        bearer:
+          headers.get("Authorization") === "Bearer rk_test_fixtureNotAKey",
+        ...Object.fromEntries(new URLSearchParams(String(init.body))),
+      });
+      if (stripe.down) return Response.json({}, { status: 500 });
+      if (path === "/v1/customers") return Response.json({ id: "cus_fixture" });
+      if (path === "/v1/checkout/sessions")
+        return Response.json({
+          url: "https://checkout.stripe.com/c/pay/cs_test_fixture",
+        });
+      if (path === "/v1/billing_portal/sessions")
+        return Response.json({
+          url: "https://billing.stripe.com/p/session/test_fixture",
+        });
+      throw new Error("Unexpected Stripe endpoint");
+    },
+  };
+  const fixture = await accountFixture({ billing });
+  const { send, local } = fixture;
+  const clock = async () =>
+    (
+      await local.db.query<{ customer: string | null }>(
+        sql`SELECT stripe_customer_id AS customer FROM trial_accounts`,
+      )
+    )[0];
+  try {
+    await send("/");
+    // Without a trial clock there is no subscription to start or manage.
+    expect((await send("/billing/checkout", {})).status).toBe(409);
+    const nothing = await send("/billing/portal", {});
+    expect(nothing.status).toBe(409);
+    expect(await nothing.text()).toContain(
+      "There is no Milton subscription to manage yet.",
+    );
+    await local.db.query(sql`UPDATE store_config SET trials_enabled=true`);
+    await local.db.query(
+      sql`INSERT INTO trial_accounts(user_id,started_at) SELECT id,clock_timestamp() FROM users`,
+    );
+    // Forms only: GET, a foreign origin or a missing CSRF token start nothing.
+    expect((await send("/billing/checkout")).status).toBe(405);
+    expect(
+      (await send("/billing/checkout", {}, { Origin: "https://evil.example" }))
+        .status,
+    ).toBe(403);
+    expect(
+      (await send("/billing/checkout", { csrf: "x".repeat(43) })).status,
+    ).toBe(403);
+    stripe.down = true;
+    const down = await send("/billing/checkout", {});
+    expect(down.status).toBe(503);
+    expect(await down.text()).toContain(
+      "Billing is unavailable right now. Nothing was charged. Try again.",
+    );
+    expect(await clock()).toEqual({ customer: null });
+    stripe.down = false;
+    stripe.calls.length = 0;
+    const checkout = await send("/billing/checkout", {});
+    expect(checkout.status).toBe(303);
+    expect(checkout.headers.get("Location")).toBe(
+      "https://checkout.stripe.com/c/pay/cs_test_fixture",
+    );
+    const userId = (
+      await local.db.query<{ id: string }>(sql`SELECT id FROM users`)
+    )[0]!.id;
+    expect(await clock()).toEqual({ customer: "cus_fixture" });
+    const session = {
+      path: "/v1/checkout/sessions",
+      idempotency: null,
+      bearer: true,
+      mode: "subscription",
+      customer: "cus_fixture",
+      client_reference_id: userId,
+      "line_items[0][price]": "price_fixture",
+      "line_items[0][quantity]": "1",
+      success_url: appOrigin + "/",
+      cancel_url: appOrigin + "/",
+    };
+    expect(stripe.calls).toEqual([
+      {
+        path: "/v1/customers",
+        idempotency: `milton-customer-${userId}`,
+        bearer: true,
+        "metadata[milton_user_id]": userId,
+      },
+      session,
+    ]);
+    // A second checkout reuses the stored customer.
+    stripe.calls.length = 0;
+    expect((await send("/billing/checkout", {})).status).toBe(303);
+    expect(stripe.calls).toEqual([session]);
+    stripe.calls.length = 0;
+    const portal = await send("/billing/portal", {});
+    expect(portal.status).toBe(303);
+    expect(portal.headers.get("Location")).toBe(
+      "https://billing.stripe.com/p/session/test_fixture",
+    );
+    expect(stripe.calls).toEqual([
+      {
+        path: "/v1/billing_portal/sessions",
+        idempotency: null,
+        bearer: true,
+        customer: "cus_fixture",
+        return_url: appOrigin + "/",
+      },
+    ]);
+  } finally {
+    await fixture.dispose();
+  }
+}, 30000);
+
 test("trial reminders stay outside TPS and expired accounts retain web view and download", async () => {
   const fixture = await memoPageFixture();
   try {
@@ -1778,6 +1913,11 @@ test("an unexpected error shows a browser page PC LOAD LETTER and answers everyt
         },
         body: "{}",
       }),
+      failing("/billing/webhook", {
+        method: "POST",
+        headers: { Accept: "text/html", "Content-Type": "application/json" },
+        body: "{}",
+      }),
     ]) {
       const response = await app(request);
       expect(response.status).toBe(503);
@@ -1788,7 +1928,7 @@ test("an unexpected error shows a browser page PC LOAD LETTER and answers everyt
     }
     expect(
       logged.mock.calls.map(([line]) => JSON.parse(String(line)).where),
-    ).toEqual(["http", "http", "http", "http", "http"]);
+    ).toEqual(["http", "http", "http", "http", "http", "http"]);
   } finally {
     logged.mockRestore();
   }

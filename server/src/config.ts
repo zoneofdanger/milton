@@ -9,7 +9,39 @@ export interface RuntimeConfig extends StoreBindings {
   cookieSecret: string;
   /** The address pages give for support; the hosted one when unset. */
   supportEmail?: string;
+  /** Stripe, for the app service only; unset means billing answers 503. */
+  billing?: BillingConfig;
 }
+/** Stripe settings for the app service, from STRIPE_SECRET_KEY,
+ * STRIPE_WEBHOOK_SECRET and STRIPE_PRICE_ID. The MCP service never reads them. */
+export interface BillingConfig {
+  secretKey: string;
+  webhookSecret: string;
+  priceId: string;
+  /** Private dependency injection for tests; never populated from env. */
+  fetch?: (url: string, init: RequestInit) => Promise<Response>;
+}
+
+// Any missing or malformed value leaves billing off: the billing routes answer
+// 503 and the rest of the app runs. Values are never logged or echoed.
+export function billingConfig(
+  env: NodeJS.ProcessEnv,
+): BillingConfig | undefined {
+  const secretKey = env.STRIPE_SECRET_KEY;
+  const webhookSecret = env.STRIPE_WEBHOOK_SECRET;
+  const priceId = env.STRIPE_PRICE_ID;
+  if (
+    !secretKey ||
+    !webhookSecret ||
+    !priceId ||
+    !/^(sk|rk)_(test|live)_[A-Za-z0-9]{8,247}$/.test(secretKey) ||
+    !/^whsec_[A-Za-z0-9+/=]{8,250}$/.test(webhookSecret) ||
+    !/^price_[A-Za-z0-9]{1,250}$/.test(priceId)
+  )
+    return undefined;
+  return { secretKey, webhookSecret, priceId };
+}
+
 const HOSTED_SUPPORT_EMAIL = "support@meetmilton.com";
 export const supportEmail = (config: Pick<RuntimeConfig, "supportEmail">) =>
   config.supportEmail ?? HOSTED_SUPPORT_EMAIL;
@@ -75,9 +107,11 @@ export function runtimeConfig(
       "configuration",
       "Milton's server configuration is unavailable.",
     );
+  const billing = billingConfig(env);
   return {
     ...config,
     cookieSecret: env.NEON_AUTH_COOKIE_SECRET,
     ...(support === undefined ? {} : { supportEmail: support }),
+    ...(billing ? { billing } : {}),
   };
 }

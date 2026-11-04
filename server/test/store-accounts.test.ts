@@ -260,6 +260,8 @@ test("trial transition preserves saves and TPS while notices and access follow t
     await local.db.query(
       sql`UPDATE trial_accounts SET paid_through=clock_timestamp()+interval '30 days' WHERE user_id=${auth.userId}`,
     );
+    // An ended clock with paid_through ahead reads as paid.
+    expect((await person.trialStatus()).status).toBe("paid");
     expect(result(await tools.get_cover_sheet())).toMatchObject(report);
     expect((await account()).started_at).toEqual(expiredStart);
     await local.db.query(

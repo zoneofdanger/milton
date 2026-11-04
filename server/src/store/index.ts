@@ -10,6 +10,11 @@ import {
 import { StoreError } from "./errors";
 import { claimTrialNotice, trialStatus, type TrialNotice } from "./trials";
 import {
+  billingAccount,
+  linkStripeCustomer,
+  recordStripeEvent,
+} from "./billing";
+import {
   compiledMemos,
   type CompiledReport,
   type Documents,
@@ -17,6 +22,7 @@ import {
   type SaveOutcome,
 } from "./compiled";
 export { StoreError } from "./errors";
+export type { StripeEventAction } from "./billing";
 
 // Stable legacy storage key: preserve existing identities and opaque version tags.
 export const TPS_REPORT_KEY = "vibes";
@@ -436,3 +442,36 @@ export async function personStoreForCurrentRequest(
 export type PersonStore = Awaited<
   ReturnType<typeof personStoreForCurrentRequest>
 >;
+
+/** The signed-in account's billing state, for the checkout and portal routes. */
+export function billingForAccount(
+  bindings: StoreBindings,
+  auth: VerifiedStoreAuth,
+) {
+  const db = database(bindings);
+  const wrap = async <T>(work: Promise<T>) => {
+    try {
+      return await work;
+    } catch (error) {
+      throw databaseFailure(error);
+    }
+  };
+  return {
+    userId: auth.userId,
+    account: () => wrap(billingAccount(db, auth.userId)),
+    linkCustomer: (customer: string) =>
+      wrap(linkStripeCustomer(db, auth.userId, customer)),
+  };
+}
+
+/** Records a verified Stripe event and applies it, once per event id. */
+export async function applyStripeEvent(
+  bindings: StoreBindings,
+  event: Parameters<typeof recordStripeEvent>[1],
+) {
+  try {
+    return await recordStripeEvent(database(bindings), event);
+  } catch (error) {
+    throw databaseFailure(error);
+  }
+}

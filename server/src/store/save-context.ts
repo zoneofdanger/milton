@@ -10,13 +10,7 @@ export const retiredSample = z.object({
   reason: z.enum(["replaced", "removed", "evicted"]),
 });
 export const outcomeSchema = z.object({
-  status: z.enum([
-    "saved",
-    "unchanged",
-    "conflict",
-    "in_progress",
-    "failed",
-  ]),
+  status: z.enum(["saved", "unchanged", "conflict", "in_progress", "failed"]),
   request_id: z.string(),
   version: z.string().optional(),
   question: z.string().optional(),

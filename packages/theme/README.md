@@ -45,8 +45,7 @@ structure stay in `server/src/pages.css` until another consumer needs them.
 The landing page owns its editorial grids and examples; `server/src/pages.css`
 owns app layout and the TPS document's special title treatment. Neither should
 redefine the shared palette, control appearance or sheet bar. Use existing tokens
-before adding another size. Keep tokens in CSS; `tokens.ts` only mirrors palette
-values that JavaScript actually needs.
+before adding another size. Keep tokens in CSS.
 
 The fonts in `public/fonts` are self-hosted, with their upstream licenses:
 

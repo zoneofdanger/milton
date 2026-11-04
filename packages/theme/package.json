@@ -3,11 +3,8 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "style": "./theme.css",
   "exports": {
-    ".": "./theme.css",
     "./base": "./base.css",
-    "./tokens": "./tokens.ts",
     "./brand": "./brand.ts"
   },
   "scripts": {

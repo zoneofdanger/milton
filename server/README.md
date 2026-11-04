@@ -71,14 +71,17 @@ Milton supplies the login and consent pages. Neon supplies authorization, token 
 
 Set these in the runtime's platform configuration or dotenvx payload before deploying. Keep credentials in secret storage or ignored environment files.
 
-| Name                      | Meaning                                                                                                                                           |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `APP_ORIGIN`              | The browser app's absolute HTTPS origin, without a path, query, or fragment.                                                                      |
-| `MCP_RESOURCE`            | The exact public MCP resource URL, ending in `/mcp`. Tokens must include this resource in their audience.                                         |
-| `NEON_AUTH_BASE_URL`      | The exact branch Auth URL copied from Neon, including its database and Auth path, without a trailing slash. It is also the expected token issuer. |
-| `NEON_AUTH_COOKIE_SECRET` | A fresh random server-only secret of at least 32 characters for browser session cookies.                                                          |
-| `DATABASE_URL`            | The TLS connection string for the `milton` database. Services use the runtime role's connection (0024); migrations and imports use the owner's.   |
-| `MILTON_SUPPORT_EMAIL`    | Optional. The support address the account pages give; `support@meetmilton.com` when unset. The MCP address pages show is `MCP_RESOURCE`.          |
+| Name                      | Meaning                                                                                                                                                                         |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `APP_ORIGIN`              | The browser app's absolute HTTPS origin, without a path, query, or fragment.                                                                                                    |
+| `MCP_RESOURCE`            | The exact public MCP resource URL, ending in `/mcp`. Tokens must include this resource in their audience.                                                                       |
+| `NEON_AUTH_BASE_URL`      | The exact branch Auth URL copied from Neon, including its database and Auth path, without a trailing slash. It is also the expected token issuer.                               |
+| `NEON_AUTH_COOKIE_SECRET` | A fresh random server-only secret of at least 32 characters for browser session cookies.                                                                                        |
+| `DATABASE_URL`            | The TLS connection string for the `milton` database. Services use the runtime role's connection (0024); migrations and imports use the owner's.                                 |
+| `MILTON_SUPPORT_EMAIL`    | Optional. The support address the account pages give; `support@meetmilton.com` when unset. The MCP address pages show is `MCP_RESOURCE`.                                        |
+| `STRIPE_SECRET_KEY`       | App service only. The restricted Stripe API key for customers, Checkout and the billing portal. Unset or malformed: the billing routes answer 503 and the rest of the app runs. |
+| `STRIPE_WEBHOOK_SECRET`   | App service only. The signing secret of the Stripe endpoint for `POST /billing/webhook`.                                                                                        |
+| `STRIPE_PRICE_ID`         | App service only. The one recurring price Checkout subscribes to.                                                                                                               |
 
 Saves are model-free: Milton stores the exact text the assistant sends and calls no
 model on any read or save, so it needs no model credential, project or budget. The

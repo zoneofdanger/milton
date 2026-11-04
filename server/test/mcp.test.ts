@@ -95,6 +95,10 @@ test("an SDK client receives instructions, discovers the four tools, and reads t
     // Assistants see cover sheet and reports, never the retired TPS name.
     for (const served of [client.getInstructions(), ...tools])
       expect(JSON.stringify(served)).not.toMatch(/TPS|tps_report/);
+    // Nothing served mentions the retired memo-update allowance.
+    expect(JSON.stringify([client.getInstructions(), tools])).not.toMatch(
+      /memo.update|counts once/i,
+    );
     const text = client.getInstructions();
     expect(text).toContain('"Did you get the memo?"');
     expect(text).toContain('"Did you get that memo?"');

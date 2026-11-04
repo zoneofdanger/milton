@@ -46,6 +46,10 @@ const staleReportCall = z.object({
 export function createMiltonServer(
   store: TenantStore,
   log: (call: ToolCall) => void = (call) => console.info(JSON.stringify(call)),
+  /** Send notifications/tools/list_changed ahead of this connection's first
+   * tool call: the handler sets it on each assistant's first call after the
+   * process starts. */
+  options: { announceToolsChanged?: boolean } = {},
 ) {
   const server = new (class extends McpServer {
     override async connect(transport: Transport) {
@@ -71,8 +75,22 @@ export function createMiltonServer(
       };
       await super.connect(transport);
       const dispatch = transport.onmessage;
+      // Related to the call, so it travels on that call's response stream; a
+      // failure to send never fails the call.
+      let announce = options.announceToolsChanged ?? false;
+      const toolsChanged = async (id: string | number) => {
+        announce = false;
+        await transport
+          .send(
+            { jsonrpc: "2.0", method: "notifications/tools/list_changed" },
+            { relatedRequestId: id },
+          )
+          .catch(() => {});
+      };
       transport.onmessage = async (message, extra) => {
+        const first = announce;
         if ("method" in message && message.method === "tools/call") {
+          if (first && "id" in message) await toolsChanged(message.id);
           if ("id" in message)
             pending.set(message.id, {
               tool: knownTool(message.params?.name),
@@ -124,6 +142,8 @@ export function createMiltonServer(
           "id" in message &&
           staleReportCall.safeParse(message.params).success
         ) {
+          // The client may hold the schema before intent: ask it to refresh.
+          if (!first) await toolsChanged(message.id);
           await transport.send({
             jsonrpc: "2.0",
             id: message.id,

@@ -183,7 +183,13 @@ only after success. Empty accounts retain first-setup approval; errors and acces
 failures must be reported honestly. Quoting or discussing the phrase does not invoke
 it, and the cue grants no save or session-capture consent. This is assistant
 guidance, not a text listener or a guarantee that every client will call the tool.
-Clients may need to reconnect to load updated guidance.
+Clients may need to reconnect to load updated guidance. To refresh tool schemas without
+one, each assistant's (account and OAuth client) first tool call that a server process
+serves carries `notifications/tools/list_changed` on that call's response stream, ahead
+of the result, and so does every `get_report` refused for a missing intent. The server is
+stateless and has no open stream to push on, so a connected client hears of a release at
+its next call; the set of announced assistants is per process, in memory, and cleared at
+10,000, so a client may refresh again after a restart or on another instance.
 
 Exactly four tools are exposed:
 

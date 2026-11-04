@@ -64,6 +64,10 @@ Files: `server/src/handler.ts`, `server/src/token.ts`, `server/src/mcp.ts`,
 - Each request also checks that the account is active and the assistant is not
   disconnected.
 - Each request builds a fresh stateless MCP server, with no sessions or subscriptions.
+- Each assistant's (account and OAuth client) first tool call after a server process starts
+  carries `notifications/tools/list_changed` ahead of its result, as does every
+  `get_report` refused for a missing intent, so clients holding tool schemas from before
+  a release refresh them; the announced set is per process and in memory.
 - Each `tools/call` increments a daily counter before running, and a call over the limit
   returns `rate_limited` with a reset time.
 - Each call logs the tool, outcome, time, and an error code from a fixed list, never

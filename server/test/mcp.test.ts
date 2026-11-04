@@ -2,6 +2,7 @@ import { sql, type SQL } from "drizzle-orm";
 import { expect, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { ToolListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { checkMcp, stubStore } from "../scripts/check-mcp";
@@ -151,6 +152,10 @@ test("get_report requires an intent: without a well-formed one it refuses, sayin
     (call) => calls.push(call),
   );
   const client = new Client({ name: "sdk-test", version: "0.0.0" });
+  let changed = 0;
+  client.setNotificationHandler(ToolListChangedNotificationSchema, () => {
+    changed++;
+  });
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
   try {
@@ -182,6 +187,8 @@ test("get_report requires an intent: without a well-formed one it refuses, sayin
       expect(refusal.message).toContain('"confirming what is on file"');
     }
     expect(intents).toEqual([]);
+    // Each refusal also tells the client its tool list changed.
+    expect(changed).toBe(3);
     expect(calls.map((c) => [c.outcome, c.error_code])).toEqual(
       Array(3).fill(["refused", "invalid_input"]),
     );
@@ -197,6 +204,7 @@ test("get_report requires an intent: without a well-formed one it refuses, sayin
       },
     });
     expect(read.isError).toBeUndefined();
+    expect(changed).toBe(3);
     expect(intents).toEqual([
       {
         report: "document",
@@ -227,8 +235,14 @@ test("two authenticated clients isolate tenants, save once and reject retired to
       },
       fixture.verify,
     );
+    // tools/list_changed notifications each client received.
+    const changed = [0, 0];
     for (const subject of ["alpha", "beta"]) {
       const client = new Client({ name: "claimed-client", version: "0.0.0" });
+      const i = clients.length;
+      client.setNotificationHandler(ToolListChangedNotificationSchema, () => {
+        changed[i]!++;
+      });
       clients.push(client);
       await client.connect(
         new StreamableHTTPClientTransport(new URL(resource), {
@@ -306,8 +320,12 @@ test("two authenticated clients isolate tenants, save once and reject retired to
     expect(
       discovered.find((t) => t.name === "create_memo")?.description,
     ).toContain("Change a rule only through exact_edits, never by adding one");
+    // Connecting and listing tools announce nothing; each assistant's first
+    // tool call after this process started does, and only that one.
+    expect(changed).toEqual([0, 0]);
     const first = (await call(0, "get_cover_sheet")).value;
     const second = (await call(1, "get_cover_sheet")).value;
+    expect(changed).toEqual([1, 1]);
     expect(first.text).toBe("");
     expect(second.text).toBe("");
     // An empty account carries the first-setup script; it leaves after the first save.
@@ -407,6 +425,13 @@ test("two authenticated clients isolate tenants, save once and reject retired to
       ).isError,
     ).toBe(true);
     expect((await call(1, "get_cover_sheet")).value.text).toBe("");
+    expect(changed).toEqual([1, 1]);
+    // A get_report from a client holding the schema before intent is refused
+    // and told again that the tool list changed.
+    expect(
+      (await call(0, "get_report", { report_id: "email" })).value.error,
+    ).toBe("invalid_input");
+    expect(changed).toEqual([2, 1]);
     expect(
       (
         await call(1, "create_memo", {

@@ -6,7 +6,7 @@ import SiteLayout from "../layouts/SiteLayout.astro";
   title="About Milton"
   description="Who made Milton, and why. Filed as a TPS report, cover sheet not attached."
 >
-  <div class="about">
+  <div class="about report-page">
     <header class="page-head">
       <h1>About Milton</h1>
       <p class="page-note">TPS report. Cover sheet not attached.</p>
@@ -86,6 +86,9 @@ import SiteLayout from "../layouts/SiteLayout.astro";
             <li>Careers: no.</li>
             <li>Press: this report.</li>
             <li>
+              <a href="/notes">Notes</a>
+            </li>
+            <li>
               Why the name: He got moved to the basement and kept filing. We
               related.
             </li>
@@ -120,61 +123,6 @@ import SiteLayout from "../layouts/SiteLayout.astro";
 </SiteLayout>
 
 <style>
-  /* Zero specificity beyond the page class, so the rules below set margins. */
-  :where(.about) :where(h1, h2, p, figure, blockquote) {
-    margin: 0;
-  }
-  /* Full-width text: no measure caps; no paragraph ends on a lone word. */
-  .about p,
-  .about li,
-  .about blockquote {
-    text-wrap: pretty;
-  }
-  .about {
-    padding-top: var(--space-16);
-  }
-
-  /* The page's header row: the form's name left, its note right, over the
-     cover sheet form's 2px rule. Wraps to two lines on narrow screens. */
-  .page-head {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: space-between;
-    align-items: baseline;
-    gap: var(--space-2) var(--space-6);
-    padding-bottom: var(--space-3);
-    border-bottom: 2px solid var(--sheet-rule);
-  }
-  .page-head h1 {
-    font-size: var(--text-page);
-    text-transform: uppercase;
-    letter-spacing: 0.02em;
-  }
-  .page-note {
-    color: var(--muted);
-    font: var(--text-small) / var(--leading-label) var(--font-mono);
-  }
-
-  /* The report: a filed page, no cover sheet. */
-  .report-wrap {
-    position: relative;
-    margin-top: var(--space-10);
-    padding-bottom: var(--space-6);
-  }
-  .report > .sheet-content {
-    padding-block: var(--space-8) var(--space-6);
-  }
-  .report-heading {
-    font-size: var(--text-section);
-    letter-spacing: -0.045em;
-  }
-  /* Set like the signed-in cover sheet's "Applies when" line. */
-  .applies {
-    margin-top: var(--space-3);
-    color: var(--muted);
-    font: italic var(--text-body) / var(--leading-label) var(--font-form);
-  }
-
   /* Each approved sample is the cabinet's pulled-out folder: a tan tab with
      its label, a tan folder, a page, and the dashed sample box. */
   .samples {
@@ -291,9 +239,6 @@ import SiteLayout from "../layouts/SiteLayout.astro";
   }
 
   @media (max-width: 767px) {
-    .about {
-      padding-top: var(--space-10);
-    }
     .closing {
       padding-block: var(--space-12);
     }

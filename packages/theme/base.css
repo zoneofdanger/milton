@@ -296,7 +296,91 @@ textarea {
   margin: var(--space-3) 0 0;
   font-size: var(--text-body);
 }
+/* The About report's framing, shared by the site's report pages. */
+:where(.report-page) :where(h1, h2, h3, p, figure, blockquote) {
+  margin: 0;
+}
+.report-page p,
+.report-page li,
+.report-page blockquote {
+  text-wrap: pretty;
+}
+.report-page {
+  padding-top: var(--space-16);
+}
+.report-page .page-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-2) var(--space-6);
+  padding-bottom: var(--space-3);
+  border-bottom: 2px solid var(--sheet-rule);
+}
+.report-page .page-head h1 {
+  font-size: var(--text-page);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.report-page .page-note {
+  color: var(--muted);
+  font: var(--text-small) / var(--leading-label) var(--font-mono);
+}
+.report-page .report-wrap {
+  position: relative;
+  margin-top: var(--space-10);
+  padding-bottom: var(--space-6);
+}
+.report-page .report > .sheet-content {
+  padding-block: var(--space-8) var(--space-6);
+}
+.report-page .report-heading {
+  font-size: var(--text-section);
+  letter-spacing: -0.045em;
+}
+.report-page .applies {
+  margin-top: var(--space-3);
+  color: var(--muted);
+  font: italic var(--text-body) / var(--leading-label) var(--font-form);
+}
+.report-section {
+  margin-top: var(--space-8);
+}
+.report-section h3 {
+  font-size: var(--text-subtitle);
+}
+.report-section > * + * {
+  margin-top: var(--space-3);
+}
+.report-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: var(--text-small);
+  font-variant-numeric: tabular-nums;
+}
+.report-table th,
+.report-table td {
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--hairline);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.report-table thead {
+  background: var(--sheet-bar);
+  color: var(--sheet-bar-ink);
+}
+.report-table th {
+  font-weight: 600;
+}
+.report-table th:first-child {
+  width: 40%;
+}
 @media (max-width: 767px) {
+  .report-page {
+    padding-top: var(--space-10);
+  }
   .sheet {
     --sheet-padding: var(--space-5);
   }

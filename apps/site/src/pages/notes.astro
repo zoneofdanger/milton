@@ -1,0 +1,178 @@
+---
+import SiteLayout from "../layouts/SiteLayout.astro";
+---
+
+<SiteLayout title="Notes" description="What we tested. What we didn't.">
+  <div class="report-page">
+    <header class="page-head">
+      <h1>Notes</h1>
+      <p class="page-note">What we tested. What we didn't.</p>
+    </header>
+
+    <div class="report-wrap">
+      <article class="sheet report" aria-labelledby="report-title">
+        <div class="sheet-content">
+          <h2 class="report-heading" id="report-title">
+            # Notes
+          </h2>
+          <p class="applies">
+            Applies when someone asks how we know any of this works.
+          </p>
+
+          <section class="report-section" aria-labelledby="no-model">
+            <h3 id="no-model">Why no model touches your writing</h3>
+            <p>
+              Milton stores your rules exactly as sent and your samples exactly
+              as approved. Reading them back is a database query, with no model
+              call. Your assistant does the writing. Milton keeps the file.
+            </p>
+            <p>We tested adding one. See below.</p>
+          </section>
+
+          <section class="report-section" aria-labelledby="sample-ranking">
+            <h3 id="sample-ranking">How Milton picks eight samples</h3>
+            <p>
+              Milton keeps every sample you approve and serves eight per report.
+              Your assistant says what it is writing, to whom, and why. Milton
+              ranks your samples by who they were for and what they were for,
+              then by matching words, then by date.
+            </p>
+            <p>
+              We tested that against two alternatives: the newest eight, and
+              Google's embedding model, which matches by meaning. We ran it
+              twice, on fictional writers, with drafts scored blind:
+            </p>
+            <ul class="instruction-list">
+              <li>
+                <strong>Round 1:</strong> one writer, 150 samples, 20 drafted
+                situations.
+              </li>
+              <li>
+                <strong>Round 2:</strong> three writers, 1,500 samples, 120
+                drafted situations.
+              </li>
+            </ul>
+
+            <table class="report-table">
+              <thead>
+                <tr>
+                  <th scope="col">Round 2</th>
+                  <th scope="col">Found the right samples, 0 to 1</th>
+                  <th scope="col">Draft score, out of 5</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">Newest eight</th>
+                  <td>0.32</td>
+                  <td>3.77</td>
+                </tr>
+                <tr>
+                  <th scope="row">Milton's ranking</th>
+                  <td>0.70</td>
+                  <td>3.72</td>
+                </tr>
+                <tr>
+                  <th scope="row">Embeddings plus Milton's ranking</th>
+                  <td>0.73</td>
+                  <td>3.68</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <p>
+              Embeddings found slightly better matches and wrote no better
+              drafts. They would also send your samples to a third party on
+              every read. We left them out.
+            </p>
+            <p>
+              The result we didn't expect:{" "}
+              <strong>
+                finding better samples did not produce better drafts.
+              </strong>{" "}
+              Our fictional writers wrote the same way to everyone, so any eight
+              of their samples sounded alike. Real people write differently to a
+              client than to a friend, which is where picking the right sample
+              should matter. That test needs real writing, and it is next.
+            </p>
+          </section>
+
+          <section class="report-section" aria-labelledby="sample-count">
+            <h3 id="sample-count">How many samples</h3>
+            <p>
+              Real writing teaches an assistant more than nothing. In one study,
+              five real emails roughly doubled how often a model's email could
+              be traced to the person it was imitating, from 29% to 60%, and two
+              emails did about as well as ten. That is why setup asks for one
+              email first, and why your samples outrank the setup choices.
+            </p>
+            <p>
+              In our own tests, cutting from eight samples to four made drafts
+              clearly worse, 3.21 against 3.65 out of 5. Milton serves eight.
+            </p>
+          </section>
+
+          <section class="report-section" aria-labelledby="untested">
+            <h3 id="untested">What we haven't tested yet</h3>
+            <ul class="instruction-list">
+              <li>Drafts for real people, judged by those people.</li>
+              <li>
+                Assistants other than Claude Code. ChatGPT, Codex, and the rest
+                are untested.
+              </li>
+              <li>Whether one short email is enough.</li>
+              <li>
+                Whether the setup choices, or any written rules, add anything
+                beyond a pasted sample.
+              </li>
+              <li>Whether you can pick out your own writing, blind.</li>
+            </ul>
+          </section>
+
+          <section class="report-section" aria-labelledby="test-method">
+            <h3 id="test-method">How these tests were run</h3>
+            <ul class="instruction-list">
+              <li>
+                The fictional writers and their samples were written by a model.
+              </li>
+              <li>
+                Drafts were scored blind by a second model, twice each, against
+                a description of the writer.
+              </li>
+              <li>
+                No person has scored them yet. People are generous judges of
+                their own voice: in one study, they rated drafts they had edited
+                as just as much their own as text they wrote alone, though the
+                drafts were measurably closer to the model's. So a person's
+                score needs to be blind too.
+              </li>
+              <li>We set the pass mark before each run.</li>
+            </ul>
+            <p>
+              Full notes:{" "}
+              <a href="https://github.com/zoneofdanger/milton/blob/main/docs/research/sample-ranking-2026.md">
+                Sample ranking
+              </a>{" "}
+              and{" "}
+              <a href="https://github.com/zoneofdanger/milton/blob/main/docs/research/writing-evidence-2026.md">
+                What the evidence supports
+              </a>
+              .
+            </p>
+            <p>
+              Sources: Wang et al. (2025),{" "}
+              <a href="https://arxiv.org/html/2509.14543v1">
+                Catch Me If You Can? Not Yet
+              </a>
+              ; Baumler et al. (2026),{" "}
+              <a href="https://arxiv.org/html/2604.24444">
+                Can You Make It Sound Like You?
+              </a>
+              .
+            </p>
+          </section>
+        </div>
+      </article>
+    </div>
+  </div>
+</SiteLayout>

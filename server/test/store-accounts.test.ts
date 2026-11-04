@@ -1,9 +1,11 @@
 import { expect, jest, spyOn, test } from "bun:test";
 import { sql } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 import { localStore } from "./local-store";
 import { betweenPhases, read, seedUsers } from "./store-fixtures";
 import { createStoreMemoTools } from "../src/store/tools";
 import { createHash } from "node:crypto";
+import type { StoreDatabase } from "../src/store/database";
 import {
   deleteAccount,
   resolveIdentityAccount,
@@ -639,6 +641,55 @@ test("identity lookup never admits or seeds an MCP caller", async () => {
     await expect(
       resolveIdentityAccount(local.env, identity),
     ).rejects.toMatchObject({ code: "account_unavailable", status: 403 });
+  } finally {
+    await local.dispose();
+  }
+}, 30000);
+
+test("a first sign-in that loses the identity race returns the winner's account and keeps no second account or trial", async () => {
+  const local = await localStore();
+  try {
+    await local.pg.exec("UPDATE store_config SET trials_enabled=true");
+    const identity = { provider: "neon", subject: "race-fixture" };
+    const dialect = new PgDialect();
+    let raced = false;
+    // The rival commits between this sign-in's lookup and its identity insert;
+    // the local store has one connection, so the rival's rows go in just before.
+    const storeDatabase: StoreDatabase = {
+      ...local.db,
+      transaction: (work) =>
+        local.db.transaction((tx) =>
+          work({
+            async query(statement) {
+              if (
+                !raced &&
+                dialect
+                  .sqlToQuery(statement)
+                  .sql.includes("INSERT INTO identities")
+              ) {
+                raced = true;
+                await tx.query(sql`INSERT INTO users (id) VALUES ('m_rival')`);
+                await tx.query(
+                  sql`INSERT INTO trial_accounts (user_id,started_at) VALUES ('m_rival',now())`,
+                );
+                await tx.query(sql`INSERT INTO identities (provider,subject,user_id)
+                  VALUES (${identity.provider},${identity.subject},'m_rival')`);
+              }
+              return tx.query(statement);
+            },
+          }),
+        ),
+    };
+    expect(
+      await resolveIdentityAccount({ ...local.env, storeDatabase }, identity),
+    ).toEqual({ miltonUserId: "m_rival" });
+    expect(raced).toBe(true);
+    expect(await local.db.query(sql`SELECT id FROM users`)).toEqual([
+      { id: "m_rival" },
+    ]);
+    expect(
+      await local.db.query(sql`SELECT user_id FROM trial_accounts`),
+    ).toEqual([{ user_id: "m_rival" }]);
   } finally {
     await local.dispose();
   }

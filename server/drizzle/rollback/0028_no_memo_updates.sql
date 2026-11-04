@@ -14,6 +14,9 @@ BEGIN;
 SET LOCAL lock_timeout = '10s';
 LOCK TABLE "users" IN EXCLUSIVE MODE;
 LOCK TABLE "save_requests", "store_config" IN ACCESS EXCLUSIVE MODE;
+-- Refuses on the 0030 schema: the guard this file restores updates users.retained_bytes,
+-- so roll back 0030 first.
+SELECT retained_bytes FROM users LIMIT 0;
 ALTER TABLE "store_config" ADD COLUMN "memo_updates_enabled" boolean DEFAULT false NOT NULL;
 ALTER TABLE "store_config" ADD COLUMN "memo_updates_daily_limit" integer DEFAULT 100 NOT NULL;
 ALTER TABLE "store_config" ADD CONSTRAINT "config_memo_updates" CHECK ("store_config"."memo_updates_daily_limit">0);

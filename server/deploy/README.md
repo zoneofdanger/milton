@@ -790,6 +790,8 @@ Release order:
 6. Smoke test through MCP as `milton_app`: a save, a replay of that save (same request ID
    and input, same outcome), and a first sign-in of a new identity.
 
+**Rollback order across 0028, 0029 and 0030.** Newest first: `rollback/0030_no_history_cap.sql`, then `rollback/0029_one_transaction.sql`, then `rollback/0028_no_memo_updates.sql`. The 0028 and 0029 rollbacks restore save guards that update `users.retained_bytes`, so each refuses while 0030 is still applied; running them out of order makes every save fail with `store_unavailable`.
+
 **Rollback boundary.** Before 0028 is applied, code rolls back by traffic alone. After it,
 an earlier revision cannot save or read through MCP: first run
 `server/drizzle/rollback/0028_no_memo_updates.sql` offline with writers stopped, then shift
@@ -869,6 +871,8 @@ both):
    and input, same outcome), a save on a stale version (`conflict`), and a first sign-in of
    a new identity.
 
+**Rollback order across 0028, 0029 and 0030.** Newest first: `rollback/0030_no_history_cap.sql`, then `rollback/0029_one_transaction.sql`, then `rollback/0028_no_memo_updates.sql`. The 0028 and 0029 rollbacks restore save guards that update `users.retained_bytes`, so each refuses while 0030 is still applied; running them out of order makes every save fail with `store_unavailable`.
+
 **Rollback boundary.** Before 0029 is applied, code rolls back by traffic alone; the
 pre-step stays and is harmless to every revision. After it, an earlier revision cannot
 save: first run `server/drizzle/rollback/0029_one_transaction.sql` offline with writers
@@ -876,7 +880,7 @@ stopped, then shift traffic. The rollback re-adds `completed` (every receipt tru
 false), `deadline` (`-infinity` on every receipt, no default) and `claimed_at` (NULL) with
 `save_request_claim_clock`, the `result_json` default, `milton_claim_clock` in its
 pre-step form with `save_claim_clock`, and the 0028 save guard, and drops
-`save_request_outcome`. Either revision saves on the result. It restores shape, not data:
+`save_request_outcome`. Either revision saves on the result, provided 0030 was rolled back first: the restored guard updates `users.retained_bytes`, which 0030 drops, and the rollback file refuses on the 0030 schema. It restores shape, not data:
 the claims 0029 deleted do not come back. The 0029 journal row stays, so re-forwarding
 means running `0029_one_transaction.sql` by hand, as one transaction that stops on the
 first error: `psql -1 -v ON_ERROR_STOP=1 -f server/drizzle/0029_one_transaction.sql`.
@@ -922,6 +926,8 @@ transaction (0029)" and add the steps below):
    it; it rolls back as a whole. Between the deploy and this step, a save past the cap
    answers `store_unavailable` instead of `memo_history_limit` and writes nothing.
 6. Smoke test through MCP as `milton_app`: a save, a replay of that save, and a read.
+
+**Rollback order across 0028, 0029 and 0030.** Newest first: `rollback/0030_no_history_cap.sql`, then `rollback/0029_one_transaction.sql`, then `rollback/0028_no_memo_updates.sql`. The 0028 and 0029 rollbacks restore save guards that update `users.retained_bytes`, so each refuses while 0030 is still applied; running them out of order makes every save fail with `store_unavailable`.
 
 **Rollback boundary.** Code rolls back by traffic alone before and after 0030. To restore
 the cap, run `server/drizzle/rollback/0030_no_history_cap.sql` offline with writers

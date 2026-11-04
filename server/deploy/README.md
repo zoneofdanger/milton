@@ -488,8 +488,11 @@ All other fields and rows survive, including card history copied from the retire
 samples, accounts, billing and receipts. Current configured limits, including `reason_bytes`,
 stay unchanged. No archive is required.
 
-1. From the landed main commit, rehearse a fresh install and the exact 0033 transition on a
-   disposable branch with fictional data. Compare catalogs, grants/default privileges, every
+1. From the landed main commit, rehearse the fresh baseline on an empty disposable database or
+   branch. Separately, build a disposable known-0033 rehearsal database using the historical
+   migrations from immutable commit `b797f1b`, seed it with fictional rows, and rehearse the
+   exact 0033 transition using landed main. Those historical files are rehearsal inputs only;
+   do not restore them to main. Compare catalogs, grants/default privileges, every
    surviving row, configured limits and served report versions; exercise save/replay,
    immutability, account isolation, least privilege and account deletion. Repeat the transition
    and normal migrator. A wrong journal and an injected failure must refuse atomically.

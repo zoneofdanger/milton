@@ -14,7 +14,7 @@ export type TrialNotice = {
 };
 
 // Stripe statuses that end access. Anything Milton does not recognize allows it,
-// so a new Stripe status or an outage never locks anyone out.
+// so a new Stripe status or an outage never cuts off a connected assistant.
 const ENDED = new Set([
   "canceled",
   "unpaid",

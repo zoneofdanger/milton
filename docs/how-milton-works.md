@@ -253,7 +253,7 @@ Files: `server/src/store/index.ts`, `server/src/store/trials.ts`,
 - Past that grace, canceled, unpaid, incomplete, incomplete_expired, and paused read as
   expired.
 - No row, no status, or a status Milton does not know reads as early access, so a Stripe
-  outage locks nobody out.
+  outage never cuts off a connected assistant, and reads never call Stripe.
 - A trial notice is claimed once per stage, 7 days and 1 day before `trial_end`, only
   while trialing.
 - Expired accounts are blocked for assistants, while the web view and download stay open.

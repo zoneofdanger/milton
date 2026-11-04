@@ -19,9 +19,9 @@ decommission on 2026-11-01. Hosting rollback now uses Cloud Run revisions.
 
 Project `milton-510506`, Cloud Run/Artifact Registry region `us-east4`. Service manifests in this directory pin an immutable image and
 secret versions. They contain configuration and secret references, never values.
-The manifests pin what is serving now: app `milton-app-clean-c27869a`
-(`sha256:32df4631…`, env 3, key 1) and MCP `milton-mcp-clean-c27869a`
-(`sha256:32df4631…`, env 3, key 1), both connecting as `milton_app`; see the current
+The manifests pin what is serving now: app `milton-app-ui-99b7209`
+(`sha256:789939cf…`, env 3, key 1) and MCP `milton-mcp-ui-99b7209`
+(`sha256:789939cf…`, env 3, key 1), both connecting as `milton_app`; see the current
 release below. There is no worker service or scheduler job. There is no memo-update
 allowance; the daily call cap bounds saves. Existing positive account safeguards remain
 in effect. Trials and billing are live (since 2026-11-04).
@@ -183,13 +183,58 @@ references. Inspect revision readiness before selecting a recorded revision:
 gcloud run revisions list --service=milton-app --project=milton-510506 --region=us-east4
 ```
 
-Now serving: MCP `milton-mcp-clean-c27869a` (selected 2026-11-04 18:49:58Z)
-and app `milton-app-clean-c27869a` (18:50:18Z), each pinned by revision at 100%.
-Both use the exact landed main commit `c27869a421634c41cda438158531baaa138079f3`.
+Now serving: MCP `milton-mcp-ui-99b7209` (selected 2026-11-04 19:47:42Z)
+and app `milton-app-ui-99b7209` (19:48:59Z), each pinned by revision at 100%.
+Both use the exact landed main commit `99b720966443e3a3cde696be9f39360fc51e7b7e`.
 Ingress is `internal-and-cloud-load-balancing`; IAM, limits, startup CPU boost and
 numeric secrets are unchanged (app/MCP env 3, keys 1). There is no worker service.
 
-Current release clean-c27869a: image index
+Current release ui-99b7209: image index
+`sha256:789939cfbca106b00fb9288a149ef1e12b4e49da87c77e4bb9d1ac8aa0d5f842`, Linux amd64
+`sha256:078a2e85ce824d598352803c2f18007ab988ce82b6079128cf44341a4e17b559` (uid 1000,
+Node 26.13.0; no env/key/pem/dev.vars/private artifacts; both roles refuse empty
+configuration). Frozen install, types, 103 tests/2,155 assertions and formatting passed
+on a clean archive of that exact commit. Its six-file UI patch is byte-identical to
+the independently accepted fictional browser implementation: mobile sample labels,
+setup guide/copy, newcomer sign-in offer/links and native Account popover dismissal.
+The landing demo remains deferred. There is no schema or migration delta from the
+previous clean-c27869a runtime; this release ran no migration, transition, writer
+drain, snapshot or database change. The cleanup evidence below remains historical.
+
+Each new revision differs from its predecessor only in its image; runtime annotations,
+ingress, IAM, limits and numeric secret references match. MCP retains its unmounted
+env-2 volume with env 3 mounted; the minimal tracked manifests omit dormant volumes
+and generated live metadata. Canonical TLS 1.2/1.3 trust and 1.0/1.1 refusal,
+health/discovery/401/CORS/308/direct-host refusal, signed-out restrictions, forms,
+invalid Stripe-signature refusal and both actual runtime-role probes passed.
+Headless Chromium checked live plain and inert fictional assistant-flow sign-in at
+320/390/1440px and 844x390: newcomer copy, both provider buttons, policy/pricing links,
+no overflow or scripts, unchanged script-free CSP and no console errors. No provider
+was activated. Signed-in sample/setup/Account behavior relies on the exact accepted
+fictional production-component evidence; no live signed-in browser session was used.
+Fresh authenticated MCP tool reads saw four tools, required intent, two email samples
+and unchanged cover/email versions; missing intent was refused. The exact deployed
+source instructions remain 4,066 characters; a new client initialization was not
+captured. Observation continued through 19:54:25Z, more than five minutes after both
+rollout checks completed at 19:49:11Z. Filtered logs showed no runtime ERROR, 5xx or
+unexpected auth/schema/permission/lock failures; there were no administrative audit
+errors. Available request metrics through 19:53Z had no 5xx. The immediate predecessors
+and their image remain
+available. No real-account saves, sign-ins or provider/billing actions ran.
+
+Immediate rollback: preserve `milton-mcp-clean-c27869a` and
+`milton-app-clean-c27869a` with image index
+`sha256:32df4631750a32c35f52c263a10c61d6bb45ea64d807ebbe98771b499471ad7d`, amd64
+`sha256:22acf1609b35b8c1aff20fbb0b705a1a96b03cce4a002c059a4e49d00919e712`, env 3/key 1.
+These healthy predecessors served the same current baseline before this code-only
+release. Recheck readiness before selecting them; preserve older revisions/images too.
+No production rollback or database restore ran.
+
+Previous release: MCP `milton-mcp-clean-c27869a` (selected 2026-11-04 18:49:58Z)
+and app `milton-app-clean-c27869a` (18:50:18Z), from landed main commit
+`c27869a421634c41cda438158531baaa138079f3`.
+
+Previous release clean-c27869a: image index
 `sha256:32df4631750a32c35f52c263a10c61d6bb45ea64d807ebbe98771b499471ad7d`, Linux amd64
 `sha256:22acf1609b35b8c1aff20fbb0b705a1a96b03cce4a002c059a4e49d00919e712` (uid 1000,
 Node 26.13.0; no env/key/pem/dev.vars artifacts; both roles refuse empty configuration).
@@ -222,7 +267,7 @@ instructions hash matched the exact source. No real-account saves or sign-ins ra
 The post-reopen observation covered at least five minutes with no unexpected 5xx,
 ERROR, relation/column, permission or lock failures in logs or request metrics.
 
-Rollback candidate: preserve `milton-mcp-rank-c63af7f` and
+Older rollback candidate: preserve `milton-mcp-rank-c63af7f` and
 `milton-app-rank-c63af7f`, image
 `sha256:420c469210565844d7b50d492b8faf253724d2a1ab6991a9124bf64ff94336dd` (amd64
 `sha256:c1f2cd7cecc5afaba5ac1f646ad4ac1a51567159c2b175bb8ce42dcdfee3d9ee`), env 3/key 1.
@@ -287,7 +332,7 @@ Keep their recorded numeric secret versions. Select a previous runtime only afte
 checking that it supports the current schema. Retired schema rollback chains and
 pre-step commands are no longer part of this checkout; recover forward for schema
 changes. Compatibility of these older simp revisions with the cleaned baseline was
-not verified in this release; use the immediate rank candidate recorded above.
+not verified in this release; use the immediate clean-c27869a candidate recorded above.
 
 Roll back only affected services, preserve ingress/IAM, then repeat the canonical
 security checks. If a

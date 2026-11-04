@@ -525,6 +525,31 @@ const comments = [
       </div>
     </section>
 
+    <section class="section faq-items" aria-labelledby="billing-faq-heading">
+      <p class="eyebrow">## A few things to know</p>
+      <h2 id="billing-faq-heading">Before you subscribe.</h2>
+      <details>
+        <summary>Will I be charged after signing up?</summary>
+        <p>
+          No. Early access is currently free and we don’t collect payment
+          details. The planned paid offer is $5.01 USD/month after a 30-day free
+          trial. No credit card is required to try it, and you won’t be charged
+          unless you subscribe.
+        </p>
+        <p>
+          After an unsubscribed trial ends at paid launch, AI reads and saves
+          will pause. Your cover sheet and reports will remain available on the
+          website to view and download.
+        </p>
+      </details>
+      <details>
+        <summary>Why the extra penny?</summary>
+        <p>
+          We’ve been assured the accounting software is working as intended.
+        </p>
+      </details>
+    </section>
+
     <section class="section" aria-labelledby="faq-heading">
       <p class="eyebrow">## FAQ</p>
       <h2 id="faq-heading">Frequently asked, by Peter.</h2>
@@ -1038,6 +1063,28 @@ const comments = [
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: var(--space-6) var(--space-8);
+  }
+
+  /* The same list as the home page's FAQ. Its divider closes the last item,
+     as the next item's border closes the others. */
+  .faq-items details {
+    border-top: 1px solid var(--hairline);
+    padding-block: var(--space-3);
+  }
+  .faq-items summary {
+    cursor: pointer;
+    list-style-position: outside;
+    margin-inline-start: var(--space-5);
+    min-height: var(--touch-target);
+    padding-block: var(--space-3);
+    font-weight: 600;
+  }
+  .faq-items details p {
+    margin-block: var(--space-2) var(--space-3);
+    color: var(--muted);
+  }
+  .section.faq-items {
+    padding-bottom: 0;
   }
 
   .closing {

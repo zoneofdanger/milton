@@ -1739,8 +1739,18 @@ test("billing checkout and portal: 503 without config; signed-in CSRF forms; the
     );
     stripe.down = "GET /v1/subscriptions";
     stripe.calls.length = 0;
+    const logged = spyOn(console, "error").mockImplementation(() => {});
     expect((await send("/billing/checkout", {})).status).toBe(503);
     expect(stripe.calls).toEqual([listCall]);
+    stripe.down = "POST /v1/billing_portal/sessions";
+    expect((await send("/billing/portal", {})).status).toBe(503);
+    // Logged as a sign-in failure is: where, class and code, nothing of Stripe's.
+    expect(logged.mock.calls.map(([line]) => String(line))).toEqual(
+      Array(2).fill(
+        '{"event":"unexpected_error","where":"billing","class":"AuthError","code":"billing_unavailable"}',
+      ),
+    );
+    logged.mockRestore();
     stripe.down = false;
     stripe.subscriptions = [];
     // A returning deleted identity has no customer yet.

@@ -272,6 +272,18 @@ const MANAGED = new Set(["trialing", "active", "past_due", "unpaid", "paused"]);
  * price, card required, no trial. An account still waiting on its trial takes it
  * first: paying now would lose the 30 days. */
 export async function billingRoutes(ctx: PageContext): Promise<Response> {
+  try {
+    return await billingRoute(ctx);
+  } catch (error) {
+    // The page logs only what it does not recognize, so a wrong key permission or
+    // an archived price would otherwise show a 503 and leave no trace.
+    if (error instanceof AuthError && error.code === "billing_unavailable")
+      logUnexpected("billing", error);
+    throw error;
+  }
+}
+
+async function billingRoute(ctx: PageContext): Promise<Response> {
   const { config, request, url, readForm, signedIn } = ctx;
   const billing = config.billing;
   if (!billing) return unavailable();

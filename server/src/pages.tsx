@@ -176,7 +176,7 @@ export function navigation(target: string) {
   return page(
     "Continue",
     <>
-      <p>Continuing your sign-in.</p>
+      <p>Taking you to the next page.</p>
       <p>
         <a href={url.href}>Continue</a>
       </p>

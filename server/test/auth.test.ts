@@ -1564,6 +1564,15 @@ test("billing checkout and portal: 503 without config; signed-in CSRF forms; the
     )[0];
   const portalUrl = "https://billing.stripe.com/p/session/test_fixture";
   const checkoutUrl = "https://checkout.stripe.com/c/pay/cs_test_fixture";
+  // form-action 'self' blocks an external Location after a form, so the answer
+  // is a page that navigates, as sign-in's is.
+  const leavesFor = async (response: Response, target: string) => {
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Location")).toBeNull();
+    const html = await response.text();
+    expect(html).toContain(`http-equiv="refresh" content="0;url=${target}"`);
+    expect(html).not.toContain("sign-in");
+  };
   const portalCall = stripeCall("POST /v1/billing_portal/sessions", {
     customer: "cus_fixture",
     return_url: appOrigin + "/",
@@ -1612,9 +1621,7 @@ test("billing checkout and portal: 503 without config; signed-in CSRF forms; the
     );
     stripe.down = false;
     stripe.calls.length = 0;
-    const healed = await send("/billing/checkout", {});
-    expect(healed.status).toBe(303);
-    expect(healed.headers.get("Location")).toBe(portalUrl);
+    await leavesFor(await send("/billing/checkout", {}), portalUrl);
     expect(await clock()).toEqual({
       customer: "cus_fixture",
       status: "trialing",
@@ -1637,18 +1644,15 @@ test("billing checkout and portal: 503 without config; signed-in CSRF forms; the
         sql`UPDATE trial_accounts SET subscription_status=${status}`,
       );
       stripe.calls.length = 0;
-      const answer = await send("/billing/checkout", {});
-      expect([status, answer.status]).toEqual([status, 303]);
-      expect(answer.headers.get("Location")).toBe(location);
-      expect(stripe.calls).toEqual([call]);
+      await leavesFor(await send("/billing/checkout", {}), location);
+      expect([status, stripe.calls]).toEqual([status, [call]]);
     }
     // A returning deleted identity has no customer yet.
     await local.db.query(
       sql`UPDATE trial_accounts SET stripe_customer_id=NULL,subscription_status='canceled'`,
     );
     stripe.calls.length = 0;
-    const back = await send("/billing/checkout", {});
-    expect(back.headers.get("Location")).toBe(checkoutUrl);
+    await leavesFor(await send("/billing/checkout", {}), checkoutUrl);
     expect(stripe.calls.map((call) => call.call)).toEqual([
       "POST /v1/customers",
       "POST /v1/checkout/sessions",
@@ -1658,9 +1662,7 @@ test("billing checkout and portal: 503 without config; signed-in CSRF forms; the
       status: "canceled",
     });
     stripe.calls.length = 0;
-    const portal = await send("/billing/portal", {});
-    expect(portal.status).toBe(303);
-    expect(portal.headers.get("Location")).toBe(portalUrl);
+    await leavesFor(await send("/billing/portal", {}), portalUrl);
     expect(stripe.calls).toEqual([portalCall]);
   } finally {
     await fixture.dispose();

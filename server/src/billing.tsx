@@ -12,7 +12,7 @@ import {
 import { boundRequest } from "./http";
 import { AuthError } from "./token";
 import { logUnexpected } from "./error-log";
-import { page } from "./pages";
+import { navigation, page } from "./pages";
 import type { PageContext } from "./auth-session";
 
 const noStore = { "Cache-Control": "no-store" };
@@ -285,8 +285,10 @@ export async function billingRoutes(ctx: PageContext): Promise<Response> {
   );
   let account = await store.account();
   const home = config.appOrigin + "/";
+  // navigation, not a redirect: form-action 'self' blocks an external Location
+  // after a form, and a person could then neither pay nor add a card.
   const portal = async (customer: string) =>
-    Response.redirect(
+    navigation(
       (
         await stripePost(
           billing,
@@ -295,7 +297,6 @@ export async function billingRoutes(ctx: PageContext): Promise<Response> {
           redirectTo("https://billing.stripe.com"),
         )
       ).url,
-      303,
     );
   if (url.pathname === "/billing/portal") {
     if (!account.customer)
@@ -334,7 +335,7 @@ export async function billingRoutes(ctx: PageContext): Promise<Response> {
     },
     redirectTo("https://checkout.stripe.com"),
   );
-  return Response.redirect(session.url, 303);
+  return navigation(session.url);
 }
 
 /** The webhook body bound, read before the signature check. */

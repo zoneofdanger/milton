@@ -209,6 +209,7 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
   form each ensure it first, and denying needs nothing.
 - A Stripe failure stops that step with a 503 saying to try again, and charges nothing;
   repeating the sign-in is the retry.
+- On a plain web sign-in, with no assistant involved, that page also links to Milton home.
 - With billing unset, no row, or a status already set, no step calls Stripe.
 - The row stays locked across customer, list, and create, so a concurrent attempt finds the
   result rather than making a second customer or trial.

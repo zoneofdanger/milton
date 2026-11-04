@@ -75,6 +75,12 @@ export function browserPages(config: RuntimeConfig) {
               <a class="button" href={ctx.loginRecovery}>
                 Back to sign-in
               </a>
+              {ctx.loginRecovery === "/login" && (
+                <>
+                  {" "}
+                  <a href="/">Milton home</a>
+                </>
+              )}
             </p>
           ) : url.pathname.startsWith("/assistants") ||
             failure.code === "reconnect_incomplete" ? (

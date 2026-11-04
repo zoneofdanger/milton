@@ -1467,6 +1467,12 @@ test("signing in starts one Stripe trial, stops on a Stripe failure, and the rep
     expect(logged.mock.calls.map(([line]) => String(line))).toEqual([
       '{"event":"unexpected_error","where":"billing","class":"AuthError","code":"billing_unavailable"}',
     ]);
+    expect(page).not.toContain('<a href="/">Milton home</a>');
+    // A plain web sign-in involves no assistant, so web view stays one link away.
+    const plain = await (await fixture.send("/login")).text();
+    expect(plain).toContain(tryAgain);
+    expect(plain).toContain('href="/login"');
+    expect(plain).toContain('<a href="/">Milton home</a>');
     // The customer lands, the subscription fails: the customer is kept.
     stripe.down = "POST /v1/subscriptions";
     stripe.calls.length = 0;

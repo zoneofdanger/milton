@@ -527,8 +527,9 @@ trial; the rest of this section describes the 0012 groundwork, and where it diff
 refusal link to the signed-in app home, whose banner holds the button. Existing early
 access must not acquire a payment gate implicitly.
 
-When explicitly enabled, only newly created accounts get a `trial_accounts` row.
-Existing accounts without a row remain early access, including on later sign-ins.
+With trials on, a new account gets a `trial_accounts` row at sign-up, and
+`scripts/backfill-subscriptions.ts` gives existing accounts theirs. An account without a
+row reads as early access.
 The account-creation transaction writes the row with the new Milton account's
 `created_at` as `started_at`, which nothing reads; Stripe's `trial_end` ends the trial.
 An enrolled account can expire without ever saving preferences. No start-trigger

@@ -74,6 +74,63 @@ test("a release passes the owner URL in its own variable, checked, and an empty 
   }
 });
 
+test("0033 adds sample labels and a stored search vector, holds labels to the append-only guard, and rolls back to the 0032 shape", async () => {
+  const base = await migratedThrough(32);
+  const pg = await migratedThrough(32);
+  const post = await migratedThrough(33);
+  try {
+    const up = await drizzleSql("0033_sample_labels.sql");
+    const down = await drizzleSql("rollback/0033_sample_labels.sql");
+    await seedUsers(pg, "ranked");
+    // A sample saved before 0033, as the previous revision writes it.
+    await pg.exec(`INSERT INTO sample_kinds(user_id,id,report,label) VALUES ('ranked','k','email','reply');
+      INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json)
+      VALUES ('ranked','old','email','k','A fictional reply.','Thanks for the budget numbers.','{}');`);
+    const forward = async () => {
+      await pg.exec("BEGIN;" + up + "COMMIT;");
+      expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(post));
+    };
+    await forward();
+    // The earlier sample stays unlabeled and gains its search vector.
+    expect(
+      (
+        await pg.query(
+          "SELECT audience,purpose,register,search::text AS search FROM samples WHERE id='old'",
+        )
+      ).rows,
+    ).toEqual([
+      {
+        audience: null,
+        purpose: null,
+        register: null,
+        search: "'budget':7 'fiction':2 'number':8 'repli':3 'thank':4",
+      },
+    ]);
+    // Only listed labels are stored, and a stored label never changes.
+    await pg.exec(`INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,audience,purpose,register)
+      VALUES ('ranked','new','email','k','A fictional decline.','No, thank you.','{}','client','follow up','plain');`);
+    await expect(
+      pg.exec(`INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,audience)
+        VALUES ('ranked','bad','email','k','A fictional note.','Hello.','{}','investor');`),
+    ).rejects.toThrow("samples_labels");
+    await expect(
+      pg.exec(
+        "UPDATE samples SET retired_at=now(),retire_reason='removed',audience='boss' WHERE id='new'",
+      ),
+    ).rejects.toThrow("sample_is_append_only");
+    await pg.exec(down);
+    expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(base));
+    expect((await pg.query("SELECT id FROM samples ORDER BY id")).rows).toEqual(
+      [{ id: "new" }, { id: "old" }],
+    );
+    await forward();
+  } finally {
+    await post.close();
+    await pg.close();
+    await base.close();
+  }
+}, 30000);
+
 test("0032 widens the sample, accepted-change and receipt checks, raises the stored daily_calls and body_bytes, and rolls back refusing rows past the old caps", async () => {
   const base = await migratedThrough(31);
   const pg = await migratedThrough(31);

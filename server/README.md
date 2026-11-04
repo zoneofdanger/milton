@@ -587,6 +587,17 @@ foreign keys, immutability guards and byte charges in `milton_rollback`; forward
 restores them exactly. Stop writers during schema rollback and keep them stopped until
 forward recovery: an older runtime cannot guarantee provenance for new saves.
 
+### Sample labels (0033)
+
+Migration 0033 adds three optional labels to `samples`, `audience`, `purpose` and
+`register`, nullable text held to fixed lists by the check `samples_labels`, and `search`,
+a stored generated `tsvector` of context and body, computed once on insert. The
+append-only guard holds the labels like every other stored field. Earlier samples stay
+unlabeled; nothing is backfilled. It is additive, so the migration ships before the code
+that reads it. See [the hosting runbook](deploy/README.md#sample-labels-0033).
+`drizzle/rollback/0033_sample_labels.sql` restores the guard and drops the check and the
+four columns.
+
 ### Limits (0032)
 
 Milton charges now, so the metered caps went up: 10,000 attempted MCP calls per account

@@ -14,7 +14,10 @@ import {
   foreignKey,
   index,
   check,
+  customType,
 } from "drizzle-orm/pg-core";
+
+const tsvector = customType<{ data: string }>({ dataType: () => "tsvector" });
 
 const createdAt = () =>
   timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
@@ -421,6 +424,16 @@ export const samples = pgTable(
     retireReason: text("retire_reason"),
     // The save that retired it; NULL only for retirements before 0020.
     retiredRequestId: text("retired_request_id"),
+    // Labels the saving assistant chose from fixed lists, each optional and
+    // never changed; NULL on samples before 0033. A report read compares
+    // audience and purpose for equality only.
+    audience: text("audience"),
+    purpose: text("purpose"),
+    register: text("register"),
+    // The words a report read ranks against, computed once on insert (0033).
+    search: tsvector("search").generatedAlwaysAs(
+      sql`to_tsvector('english'::regconfig, context || ' ' || body)`,
+    ),
   },
   (t) => [
     primaryKey({ columns: [t.userId, t.id] }),
@@ -457,6 +470,10 @@ export const samples = pgTable(
     check(
       "samples_retirement",
       sql`(${t.retireReason} IS NULL) = (${t.retiredAt} IS NULL) AND (${t.retireReason} IS NULL OR ${t.retireReason} IN ('replaced','removed','evicted')) AND (${t.retiredRequestId} IS NULL OR ${t.retiredAt} IS NOT NULL)`,
+    ),
+    check(
+      "samples_labels",
+      sql`(${t.audience} IS NULL OR ${t.audience} IN ('client','boss','colleague','friend','public','other')) AND (${t.purpose} IS NULL OR ${t.purpose} IN ('decline','ask','thank','update','announce','apologize','introduce','follow up','other')) AND (${t.register} IS NULL OR ${t.register} IN ('formal','plain','casual'))`,
     ),
   ],
 );

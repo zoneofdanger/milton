@@ -53,37 +53,12 @@ import { memoExample } from "./memo-example";
       </section>
     ))}
   </div>
-  <div class="demo-controls" data-demo-controls hidden>
-    <button
-      class="secondary"
-      type="button"
-      data-playback
-      aria-controls="memo-demo"
-      aria-label="Pause animation"
-    >
-      Pause
-    </button>
-    <button
-      class="secondary"
-      type="button"
-      data-replay
-      aria-controls="memo-demo"
-      aria-label="Replay animation"
-    >
-      Replay
-    </button>
-    <span class="playback-status" data-playback-status role="status"></span>
-  </div>
 </figure>
 
 <script>
   const demo = document.querySelector<HTMLElement>("[data-memo-demo]");
   if (demo) {
     const story = demo.querySelector<HTMLElement>(".scene-stage")!;
-    const controls = demo.querySelector<HTMLElement>("[data-demo-controls]")!;
-    const toggle = demo.querySelector<HTMLButtonElement>("[data-playback]")!;
-    const replay = demo.querySelector<HTMLButtonElement>("[data-replay]")!;
-    const status = demo.querySelector<HTMLElement>("[data-playback-status]")!;
     const progress = demo.querySelector<HTMLElement>("[data-scene-progress]")!;
     const names = Array.from(
       demo.querySelectorAll<HTMLElement>("[data-scene-name]"),
@@ -101,7 +76,7 @@ import { memoExample } from "./memo-example";
     visual
       .querySelectorAll("[aria-labelledby]")
       .forEach((node) => node.removeAttribute("aria-labelledby"));
-    controls.before(visual);
+    demo.append(visual);
     const panels = Array.from(visual.querySelectorAll<HTMLElement>(".scene"));
     const messages = panels.map((panel) =>
       Array.from(panel.querySelectorAll<HTMLElement>(".chat > li")).map(
@@ -141,9 +116,9 @@ import { memoExample } from "./memo-example";
       ],
     ];
     const finalCue = cues[1][3];
-    const duration = finalCue.at + finalCue.type;
+    const completedAt = finalCue.at + finalCue.type;
+    const cycleDuration = completedAt + 2150;
     let elapsed = 0;
-    let playing = true;
     let visible = false;
     let frame = 0;
     let last: number | null = null;
@@ -175,70 +150,26 @@ import { memoExample } from "./memo-example";
         }),
       );
     };
-    const announce = () => {
-      const ended = elapsed >= duration;
-      toggle.textContent = ended ? "Complete" : playing ? "Pause" : "Play";
-      toggle.setAttribute(
-        "aria-label",
-        ended
-          ? "Animation complete"
-          : playing
-            ? "Pause animation"
-            : "Play animation",
-      );
-      toggle.setAttribute("aria-disabled", String(ended));
-      status.textContent = ended
-        ? "Complete"
-        : !playing
-          ? "Paused"
-          : visible && !document.hidden
-            ? "Playing"
-            : "Waiting";
-    };
     const advance = (now: number) => {
       // A frame's timestamp can precede schedule's performance.now(). Keep the
-      // clock monotonic, including the first frame after Replay or resume.
+      // frame delta nonnegative, including the first frame after resume.
       const current = Math.max(now, last ?? now);
-      if (last !== null) elapsed = Math.min(duration, elapsed + current - last);
+      if (last !== null) elapsed = (elapsed + current - last) % cycleDuration;
       last = current;
       render();
     };
     const tick = (now: number) => {
       advance(now);
-      if (elapsed < duration) frame = requestAnimationFrame(tick);
-      else {
-        playing = false;
-        last = null;
-        announce();
-      }
+      frame = requestAnimationFrame(tick);
     };
     const schedule = () => {
       cancelAnimationFrame(frame);
       last = null;
-      if (
-        playing &&
-        visible &&
-        !reduced.matches &&
-        !document.hidden &&
-        elapsed < duration
-      ) {
+      if (visible && !reduced.matches && !document.hidden) {
         last = performance.now();
         frame = requestAnimationFrame(tick);
       }
-      announce();
     };
-    toggle.addEventListener("click", () => {
-      if (elapsed >= duration) return;
-      if (last !== null) advance(performance.now());
-      playing = !playing;
-      schedule();
-    });
-    replay.addEventListener("click", () => {
-      elapsed = 0;
-      playing = true;
-      render();
-      schedule();
-    });
     document.addEventListener("visibilitychange", schedule);
     let observer: IntersectionObserver | undefined;
     let requiredVisibility = 0.35;
@@ -272,7 +203,6 @@ import { memoExample } from "./memo-example";
     window.addEventListener("resize", observeVisibility);
     const preference = () => {
       demo.classList.toggle("enhanced", !reduced.matches);
-      controls.hidden = reduced.matches;
       observeVisibility();
       schedule();
     };
@@ -385,31 +315,5 @@ import { memoExample } from "./memo-example";
   p {
     margin: 0;
     text-wrap: pretty;
-  }
-  .demo-controls {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-3) var(--sheet-padding);
-    border-top: 1px solid var(--hairline);
-  }
-  .demo-controls[hidden] {
-    display: none;
-  }
-  .demo-controls button {
-    min-height: var(--touch-target);
-    padding: var(--space-2) var(--space-4);
-  }
-  .demo-controls button[aria-disabled="true"] {
-    color: var(--muted);
-    border-color: var(--muted);
-    background: var(--ground);
-    cursor: default;
-  }
-  .playback-status {
-    flex-basis: 100%;
-    color: var(--muted);
-    font: var(--text-caption) / var(--leading-label) var(--font-mono);
   }
 </style>

@@ -45,7 +45,8 @@ export function coverSheet(documents: Documents & { version: string }) {
   };
 }
 /** Active samples without their bodies (those stay in text), newest first, so
- * an assistant can reuse a kind or name a sample to replace or remove. */
+ * an assistant can reuse a kind or name a sample to replace or remove. Labels
+ * appear only when the sample has them. */
 const sampleIndex = (report: ReportDocument) =>
   report.samples.map((s) => ({
     id: s.id,
@@ -53,6 +54,9 @@ const sampleIndex = (report: ReportDocument) =>
     kind: s.kind,
     context: s.context,
     date: s.date,
+    ...(s.audience ? { audience: s.audience } : {}),
+    ...(s.purpose ? { purpose: s.purpose } : {}),
+    ...(s.register ? { register: s.register } : {}),
   }));
 /** A report's setup block, served only while that report has no rules. */
 const setupField = (documents: Documents, id: (typeof REPORT_IDS)[number]) => {

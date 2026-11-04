@@ -175,6 +175,8 @@ not at all.
 - Identical sample text for a kind files nothing.
 - Kinds match by label, ignoring case.
 - A `kind_id` must name a kind in the same report.
+- A sample's optional `audience`, `purpose` and `register` must come from their fixed
+  lists, or the save is refused as `invalid_input`; they are stored as sent (0033).
 - Replacing a sample requires an active sample of the same kind.
 - Each sample removal must name an active sample, listed once.
 - Every approved sample stays until the person replaces or removes it; reports serve the

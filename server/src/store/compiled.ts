@@ -1,7 +1,10 @@
 import { cardHeadsJson, cardFingerprint, type CardHead } from "./cards";
 import {
   assembleDocuments,
+  AUDIENCES,
   FILINGS,
+  PURPOSES,
+  REGISTERS,
   REPORT_IDS,
   type Documents,
   type Sample,
@@ -122,6 +125,12 @@ export const saveMemoInput = z.strictObject({
       context: oneLine(200).describe(
         "One line of context shown above the sample, such as follow-up after someone agreed to a call.",
       ),
+      audience: z
+        .enum(AUDIENCES)
+        .optional()
+        .describe("Who it was written for."),
+      purpose: z.enum(PURPOSES).optional().describe("What it does."),
+      register: z.enum(REGISTERS).optional().describe("How formal it is."),
       text: text
         .refine((v) => v.trim().length > 0)
         .describe(
@@ -213,6 +222,7 @@ export function compiledMemos(
       (${cardHeadsJson(userId)}) AS heads,
       (SELECT coalesce(json_agg(json_build_object('id',s.id,'report',s.report,'kind_id',s.kind_id,'kind',k.label,'context',s.context,'body',s.body,
         'date',to_char(s.created_at AT TIME ZONE 'UTC','YYYY-MM-DD'),
+        'audience',s.audience,'purpose',s.purpose,'register',s.register,
         'created_at',to_char(s.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"')) ORDER BY s.created_at,s.id),'[]'::json)
         FROM samples s JOIN sample_kinds k ON k.user_id=s.user_id AND k.id=s.kind_id
         WHERE s.user_id=${userId} AND s.retired_at IS NULL) AS samples`,

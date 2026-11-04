@@ -884,11 +884,27 @@ test("replaces retires the named sample as replaced and records lineage", async 
         replaces: old.id,
         context: "second launch",
         text: "New",
+        audience: "public",
+        purpose: "announce",
+        register: "plain",
       },
     };
+    // A label off its list is refused before anything is read or written.
+    await expect(
+      f.save({ sample: { ...replace.sample, audience: "investor" } }),
+    ).rejects.toMatchObject({ code: "invalid_input" });
     expect(await f.save(replace)).toMatchObject({
       status: "saved",
       samples_retired: [{ id: old.id, reason: "replaced" }],
+    });
+    // Labels are stored as sent and listed with the sample.
+    expect(
+      reportEnvelope(await f.store.readDocuments(), "post").samples[0],
+    ).toMatchObject({
+      context: "second launch",
+      audience: "public",
+      purpose: "announce",
+      register: "plain",
     });
     expect(
       (

@@ -72,6 +72,9 @@ test("setup renders from its catalog, per report while empty, within 32 KB", () 
           body: "A fictional email.",
           date: "2026-11-02",
           created_at: "2026-11-02T00:00:00.000000Z",
+          audience: null,
+          purpose: null,
+          register: null,
         },
       ],
     ),
@@ -221,7 +224,7 @@ test("every create_memo shape the server instructions describe parses against sa
     ],
   });
   says(
-    "call create_memo with sample (report; kind_id from get_report, or new_kind only if none fits; context; text exactly as approved)",
+    "call create_memo with sample (report; kind_id from get_report, or new_kind only if none fits; context; audience, purpose and register; text exactly as approved)",
   );
   for (const kind of [{ kind_id: "fictional-kind" }, { new_kind: "follow-up" }])
     parses({
@@ -230,6 +233,9 @@ test("every create_memo shape the server instructions describe parses against sa
         report: "email",
         ...kind,
         context: "A fictional situation.",
+        audience: "client",
+        purpose: "follow up",
+        register: "plain",
         text: "A fictional email.",
       },
     });

@@ -265,7 +265,12 @@ snapshot and commits together or not at all. `moves` is `[{before, report}]`
 (1-500): `before` is verbatim text identifying one rule, as for `exact_edits`, and
 `report` is a report or `cover`. A move to the rule's current place is a no-op; an
 unresolvable or repeated move, or a move of a rule the same save removes, fails with
-`move_conflict`. `sample` is `{report, kind_id | new_kind, context, text, replaces?}`.
+`move_conflict`. `sample` is `{report, kind_id | new_kind, context, audience?, purpose?,
+register?, text, replaces?}`. The labels come from fixed lists (audience: client, boss,
+colleague, friend, public, other; purpose: decline, ask, thank, update, announce,
+apologize, introduce, follow up, other; register: formal, plain, casual); any other value
+is refused as `invalid_input`. They are stored as sent and never interpreted beyond
+equality (0033).
 `kind_id` must name a kind in that report. A `new_kind` whose label already exists
 there, in any letter case, files under that kind (including a kind whose samples are
 all retired, which reads no longer list); otherwise it creates one. `replaces` names an active sample of the
@@ -278,7 +283,8 @@ save that then changes nothing returns `unchanged` and charges nothing.
 Sample errors fail with `sample_conflict`. A `saved` result carries
 `samples_retired: [{id, reason}]` whenever a sample was retired, and replay returns
 it unchanged. Reports serve the newest two active samples of each kind, and report
-reads list each served sample as `{id, kind_id, kind, context, date}`, newest first;
+reads list each served sample as `{id, kind_id, kind, context, date}`, plus each label
+it has, newest first;
 kind labels never appear in report text.
 
 The assistant offers first setup once when empty, uses available explicit

@@ -30,7 +30,8 @@ Filing is correctable (0020): a card's report (or `cover`) lives on each version
 an explicit `moves` entry appends a version that keeps the card's identity, text and
 history; no card moves to tidy up. Samples belong to stable, immutable
 kinds named once per report; assistants reuse a `kind_id` from `get_report` and use
-`new_kind` only when none fits. `replaces` and `retire_samples` retire samples on
+`new_kind` only when none fits, and label each sample with an audience, purpose and
+register from fixed lists (0033). `replaces` and `retire_samples` retire samples on
 request, and nothing retires a sample automatically; every retirement is reported in
 `samples_retired` and recorded with its reason and request. Kind labels
 stay out of report text.

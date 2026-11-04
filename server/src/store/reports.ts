@@ -45,6 +45,29 @@ export const REPORTS: { id: ReportId; title: string; when: string }[] = [
 export const resolveReportId = (id: string): ReportId | undefined =>
   id === "doc" ? "document" : REPORT_IDS.find((known) => known === id);
 
+/** Labels an assistant may give a sample when saving it, and audience and
+ * purpose when reading a report. Stored as sent and compared for equality only. */
+export const AUDIENCES = [
+  "client",
+  "boss",
+  "colleague",
+  "friend",
+  "public",
+  "other",
+] as const;
+export const PURPOSES = [
+  "decline",
+  "ask",
+  "thank",
+  "update",
+  "announce",
+  "apologize",
+  "introduce",
+  "follow up",
+  "other",
+] as const;
+export const REGISTERS = ["formal", "plain", "casual"] as const;
+
 export type Sample = {
   id: string;
   report: ReportId;
@@ -57,6 +80,10 @@ export type Sample = {
   date: string;
   /** Full UTC timestamp, for ordering only. */
   created_at: string;
+  /** Labels the saving assistant chose; null when it sent none (0033). */
+  audience: (typeof AUDIENCES)[number] | null;
+  purpose: (typeof PURPOSES)[number] | null;
+  register: (typeof REGISTERS)[number] | null;
 };
 export type ReportDocument = {
   id: ReportId;

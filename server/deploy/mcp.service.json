@@ -23,7 +23,7 @@
         "timeoutSeconds": 180,
         "containers": [
           {
-            "image": "us-east4-docker.pkg.dev/milton-510506/milton/runtime@sha256:32df4631750a32c35f52c263a10c61d6bb45ea64d807ebbe98771b499471ad7d",
+            "image": "us-east4-docker.pkg.dev/milton-510506/milton/runtime@sha256:789939cfbca106b00fb9288a149ef1e12b4e49da87c77e4bb9d1ac8aa0d5f842",
             "ports": [
               {
                 "containerPort": 8080
@@ -80,7 +80,7 @@
     },
     "traffic": [
       {
-        "revisionName": "milton-mcp-clean-c27869a",
+        "revisionName": "milton-mcp-ui-99b7209",
         "percent": 100
       }
     ]

@@ -71,10 +71,6 @@ const deletionPage = async (
           second trial.
         </li>
         <li>
-          If you received an early-access invitation, that invitation entry
-          (your sign-in ID), which an operator can remove.
-        </li>
-        <li>
           Your sign-in record (email, name, Google or GitHub link) stays with
           our sign-in provider. To remove it, email{" "}
           <a href={`mailto:${supportEmail(config)}`}>{supportEmail(config)}</a>.

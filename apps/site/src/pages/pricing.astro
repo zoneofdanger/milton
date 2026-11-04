@@ -301,8 +301,8 @@ const comments = [
     <section class="section" id="tiers" aria-labelledby="tiers-heading">
       <p class="eyebrow">## One plan. We resisted making three columns.</p>
       <h2 id="tiers-heading">We did make seven tiers. Six are imaginary.</h2>
-      <ul class="tiers">
-        <li class="sheet tier tier-real">
+      <div class="pricing-grid">
+        <div class="sheet tier">
           <div class="sheet-bar">
             <span>Tier 1</span>
             <span>Real</span>
@@ -315,12 +315,61 @@ const comments = [
               free during early access, and no credit card is required. You get
               one cover sheet and five reports, served to every AI you connect.
             </p>
+            <ul class="checklist">
+              <li>
+                <span class="check-box" aria-hidden="true">
+                  ✓
+                </span>
+                <span>
+                  Not AI-powered. Your AI is.
+                  <span class="visually-hidden">(done)</span>
+                </span>
+              </li>
+              <li>
+                <span class="check-box" aria-hidden="true">
+                  ✓
+                </span>
+                <span>
+                  Enterprise-grade asking nicely.
+                  <span class="visually-hidden">(done)</span>
+                </span>
+              </li>
+              <li>
+                <span class="check-box" aria-hidden="true"></span>
+                <span>
+                  Synergy, pending approval.
+                  <span class="visually-hidden">(pending)</span>
+                </span>
+              </li>
+            </ul>
             <p class="tier-meta">Estimated delivery: today.</p>
             <a class="button" href={loginUrl}>
               Try free early access <span aria-hidden="true">↗</span>
             </a>
           </div>
-        </li>
+        </div>
+        <div class="testimonial-column">
+          <figure class="employee-testimonial" id="employee-testimonial">
+            <blockquote>
+              “Milton lets me say ‘Did you get that memo?’ to software. I have
+              never felt more qualified for management.”
+            </blockquote>
+            <figcaption>
+              <strong>Michael Bolton</strong>
+              <span>Senior Founding AI Forward Deployed Product Engineer</span>
+            </figcaption>
+          </figure>
+          <ul class="social-proof">
+            <li>Would recommend: 1 of 1 founders.</li>
+            <li>Reduced rewrites by an amount we did not measure.</li>
+            <li>
+              Wall of love: one quote. We put it next to the price so it would
+              look like more.
+            </li>
+          </ul>
+        </div>
+      </div>
+      <ul class="tiers">
         {jokeTiers.map(({ name, price, text, delivery }, index) => (
           <li class="sheet tier tier-void">
             <div class="sheet-bar">
@@ -681,6 +730,14 @@ const comments = [
     font-size: var(--text-lead);
   }
 
+  /* The real tier first, testimonial beside it; both share a centre line. */
+  .pricing-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-16);
+    align-items: center;
+    margin-top: var(--space-8);
+  }
   /* The real tier is a clean sheet; the rest are voided forms. */
   .tiers {
     display: grid;
@@ -720,15 +777,65 @@ const comments = [
     color: var(--muted);
     font: var(--text-caption) / var(--leading-label) var(--font-mono);
   }
-  .tier-real {
-    grid-column: 1 / -1;
-  }
   .tier-void {
     box-shadow: none;
     border-style: dashed;
   }
   .tier-void .tier-price {
     color: var(--muted);
+  }
+
+  /* A form checklist: two boxes ticked, the third left open because it is
+     pending. The boxes are drawn like a routing slip's and are decoration;
+     each item carries its state in visually hidden text. */
+  .checklist {
+    display: grid;
+    gap: var(--space-3);
+    margin: var(--space-6) 0;
+    padding: 0;
+    list-style: none;
+  }
+  .checklist li {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    color: var(--ink);
+  }
+  .check-box {
+    display: inline-grid;
+    flex: none;
+    place-items: center;
+    width: var(--space-6);
+    height: var(--space-6);
+    border: 1px solid var(--ink);
+    background: var(--surface);
+    font: var(--text-body) / 1 var(--font-mono);
+  }
+
+  .employee-testimonial blockquote {
+    margin: 0 0 var(--space-6);
+    font: var(--font-display-weight) var(--text-section) /
+      var(--leading-heading) var(--font-display);
+  }
+  .employee-testimonial figcaption {
+    display: grid;
+    gap: var(--space-2);
+    font-size: var(--text-small);
+  }
+  .employee-testimonial figcaption span {
+    color: var(--muted);
+  }
+  /* Fine print where a case study would show its metrics: plain lines under
+     the caption, set off by a hairline, and kept with the figure. */
+  .social-proof {
+    display: grid;
+    gap: var(--space-2);
+    margin: var(--space-6) 0 0;
+    padding: var(--space-4) 0 0;
+    border-top: 1px solid var(--hairline);
+    list-style: none;
+    color: var(--muted);
+    font-size: var(--text-small);
   }
 
   /* The rubber stamp from the routing slip. Decorative only. */
@@ -957,6 +1064,9 @@ const comments = [
   }
 
   @media (max-width: 1000px) {
+    .pricing-grid {
+      gap: var(--space-8);
+    }
     .tiers {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
@@ -995,6 +1105,10 @@ const comments = [
     }
     .truth-list {
       padding-inline-start: var(--space-4);
+    }
+    .pricing-grid {
+      grid-template-columns: minmax(0, 1fr);
+      gap: var(--space-10);
     }
   }
   @media (max-width: 600px) {

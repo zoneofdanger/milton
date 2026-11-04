@@ -381,6 +381,7 @@ main > nav + .tps-form {
 .form-sample .typed {
   flex: 1;
 }
+.form-sample .labels,
 .form-sample .date {
   color: var(--muted);
   font: var(--text-caption) var(--font-mono);

@@ -468,7 +468,8 @@ report index (one "when" line per report) travels beside it as data. Each report
 prints `# Title`, its when line, eight active samples, ranked for the read's intent or
 else newest first (a context line with
 the date, then the body quoted with `>`), then its rules. The full text (TPS.md and
-the web page) is the cover sheet plus every non-empty report.
+the web page) is the cover sheet plus every non-empty report. The web page lists each
+sample by its context line, its labels when it has any, and its date (0033).
 
 A read takes the card heads, the active samples and the account's status in one
 statement, without a transaction or lock, so a concurrent save shows whole or not at

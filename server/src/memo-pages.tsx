@@ -4,7 +4,7 @@ import type { Child } from "hono/jsx";
 import type { PersonStore } from "./store";
 import type { TrialStatus } from "./store/trials";
 import type { CompiledReport, Documents } from "./store/compiled";
-import { ruleText } from "./store/reports";
+import { ruleText, type Sample } from "./store/reports";
 
 export const isMemoRoute = (path: string) =>
   path === "/" || path === "/download" || path === "/tps-report";
@@ -143,6 +143,9 @@ const ruled = (bodies: string[]) => (
 );
 const capitalised = (text: string) =>
   text.charAt(0).toUpperCase() + text.slice(1);
+/** A sample's labels as one line, or "" when it has none. */
+const labelLine = (s: Sample) =>
+  [s.audience, s.purpose, s.register].filter(Boolean).join(", ");
 
 type SheetView = {
   report: CompiledReport;
@@ -219,6 +222,9 @@ function sheet({ report, documents, email, date, comment }: SheetView) {
                           ☑
                         </span>
                         <span class="typed">{capitalised(s.context)}</span>
+                        {labelLine(s) && (
+                          <span class="labels">{labelLine(s)}</span>
+                        )}
                         <span class="date">{s.date}</span>
                       </summary>
                       {plain(s.body)}

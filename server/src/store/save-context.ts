@@ -9,7 +9,7 @@ export const retiredSample = z.object({
   reason: z.enum(["replaced", "removed", "evicted"]),
 });
 export const outcomeSchema = z.object({
-  status: z.enum(["saved", "unchanged", "conflict", "in_progress", "failed"]),
+  status: z.enum(["saved", "unchanged", "conflict", "failed"]),
   request_id: z.string(),
   version: z.string().optional(),
   question: z.string().optional(),
@@ -20,13 +20,7 @@ export const outcomeSchema = z.object({
 });
 export type SaveOutcome = z.infer<typeof outcomeSchema>;
 export type Report = { revision: number; body: string; source_hash: string };
-export type Receipt = {
-  input_hash: string;
-  source_hash: string;
-  completed: boolean;
-  live: boolean;
-  result_json: unknown;
-};
+export type Receipt = { input_hash: string; result_json: unknown };
 /** What `snapshot` reads inside a transaction. */
 export type Snapshot = {
   heads: CardHead[];
@@ -38,8 +32,8 @@ export type Snapshot = {
   ready: boolean;
   version: string;
 };
-/** One save's input and the account helpers its phases share. Built once per
- * save, after the input is parsed and the assistant is known. */
+/** One save's input and the account helpers its transaction uses. Built once
+ * per save, after the input is parsed and the assistant is known. */
 export type SaveContext = {
   db: StoreDatabase;
   userId: string;
@@ -53,7 +47,6 @@ export type SaveContext = {
   lock: (tx: StoreSession) => Promise<void>;
   snapshot: (tx: StoreSession) => Promise<Snapshot>;
   receipt: (tx: StoreSession, id: string) => Promise<Receipt | undefined>;
-  complete: (tx: StoreSession, result: SaveOutcome) => Promise<SaveOutcome>;
   assemble: (tx: StoreSession, documents: Documents) => Promise<string>;
   publish: (
     tx: StoreSession,

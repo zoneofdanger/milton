@@ -2,19 +2,18 @@ import type { PGlite } from "@electric-sql/pglite";
 import { compiledMemos } from "../src/store/compiled";
 import type { StoreDatabase, StoreSession } from "../src/store/database";
 
-// Runs `between` after a save's claim commits and before its write phase, the
-// window in which another request or an account change can land.
-export const betweenPhases = (
+// Runs `inside` at the start of every transaction, while it is open. A request
+// started meanwhile waits for it, as on the account lock.
+export const insideTransactions = (
   db: StoreDatabase,
-  between: () => Promise<unknown>,
+  inside: () => Promise<unknown>,
 ): StoreDatabase => ({
   ...db,
-  async transaction<T>(work: (tx: StoreSession) => Promise<T>) {
-    const result = await db.transaction(work);
-    if (typeof result === "object" && result !== null && "current" in result)
-      await between();
-    return result;
-  },
+  transaction: (work) =>
+    db.transaction(async (tx) => {
+      await inside();
+      return work(tx);
+    }),
 });
 
 // The JSON payload of an MCP tool result.

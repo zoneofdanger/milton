@@ -6,18 +6,13 @@ import { databaseFailure } from "../src/store/database";
 import { StoreError } from "../src/store/errors";
 import { BASELINE_NOTE } from "../src/store/reports";
 import { localStore } from "./local-store";
-import { betweenPhases, fixtureStore, seedUsers } from "./store-fixtures";
+import { fixtureStore, insideTransactions, seedUsers } from "./store-fixtures";
 
 test("compiled saves publish memos and TPS together and charge once with durable replay", async () => {
   const local = await localStore();
   try {
     await seedUsers(local.pg, "compiled-a", "compiled-b");
-    let calls = 0;
-    const store = fixtureStore(
-      betweenPhases(local.db, async () => calls++),
-      "compiled-a",
-      "assistant",
-    );
+    const store = fixtureStore(local.db, "compiled-a", "assistant");
     const empty = await store.getTpsReport();
     expect(empty.text).toBe("");
     const input = {
@@ -38,7 +33,6 @@ test("compiled saves publish memos and TPS together and charge once with durable
     ]);
     expect(current.version).not.toBe(empty.version);
     expect(await store.saveMemo(input)).toEqual(saved);
-    expect(calls).toBe(1);
     expect(
       (
         await local.pg.query(
@@ -64,10 +58,10 @@ test("compiled saves publish memos and TPS together and charge once with durable
     await expect(
       store.saveMemo({ ...input, text: "Changed" }),
     ).rejects.toMatchObject({ code: "request_id_reused" });
-    // A completed receipt is immutable, so a replay can only return what was saved.
+    // A receipt is immutable, so a replay can only return what was saved.
     await expect(
       local.pg.exec(
-        "UPDATE save_requests SET result_json='{}' WHERE user_id='compiled-a'",
+        `UPDATE save_requests SET result_json='{"status":"failed"}' WHERE user_id='compiled-a'`,
       ),
     ).rejects.toThrow("save_receipt_is_immutable");
     expect(
@@ -108,24 +102,7 @@ test("TPS preserves every active source body verbatim and refreshes only the der
       ('fidelity','a',1,'Units',${companion},false,'Fixture','{}'),
       ('fidelity','z',1,'Product naming',${source},false,'Fixture','{}'),
       ('fidelity','retired',1,'Old','Archived instructions must stay out.',true,'Fixture','{}')`);
-    let slow = false;
-    let release!: () => void, started!: () => void;
-    const begun = new Promise<void>((r) => {
-      started = r;
-    });
-    const held = new Promise<void>((r) => {
-      release = r;
-    });
-    const store = fixtureStore(
-      betweenPhases(local.db, async () => {
-        if (slow) {
-          started();
-          await held;
-        }
-      }),
-      "fidelity",
-      "assistant",
-    );
+    const store = fixtureStore(local.db, "fidelity", "assistant");
     // Legacy sources assemble on first read, in stored position order.
     const initial = await store.getTpsReport();
     expect(initial.text).toBe(exact);
@@ -193,18 +170,13 @@ test("TPS preserves every active source body verbatim and refreshes only the der
     expect(rebuilt.version).not.toBe(canonical.version);
     expect(rebuilt.text).toBe(exact + "Updated condition.");
     expect((await store.getTpsReport()).version).toBe(rebuilt.version);
-    // A save fenced on a version that a concurrent read superseded conflicts.
-    slow = true;
-    const pending = save(rebuilt.version);
-    await begun;
+    // A save fenced on a version that a later read superseded conflicts.
     await local.pg
       .exec(`INSERT INTO memo_versions(user_id,memo_id,version,description,body,reason,actor_json)
       SELECT user_id,memo_id,3,description,body,'Fixture','{}'
       FROM memo_versions WHERE user_id='fidelity' AND memo_id='z' AND version=2`);
     const changed = await admin.getTpsReport();
-    release();
-    slow = false;
-    expect((await pending).status).toBe("conflict");
+    expect((await save(rebuilt.version)).status).toBe("conflict");
     expect(changed.text).toBe(exact + "Updated condition.");
     // Each body fits; the assembled cover sheet does not. Nothing is truncated.
     await local.pg.exec(
@@ -267,38 +239,48 @@ test("stale and failed compiled saves preserve current memos, receipts and charg
     const held = new Promise<void>((r) => {
       release = r;
     });
-    // Claims that reached the write phase; the first one waits there.
-    let calls = 0;
+    // The next transaction stays open until released.
+    let hold = false;
     const store = fixtureStore(
-      betweenPhases(local.db, async () => {
-        if (++calls === 1) {
-          started();
-          await held;
-        }
+      insideTransactions(local.db, async () => {
+        if (!hold) return;
+        hold = false;
+        started();
+        await held;
       }),
       "race",
     );
     const initial = await store.getTpsReport();
     const slow = {
-      text: "Slow",
-      rules: [{ report: "cover" as const, text: "Slow" }],
-      request_id: crypto.randomUUID(),
-      expected_version: initial.version,
-    };
-    const pending = store.saveMemo(slow);
-    await begun;
-    expect((await store.saveMemo(slow)).status).toBe("in_progress");
-    expect((await store.getTpsReport()).text).toBe("");
-    const fast = {
       text: "Be concise.",
       rules: [{ report: "cover" as const, text: "Be concise." }],
       request_id: crypto.randomUUID(),
       expected_version: initial.version,
     };
-    expect((await store.saveMemo(fast)).status).toBe("saved");
+    hold = true;
+    const pending = store.saveMemo(slow);
+    await begun;
+    // A replay and another save on the same version wait for the open save,
+    // as on the account lock: the replay returns its outcome, never a
+    // pending state, and the other save conflicts.
+    const replay = store.saveMemo(slow);
+    const reading = store.getTpsReport();
+    const fast = {
+      text: "Slow",
+      rules: [{ report: "cover" as const, text: "Slow" }],
+      request_id: crypto.randomUUID(),
+      expected_version: initial.version,
+    };
+    const racing = store.saveMemo(fast);
     release();
-    expect((await pending).status).toBe("conflict");
-    expect(calls).toBe(2);
+    const committed = await pending;
+    expect(committed.status).toBe("saved");
+    expect(await replay).toEqual(committed);
+    expect((await reading).text).toBe("- Be concise.");
+    expect(await racing).toMatchObject({
+      status: "conflict",
+      version: committed.version,
+    });
     const first = await store.getTpsReport();
     expect(first.text).toBe("- Be concise.");
     // Throw after actual commit: receipt resolution must report the committed result.
@@ -436,11 +418,7 @@ test("targeted saves preserve omitted memos and reject invalid changes atomicall
       .exec(`INSERT INTO memos(user_id,id,name) VALUES ('targeted','a','a'),('targeted','b','b'),('targeted','c','c');
       INSERT INTO memo_versions(user_id,memo_id,version,description,body,reason,actor_json)
         SELECT user_id,id,1,'Instruction '||id,'Preserve '||id||' exactly.','Fixture','{}' FROM memos;`);
-    let calls = 0;
-    const store = fixtureStore(
-      betweenPhases(local.db, async () => calls++),
-      "targeted",
-    );
+    const store = fixtureStore(local.db, "targeted");
     const initial = await store.getTpsReport();
     const request = {
       text: "Change a, add d and remove c.",
@@ -455,7 +433,6 @@ test("targeted saves preserve omitted memos and reject invalid changes atomicall
     const result = await store.saveMemo(request);
     expect(result.status).toBe("saved");
     expect(await store.saveMemo(request)).toEqual(result);
-    expect(calls).toBe(1);
     const current = await store.getTpsReport();
     const heads = (
       await local.pg.query<{
@@ -1063,7 +1040,7 @@ test("accepted change evidence replays once and rolls back with an over-quota sa
   }
 });
 
-test("a conflict or refusal in the claim phase stores a receipt and replays like one found in the apply phase", async () => {
+test("a conflict or refusal stores a receipt with its outcome and replays it", async () => {
   const local = await localStore();
   try {
     await seedUsers(local.pg, "replay");
@@ -1113,7 +1090,7 @@ test("a conflict or refusal in the claim phase stores a receipt and replays like
     expect(
       (
         await local.pg.query<{ status: string }>(
-          "SELECT result_json->>'status' AS status FROM save_requests WHERE user_id='replay' AND completed ORDER BY created_at",
+          "SELECT result_json->>'status' AS status FROM save_requests WHERE user_id='replay' ORDER BY created_at",
         )
       ).rows.map((row) => row.status),
     ).toEqual(["saved", "conflict", "saved", "failed"]);
@@ -1122,113 +1099,72 @@ test("a conflict or refusal in the claim phase stores a receipt and replays like
   }
 });
 
-test("an expired open claim completes as request_expired, and a lost claim acknowledgment dispatches nothing and replays in_progress", async () => {
+test("a save and its receipt commit together: a lost acknowledgment replays the outcome, a failed lookup answers save_outcome_unknown, and an uncommitted save leaves no receipt", async () => {
   const local = await localStore();
   try {
-    await seedUsers(local.pg, "expired", "uncertain");
-    let calls = 0;
-    let paused: { entered: () => void; gate: Promise<void> } | undefined;
-    const store = (id: string, db = local.db) =>
-      fixtureStore(
-        betweenPhases(db, async () => {
-          calls++;
-          const hold = paused;
-          paused = undefined;
-          if (hold) {
-            hold.entered();
-            await hold.gate;
-          }
-        }),
-        id,
-        "assistant",
-      );
-    const input = async (s: ReturnType<typeof store>, text: string) => ({
-      text,
-      rules: [{ report: "cover" as const, text }],
-      request_id: crypto.randomUUID(),
-      expected_version: (await s.getTpsReport()).version,
-    });
-    // The receipt guard forbids moving a deadline, so the fixture lifts it.
-    const expire = async (requestId: string) => {
-      await local.pg.exec(
-        "ALTER TABLE save_requests DISABLE TRIGGER save_request_guard",
-      );
-      await local.db.query(
-        sql`UPDATE save_requests SET deadline=clock_timestamp()-interval '1 second' WHERE request_id=${requestId}`,
-      );
-      await local.pg.exec(
-        "ALTER TABLE save_requests ENABLE TRIGGER save_request_guard",
-      );
-    };
-    // Apply phase: a claim that outlives its deadline publishes nothing.
-    const expired = store("expired");
-    const expiredInput = await input(expired, "Expired rule.");
-    let release!: () => void;
-    const entered = new Promise<void>((resolve) => {
-      paused = {
-        entered: resolve,
-        gate: new Promise<void>((done) => (release = done)),
-      };
-    });
-    const pending = expired.saveMemo(expiredInput);
-    await entered;
-    expect((await expired.saveMemo(expiredInput)).status).toBe("in_progress");
-    await expire(expiredInput.request_id);
-    release();
-    expect(await pending).toMatchObject({
-      status: "failed",
-      error: "request_expired",
-    });
-    expect((await expired.getTpsReport()).is_empty).toBe(true);
-    expect(await expired.saveMemo(expiredInput)).toMatchObject({
-      status: "failed",
-      error: "request_expired",
-    });
-    // Claim phase: the claim commits but its acknowledgment and the recovery
-    // lookup are both lost, so nothing is dispatched.
-    let loseClaim = true,
-      loseRecovery = true;
-    const uncertainClaim = {
+    await seedUsers(local.pg, "uncertain");
+    // Each transaction takes the next cue: "abort" fails it before commit,
+    // "ack" loses the acknowledgment of its commit, "lookup" fails it unrun.
+    const cues: ("abort" | "ack" | "lookup" | undefined)[] = [];
+    const flaky = {
       ...local.db,
       async transaction<T>(
         work: Parameters<typeof local.db.transaction<T>>[0],
       ) {
-        if (!loseClaim && loseRecovery) {
-          loseRecovery = false;
-          throw new Error("Fictional unavailable recovery");
-        }
-        const result = await local.db.transaction(work);
-        if (
-          loseClaim &&
-          typeof result === "object" &&
-          result !== null &&
-          "current" in result
-        ) {
-          loseClaim = false;
-          throw new Error("Fictional lost claim acknowledgment");
-        }
+        const cue = cues.shift();
+        if (cue === "lookup") throw new Error("Fictional unavailable lookup");
+        const result = await local.db.transaction(async (tx) => {
+          const done = await work(tx);
+          if (cue === "abort")
+            throw new Error("Fictional connection lost before commit");
+          return done;
+        });
+        if (cue === "ack") throw new Error("Fictional lost acknowledgment");
         return result;
       },
     };
-    const uncertain = store("uncertain", uncertainClaim);
-    const claimInput = await input(uncertain, "Uncertain rule.");
-    const before = calls;
-    await expect(uncertain.saveMemo(claimInput)).rejects.toMatchObject({
-      code: "save_outcome_unknown",
+    const store = fixtureStore(flaky, "uncertain", "assistant");
+    const input = async (text: string) => ({
+      text,
+      rules: [{ report: "cover" as const, text }],
+      request_id: crypto.randomUUID(),
+      expected_version: (await store.getTpsReport()).version,
     });
-    expect(calls).toBe(before);
-    expect((await store("uncertain").saveMemo(claimInput)).status).toBe(
-      "in_progress",
-    );
-    // Its replay past the deadline completes the receipt in the claim phase.
-    await expire(claimInput.request_id);
-    for (let i = 0; i < 2; i++)
-      expect(await store("uncertain").saveMemo(claimInput)).toMatchObject({
-        status: "failed",
-        error: "request_expired",
-      });
-    expect(calls).toBe(before);
-    expect((await store("uncertain").getTpsReport()).is_empty).toBe(true);
+    const receipts = async () =>
+      (
+        await local.pg.query(
+          "SELECT count(*)::int AS n FROM save_requests WHERE user_id='uncertain'",
+        )
+      ).rows;
+    // Rolled back before commit: the lookup finds no receipt, so nothing was
+    // written and the same request runs again.
+    const aborted = await input("Aborted rule.");
+    cues.push("abort");
+    await expect(store.saveMemo(aborted)).rejects.toMatchObject({
+      code: "store_unavailable",
+    });
+    expect(await receipts()).toEqual([{ n: 0 }]);
+    expect((await store.getTpsReport()).is_empty).toBe(true);
+    const retried = await store.saveMemo(aborted);
+    expect(retried.status).toBe("saved");
+    // Committed without its acknowledgment: the lookup returns the outcome.
+    const lost = await input("Acknowledged late.");
+    cues.push("ack");
+    const recovered = await store.saveMemo(lost);
+    expect(recovered.status).toBe("saved");
+    expect(await store.saveMemo(lost)).toEqual(recovered);
+    // When the lookup fails too, the outcome is unknown until the same
+    // request replays it.
+    const unknown = await input("Unknown until replayed.");
+    cues.push("ack", "lookup");
+    await expect(store.saveMemo(unknown)).rejects.toMatchObject({
+      code: "save_outcome_unknown",
+      details: { request_id: unknown.request_id },
+    });
+    const replayed = await store.saveMemo(unknown);
+    expect(replayed.status).toBe("saved");
+    expect((await store.getTpsReport()).version).toBe(replayed.version!);
+    expect(await receipts()).toEqual([{ n: 3 }]);
   } finally {
     await local.dispose();
   }

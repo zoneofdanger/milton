@@ -17,6 +17,7 @@ import {
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
+import { createHash } from "node:crypto";
 import { appendFile, cp, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -70,6 +71,121 @@ test("a release passes the owner URL in its own variable, checked, and an empty 
     );
   }
 });
+
+test("0029 deletes open claims, drops the two-phase receipt columns and claim trigger, holds every receipt to an outcome, and rolls back to the pre-step shape", async () => {
+  const preStep = await drizzleSql("pre/0029_one_transaction.sql");
+  const base = await migratedThrough(28);
+  const pg = await migratedThrough(28);
+  const post = await migratedThrough(29);
+  try {
+    await base.exec(preStep);
+    const up = await drizzleSql("0029_one_transaction.sql");
+    const down = await drizzleSql("rollback/0029_one_transaction.sql");
+    const id = (n: number) => `00000000-0000-4000-8000-0000000000${n}`;
+    const store = fixtureStore(storeDatabase(pg), "once", "assistant");
+    // A save's input in schema order, hashed as the store hashes it.
+    const input = (n: number, text: string, version: string) => {
+      const value = {
+        text,
+        rules: [{ report: "cover" as const, text }],
+        request_id: id(n),
+        expected_version: version,
+      };
+      return {
+        value,
+        hash: createHash("sha256").update(JSON.stringify(value)).digest("hex"),
+      };
+    };
+    await pg.exec("INSERT INTO users(id) VALUES ('once')");
+    const empty = (await store.getTpsReport()).version;
+    // Receipts as the two-phase code wrote them: one completed, one open.
+    const open = input(11, "An open claim.", empty);
+    await pg.exec(`INSERT INTO save_requests(user_id,request_id,input_hash,source_hash,deadline,completed,result_json) VALUES
+      ('once','${id(10)}',repeat('a',64),repeat('c',64),now(),true,'{"status":"saved","request_id":"${id(10)}"}'),
+      ('once','${id(11)}','${open.hash}',repeat('c',64),now(),false,'{}')`);
+    await pg.exec(preStep);
+    // After the pre-step the two-phase claim still opens, and the
+    // one-transaction code saves and replays on the 0028 schema.
+    const twoPhase = (n: number) =>
+      pg.exec(`INSERT INTO save_requests(user_id,request_id,input_hash,source_hash,deadline,claimed_at,created_at)
+        VALUES ('once','${id(n)}',repeat('b',64),repeat('c',64),now(),now(),now());
+        UPDATE save_requests SET completed=true,result_json='{"status":"saved"}' WHERE request_id='${id(n)}';
+        DELETE FROM save_requests WHERE request_id='${id(n)}';`);
+    await twoPhase(12);
+    const first = input(13, "Saved before 0029.", empty);
+    const saved = await store.saveMemo(first.value);
+    expect(saved.status).toBe("saved");
+    expect(await store.saveMemo(first.value)).toEqual(saved);
+    // Complete, so the two-phase code replays it too.
+    expect(
+      (
+        await pg.query(
+          `SELECT completed,deadline=created_at AND claimed_at=created_at AS clocked FROM save_requests WHERE request_id='${id(13)}'`,
+        )
+      ).rows,
+    ).toEqual([{ completed: true, clocked: true }]);
+    // An open claim has no outcome to replay until 0029 deletes it.
+    await expect(store.saveMemo(open.value)).rejects.toMatchObject({
+      code: "save_outcome_unknown",
+    });
+    const retained = async () =>
+      (
+        await pg.query(
+          `SELECT id FROM users u WHERE retained_bytes <> (SELECT coalesce(sum(payload_bytes),0) FROM save_requests WHERE user_id=u.id)
+            + (SELECT coalesce(sum(payload_bytes),0) FROM instruction_card_versions WHERE user_id=u.id)
+            + (SELECT coalesce(sum(payload_bytes),0) FROM accepted_changes WHERE user_id=u.id)`,
+        )
+      ).rows;
+    const rows = async () =>
+      (
+        await pg.query<{ request_id: string; result_json: unknown }>(
+          "SELECT request_id,result_json FROM save_requests ORDER BY request_id",
+        )
+      ).rows;
+    expect(await retained()).toEqual([]);
+    const kept = (await rows()).filter((row) => row.request_id !== id(11));
+    const forward = async () => {
+      await pg.exec("BEGIN;" + up + "COMMIT;");
+      expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(post));
+      expect(await retained()).toEqual([]);
+      // Every receipt holds an outcome and never changes.
+      await expect(
+        pg.exec(`UPDATE save_requests SET result_json='{"status":"failed"}'`),
+      ).rejects.toThrow("save_receipt_is_immutable");
+      await expect(
+        pg.exec(`INSERT INTO save_requests(user_id,request_id,input_hash,source_hash,result_json)
+          VALUES ('once','${id(14)}',repeat('b',64),repeat('c',64),'{}')`),
+      ).rejects.toThrow("save_request_outcome");
+    };
+    await forward();
+    expect(await rows()).toEqual(kept);
+    // The deleted open claim's request now runs as a new save, fenced by its
+    // version, which the save before 0029 moved on.
+    expect(await store.saveMemo(open.value)).toMatchObject({
+      status: "conflict",
+    });
+    const after = await rows();
+    await pg.exec(down);
+    expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(base));
+    expect(await rows()).toEqual(after);
+    expect(
+      (
+        await pg.query(
+          "SELECT DISTINCT completed,deadline='-infinity' AS expired,claimed_at FROM save_requests",
+        )
+      ).rows,
+    ).toEqual([{ completed: true, expired: true, claimed_at: null }]);
+    // Both revisions save on the rolled-back shape.
+    await twoPhase(15);
+    const second = input(16, "Saved after the rollback.", saved.version!);
+    expect((await store.saveMemo(second.value)).status).toBe("saved");
+    await forward();
+  } finally {
+    await post.close();
+    await pg.close();
+    await base.close();
+  }
+}, 30000);
 
 test("0028 drops the memo-update columns, guard and the runtime's store_config UPDATE, keeps every receipt, and rolls back to the 0027 shape", async () => {
   const base = await migratedThrough(27);
@@ -403,12 +519,16 @@ test("0024 runtime role saves through its grants, cannot change the schema or by
   const pg = await migratedThrough(23);
   const post = await migratedThrough(24);
   try {
-    // The current code omits reserved_micros: before 0026 it needs the deploy
-    // pre-step's default (deploy/README.md "Dead columns (0026)").
-    for (const db of [base, pg, post])
+    // The current code omits reserved_micros and the receipt columns 0029
+    // drops: before those migrations it needs the deploy pre-steps
+    // (deploy/README.md "Dead columns (0026)" and "Saves in one transaction (0029)").
+    const preStep0029 = await drizzleSql("pre/0029_one_transaction.sql");
+    for (const db of [base, pg, post]) {
       await db.exec(
         "ALTER TABLE save_requests ALTER COLUMN reserved_micros SET DEFAULT 0",
       );
+      await db.exec(preStep0029);
+    }
     const up = await drizzleSql("0024_runtime_role.sql");
     const down = await drizzleSql("rollback/0024_runtime_role.sql");
     const roles = async (db: PGlite) =>

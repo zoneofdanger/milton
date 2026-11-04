@@ -55,7 +55,7 @@ reports, memos) and plain text on security screens and anything an assistant rea
       00:00Z on a parallel run; passes on rerun). Inject the clock or compute the day once.
 
 - [ ] #12 (server, low) **Break the store import cycle.** store/index.ts and compiled.ts import
-      each other, now also through save-claim.ts and save-apply.ts. Nothing reads those imports
+      each other, now also through save.ts and save-apply.ts. Nothing reads those imports
       at load time, so it works today; a top-level use of utf8Bytes in a save module would crash
       startup. Move readLimits and utf8Bytes into a module with no store imports.
 

@@ -274,10 +274,8 @@ export const saveRequests = pgTable(
     requestId: text("request_id").notNull(),
     inputHash: text("input_hash").notNull(),
     sourceHash: text("source_hash").notNull(),
-    result: jsonb("result_json").notNull().default({}),
-    completed: boolean("completed").notNull().default(false),
-    deadline: timestamp("deadline", { withTimezone: true }).notNull(),
-    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    // Written once, with the save's outcome, in the save's transaction (0029).
+    result: jsonb("result_json").notNull(),
     createdAt: createdAt(),
     payloadBytes: bigint("payload_bytes", { mode: "number" })
       .notNull()
@@ -288,10 +286,6 @@ export const saveRequests = pgTable(
   (t) => [
     primaryKey({ columns: [t.userId, t.requestId] }),
     check(
-      "save_request_claim_clock",
-      sql`${t.claimedAt} IS NULL OR (isfinite(${t.claimedAt}) AND ${t.claimedAt}=${t.createdAt})`,
-    ),
-    check(
       "save_request_hashes",
       sql`${t.inputHash} ~ '^[a-f0-9]{64}$' AND ${t.sourceHash} ~ '^[a-f0-9]{64}$'`,
     ),
@@ -300,6 +294,7 @@ export const saveRequests = pgTable(
       "save_request_result",
       sql`jsonb_typeof(${t.result}) = 'object' AND octet_length(${t.result}::text) <= 2048`,
     ),
+    check("save_request_outcome", sql`(${t.result}->>'status') IS NOT NULL`),
   ],
 );
 

@@ -1127,3 +1127,18 @@ than the caller is still a member of `milton_runtime`. The 0024 journal row stay
 re-forwarding means running `0024_runtime_role.sql` by hand. Restoring the branch to a
 point before 0024 also removes both roles, so switch the services back to the owner
 payloads first.
+
+## Open sign-ups (0025)
+
+Migration 0025 drops `store_config.signup_mode` and `allowed_identities_json` with their
+checks: every successful sign-in creates or finds its account (see the server README).
+Every revision before this release locks and reads both columns on a first sign-in; this
+release reads neither and runs on either schema. Release order: ship MCP and app from the
+same image, take a snapshot, then apply 0025.
+
+**Rollback boundary.** Before 0025 is applied, code rolls back by traffic alone. After it,
+no earlier revision can create an account: first run
+`server/drizzle/rollback/0025_open_signup.sql` offline with writers stopped, then shift
+traffic. The rollback re-adds both columns (defaults `'closed'`, `[]`), sets the row to
+`open`, and restores both checks; the 0025 journal row stays, so re-forwarding means
+running `0025_open_signup.sql` by hand.

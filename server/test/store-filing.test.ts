@@ -6,13 +6,10 @@ import { localStore } from "./local-store";
 import { fixtureStore, seedUsers } from "./store-fixtures";
 import { coverSheet, reportEnvelope } from "../src/store/tools";
 
-const enableMemoUpdates = "UPDATE store_config SET memo_updates_enabled=true";
-
-test("rules are stored byte for byte, one card each, with one charge", async () => {
+test("rules are stored byte for byte, one card each", async () => {
   const local = await localStore();
   try {
     await seedUsers(local.pg, "rules");
-    await local.pg.exec(enableMemoUpdates);
     const store = fixtureStore(local.db, "rules");
     const rules = [
       {
@@ -31,10 +28,7 @@ test("rules are stored byte for byte, one card each, with one charge", async () 
       expected_version: (await store.getTpsReport()).version,
       rules,
     });
-    expect(saved).toMatchObject({
-      status: "saved",
-      memo_update: { state: "charged", charged: 1 },
-    });
+    expect(saved.status).toBe("saved");
     expect(
       (
         await local.pg.query(
@@ -384,11 +378,10 @@ test("a read that rebuilds a lagging snapshot serves it whatever the save-time c
   }
 });
 
-test("an exact duplicate rule is skipped as unchanged without a charge", async () => {
+test("an exact duplicate rule is skipped as unchanged", async () => {
   const local = await localStore();
   try {
     await seedUsers(local.pg, "dupes");
-    await local.pg.exec(enableMemoUpdates);
     const store = fixtureStore(local.db, "dupes");
     const rule = { report: "chat" as const, text: "Keep replies short." };
     const first = await store.saveMemo({
@@ -413,7 +406,6 @@ test("an exact duplicate rule is skipped as unchanged without a charge", async (
     expect(repeat).toMatchObject({
       status: "unchanged",
       version: report.version,
-      memo_update: { state: "released", charged: 0 },
     });
     // The same bytes in another report are a different rule.
     expect(
@@ -655,11 +647,8 @@ test("reports print a heading, when line, samples newest first and rules; sample
     expect(documents.cover).toBe("- No em dashes.\n\n- Oxford comma.");
     expect(documents.is_empty).toBe(false);
     // A third sample of one kind retires the oldest; retirement is the only change.
-    // A saved sample is a user-directed filing, so it charges one memo update.
-    await local.pg.exec("UPDATE store_config SET memo_updates_enabled=true");
     expect(await sample("follow-up", "Third follow-up")).toMatchObject({
       status: "saved",
-      memo_update: { state: "charged", charged: 1 },
     });
     expect(
       (
@@ -1048,10 +1037,9 @@ test("an account has no card count limit: 120 creates and 60 removals all save",
   }
 }, 30000);
 
-test("a sample identical to an active one of its kind is unchanged: no copy, no eviction, no charge", async () => {
+test("a sample identical to an active one of its kind is unchanged: no copy, no eviction", async () => {
   const f = await filingFixture("same-sample");
   try {
-    await f.local.pg.exec(enableMemoUpdates);
     const sample = (text: string, kind: object) => ({
       sample: { report: "email", context: "after a call", text, ...kind },
     });
@@ -1066,7 +1054,6 @@ test("a sample identical to an active one of its kind is unchanged: no copy, no 
     ])
       expect(await f.save(repeat)).toMatchObject({
         status: "unchanged",
-        memo_update: { state: "released", charged: 0 },
       });
     expect((await f.report("email")).samples).toEqual(before);
     expect((await f.store.getTpsReport()).version).toBe(version);

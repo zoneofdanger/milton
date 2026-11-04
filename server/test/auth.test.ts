@@ -2256,23 +2256,8 @@ test("report bullets require exact revision and complete text parity; optional l
     version: "a".repeat(64),
     is_empty: false,
   };
-  let balanceReads = 0;
-  let balanceUnavailable = false;
-  const balance = {
-    limit: 100,
-    used: 2,
-    pending: 1,
-    available: 97,
-    resets_at: "2026-11-02T00:00:00Z",
-    as_of: "2026-11-01T23:00:00Z",
-  };
   const base = {
     readTpsReport: async () => report,
-    memoUpdates: async () => {
-      balanceReads++;
-      if (balanceUnavailable) throw new Error("Optional usage unavailable");
-      return balance;
-    },
   };
   const emptyReport = (id: string, title: string) => ({
     id,
@@ -2315,23 +2300,15 @@ test("report bullets require exact revision and complete text parity; optional l
     ["Reports", "None"],
     ["Rules", "2"],
     ["Samples", "0"],
-    ["Memo updates today", "2 of 100"],
   ])
     expect(html).toContain(`<dt>${label}:</dt><dd class="fill">${value}</dd>`);
-  // Pending and reset sit on the line above the sheet; used is only in the form.
   expect(html).toContain(
-    "To change your cover sheet, tell a connected assistant what to change. Memo updates reset at 00:00 UTC. 1 pending.</p>",
+    "To change your cover sheet, tell a connected assistant what to change.</p>",
   );
+  expect(html).not.toContain("Memo updates");
   expect(html).toContain(
     '<p class="line typed comment">Red stapler located. Returned to owner.</p>',
   );
-  balanceUnavailable = true;
-  const withoutBalance = await render(async () => exact);
-  expect(withoutBalance.status).toBe(200);
-  const unmetered = await withoutBalance.text();
-  expect(unmetered).not.toContain("Memo updates today");
-  expect(unmetered).toContain("tell a connected assistant what to change.</p>");
-  balanceUnavailable = false;
   expect(html).toContain(
     '<ol class="ruled"><li class="line"><span class="typed">  Keep fictional units explicit.\n\nUnless a condition applies, preserve &lt;tag&gt; &amp; wording.  </span></li><li class="line"><span class="typed">Do the second instruction after the first.\nKeep this exception attached.\n</span></li></ol>',
   );
@@ -2367,7 +2344,6 @@ test("report bullets require exact revision and complete text parity; optional l
     );
   }
   let lookups = 0;
-  const priorBalanceReads = balanceReads;
   const download = await render(async () => {
     lookups++;
     throw new Error("Download must not need layout");
@@ -2376,7 +2352,6 @@ test("report bullets require exact revision and complete text parity; optional l
     new TextEncoder().encode(report.text),
   );
   expect(lookups).toBe(0);
-  expect(balanceReads).toBe(priorBalanceReads);
   const titled = await memoPages(
     new Request(appOrigin + "/tps-report"),
     {

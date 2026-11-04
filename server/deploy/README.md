@@ -22,9 +22,9 @@ secret versions. They contain configuration and secret references, never values.
 The manifests pin what is serving now: app `milton-app-dead-d03de23`
 (`sha256:29489483…`, env 2, key 1) and MCP `milton-mcp-dead-d03de23`
 (`sha256:29489483…`, env 3, key 1), both connecting as `milton_app`; see the current
-release below. There is no worker service or scheduler job. `memo_updates_enabled` and
-`memo_updates_daily_limit` in `store_config` control admission. Existing positive
-account safeguards remain in effect. Trials and billing remain disabled.
+release below. There is no worker service or scheduler job. There is no memo-update
+allowance; the daily call cap bounds saves. Existing positive account safeguards remain
+in effect. Trials and billing remain disabled.
 Each image includes both roles and browser assets. Validate manifests before applying:
 
 ```sh
@@ -398,8 +398,8 @@ SELECT, INSERT and UPDATE by default on tables later migrations create (see the 
 README for the table list). It owns nothing, so it cannot alter, drop or truncate a
 table, disable a trigger or read the Drizzle journal. App and MCP then connect as
 `milton_app`, a login role whose only membership is `milton_runtime`. Membership
-inherits; the runtime needs no `SET ROLE` and no code change. The migration runner and
-`scripts/memo-updates.ts` keep the `neondb_owner` connection and refuse any other role.
+inherits; the runtime needs no `SET ROLE` and no code change. The migration runner
+keeps the `neondb_owner` connection and refuses any other role.
 
 **Create `milton_app` with SQL, not the console or API.** Neon makes every role created
 in the console, CLI or API a member of `neon_superuser`, which brings

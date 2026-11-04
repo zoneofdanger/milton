@@ -10,12 +10,7 @@ export const isMemoRoute = (path: string) =>
   path === "/" || path === "/download" || path === "/tps-report";
 
 type PageStore = Pick<PersonStore, "readTpsReport"> &
-  Partial<Pick<PersonStore, "trialStatus" | "readDocuments">> & {
-    memoUpdates?(): Promise<
-      | { limit: number; used: number; pending: number; resets_at: string }
-      | undefined
-    >;
-  };
+  Partial<Pick<PersonStore, "trialStatus" | "readDocuments">>;
 
 // The note above the report, only when paying is pressing: a trial's last 7 days
 // or a pause. The account menu always holds the action. Worded for everyone in the
@@ -154,12 +149,11 @@ type SheetView = {
   documents?: (Documents & { version: string }) | null;
   email?: string;
   date: string;
-  usage?: { used: number; limit: number; pending: number };
   comment: string;
 };
 /** The signed-in cover sheet as a T.P.S. report form. Page only: the download
  * and MCP serve the report text unchanged. */
-function sheet({ report, documents, email, date, usage, comment }: SheetView) {
+function sheet({ report, documents, email, date, comment }: SheetView) {
   const docs = documents?.version === report.version ? documents : null;
   const filed = docs?.reports.filter((r) => !r.is_empty) ?? [];
   const counts = report.is_empty
@@ -192,11 +186,7 @@ function sheet({ report, documents, email, date, usage, comment }: SheetView) {
             {field("Samples", counts.samples)}
           </dl>
         )}
-        <dl class="row">
-          {field("Approved by", "Milton", true)}
-          {usage &&
-            field("Memo updates today", `${usage.used} of ${usage.limit}`)}
-        </dl>
+        <dl class="row">{field("Approved by", "Milton", true)}</dl>
       </div>
       {report.is_empty ? (
         <div class="form-empty">
@@ -287,10 +277,6 @@ function current(
       {!view.report.is_empty && !assistantPaused && (
         <p class="small-note sheet-meta">
           To change your cover sheet, tell a connected assistant what to change.
-          {view.usage && " Memo updates reset at 00:00 UTC."}
-          {view.usage && view.usage.pending > 0
-            ? ` ${view.usage.pending} pending.`
-            : ""}
         </p>
       )}
       {sheet(view)}
@@ -327,18 +313,11 @@ export async function memoPages(
         // Optional presentation must never prevent canonical report access.
       }
     }
-    let usage: SheetView["usage"];
-    try {
-      usage = await store.memoUpdates?.();
-    } catch {
-      // Advisory usage must not prevent viewing or downloading saved instructions.
-    }
     return current(
       {
         report,
         documents,
         email,
-        usage,
         date: (options.now?.() ?? new Date()).toISOString().slice(0, 10),
         comment: (options.comment ?? randomComment)(),
       },

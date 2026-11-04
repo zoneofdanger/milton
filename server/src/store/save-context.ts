@@ -2,7 +2,6 @@ import { z } from "zod";
 import type { StoreDatabase, StoreSession } from "./database";
 import type { CardHead } from "./cards";
 import type { Documents, Sample } from "./reports";
-import type { MemoUpdate, UpdateReceipt } from "./memo-updates";
 import type { SaveMemoInput } from "./compiled";
 
 export const retiredSample = z.object({
@@ -19,11 +18,9 @@ export const outcomeSchema = z.object({
   message: z.string().optional(),
   samples_retired: z.array(retiredSample).optional(),
 });
-export type SaveOutcome = z.infer<typeof outcomeSchema> & {
-  memo_update?: MemoUpdate;
-};
+export type SaveOutcome = z.infer<typeof outcomeSchema>;
 export type Report = { revision: number; body: string; source_hash: string };
-export type Receipt = UpdateReceipt & {
+export type Receipt = {
   input_hash: string;
   source_hash: string;
   completed: boolean;
@@ -56,11 +53,7 @@ export type SaveContext = {
   lock: (tx: StoreSession) => Promise<void>;
   snapshot: (tx: StoreSession) => Promise<Snapshot>;
   receipt: (tx: StoreSession, id: string) => Promise<Receipt | undefined>;
-  complete: (
-    tx: StoreSession,
-    result: SaveOutcome,
-    changed?: boolean,
-  ) => Promise<SaveOutcome>;
+  complete: (tx: StoreSession, result: SaveOutcome) => Promise<SaveOutcome>;
   assemble: (tx: StoreSession, documents: Documents) => Promise<string>;
   publish: (
     tx: StoreSession,

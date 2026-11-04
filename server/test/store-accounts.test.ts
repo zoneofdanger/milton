@@ -820,9 +820,7 @@ test("closing an account refuses its reads, saves and replays, fences a pending 
 test("account deletion removes every tenant row, keeps refusals, stops in-flight saves, and allows no second trial", async () => {
   const local = await localStore();
   try {
-    await local.pg.exec(
-      "UPDATE store_config SET trials_enabled=true,memo_updates_enabled=true",
-    );
+    await local.pg.exec("UPDATE store_config SET trials_enabled=true");
     const neon = (subject: string) => ({ provider: "neon", subject });
     let hold: { entered: () => void; gate: Promise<void> } | undefined;
     const storeDatabase = betweenPhases(local.db, async () => {
@@ -951,7 +949,7 @@ test("account deletion removes every tenant row, keeps refusals, stops in-flight
     expect(
       (
         await local.db.query(
-          sql`SELECT 1 FROM save_requests WHERE user_id=${gone.auth.userId} AND NOT completed AND memo_update_state='held'`,
+          sql`SELECT 1 FROM save_requests WHERE user_id=${gone.auth.userId} AND NOT completed`,
         )
       ).length,
     ).toBe(1);

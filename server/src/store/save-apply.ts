@@ -7,7 +7,6 @@ import { StoreError } from "./errors";
 import { readLimits, utf8Bytes } from "./index";
 import { exactEditsProposal, exactMoves } from "../exact-edits";
 import { assertTrialAccess } from "./trials";
-import { withMemoUpdate } from "./memo-updates";
 import { publishSave } from "./save-publish";
 import { closestBaseline, knownBaseline } from "./setup";
 import {
@@ -143,12 +142,7 @@ export async function applySave(
         "The save request is unavailable.",
         503,
       );
-    if (pending.completed)
-      return withMemoUpdate(
-        outcomeSchema.parse(pending.result_json),
-        pending,
-        true,
-      );
+    if (pending.completed) return outcomeSchema.parse(pending.result_json);
     if (!pending.live)
       return complete(tx, result("failed", { error: "request_expired" }));
     await assertTrialAccess(tx, userId);
@@ -346,6 +340,6 @@ export async function applySave(
     }
     for (const id of retire) await append(known.get(id)!, true, "archive");
     await applySamples();
-    return publishSave(ctx, tx, current, retired, attribution, samplesChanged);
+    return publishSave(ctx, tx, current, retired, attribution);
   });
 }

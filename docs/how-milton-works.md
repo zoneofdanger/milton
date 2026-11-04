@@ -66,8 +66,8 @@ Files: `server/src/handler.ts`, `server/src/token.ts`, `server/src/mcp.ts`,
 - Each request builds a fresh stateless MCP server, with no sessions or subscriptions.
 - Each `tools/call` increments a daily counter before running, and a call over the limit
   returns `rate_limited` with a reset time.
-- Each call logs the tool, outcome, time, memo-update state, and an error code
-  from a fixed list, never text or identity.
+- Each call logs the tool, outcome, time, and an error code from a fixed list, never
+  text or identity.
 - The tool name is read early, so calls refused before dispatch are still logged.
 
 ## The four tools
@@ -117,8 +117,7 @@ Files: `server/src/store/reports.ts`, `server/src/store/compiled.ts`.
 
 Files: `server/src/store/compiled.ts`, `server/src/store/save-claim.ts`,
 `server/src/store/save-apply.ts`, `server/src/store/save-publish.ts`,
-`server/src/store/memo-updates.ts`, `server/src/store/provenance.ts`,
-`server/src/exact-edits.ts`.
+`server/src/store/provenance.ts`, `server/src/exact-edits.ts`.
 
 ### Claim
 
@@ -135,7 +134,7 @@ Files: `server/src/store/compiled.ts`, `server/src/store/save-claim.ts`,
   replay, so an older receipt still recovers.
 - Oversized input fails, and that decision is stored on the receipt so it replays.
 - Trial and daily-limit refusals write no receipt, so the same request can succeed later.
-- Admission holds a daily memo update and writes a receipt with a 40-second deadline.
+- Admission writes a receipt with a 40-second deadline.
 - If the claim's outcome is uncertain, Milton checks the receipt or returns
   `save_outcome_unknown`.
 
@@ -271,7 +270,7 @@ Files: `server/src/pages.tsx`, `server/src/memo-pages.tsx`, `server/src/auth.tsx
 - `/tps-report` shows the same cover sheet as the signed-in home page.
 - The cover sheet renders as a TPS form with counts, rules, samples, and a random joke
   comment.
-- It shows daily usage if enabled, and setup prompts for reports without rules.
+- It shows setup prompts for reports without rules.
 - If the structured read fails, it falls back to plain report text.
 - `/download` returns the report as `TPS.md`.
 - `/assistants` lists live consents and looks up at most 20 names per view.
@@ -286,8 +285,7 @@ Files: `server/src/pages.tsx`, `server/src/memo-pages.tsx`, `server/src/auth.tsx
 ## Limits and trials
 
 Files: `server/src/store/index.ts`, `server/src/store/trials.ts`,
-`server/src/store/billing.ts`, `server/src/store/memo-updates.ts`, `server/src/billing.tsx`,
-`server/src/config.ts`.
+`server/src/store/billing.ts`, `server/src/billing.tsx`, `server/src/config.ts`.
 
 - Limits live in a single `store_config` row and are validated on read.
 - Trials are switched by `trials_enabled`, and when off, everyone is early access.
@@ -336,8 +334,6 @@ Files: `server/src/store/index.ts`, `server/src/store/trials.ts`,
 - Both routes leave through a page that navigates, because `form-action 'self'` blocks an
   external redirect after a form.
 - A Stripe session URL is used only if it starts with Stripe's checkout or portal host.
-- Daily memo updates count charged and held saves, reset at 00:00 UTC, and are enforced
-  only when enabled.
 
 ## Database guarantees
 
@@ -389,7 +385,6 @@ Files: `packages/theme/`, `server/scripts/`, `.github/workflows/checks.yml`.
   keeping credentials in memory.
 - `check-runtime-role` confirms a connection has no elevated rights.
 - `probe-forms` confirms a signed-out form post passes CSRF.
-- `memo-updates.ts` sets the daily limit or switches memo updates on and off.
 - `build.ts` builds the CSS with Vite and bundles the Cloud Run entry with Bun.
 - `dev.ts` serves the app on loopback and rebuilds the CSS on change.
 - CI runs types, tests, and formatting, holds no secrets, and does not deploy.

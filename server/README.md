@@ -10,7 +10,7 @@ history, the current report snapshot and request receipts; Neon Auth handles sig
 ## Prerequisites
 
 - Bun, using the version pinned in the repository's root `package.json`, and Node 26 LTS.
-- A Neon project with Auth and its OAuth provider plugin enabled. Create a Postgres database named `milton`. The migration and `memo-updates` commands require the `neondb_owner` role; the app and MCP connect as a login role in `milton_runtime` (0024), never the owner. Database connections require TLS.
+- A Neon project with Auth and its OAuth provider plugin enabled. Create a Postgres database named `milton`. The migration command requires the `neondb_owner` role; the app and MCP connect as a login role in `milton_runtime` (0024), never the owner. Database connections require TLS.
 - A Google OAuth app, a GitHub OAuth app, or both. Configure their credentials in Neon Auth for your branch.
 - A Google Cloud project for Cloud Run, Artifact Registry, Secret Manager and an HTTPS load balancer.
 - An HTTPS origin for the browser app and an HTTPS URL ending in `/mcp` for assistants. They can share one hostname. The public service uses `app.meetmilton.com` and `mcp.meetmilton.com`; use your own addresses for your installation.
@@ -86,9 +86,8 @@ Saves are model-free: Milton stores the exact text the assistant sends and calls
 model on any read or save, so it needs no model credential, project or budget. The
 runtime no longer reads `MILTON_GEMINI_*` or `MILTON_MODEL_*_BUDGET_USD`;
 `MILTON_GLOBAL_SPEND_POLICY` or any `MILTON_SPEND_*` or `RESEND_API_KEY` setting either.
-0022 dropped the SQL spend policy and readiness columns and 0023 the spend ledgers: memo updates depend only on `memo_updates_enabled` and
-`memo_updates_daily_limit` in `store_config`. Claims reserve nothing; 0026 dropped
-`save_requests.reserved_micros`.
+0022 dropped the SQL spend policy and readiness columns and 0023 the spend ledgers.
+Claims reserve nothing; 0026 dropped `save_requests.reserved_micros`.
 
 Use separate Neon branches and matching environment settings for development and previews. Redeploy after changing runtime configuration.
 
@@ -203,12 +202,12 @@ with the request ID and relevant version/error.
 proves the requested meaning is on file: reread the cover sheet or report and compare it
 with the requested change before confirming that. Reuse the exact same
 arguments to recover an uncertain request; a completed receipt returns its original
-outcome without another memo-update charge. That receipt's version may be
+outcome. That receipt's version may be
 older than the current report. Reusing an ID with different arguments is rejected.
 For a conflict, reread the cover sheet and reconsider a new request. No blind retry.
 
 Replay does not depend on the phase. Account gates checked before a claim (trial
-access, the memo-update allowance) answer without a receipt, so the same request can
+access) answer without a receipt, so the same request can
 succeed once the gate opens. Every outcome decided after them completes a receipt,
 whether found while claiming (a version conflict, `request_too_large`,
 `memo_body_limit`) or while applying (a conflict, an edit, move, sample or size
@@ -385,7 +384,7 @@ samples (see 0017 below). Bodies are not trimmed, rewritten or truncated, apart 
 one stored leading `- ` that the printed bullet replaces;
 descriptions are metadata, not an additional instruction source. Publication rechecks
 the account, request deadline, source fingerprint and report version; card versions,
-the current snapshot, receipt and any memo-update charge commit together. Stale or conflicting
+the current snapshot and receipt commit together. Stale or conflicting
 saves cannot partially publish.
 
 Internal `instruction_card_versions` are append-only; legacy `memo_versions` are retained. `tps_reports` holds one replaceable
@@ -401,7 +400,7 @@ Existing content under the former `vibes` core key is ordinary source. Invalid U
 in submitted text is rejected before a driver can replace it. The database validates
 identity, complete publication and size limits. If a report or the full text exceeds
 its bound, the whole publication rolls back with `tps_body_limit`; the failed
-request receipt remains, but no source change or memo-update charge commits. No read or
+request receipt remains, but no source change commits. No read or
 save invokes a model.
 
 | Limit                                       | Default                                                      |
@@ -411,14 +410,10 @@ save invokes a model.
 | Description/reason                          | 500 UTF-8 bytes each                                         |
 | Retained memo versions and bounded receipts | 64 MiB per account                                           |
 | Attempted MCP calls                         | 1,000 per account per UTC day                                |
-| Launch memo updates (0014, default off)     | 100 successful user-directed batches per account per UTC day |
 | Request body                                | 64 KiB before parsing (`MAX_REQUEST_BYTES` in `src/http.ts`) |
 
-The memo-update allowance is the only daily save cap: each successful
-`create_memo` that changes rules or samples charges one update, regardless of how
-many internal memos it touches (0014). No-op, conflict, failed saves and receipt
-replays charge nothing. While the allowance is off (the 0014 default), the
-attempted-call limit is the only daily bound on saves. The former 200-a-day
+The attempted-call limit is the only daily bound on saves; there is no separate save
+allowance (see "No memo updates" below). The former 200-a-day
 technical write quota is retired; 0026 dropped its `usage_daily.writes` column.
 Every attempted MCP call still counts, including retries. There are no public archive/restore exemptions or history controls.
 
@@ -589,59 +584,27 @@ foreign keys, immutability guards and byte charges in `milton_rollback`; forward
 restores them exactly. Stop writers during schema rollback and keep them stopped until
 forward recovery: an older runtime cannot guarantee provenance for new saves.
 
-### Memo-update allowance (0014)
+### No memo updates
 
-Migration 0014 is additive and defaults off. It preserves existing receipt JSON,
-source/history, the report snapshot and trials. `memo_updates_enabled` alone turns the
-allowance on (0022 removed the spend policy and readiness flag it once also needed).
-From `server/`, with the protected database/dotenvx setup:
-
-```sh
-bun --no-env-file scripts/memo-updates.ts policy --daily-limit 100
-bun --no-env-file scripts/memo-updates.ts enable
-```
-
-`policy --daily-limit COUNT` changes the daily limit and does not enable updates.
-No command activates trials, billing or model
-work. `disable` stops allowance enforcement without erasing holds
-or charges; drain mutating traffic/holds before a compatible rollback.
-
-The launch allowance is **100 memo updates per account per UTC day**, shared across
-assistants, with no rollover. One committed save that changes rules or samples
-consumes one. Unchanged saves, failed or rolled-back publication, snapshot
-rebuilds on read, reads/downloads and completed-request replay consume zero.
-Historical/pre-activation claims stay uncharged. Saves keep their
-post-lock claim day across midnight. The captured claim timestamp plus 40 seconds
-remains the publication deadline. An expired hold no longer occupies capacity and
-cannot publish late.
-
-A new potentially mutating request at zero available updates is refused before it
-claims. `memo_updates_exhausted` differs from `memo_updates_pending`; the retired
-`model_budget_reached` appears only in older receipts. Reads retain existing
-access/trial policy. Concurrent claims for one account serialize on the account lock
-before dispatch; a save takes only that lock and reads the memo-update settings from
-`store_config` without locking the row. Same-ID recovery
-wins over a new quota check; an uncertain claim is not redispatched or refunded,
-and an uncertain publication recovers the original receipt.
-
-MCP `memo_updates` metadata contains `limit`, `used`, `pending`, `available`,
-`resets_at` and `as_of`. Save `memo_update` separately describes the original
-request's charge/state/day/replay. Both are outside report text and immutable receipt JSON.
-The advisory balance lookup is bounded and omitted on failure; it cannot reverse a
-confirmed save. Core quota checks fail closed. Final MCP events contain only known
-tool/outcome/error values, elapsed time and charge/replay/release state, without
-client/account identity, instruction text or result bodies.
-
-The daily count is read from `save_requests` (`memo_update_state`,
-`memo_update_day`) under the account lock.
+The memo-update allowance (0014) is gone. Saves are model-free and cost nothing to
+process, so there is no daily save allowance, no held, charged or released state on a
+receipt, no `memo_updates` balance or `memo_update` object on a tool reply, no "Memo
+updates today" field on the signed-in cover sheet and no `scripts/memo-updates.ts`. The
+attempted-call limit (`limits_json.daily_calls`) bounds saves and reads alike. The
+`memo_updates_exhausted` and `memo_updates_pending` refusals and the retired
+`model_budget_reached` appear only in older receipts. Final MCP events contain only
+known tool/outcome/error values and elapsed time, without client/account identity,
+instruction text or result bodies. The runtime no longer reads or writes the config
+columns `memo_updates_enabled` and `memo_updates_daily_limit` or the receipt columns
+`memo_update_state` and `memo_update_day`; they stay in the schema, unread, until a
+migration drops them.
 
 ### No count limit (0021)
 
 Migration 0021 replaces `milton_card_guard` and `milton_memo_guard` without their count
 checks; card identity stays immutable, writes still need an active account and memo
 names keep their byte cap. `limits_json.memos` stays in the row, unread. Saves stay
-bounded by the daily memo-update cap (hosted), the tool-call rate limit and the byte
-caps. Apply 0021 before releasing the code: the previous runtime runs on either guard,
+bounded by the tool-call rate limit and the byte caps. Apply 0021 before releasing the code: the previous runtime runs on either guard,
 while the current one without 0021 would hit the old lifetime count as
 `store_unavailable`. `drizzle/rollback/0021_no_card_count.sql` restores both previous
 functions and changes no rows; an account already past the old limit keeps its cards
@@ -669,7 +632,7 @@ The role owns nothing, so it cannot alter, drop or truncate a table, disable a
 trigger, set `session_replication_role`, create objects in `public` or read the
 `drizzle` journal. The triggers guard updates and deletes on the tables the runtime
 may change; where no trigger guards a row, the grant is what protects it. The runtime
-cannot delete from `save_requests` (which would erase memo-update accounting),
+cannot delete from `save_requests` (which would erase receipts and their replay),
 `deleted_identities` or `trial_accounts` (which would let a deleted identity start a
 second trial) or `usage_daily` (which would reset the daily call count), and cannot
 change any `store_config` setting. Default privileges give tables later migrations
@@ -679,8 +642,8 @@ grant; the runtime calls no function directly and runs no statement that needs
 ownership (`SET LOCAL` timeouts, `FOR UPDATE` and `ON CONFLICT` need only these
 grants).
 
-Migrations and `scripts/memo-updates.ts` keep the owner connection and refuse
-any other role; changing `store_config` settings is an owner operation.
+Migrations keep the owner connection and refuse any other role; changing
+`store_config` settings is an owner operation.
 `drizzle/rollback/0024_runtime_role.sql` revokes every grant and drops the group role;
 it refuses while a login role is still a member. See
 [the hosting runbook](deploy/README.md#runtime-role-0024) for creating `milton_app`

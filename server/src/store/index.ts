@@ -12,7 +12,11 @@ import { claimTrialNotice, trialStatus, type TrialNotice } from "./trials";
 import {
   billingAccount,
   linkStripeCustomer,
+  lockStripeCustomer,
   recordStripeEvent,
+  stripeEventRecorded,
+  type StripeEvent,
+  type StripeSubscriptionState,
 } from "./billing";
 import {
   compiledMemos,
@@ -22,7 +26,7 @@ import {
   type SaveOutcome,
 } from "./compiled";
 export { StoreError } from "./errors";
-export type { StripeEventAction } from "./billing";
+export type { StripeSubscriptionState } from "./billing";
 
 // Stable legacy storage key: preserve existing identities and opaque version tags.
 export const TPS_REPORT_KEY = "vibes";
@@ -467,14 +471,33 @@ export function billingForAccount(
   };
 }
 
-/** Records a verified Stripe event and applies it, once per event id. */
+/**
+ * Records a verified Stripe event, once per id. When it names a customer Milton
+ * holds, `read` asks Stripe for that customer's state and the answer is written
+ * in the statement that records the event. The row stays locked across the read;
+ * a `read` that throws leaves nothing recorded, so Stripe redelivers.
+ */
 export async function applyStripeEvent(
   bindings: StoreBindings,
-  event: Parameters<typeof recordStripeEvent>[1],
+  event: StripeEvent,
+  customer: string | null,
+  read: (
+    customer: string,
+    stored: string | null,
+  ) => Promise<StripeSubscriptionState | "canceled" | undefined>,
 ) {
-  try {
-    return await recordStripeEvent(database(bindings), event);
-  } catch (error) {
-    throw databaseFailure(error);
-  }
+  const db = database(bindings);
+  if (!customer) return recordStripeEvent(db, event);
+  return db.transaction(async (tx) => {
+    const row = await lockStripeCustomer(tx, customer);
+    if (!row) return recordStripeEvent(tx, event);
+    if (await stripeEventRecorded(tx, event.id))
+      return { recorded: false, updated: 0 };
+    const state = await read(customer, row.subscription);
+    return recordStripeEvent(
+      tx,
+      event,
+      state ? { customer, state } : undefined,
+    );
+  });
 }

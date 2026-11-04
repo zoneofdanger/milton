@@ -7,7 +7,11 @@ import {
 } from "./local-store";
 import { fixtureStore, seedUsers } from "./store-fixtures";
 import { checkRuntimeRole } from "../scripts/check-runtime-role";
-import { linkStripeCustomer, recordStripeEvent } from "../src/store/billing";
+import {
+  linkStripeCustomer,
+  lockStripeCustomer,
+  recordStripeEvent,
+} from "../src/store/billing";
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
@@ -142,21 +146,25 @@ test("0025 adds the Stripe ledger and subscription columns, marks returning dele
         id: "evt_fixture",
         type: "invoice.paid",
         payloadSha256: "a".repeat(64),
-        action: {
-          kind: "paid_through" as const,
-          customer: "cus_fixture",
-          periodEnd: Date.parse("2026-12-01T00:00:00Z") / 1000,
-        },
       };
-      expect(await recordStripeEvent(db, paid)).toEqual({
-        recorded: true,
-        updated: 1,
+      const state = {
+        id: "sub_fixture",
+        status: "active",
+        trialEnd: null,
+        periodStart: Date.parse("2026-11-01T00:00:00Z") / 1000,
+        periodEnd: Date.parse("2026-12-01T00:00:00Z") / 1000,
+      };
+      expect(await lockStripeCustomer(db, "cus_fixture")).toEqual({
+        subscription: null,
       });
+      expect(
+        await recordStripeEvent(db, paid, { customer: "cus_fixture", state }),
+      ).toEqual({ recorded: true, updated: 1 });
       // The same event id again changes nothing, whatever it carries.
       expect(
-        await recordStripeEvent(db, {
-          ...paid,
-          action: { kind: "clear", customer: "cus_fixture" },
+        await recordStripeEvent(db, paid, {
+          customer: "cus_fixture",
+          state: "canceled",
         }),
       ).toEqual({ recorded: false, updated: 0 });
       for (const statement of [
@@ -171,10 +179,17 @@ test("0025 adds the Stripe ledger and subscription columns, marks returning dele
     expect(
       (
         await pg.query(
-          "SELECT stripe_customer_id,paid_through=timestamptz '2026-12-04T00:00:00Z' AS grace FROM trial_accounts WHERE user_id='billing'",
+          "SELECT stripe_customer_id,stripe_subscription_id,subscription_status,current_period_end=timestamptz '2026-12-01T00:00:00Z' AS period FROM trial_accounts WHERE user_id='billing'",
         )
       ).rows,
-    ).toEqual([{ stripe_customer_id: "cus_fixture", grace: true }]);
+    ).toEqual([
+      {
+        stripe_customer_id: "cus_fixture",
+        stripe_subscription_id: "sub_fixture",
+        subscription_status: "active",
+        period: true,
+      },
+    ]);
 
     await expect(pg.exec(down)).rejects.toThrow(
       "stripe_billing_rollback_requires_no_customers",

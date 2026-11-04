@@ -1,18 +1,21 @@
 import { sql } from "drizzle-orm";
 import type { StoreSession } from "./database";
 
-// What one verified Stripe event does to the clock row it names. Milton keeps
-// paid access as paid_through only; Stripe stays the record of the subscription.
-export type StripeEventAction =
-  | { kind: "none" }
-  // checkout.session.completed: confirms the customer checkout linked.
-  | { kind: "link"; customer: string; userId: string }
-  // invoice.paid and an active customer.subscription.updated: the period end
-  // in epoch seconds; paid_through is that plus 3 days of grace. It only moves forward, so a late or reordered
-  // delivery cannot shorten access.
-  | { kind: "paid_through"; customer: string; periodEnd: number }
-  // customer.subscription.deleted.
-  | { kind: "clear"; customer: string };
+// One Stripe subscription as Milton keeps it. Dates are epoch seconds.
+export type StripeSubscriptionState = {
+  id: string;
+  status: string;
+  trialEnd: number | null;
+  periodStart: number;
+  periodEnd: number;
+};
+export type StripeEvent = { id: string; type: string; payloadSha256: string };
+
+const subscriptionColumns = (state: StripeSubscriptionState) =>
+  sql`stripe_subscription_id=${state.id},subscription_status=${state.status},
+    trial_end=to_timestamp(${state.trialEnd}::double precision),
+    current_period_start=to_timestamp(${state.periodStart}::double precision),
+    current_period_end=to_timestamp(${state.periodEnd}::double precision)`;
 
 export async function billingAccount(db: StoreSession, userId: string) {
   const row = (
@@ -40,38 +43,42 @@ export async function linkStripeCustomer(
   )[0]?.customer;
 }
 
-/** Records the event and applies its action in one statement: a redelivered
- * event id records nothing and changes nothing. */
+/** Locks the row holding this customer, if any, for the rest of the transaction.
+ * Reads of Stripe for one customer run one at a time, so a slower, older read
+ * cannot land after a newer one. */
+export async function lockStripeCustomer(db: StoreSession, customer: string) {
+  return (
+    await db.query<{ subscription: string | null }>(sql`
+    SELECT stripe_subscription_id AS subscription FROM trial_accounts
+    WHERE stripe_customer_id=${customer} FOR UPDATE`)
+  )[0];
+}
+
+export async function stripeEventRecorded(db: StoreSession, id: string) {
+  return (
+    (await db.query(sql`SELECT 1 FROM stripe_events WHERE id=${id}`)).length > 0
+  );
+}
+
+/** Records the event and writes what Stripe answered in one statement: a
+ * redelivered event id records nothing and changes nothing. "canceled" keeps the
+ * stored subscription and dates and ends the status: Stripe no longer has it. */
 export async function recordStripeEvent(
   db: StoreSession,
-  event: {
-    id: string;
-    type: string;
-    payloadSha256: string;
-    action: StripeEventAction;
-  },
+  event: StripeEvent,
+  write?: { customer: string; state: StripeSubscriptionState | "canceled" },
 ) {
-  const { action } = event;
   const recorded = sql`e AS (INSERT INTO stripe_events(id,type,payload_sha256)
     VALUES (${event.id},${event.type},${event.payloadSha256})
     ON CONFLICT (id) DO NOTHING RETURNING id)`;
-  const until = (end: number) =>
-    sql`to_timestamp(${end}::double precision) + interval '3 days'`;
-  const update =
-    action.kind === "paid_through"
-      ? sql`UPDATE trial_accounts SET paid_through=greatest(coalesce(paid_through,${until(action.periodEnd)}),${until(action.periodEnd)})
-        WHERE stripe_customer_id=${action.customer}`
-      : action.kind === "clear"
-        ? sql`UPDATE trial_accounts SET paid_through=NULL WHERE stripe_customer_id=${action.customer}`
-        : action.kind === "link"
-          ? sql`UPDATE trial_accounts SET stripe_customer_id=${action.customer}
-        WHERE user_id=${action.userId} AND stripe_customer_id IS NULL
-        AND NOT EXISTS (SELECT 1 FROM trial_accounts WHERE stripe_customer_id=${action.customer})`
-          : undefined;
   const row = (
     await db.query<{ recorded: number; updated: number }>(
-      update
-        ? sql`WITH ${recorded}, u AS (${update} AND EXISTS (SELECT 1 FROM e) RETURNING 1)
+      write
+        ? sql`WITH ${recorded}, u AS (UPDATE trial_accounts SET ${
+            write.state === "canceled"
+              ? sql`subscription_status='canceled'`
+              : subscriptionColumns(write.state)
+          } WHERE stripe_customer_id=${write.customer} AND EXISTS (SELECT 1 FROM e) RETURNING 1)
           SELECT (SELECT count(*) FROM e)::int AS recorded, (SELECT count(*) FROM u)::int AS updated`
         : sql`WITH ${recorded} SELECT (SELECT count(*) FROM e)::int AS recorded, 0 AS updated`,
     )

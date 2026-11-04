@@ -7,7 +7,7 @@ import {
   billingForAccount,
   lookupIdentityAccount,
   StoreError,
-  type StripeEventAction,
+  type StripeSubscriptionState,
 } from "./store";
 import { boundRequest } from "./http";
 import { AuthError } from "./token";
@@ -31,32 +31,44 @@ const stripeFailed = () =>
     503,
   );
 
-// One form-encoded POST to the Stripe API with the restricted key. A failure
-// is reported without Stripe's status, body or any request value.
-async function stripePost<T>(
+// Stripe's API version, pinned so the shapes read here never move with the
+// account's default. Periods live on subscription items from 2025-03-31 on.
+const STRIPE_VERSION = "2026-10-28.endive";
+const STRIPE_TIMEOUT_MS = 5000;
+
+// One call to the Stripe API with the restricted key. A failure is reported
+// without Stripe's status, body or any request value.
+async function stripeCall(
   billing: BillingConfig,
-  path: "customers" | "checkout/sessions" | "billing_portal/sessions",
-  params: Record<string, string>,
-  shape: z.ZodType<T>,
+  method: "GET" | "POST" | "DELETE",
+  path: string,
+  params?: Record<string, string>,
   idempotencyKey?: string,
-): Promise<T> {
+) {
+  try {
+    return await (billing.fetch ?? fetch)(`https://api.stripe.com/v1/${path}`, {
+      method,
+      headers: {
+        Authorization: `Bearer ${billing.secretKey}`,
+        "Stripe-Version": STRIPE_VERSION,
+        ...(params
+          ? { "Content-Type": "application/x-www-form-urlencoded" }
+          : {}),
+        ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
+      },
+      ...(params ? { body: new URLSearchParams(params) } : {}),
+      redirect: "error",
+      signal: AbortSignal.timeout(STRIPE_TIMEOUT_MS),
+    });
+  } catch {
+    throw stripeFailed();
+  }
+}
+
+async function stripeAnswer<T>(response: Response, shape: z.ZodType<T>) {
+  if (!response.ok) throw stripeFailed();
   let body: unknown;
   try {
-    const response = await (billing.fetch ?? fetch)(
-      `https://api.stripe.com/v1/${path}`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${billing.secretKey}`,
-          "Content-Type": "application/x-www-form-urlencoded",
-          ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
-        },
-        body: new URLSearchParams(params),
-        redirect: "error",
-        signal: AbortSignal.timeout(10000),
-      },
-    );
-    if (!response.ok) throw stripeFailed();
     body = await response.json();
   } catch {
     throw stripeFailed();
@@ -66,8 +78,74 @@ async function stripePost<T>(
   return parsed.data;
 }
 
+const stripePost = async <T,>(
+  billing: BillingConfig,
+  path: "customers" | "checkout/sessions" | "billing_portal/sessions",
+  params: Record<string, string>,
+  shape: z.ZodType<T>,
+  idempotencyKey?: string,
+) =>
+  stripeAnswer(
+    await stripeCall(billing, "POST", path, params, idempotencyKey),
+    shape,
+  );
+
 const customerId = z.string().regex(/^cus_[A-Za-z0-9]{1,251}$/);
 const stripeCustomer = z.object({ id: customerId });
+const epoch = z.number().int().min(1_000_000_000).max(10_000_000_000);
+// Only item-level periods: the pinned API version has no other.
+const stripeSubscription = z
+  .object({
+    id: z.string().regex(/^sub_[A-Za-z0-9]{1,251}$/),
+    status: z.string().min(1).max(64),
+    created: epoch,
+    trial_end: epoch.nullable(),
+    items: z.object({
+      data: z
+        .array(
+          z.object({ current_period_start: epoch, current_period_end: epoch }),
+        )
+        .min(1),
+    }),
+  })
+  .transform((sub) => ({
+    id: sub.id,
+    status: sub.status,
+    created: sub.created,
+    trialEnd: sub.trial_end,
+    periodStart: sub.items.data[0]!.current_period_start,
+    periodEnd: sub.items.data[0]!.current_period_end,
+  }));
+type StripeSubscription = StripeSubscriptionState & { created: number };
+
+// Every subscription the customer has, canceled included. A customer Stripe no
+// longer has has none.
+async function listSubscriptions(billing: BillingConfig, customer: string) {
+  const response = await stripeCall(
+    billing,
+    "GET",
+    `subscriptions?customer=${customer}&status=all&limit=10`,
+  );
+  if (response.status === 404) return [];
+  return (
+    await stripeAnswer(
+      response,
+      z.object({ data: z.array(stripeSubscription) }),
+    )
+  ).data;
+}
+
+const STATUS_ORDER = ["active", "trialing", "past_due"];
+const statusRank = ({ status }: StripeSubscription) => {
+  const rank = STATUS_ORDER.indexOf(status);
+  return rank < 0 ? STATUS_ORDER.length : rank;
+};
+/** active, then trialing, then past_due, otherwise the newest. */
+const decidingSubscription = (subscriptions: StripeSubscription[]) =>
+  subscriptions.toSorted(
+    (a, b) => statusRank(a) - statusRank(b) || b.created - a.created,
+  )[0];
+
 const redirectTo = (origin: string) =>
   z.object({
     url: z
@@ -196,96 +274,46 @@ export function verifyStripeSignature(
   );
 }
 
-const epoch = z.number().int().min(1_000_000_000).max(10_000_000_000);
 const stripeEvent = z.object({
   id: z.string().regex(/^evt_[A-Za-z0-9]{1,251}$/),
   type: z.string().min(1).max(128),
   data: z.object({ object: z.unknown() }),
 });
-const checkoutSession = z.object({
-  mode: z.string(),
-  customer: customerId.nullable(),
-  client_reference_id: z.string().nullable().optional(),
-});
-const paidInvoice = z.object({
-  customer: customerId,
-  lines: z.object({
-    data: z.array(z.object({ period: z.object({ end: epoch }) })).min(1),
-  }),
-});
-// Before API version 2025-03-31 the period end is on the subscription; from it
-// on, on each subscription item. Either is read.
-const subscription = z.object({
-  customer: customerId,
-  status: z.string(),
-  current_period_end: epoch.optional(),
-  items: z
-    .object({
-      data: z.array(z.object({ current_period_end: epoch.optional() })),
-    })
-    .optional(),
-});
-const latest = (ends: (number | undefined)[]) => {
-  const known = ends.filter((end) => end !== undefined);
-  return known.length ? Math.max(...known) : undefined;
-};
+// Every handled type carries its customer at this one field, and that is all
+// Milton reads from an event: Stripe does not guarantee event order, so what an
+// event says is never state, only a reason to ask Stripe for the current state.
+const HANDLED_EVENTS = new Set([
+  "customer.subscription.created",
+  "customer.subscription.updated",
+  "customer.subscription.deleted",
+  "invoice.paid",
+  "invoice.payment_failed",
+  "checkout.session.completed",
+]);
+const eventObject = z.object({ customer: customerId.nullable() });
 
-// What a verified event does; undefined when a handled type is unreadable.
-function eventAction(
-  type: string,
-  object: unknown,
-): StripeEventAction | undefined {
-  if (type === "checkout.session.completed") {
-    const session = checkoutSession.safeParse(object);
-    if (!session.success) return;
-    const { mode, customer, client_reference_id: userId } = session.data;
-    return mode === "subscription" &&
-      customer &&
-      userId &&
-      /^m_[0-9a-f-]{36}$/.test(userId)
-      ? { kind: "link", customer, userId }
-      : { kind: "none" };
-  }
-  if (type === "invoice.paid") {
-    const invoice = paidInvoice.safeParse(object);
-    if (!invoice.success) return;
-    return {
-      kind: "paid_through",
-      customer: invoice.data.customer,
-      periodEnd: latest(
-        invoice.data.lines.data.map((line) => line.period.end),
-      )!,
-    };
-  }
-  if (type === "customer.subscription.updated") {
-    const sub = subscription.safeParse(object);
-    if (!sub.success) return;
-    // Only an active subscription extends access; past_due and later states
-    // keep the paid_through already earned and let it run out.
-    if (!["active", "trialing"].includes(sub.data.status))
-      return { kind: "none" };
-    const end =
-      sub.data.current_period_end ??
-      latest(sub.data.items?.data.map((item) => item.current_period_end) ?? []);
-    return end === undefined
-      ? undefined
-      : { kind: "paid_through", customer: sub.data.customer, periodEnd: end };
-  }
-  if (type === "customer.subscription.deleted") {
-    const sub = z.object({ customer: customerId }).safeParse(object);
-    return sub.success
-      ? { kind: "clear", customer: sub.data.customer }
-      : undefined;
-  }
-  return { kind: "none" };
+/** The state Stripe holds now for a customer Milton has stored: the one
+ * subscription that decides access, or "canceled" when Stripe no longer has the
+ * stored one, or nothing when neither side has one yet. */
+async function currentSubscription(
+  billing: BillingConfig,
+  customer: string,
+  stored: string | null,
+) {
+  const subscriptions = await listSubscriptions(billing, customer);
+  return (
+    decidingSubscription(subscriptions) ?? (stored ? "canceled" : undefined)
+  );
 }
 
 /** POST /billing/webhook. Unauthenticated: the Stripe signature is the only
  * credential. It is routed ahead of the browser pages, so no session, cookie or
  * CSRF check runs; it answers JSON only. Bounds: POST, Content-Type
  * application/json, at most WEBHOOK_MAX_BYTES read before the signature check.
- * A verified event is recorded once by id and applied in the same statement;
- * unknown types are recorded and ignored. */
+ * One rule: a verified event of a handled type names a customer; if Milton holds
+ * that customer, Stripe's current state is read and written in the statement that
+ * records the event. Anything else is recorded and ignored. A failed read answers
+ * 503 unrecorded, so Stripe redelivers. */
 export function stripeWebhook(config: RuntimeConfig) {
   const answer = (status: number, body: Record<string, unknown>) =>
     Response.json(body, { status, headers: noStore });
@@ -315,25 +343,29 @@ export function stripeWebhook(config: RuntimeConfig) {
     )
       return answer(400, { error: "signature_invalid" });
     let event: z.infer<typeof stripeEvent>;
-    let action: StripeEventAction | undefined;
+    let customer: string | null = null;
     try {
       event = stripeEvent.parse(
         JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body)),
       );
-      action = eventAction(event.type, event.data.object);
+      // A handled type Milton cannot read is refused unrecorded, so Stripe
+      // retries it and shows the failure, rather than access silently not moving.
+      if (HANDLED_EVENTS.has(event.type))
+        customer = eventObject.parse(event.data.object).customer;
     } catch {
       return answer(400, { error: "event_invalid" });
     }
-    // A handled type Milton cannot read is refused unrecorded, so Stripe
-    // retries it and shows the failure, rather than access silently not moving.
-    if (!action) return answer(400, { error: "event_invalid" });
     try {
-      const result = await applyStripeEvent(config, {
-        id: event.id,
-        type: event.type,
-        payloadSha256: createHash("sha256").update(body).digest("hex"),
-        action,
-      });
+      const result = await applyStripeEvent(
+        config,
+        {
+          id: event.id,
+          type: event.type,
+          payloadSha256: createHash("sha256").update(body).digest("hex"),
+        },
+        customer,
+        (found, stored) => currentSubscription(billing, found, stored),
+      );
       return answer(200, {
         received: true,
         ...(result.recorded ? {} : { duplicate: true }),

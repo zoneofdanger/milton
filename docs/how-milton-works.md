@@ -245,6 +245,14 @@ Files: `server/src/store/index.ts`, `server/src/store/trials.ts`,
 - A trial notice is claimed once per stage, 7 days and 1 day before `trial_end`, only
   while trialing.
 - Expired accounts are blocked for assistants, while the web view and download stay open.
+- The Stripe webhook verifies the signature, then takes only a customer ID from the six
+  handled event types, because Stripe does not guarantee event order.
+- For a customer Milton holds, the webhook locks the row, reads the customer's
+  subscriptions from Stripe, and writes the deciding one where it records the event.
+- The deciding subscription is active, then trialing, then past_due, otherwise the newest.
+- An empty list or a 404 with a stored subscription writes canceled.
+- A failed Stripe read answers 503 unrecorded so Stripe retries; a replayed event, an
+  unknown type, or a customer Milton does not hold calls nothing.
 - Daily memo updates count charged and held saves, reset at 00:00 UTC, and are enforced
   only when enabled.
 

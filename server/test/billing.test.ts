@@ -7,14 +7,50 @@ import { localStore } from "./local-store";
 
 const appOrigin = "http://localhost:3001";
 // Obviously fake values in the shapes Stripe uses.
-const billing = {
-  secretKey: "rk_test_fixtureNotAKey",
-  webhookSecret: "whsec_fixtureNotASecret",
-  priceId: "price_fixture",
+const day = 86400;
+const now = Math.floor(Date.now() / 1000);
+const subscription = (status: string, created = now - 40 * day) => ({
+  id: `sub_${status.replaceAll("_", "")}`,
+  object: "subscription",
+  customer: "cus_fixture",
+  status,
+  created,
+  trial_end: now - 10 * day,
+  items: {
+    data: [
+      { current_period_start: now - day, current_period_end: now + 29 * day },
+    ],
+  },
+});
+// Answers Stripe's list call with `answer`; each call is recorded.
+const fakeStripe = () => {
+  const stripe = {
+    answer: Response.json({ data: [subscription("active")] }) as
+      Response | undefined,
+    calls: [] as { url: string; version: string | null }[],
+  };
+  return {
+    stripe,
+    billing: {
+      secretKey: "rk_test_fixtureNotAKey",
+      webhookSecret: "whsec_fixtureNotASecret",
+      priceId: "price_fixture",
+      fetch: async (url: string, init: RequestInit) => {
+        stripe.calls.push({
+          url,
+          version: new Headers(init.headers).get("Stripe-Version"),
+        });
+        if (!stripe.answer) throw new Error("Stripe is unreachable");
+        return stripe.answer.clone();
+      },
+    },
+  };
 };
 const userId = "m_00000000-0000-4000-8000-000000000025";
+const webhookSecret = "whsec_fixtureNotASecret";
 
 async function webhookFixture(configured = true) {
+  const { stripe, billing } = fakeStripe();
   const local = await localStore();
   await local.db.query(sql`UPDATE store_config SET trials_enabled=true`);
   await local.db.query(sql`INSERT INTO users(id) VALUES (${userId})`);
@@ -32,7 +68,7 @@ async function webhookFixture(configured = true) {
     ...(configured ? { billing } : {}),
   });
   const sign = (body: string, t = Math.floor(Date.now() / 1000)) =>
-    `t=${t},v1=${createHmac("sha256", billing.webhookSecret).update(`${t}.${body}`).digest("hex")}`;
+    `t=${t},v1=${createHmac("sha256", webhookSecret).update(`${t}.${body}`).digest("hex")}`;
   const post = async (
     body: string,
     signature: string | null = sign(body),
@@ -55,6 +91,7 @@ async function webhookFixture(configured = true) {
   };
   return {
     local,
+    stripe,
     sign,
     post,
     status: async () => (await trialStatus(local.db, userId)).status,
@@ -67,18 +104,16 @@ async function webhookFixture(configured = true) {
   };
 }
 
-const periodEnd = Math.floor(Date.now() / 1000) + 30 * 86400;
 const event = (id: string, type: string, object: Record<string, unknown>) =>
   JSON.stringify({ id, object: "event", type, data: { object } });
 const updated = event("evt_updated", "customer.subscription.updated", {
   object: "subscription",
   customer: "cus_fixture",
   status: "active",
-  items: { data: [{ current_period_end: periodEnd }] },
 });
 
 test("Stripe webhook refuses unsigned, stale, forged, oversized and non-JSON requests and answers 503 without config", async () => {
-  const { local, sign, post, ledger, status } = await webhookFixture();
+  const { local, stripe, sign, post, ledger, status } = await webhookFixture();
   try {
     const stale = Math.floor(Date.now() / 1000) - 301;
     const forged = `t=${Math.floor(Date.now() / 1000)},v1=${createHmac("sha256", "whsec_otherFixtureSecret").update("x").digest("hex")}`;
@@ -110,6 +145,7 @@ test("Stripe webhook refuses unsigned, stale, forged, oversized and non-JSON req
     ]);
     expect(await ledger()).toEqual([]);
     expect(await status()).toBe("expired");
+    expect(stripe.calls).toEqual([]);
   } finally {
     await local.dispose();
   }
@@ -176,54 +212,139 @@ test("the gate follows the subscription status: unknown or missing is allowed, p
   }
 });
 
-test("a signed Stripe event sets paid_through once, a replay is ignored, deletion clears it, and unknown events are recorded only", async () => {
-  const { local, post, ledger } = await webhookFixture();
-  const paidThrough = async () =>
+test("a verified event only triggers a re-read: the list decides, a replay and an unknown customer call nothing, and a read failure stays unrecorded", async () => {
+  const { local, stripe, post, ledger, status } = await webhookFixture();
+  const row = async () =>
     (
-      await local.db.query<{ paid_through: Date | string | null }>(
-        sql`SELECT paid_through FROM trial_accounts WHERE user_id=${userId}`,
+      await local.db.query<Record<string, unknown>>(
+        sql`SELECT stripe_subscription_id AS id,subscription_status AS status,
+          extract(epoch from trial_end)::bigint::text AS trial,
+          extract(epoch from current_period_start)::bigint::text AS start,
+          extract(epoch from current_period_end)::bigint::text AS end
+          FROM trial_accounts WHERE user_id=${userId}`,
       )
-    )[0]!.paid_through;
+    )[0];
+  const list = (...data: unknown[]) => {
+    stripe.answer = Response.json({ data });
+  };
   try {
     expect(await post(updated)).toEqual([200, '{"received":true}']);
-    // The period end plus three days of grace.
-    expect(new Date(String(await paidThrough())).getTime()).toBe(
-      (periodEnd + 3 * 86400) * 1000,
-    );
+    expect(await row()).toEqual({
+      id: "sub_active",
+      status: "active",
+      trial: String(now - 10 * day),
+      start: String(now - day),
+      end: String(now + 29 * day),
+    });
+    expect(await status()).toBe("paid");
+    expect(stripe.calls).toEqual([
+      {
+        url: "https://api.stripe.com/v1/subscriptions?customer=cus_fixture&status=all&limit=10",
+        version: "2026-10-28.endive",
+      },
+    ]);
+    // A replay reads nothing and changes nothing.
+    list(subscription("canceled"));
     expect(await post(updated)).toEqual([
       200,
       '{"received":true,"duplicate":true}',
     ]);
-    expect(await ledger()).toEqual([
-      { id: "evt_updated", type: "customer.subscription.updated" },
-    ]);
-    // An earlier invoice delivered late never shortens access.
+    expect(stripe.calls).toHaveLength(1);
+    expect((await row())!.status).toBe("active");
+    // A stale event still writes what the list says now, whatever it carries.
     expect(
       await post(
-        event("evt_oldInvoice", "invoice.paid", {
+        event("evt_stale", "invoice.paid", { customer: "cus_fixture" }),
+      ),
+    ).toEqual([200, '{"received":true}']);
+    expect((await row())!.status).toBe("canceled");
+    expect(await status()).toBe("expired");
+    // active > trialing > past_due > otherwise the newest.
+    const choice = [
+      [["canceled", now], ["active"], ["trialing"]],
+      [["canceled", now], ["trialing"], ["past_due"]],
+      [["canceled", now], ["past_due"]],
+      [
+        ["unpaid", now - day],
+        ["incomplete_expired", now],
+      ],
+    ] as const;
+    for (const [i, rows] of choice.entries()) {
+      list(...rows.map(([s, created]) => subscription(s, created)));
+      await post(
+        event(`evt_choice${i}`, "invoice.payment_failed", {
           customer: "cus_fixture",
-          lines: { data: [{ period: { end: periodEnd - 30 * 86400 } }] },
+        }),
+      );
+      expect((await row())!.status).toBe(
+        ["active", "trialing", "past_due", "incomplete_expired"][i]!,
+      );
+    }
+    // An empty list or a 404 with a stored subscription reads as canceled.
+    for (const [i, answer] of [
+      Response.json({ data: [] }),
+      Response.json({}, { status: 404 }),
+    ].entries()) {
+      await local.db.query(
+        sql`UPDATE trial_accounts SET subscription_status='active'`,
+      );
+      stripe.answer = answer;
+      expect(
+        await post(
+          event(`evt_gone${i}`, "customer.subscription.deleted", {
+            customer: "cus_fixture",
+          }),
+        ),
+      ).toEqual([200, '{"received":true}']);
+      expect((await row())!.status).toBe("canceled");
+    }
+    // Without a stored subscription nothing is known to have ended.
+    await local.db.query(
+      sql`UPDATE trial_accounts SET stripe_subscription_id=NULL,subscription_status=NULL`,
+    );
+    list();
+    expect(
+      await post(
+        event("evt_none", "checkout.session.completed", {
+          customer: "cus_fixture",
         }),
       ),
     ).toEqual([200, '{"received":true}']);
-    expect(new Date(String(await paidThrough())).getTime()).toBe(
-      (periodEnd + 3 * 86400) * 1000,
-    );
-    expect(
-      await post(event("evt_unknown", "customer.created", { id: "cus_x" })),
-    ).toEqual([200, '{"received":true}']);
-    const deleted = event("evt_deleted", "customer.subscription.deleted", {
+    expect((await row())!.status).toBeNull();
+    // A read failure is unrecorded, so Stripe's retry does the work.
+    const failing = event("evt_retry", "customer.subscription.updated", {
       customer: "cus_fixture",
-      status: "canceled",
     });
-    expect(await post(deleted)).toEqual([200, '{"received":true}']);
-    expect(await paidThrough()).toBeNull();
-    expect((await ledger()).map((row) => row.id).sort()).toEqual([
-      "evt_deleted",
-      "evt_oldInvoice",
-      "evt_unknown",
-      "evt_updated",
-    ]);
+    for (const answer of [
+      Response.json({}, { status: 500 }),
+      Response.json({ data: [{ id: "not a subscription" }] }),
+      undefined,
+    ]) {
+      stripe.answer = answer;
+      expect(await post(failing)).toEqual([
+        503,
+        '{"error":"server_unavailable"}',
+      ]);
+    }
+    expect((await ledger()).map(({ id }) => id)).not.toContain("evt_retry");
+    list(subscription("trialing"));
+    expect(await post(failing)).toEqual([200, '{"received":true}']);
+    expect((await row())!.status).toBe("trialing");
+    // No row for the customer, no customer, or an unknown type: recorded only.
+    stripe.calls.length = 0;
+    for (const body of [
+      event("evt_other", "invoice.paid", { customer: "cus_other" }),
+      event("evt_nobody", "checkout.session.completed", { customer: null }),
+      event("evt_unknown", "customer.created", { id: "cus_x" }),
+    ])
+      expect(await post(body)).toEqual([200, '{"received":true}']);
+    expect(stripe.calls).toEqual([]);
+    expect((await ledger()).map(({ id }) => id)).toContain("evt_unknown");
+    // A handled type Milton cannot read is refused unrecorded.
+    expect(
+      await post(event("evt_bad", "invoice.paid", { customer: 7 })),
+    ).toEqual([400, '{"error":"event_invalid"}']);
+    expect((await ledger()).map(({ id }) => id)).not.toContain("evt_bad");
   } finally {
     await local.dispose();
   }

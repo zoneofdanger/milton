@@ -244,8 +244,9 @@ export async function ensureSubscription(
 }
 
 /** Deletes the account's Stripe customer, which ends any subscription at once. A
- * 404 proves nothing on its own: a key from the wrong mode gets one for a live
- * customer who would go on being charged, so only a read that reports the customer
+ * failed DELETE proves nothing either way: a key from the wrong mode gets a 404 for
+ * a live customer who would go on being charged, and a repeat on a deleted customer
+ * may answer anything. So on any failure, only a read that reports the customer
  * deleted counts as done. The row then forgets the customer before Milton's own
  * delete, which can still fail. Throws on anything else, including a customer on
  * record with billing unconfigured. Issues no refund. */
@@ -257,12 +258,11 @@ export async function endStripeCustomer(config: RuntimeConfig, userId: string) {
   if (!billing) throw stripeFailed();
   const path = `customers/${customer}`;
   const response = await stripeCall(billing, "DELETE", path);
-  if (response.status === 404)
+  if (!response.ok)
     await stripeAnswer(
       await stripeCall(billing, "GET", path),
       z.object({ deleted: z.literal(true) }),
     );
-  else if (!response.ok) throw stripeFailed();
   await store.clearCustomer();
 }
 

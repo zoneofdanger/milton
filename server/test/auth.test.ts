@@ -1360,24 +1360,26 @@ test("account deletion ends the Stripe customer first, a Stripe failure deletes 
     expect(fixture.state.calls.map(({ path }) => path)).not.toContain(
       "/oauth2/delete-consent",
     );
-    // A 404 alone proves nothing: a key from the wrong mode gets one for a live
-    // customer, whose subscription would go on charging. Nothing is deleted.
+    // A failed DELETE proves nothing, 404 included: a key from the wrong mode gets
+    // one for a live customer, whose subscription would go on charging. Nothing
+    // is deleted.
     stripe.down = false;
-    stripe.deleteStatus = 404;
     stripe.calls.length = 0;
-    for (const customer of [
-      { status: 404, body: {} },
-      { status: 200, body: { id: "cus_fixture", deleted: false } },
-      { status: 500, body: {} },
-    ]) {
-      stripe.customer = customer;
-      const unproven = await fixture.send("/account/delete", remove);
-      expect(unproven.status).toBe(503);
-      expect(await unproven.text()).toContain(unavailable);
-      expect(await users(fixture)).toBe(1);
-    }
-    // Stripe goes first, with the account still here; only a customer Stripe
-    // reports as deleted counts as done.
+    for (const deleteStatus of [404, 409])
+      for (const customer of [
+        { status: 404, body: {} },
+        { status: 200, body: { id: "cus_fixture", deleted: false } },
+        { status: 500, body: {} },
+      ]) {
+        stripe.deleteStatus = deleteStatus;
+        stripe.customer = customer;
+        const unproven = await fixture.send("/account/delete", remove);
+        expect(unproven.status).toBe(503);
+        expect(await unproven.text()).toContain(unavailable);
+        expect(await users(fixture)).toBe(1);
+      }
+    // Stripe goes first, with the account still here. A repeat DELETE on a deleted
+    // customer may answer anything: only a read reporting it deleted is done.
     stripe.customer = {
       status: 200,
       body: { id: "cus_fixture", deleted: true },

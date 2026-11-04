@@ -19,9 +19,9 @@ decommission on 2026-11-01. Hosting rollback now uses Cloud Run revisions.
 
 Project `milton-510506`, Cloud Run/Artifact Registry region `us-east4`. Service manifests in this directory pin an immutable image and
 secret versions. They contain configuration and secret references, never values.
-The manifests pin what is serving now: app `milton-app-stick-4272d1d`
-(`sha256:ce6fc19c…`, env 2, key 1) and MCP `milton-mcp-stick-4272d1d`
-(`sha256:ce6fc19c…`, env 3, key 1), both connecting as `milton_app`; see the release
+The manifests pin what is serving now: app `milton-app-open-13f2d93`
+(`sha256:8f205685…`, env 2, key 1) and MCP `milton-mcp-open-13f2d93`
+(`sha256:8f205685…`, env 3, key 1), both connecting as `milton_app`; see the release
 records below. The spend worker,
 its scheduler job, service accounts and manifest were removed with 0023 (see
 [spend subsystem removal](#spend-subsystem-removal-0023)). `memo_updates_enabled` and
@@ -195,13 +195,71 @@ gcloud run services update-traffic milton-mcp --to-revisions=milton-mcp-derived-
 gcloud run services update-traffic milton-worker --to-revisions=milton-worker-env4-cba4f6c=100 --project=milton-510506 --region=us-east4
 ```
 
-Now serving: MCP `milton-mcp-stick-4272d1d` (since 2026-11-04 00:07:46Z) and app
-`milton-app-stick-4272d1d` (since 00:08:00Z), one image and one commit; recorded below. There is
-no worker service.
+Now serving: MCP `milton-mcp-open-13f2d93` (since 2026-11-04 01:15:46Z) and app
+`milton-app-open-13f2d93` (since 01:16:01Z), one image and one commit, on Drizzle journal 26;
+recorded below. There is no worker service.
 
-Current release stick-4272d1d: MCP and app, from main `4272d1d` (the merge of `agent/stick`).
+Current release open-13f2d93: MCP and app, then migration 0025, from main `13f2d93` (the merge of
+`agent/open-signup`). Revisions `milton-mcp-open-13f2d93` and `milton-app-open-13f2d93`, switched
+directly at 100% (no users yet) by a release agent on 2026-11-04: MCP created 01:15:24Z to
+01:15:30Z with `gcloud run services update milton-mcp --image=<digest>
+--revision-suffix=open-13f2d93` (the live MCP template carries the startup CPU boost, which the
+manifest lacks), then `update-traffic --to-revisions=milton-mcp-open-13f2d93=100` at 01:15:46Z; the
+app with `gcloud run services replace` from `app.release.json` (a copy naming the revision) at
+01:15:54Z, Ready 01:16:01Z, pinned by name with `update-traffic` at 01:16:06Z. Both run image
+`sha256:8f205685dafc34e2a7f3375d0301ac4a4a224c13779db38af29f6d8772bf3b7d` (amd64
+`sha256:6648c10392312cd67ad81573ed1d748db593abfb252522eccaafa9705eb1fa0e`; uid 1000, Node
+26.13.0, no env, key or pem files; build stage `oven/bun:1.4.4`; the bundle has no
+`signup_mode`, `allowed_identities` or `admission_refused`). Each revision spec differs from its
+predecessor only in the image (MCP keeps the startup CPU boost, the mount `milton-mcp-env:3`, the
+unmounted leftover `milton-mcp-env:2` volume and `milton-mcp-key:1`; app `milton-app-env:2`,
+`milton-app-key:1`); no secret version changed. Change: the admission gate is gone; every
+successful sign-in creates or finds its account. Release order: code first, because
+stick-4272d1d reads both dropped columns on a first sign-in. Before the release the commit tree
+passed `check-types`, `bun test` (100 pass) and `format:check`. First, a throwaway branch from
+production (`rehearsal-0025-open-signup-2`) rehearsed 0025 through `migrateStore` (journal 25 to
+26; only the two columns, their two checks and NOT NULLs, and the column grants that went with
+them were gone; 274 rows, every other table and every function, trigger, index and grant
+unchanged), then `rollback/0025` (the schema matched the pre-0025 capture exactly, row `open`),
+then a hand re-forward with `0025_open_signup.sql` (identical to the first forward); the branch
+was deleted. An earlier attempt on a first throwaway branch failed in the helper before
+migrating and was discarded with its branch. On the new code and the 0024 schema the canonical
+checks matched the baseline and `bun scripts/probe-forms.ts` printed `PASS`. Then Neon snapshot
+`before-0025-open-signup` (`snap-shiny-dream-b8j4jq7z`, 01:16:20Z) and 0025 applied at 01:16:32Z
+to 01:16:33Z through `migrateStore` as `neondb_owner` (Drizzle journal 25 to 26). `store_config`
+lost `signup_mode` and `allowed_identities_json` with `config_signup_mode` and
+`config_allowlist_array`; its other fields are unchanged (`memo_updates_enabled` true,
+`memo_updates_daily_limit` 100), 17 tables and 274 rows before and after, the other 16 tables
+kept identical hashes, and functions, triggers, indexes and table grants are unchanged. Before
+the drop the row was `open` and held one allow-list identity, now kept only in the snapshot.
+After the migration the canonical checks again matched the baseline (MCP and app `/health` 200,
+discovery 200, unauthenticated `/mcp` 401 with resource metadata, app `/` and `/login` 200 with
+its CSRF field, signed-out `/assistants`, `/account/delete` and `/download` 403, HTTP 308,
+`run.app` 404), the probe printed `PASS`, and a fresh headless Claude Code client listed exactly
+four tools and read `get_cover_sheet` with no error, version `5bbb8ddf…` unchanged and memo
+updates 0/100. From 01:15:24Z to 01:20:35Z neither service logged an error, `unexpected_error`,
+`does not exist` or 5xx (MCP 21 x 200 and 8 x 401; app 17 x 200 and 8 x 403, all from the
+checks), and the only tool call was the fresh client's `get_cover_sheet` read. No account was
+created and no save ran, so a first sign-in on the new code was not observed in production.
+
+Rollback. Since 0025 is applied, stick-4272d1d cannot create an account: a traffic shift alone
+breaks first sign-ins (only a first sign-in reads the dropped columns). Stop writers, run
+`server/drizzle/rollback/0025_open_signup.sql` offline as `neondb_owner` (it re-adds both
+columns, sets the row to `open` with an empty list and restores both checks; rehearsed), then
+shift traffic and, in the same step, set the manifests' images back to `sha256:ce6fc19c…`. The
+0025 journal row stays, so re-forwarding means running `0025_open_signup.sql` by hand. The new
+code runs on either schema, so after the rollback script the open-13f2d93 revisions stay valid.
+Never restore the `before-0025-open-signup` snapshot to roll back code.
+
+```sh
+gcloud run services update-traffic milton-mcp --to-revisions=milton-mcp-stick-4272d1d=100 --project=milton-510506 --region=us-east4
+gcloud run services update-traffic milton-app --to-revisions=milton-app-stick-4272d1d=100 --project=milton-510506 --region=us-east4
+```
+
+Release stick-4272d1d: MCP and app, from main `4272d1d` (the merge of `agent/stick`).
 Revisions `milton-mcp-stick-4272d1d` and `milton-app-stick-4272d1d`, switched directly at 100% (no
-users yet) by a release agent on 2026-11-04: MCP created 00:07:20Z to 00:07:25Z with
+users yet) by a release agent on 2026-11-04, each serving until open-13f2d93: MCP created
+00:07:20Z to 00:07:25Z with
 `gcloud run services update milton-mcp --image=<digest> --revision-suffix=stick-4272d1d`, because
 the live MCP template carries `run.googleapis.com/startup-cpu-boost`, which the manifest lacks
 (traffic stayed pinned on `milton-mcp-role-0851a8c` until `update-traffic` sent the new revision
@@ -234,8 +292,9 @@ through the probe's stub store, not from production (no empty production account
 neither service logged an error, `unexpected_error` or 5xx (MCP 21 x 200 and 4 x 401; app 8 x 200
 and 4 x 403, all from the checks), and no save ran.
 
-Rollback (no schema step; restores the agent kit, `hook_event` and the Origin allowlist on MCP
-and the PC LOAD LETTER app), and in the same step set the manifests' images back to
+Rollback (since 0025, reachable only after the 0025 rollback above; no further schema step;
+restores the agent kit, `hook_event` and the Origin allowlist on MCP and the PC LOAD LETTER app),
+and in the same step set the manifests' images back to
 `sha256:2eb49f6e…` (MCP) and `sha256:677b40b9…` (app):
 
 ```sh
@@ -1129,6 +1188,10 @@ point before 0024 also removes both roles, so switch the services back to the ow
 payloads first.
 
 ## Open sign-ups (0025)
+
+Applied 2026-11-04 01:16:32Z (journal 26, snapshot `before-0025-open-signup`,
+`snap-shiny-dream-b8j4jq7z`), after the open-13f2d93 code served MCP and app (see the release
+records).
 
 Migration 0025 drops `store_config.signup_mode` and `allowed_identities_json` with their
 checks: every successful sign-in creates or finds its account (see the server README).

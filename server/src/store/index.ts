@@ -61,7 +61,6 @@ export const utf8Bytes = (value: string) =>
 interface VerifiedIdentity {
   provider: string;
   subject: string;
-  profile?: Record<string, unknown>;
 }
 
 // One-way fingerprint of a sign-in identity, stored after account deletion.
@@ -107,8 +106,8 @@ export async function resolveIdentityAccount(
               ON d.identity_hash=${identityHash(provider, subject)}
             WHERE u.id=${id} AND c.singleton=1
             AND (c.trials_enabled OR d.identity_hash IS NOT NULL)`);
-          await tx.query(sql`INSERT INTO identities (provider,subject,user_id,profile_json)
-          VALUES (${provider},${subject},${id},${JSON.stringify(identity.profile ?? {})}::jsonb)`);
+          await tx.query(sql`INSERT INTO identities (provider,subject,user_id)
+          VALUES (${provider},${subject},${id})`);
           account = { id, status: "active" };
         }
       }

@@ -756,12 +756,14 @@ reads the config columns on each tool call; this release touches none of them.
 Release order:
 
 1. Ship MCP and app from the same image.
-2. Only once both services are fully on the new revision (traffic at 100% and the old
-   revision idle), take a Neon snapshot, then, with the owner connection, run the check
-   below. Expect `functions` to be `milton_memo_update_guard` only, `views` 0 and
-   `runtime_update` `singleton`. Record `enabled` and `daily_limit`: the rollback restores
-   neither. `held` may be nonzero: claims that expired while held keep that state, and
-   0028 drops it with the column.
+2. Wait until both services, not one, serve 100% on the new image and the old revisions
+   are idle. An older revision writes the dropped columns on every save and, before the
+   sign-in lock removal, locks `store_config` at a first sign-in, which 0028's revoke refuses.
+3. Take a Neon snapshot.
+4. With the owner connection, run the check below. Expect `functions` to be
+   `milton_memo_update_guard` only, `views` 0 and `runtime_update` `singleton`. Record
+   `enabled` and `daily_limit`: the rollback restores neither. `held` may be nonzero: claims
+   that expired while held keep that state, and 0028 drops it with the column.
 
    ```sql
    SELECT
@@ -778,7 +780,13 @@ Release order:
      (SELECT memo_updates_daily_limit FROM store_config WHERE singleton = 1) AS daily_limit;
    ```
 
-3. Apply 0028 with the normal runner.
+5. Apply 0028 with the normal runner, promptly. Between the deploy and 0028, a replay of a
+   claim an old revision left `held` and that has since expired gets a 422 `check_violation`
+   instead of `request_expired`: the new code completes the receipt without moving it out of
+   `held`, which the 0014 check refuses. Nothing is written, and 0028 ends it by dropping the
+   check. If 0028 fails on a deadlock, rerun it; it rolls back as a whole.
+6. Smoke test through MCP as `milton_app`: a save, a replay of that save (same request ID
+   and input, same outcome), and a first sign-in of a new identity.
 
 **Rollback boundary.** Before 0028 is applied, code rolls back by traffic alone. After it,
 an earlier revision cannot save or read through MCP: first run

@@ -426,6 +426,16 @@ before going live. A key from the wrong mode against real rows reads as a failed
 webhooks answer 503 and Stripe retries, sign-ins stop with try again, nobody is marked
 canceled, and account deletion refuses rather than leave a live subscription charging.
 
+**Stripe Dashboard settings, in both test and live mode.** Check both before `trials_enabled`
+is flipped; no code sets either.
+
+- Failed payments must be set to "Cancel the subscription". The gate reads `unpaid` as expired
+  and Checkout will not sell over it, and nothing confirms the portal can settle it, so "Mark as
+  unpaid" would lock out a paying person until support steps in.
+- Payment methods must be cards only, in the default payment method configuration. Setting
+  `payment_method_types` on a subscription does not limit the portal: in test mode it still
+  offered Bank, and its general path Cash App Pay and Amazon Pay.
+
 **Data statement.** An older image still serving after 0026 can write a returning deleted
 identity's row with no status. Once the new image has all traffic, rerun 0026's statement. It
 only touches rows with no status, so it never changes one Stripe has answered for:

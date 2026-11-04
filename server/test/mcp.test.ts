@@ -165,15 +165,7 @@ test("get_report requires an intent: without a well-formed one it refuses, sayin
       (tool) => tool.name === "get_report",
     )!.inputSchema;
     expect(schema.required).toEqual(["report_id", "intent"]);
-    // A client holding the old schema sends no intent; a bad label is refused alike.
-    for (const args of [
-      { report_id: "email" },
-      { report_id: "email", intent: { situation: " " } },
-      {
-        report_id: "email",
-        intent: { situation: "a reply", audience: "investor" },
-      },
-    ]) {
+    const refused = async (args: Record<string, unknown>) => {
       const reply = await client.callTool({
         name: "get_report",
         arguments: args,
@@ -181,16 +173,38 @@ test("get_report requires an intent: without a well-formed one it refuses, sayin
       expect(reply.isError).toBe(true);
       const refusal = JSON.parse((reply.content as [{ text: string }])[0].text);
       expect(refusal.error).toBe("invalid_input");
-      expect(refusal.message).toContain(
-        "reconnect your assistant if it has no intent field",
-      );
-      expect(refusal.message).toContain('"confirming what is on file"');
+      return String(refusal.message);
+    };
+    // A client holding the old schema sends no intent: say what to send and
+    // to reconnect, and tell it the tool list changed.
+    const missing = await refused({ report_id: "email" });
+    expect(missing).toContain(
+      "reconnect your assistant if it has no intent field",
+    );
+    expect(missing).toContain('"confirming what is on file"');
+    expect(changed).toBe(1);
+    // A malformed intent names the limit it broke, without the reconnect hint.
+    for (const [intent, says] of [
+      [
+        { situation: " " },
+        "situation must be one line of at most 200 characters",
+      ],
+      [
+        { situation: "x".repeat(201) },
+        "situation must be one line of at most 200 characters",
+      ],
+      [
+        { situation: "a reply", audience: "investor" },
+        "audience must be one of client, boss, colleague, friend, public, other",
+      ],
+    ] as const) {
+      const message = await refused({ report_id: "email", intent });
+      expect(message).toBe(`get_report intent: ${says}. Nothing was read.`);
     }
     expect(intents).toEqual([]);
-    // Each refusal also tells the client its tool list changed.
-    expect(changed).toBe(3);
+    expect(changed).toBe(1);
     expect(calls.map((c) => [c.outcome, c.error_code])).toEqual(
-      Array(3).fill(["refused", "invalid_input"]),
+      Array(4).fill(["refused", "invalid_input"]),
     );
     const read = await client.callTool({
       name: "get_report",
@@ -204,7 +218,7 @@ test("get_report requires an intent: without a well-formed one it refuses, sayin
       },
     });
     expect(read.isError).toBeUndefined();
-    expect(changed).toBe(3);
+    expect(changed).toBe(1);
     expect(intents).toEqual([
       {
         report: "document",

@@ -6,6 +6,7 @@ import {
   storeResult,
   coverSheetInput,
   intentInput,
+  malformedIntent,
   missingIntent,
   reportInput,
   listReportsInput,
@@ -133,22 +134,29 @@ export function createMiltonServer(
             return;
           }
         }
-        // A get_report without a well-formed intent, often from a client
-        // holding the schema before intent existed, gets a refusal that says
-        // what to send instead of the SDK's validation text.
-        if (
+        // A get_report without a well-formed intent gets a refusal that says
+        // what to send instead of the SDK's validation text. No intent at all
+        // usually means a client holding the schema before intent existed.
+        const stale =
           "method" in message &&
           message.method === "tools/call" &&
           "id" in message &&
-          staleReportCall.safeParse(message.params).success
-        ) {
-          // The client may hold the schema before intent: ask it to refresh.
-          if (!first) await toolsChanged(message.id);
+          staleReportCall.safeParse(message.params);
+        if (stale && stale.success) {
+          const intent = stale.data.arguments?.intent;
+          // Only a missing intent suggests an old schema: ask for a refresh.
+          if (intent === undefined && !first) await toolsChanged(message.id);
           await transport.send({
             jsonrpc: "2.0",
             id: message.id,
             result: storeResult(
-              { error: "invalid_input", message: missingIntent },
+              {
+                error: "invalid_input",
+                message:
+                  intent === undefined
+                    ? missingIntent
+                    : malformedIntent(intent),
+              },
               true,
             ),
           });

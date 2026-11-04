@@ -38,10 +38,27 @@ export const reportInput = z.strictObject({
     ),
   intent: intentInput,
 });
-/** The refusal for a get_report call whose intent is missing or malformed,
- * such as from a client still holding the schema before intent existed. */
+/** The refusal for a get_report call with no intent, as from a client still
+ * holding the schema before intent existed. */
 export const missingIntent =
   'get_report needs intent: situation, one line on what you are writing, to whom and why (or why you are reading, such as "confirming what is on file"), plus audience and purpose from their lists when you know them; reconnect your assistant if it has no intent field. Nothing was read.';
+/** The refusal for a get_report intent that is present but malformed: each
+ * limit it broke, and no reconnect hint, since the client has the field. */
+export function malformedIntent(intent: unknown) {
+  const issues = intentInput.safeParse(intent).error?.issues ?? [];
+  const broken = new Set(
+    issues.map((issue) =>
+      issue.path[0] === "situation"
+        ? "situation must be one line of at most 200 characters"
+        : issue.path[0] === "audience"
+          ? `audience must be one of ${AUDIENCES.join(", ")}`
+          : issue.path[0] === "purpose"
+            ? `purpose must be one of ${PURPOSES.join(", ")}`
+            : "intent takes only situation, audience and purpose",
+    ),
+  );
+  return `get_report intent: ${[...broken].join("; ")}. Nothing was read.`;
+}
 export const listReportsInput = z.strictObject({});
 
 type ToolResult = {

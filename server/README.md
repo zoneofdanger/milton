@@ -624,8 +624,10 @@ The tsquery matches any word of the situation, as the ranking test did. Unlabele
 samples (all from before 0033) rank by full text and recency only. Without an intent
 (`list_reports`, the web page, `TPS.md`) a report serves its newest eight. The version
 covers every active sample, so it is the same for every intent. A `get_report` without
-a well-formed intent is refused with `invalid_input` before the store is read; the
-message says what to send and to reconnect the assistant if it has no intent field.
+a well-formed intent is refused with `invalid_input` before the store is read. With no
+intent, the message says what to send and to reconnect the assistant if it has no intent
+field; with a malformed one, it names each limit broken (situation must be one line of at
+most 200 characters, or the audience or purpose list) and gives no reconnect hint.
 Every active sample's ID now enters the version, and reports serve eight per report
 rather than two per kind, so a client holding a version from before this release
 conflicts once on its next save, rereads and saves.

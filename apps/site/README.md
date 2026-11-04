@@ -58,7 +58,7 @@ main builds and publishes the site, whatever it touches (an ignored-build-step c
 was tried on 2026-11-03 and failed: git is not available to that step on this project,
 so every push builds; a build takes about a minute). A branch can only produce a preview: build one with
 `vercel deploy --project milton-site --scope zoneofdanger` (never `--prod`) from the
-repository root, where `.vercelignore` allowlists `apps/site`, `packages/theme` and the
+repository root, where `.vercelignore` keeps only `apps/site`, `packages/theme` and the
 workspace manifests. Never promote a branch build; land it and let the push publish.
 
 Do not reuse the web app's project link or copy its environment variables.

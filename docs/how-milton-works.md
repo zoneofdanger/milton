@@ -63,8 +63,8 @@ Files: `server/src/handler.ts`, `server/src/token.ts`, `server/src/mcp.ts`,
 - Each request builds a fresh stateless MCP server, with no sessions or subscriptions.
 - Each `tools/call` increments a daily counter before running, and a call over the limit
   returns `rate_limited` with a reset time.
-- Each call logs the tool, outcome, time, memo-update state, and an allowlisted error
-  code, never text or identity.
+- Each call logs the tool, outcome, time, memo-update state, and an error code
+  from a fixed list, never text or identity.
 - The tool name is read early, so calls refused before dispatch are still logged.
 
 ## The four tools

@@ -22,10 +22,10 @@ static build is written to `apps/site/dist`.
 
 ## Landing content
 
-The home page explains working preferences, explicit save/read steps, and planned
-launch pricing. Early access remains free; the site does not implement billing or
-a trial clock. Update the pricing and expiry language together with the billing
-release rather than implying payment controls already exist. `/setup` provides
+The home page explains working preferences and explicit save/read steps; `/pricing`
+states the plan: 30 days free with no credit card, then $5.01 USD a month. That copy
+is true only once trials are switched on, so it is published in the same hour as the
+billing release; the site itself has no billing. `/setup` provides
 client-specific guidance and links to official documentation; no connection is
 created merely by visiting the guide. `AssistantSetup.astro` owns the shared public
 setup prompt and encoded Claude/ChatGPT launch links. No account data goes into

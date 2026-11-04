@@ -62,7 +62,7 @@ export function allowedHosts(
     hostnames.push("localhost", "127.0.0.1", "[::1]");
   return hostnames;
 }
-export function validateMcpTransport(
+function validateMcpTransport(
   request: Request,
   config: Pick<McpConfig, "resource" | "appOrigin">,
 ) {

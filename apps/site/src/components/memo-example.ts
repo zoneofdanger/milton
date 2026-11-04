@@ -1,18 +1,18 @@
 // Every line of the hero conversation, once. MemoDemo renders it in order.
 
 /** A saved-report excerpt: the text as kept, then the signature on its own line. */
-export interface MemoExcerpt {
+interface MemoExcerpt {
   body: string;
   signature: string;
 }
 
-export interface MemoTurn {
+interface MemoTurn {
   speaker: "You" | "Claude" | "ChatGPT";
   text?: string;
   excerpt?: MemoExcerpt;
 }
 
-export interface MemoScene {
+interface MemoScene {
   label: string;
   turns: MemoTurn[];
 }

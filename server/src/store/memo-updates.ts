@@ -2,8 +2,8 @@ import { sql } from "drizzle-orm";
 import type { StoreDatabase, StoreSession } from "./database";
 import { StoreError } from "./errors";
 
-export type ClaimClock = { at: string; day: string };
-export type MemoUpdateState = "none" | "held" | "charged" | "released";
+type ClaimClock = { at: string; day: string };
+type MemoUpdateState = "none" | "held" | "charged" | "released";
 export type MemoUpdate = {
   charged: 0 | 1;
   state: MemoUpdateState;

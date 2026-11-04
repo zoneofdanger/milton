@@ -18,7 +18,7 @@ const accessClaims = z.object({
   exp: z.number().int().positive(),
 });
 const verifiedAccess = Symbol("verifiedAccess");
-export interface VerifiedAccess {
+interface VerifiedAccess {
   readonly issuer: string;
   readonly subject: string;
   readonly clientId: string;

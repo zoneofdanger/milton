@@ -24,7 +24,7 @@ enable is a separate prospective rollout step. disable retains existing holds an
 drain mutating traffic/holds before compatible runtime rollback. No command
 changes instructions or calls a model.`;
 
-export async function memoUpdatesCommand(
+async function memoUpdatesCommand(
   args: string[],
   env: NodeJS.ProcessEnv = process.env,
 ) {

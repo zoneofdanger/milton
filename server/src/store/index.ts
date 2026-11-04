@@ -37,7 +37,7 @@ const limitsSchema = z.object({
   report_body_bytes: positiveLimit,
   daily_calls: positiveLimit,
 });
-export type StoreLimits = z.infer<typeof limitsSchema>;
+type StoreLimits = z.infer<typeof limitsSchema>;
 
 export async function readLimits(db: StoreSession): Promise<StoreLimits> {
   let value: unknown;
@@ -58,7 +58,7 @@ export async function readLimits(db: StoreSession): Promise<StoreLimits> {
 export const utf8Bytes = (value: string) =>
   new TextEncoder().encode(value).length;
 
-export interface VerifiedIdentity {
+interface VerifiedIdentity {
   provider: string;
   subject: string;
   profile?: Record<string, unknown>;
@@ -132,7 +132,7 @@ export interface VerifiedStoreAuth {
 }
 
 // An assistant is one OAuth client acting for one sign-in identity.
-export interface AssistantIdentity {
+interface AssistantIdentity {
   provider: string;
   subject: string;
   clientId: string;
@@ -287,7 +287,7 @@ export async function deleteAccount(
     });
 }
 
-export type CallAllowance =
+type CallAllowance =
   { allowed: true } | { allowed: false; retry_at_ms: number; limit: "day" };
 export interface TenantStore {
   trialNotice?(): Promise<TrialNotice | undefined>;

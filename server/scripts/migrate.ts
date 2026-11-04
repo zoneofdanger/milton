@@ -4,7 +4,7 @@ import { withNeonClient } from "../src/store/database";
 import { StoreError } from "../src/store/errors";
 import { localDatabaseUrl } from "./database-config";
 
-export async function migrateStore(url: string) {
+async function migrateStore(url: string) {
   await withNeonClient(url, async (client) => {
     const { rows } = await client.query<{ database: string; role: string }>(
       "SELECT current_database() AS database, current_user AS role",

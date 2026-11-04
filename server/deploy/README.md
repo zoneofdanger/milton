@@ -817,7 +817,8 @@ none of the three columns. `deadline` is NOT NULL without a default, so this rel
 cannot save on the old schema without the pre-step. The image also carries 0028's code,
 so 0028 and 0029 release together.
 
-Release order:
+Release order (it replaces 0028's: 0028's check runs at step 5 and one runner pass applies
+both):
 
 1. As the owner, while the current revision serves, apply the pre-step:
    `psql "$MILTON_OWNER_DATABASE_URL" -v ON_ERROR_STOP=1 -f server/drizzle/pre/0029_one_transaction.sql`.
@@ -827,13 +828,13 @@ Release order:
    rolls back by traffic alone until 0029. Retry on a lock timeout.
 2. Ship MCP and app from the same image.
 3. Wait until both services, not one, serve 100% on the new image and the old revisions
-   are idle. An older revision's claim stays open up to its 40-second deadline.
+   are idle, then 40 seconds more: an older revision's claim stays open up to its deadline.
 4. Take a Neon snapshot.
-5. If 0028 is not applied yet, run its check and apply it now ("No memo updates
-   (0028)" steps 4 and 5).
-6. With the owner connection, run the check below. Expect `pre_step` true and `live_open`
-   and `outcomeless` 0; if `live_open` is nonzero, wait 40 seconds and rerun. `open` is the
-   number of claims 0029 deletes; record it.
+5. With the owner connection, run both checks before migrating, and record their values.
+   If 0028 is not applied yet, run its check first ("No memo updates (0028)" step 4) and
+   record `enabled` and `daily_limit`. Then run the 0029 check below. Expect `pre_step`
+   true and `live_open` and `outcomeless` 0; if `live_open` is nonzero, wait 40 seconds and
+   rerun. `open` is the number of claims 0029 deletes.
 
    ```sql
    SELECT
@@ -846,14 +847,17 @@ Release order:
        WHERE completed AND result_json->>'status' IS NULL)::int AS outcomeless;
    ```
 
-7. Apply 0029 with the normal runner, promptly. Between the deploy and 0029, a replay of
-   a claim an older revision left open answers `save_outcome_unknown` and writes nothing;
-   after 0029 the same request runs as a new save. 0029 locks `users` in EXCLUSIVE mode
-   (reads continue; account locks wait), then `save_requests` and `store_config`, the
-   order a save takes them. If it fails on a lock timeout or deadlock, rerun it; it rolls
-   back as a whole.
-8. Smoke test through MCP as `milton_app`: a save, a replay of that save (same request ID
-   and input, same outcome), and a save on a stale version (`conflict`).
+6. Run the normal runner once, promptly: `bun run --cwd server db:migrate`. It applies
+   every pending migration in one transaction, so with 0028 pending one run applies 0028
+   and 0029 together; there is no point between them to check. Both lock `users` in
+   EXCLUSIVE mode first (reads continue; account locks wait), then `save_requests` and
+   `store_config`, the order a save takes them. On a deadlock or lock timeout, rerun it; it
+   rolls back as a whole. Between the deploy and this step, a replay of a claim an older
+   revision left open answers `save_outcome_unknown` and writes nothing; afterwards the
+   same request runs as a new save.
+7. Smoke test through MCP as `milton_app`: a save, a replay of that save (same request ID
+   and input, same outcome), a save on a stale version (`conflict`), and a first sign-in of
+   a new identity.
 
 **Rollback boundary.** Before 0029 is applied, code rolls back by traffic alone; the
 pre-step stays and is harmless to every revision. After it, an earlier revision cannot

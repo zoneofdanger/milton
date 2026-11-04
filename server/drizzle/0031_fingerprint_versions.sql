@@ -14,7 +14,8 @@
 SET LOCAL lock_timeout = '10s';
 --> statement-breakpoint
 -- Lock in the save path's order: users (the account lock), then the table.
--- Dropping the foreign key needs this lock on users.
-LOCK TABLE "users" IN SHARE ROW EXCLUSIVE MODE;
+-- Dropping the table drops its foreign key, which takes ACCESS EXCLUSIVE on
+-- users; take it first (as 0030 does) rather than upgrade a weaker lock.
+LOCK TABLE "users" IN ACCESS EXCLUSIVE MODE;
 --> statement-breakpoint
 DROP TABLE "tps_reports";

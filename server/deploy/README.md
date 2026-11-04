@@ -983,9 +983,10 @@ transaction (0029)" and "No history cap (0030)" and add the steps below):
    ```
 
 5. Run the normal runner once: `bun run --cwd server db:migrate`. With 0028, 0029 and 0030
-   pending, one run applies all four in one transaction. 0031 locks `users` in SHARE ROW
-   EXCLUSIVE mode (the foreign key drop needs it; earlier steps in the same run already
-   hold a stronger lock), then drops the table. On a deadlock or lock timeout, rerun it; it
+   pending, one run applies all four in one transaction. 0031 locks `users` in ACCESS
+   EXCLUSIVE mode, as 0030 does (dropping the table's foreign key takes it; in the
+   combined run 0030 already holds it), then drops the table. Reads of `users` wait
+   while it is held. On a deadlock or lock timeout, rerun it; it
    rolls back as a whole.
 6. Smoke test through MCP as `milton_app`: a read, a save on that read's version, a replay
    of that save, a save on a stale version (`conflict`), and two reads in a row returning

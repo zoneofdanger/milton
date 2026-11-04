@@ -158,8 +158,16 @@ const redirectTo = (origin: string) =>
       .refine((url) => url.startsWith(origin + "/")),
   });
 
-// The key makes a repeated or concurrent first call reuse one customer. Stored
-// before anything else happens with it, so a later failure leaves it findable.
+// A key that lasts one UTC minute. Stripe replays a stored error for the same key
+// for 24 hours or more, and refuses the same key with other params; under the
+// rule that a failure stops the sign-in, a fixed key would lock the person out for
+// a day. Double submits within a minute still dedupe, and listing first guards
+// every later retry.
+const idempotencyKey = (kind: "customer" | "subscription", userId: string) =>
+  `milton-${kind}-${userId}-${Math.floor(Date.now() / 60000)}`;
+
+// Stored before anything else happens with it, so a later failure leaves it
+// findable.
 async function createCustomer(
   billing: BillingConfig,
   store: ReturnType<typeof billingForAccount>,
@@ -173,7 +181,7 @@ async function createCustomer(
       ...(email ? { email } : {}),
     },
     stripeCustomer,
-    `milton-customer-${store.userId}`,
+    idempotencyKey("customer", store.userId),
   );
   const customer = await store.linkCustomer(created.id);
   if (!customer) throw stripeFailed();
@@ -181,10 +189,9 @@ async function createCustomer(
 }
 
 /** Gives an enrolled account with no subscription its 30-day Stripe trial; a
- * no-op for any other account or without billing. A stored customer is listed
- * first, so a retry stores what exists rather than starting a second trial. Never
- * throws: a sign-up that hits a Stripe failure heals at the next sign-in, and the
- * gate allows the account meanwhile. Each Stripe call is bound by its timeout. */
+ * no-op for any other account or without billing. What Stripe already has is
+ * stored rather than starting a second trial. A failure throws a 503 that says to
+ * try again, and repeating the attempt is the retry. */
 export async function ensureSubscription(
   config: RuntimeConfig,
   userId: string,
@@ -196,31 +203,31 @@ export async function ensureSubscription(
     const store = billingForAccount(config, userId);
     const account = await store.account();
     if (!account.enrolled || account.status !== null) return;
-    if (account.customer) {
-      const found = decidingSubscription(
-        await listSubscriptions(billing, account.customer),
-      );
-      if (found) return await store.saveSubscription(found);
-    }
     const customer =
       account.customer ?? (await createCustomer(billing, store, email));
     await store.saveSubscription(
-      await stripePost(
-        billing,
-        "subscriptions",
-        {
-          customer,
-          "items[0][price]": billing.priceId,
-          trial_period_days: "30",
-          "payment_settings[save_default_payment_method]": "on_subscription",
-          "trial_settings[end_behavior][missing_payment_method]": "cancel",
-        },
-        stripeSubscription,
-        `milton-subscription-${userId}`,
-      ),
+      decidingSubscription(await listSubscriptions(billing, customer)) ??
+        (await stripePost(
+          billing,
+          "subscriptions",
+          {
+            customer,
+            "items[0][price]": billing.priceId,
+            trial_period_days: "30",
+            "payment_settings[save_default_payment_method]": "on_subscription",
+            "trial_settings[end_behavior][missing_payment_method]": "cancel",
+          },
+          stripeSubscription,
+          idempotencyKey("subscription", userId),
+        )),
     );
   } catch (error) {
     logUnexpected("billing", error);
+    throw new AuthError(
+      "auth_unavailable",
+      "Milton could not start your subscription. Nothing was charged. Try again.",
+      503,
+    );
   }
 }
 

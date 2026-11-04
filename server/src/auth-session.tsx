@@ -161,10 +161,6 @@ export function pageContext(
       );
     return user;
   };
-  const identity = async () => ({
-    provider: "neon",
-    subject: (await signedIn()).id,
-  });
   const readForm = async () => {
     const origin = request.headers.get("Origin");
     const sameOrigin =
@@ -232,7 +228,6 @@ export function pageContext(
     auth,
     session,
     signedIn,
-    identity,
     readForm,
     renderMemos,
   };

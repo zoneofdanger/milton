@@ -203,12 +203,16 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
   blocks them otherwise.
 - Every successful sign-in creates or finds its account; sign-ups are always open.
 - A new account starts empty, with a trial row if trials are on.
-- Every `/login` with a session gives a trial row with no status a Stripe customer and a
-  30-day Stripe trial with no card, which cancels at the end if no card was added.
-- A stored customer is listed first, so a retry stores the subscription rather than
+- With billing configured, a trial row with no status gets a Stripe customer and a 30-day
+  Stripe trial with no card, which cancels at the end if no card was added.
+- No assistant connects until then: `/login`, the consent page, and an Allow on the consent
+  form each ensure it first, and denying needs nothing.
+- A Stripe failure stops that step with a 503 saying to try again, and charges nothing;
+  repeating the sign-in is the retry.
+- With billing unset, no row, or a status already set, no step calls Stripe.
+- What Stripe already has is listed first, so a retry stores the subscription rather than
   starting a second trial.
-- Stripe being unset or failing never blocks sign-in; the row stays allowed and heals at
-  the next sign-in.
+- Idempotency keys carry the UTC minute, because Stripe replays a stored error for a day.
 - A returning deleted identity gets a row already marked canceled, found through its hash,
   so it reads as expired and gets no Stripe trial.
 - Disconnecting writes Milton's refusal first, then removes the consent at Neon.

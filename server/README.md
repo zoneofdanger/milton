@@ -576,8 +576,11 @@ claimed and again under the publication lock; a save that crosses expiry fails
 without publishing. Exact replay still
 recovers an already accepted receipt. Web view/download remains available.
 
-The signed Stripe webhook keeps `subscription_status` and the dates current; the next
-request rechecks access, so reconnecting an assistant is unnecessary. These fields are
+With billing configured, no assistant connects until the account has a subscription:
+`/login`, the consent page and an Allow on the consent form each start the trial first,
+and a Stripe failure stops that step with a 503 saying to try again. The signed Stripe
+webhook keeps `subscription_status` and the dates current; the next request rechecks
+access, so reconnecting an assistant is unnecessary. These fields are
 not writable through any MCP/browser input. The gate reads neither `started_at` nor
 `paid_through`, which stay in place until a later migration. Subscribing early keeps
 the trial: an account in a trial goes to the Stripe portal, where a card takes effect at

@@ -880,3 +880,55 @@ pre-step form with `save_claim_clock`, and the 0028 save guard, and drops
 the claims 0029 deleted do not come back. The 0029 journal row stays, so re-forwarding
 means running `0029_one_transaction.sql` by hand, as one transaction that stops on the
 first error: `psql -1 -v ON_ERROR_STOP=1 -f server/drizzle/0029_one_transaction.sql`.
+
+## No history cap (0030)
+
+Migration 0030 removes the lifetime history cap: an account that reached
+`limits_json.history_bytes` (64 MiB) could not save again and had no way to free space. It
+drops the byte triggers `memo_versions_bytes`, `instruction_card_versions_bytes` and
+`accepted_changes_bytes` with `milton_memo_version_bytes`, `milton_card_version_bytes` and
+`milton_accepted_change_bytes`; replaces the save guard so it still refuses every receipt
+UPDATE and a save to an account that is not active, without counting bytes or refusing
+`memo_history_limit`; drops `users.retained_bytes` with `users_bytes`; and drops
+`history_bytes` from the `limits_json` default. The stored row keeps the key, unread. The
+runtime role needs no grant change: the account lock still needs UPDATE on `users`. This
+release reads neither the key nor the column. Every earlier revision reads its limits from
+the stored row and names no dropped object, so it runs on either schema.
+
+Release order (it rides the pending 0028 and 0029 release; follow "Saves in one
+transaction (0029)" and add the steps below):
+
+1. Ship MCP and app from the same image, after 0029's pre-step.
+2. Wait until both services, not one, serve 100% on the new image and the old revisions
+   are idle.
+3. Take a Neon snapshot.
+4. With the owner connection, run the check below with the 0028 and 0029 checks, and
+   record its values. Expect `functions` to be
+   `milton_accepted_change_bytes,milton_card_version_bytes,milton_memo_version_bytes,milton_save_request_guard`.
+   `largest` above `cap` means an account is already refused; 0030 lets it save again.
+
+   ```sql
+   SELECT
+     (SELECT string_agg(proname, ',' ORDER BY proname) FROM pg_proc
+       WHERE pronamespace = 'public'::regnamespace AND prosrc ~ 'history_bytes') AS functions,
+     (SELECT limits_json->>'history_bytes' FROM store_config WHERE singleton = 1) AS cap,
+     (SELECT max(retained_bytes) FROM users) AS largest;
+   ```
+
+5. Run the normal runner once: `bun run --cwd server db:migrate`. With 0028 and 0029
+   pending, one run applies all three in one transaction. 0030 locks `users` in ACCESS
+   EXCLUSIVE mode first (sign-ins, reads and saves wait), then `store_config` and the
+   three history tables, the order a save takes them. On a deadlock or lock timeout, rerun
+   it; it rolls back as a whole. Between the deploy and this step, a save past the cap
+   answers `store_unavailable` instead of `memo_history_limit` and writes nothing.
+6. Smoke test through MCP as `milton_app`: a save, a replay of that save, and a read.
+
+**Rollback boundary.** Code rolls back by traffic alone before and after 0030. To restore
+the cap, run `server/drizzle/rollback/0030_no_history_cap.sql` offline with writers
+stopped. It re-adds `users.retained_bytes` with `users_bytes`, each account's value
+recomputed from the rows the triggers counted, the three byte functions and triggers, the
+0029 save guard and the previous `limits_json` default; the cap applies again at the
+stored value, so an account that grew past it keeps its rows and cannot save. The 0030
+journal row stays, so re-forwarding means running `0030_no_history_cap.sql` by hand, as
+one transaction that stops on the first error:
+`psql -1 -v ON_ERROR_STOP=1 -f server/drizzle/0030_no_history_cap.sql`.

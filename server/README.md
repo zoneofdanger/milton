@@ -143,10 +143,8 @@ model call or speculative split occurs. 0008 also added the `memo_cards` members
 table; since 0017 assembly no longer reads it, and it remains as history only.
 
 This expand phase retains the original memo history and a complete card-history copy.
-Both copies count toward retained storage. Backfill does not discard history or fail
-merely because the account crosses its ceiling, but subsequent ordinary writes are
-refused until capacity is available. Check headroom before rollout. Later removal of
-legacy copies requires a separate migration; it is not included here.
+Both copies counted toward the retained-history cap until 0030 removed it. Later removal
+of legacy copies requires a separate migration; it is not included here.
 
 Sign-up no longer seeds the empty `vibes` memo, so nothing writes legacy memos. Once
 cards are independently edited, legacy writes/deletion refuse with
@@ -393,8 +391,7 @@ partially publish.
 Internal `instruction_card_versions` are append-only; legacy `memo_versions` are retained. `tps_reports` holds one replaceable
 snapshot per account, with a monotonic revision and source fingerprint. There is
 no report content history. Receipts keep input hashes and bounded outcomes, not raw
-submitted text or copies of reports, and count their maximum 2-KiB result space plus
-metadata against retained-history capacity. A receipt is written once, with its
+submitted text or copies of reports. A receipt is written once, with its
 outcome, and is immutable. A crashed request commits nothing and leaves no receipt.
 
 Saves anchor only in current active cards, never archived versions or a prior snapshot.
@@ -405,19 +402,19 @@ its bound, the whole publication rolls back with `tps_body_limit`; the failed
 request receipt remains, but no source change commits. No read or
 save invokes a model.
 
-| Limit                                       | Default                                                      |
-| ------------------------------------------- | ------------------------------------------------------------ |
-| Rule (card) body                            | 32 KiB UTF-8                                                 |
-| Cover sheet or report body                  | 256 KiB UTF-8 each (`report_body_bytes`)                     |
-| Description/reason                          | 500 UTF-8 bytes each                                         |
-| Retained memo versions and bounded receipts | 64 MiB per account                                           |
-| Attempted MCP calls                         | 1,000 per account per UTC day                                |
-| Request body                                | 64 KiB before parsing (`MAX_REQUEST_BYTES` in `src/http.ts`) |
+| Limit                      | Default                                                      |
+| -------------------------- | ------------------------------------------------------------ |
+| Rule (card) body           | 32 KiB UTF-8                                                 |
+| Cover sheet or report body | 256 KiB UTF-8 each (`report_body_bytes`)                     |
+| Description/reason         | 500 UTF-8 bytes each                                         |
+| Attempted MCP calls        | 1,000 per account per UTC day                                |
+| Request body               | 64 KiB before parsing (`MAX_REQUEST_BYTES` in `src/http.ts`) |
 
 The attempted-call limit is the only daily bound on saves; there is no separate save
 allowance (see "No memo updates (0028)" below). The former 200-a-day
 technical write quota is retired; 0026 dropped its `usage_daily.writes` column.
 Every attempted MCP call still counts, including retries. There are no public archive/restore exemptions or history controls.
+Retained history has no cap (see "No history cap (0030)" below).
 
 The website shows the current cover sheet and reports, escapes their text and serves no browser JavaScript.
 It displays one bullet per complete active instruction card, preserving internal
@@ -578,12 +575,27 @@ No-op and failed saves add no accepted-change record.
 Replay adds no duplicate. New saves record transformation pipeline `exact:v1`.
 
 Records live as long as internal history and are removed with account deletion. Their
-serialized payload bytes count against the existing retained-history quota; an over-quota
-save fails atomically instead of dropping evidence.
+serialized payload bytes counted against the retained-history cap until 0030 removed it.
 Migration 0010 is additive and copies no legacy request text. Its inverse parks evidence,
 foreign keys, immutability guards and byte charges in `milton_rollback`; forward migration
 restores them exactly. Stop writers during schema rollback and keep them stopped until
 forward recovery: an older runtime cannot guarantee provenance for new saves.
+
+### No history cap (0030)
+
+History rows never shrink short of account deletion, so the 64-MiB lifetime cap
+(`limits_json.history_bytes`) left an account that reached it unable to save, with no way
+to free space. The runtime no longer reads `history_bytes` and no longer maps or logs
+`memo_history_limit`, which now appears only in older receipts and logs. Migration 0030
+drops the byte triggers `memo_versions_bytes`, `instruction_card_versions_bytes` and
+`accepted_changes_bytes` with their functions, makes the save guard refuse receipt
+updates and saves to an inactive account without counting bytes, drops
+`users.retained_bytes` (no code read it) with `users_bytes`, and drops `history_bytes`
+from the `limits_json` default; the stored row keeps it, unread, so an earlier revision
+still runs. Release the code first; see
+[the hosting runbook](deploy/README.md#no-history-cap-0030).
+`drizzle/rollback/0030_no_history_cap.sql` restores the cap, the counter recomputed from
+the rows it counted.
 
 ### Saves in one transaction (0029)
 
@@ -641,7 +653,7 @@ trigger it fires, runs on it:
 
 | Grant                          | Tables and why                                                                                                                                                                                    |
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| SELECT, INSERT, UPDATE, DELETE | `users`: sign-up, the account lock, retained bytes kept by triggers, and account deletion (its cascades run as the table owner)                                                                   |
+| SELECT, INSERT, UPDATE, DELETE | `users`: sign-up, the account lock and account deletion (its cascades run as the table owner)                                                                                                     |
 | SELECT, INSERT, DELETE         | `assistant_disconnects`: disconnect, the refusal check, reconnect on Allow                                                                                                                        |
 | SELECT, INSERT, UPDATE         | `save_requests` (receipts; the save guard refuses every update), `samples` (retirement), `tps_reports` (snapshot upsert), `trial_accounts` (notice stage), `usage_daily` (daily call upsert)      |
 | SELECT, INSERT                 | `identities`, `deleted_identities`, `instruction_cards`, `instruction_card_versions`, `sample_kinds`, and the legacy `memos`, `memo_versions` and `memo_cards` (the signup seed and its triggers) |

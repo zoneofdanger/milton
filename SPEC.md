@@ -61,7 +61,7 @@ against generated text; overlapping edits fail. The source/report fences, receip
 replay, history, size and heading limits still apply; reservation is always zero. A
 report exceeding its bound refuses the entire save; source instructions are never
 truncated. There is no separate save allowance: the 1,000/day attempted-call limit
-bounds saves and reads alike, with the retained-history limit. A save runs in one
+bounds saves and reads alike; retained history has no cap (0030). A save runs in one
 transaction, takes only the account lock and reads `store_config` without locking it.
 
 Removing the model removes paraphrase drift, not interpretation risk: the assistant
@@ -90,7 +90,7 @@ existing instructions. Cards organize and narrow edits; they do not establish se
 
 Accepted changes now retain the exact submitted purpose, rules and edits, actor, affected card
 versions and transformation identity atomically with source, history and the report snapshot. These internal
-records use the existing history quota and account-deletion policy. Missing legacy
+records follow the account-deletion policy, with no history cap. Missing legacy
 request evidence remains unavailable.
 
 No sign-up cap anywhere, hosted or self-hosted (Peter, 2026-10-30). Sign-ups are open and

@@ -144,13 +144,11 @@ test("TPS preserves every active source body verbatim and refreshes only the der
           versions: unknown;
           receipts: unknown;
           usage: unknown;
-          retained_bytes: number;
         }>(`SELECT
       (SELECT jsonb_agg(m) FROM memos m WHERE user_id='fidelity') AS memos,
       (SELECT jsonb_agg(v) FROM memo_versions v WHERE user_id='fidelity') AS versions,
       (SELECT jsonb_agg(r) FROM save_requests r WHERE user_id='fidelity') AS receipts,
-      (SELECT jsonb_agg(d) FROM usage_daily d WHERE user_id='fidelity') AS usage,
-      (SELECT retained_bytes FROM users WHERE id='fidelity') AS retained_bytes`)
+      (SELECT jsonb_agg(d) FROM usage_daily d WHERE user_id='fidelity') AS usage`)
       ).rows;
     // A stored paraphrase with the right source fence is kept: the fence, not the
     // text, decides whether assembly runs. A source change rebuilds on read.
@@ -350,15 +348,6 @@ test("stale and failed compiled saves preserve current memos, receipts and charg
         )
       ).rows,
     ).toEqual([{ n: 1 }]);
-    expect(
-      (
-        await local.pg.query(`SELECT id FROM users u WHERE retained_bytes <>
-      (SELECT coalesce(sum(payload_bytes),0) FROM memo_versions WHERE user_id=u.id) +
-      (SELECT coalesce(sum(payload_bytes),0) FROM instruction_card_versions WHERE user_id=u.id) +
-      (SELECT coalesce(sum(payload_bytes),0) FROM save_requests WHERE user_id=u.id) +
-      (SELECT coalesce(sum(payload_bytes),0) FROM accepted_changes WHERE user_id=u.id)`)
-      ).rows,
-    ).toEqual([]);
   } finally {
     await local.dispose();
   }
@@ -659,7 +648,7 @@ test("exact caller edits preserve conditions and scope without a model, with ato
   }
 });
 
-test("Postgres enforces separate UTF-8 field caps, no memo count, and counts recovery bytes", async () => {
+test("Postgres enforces separate UTF-8 field caps and no memo count", async () => {
   const local = await localStore();
   try {
     await seedUsers(local.pg, "m_caps");
@@ -683,9 +672,6 @@ test("Postgres enforces separate UTF-8 field caps, no memo count, and counts rec
     await local.pg.query(
       "INSERT INTO memos (user_id,id,name) VALUES ('m_caps','vibes','vibes')",
     );
-    expect(
-      (await local.pg.query("SELECT retained_bytes FROM users")).rows,
-    ).toEqual([{ retained_bytes: 67570 }]);
     await expect(
       local.pg.query(
         "INSERT INTO memos (user_id,id,name) VALUES ('m_caps','too-long',$1)",
@@ -724,17 +710,6 @@ test("Postgres enforces separate UTF-8 field caps, no memo count, and counts rec
     await local.pg
       .query(`INSERT INTO memo_versions (user_id,memo_id,version,description,body,archived,reason,actor_json,details_json)
       SELECT user_id,memo_id,2,description,body,archived,'','{"kind":"person"}','{"kind":"revert","source_version":1}' FROM memo_versions WHERE version=1`);
-    expect(
-      (
-        await local.pg.query<{ retained_bytes: number }>(
-          "SELECT retained_bytes FROM users",
-        )
-      ).rows[0]!.retained_bytes,
-    ).toBeGreaterThan(67570);
-    await local.pg.query("DELETE FROM memo_versions WHERE version=2");
-    expect(
-      (await local.pg.query("SELECT retained_bytes FROM users")).rows,
-    ).toEqual([{ retained_bytes: 67570 }]);
     await local.pg.query(
       "INSERT INTO memos (user_id,id,name) VALUES ('m_caps','third','third')",
     );
@@ -771,11 +746,6 @@ test("Postgres version conflicts return typed errors", async () => {
         sql`SELECT version,body FROM memo_versions WHERE user_id=${userId}`,
       ),
     ).toEqual([{ version: 1, body: "hello" }]);
-    expect(
-      await local.db.query(
-        sql`SELECT retained_bytes FROM users WHERE id=${userId}`,
-      ),
-    ).toEqual([{ retained_bytes: 40 }]);
   } finally {
     await local.dispose();
   }

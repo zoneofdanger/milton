@@ -591,8 +591,9 @@ process, so there is no daily save allowance, no held, charged or released state
 receipt, no `memo_updates` balance or `memo_update` object on a tool reply, no "Memo
 updates today" field on the signed-in cover sheet and no `scripts/memo-updates.ts`. The
 attempted-call limit (`limits_json.daily_calls`) bounds saves and reads alike. The
-`memo_updates_exhausted` and `memo_updates_pending` refusals and the retired
-`model_budget_reached` appear only in older receipts. Final MCP events contain only
+`memo_updates_exhausted` and `memo_updates_pending` refusals came before a claim and
+wrote no receipt, so they appear only in older logs; the retired `model_budget_reached`
+appears only in older receipts. Final MCP events contain only
 known tool/outcome/error values and elapsed time, without client/account identity,
 instruction text or result bodies. The runtime no longer reads or writes the config
 columns `memo_updates_enabled` and `memo_updates_daily_limit` or the receipt columns

@@ -566,7 +566,7 @@ test("a save without a structured field is refused with invalid_input", async ()
   }
 });
 
-test("reports print a heading, when line, the newest two samples per kind and rules; card text cannot add headings", async () => {
+test("reports print a heading, when line, the newest eight samples and rules; card text cannot add headings", async () => {
   const local = await localStore();
   try {
     await seedUsers(local.pg, "reports");
@@ -646,7 +646,8 @@ test("reports print a heading, when line, the newest two samples per kind and ru
     ).toHaveLength(1);
     expect(documents.cover).toBe("- No em dashes.\n\n- Oxford comma.");
     expect(documents.is_empty).toBe(false);
-    // A third sample of one kind stays on file; the report serves the newest two.
+    // A third sample of one kind stays on file and is served: without an
+    // intent a report serves its newest eight, whatever their kinds.
     expect(await sample("follow-up", "Third follow-up")).toMatchObject({
       status: "saved",
     });
@@ -654,7 +655,7 @@ test("reports print a heading, when line, the newest two samples per kind and ru
       (await store.readDocuments()).reports
         .find((r) => r.id === "email")!
         .samples.map((s) => s.body),
-    ).toEqual(["Third follow-up", "Second follow-up"]);
+    ).toEqual(["Third follow-up", "Second follow-up", "Hi [name],\n\nThanks!"]);
     expect(
       (
         await local.pg.query(
@@ -800,7 +801,7 @@ test("an exact edit and a move of one rule land in one version", async () => {
   }
 });
 
-test("a reused kind_id shares one kind; every sample stays, the newest two are served, and a save replays identically", async () => {
+test("a reused kind_id shares one kind; every sample stays and is served, and a save replays identically", async () => {
   const f = await filingFixture("kinds-keep");
   try {
     const sample = (text: string, kind: object) => ({
@@ -840,6 +841,7 @@ test("a reused kind_id shares one kind; every sample stays, the newest two are s
     expect((await f.report("email")).samples.map((s) => s.body)).toEqual([
       "Three",
       "Two",
+      "One",
     ]);
     expect(
       (
@@ -884,11 +886,27 @@ test("replaces retires the named sample as replaced and records lineage", async 
         replaces: old.id,
         context: "second launch",
         text: "New",
+        audience: "public",
+        purpose: "announce",
+        register: "plain",
       },
     };
+    // A label off its list is refused before anything is read or written.
+    await expect(
+      f.save({ sample: { ...replace.sample, audience: "investor" } }),
+    ).rejects.toMatchObject({ code: "invalid_input" });
     expect(await f.save(replace)).toMatchObject({
       status: "saved",
       samples_retired: [{ id: old.id, reason: "replaced" }],
+    });
+    // Labels are stored as sent and listed with the sample.
+    expect(
+      reportEnvelope(await f.store.readDocuments(), "post").samples[0],
+    ).toMatchObject({
+      context: "second launch",
+      audience: "public",
+      purpose: "announce",
+      register: "plain",
     });
     expect(
       (

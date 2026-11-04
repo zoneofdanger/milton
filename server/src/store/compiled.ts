@@ -1,9 +1,14 @@
 import { cardHeadsJson, cardFingerprint, type CardHead } from "./cards";
 import {
   assembleDocuments,
+  AUDIENCES,
   FILINGS,
+  PURPOSES,
+  REGISTERS,
   REPORT_IDS,
+  SERVED_SAMPLES,
   type Documents,
+  type ReportIntent,
   type Sample,
 } from "./reports";
 import { createHash } from "node:crypto";
@@ -30,7 +35,7 @@ const text = z
   .refine(
     (v) => v.isWellFormed() && !v.includes("\0") && utf8Bytes(v) <= 131072,
   );
-const oneLine = (max: number) =>
+export const oneLine = (max: number) =>
   z
     .string()
     .trim()
@@ -122,6 +127,12 @@ export const saveMemoInput = z.strictObject({
       context: oneLine(200).describe(
         "One line of context shown above the sample, such as follow-up after someone agreed to a call.",
       ),
+      audience: z
+        .enum(AUDIENCES)
+        .optional()
+        .describe("Who it was written for."),
+      purpose: z.enum(PURPOSES).optional().describe("What it does."),
+      register: z.enum(REGISTERS).optional().describe("How formal it is."),
       text: text
         .refine((v) => v.trim().length > 0)
         .describe(
@@ -133,7 +144,7 @@ export const saveMemoInput = z.strictObject({
     })
     .optional()
     .describe(
-      "Optional approved sample to file under a report, offered once when the person approves a draft and sent only after they say yes. Every approved sample stays; a report serves the newest two per kind. Remove one with retire_samples or replace it with replaces; either is reported in samples_retired. Text identical to an active sample of the kind files nothing.",
+      "Optional approved sample to file under a report, offered once when the person approves a draft and sent only after they say yes. Every approved sample stays; a report read serves the eight that best fit its intent. Remove one with retire_samples or replace it with replaces; either is reported in samples_retired. Text identical to an active sample of the kind files nothing.",
     ),
   retire_samples: z
     .array(z.string().min(1).max(256))
@@ -185,10 +196,12 @@ export function compiledMemos(
     )
       throw unavailable();
   }
-  // The version is a fingerprint of what is served: the cover sheet and each
-  // report's text with its samples' IDs and kinds. The same cards and samples
-  // always give the same version, and the user ID keeps it to one account.
-  const version = (documents: Documents) =>
+  // The version is a fingerprint of what any read can serve: the cover sheet
+  // and each report's text (newest eight samples) with every active sample's ID
+  // and kind, since a read with an intent may serve any of them. Labels never
+  // change, so the ID covers them. The same cards and samples always give the
+  // same version, and the user ID keeps it to one account.
+  const version = (documents: Documents, samples: Sample[]) =>
     hash([
       "documents",
       userId,
@@ -196,10 +209,26 @@ export function compiledMemos(
       documents.reports.map((r) => [
         r.id,
         r.body,
-        r.samples.map((s) => [s.id, s.kind_id, s.kind]),
+        samples
+          .filter((s) => s.report === r.id)
+          .map((s) => [s.id, s.kind_id, s.kind]),
       ]),
     ]);
-  async function snapshot(session: StoreSession): Promise<Snapshot> {
+  // A report read's eight samples: label overlap with the intent (audience,
+  // purpose), then full-text rank of the situation against context and body
+  // (any word of it, through the stored search vector), then newest, then id.
+  const ranked = (intent: ReportIntent) =>
+    sql`(SELECT coalesce(json_agg(r.id ORDER BY r.n),'[]'::json) FROM (
+      SELECT s.id,row_number() OVER (ORDER BY
+        COALESCE(s.audience=${intent.audience ?? null},false)::int+COALESCE(s.purpose=${intent.purpose ?? null},false)::int DESC,
+        ts_rank(s.search,q.q) DESC,s.created_at DESC,s.id) AS n
+      FROM samples s,(SELECT replace(plainto_tsquery('english',${intent.situation})::text,'&','|')::tsquery AS q) q
+      WHERE s.user_id=${userId} AND s.report=${intent.report} AND s.retired_at IS NULL
+      ORDER BY n LIMIT ${SERVED_SAMPLES}) r)`;
+  async function snapshot(
+    session: StoreSession,
+    intent?: ReportIntent,
+  ): Promise<Snapshot & { served?: Documents }> {
     // One statement reads every head (including archive state) and the active
     // samples, so a read without a transaction still sees a save whole or not
     // at all. Never page this input.
@@ -208,14 +237,17 @@ export function compiledMemos(
         open: boolean;
         heads: CardHead[];
         samples: Sample[];
+        ranked: string[] | null;
       }>(
         sql`SELECT EXISTS(SELECT 1 FROM users WHERE id=${userId} AND status='active') AS open,
       (${cardHeadsJson(userId)}) AS heads,
       (SELECT coalesce(json_agg(json_build_object('id',s.id,'report',s.report,'kind_id',s.kind_id,'kind',k.label,'context',s.context,'body',s.body,
         'date',to_char(s.created_at AT TIME ZONE 'UTC','YYYY-MM-DD'),
+        'audience',s.audience,'purpose',s.purpose,'register',s.register,
         'created_at',to_char(s.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"')) ORDER BY s.created_at,s.id),'[]'::json)
         FROM samples s JOIN sample_kinds k ON k.user_id=s.user_id AND k.id=s.kind_id
-        WHERE s.user_id=${userId} AND s.retired_at IS NULL) AS samples`,
+        WHERE s.user_id=${userId} AND s.retired_at IS NULL) AS samples,
+      ${intent ? ranked(intent) : sql`NULL`} AS ranked`,
       )
     )[0]!;
     const { heads, samples } = row;
@@ -232,15 +264,23 @@ export function compiledMemos(
       fingerprint,
       active,
       documents,
-      version: version(documents),
+      version: version(documents, samples),
+      ...(intent && row.ranked
+        ? {
+            served: assembleDocuments(active, samples, {
+              report: intent.report,
+              ids: row.ranked,
+            }),
+          }
+        : {}),
     };
   }
   /** A read assembles the documents from cards and samples. It takes no lock
    * and writes nothing: one statement for the snapshot, then the trial gate
    * for an assistant. The size cap bounds saves; a read serves what is on file. */
-  async function read() {
+  async function read(intent?: ReportIntent) {
     try {
-      const current = await snapshot(db);
+      const current = await snapshot(db, intent);
       if (!current.open) throw unavailable();
       if (actor) await assertTrialAccess(db, userId);
       return current;
@@ -272,10 +312,17 @@ export function compiledMemos(
       );
   }
   return {
-    /** The cover sheet and the five reports at one version. */
-    async readDocuments(): Promise<Documents & { version: string }> {
-      const current = await read();
-      return { ...current.documents, version: current.version };
+    /** The cover sheet and the five reports at one version. With an intent,
+     * that report serves the eight samples ranked for it; the version stays
+     * the same for every intent. */
+    async readDocuments(
+      intent?: ReportIntent,
+    ): Promise<Documents & { version: string }> {
+      const current = await read(intent);
+      return {
+        ...(current.served ?? current.documents),
+        version: current.version,
+      };
     },
     async getTpsReport(): Promise<CompiledReport> {
       const current = await read();

@@ -43,13 +43,6 @@ reports, memos) and plain text on security screens and anything an assistant rea
       and how reliably assistants offer and save what they should across clients. milton-eval's
       email before-and-after is the first piece; needs a fictional test account Peter provides.
 
-- [ ] #9 (server, low) **Announce tool changes so clients refresh their schemas.** Found
-      2026-11-02: a Claude Code session connected before the model-free release kept the
-      old create_memo schema and sent rules as a string; the server refused it cleanly, but the
-      first save from every stale client fails until it reconnects. Send the MCP
-      notifications/tools/list_changed on connection resume after a contract change, and say
-      "reconnect your assistant" in the invalid_input message when the shape is unknown.
-
 - [ ] #11 (server, low) **Make the spend test independent of UTC midnight.** A store-spend test
       reads the current UTC day twice and fails when a run crosses midnight (seen 2026-11-03
       00:00Z on a parallel run; passes on rerun). Inject the clock or compute the day once.

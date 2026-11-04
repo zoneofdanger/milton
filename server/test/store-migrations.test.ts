@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import {
+  addSampleLabels,
   drizzleSql,
   migratedThrough,
   migrationsThrough,
@@ -8,6 +9,7 @@ import {
 import { fixtureStore, seedUsers } from "./store-fixtures";
 import { checkRuntimeRole } from "../scripts/check-runtime-role";
 import type { SaveMemoInput } from "../src/store/compiled";
+import type { ReportIntent } from "../src/store/reports";
 import { migrationUrl } from "../scripts/migrate";
 import {
   linkStripeCustomer,
@@ -74,11 +76,112 @@ test("a release passes the owner URL in its own variable, checked, and an empty 
   }
 });
 
+test("0033 adds sample labels and a stored search vector, holds labels to the append-only guard, and rolls back to the 0032 shape", async () => {
+  const base = await migratedThrough(32);
+  const pg = await migratedThrough(32);
+  const post = await migratedThrough(33);
+  try {
+    const up = await drizzleSql("0033_sample_labels.sql");
+    const down = await drizzleSql("rollback/0033_sample_labels.sql");
+    await seedUsers(pg, "ranked");
+    // A sample saved before 0033, as the previous revision writes it.
+    await pg.exec(`INSERT INTO sample_kinds(user_id,id,report,label) VALUES ('ranked','k','email','reply');
+      INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json)
+      VALUES ('ranked','old','email','k','A fictional reply.','Thanks for the budget numbers.','{}');`);
+    const forward = async () => {
+      await pg.exec("BEGIN;" + up + "COMMIT;");
+      expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(post));
+    };
+    await forward();
+    // The earlier sample stays unlabeled and gains its search vector.
+    expect(
+      (
+        await pg.query(
+          "SELECT audience,purpose,register,search::text AS search FROM samples WHERE id='old'",
+        )
+      ).rows,
+    ).toEqual([
+      {
+        audience: null,
+        purpose: null,
+        register: null,
+        search: "'budget':7 'fiction':2 'number':8 'repli':3 'thank':4",
+      },
+    ]);
+    // Only listed labels are stored, and a stored label never changes.
+    await pg.exec(`INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,audience,purpose,register)
+      VALUES ('ranked','new','email','k','A fictional decline.','No, thank you.','{}','client','follow up','plain');`);
+    await expect(
+      pg.exec(`INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,audience)
+        VALUES ('ranked','bad','email','k','A fictional note.','Hello.','{}','investor');`),
+    ).rejects.toThrow("samples_labels");
+    await expect(
+      pg.exec(
+        "UPDATE samples SET retired_at=now(),retire_reason='removed',audience='boss' WHERE id='new'",
+      ),
+    ).rejects.toThrow("sample_is_append_only");
+    // A report read serves eight: label overlap with the intent, then
+    // full-text rank of the situation, then newest. Retired samples and other
+    // reports never compete.
+    const at = (day: number) => `'2026-01-0${day}T00:00:00Z'`;
+    await pg.exec(`INSERT INTO sample_kinds(user_id,id,report,label) VALUES ('ranked','c','chat','note');
+      INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,created_at,audience,purpose) VALUES
+      ('ranked','a','email','k','A fictional note.','See you soon.','{}',${at(1)},'client','thank'),
+      ('ranked','b','email','k','A fictional note.','Budget numbers attached.','{}',${at(2)},'client','thank'),
+      ('ranked','c','email','k','A fictional note.','Budget numbers attached.','{}',${at(3)},'boss','thank'),
+      ('ranked','d','email','k','A fictional note.','No budget this year.','{}',${at(4)},'client','decline'),
+      ('ranked','f','email','k','A fictional note.','Budget.','{}',${at(5)},NULL,NULL),
+      ('ranked','h','email','k','A fictional note.','Hello.','{}',${at(7)},NULL,NULL),
+      ('ranked','g','email','k','A fictional note.','Lunch?','{}',${at(8)},'other','other'),
+      ('ranked','e','email','k','A fictional note.','We moved house.','{}',${at(9)},'friend','announce'),
+      ('ranked','x','chat','c','A fictional note.','Budget numbers attached.','{}',${at(9)},'client','thank');
+      INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,created_at,audience,purpose,retired_at,retire_reason) VALUES
+      ('ranked','r','email','k','A fictional note.','Budget numbers attached.','{}',${at(6)},'client','thank',now(),'removed');`);
+    const store = fixtureStore(storeDatabase(pg), "ranked", "assistant");
+    const served = async (intent?: ReportIntent) => {
+      const documents = await store.readDocuments(intent);
+      const email = documents.reports.find((r) => r.id === "email")!;
+      return {
+        version: documents.version,
+        ids: email.samples.map((s) => s.id),
+      };
+    };
+    const intent = {
+      report: "email",
+      situation: "budget numbers for the client",
+      audience: "client",
+      purpose: "thank",
+    } as const;
+    const ranked = await served(intent);
+    expect(ranked.ids).toEqual(["b", "a", "c", "d", "new", "old", "f", "e"]);
+    // Without labels, full-text rank then recency decide: two matching words
+    // outrank one, and equal ranks go newest first.
+    expect(
+      (await served({ report: "email", situation: intent.situation })).ids,
+    ).toEqual(["old", "c", "b", "f", "d", "new", "e", "g"]);
+    // Without an intent, the newest eight; the version is the same either way.
+    const newest = await served();
+    expect(newest.ids).toEqual(["new", "old", "e", "g", "h", "f", "d", "c"]);
+    expect(newest.version).toBe(ranked.version);
+    await pg.exec(down);
+    expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(base));
+    expect(
+      (await pg.query("SELECT count(*)::int AS n FROM samples")).rows,
+    ).toEqual([{ n: 12 }]);
+    await forward();
+  } finally {
+    await post.close();
+    await pg.close();
+    await base.close();
+  }
+}, 30000);
+
 test("0032 widens the sample, accepted-change and receipt checks, raises the stored daily_calls and body_bytes, and rolls back refusing rows past the old caps", async () => {
   const base = await migratedThrough(31);
   const pg = await migratedThrough(31);
   const post = await migratedThrough(32);
   try {
+    await addSampleLabels(base, pg, post);
     const up = await drizzleSql("0032_raise_limits.sql");
     const down = await drizzleSql("rollback/0032_raise_limits.sql");
     await seedUsers(pg, "limits");
@@ -168,6 +271,7 @@ test("0031 drops tps_reports and its runtime grant, leaves every version and sav
   const pg = await migratedThrough(30);
   const post = await migratedThrough(31);
   try {
+    await addSampleLabels(base, pg, post);
     const up = await drizzleSql("0031_fingerprint_versions.sql");
     const down = await drizzleSql("rollback/0031_fingerprint_versions.sql");
     const acl = async (db: PGlite) =>
@@ -235,6 +339,7 @@ test("0030 drops the history cap, its byte triggers and users.retained_bytes, ke
   const pg = await migratedThrough(29);
   const post = await migratedThrough(30);
   try {
+    await addSampleLabels(base, pg, post);
     const up = await drizzleSql("0030_no_history_cap.sql");
     const down = await drizzleSql("rollback/0030_no_history_cap.sql");
     const store = fixtureStore(storeDatabase(pg), "cap", "assistant");
@@ -304,6 +409,7 @@ test("0029 deletes open claims, drops the two-phase receipt columns and claim tr
   const pg = await migratedThrough(28);
   const post = await migratedThrough(29);
   try {
+    await addSampleLabels(base, pg, post);
     await base.exec(preStep);
     const up = await drizzleSql("0029_one_transaction.sql");
     const down = await drizzleSql("rollback/0029_one_transaction.sql");
@@ -877,11 +983,13 @@ test("0024 runtime role saves through its grants, cannot change the schema or by
     expect(await grants(pg)).toEqual(await grants(post));
 
     await seedUsers(pg, "runtime");
-    // The store's trial gate reads 0027's columns, so the runtime checks below
-    // run with them in place; 0027 comes back out before 0024's rollback.
+    // The store's trial gate reads 0027's columns and its reads 0033's, so the
+    // runtime checks below run with them in place; both come back out, newest
+    // first, before 0024's rollback.
     await pg.exec(
       "BEGIN;" + (await drizzleSql("0027_stripe_billing.sql")) + "COMMIT;",
     );
+    await addSampleLabels(pg);
     // A login role in the group, as milton_app is in Neon. Membership
     // inherits: the session needs no SET ROLE milton_runtime. PGlite's session
     // user is a superuser, so SET ROLE stands in for logging in; what is checked
@@ -970,6 +1078,7 @@ test("0024 runtime role saves through its grants, cannot change the schema or by
     } finally {
       await pg.exec("RESET ROLE");
     }
+    await pg.exec(await drizzleSql("rollback/0033_sample_labels.sql"));
     await pg.exec(await drizzleSql("rollback/0027_stripe_billing.sql"));
 
     // Rollback refuses while a login role is still in the group.

@@ -2377,6 +2377,9 @@ test("report bullets require exact revision and complete text parity; optional l
                 context: "after a call",
                 body: "Hi <there>,\n\nThanks.",
                 date: "2026-11-02",
+                audience: "client",
+                purpose: "follow up",
+                register: null,
               },
             ],
             rules: ["- One.", "- Two\nlines."],
@@ -2389,7 +2392,7 @@ test("report bullets require exact revision and complete text parity; optional l
   );
   const titledPage = await titled.text();
   expect(titledPage).toContain(
-    '<section class="form-section"><h2>Email</h2><p class="applies">Applies when fictional.</p><p class="sub-label">Approved samples:</p><details class="form-sample"><summary><span class="box" aria-hidden="true">☑</span><span class="typed">After a call</span><span class="date">2026-11-02</span></summary><pre class="memo-text"><span>Hi &lt;there&gt;,\n\nThanks.</span></pre></details><p class="sub-label">Rules:</p><ol class="ruled"><li class="line"><span class="typed">One.</span></li><li class="line"><span class="typed">Two\nlines.</span></li></ol></section>',
+    '<section class="form-section"><h2>Email</h2><p class="applies">Applies when fictional.</p><p class="sub-label">Approved samples:</p><details class="form-sample"><summary><span class="box" aria-hidden="true">☑</span><span class="typed">After a call</span><span class="labels">client, follow up</span><span class="date">2026-11-02</span></summary><pre class="memo-text"><span>Hi &lt;there&gt;,\n\nThanks.</span></pre></details><p class="sub-label">Rules:</p><ol class="ruled"><li class="line"><span class="typed">One.</span></li><li class="line"><span class="typed">Two\nlines.</span></li></ol></section>',
   ); // A report without rules says how to ask for its setup.
   expect(titledPage).toContain(
     '<h2>Not set up yet</h2><p class="applies">Tell any connected assistant: set up my chat report.</p></section>',

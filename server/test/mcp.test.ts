@@ -2,6 +2,7 @@ import { sql, type SQL } from "drizzle-orm";
 import { expect, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { ToolListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { checkMcp, stubStore } from "../scripts/check-mcp";
@@ -103,7 +104,7 @@ test("an SDK client receives instructions, discovers the four tools, and reads t
     expect(
       tools.find((tool) => tool.name === "create_memo")?.description,
     ).toContain(
-      "every approved sample stays and reports serve the newest two per kind",
+      "every approved sample stays, and a report read serves the eight that best fit its intent",
     );
     const text = client.getInstructions();
     expect(text).toContain('"Did you get the memo?"');
@@ -136,6 +137,102 @@ test("an SDK client receives instructions, discovers the four tools, and reads t
   }
 });
 
+test("get_report requires an intent: without a well-formed one it refuses, saying what to send; with one the store ranks for it", async () => {
+  const calls: ToolCall[] = [];
+  const intents: unknown[] = [];
+  const stub = stubStore();
+  const server = createMiltonServer(
+    {
+      ...stub,
+      readDocuments: (intent) => {
+        intents.push(intent);
+        return stub.readDocuments();
+      },
+    },
+    (call) => calls.push(call),
+  );
+  const client = new Client({ name: "sdk-test", version: "0.0.0" });
+  let changed = 0;
+  client.setNotificationHandler(ToolListChangedNotificationSchema, () => {
+    changed++;
+  });
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
+  try {
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    const schema = (await client.listTools()).tools.find(
+      (tool) => tool.name === "get_report",
+    )!.inputSchema;
+    expect(schema.required).toEqual(["report_id", "intent"]);
+    const refused = async (args: Record<string, unknown>) => {
+      const reply = await client.callTool({
+        name: "get_report",
+        arguments: args,
+      });
+      expect(reply.isError).toBe(true);
+      const refusal = JSON.parse((reply.content as [{ text: string }])[0].text);
+      expect(refusal.error).toBe("invalid_input");
+      return String(refusal.message);
+    };
+    // A client holding the old schema sends no intent: say what to send and
+    // to reconnect, and tell it the tool list changed.
+    const missing = await refused({ report_id: "email" });
+    expect(missing).toContain(
+      "reconnect your assistant if it has no intent field",
+    );
+    expect(missing).toContain('"confirming what is on file"');
+    expect(changed).toBe(1);
+    // A malformed intent names the limit it broke, without the reconnect hint.
+    for (const [intent, says] of [
+      [
+        { situation: " " },
+        "situation must be one line of at most 200 characters",
+      ],
+      [
+        { situation: "x".repeat(201) },
+        "situation must be one line of at most 200 characters",
+      ],
+      [
+        { situation: "a reply", audience: "investor" },
+        "audience must be one of client, boss, colleague, friend, public, other",
+      ],
+    ] as const) {
+      const message = await refused({ report_id: "email", intent });
+      expect(message).toBe(`get_report intent: ${says}. Nothing was read.`);
+    }
+    expect(intents).toEqual([]);
+    expect(changed).toBe(1);
+    expect(calls.map((c) => [c.outcome, c.error_code])).toEqual(
+      Array(4).fill(["refused", "invalid_input"]),
+    );
+    const read = await client.callTool({
+      name: "get_report",
+      arguments: {
+        report_id: "doc",
+        intent: {
+          situation: "declining a client's request for a discount",
+          audience: "client",
+          purpose: "decline",
+        },
+      },
+    });
+    expect(read.isError).toBeUndefined();
+    expect(changed).toBe(1);
+    expect(intents).toEqual([
+      {
+        report: "document",
+        situation: "declining a client's request for a discount",
+        audience: "client",
+        purpose: "decline",
+      },
+    ]);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
 test("two authenticated clients isolate tenants, save once and reject retired tools", async () => {
   const local = await localStore();
   const clients: Client[] = [];
@@ -152,8 +249,14 @@ test("two authenticated clients isolate tenants, save once and reject retired to
       },
       fixture.verify,
     );
+    // tools/list_changed notifications each client received.
+    const changed = [0, 0];
     for (const subject of ["alpha", "beta"]) {
       const client = new Client({ name: "claimed-client", version: "0.0.0" });
+      const i = clients.length;
+      client.setNotificationHandler(ToolListChangedNotificationSchema, () => {
+        changed[i]!++;
+      });
       clients.push(client);
       await client.connect(
         new StreamableHTTPClientTransport(new URL(resource), {
@@ -231,8 +334,12 @@ test("two authenticated clients isolate tenants, save once and reject retired to
     expect(
       discovered.find((t) => t.name === "create_memo")?.description,
     ).toContain("Change a rule only through exact_edits, never by adding one");
+    // Connecting and listing tools announce nothing; each assistant's first
+    // tool call after this process started does, and only that one.
+    expect(changed).toEqual([0, 0]);
     const first = (await call(0, "get_cover_sheet")).value;
     const second = (await call(1, "get_cover_sheet")).value;
+    expect(changed).toEqual([1, 1]);
     expect(first.text).toBe("");
     expect(second.text).toBe("");
     // An empty account carries the first-setup script; it leaves after the first save.
@@ -298,7 +405,12 @@ test("two authenticated clients isolate tenants, save once and reject retired to
       ],
     });
     // Reports read by id (doc is an alias); an empty one is a heading and a when line.
-    const document = (await call(0, "get_report", { report_id: "doc" })).value;
+    const document = (
+      await call(0, "get_report", {
+        report_id: "doc",
+        intent: { situation: "confirming what is on file" },
+      })
+    ).value;
     expect(document).toMatchObject({
       report_id: "document",
       is_empty: true,
@@ -319,11 +431,21 @@ test("two authenticated clients isolate tenants, save once and reject retired to
       (
         await clients[0]!.callTool({
           name: "get_report",
-          arguments: { report_id: "memo" },
+          arguments: {
+            report_id: "memo",
+            intent: { situation: "confirming what is on file" },
+          },
         })
       ).isError,
     ).toBe(true);
     expect((await call(1, "get_cover_sheet")).value.text).toBe("");
+    expect(changed).toEqual([1, 1]);
+    // A get_report from a client holding the schema before intent is refused
+    // and told again that the tool list changed.
+    expect(
+      (await call(0, "get_report", { report_id: "email" })).value.error,
+    ).toBe("invalid_input");
+    expect(changed).toEqual([2, 1]);
     expect(
       (
         await call(1, "create_memo", {

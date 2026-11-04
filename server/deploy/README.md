@@ -1156,3 +1156,53 @@ are not recorded. Rule bodies over 32768 bytes stay; the old cap applies only to
 versions. The 0032 journal row stays, so re-forwarding means running
 `0032_raise_limits.sql` by hand, as one transaction that stops on the first error:
 `psql -1 -v ON_ERROR_STOP=1 -f server/drizzle/0032_raise_limits.sql`.
+
+## Sample labels (0033)
+
+Migration 0033 is additive and ships in its own release, after the 0028-0032 release is
+done. It adds three optional labels to `samples` (`audience`, `purpose`, `register`:
+nullable text held to fixed lists by one check, `samples_labels`), a stored generated
+`tsvector` column `search` over context and body, and the labels to the append-only guard
+`milton_sample_guard`. No GIN index: a report read ranks every active sample of one report
+and filters on no text match. Existing samples stay unlabeled; there is no backfill. The
+runtime role needs no grant change (its table grants cover new columns).
+
+**Order: migration first, then code.** The previous revision names every column it reads
+and writes, so it runs on the 0033 schema unchanged. The 0033 code reads the labels and
+`search` on every read, so it fails on the 0032 schema; there is no feature check.
+
+1. Take a Neon snapshot.
+2. Run the normal runner once: `bun run --cwd server db:migrate`. 0033 locks `samples` in
+   ACCESS EXCLUSIVE mode and rewrites it once to fill `search`; reads and saves wait while
+   it runs. On a lock timeout, rerun it; it rolls back as a whole.
+3. Check the result with the owner connection. Expect `unlabeled` equal to `samples` and
+   `unsearched` 0.
+
+   ```sql
+   SELECT count(*)::int AS samples,
+     count(*) FILTER (WHERE audience IS NULL AND purpose IS NULL AND register IS NULL)::int AS unlabeled,
+     count(*) FILTER (WHERE search IS NULL)::int AS unsearched
+   FROM samples;
+   ```
+
+4. Smoke test the running (previous) revision through MCP as `milton_app`: a read and a
+   save.
+5. Ship MCP and app from the same image. Wait until both serve 100% and the old revisions
+   are idle.
+6. Smoke test through MCP: `get_report` with an intent, `get_report` without one (refused
+   as `invalid_input`), a save with a labeled sample, then `get_report` again.
+
+**First save after the code release.** The version now covers every active sample and
+reports serve eight per report, so versions change form for accounts with samples: a
+client holding an older version gets one ordinary `conflict` on its next save, rereads
+and saves. Clients that cached the old `get_report` schema are refused with
+`invalid_input` until they refresh it.
+
+**Rollback order.** Code first, then schema. Code rolls back by traffic alone at any time:
+the previous revision runs on the 0033 schema. Only after traffic is off the 0033 code,
+run `server/drizzle/rollback/0033_sample_labels.sql` offline with writers stopped. It
+restores the guard and drops the check and the four columns. Labels saved since 0033 leave
+the table; every save's request in `accepted_changes` and `save_requests` still records the
+labels it sent. The 0033 journal row stays, so re-forwarding means running
+`0033_sample_labels.sql` by hand, as one transaction that stops on the first error:
+`psql -1 -v ON_ERROR_STOP=1 -f server/drizzle/0033_sample_labels.sql`.

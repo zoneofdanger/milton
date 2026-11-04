@@ -183,16 +183,22 @@ only after success. Empty accounts retain first-setup approval; errors and acces
 failures must be reported honestly. Quoting or discussing the phrase does not invoke
 it, and the cue grants no save or session-capture consent. This is assistant
 guidance, not a text listener or a guarantee that every client will call the tool.
-Clients may need to reconnect to load updated guidance.
+Clients may need to reconnect to load updated guidance. To refresh tool schemas without
+one, each assistant's (account and OAuth client) first tool call that a server process
+serves carries `notifications/tools/list_changed` on that call's response stream, ahead
+of the result, and so does every `get_report` refused for a missing intent. The server is
+stateless and has no open stream to push on, so a connected client hears of a release at
+its next call; the set of announced assistants is per process, in memory, and cleared at
+10,000, so a client may refresh again after a restart or on another instance.
 
 Exactly four tools are exposed:
 
-| Tool                                                     | Contract                                                                                                                                                                                                                                                                                                                                                                                |
-| -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `get_cover_sheet()`                                      | Returns `{text, version, is_empty, reports}`: the rules true of all writing, the save fence, whether the whole account is empty, and the index of five reports with their situations; while no rules exist yet (samples do not count), `setup` carries the first-setup script. No model call, no write.                                                                                 |
-| `get_report({report_id})`                                | One of `email`, `chat`, `post`, `document` (`doc` accepted), `speech`. Returns `{report_id, text, version, is_empty, samples}`: heading, when line, the newest two samples of each kind newest first, then rules; see below for `samples`. While the report has no rules, `setup` carries that report's setup block, with the cover-sheet questions while the cover sheet has no rules. |
-| `list_reports()`                                         | All five reports as `{reports: [{report_id, text, is_empty, samples, setup?}], version}`, without the cover sheet; a report without rules has a one-line `setup` pointer to `get_report`.                                                                                                                                                                                               |
-| `create_memo({text, request_id, expected_version, ...})` | An exact save with at least one of `rules`, `exact_edits`, `moves`, `sample`, `retire_samples`; `text` states its purpose. UUID for the logical request and version from the cover sheet.                                                                                                                                                                                               |
+| Tool                                                     | Contract                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `get_cover_sheet()`                                      | Returns `{text, version, is_empty, reports}`: the rules true of all writing, the save fence, whether the whole account is empty, and the index of five reports with their situations; while no rules exist yet (samples do not count), `setup` carries the first-setup script. No model call, no write.                                                                                                                                                                                                                                       |
+| `get_report({report_id, intent})`                        | One of `email`, `chat`, `post`, `document` (`doc` accepted), `speech`, and a required `intent`: `{situation, audience?, purpose?}`. Returns `{report_id, text, version, is_empty, samples}`: heading, when line, the eight samples that best fit the intent, best first, then rules; see below for `samples`. Without a well-formed intent it refuses with `invalid_input`, saying what to send. While the report has no rules, `setup` carries that report's setup block, with the cover-sheet questions while the cover sheet has no rules. |
+| `list_reports()`                                         | All five reports as `{reports: [{report_id, text, is_empty, samples, setup?}], version}`, without the cover sheet, each with its newest eight samples; a report without rules has a one-line `setup` pointer to `get_report`.                                                                                                                                                                                                                                                                                                                 |
+| `create_memo({text, request_id, expected_version, ...})` | An exact save with at least one of `rules`, `exact_edits`, `moves`, `sample`, `retire_samples`; `text` states its purpose. UUID for the logical request and version from the cover sheet.                                                                                                                                                                                                                                                                                                                                                     |
 
 `create_memo` returns `saved`, `unchanged`, `conflict`, or `failed`,
 with the request ID and relevant version/error.
@@ -265,7 +271,12 @@ snapshot and commits together or not at all. `moves` is `[{before, report}]`
 (1-500): `before` is verbatim text identifying one rule, as for `exact_edits`, and
 `report` is a report or `cover`. A move to the rule's current place is a no-op; an
 unresolvable or repeated move, or a move of a rule the same save removes, fails with
-`move_conflict`. `sample` is `{report, kind_id | new_kind, context, text, replaces?}`.
+`move_conflict`. `sample` is `{report, kind_id | new_kind, context, audience?, purpose?,
+register?, text, replaces?}`. The labels come from fixed lists (audience: client, boss,
+colleague, friend, public, other; purpose: decline, ask, thank, update, announce,
+apologize, introduce, follow up, other; register: formal, plain, casual); any other value
+is refused as `invalid_input`. They are stored as sent and never interpreted beyond
+equality (0033).
 `kind_id` must name a kind in that report. A `new_kind` whose label already exists
 there, in any letter case, files under that kind (including a kind whose samples are
 all retired, which reads no longer list); otherwise it creates one. `replaces` names an active sample of the
@@ -277,8 +288,9 @@ retires it); a
 save that then changes nothing returns `unchanged` and charges nothing.
 Sample errors fail with `sample_conflict`. A `saved` result carries
 `samples_retired: [{id, reason}]` whenever a sample was retired, and replay returns
-it unchanged. Reports serve the newest two active samples of each kind, and report
-reads list each served sample as `{id, kind_id, kind, context, date}`, newest first;
+it unchanged. A report read serves eight active samples (see "Sample labels and ranking
+(0033)"), and report reads list each served sample as `{id, kind_id, kind, context,
+date}`, plus each label it has, in served order;
 kind labels never appear in report text.
 
 The assistant offers first setup once when empty, uses available explicit
@@ -444,7 +456,7 @@ line, the `body` exactly as submitted, the filing client, and `retired_at`. A gu
 makes the table append-only: the only update sets `retired_at` once, and rows leave
 only with their account. Filing a sample through `create_memo` with the `sample` field
 makes no model call and reserves no budget. Every approved sample stays active until
-the person replaces or removes it; reports serve the newest two per kind.
+the person replaces or removes it; a report read serves eight.
 
 Assembly is deterministic and runs on read. Every rule prints as one bullet: `- `
 followed by its stored body, with one stored leading `- ` (as the retired compiler
@@ -453,19 +465,21 @@ rule whose own text starts with `- ` (stored as sent) prints as a plain bullet, 
 reader cannot tell that dash is content. Stored cards are not
 edited. The cover sheet is the cover-sheet rules joined by blank lines; the fixed
 report index (one "when" line per report) travels beside it as data. Each report
-prints `# Title`, its when line, the newest two active samples of each kind, newest
-first (a context line with
+prints `# Title`, its when line, eight active samples, ranked for the read's intent or
+else newest first (a context line with
 the date, then the body quoted with `>`), then its rules. The full text (TPS.md and
-the web page) is the cover sheet plus every non-empty report.
+the web page) is the cover sheet plus every non-empty report. The web page lists each
+sample by its context line, its labels when it has any, and its date (0033).
 
 A read takes the card heads, the active samples and the account's status in one
 statement, without a transaction or lock, so a concurrent save shows whole or not at
 all; it writes nothing. An assistant read adds the trial gate: two queries and no
 database connection, where the read before 0031 opened a connection and a transaction
 with the account lock and wrote a lagging snapshot. The version every
-read returns and every save fences on is a fingerprint of what is served: SHA-256 of
-the user ID, the cover sheet, and each report's text with its samples' IDs, kind IDs
-and kind labels. The same cards and samples always give the same version, an empty
+read returns and every save fences on is a fingerprint of what any read can serve:
+SHA-256 of the user ID, the cover sheet, and each report's text (its newest eight) with
+every active sample's ID, kind ID and kind label (0033; before, only the served ones), so
+it is the same for every intent. The same cards and samples always give the same version, an empty
 account included, and a save that changes what is served changes it. Versions from
 before 0031 hashed a stored revision, so a client holding one conflicts once on its
 next save (`conflict` with the current version), rereads and saves normally.
@@ -586,6 +600,46 @@ Migration 0010 is additive and copies no legacy request text. Its inverse parks 
 foreign keys, immutability guards and byte charges in `milton_rollback`; forward migration
 restores them exactly. Stop writers during schema rollback and keep them stopped until
 forward recovery: an older runtime cannot guarantee provenance for new saves.
+
+### Sample labels and ranking (0033)
+
+A report read serves eight samples per report, chosen for the assistant's intent.
+`get_report` requires `intent: {situation, audience?, purpose?}`: `situation` is one line
+(at most 200 characters); `audience` and `purpose` come from the sample label lists. One
+statement, the same one that reads the cards and samples, ranks the report's active
+samples:
+
+```sql
+SELECT s.id, row_number() OVER (ORDER BY
+    COALESCE(s.audience = $audience, false)::int
+      + COALESCE(s.purpose = $purpose, false)::int DESC,
+    ts_rank(s.search, q.q) DESC, s.created_at DESC, s.id) AS n
+FROM samples s,
+  (SELECT replace(plainto_tsquery('english', $situation)::text, '&', '|')::tsquery AS q) q
+WHERE s.user_id = $user AND s.report = $report AND s.retired_at IS NULL
+ORDER BY n LIMIT 8
+```
+
+The tsquery matches any word of the situation, as the ranking test did. Unlabeled
+samples (all from before 0033) rank by full text and recency only. Without an intent
+(`list_reports`, the web page, `TPS.md`) a report serves its newest eight. The version
+covers every active sample, so it is the same for every intent. A `get_report` without
+a well-formed intent is refused with `invalid_input` before the store is read. With no
+intent, the message says what to send and to reconnect the assistant if it has no intent
+field; with a malformed one, it names each limit broken (situation must be one line of at
+most 200 characters, or the audience or purpose list) and gives no reconnect hint.
+Every active sample's ID now enters the version, and reports serve eight per report
+rather than two per kind, so a client holding a version from before this release
+conflicts once on its next save, rereads and saves.
+
+Migration 0033 adds three optional labels to `samples`, `audience`, `purpose` and
+`register`, nullable text held to fixed lists by the check `samples_labels`, and `search`,
+a stored generated `tsvector` of context and body, computed once on insert. The
+append-only guard holds the labels like every other stored field. Earlier samples stay
+unlabeled; nothing is backfilled. It is additive, so the migration ships before the code
+that reads it. See [the hosting runbook](deploy/README.md#sample-labels-0033).
+`drizzle/rollback/0033_sample_labels.sql` restores the guard and drops the check and the
+four columns.
 
 ### Limits (0032)
 

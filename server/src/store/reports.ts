@@ -45,6 +45,38 @@ export const REPORTS: { id: ReportId; title: string; when: string }[] = [
 export const resolveReportId = (id: string): ReportId | undefined =>
   id === "doc" ? "document" : REPORT_IDS.find((known) => known === id);
 
+/** Labels an assistant may give a sample when saving it, and audience and
+ * purpose when reading a report. Stored as sent and compared for equality only. */
+export const AUDIENCES = [
+  "client",
+  "boss",
+  "colleague",
+  "friend",
+  "public",
+  "other",
+] as const;
+export const PURPOSES = [
+  "decline",
+  "ask",
+  "thank",
+  "update",
+  "announce",
+  "apologize",
+  "introduce",
+  "follow up",
+  "other",
+] as const;
+export const REGISTERS = ["formal", "plain", "casual"] as const;
+
+/** What a report read is for: the report, one line on the situation, and the
+ * audience and purpose when the assistant knows them. */
+export type ReportIntent = {
+  report: ReportId;
+  situation: string;
+  audience?: (typeof AUDIENCES)[number];
+  purpose?: (typeof PURPOSES)[number];
+};
+
 export type Sample = {
   id: string;
   report: ReportId;
@@ -57,6 +89,10 @@ export type Sample = {
   date: string;
   /** Full UTC timestamp, for ordering only. */
   created_at: string;
+  /** Labels the saving assistant chose; null when it sent none (0033). */
+  audience: (typeof AUDIENCES)[number] | null;
+  purpose: (typeof PURPOSES)[number] | null;
+  register: (typeof REGISTERS)[number] | null;
 };
 export type ReportDocument = {
   id: ReportId;
@@ -110,31 +146,31 @@ const coverSheetText = (active: CardHead[]) =>
     ...rules(active, "cover").map(bullet),
   ].join("\n\n");
 const reportIndex = () => REPORTS.map((r) => ({ id: r.id, when: r.when }));
-/** Samples served per kind; every active sample stays stored. */
-const SERVED_PER_KIND = 2;
-/** Heading, the when line, the newest two samples of each kind, newest first
- * (context line, quoted body), then rules as bullets. Every stored byte of a
- * rule or sample is preserved, apart from one leading "- " a bullet replaces. */
+/** Samples a report serves; every active sample stays stored. */
+export const SERVED_SAMPLES = 8;
+/** Heading, the when line, the served samples (context line, quoted body),
+ * then rules as bullets. The served samples are `ranked`, in that order, when a
+ * read ranked them for an intent; otherwise the newest eight, newest first.
+ * Every stored byte of a rule or sample is preserved, apart from one leading
+ * "- " a bullet replaces. */
 function reportDocument(
   report: (typeof REPORTS)[number],
   active: CardHead[],
   samples: Sample[],
+  ranked?: string[],
 ): ReportDocument {
-  const served = new Map<string, number>();
-  const own = samples
-    .filter((s) => s.report === report.id)
-    .sort((a, b) =>
-      a.created_at === b.created_at
-        ? b.id.localeCompare(a.id)
-        : a.created_at < b.created_at
-          ? 1
-          : -1,
-    )
-    .filter((s) => {
-      const count = served.get(s.kind_id) ?? 0;
-      served.set(s.kind_id, count + 1);
-      return count < SERVED_PER_KIND;
-    });
+  const mine = samples.filter((s) => s.report === report.id);
+  const own = ranked
+    ? ranked.flatMap((id) => mine.filter((s) => s.id === id))
+    : mine
+        .sort((a, b) =>
+          a.created_at === b.created_at
+            ? b.id.localeCompare(a.id)
+            : a.created_at < b.created_at
+              ? 1
+              : -1,
+        )
+        .slice(0, SERVED_SAMPLES);
   const parts = [
     `# ${report.title}`,
     `Applies when ${report.when}.`,
@@ -151,12 +187,22 @@ function reportDocument(
     rules: rules(active, report.id),
   };
 }
+/** The cover sheet and the five reports. `ranked` replaces one report's newest
+ * eight with the samples a read ranked for its intent. */
 export function assembleDocuments(
   active: CardHead[],
   samples: Sample[],
+  ranked?: { report: ReportId; ids: string[] },
 ): Documents {
   const cover = coverSheetText(active);
-  const reports = REPORTS.map((r) => reportDocument(r, active, samples));
+  const reports = REPORTS.map((r) =>
+    reportDocument(
+      r,
+      active,
+      samples,
+      r.id === ranked?.report ? ranked.ids : undefined,
+    ),
+  );
   return {
     cover,
     cover_rules: rules(active, "cover"),

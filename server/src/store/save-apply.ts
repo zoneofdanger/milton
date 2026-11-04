@@ -205,8 +205,8 @@ export async function applySave(
     }
     if (duplicate !== undefined) return;
     // Every approved sample stays until the person retires or replaces it.
-    await tx.query(sql`INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,replaces_id)
-        VALUES (${userId},${randomUUID()},${report},${kindId},${sample.context},${sample.text},${attribution},${sample.replaces ?? null})`);
+    await tx.query(sql`INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,replaces_id,audience,purpose,register)
+        VALUES (${userId},${randomUUID()},${report},${kindId},${sample.context},${sample.text},${attribution},${sample.replaces ?? null},${sample.audience ?? null},${sample.purpose ?? null},${sample.register ?? null})`);
   };
   const known = new Map(current.active.map((h) => [h.id, h]));
   // A rule cannot be moved and retired at once, including by an exact

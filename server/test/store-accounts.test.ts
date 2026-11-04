@@ -316,7 +316,12 @@ async function tenantPair(local: Awaited<ReturnType<typeof localStore>>) {
     const everything = async () =>
       JSON.stringify([
         read(await tools.get_cover_sheet()),
-        read(await tools.get_report({ report_id: "email" })),
+        read(
+          await tools.get_report({
+            report_id: "email",
+            intent: { situation: "confirming what is on file" },
+          }),
+        ),
         read(await tools.list_reports()),
       ]);
     return { id: auth.userId, tools, version, everything };
@@ -743,7 +748,10 @@ test("closing an account refuses its reads, saves and replays, fences a pending 
     const refusals = async () => {
       for (const result of [
         await alpha.tools.get_cover_sheet(),
-        await alpha.tools.get_report({ report_id: "email" }),
+        await alpha.tools.get_report({
+          report_id: "email",
+          intent: { situation: "confirming what is on file" },
+        }),
         await alpha.tools.list_reports(),
         await alpha.tools.create_memo({
           ...emailRule("- Fresh after closing."),

@@ -9,7 +9,13 @@ import {
   type Filing,
 } from "../src/store/reports";
 import { setupCatalog, setupHint } from "../src/store/setup";
-import { coverSheet, reportEnvelope, reportList } from "../src/store/tools";
+import {
+  coverSheet,
+  missingIntent,
+  reportEnvelope,
+  reportInput,
+  reportList,
+} from "../src/store/tools";
 import { subscriptionRequired, trialEndingMessage } from "../src/store/trials";
 
 // Fields every save carries, as the instructions name them.
@@ -72,6 +78,9 @@ test("setup renders from its catalog, per report while empty, within 32 KB", () 
           body: "A fictional email.",
           date: "2026-11-02",
           created_at: "2026-11-02T00:00:00.000000Z",
+          audience: null,
+          purpose: null,
+          register: null,
         },
       ],
     ),
@@ -221,7 +230,7 @@ test("every create_memo shape the server instructions describe parses against sa
     ],
   });
   says(
-    "call create_memo with sample (report; kind_id from get_report, or new_kind only if none fits; context; text exactly as approved)",
+    "call create_memo with sample (report; kind_id from get_report, or new_kind only if none fits; context; audience, purpose and register; text exactly as approved)",
   );
   for (const kind of [{ kind_id: "fictional-kind" }, { new_kind: "follow-up" }])
     parses({
@@ -230,6 +239,9 @@ test("every create_memo shape the server instructions describe parses against sa
         report: "email",
         ...kind,
         context: "A fictional situation.",
+        audience: "client",
+        purpose: "follow up",
+        register: "plain",
         text: "A fictional email.",
       },
     });
@@ -255,6 +267,20 @@ test("every create_memo shape the server instructions describe parses against sa
       { before: "Another fictional rule.", after: "" },
     ],
   });
+  // The read the instructions, the tool description and the refusal describe.
+  says(
+    "get_report for each matching report with intent: one line on the situation, plus audience and purpose",
+  );
+  for (const situation of [
+    "declining a client's request for a discount",
+    between(missingIntent, 'such as "', '"'),
+  ])
+    expect(
+      reportInput.safeParse({
+        report_id: "email",
+        intent: { situation, audience: "client", purpose: "decline" },
+      }).error?.issues ?? [],
+    ).toEqual([]);
   says("pass moves: before verbatim from the rule and its new report");
   parses({
     ...envelope(),

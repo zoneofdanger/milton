@@ -90,6 +90,11 @@ export function createMiltonHandler(
   verify: AccessTokenVerifier = createAccessTokenVerifier(config),
   log: (call: ToolCall) => void = (call) => console.info(JSON.stringify(call)),
 ) {
+  // Assistants (account and OAuth client) this process has served a tool call.
+  // Each one's first tool call after startup carries tools/list_changed, so a
+  // client still holding the tool schemas from before a release refreshes
+  // them. Memory only, bounded; a cleared or restarted set announces again.
+  const announced = new Set<string>();
   return async (request: Request): Promise<Response> => {
     const refusal = validateMcpTransport(request, config);
     if (refusal) return refusal;
@@ -137,12 +142,22 @@ export function createMiltonHandler(
         issuer: identity.issuer,
         clientId: identity.clientId,
       });
-      const sdk = createMcpHandler(() => createMiltonServer(store, emit), {
-        legacy: "stateless",
-        maxSubscriptions: 0,
-        keepAliveMs: 0,
-        maxRequestBodySize: MAX_REQUEST_BYTES,
-      });
+      const assistant = `${auth.userId}\n${identity.clientId}`;
+      const announce = call.success && !announced.has(assistant);
+      if (announce) {
+        if (announced.size >= 10_000) announced.clear();
+        announced.add(assistant);
+      }
+      const sdk = createMcpHandler(
+        () =>
+          createMiltonServer(store, emit, { announceToolsChanged: announce }),
+        {
+          legacy: "stateless",
+          maxSubscriptions: 0,
+          keepAliveMs: 0,
+          maxRequestBodySize: MAX_REQUEST_BYTES,
+        },
+      );
       const result = await sdk.fetch(bounded);
       if (result.status >= 400)
         recordFailure(

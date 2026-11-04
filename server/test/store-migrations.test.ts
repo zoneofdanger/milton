@@ -7,6 +7,7 @@ import {
 } from "./local-store";
 import { fixtureStore, seedUsers } from "./store-fixtures";
 import { checkRuntimeRole } from "../scripts/check-runtime-role";
+import { migrationUrl } from "../scripts/migrate";
 import {
   linkStripeCustomer,
   lockStripeCustomer,
@@ -54,6 +55,21 @@ const schemaCatalog = async (pg: PGlite) => {
     ),
   };
 };
+
+test("a release passes the owner URL in its own variable, checked, and an empty one is refused", async () => {
+  const url = "postgresql://owner:fixture@db.example.invalid/milton";
+  expect(await migrationUrl({ MILTON_OWNER_DATABASE_URL: url })).toBe(url);
+  for (const bad of [
+    "",
+    "postgresql://owner:fixture@db.example.invalid/other",
+  ]) {
+    const refused = migrationUrl({ MILTON_OWNER_DATABASE_URL: bad });
+    await expect(refused).rejects.toMatchObject({ code: "configuration" });
+    expect(String(await refused.catch((error) => error.message))).not.toContain(
+      "fixture",
+    );
+  }
+});
 
 test("0027 adds the Stripe ledger and subscription columns, marks returning deleted identities canceled, the runtime applies an event once, and rollback refuses until nothing is recorded", async () => {
   const base = await migratedThrough(26);

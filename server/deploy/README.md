@@ -448,6 +448,18 @@ fails with a 503. Both services must move: an older MCP revision keeps gating on
 clock. The three `STRIPE_*` settings go on the app service only; all three or none, since a
 partial or malformed set stops the app at startup.
 
+To apply 0027, from a checkout of the released commit, with the owner connection in the
+environment and never on a command line:
+
+```sh
+read -rs MILTON_OWNER_DATABASE_URL
+export MILTON_OWNER_DATABASE_URL
+bun run --cwd server db:migrate
+unset MILTON_OWNER_DATABASE_URL
+```
+
+It refuses any database but `milton` and any role but `neondb_owner`, and prints no URL.
+
 **Rollback boundary.** Before trials are on, code rolls back by traffic alone. Once trials are
 on there is no traffic rollback to a pre-billing image: it gates on the retired clock and
 refuses paying customers. Recover forward. `server/drizzle/rollback/0027_stripe_billing.sql`

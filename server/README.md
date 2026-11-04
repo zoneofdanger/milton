@@ -107,7 +107,7 @@ Put the database connection string under `DATABASE_URL` in the ignored `server/.
 bun run db:migrate
 ```
 
-This command explicitly reads `.dev.vars`. It does not use `.env.local` or an inherited `DATABASE_URL`. It checks the database name and owner role, then applies pending migrations and records them in the Drizzle journal. Rerunning it applies only migrations that have not completed. Run one migration process at a time.
+This command explicitly reads `.dev.vars`, unless a release sets `MILTON_OWNER_DATABASE_URL` to the owner connection, which it then uses instead. It does not use `.env.local` or an inherited `DATABASE_URL`. It checks the database name and owner role, then applies pending migrations and records them in the Drizzle journal. Rerunning it applies only migrations that have not completed. Run one migration process at a time.
 
 The migrations create the application tables defined in `src/store/schema.ts`.
 Every successful sign-in creates or finds its account; there is no sign-up setting (0025).

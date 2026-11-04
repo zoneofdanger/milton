@@ -336,6 +336,8 @@ Files: `packages/theme/`, `server/scripts/`, `.github/workflows/checks.yml`.
 
 - A shared theme supplies fonts, favicons, and tokens, with a WCAG contrast test.
 - `migrate.ts` runs only against the `milton` database as `neondb_owner`.
+- It takes the owner connection from `MILTON_OWNER_DATABASE_URL` for a release, otherwise
+  from `server/.dev.vars`, and never from an inherited `DATABASE_URL`.
 - `check-mcp` confirms the instructions, exactly four tools, and a read, without saving.
 - `check-runtime-role` confirms a connection has no elevated rights.
 - `probe-forms` confirms a signed-out form post passes CSRF.

@@ -194,8 +194,7 @@ Exactly four tools are exposed:
 | `create_memo({text, request_id, expected_version, ...})` | An exact save with at least one of `rules`, `exact_edits`, `moves`, `sample`, `retire_samples`; `text` states its purpose. UUID for the logical request and version from the cover sheet.                                                                                                                                                                   |
 
 `create_memo` returns `saved`, `unchanged`, `conflict`, `in_progress`, or `failed`,
-with the request ID and relevant version/error. (`needs_clarification` appears only
-in receipts saved before saves became model-free; their replay returns it unchanged.)
+with the request ID and relevant version/error.
 `saved` confirms a committed write; `unchanged` confirms no write. Neither alone
 proves the requested meaning is on file: reread the cover sheet or report and compare it
 with the requested change before confirming that. Reuse the exact same

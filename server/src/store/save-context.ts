@@ -9,12 +9,10 @@ export const retiredSample = z.object({
   id: z.string(),
   reason: z.enum(["replaced", "removed", "evicted"]),
 });
-// Stored receipts may hold needs_clarification from the retired model path.
 export const outcomeSchema = z.object({
   status: z.enum([
     "saved",
     "unchanged",
-    "needs_clarification",
     "conflict",
     "in_progress",
     "failed",

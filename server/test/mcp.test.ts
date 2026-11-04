@@ -95,9 +95,15 @@ test("an SDK client receives instructions, discovers the four tools, and reads t
     // Assistants see cover sheet and reports, never the retired TPS name.
     for (const served of [client.getInstructions(), ...tools])
       expect(JSON.stringify(served)).not.toMatch(/TPS|tps_report/);
-    // Nothing served mentions the retired memo-update allowance.
+    // Nothing served mentions the retired memo-update allowance, or the
+    // retired automatic sample retirement.
     expect(JSON.stringify([client.getInstructions(), tools])).not.toMatch(
-      /memo.update|counts once/i,
+      /memo.update|counts once|retires the oldest|newest two per kind kept/i,
+    );
+    expect(
+      tools.find((tool) => tool.name === "create_memo")?.description,
+    ).toContain(
+      "every approved sample stays and reports serve the newest two per kind",
     );
     const text = client.getInstructions();
     expect(text).toContain('"Did you get the memo?"');

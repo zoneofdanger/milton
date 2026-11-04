@@ -15,11 +15,11 @@ report and sends its exact approved wording, and Milton stores those bytes. Comp
 instructions, including conditions and exceptions, are independently versioned cards. Each card belongs to one of five fixed
 reports (`email`, `chat`, `post`, `document`, `speech`) or to the cover sheet, the
 rules true of all writing. Approved samples are stored exactly as sent in their own
-append-only table, newest per kind winning and at most two per kind staying active.
+append-only table; every approved sample stays, and reports serve the newest two per kind.
 Assembly is deterministic and runs on read: the cover sheet is its rules in
 write-once insertion order, after one fixed note on the `Baseline: ` prefix while any
 active rule carries it; each report prints its heading, its when line, its
-samples newest first, then its rules (0017). Every rule prints as one bullet, with
+newest two samples of each kind, newest first, then its rules (0017). Every rule prints as one bullet, with
 one stored leading `- ` dropped first so rules filed by the retired compiler and rules
 stored as sent read alike. Card text cannot contain Markdown
 headings. The version is a fingerprint of the assembled cover sheet and reports
@@ -31,8 +31,8 @@ an explicit `moves` entry appends a version that keeps the card's identity, text
 history; no card moves to tidy up. Samples belong to stable, immutable
 kinds named once per report; assistants reuse a `kind_id` from `get_report` and use
 `new_kind` only when none fits. `replaces` and `retire_samples` retire samples on
-request; every retirement, including the automatic newest-two-per-kind eviction, is
-reported in `samples_retired` and recorded with its reason and request. Kind labels
+request, and nothing retires a sample automatically; every retirement is reported in
+`samples_retired` and recorded with its reason and request. Kind labels
 stay out of report text.
 
 Embeddings, advisory card graphs, task-aware retrieval and observation-only gardening

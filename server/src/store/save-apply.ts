@@ -143,7 +143,7 @@ export async function applySave(
           WHERE user_id=${userId} AND id=${id} AND retired_at IS NULL ${kindId === undefined ? sql`` : sql`AND kind_id=${kindId}`} RETURNING id`)
     ).length > 0;
   // A sample whose bytes equal an active sample of its kind files nothing:
-  // no copy, no eviction. A replacement of some other sample still applies.
+  // no copy. A replacement of some other sample still applies.
   // Samples this save retires are not on file for this check.
   const sampleReport = input.sample && resolveReportId(input.sample.report)!;
   const duplicate =
@@ -204,15 +204,9 @@ export async function applySave(
       retired.push({ id: sample.replaces, reason: "replaced" });
     }
     if (duplicate !== undefined) return;
+    // Every approved sample stays until the person retires or replaces it.
     await tx.query(sql`INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,replaces_id)
         VALUES (${userId},${randomUUID()},${report},${kindId},${sample.context},${sample.text},${attribution},${sample.replaces ?? null})`);
-    // Newest two per kind stay; every eviction is reported.
-    const evicted = await tx.query<{ id: string }>(sql`UPDATE samples
-        SET retired_at=clock_timestamp(),retire_reason='evicted',retired_request_id=${input.request_id}
-        WHERE user_id=${userId} AND id IN (SELECT id FROM samples WHERE user_id=${userId} AND kind_id=${kindId} AND retired_at IS NULL
-        ORDER BY created_at DESC,id DESC OFFSET 2) RETURNING id`);
-    for (const { id } of evicted.toSorted((a, b) => a.id.localeCompare(b.id)))
-      retired.push({ id, reason: "evicted" });
   };
   const known = new Map(current.active.map((h) => [h.id, h]));
   // A rule cannot be moved and retired at once, including by an exact

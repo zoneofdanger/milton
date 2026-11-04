@@ -107,8 +107,8 @@ Files: `server/src/store/reports.ts`, `server/src/store/compiled.ts`.
 
 - Reports are fixed in code: email, chat, post, document, and speech.
 - Cards print as bullets in insertion order, and an older stored `- ` is not doubled.
-- A report is its heading, "Applies when…", samples newest first as quotes, and then
-  rules.
+- A report is its heading, "Applies when…", the newest two samples of each kind, newest
+  first, as quotes, and then rules.
 - The cover sheet prints a note explaining `Baseline:` whenever any active rule has that
   prefix.
 - `TPS.md` is the cover sheet plus every non-empty report.
@@ -177,7 +177,9 @@ not at all.
 - A `kind_id` must name a kind in the same report.
 - Replacing a sample requires an active sample of the same kind.
 - Each sample removal must name an active sample, listed once.
-- Each kind keeps its newest two samples, and evictions are reported in `samples_retired`.
+- Every approved sample stays until the person replaces or removes it; reports serve the
+  newest two per kind. `samples_retired` reports what `replaces` and `retire_samples`
+  retired.
 
 ### Publish
 

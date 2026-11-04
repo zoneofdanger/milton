@@ -187,12 +187,12 @@ Clients may need to reconnect to load updated guidance.
 
 Exactly four tools are exposed:
 
-| Tool                                                     | Contract                                                                                                                                                                                                                                                                                                                                                    |
-| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `get_cover_sheet()`                                      | Returns `{text, version, is_empty, reports}`: the rules true of all writing, the save fence, whether the whole account is empty, and the index of five reports with their situations; while no rules exist yet (samples do not count), `setup` carries the first-setup script. No model call, no write.                                                     |
-| `get_report({report_id})`                                | One of `email`, `chat`, `post`, `document` (`doc` accepted), `speech`. Returns `{report_id, text, version, is_empty, samples}`: heading, when line, samples newest first, then rules; see below for `samples`. While the report has no rules, `setup` carries that report's setup block, with the cover-sheet questions while the cover sheet has no rules. |
-| `list_reports()`                                         | All five reports as `{reports: [{report_id, text, is_empty, samples, setup?}], version}`, without the cover sheet; a report without rules has a one-line `setup` pointer to `get_report`.                                                                                                                                                                   |
-| `create_memo({text, request_id, expected_version, ...})` | An exact save with at least one of `rules`, `exact_edits`, `moves`, `sample`, `retire_samples`; `text` states its purpose. UUID for the logical request and version from the cover sheet.                                                                                                                                                                   |
+| Tool                                                     | Contract                                                                                                                                                                                                                                                                                                                                                                                |
+| -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `get_cover_sheet()`                                      | Returns `{text, version, is_empty, reports}`: the rules true of all writing, the save fence, whether the whole account is empty, and the index of five reports with their situations; while no rules exist yet (samples do not count), `setup` carries the first-setup script. No model call, no write.                                                                                 |
+| `get_report({report_id})`                                | One of `email`, `chat`, `post`, `document` (`doc` accepted), `speech`. Returns `{report_id, text, version, is_empty, samples}`: heading, when line, the newest two samples of each kind newest first, then rules; see below for `samples`. While the report has no rules, `setup` carries that report's setup block, with the cover-sheet questions while the cover sheet has no rules. |
+| `list_reports()`                                         | All five reports as `{reports: [{report_id, text, is_empty, samples, setup?}], version}`, without the cover sheet; a report without rules has a one-line `setup` pointer to `get_report`.                                                                                                                                                                                               |
+| `create_memo({text, request_id, expected_version, ...})` | An exact save with at least one of `rules`, `exact_edits`, `moves`, `sample`, `retire_samples`; `text` states its purpose. UUID for the logical request and version from the cover sheet.                                                                                                                                                                                               |
 
 `create_memo` returns `saved`, `unchanged`, `conflict`, or `failed`,
 with the request ID and relevant version/error.
@@ -270,14 +270,16 @@ unresolvable or repeated move, or a move of a rule the same save removes, fails 
 there, in any letter case, files under that kind (including a kind whose samples are
 all retired, which reads no longer list); otherwise it creates one. `replaces` names an active sample of the
 same kind, retired as `replaced`. `retire_samples` lists active sample IDs, retired as
-`removed`. After an insert the oldest beyond two per kind is retired as `evicted`.
-A `sample` whose text is byte-identical to an active sample of the same kind inserts
-nothing and evicts nothing (a `replaces` naming another sample still retires it); a
+`removed`. Every approved sample stays active until one of those retires it; nothing
+retires a sample automatically. A `sample` whose text is byte-identical to an active
+sample of the same kind inserts nothing (a `replaces` naming another sample still
+retires it); a
 save that then changes nothing returns `unchanged` and charges nothing.
 Sample errors fail with `sample_conflict`. A `saved` result carries
 `samples_retired: [{id, reason}]` whenever a sample was retired, and replay returns
-it unchanged. Report reads list each active sample as `{id, kind_id, kind, context,
-date}`, newest first; kind labels never appear in report text.
+it unchanged. Reports serve the newest two active samples of each kind, and report
+reads list each served sample as `{id, kind_id, kind, context, date}`, newest first;
+kind labels never appear in report text.
 
 The assistant offers first setup once when empty, uses available explicit
 instructions or asks questions, and shows the full draft for approval before
@@ -441,8 +443,8 @@ Approved samples live in `samples`: report, a free-form `kind` label, one `conte
 line, the `body` exactly as submitted, the filing client, and `retired_at`. A guard
 makes the table append-only: the only update sets `retired_at` once, and rows leave
 only with their account. Filing a sample through `create_memo` with the `sample` field
-makes no model call and reserves no budget. The newest sample per kind wins; at most
-two per kind stay active, and retirement is the only automatic change.
+makes no model call and reserves no budget. Every approved sample stays active until
+the person replaces or removes it; reports serve the newest two per kind.
 
 Assembly is deterministic and runs on read. Every rule prints as one bullet: `- `
 followed by its stored body, with one stored leading `- ` (as the retired compiler
@@ -451,7 +453,8 @@ rule whose own text starts with `- ` (stored as sent) prints as a plain bullet, 
 reader cannot tell that dash is content. Stored cards are not
 edited. The cover sheet is the cover-sheet rules joined by blank lines; the fixed
 report index (one "when" line per report) travels beside it as data. Each report
-prints `# Title`, its when line, its active samples newest first (a context line with
+prints `# Title`, its when line, the newest two active samples of each kind, newest
+first (a context line with
 the date, then the body quoted with `>`), then its rules. The full text (TPS.md and
 the web page) is the cover sheet plus every non-empty report.
 
@@ -490,7 +493,8 @@ per report by `lower(label)`, rows removable only with their account. `samples`
 references its kind through `(user_id, kind_id, report)`, so a sample's report is its
 kind's report by construction, and `replaces_id` through `(user_id, replaces_id,
 kind_id)`, so a replacement is always the same kind. Retirement sets `retired_at`,
-`retire_reason` (`replaced`, `removed`, `evicted`) and the retiring `request_id`
+`retire_reason` (`replaced`, `removed`, `evicted`; current saves no longer evict, and
+`evicted` stays for rows and receipts written before) and the retiring `request_id`
 once, together; nothing else changes. The migration files every existing version in
 its card's report (NULL becomes `cover`), creates one kind per report and case-folded
 label (spelled as its earliest sample), and marks already retired samples `evicted`

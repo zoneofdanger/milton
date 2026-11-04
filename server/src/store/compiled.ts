@@ -133,7 +133,7 @@ export const saveMemoInput = z.strictObject({
     })
     .optional()
     .describe(
-      "Optional approved sample to file under a report, offered once when the person approves a draft and sent only after they say yes. At most two stay per kind; Milton retires the oldest beyond that and reports it in samples_retired. Text identical to an active sample of the kind files nothing.",
+      "Optional approved sample to file under a report, offered once when the person approves a draft and sent only after they say yes. Every approved sample stays; a report serves the newest two per kind. Remove one with retire_samples or replace it with replaces; either is reported in samples_retired. Text identical to an active sample of the kind files nothing.",
     ),
   retire_samples: z
     .array(z.string().min(1).max(256))

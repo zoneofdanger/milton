@@ -147,7 +147,8 @@ export const accountDeletion = async (ctx: PageContext): Promise<Response> => {
     throw deletionUnavailable();
   }
   // Stripe first: otherwise a deleted account keeps being charged and Milton has
-  // lost the customer id. If the delete below fails, a retry finds the 404.
+  // lost the customer id. If the delete below fails, the row no longer holds the
+  // customer, so a retry has nothing to call.
   const { userId } = await lookupIdentityAccount(config, {
     provider: "neon",
     subject: user.id,

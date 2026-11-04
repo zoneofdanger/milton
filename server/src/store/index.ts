@@ -11,6 +11,7 @@ import { StoreError } from "./errors";
 import { claimTrialNotice, trialStatus, type TrialNotice } from "./trials";
 import {
   billingAccount,
+  clearStripeCustomer,
   linkStripeCustomer,
   lockStripeCustomer,
   lockWaitingSubscription,
@@ -446,6 +447,7 @@ export function billingForAccount(bindings: StoreBindings, userId: string) {
     account: () => wrap(billingAccount(db, userId)),
     linkCustomer: (customer: string) =>
       wrap(linkStripeCustomer(db, userId, customer)),
+    clearCustomer: () => wrap(clearStripeCustomer(db, userId)),
     /** Reads Stripe holding the customer's row, as the webhook does, and stores
      * what the read returns, if anything. */
     syncSubscription: (

@@ -224,6 +224,8 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
 - Deletion requires the exact phrase "delete my account" and a live consent list.
 - Deletion first deletes any Stripe customer, ending its subscription at once with no
   refund; Stripe's 404 counts as done, and any other failure deletes nothing.
+- The row then clears the customer and subscription and reads canceled, so if Milton's own
+  delete fails, a retry calls nothing and a later Checkout makes a new customer.
 - Deletion records disconnects and the identity hash, then deletes the user and cascades.
 - Consent removal and sign-out after deletion are best effort.
 

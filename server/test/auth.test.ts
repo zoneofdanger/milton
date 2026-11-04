@@ -1376,6 +1376,35 @@ test("account deletion ends the Stripe customer first, a Stripe failure deletes 
   } finally {
     await fixture.dispose();
   }
+  // Stripe's delete lands and Milton's fails: the row forgets the dead customer,
+  // so a retry calls nothing and a later subscription starts a new customer.
+  const half = fakeStripe();
+  const stuck = await accountFixture({ billing: half.billing });
+  const quiet = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    await setUp(stuck);
+    await stuck.local.pg.exec(`
+      UPDATE trial_accounts SET stripe_subscription_id='sub_fixture';
+      CREATE FUNCTION refuse_delete() RETURNS trigger LANGUAGE plpgsql AS
+        $$ BEGIN RAISE EXCEPTION 'fixture refusal'; END $$;
+      CREATE TRIGGER refuse_delete BEFORE DELETE ON users
+        FOR EACH ROW EXECUTE FUNCTION refuse_delete()`);
+    expect((await stuck.send("/account/delete", remove)).status).toBe(503);
+    expect(half.stripe.calls).toEqual([deleteCall]);
+    expect(
+      await stuck.local.db.query(
+        sql`SELECT stripe_customer_id AS customer,stripe_subscription_id AS subscription,subscription_status AS status FROM trial_accounts`,
+      ),
+    ).toEqual([{ customer: null, subscription: null, status: "canceled" }]);
+    await stuck.local.pg.exec("DROP TRIGGER refuse_delete ON users");
+    half.stripe.calls.length = 0;
+    expect((await stuck.send("/account/delete", remove)).status).toBe(200);
+    expect(half.stripe.calls).toEqual([]);
+    expect(await users(stuck)).toBe(0);
+  } finally {
+    quiet.mockRestore();
+    await stuck.dispose();
+  }
 }, 30000);
 
 const tryAgain =

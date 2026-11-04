@@ -83,6 +83,14 @@ export async function stripeEventRecorded(db: StoreSession, id: string) {
   );
 }
 
+/** Forgets a customer Stripe has deleted. Stripe accepts nothing further for that
+ * id, so keeping it would block a retry and any later subscription. */
+export async function clearStripeCustomer(db: StoreSession, userId: string) {
+  await db.query(sql`UPDATE trial_accounts SET stripe_customer_id=NULL,
+    stripe_subscription_id=NULL,subscription_status='canceled'
+    WHERE user_id=${userId}`);
+}
+
 /** Records the event and writes what Stripe answered in one statement: a
  * redelivered event id records nothing and changes nothing. "canceled" keeps the
  * stored subscription and dates and ends the status: Stripe no longer has it. */

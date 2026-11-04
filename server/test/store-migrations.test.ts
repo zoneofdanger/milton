@@ -72,6 +72,74 @@ test("a release passes the owner URL in its own variable, checked, and an empty 
   }
 });
 
+test("0030 drops the history cap, its byte triggers and users.retained_bytes, keeps the stored limits, and rolls back with the counter recomputed", async () => {
+  const base = await migratedThrough(29);
+  const pg = await migratedThrough(29);
+  const post = await migratedThrough(30);
+  try {
+    const up = await drizzleSql("0030_no_history_cap.sql");
+    const down = await drizzleSql("rollback/0030_no_history_cap.sql");
+    const store = fixtureStore(storeDatabase(pg), "cap", "assistant");
+    const save = async (text: string) =>
+      store.saveMemo({
+        text,
+        rules: [{ report: "cover", text }],
+        request_id: crypto.randomUUID(),
+        expected_version: (await store.getTpsReport()).version,
+      });
+    // Rows in all four counted tables, and an account with none.
+    await pg.exec(`INSERT INTO users(id) VALUES ('cap'),('none');
+      INSERT INTO memos(user_id,id,name) VALUES ('cap','memo','sample');
+      INSERT INTO memo_versions(user_id,memo_id,version,description,body,reason,actor_json)
+      VALUES ('cap','memo',1,'Sample.','hello','seed','{}');`);
+    expect((await save("Saved before 0030.")).status).toBe("saved");
+    const receipt = () =>
+      pg.exec(`INSERT INTO save_requests(user_id,request_id,input_hash,source_hash,result_json)
+        VALUES ('cap','${crypto.randomUUID()}',repeat('a',64),repeat('c',64),'{"status":"saved"}')`);
+    // The cap at what the account holds, so its next row is past it.
+    await pg.exec(
+      "UPDATE store_config SET limits_json=jsonb_set(limits_json,'{history_bytes}',to_jsonb((SELECT retained_bytes FROM users WHERE id='cap')))",
+    );
+    await expect(receipt()).rejects.toThrow("memo_history_limit");
+    const limits = async () =>
+      (await pg.query("SELECT limits_json FROM store_config")).rows;
+    const stored = await limits();
+    const forward = async () => {
+      await pg.exec("BEGIN;" + up + "COMMIT;");
+      expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(post));
+      expect(await limits()).toEqual(stored);
+    };
+    await forward();
+    // The row keeps history_bytes, unread: saves go past it.
+    expect((await save("Saved past the old cap.")).status).toBe("saved");
+    await receipt();
+    await pg.exec(down);
+    expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(base));
+    expect(
+      (
+        await pg.query(
+          `SELECT id FROM users u WHERE retained_bytes <> (SELECT coalesce(sum(payload_bytes),0) FROM memo_versions WHERE user_id=u.id)
+            + (SELECT coalesce(sum(payload_bytes),0) FROM instruction_card_versions WHERE user_id=u.id)
+            + (SELECT coalesce(sum(payload_bytes),0) FROM accepted_changes WHERE user_id=u.id)
+            + (SELECT coalesce(sum(payload_bytes),0) FROM save_requests WHERE user_id=u.id)`,
+        )
+      ).rows,
+    ).toEqual([]);
+    // The cap is back at its stored value, and this code saves under it.
+    await expect(receipt()).rejects.toThrow("memo_history_limit");
+    await pg.exec(
+      `UPDATE store_config SET limits_json=limits_json || '{"history_bytes":67108864}'::jsonb`,
+    );
+    stored[0] = (await limits())[0];
+    expect((await save("Saved after the rollback.")).status).toBe("saved");
+    await forward();
+  } finally {
+    await post.close();
+    await pg.close();
+    await base.close();
+  }
+}, 30000);
+
 test("0029 deletes open claims, drops the two-phase receipt columns and claim trigger, holds every receipt to an outcome, and rolls back to the pre-step shape", async () => {
   const preStep = await drizzleSql("pre/0029_one_transaction.sql");
   const base = await migratedThrough(28);

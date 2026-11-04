@@ -76,10 +76,6 @@ export const triggerRefusals = new Map<
     { message: "Memo metadata cannot be changed.", status: 409 },
   ],
   [
-    "memo_history_limit",
-    { message: "The memo history limit has been reached.", status: 422 },
-  ],
-  [
     "memo_body_limit",
     { message: "The memo body exceeds its size limit.", status: 422 },
   ],

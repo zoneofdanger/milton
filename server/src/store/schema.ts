@@ -25,7 +25,6 @@ const limits = {
   name_bytes: 64,
   description_bytes: 500,
   reason_bytes: 500,
-  history_bytes: 67108864,
   report_body_bytes: 262144,
   daily_calls: 1000,
 };
@@ -46,14 +45,10 @@ export const users = pgTable(
   {
     id: text("id").primaryKey(),
     status: text("status").notNull().default("active"),
-    retainedBytes: bigint("retained_bytes", { mode: "number" })
-      .notNull()
-      .default(0),
     createdAt: createdAt(),
   },
   (t) => [
     check("users_status", sql`${t.status} IN ('active','deleting')`),
-    check("users_bytes", sql`${t.retainedBytes} >= 0`),
     check(
       "users_id_format",
       sql`${t.id} <> '' AND position(':' in ${t.id}) = 0`,

@@ -349,9 +349,9 @@ Files: `server/drizzle/`, `server/src/store/schema.ts`, `server/src/store/databa
 - Samples and kinds are append-only, and a sample can only be retired.
 - A receipt is written once with its outcome and cannot change.
 - Audit rows are immutable and must reference real card versions.
-- `retained_bytes` tracks stored history against a cap.
-- History rows never shrink short of account deletion, so that cap is effectively
-  lifetime.
+- History has no size cap. History rows never shrink short of account deletion, so the
+  lifetime cap that refused every save once an account reached it is gone (0030), with
+  the `retained_bytes` counter it read.
 - User IDs cannot change.
 - Disconnects and identity hashes have no foreign key to users, so they outlive the account.
 - `stripe_events` keeps each event's ID, type, and body hash, never the payload.

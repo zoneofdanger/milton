@@ -19,9 +19,9 @@ decommission on 2026-11-01. Hosting rollback now uses Cloud Run revisions.
 
 Project `milton-510506`, Cloud Run/Artifact Registry region `us-east4`. Service manifests in this directory pin an immutable image and
 secret versions. They contain configuration and secret references, never values.
-The manifests pin what is serving now: app `milton-app-pcl-0e04873`
-(`sha256:677b40b9…`, env 2, key 1) and MCP `milton-mcp-role-0851a8c`
-(`sha256:2eb49f6e…`, env 3, key 1), both connecting as `milton_app`; see the release
+The manifests pin what is serving now: app `milton-app-stick-4272d1d`
+(`sha256:ce6fc19c…`, env 2, key 1) and MCP `milton-mcp-stick-4272d1d`
+(`sha256:ce6fc19c…`, env 3, key 1), both connecting as `milton_app`; see the release
 records below. The spend worker,
 its scheduler job, service accounts and manifest were removed with 0023 (see
 [spend subsystem removal](#spend-subsystem-removal-0023)). `memo_updates_enabled` and
@@ -195,14 +195,59 @@ gcloud run services update-traffic milton-mcp --to-revisions=milton-mcp-derived-
 gcloud run services update-traffic milton-worker --to-revisions=milton-worker-env4-cba4f6c=100 --project=milton-510506 --region=us-east4
 ```
 
-Now serving: MCP `milton-mcp-role-0851a8c` (since 2026-11-03 07:43:53Z), app
-`milton-app-pcl-0e04873` (since 19:23:56Z); each is recorded below. There is no worker service.
+Now serving: MCP `milton-mcp-stick-4272d1d` (since 2026-11-04 00:07:46Z) and app
+`milton-app-stick-4272d1d` (since 00:08:00Z), one image and one commit; recorded below. There is
+no worker service.
 
-Current release pcl-0e04873: app only, from main `0e04873` (the merge `d600d1b` of
+Current release stick-4272d1d: MCP and app, from main `4272d1d` (the merge of `agent/stick`).
+Revisions `milton-mcp-stick-4272d1d` and `milton-app-stick-4272d1d`, switched directly at 100% (no
+users yet) by a release agent on 2026-11-04: MCP created 00:07:20Z to 00:07:25Z with
+`gcloud run services update milton-mcp --image=<digest> --revision-suffix=stick-4272d1d`, because
+the live MCP template carries `run.googleapis.com/startup-cpu-boost`, which the manifest lacks
+(traffic stayed pinned on `milton-mcp-role-0851a8c` until `update-traffic` sent the new revision
+100% at 00:07:46Z); the app with `gcloud run services replace` from `app.service.json` (a copy
+naming the revision) at 00:07:53Z, Ready 00:08:00Z. After each shift, traffic was pinned to the
+revision by name with `update-traffic --to-revisions=<revision>=100`. Both run image
+`sha256:ce6fc19c5fb4ab4007cad1c6aa7f9bc1437f31461a787e2073522f07cabf9e4a` (amd64
+`sha256:a6446a38a4e1655e08c89f02b11a31c22539839da3b91da5fb0df609220d5fa2`; uid 1000, Node
+26.13.0, no env, key or pem files; build stage `oven/bun:1.4.4`). Each revision spec differs from
+its predecessor only in the image (MCP keeps the startup CPU boost, the mount `milton-mcp-env:3`,
+the unmounted leftover `milton-mcp-env:2` volume and `milton-mcp-key:1`; app `milton-app-env:2`,
+`milton-app-key:1`); no secret version changed. No migration and no schema change (Drizzle
+journal 25). Changes: the first-setup script ends its numbered steps with step 7, the
+standing-line step (the question blocks follow it); the agent kit and every hook path are gone,
+so `get_cover_sheet` takes no arguments and refuses `hook_event` as an unknown key; `/mcp` no
+longer allowlists the `Origin` header (the Host check and bearer tokens remain); the PC LOAD
+LETTER page, already on the app, now also ships in the MCP image. Before the release, the commit
+tree passed `check-types`, `bun test` (100 pass) and `format:check`. After the switch the
+canonical checks matched the baseline (MCP and app `/health` 200, discovery 200, unauthenticated
+`/mcp` 401 with resource metadata, app `/` and `/login` 200 with its CSRF field, signed-out
+`/assistants`, `/account/delete` and `/download` 403, HTTP 308, `run.app` 404) except one
+intended change: an unauthenticated `POST /mcp` with `Origin: https://example.invalid` returned
+401 (403 before). `bun scripts/probe-forms.ts` printed `PASS`. A fresh headless Claude Code
+client listed exactly four tools; its `get_cover_sheet` with no arguments returned the cover
+sheet with version `5bbb8ddf…` unchanged and no error, and with `{"hook_event":"SessionStart"}`
+returned the error `Unrecognized key: "hook_event"` and no cover sheet (logged as `refused`,
+`invalid_arguments`). The empty-account setup text was read in memory from the `4272d1d` tree
+through the probe's stub store, not from production (no empty production account was used): step
+7 begins "7. Before the next report or stopping, make it stick". From 00:07:20Z to 00:11:24Z
+neither service logged an error, `unexpected_error` or 5xx (MCP 21 x 200 and 4 x 401; app 8 x 200
+and 4 x 403, all from the checks), and no save ran.
+
+Rollback (no schema step; restores the agent kit, `hook_event` and the Origin allowlist on MCP
+and the PC LOAD LETTER app), and in the same step set the manifests' images back to
+`sha256:2eb49f6e…` (MCP) and `sha256:677b40b9…` (app):
+
+```sh
+gcloud run services update-traffic milton-mcp --to-revisions=milton-mcp-role-0851a8c=100 --project=milton-510506 --region=us-east4
+gcloud run services update-traffic milton-app --to-revisions=milton-app-pcl-0e04873=100 --project=milton-510506 --region=us-east4
+```
+
+Release pcl-0e04873: app only, from main `0e04873` (the merge `d600d1b` of
 `agent/pc-load-letter` plus test fixes). Revision `milton-app-pcl-0e04873`; a release agent
 created it with `gcloud run services replace` from `app.service.json` (a copy naming the revision)
 at 2026-11-03 19:23:41Z to 19:23:56Z, and the manifest's traffic block sent it 100% directly (no
-users yet). MCP stays on `milton-mcp-role-0851a8c`, untouched (same spec and generation). It
+users yet); it served until stick-4272d1d. MCP stays on `milton-mcp-role-0851a8c`, untouched (same spec and generation). It
 runs image `sha256:677b40b9087cd71d81babe1159393253caaee775f4361abba4eb546ca22335b2` (amd64
 `sha256:7d6b036dbeb778706ed9aa6b563ea361816c514c90391a51f8ace479db062ba5`; uid 1000, Node
 26.13.0, no env, key or pem files; build stage `oven/bun:1.4.4`). `replace`, not `update`,
@@ -238,8 +283,8 @@ nospend-41de4f6 image (`sha256:2eb49f6e…`) and differ from the nospend-41de4f6
 in the mounted payload: MCP `milton-mcp-env:3`, app `milton-app-env:2` (keys unchanged,
 `milton-mcp-key:1`, `milton-app-key:1`), whose `DATABASE_URL` user is `milton_app` on the same
 host, database and parameters. A release agent switched MCP at 2026-11-03 07:43:53Z and the
-app at 07:44:40Z, directly at 100% (no users yet); MCP still serves it, and the app served it
-until pcl-0e04873. The revisions were created with
+app at 07:44:40Z, directly at 100% (no users yet); MCP served it until stick-4272d1d, and the
+app until pcl-0e04873. The revisions were created with
 `gcloud run services update --update-secrets=/run/milton/.env=<secret>:<version>
 --revision-suffix=role-0851a8c` rather than `replace`, because the live MCP template carries
 `run.googleapis.com/startup-cpu-boost`, which the manifest lacks; the update changed only the

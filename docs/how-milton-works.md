@@ -21,8 +21,7 @@ Files: `server/src/cloud-run.ts`, `server/src/environment.ts`, `server/src/confi
 - HTTP upgrades to HTTPS with a redirect that keeps the method.
 - Vercel builds the static site from main on every push.
 - Startup decrypts a dotenvx file using a separate platform-held key.
-- Startup fails on a retired inline secret, bad URLs, a short cookie secret, a bad support
-  email, or a bad port.
+- Startup fails on bad URLs, a short cookie secret, a bad support email, or a bad port.
 - Plain HTTP is allowed only on loopback outside production.
 - On SIGTERM the server stops accepting requests and force-exits after 8 seconds.
 - The image builds with Bun, then ships only the bundle and public assets to a non-root

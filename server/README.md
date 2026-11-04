@@ -38,8 +38,7 @@ to eight seconds to finish.
 
 For dotenvx, mount an encrypted file and set `MILTON_ENCRYPTED_ENV_FILE` on Cloud Run.
 Supply the matching `DOTENV_PRIVATE_KEY` separately through platform secret storage.
-The file is the only payload option; the retired inline `MILTON_ENCRYPTED_ENV`
-value is refused. Missing or invalid decryption fails closed. Existing platform
+The file is the only payload option. Missing or invalid decryption fails closed. Existing platform
 environment values take precedence. Without a payload file, the runtime
 uses its environment directly, supporting local development and staged migration.
 Keep encrypted release payloads private and versioned, and keep private keys out of

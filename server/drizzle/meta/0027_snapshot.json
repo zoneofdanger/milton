@@ -1,6 +1,6 @@
 {
-  "id": "636bac28-866d-4870-ad80-f783e6d3aa8c",
-  "prevId": "c0b89179-092a-4717-8936-58f2d3df53fc",
+  "id": "6413b70a-3823-456b-b76c-647514648b24",
+  "prevId": "04ac5386-0c0a-42a9-a05e-3967fb253cf7",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -236,13 +236,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "profile_json": {
-          "name": "profile_json",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::jsonb"
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -298,10 +291,6 @@
         "identities_subject": {
           "name": "identities_subject",
           "value": "\"identities\".\"subject\" <> ''"
-        },
-        "identities_profile_object": {
-          "name": "identities_profile_object",
-          "value": "jsonb_typeof(\"identities\".\"profile_json\") = 'object'"
         }
       },
       "isRLSEnabled": false
@@ -1200,12 +1189,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "reserved_micros": {
-          "name": "reserved_micros",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
         "result_json": {
           "name": "result_json",
           "type": "jsonb",
@@ -1264,42 +1247,6 @@
         }
       },
       "indexes": {
-        "save_requests_by_day": {
-          "name": "save_requests_by_day",
-          "columns": [
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "save_requests_by_account_day": {
-          "name": "save_requests_by_account_day",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "save_requests_memo_updates": {
           "name": "save_requests_memo_updates",
           "columns": [
@@ -1362,10 +1309,6 @@
           "name": "save_request_hashes",
           "value": "\"save_requests\".\"input_hash\" ~ '^[a-f0-9]{64}$' AND \"save_requests\".\"source_hash\" ~ '^[a-f0-9]{64}$'"
         },
-        "save_request_cost": {
-          "name": "save_request_cost",
-          "value": "\"save_requests\".\"reserved_micros\" >= 0"
-        },
         "save_request_id": {
           "name": "save_request_id",
           "value": "length(\"save_requests\".\"request_id\") = 36"
@@ -1413,14 +1356,7 @@
           "type": "jsonb",
           "primaryKey": false,
           "notNull": true,
-          "default": "'{\"memos\":100,\"body_bytes\":32768,\"name_bytes\":64,\"description_bytes\":500,\"reason_bytes\":500,\"history_bytes\":67108864,\"report_body_bytes\":262144,\"daily_calls\":1000,\"daily_writes\":200,\"request_bytes\":65536,\"page_size\":50}'::jsonb"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
+          "default": "'{\"body_bytes\":32768,\"name_bytes\":64,\"description_bytes\":500,\"reason_bytes\":500,\"history_bytes\":67108864,\"report_body_bytes\":262144,\"daily_calls\":1000}'::jsonb"
         }
       },
       "indexes": {},
@@ -1440,6 +1376,49 @@
         "config_memo_updates": {
           "name": "config_memo_updates",
           "value": "\"store_config\".\"memo_updates_daily_limit\">0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.stripe_events": {
+      "name": "stripe_events",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "type": {
+          "name": "type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "received_at": {
+          "name": "received_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "payload_sha256": {
+          "name": "payload_sha256",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "stripe_event_shape": {
+          "name": "stripe_event_shape",
+          "value": "\"stripe_events\".\"id\" ~ '^evt_[A-Za-z0-9]{1,251}$' AND char_length(\"stripe_events\".\"type\") BETWEEN 1 AND 128 AND \"stripe_events\".\"payload_sha256\" ~ '^[a-f0-9]{64}$'"
         }
       },
       "isRLSEnabled": false
@@ -1543,6 +1522,42 @@
           "primaryKey": false,
           "notNull": true,
           "default": 0
+        },
+        "stripe_customer_id": {
+          "name": "stripe_customer_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "stripe_subscription_id": {
+          "name": "stripe_subscription_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "subscription_status": {
+          "name": "subscription_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "trial_end": {
+          "name": "trial_end",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "current_period_start": {
+          "name": "current_period_start",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "current_period_end": {
+          "name": "current_period_end",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {},
@@ -1562,12 +1577,43 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "trial_accounts_stripe_customer_id_unique": {
+          "name": "trial_accounts_stripe_customer_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "stripe_customer_id"
+          ]
+        },
+        "trial_accounts_stripe_subscription_id_unique": {
+          "name": "trial_accounts_stripe_subscription_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "stripe_subscription_id"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {
         "trial_notice_stage": {
           "name": "trial_notice_stage",
           "value": "\"trial_accounts\".\"notice_stage\" BETWEEN 0 AND 2"
+        },
+        "trial_stripe_customer": {
+          "name": "trial_stripe_customer",
+          "value": "\"trial_accounts\".\"stripe_customer_id\" IS NULL OR \"trial_accounts\".\"stripe_customer_id\" ~ '^cus_[A-Za-z0-9]{1,251}$'"
+        },
+        "trial_stripe_subscription": {
+          "name": "trial_stripe_subscription",
+          "value": "\"trial_accounts\".\"stripe_subscription_id\" IS NULL OR \"trial_accounts\".\"stripe_subscription_id\" ~ '^sub_[A-Za-z0-9]{1,251}$'"
+        },
+        "trial_subscription_status": {
+          "name": "trial_subscription_status",
+          "value": "\"trial_accounts\".\"subscription_status\" IS NULL OR char_length(\"trial_accounts\".\"subscription_status\") BETWEEN 1 AND 64"
+        },
+        "trial_stripe_dates": {
+          "name": "trial_stripe_dates",
+          "value": "(\"trial_accounts\".\"trial_end\" IS NULL OR isfinite(\"trial_accounts\".\"trial_end\")) AND (\"trial_accounts\".\"current_period_start\" IS NULL OR isfinite(\"trial_accounts\".\"current_period_start\")) AND (\"trial_accounts\".\"current_period_end\" IS NULL OR isfinite(\"trial_accounts\".\"current_period_end\"))"
         },
         "trial_finite_dates": {
           "name": "trial_finite_dates",
@@ -1594,13 +1640,6 @@
         },
         "tool_calls": {
           "name": "tool_calls",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "writes": {
-          "name": "writes",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
@@ -1637,7 +1676,7 @@
       "checkConstraints": {
         "usage_nonnegative": {
           "name": "usage_nonnegative",
-          "value": "\"usage_daily\".\"tool_calls\" >= 0 AND \"usage_daily\".\"writes\" >= 0"
+          "value": "\"usage_daily\".\"tool_calls\" >= 0"
         }
       },
       "isRLSEnabled": false
@@ -1658,20 +1697,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'active'"
-        },
-        "templates_revision": {
-          "name": "templates_revision",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "profile_json": {
-          "name": "profile_json",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::jsonb"
         },
         "retained_bytes": {
           "name": "retained_bytes",
@@ -1697,14 +1722,6 @@
         "users_status": {
           "name": "users_status",
           "value": "\"users\".\"status\" IN ('active','deleting')"
-        },
-        "users_revision": {
-          "name": "users_revision",
-          "value": "\"users\".\"templates_revision\" >= 0"
-        },
-        "users_profile_object": {
-          "name": "users_profile_object",
-          "value": "jsonb_typeof(\"users\".\"profile_json\") = 'object'"
         },
         "users_bytes": {
           "name": "users_bytes",

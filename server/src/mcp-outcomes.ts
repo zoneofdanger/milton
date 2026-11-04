@@ -12,7 +12,6 @@ export type ToolCall = {
     | "read"
     | "saved"
     | "unchanged"
-    | "needs_clarification"
     | "conflict"
     | "in_progress"
     | "refused"
@@ -27,7 +26,6 @@ export const knownTool = (name: unknown): ToolCall["tool"] =>
 const statuses = z.enum([
   "saved",
   "unchanged",
-  "needs_clarification",
   "conflict",
   "in_progress",
   "failed",
@@ -53,7 +51,7 @@ const response = z.object({
     })
     .optional(),
 });
-// Logged by name. memo_count_limit is retired but may sit in stored receipts.
+// Logged by name.
 export const loggedErrorCodes = new Set([
   "rate_limited",
   "store_unavailable",
@@ -64,7 +62,6 @@ export const loggedErrorCodes = new Set([
   "request_too_large",
   "memo_body_limit",
   "memo_history_limit",
-  "memo_count_limit",
   "request_id_reused",
   "request_expired",
   "request_unavailable",

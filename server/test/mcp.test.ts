@@ -552,15 +552,11 @@ test("MCP refuses unsafe transports and oversized bodies before database access"
   }
 }, 30000);
 
-test("one code constant bounds requests: limits_json.request_bytes refuses nothing, and an oversized body is refused once", async () => {
+test("one code constant bounds requests: an oversized body is refused once", async () => {
   const local = await localStore();
   const logged: ToolCall[] = [];
   let client: Client | undefined;
   try {
-    // A lowered stored value must not refuse a body within the code bound.
-    await local.db.query(
-      sql`UPDATE store_config SET limits_json = limits_json || '{"request_bytes":256}'::jsonb`,
-    );
     await resolveIdentityAccount(local.env, {
       provider: "neon",
       subject: "bound",

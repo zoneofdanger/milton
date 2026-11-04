@@ -68,8 +68,7 @@ nothing. A save's claim takes only the account lock and reads the cap without lo
 Removing the model removes paraphrase drift, not interpretation risk: the assistant
 picks the report and wording, and a free-text correction sent as a new rule leaves
 two rules that disagree. Nothing detects that; the instructions require exact_edits
-for every correction. Stored receipts from the retired model path (for example
-`needs_clarification`) still replay.
+for every correction.
 
 History belongs to internal instruction cards; legacy memo history is retained. The
 cover sheet and reports keep only a current snapshot and a version. The website shows

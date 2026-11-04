@@ -1,4 +1,4 @@
--- Rollback of 0026_stripe_billing. Offline; stop writers first. Code before 0026
+-- Rollback of 0027_stripe_billing. Offline; stop writers first. Code before 0027
 -- can run on this schema, ignoring the ledger and the new columns, but with trials
 -- on it gates on the retired started_at clock and refuses paying customers, so
 -- there is no traffic rollback to it once trials are on. Before then, a runtime
@@ -8,8 +8,8 @@
 -- marks on returning deleted identities go too. Rows written before this code
 -- keep started_at before created_at, so re-forwarding marks them again; rows
 -- written since do not, so those accounts lose the mark for good and a second
--- trial is possible. Run as neondb_owner. The 0026 journal row stays, so re-forwarding means running
--- 0026_stripe_billing.sql by hand.
+-- trial is possible. Run as neondb_owner. The 0027 journal row stays, so re-forwarding means running
+-- 0027_stripe_billing.sql by hand.
 BEGIN;
 SET LOCAL lock_timeout = '10s';
 LOCK TABLE trial_accounts, stripe_events IN ACCESS EXCLUSIVE MODE;

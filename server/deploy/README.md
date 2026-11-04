@@ -401,13 +401,46 @@ traffic. The rollback re-adds both columns (defaults `'closed'`, `[]`), sets the
 `open`, and restores both checks; the 0025 journal row stays, so re-forwarding means
 running `0025_open_signup.sql` by hand.
 
-## Stripe billing (0026)
+## Dead columns (0026)
 
-Migration 0026 adds the Stripe webhook ledger and the subscription columns on
+Migration 0026 drops columns nothing reads: `users.profile_json` and `templates_revision`,
+`identities.profile_json`, `usage_daily.writes`, `store_config.updated_at` and
+`save_requests.reserved_micros`, with their checks; the indexes `save_requests_by_day` and
+`save_requests_by_account_day`; and the keys `memos`, `daily_writes`, `request_bytes` and
+`page_size` from the `limits_json` default (the stored row keeps them, unread). It replaces
+the save guard without `reserved_micros`. The runtime role needs no grant change: a dropped
+column takes its privileges with it. Every revision before this release writes
+`identities.profile_json` on a first sign-in and `reserved_micros` on every save claim;
+this release writes neither.
+
+Release order:
+
+1. As the owner, give `reserved_micros` a default so this release can claim before 0026,
+   with a lock timeout so a stuck transaction cannot stall every save:
+   `SET lock_timeout = '5s'; ALTER TABLE save_requests ALTER COLUMN reserved_micros SET DEFAULT 0;`
+   Retry on a timeout. The running revision names the column and is unaffected; 0026 drops
+   the column and its default.
+2. Ship MCP and app from the same image.
+3. Only once both services are fully on the new revision (traffic at 100% and the old
+   revision idle), take a Neon snapshot, then apply 0026 with the normal runner.
+
+**Rollback boundary.** Before 0026 is applied, code rolls back by traffic alone. After it,
+an earlier revision cannot sign up an account or save: first run
+`server/drizzle/rollback/0026_dead_columns.sql` offline with writers stopped, then shift
+traffic. The rollback re-adds the columns at their defaults (`reserved_micros` keeps
+`DEFAULT 0`, so either revision saves), their checks, both indexes (built over current
+rows), the previous `limits_json` default and the 0006 save guard; it restores shape, not
+data (`templates_revision` comes back 0). The 0026 journal row stays, so re-forwarding
+means running `0026_dead_columns.sql` by hand, as one transaction that stops on the first
+error: `psql -1 -v ON_ERROR_STOP=1 -f server/drizzle/0026_dead_columns.sql`.
+
+## Stripe billing (0027)
+
+Migration 0027 adds the Stripe webhook ledger and the subscription columns on
 `trial_accounts`, and marks returning deleted identities canceled. Stripe owns the trial; the
 gate reads `subscription_status`.
 
-**Release order.** Take a snapshot, apply 0026, then ship MCP and app from the same image. This
+**Release order.** Take a snapshot, apply 0027, then ship MCP and app from the same image. This
 code reads the new columns on every gated read, so on the older schema every assistant read
 fails with a 503. Both services must move: an older MCP revision keeps gating on the retired
 clock. The three `STRIPE_*` settings go on the app service only; all three or none, since a
@@ -415,7 +448,7 @@ partial or malformed set stops the app at startup.
 
 **Rollback boundary.** Before trials are on, code rolls back by traffic alone. Once trials are
 on there is no traffic rollback to a pre-billing image: it gates on the retired clock and
-refuses paying customers. Recover forward. `server/drizzle/rollback/0026_stripe_billing.sql`
+refuses paying customers. Recover forward. `server/drizzle/rollback/0027_stripe_billing.sql`
 refuses while any customer id or event is recorded, and its header says what else it loses.
 
 **Stripe mode.** The live key, live webhook secret and live price go in before `trials_enabled`
@@ -449,9 +482,9 @@ all three are on before `trials_enabled` is flipped:
 
 Stripe sends no trial reminders in a sandbox, so a test-mode run cannot confirm the first.
 
-**Data statement.** An older image still serving after 0026 can write a returning deleted
+**Data statement.** An older image still serving after 0027 can write a returning deleted
 identity's row with no status. Once the new image has all traffic, and before the backfill,
-rerun 0026's statement. It only touches rows with no status, so it never changes one Stripe has
+rerun 0027's statement. It only touches rows with no status, so it never changes one Stripe has
 answered for:
 
     UPDATE trial_accounts t SET subscription_status = 'canceled'

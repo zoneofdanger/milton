@@ -68,8 +68,8 @@ export async function claimSave(ctx: SaveContext, structured: boolean) {
       const current = await snapshot(tx);
       const clock = await claimClock(tx);
       const claimReceipt = async (updateDay: string | null) => {
-        await tx.query(sql`INSERT INTO save_requests(user_id,request_id,input_hash,source_hash,reserved_micros,deadline,claimed_at,created_at,memo_update_day,memo_update_state)
-        VALUES (${userId},${input.request_id},${inputHash},${current.fingerprint},0,${clock.at}::timestamptz+${deadlineSeconds}*interval '1 second',${clock.at}::timestamptz,${clock.at}::timestamptz,${updateDay}::date,${updateDay ? "held" : "none"})`);
+        await tx.query(sql`INSERT INTO save_requests(user_id,request_id,input_hash,source_hash,deadline,claimed_at,created_at,memo_update_day,memo_update_state)
+        VALUES (${userId},${input.request_id},${inputHash},${current.fingerprint},${clock.at}::timestamptz+${deadlineSeconds}*interval '1 second',${clock.at}::timestamptz,${clock.at}::timestamptz,${updateDay}::date,${updateDay ? "held" : "none"})`);
       };
       // A conflict or refusal decided against the request completes a receipt
       // here as in the apply phase: the same request replays the same outcome.

@@ -38,8 +38,7 @@ to eight seconds to finish.
 
 For dotenvx, mount an encrypted file and set `MILTON_ENCRYPTED_ENV_FILE` on Cloud Run.
 Supply the matching `DOTENV_PRIVATE_KEY` separately through platform secret storage.
-The file is the only payload option; the retired inline `MILTON_ENCRYPTED_ENV`
-value is refused. Missing or invalid decryption fails closed. Existing platform
+The file is the only payload option. Missing or invalid decryption fails closed. Existing platform
 environment values take precedence. Without a payload file, the runtime
 uses its environment directly, supporting local development and staged migration.
 Keep encrypted release payloads private and versioned, and keep private keys out of
@@ -88,7 +87,8 @@ model on any read or save, so it needs no model credential, project or budget. T
 runtime no longer reads `MILTON_GEMINI_*` or `MILTON_MODEL_*_BUDGET_USD`;
 `MILTON_GLOBAL_SPEND_POLICY` or any `MILTON_SPEND_*` or `RESEND_API_KEY` setting either.
 0022 dropped the SQL spend policy and readiness columns and 0023 the spend ledgers: memo updates depend only on `memo_updates_enabled` and
-`memo_updates_daily_limit` in `store_config`. Every claim reserves 0.
+`memo_updates_daily_limit` in `store_config`. Claims reserve nothing; 0026 dropped
+`save_requests.reserved_micros`.
 
 Use separate Neon branches and matching environment settings for development and previews. Redeploy after changing runtime configuration.
 
@@ -198,8 +198,7 @@ Exactly four tools are exposed:
 | `create_memo({text, request_id, expected_version, ...})` | An exact save with at least one of `rules`, `exact_edits`, `moves`, `sample`, `retire_samples`; `text` states its purpose. UUID for the logical request and version from the cover sheet.                                                                                                                                                                   |
 
 `create_memo` returns `saved`, `unchanged`, `conflict`, `in_progress`, or `failed`,
-with the request ID and relevant version/error. (`needs_clarification` appears only
-in receipts saved before saves became model-free; their replay returns it unchanged.)
+with the request ID and relevant version/error.
 `saved` confirms a committed write; `unchanged` confirms no write. Neither alone
 proves the requested meaning is on file: reread the cover sheet or report and compare it
 with the requested change before confirming that. Reuse the exact same
@@ -420,10 +419,8 @@ The memo-update allowance is the only daily save cap: each successful
 many internal memos it touches (0014). No-op, conflict, failed saves and receipt
 replays charge nothing. While the allowance is off (the 0014 default), the
 attempted-call limit is the only daily bound on saves. The former 200-a-day
-technical write quota is retired; its
-`daily_writes` key and `usage_daily.writes` column stay unread until a migration
-drops them. Every attempted MCP call still counts, including retries. There are no
-public archive/restore exemptions or history controls.
+technical write quota is retired; 0026 dropped its `usage_daily.writes` column.
+Every attempted MCP call still counts, including retries. There are no public archive/restore exemptions or history controls.
 
 The website shows the current cover sheet and reports, escapes their text and serves no browser JavaScript.
 It displays one bullet per complete active instruction card, preserving internal
@@ -521,7 +518,7 @@ Future Stripe price configuration must use 501 USD cents, replacing the earlier
 $5 proposal. Current early access remains free; no payment price exists in this slice.
 Billing is not launched. Do not enable it until authenticated `/billing` checkout,
 verified provider entitlement synchronization and the remaining launch policies are
-implemented and tested. Stripe's routes and webhook exist (0026) and Stripe owns the
+implemented and tested. Stripe's routes and webhook exist (0027) and Stripe owns the
 trial; the rest of this section describes the 0012 groundwork, and where it differs,
 `docs/how-milton-works.md` is current. The trial notice and the `subscription_required`
 refusal link to the signed-in app home, whose banner holds the button. Existing early
@@ -636,8 +633,7 @@ tool/outcome/error values, elapsed time and charge/replay/release state, without
 client/account identity, instruction text or result bodies.
 
 The daily count is read from `save_requests` (`memo_update_state`,
-`memo_update_day`) under the account lock. `save_requests.reserved_micros` stays,
-always 0, because the save guard covers it.
+`memo_update_day`) under the account lock.
 
 ### No count limit (0021)
 

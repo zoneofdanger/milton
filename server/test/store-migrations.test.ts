@@ -55,13 +55,13 @@ const schemaCatalog = async (pg: PGlite) => {
   };
 };
 
-test("0026 adds the Stripe ledger and subscription columns, marks returning deleted identities canceled, the runtime applies an event once, and rollback refuses until nothing is recorded", async () => {
-  const base = await migratedThrough(25);
-  const pg = await migratedThrough(25);
-  const post = await migratedThrough(26);
+test("0027 adds the Stripe ledger and subscription columns, marks returning deleted identities canceled, the runtime applies an event once, and rollback refuses until nothing is recorded", async () => {
+  const base = await migratedThrough(26);
+  const pg = await migratedThrough(26);
+  const post = await migratedThrough(27);
   try {
-    const up = await drizzleSql("0026_stripe_billing.sql");
-    const down = await drizzleSql("rollback/0026_stripe_billing.sql");
+    const up = await drizzleSql("0027_stripe_billing.sql");
+    const down = await drizzleSql("rollback/0027_stripe_billing.sql");
     // A plain clock starts at created_at; a returning deleted identity's before it.
     await pg.exec(`INSERT INTO users(id) VALUES ('billing'),('returned');
       INSERT INTO trial_accounts(user_id,started_at) SELECT id,created_at FROM users WHERE id='billing';
@@ -234,11 +234,91 @@ test("0026 adds the Stripe ledger and subscription columns, marks returning dele
   }
 }, 30000);
 
+test("0026 drops the dead columns and save_requests indexes, keeps every row, and rolls back to the 0025 shape", async () => {
+  const base = await migratedThrough(25);
+  const pg = await migratedThrough(25);
+  const post = await migratedThrough(26);
+  try {
+    const up = await drizzleSql("0026_dead_columns.sql");
+    const down = await drizzleSql("rollback/0026_dead_columns.sql");
+    // The pre-release step (deploy/README.md "Dead columns (0026)"): a default
+    // lets the current code omit reserved_micros before 0026 runs.
+    const preStep =
+      "ALTER TABLE save_requests ALTER COLUMN reserved_micros SET DEFAULT 0";
+    const id = (n: number) => `00000000-0000-4000-8000-0000000000${n}`;
+    // Rows as the pre-0026 code writes them.
+    await pg.exec(`INSERT INTO users(id) VALUES ('dead');
+      INSERT INTO identities(provider,subject,user_id) VALUES ('neon','dead','dead');
+      INSERT INTO usage_daily(user_id,day_utc,tool_calls) VALUES ('dead','2026-11-01',3);
+      INSERT INTO save_requests(user_id,request_id,input_hash,source_hash,reserved_micros,deadline,completed,result_json) VALUES
+      ('dead','${id(26)}',repeat('a',64),repeat('c',64),0,now(),true,'{"status":"saved"}');`);
+    // The production check: every dropped column is still at its default.
+    expect(
+      (
+        await pg.query(
+          "SELECT (SELECT count(*) FROM users WHERE profile_json<>'{}'::jsonb)::int AS users_profile,(SELECT count(*) FROM identities WHERE profile_json<>'{}'::jsonb)::int AS identity_profile,(SELECT count(*) FROM usage_daily WHERE writes<>0)::int AS writes,(SELECT count(*) FROM save_requests WHERE reserved_micros<>0)::int AS reserved",
+        )
+      ).rows,
+    ).toEqual([
+      { users_profile: 0, identity_profile: 0, writes: 0, reserved: 0 },
+    ]);
+    await pg.exec(preStep);
+    await base.exec(preStep);
+    const save = (n: number) =>
+      pg.exec(`INSERT INTO save_requests(user_id,request_id,input_hash,source_hash,deadline,completed,result_json) VALUES
+        ('dead','${id(n)}',repeat('b',64),repeat('c',64),now(),true,'{"status":"saved"}')`);
+    // The current code's claim, which omits reserved_micros, works before 0026.
+    await save(27);
+    const rows = async () =>
+      (
+        await pg.query(
+          `SELECT (SELECT jsonb_agg(jsonb_build_object('id',id,'bytes',retained_bytes)) FROM users) AS users,
+            (SELECT jsonb_agg(user_id) FROM identities) AS identities,
+            (SELECT jsonb_agg(tool_calls) FROM usage_daily) AS calls,
+            (SELECT jsonb_agg(request_id ORDER BY request_id) FROM save_requests) AS saves`,
+        )
+      ).rows;
+    const kept = await rows();
+    const immutable = () =>
+      expect(
+        pg.exec(
+          `UPDATE save_requests SET input_hash=repeat('e',64) WHERE request_id='${id(26)}'`,
+        ),
+      ).rejects.toThrow("save_receipt_is_immutable");
+    const forward = async () => {
+      await pg.exec("BEGIN;" + up + "COMMIT;");
+      expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(post));
+      expect(await rows()).toEqual(kept);
+      await immutable();
+    };
+    await forward();
+    await save(28);
+    await pg.exec(`DELETE FROM save_requests WHERE request_id='${id(28)}'`);
+    await pg.exec(down);
+    expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(base));
+    expect(await rows()).toEqual(kept);
+    await immutable();
+    await save(28);
+    await pg.exec(`DELETE FROM save_requests WHERE request_id='${id(28)}'`);
+    await forward();
+  } finally {
+    await post.close();
+    await pg.close();
+    await base.close();
+  }
+}, 30000);
+
 test("0024 runtime role saves through its grants, cannot change the schema or bypass a trigger, and rolls back", async () => {
   const base = await migratedThrough(23);
   const pg = await migratedThrough(23);
   const post = await migratedThrough(24);
   try {
+    // The current code omits reserved_micros: before 0026 it needs the deploy
+    // pre-step's default (deploy/README.md "Dead columns (0026)").
+    for (const db of [base, pg, post])
+      await db.exec(
+        "ALTER TABLE save_requests ALTER COLUMN reserved_micros SET DEFAULT 0",
+      );
     const up = await drizzleSql("0024_runtime_role.sql");
     const down = await drizzleSql("rollback/0024_runtime_role.sql");
     const roles = async (db: PGlite) =>
@@ -361,10 +441,10 @@ test("0024 runtime role saves through its grants, cannot change the schema or by
     expect(await grants(pg)).toEqual(await grants(post));
 
     await seedUsers(pg, "runtime");
-    // The store's trial gate reads 0026's columns, so the runtime checks below
-    // run with them in place; 0026 comes back out before 0024's rollback.
+    // The store's trial gate reads 0027's columns, so the runtime checks below
+    // run with them in place; 0027 comes back out before 0024's rollback.
     await pg.exec(
-      "BEGIN;" + (await drizzleSql("0026_stripe_billing.sql")) + "COMMIT;",
+      "BEGIN;" + (await drizzleSql("0027_stripe_billing.sql")) + "COMMIT;",
     );
     // A login role in the group, as milton_app is in Neon. Membership
     // inherits: the session needs no SET ROLE milton_runtime. PGlite's session
@@ -454,7 +534,7 @@ test("0024 runtime role saves through its grants, cannot change the schema or by
     } finally {
       await pg.exec("RESET ROLE");
     }
-    await pg.exec(await drizzleSql("rollback/0026_stripe_billing.sql"));
+    await pg.exec(await drizzleSql("rollback/0027_stripe_billing.sql"));
 
     // Rollback refuses while a login role is still in the group.
     await expect(pg.exec(down)).rejects.toThrow(

@@ -117,7 +117,7 @@ export async function recordStripeEvent(
   return { recorded: row.recorded === 1, updated: row.updated };
 }
 
-/** 0026's data statement: a returning deleted identity an older image wrote, with
+/** 0027's data statement: a returning deleted identity an older image wrote, with
  * no status and a start before its account, is canceled, never given a trial. */
 export async function cancelReturningIdentities(db: StoreSession) {
   await db.query(sql`UPDATE trial_accounts t SET subscription_status='canceled'

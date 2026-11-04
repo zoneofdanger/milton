@@ -18,13 +18,9 @@ import {
 
 const createdAt = () =>
   timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
-// Changing this default needs a migration, so retired keys stay. Triggers still
-// read name_bytes (memos) and reason_bytes (memo and card versions); no
-// application code reads them, page_size or daily_writes (the technical write
-// cap is retired; the memo-update allowance is the daily save cap). Nothing
-// reads memos since 0021 removed the count limit.
+// Changing this default needs a migration. Triggers read name_bytes (memos) and
+// reason_bytes (memo and card versions); no application code reads them.
 const limits = {
-  memos: 100,
   body_bytes: 32768,
   name_bytes: 64,
   description_bytes: 500,
@@ -32,10 +28,6 @@ const limits = {
   history_bytes: 67108864,
   report_body_bytes: 262144,
   daily_calls: 1000,
-  daily_writes: 200,
-  // Unread: the request bound is MAX_REQUEST_BYTES in src/http.ts.
-  request_bytes: 65536,
-  page_size: 50,
 };
 export const storeConfig = pgTable(
   "store_config",
@@ -49,9 +41,6 @@ export const storeConfig = pgTable(
       .notNull()
       .default(100),
     limits: jsonb("limits_json").notNull().default(limits),
-    updatedAt: timestamp("updated_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
   },
   (t) => [
     check("config_singleton", sql`${t.singleton} = 1`),
@@ -64,8 +53,6 @@ export const users = pgTable(
   {
     id: text("id").primaryKey(),
     status: text("status").notNull().default("active"),
-    templatesRevision: integer("templates_revision").notNull().default(0),
-    profile: jsonb("profile_json").notNull().default({}),
     retainedBytes: bigint("retained_bytes", { mode: "number" })
       .notNull()
       .default(0),
@@ -73,8 +60,6 @@ export const users = pgTable(
   },
   (t) => [
     check("users_status", sql`${t.status} IN ('active','deleting')`),
-    check("users_revision", sql`${t.templatesRevision} >= 0`),
-    check("users_profile_object", sql`jsonb_typeof(${t.profile}) = 'object'`),
     check("users_bytes", sql`${t.retainedBytes} >= 0`),
     check(
       "users_id_format",
@@ -139,17 +124,12 @@ export const identities = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    profile: jsonb("profile_json").notNull().default({}),
     createdAt: createdAt(),
   },
   (t) => [
     primaryKey({ columns: [t.provider, t.subject] }),
     index("identities_by_user").on(t.userId),
     check("identities_subject", sql`${t.subject} <> ''`),
-    check(
-      "identities_profile_object",
-      sql`jsonb_typeof(${t.profile}) = 'object'`,
-    ),
   ],
 );
 // Assistants a person disconnected from Milton, keyed by sign-in identity and
@@ -262,12 +242,10 @@ export const usageDaily = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     dayUtc: date("day_utc").notNull(),
     toolCalls: integer("tool_calls").notNull().default(0),
-    // Retired technical write counter: nothing writes it; dropping it needs a migration.
-    writes: integer("writes").notNull().default(0),
   },
   (t) => [
     primaryKey({ columns: [t.userId, t.dayUtc] }),
-    check("usage_nonnegative", sql`${t.toolCalls} >= 0 AND ${t.writes} >= 0`),
+    check("usage_nonnegative", sql`${t.toolCalls} >= 0`),
   ],
 );
 
@@ -300,7 +278,6 @@ export const saveRequests = pgTable(
     requestId: text("request_id").notNull(),
     inputHash: text("input_hash").notNull(),
     sourceHash: text("source_hash").notNull(),
-    reservedMicros: integer("reserved_micros").notNull(),
     result: jsonb("result_json").notNull().default({}),
     completed: boolean("completed").notNull().default(false),
     deadline: timestamp("deadline", { withTimezone: true }).notNull(),
@@ -316,8 +293,6 @@ export const saveRequests = pgTable(
   },
   (t) => [
     primaryKey({ columns: [t.userId, t.requestId] }),
-    index("save_requests_by_day").on(t.createdAt),
-    index("save_requests_by_account_day").on(t.userId, t.createdAt),
     index("save_requests_memo_updates")
       .on(t.userId, t.memoUpdateDay)
       .where(sql`${t.memoUpdateState} IN ('held','charged')`),
@@ -333,7 +308,6 @@ export const saveRequests = pgTable(
       "save_request_hashes",
       sql`${t.inputHash} ~ '^[a-f0-9]{64}$' AND ${t.sourceHash} ~ '^[a-f0-9]{64}$'`,
     ),
-    check("save_request_cost", sql`${t.reservedMicros} >= 0`),
     check("save_request_id", sql`length(${t.requestId}) = 36`),
     check(
       "save_request_result",

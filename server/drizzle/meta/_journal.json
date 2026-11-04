@@ -187,8 +187,15 @@
     {
       "idx": 26,
       "version": "7",
-      "when": 1793754786172,
-      "tag": "0026_stripe_billing",
+      "when": 1793756884938,
+      "tag": "0026_dead_columns",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1793760045324,
+      "tag": "0027_stripe_billing",
       "breakpoints": true
     }
   ]

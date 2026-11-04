@@ -21,8 +21,7 @@ Files: `server/src/cloud-run.ts`, `server/src/environment.ts`, `server/src/confi
 - HTTP upgrades to HTTPS with a redirect that keeps the method.
 - Vercel builds the static site from main on every push.
 - Startup decrypts a dotenvx file using a separate platform-held key.
-- Startup fails on a retired inline secret, bad URLs, a short cookie secret, a bad support
-  email, or a bad port.
+- Startup fails on bad URLs, a short cookie secret, a bad support email, or a bad port.
 - Plain HTTP is allowed only on loopback outside production.
 - On SIGTERM the server stops accepting requests and force-exits after 8 seconds.
 - The image builds with Bun, then ships only the bundle and public assets to a non-root
@@ -219,7 +218,7 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
 - `scripts/backfill-subscriptions.ts` does the same for every active account, paced at about
   5 a second: a dry run unless told otherwise, it skips rows with a status, sends no email,
   prints only counts, and refuses without `trials_enabled` and a live key.
-- The backfill cancels a returning deleted identity left with no status, by 0026's rule,
+- The backfill cancels a returning deleted identity left with no status, by 0027's rule,
   and counts it as skipped, so it never gets a trial.
 - A reply lost after Stripe made a customer can leave an orphan: never charged, may hold an
   email, removed by hand in Stripe if ever needed.

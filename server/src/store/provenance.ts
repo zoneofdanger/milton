@@ -7,7 +7,7 @@ export async function recordAcceptedChange(
   input: {
     userId: string;
     requestId: string;
-    operation: "save_memo" | "refinement_apply";
+    operation: "save_memo";
     request: unknown;
     actor: unknown;
     transformation: unknown;

@@ -1,5 +1,5 @@
 /** The one request-size bound, read before parsing, authentication or any
- * database access. `limits_json.request_bytes` is not read. */
+ * database access. */
 export const MAX_REQUEST_BYTES = 65536;
 
 export async function boundRequest(

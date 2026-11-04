@@ -134,13 +134,13 @@ import AssistantSetup from "../components/AssistantSetup.astro";
       </li>
       <li>
         Make Milton available in your conversation before asking ChatGPT to read
-        or save preferences.
+        or save rules and samples.
       </li>
     </ol>
     <p>
       Custom MCP access depends on your plan and workspace settings. You need
-      both read and write tools; a search-only connection won’t save
-      preferences. If the option is missing, check the{" "}
+      both read and write tools; a search-only connection won’t save rules and
+      samples. If the option is missing, check the{" "}
       <a href="https://developers.openai.com/plugins/build/app-quickstart">
         official connection guide ↗
       </a>{" "}
@@ -159,8 +159,8 @@ import AssistantSetup from "../components/AssistantSetup.astro";
     </p>
     <blockquote>
       Add Milton as a remote MCP server at https://mcp.meetmilton.com/mcp. Use
-      OAuth browser sign-in, then list its tools. Do not save or change
-      preferences during setup.
+      OAuth browser sign-in, then list its tools. Do not save or change rules
+      and samples during setup.
     </blockquote>
     <ol>
       <li>Complete the browser sign-in using your Milton account.</li>
@@ -193,8 +193,8 @@ import AssistantSetup from "../components/AssistantSetup.astro";
     <blockquote>
       Create a Custom Connector named Milton for the remote MCP server at
       https://mcp.meetmilton.com/mcp. It uses Streamable HTTP and OAuth browser
-      sign-in. List its tools after connecting. Do not save or change
-      preferences during setup.
+      sign-in. List its tools after connecting. Do not save or change rules and
+      samples during setup.
     </blockquote>
     <ol>
       <li>
@@ -275,7 +275,7 @@ codex mcp login milton`}</code></pre>
     </p>
   </section>
   <section id="first-preference" aria-labelledby="first-heading">
-    <h2 id="first-heading">Put your first preference on file.</h2>
+    <h2 id="first-heading">Put your first rules on file.</h2>
     <p>
       Your account starts empty. The setup prompt above runs a short quiz: paste
       one email you sent, then pick between short examples, one question at a

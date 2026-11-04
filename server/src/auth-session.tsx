@@ -211,7 +211,9 @@ export function pageContext(
       subject: user.id,
     });
     const store = await personStoreForCurrentRequest(config, verified);
-    return memoPages(request, store, csrfField, user.email);
+    return memoPages(request, store, csrfField, user.email, {
+      billing: !!config.billing,
+    });
   };
   return {
     config,

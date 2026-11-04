@@ -523,9 +523,9 @@ Billing is not launched. Do not enable it until authenticated `/billing` checkou
 verified provider entitlement synchronization and the remaining launch policies are
 implemented and tested. Stripe's routes and webhook exist (0026) and Stripe owns the
 trial; the rest of this section describes the 0012 groundwork, and where it differs,
-`docs/how-milton-works.md` is current. Until the subscribe link ships, the trial notice,
-the page banner and the `subscription_required` refusal carry no subscription link;
-the banner names the price as plain text. Existing early access must not acquire a payment gate implicitly.
+`docs/how-milton-works.md` is current. The trial notice and the `subscription_required`
+refusal link to the signed-in app home, whose banner holds the button. Existing early
+access must not acquire a payment gate implicitly.
 
 When explicitly enabled, only newly created accounts get a `trial_accounts` row.
 Existing accounts without a row remain early access, including on later sign-ins.

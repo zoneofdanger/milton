@@ -17,20 +17,42 @@ type PageStore = Pick<PersonStore, "readTpsReport"> &
     >;
   };
 
-function trialBanner(status?: TrialStatus) {
-  if (!status || status.status === "early_access" || status.status === "paid")
-    return null;
-  if (status.status === "trial" && !status.reminder_stage) return null;
-  return (
-    <aside class="small-note" aria-label="Milton subscription">
-      <p>
-        {status.status === "expired"
-          ? "Your Milton trial has ended. Assistant reads and saves are paused. Your preferences are still here to view and download."
-          : `Your Milton trial ends ${status.trial_ends_at!.slice(0, 10)} (UTC).`}{" "}
-        {/* Plain text until billing exists: /billing has no route. */}
-        Subscribe for $5.01/month.
-      </p>
+// What a person sees about paying. Worded for everyone in the status: a paying
+// person past grace reads the paused line, and someone with a card the trial line.
+function billingBanner(
+  csrf: () => Child,
+  billing: boolean,
+  status?: TrialStatus,
+) {
+  if (!status || status.status === "early_access") return null;
+  const button = (action: "checkout" | "portal", label: string) =>
+    billing && (
+      <form method="post" action={`/billing/${action}`}>
+        {csrf()}
+        <button class="secondary">{label}</button>
+      </form>
+    );
+  const days = status.days_left;
+  const banner = (message: string | null, form: Child) => (
+    <aside class="small-note billing-note" aria-label="Milton subscription">
+      {message && <p>{message}</p>}
+      {form}
     </aside>
+  );
+  if (status.status === "paid")
+    return billing ? banner(null, button("portal", "Manage billing")) : null;
+  if (status.status === "expired")
+    return banner(
+      "Assistant reads and saves are paused until you subscribe for $5.01/month. Your rules and samples are still here to view and download.",
+      button("checkout", "Subscribe"),
+    );
+  // Without billing there is nothing to press, so only the last week shows.
+  if (!billing && !status.reminder_stage) return null;
+  return banner(
+    days === undefined
+      ? null
+      : `${days} ${days === 1 ? "day" : "days"} left in your Milton trial, then it's $5.01/month. Unless you've already added a card, add one by then.`,
+    button("checkout", "Add a card"),
   );
 }
 
@@ -289,9 +311,9 @@ export async function memoPages(
   store: PageStore,
   csrf: () => Child,
   email?: string,
-  /** Fixed values for tests; a request otherwise uses today (UTC) and a
-   * random comment. */
-  options: { now?: () => Date; comment?: () => string } = {},
+  /** billing says Stripe is configured. Fixed values for tests; a request
+   * otherwise uses today (UTC) and a random comment. */
+  options: { billing?: boolean; now?: () => Date; comment?: () => string } = {},
 ): Promise<Response> {
   async function showCurrent(
     report: CompiledReport,
@@ -349,7 +371,7 @@ export async function memoPages(
   const trial = await store.trialStatus?.().catch(() => undefined);
   return showCurrent(
     report,
-    trialBanner(trial),
+    billingBanner(csrf, options.billing ?? false, trial),
     200,
     trial?.status === "expired",
   );

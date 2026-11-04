@@ -247,8 +247,9 @@ Files: `server/src/pages.tsx`, `server/src/memo-pages.tsx`,
 - `/download` returns the report as `TPS.md`.
 - `/assistants` lists live consents and looks up at most 20 names per view.
 - The setup prompt changes depending on whether the account is empty.
-- The trial banner shows only in a Stripe trial's last 7 days or after expiry, and billing
-  is plain text with no link yet.
+- With billing configured, the cover sheet shows days left and Add a card in a trial,
+  Subscribe when expired, and Manage billing when paid; early access shows nothing.
+- Without billing configured there are no buttons, and a trial shows only in its last 7 days.
 
 ## Limits and trials
 

@@ -1808,6 +1808,60 @@ test("billing checkout and portal: 503 without config; signed-in CSRF forms; the
   }
 }, 30000);
 
+test("the cover sheet offers the way to pay for each status, only with billing configured", async () => {
+  const { billing } = fakeStripe();
+  const fixture = await accountFixture({ billing });
+  const { local, send } = fixture;
+  const set = (status: string, renewed = "1 day") =>
+    local.db.query(sql`UPDATE trial_accounts SET subscription_status=${status},
+      trial_end=clock_timestamp()+interval '11 days 12 hours',
+      current_period_start=clock_timestamp()-${renewed}::interval`);
+  const form = (action: string, label: string) =>
+    new RegExp(
+      `<form method="post" action="/billing/${action}"><input type="hidden" name="csrf"[^>]*/?><button[^>]*>${label}</button></form>`,
+    );
+  try {
+    // Early access: nothing, even with billing on.
+    expect(await (await send("/")).text()).not.toContain("Milton subscription");
+    await local.db.query(sql`UPDATE store_config SET trials_enabled=true`);
+    await local.db.query(
+      sql`INSERT INTO trial_accounts(user_id,started_at) SELECT id,created_at FROM users`,
+    );
+    await set("trialing");
+    const trial = await (await send("/")).text();
+    expect(trial).toContain("12 days left in your Milton trial");
+    expect(trial).toContain("Unless you&#39;ve already added a card");
+    expect(trial).toMatch(form("checkout", "Add a card"));
+    await local.db.query(
+      sql`UPDATE trial_accounts SET trial_end=clock_timestamp()+interval '2 hours'`,
+    );
+    expect(await (await send("/")).text()).toContain(
+      "1 day left in your Milton trial",
+    );
+    for (const status of ["canceled", "unpaid"]) {
+      await set(status);
+      const paused = await (await send("/")).text();
+      expect(paused).toContain("paused until you subscribe for $5.01/month");
+      expect(paused).toMatch(form("checkout", "Subscribe"));
+      expect(paused).not.toContain("trial has ended");
+    }
+    // Past grace reads as expired, inside it as paid.
+    await set("past_due", "4 days");
+    expect(await (await send("/")).text()).toMatch(
+      form("checkout", "Subscribe"),
+    );
+    for (const status of ["active", "past_due"]) {
+      await set(status);
+      const paid = await (await send("/")).text();
+      expect(paid).toMatch(form("portal", "Manage billing"));
+      expect(paid).not.toContain("$5.01");
+      expect(paid).not.toContain("/billing/checkout");
+    }
+  } finally {
+    await fixture.dispose();
+  }
+}, 30000);
+
 test("trial reminders stay outside TPS and expired accounts retain web view and download", async () => {
   const fixture = await memoPageFixture();
   try {
@@ -1821,7 +1875,7 @@ test("trial reminders stay outside TPS and expired accounts retain web view and 
     expect(saved.status).toBe("saved");
     const report = await fixture.store.readTpsReport();
     expect(await (await fixture.send("/")).text()).not.toContain(
-      "Subscribe for $5.01/month",
+      "Milton subscription",
     );
     await fixture.db.query(sql`UPDATE store_config SET trials_enabled=true`);
     await fixture.db.query(
@@ -1829,15 +1883,16 @@ test("trial reminders stay outside TPS and expired accounts retain web view and 
     );
     const freshTrial = await (await fixture.send("/")).text();
     expect(freshTrial).not.toContain("trial starts");
-    expect(freshTrial).not.toContain("Subscribe for $5.01/month");
+    expect(freshTrial).not.toContain("Milton subscription");
     await fixture.db.query(
       sql`UPDATE trial_accounts SET trial_end=clock_timestamp()+interval '6 days'`,
     );
     const warning = await fixture.send("/");
     expect(warning.status).toBe(200);
     const warned = await warning.text();
-    expect(warned).toContain("Subscribe for $5.01/month.");
-    expect(warned).not.toContain('href="/billing"');
+    expect(warned).toContain("days left in your Milton trial");
+    // Without billing configured there is nothing to press.
+    expect(warned).not.toContain('action="/billing');
     // Page views do not consume an assistant's reminder milestone.
     expect(
       (await fixture.db.query(sql`SELECT notice_stage FROM trial_accounts`))[0]!
@@ -1849,7 +1904,8 @@ test("trial reminders stay outside TPS and expired accounts retain web view and 
     const expired = await fixture.send("/tps-report");
     expect(expired.status).toBe(200);
     const html = await expired.text();
-    expect(html).toContain("Assistant reads and saves are paused.");
+    expect(html).toContain("Assistant reads and saves are paused until");
+    expect(html).not.toContain('action="/billing');
     expect(html).not.toContain("ask a connected assistant to save");
     expect(html).toContain("Be concise.");
     const download = await fixture.send("/download");

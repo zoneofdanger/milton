@@ -5,6 +5,8 @@ import { StoreError } from "./errors";
 export type TrialStatus = {
   status: "early_access" | "trial" | "paid" | "expired";
   trial_ends_at?: string;
+  /** Whole days left in a trial, rounded up; a trial still running reads 1 at least. */
+  days_left?: number;
   reminder_stage: 0 | 1 | 2;
 };
 export type TrialNotice = {
@@ -59,6 +61,7 @@ export async function trialStatus(
   return {
     status: "trial",
     trial_ends_at: end.toISOString(),
+    days_left: Math.max(Math.ceil(remaining / 86400000), 1),
     reminder_stage:
       remaining <= 0 || remaining > 7 * 86400000
         ? 0

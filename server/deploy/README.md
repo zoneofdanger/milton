@@ -502,16 +502,49 @@ Migration 0027 adds the Stripe webhook ledger and the subscription columns on
 `trial_accounts`, and marks returning deleted identities canceled. Stripe owns the trial; the
 gate reads `subscription_status`.
 
-**Release order.** Dead columns (0026) must be fully released first, code then migration: the
-runner applies everything pending, and 0027 runs before its own code, the opposite of 0026. Then
-take a snapshot, apply 0027, and ship MCP and app from the same image. This
-code reads the new columns on every gated read, so on the older schema every assistant read
-fails with a 503. Both services must move: an older MCP revision keeps gating on the retired
-clock. The three `STRIPE_*` settings go on the app service only; all three or none, since a
-partial or malformed set stops the app at startup.
+**Release order.** Dead columns (0026) is already released, so only 0027 is pending. Agents never
+hold the owner connection or `DOTENV_PRIVATE_KEY`, so Peter runs every step that needs either. A
+release agent takes the snapshot and ships the images. Run these in order:
 
-To apply 0027, from a checkout of the released commit, with the owner connection in the
-environment and never on a command line:
+1. **Peter, in the Stripe Dashboard.** Roll both webhook signing secrets, test and live, expiring
+   the old ones immediately, and create the live restricted key (Write on Customers, Subscriptions,
+   Checkout Sessions and Customer portal). Install only a rolled secret, never one that has
+   appeared in a transcript.
+2. **Peter, in the Stripe Dashboard, live mode.** Confirm the settings below on the day: failed
+   payments cancel the subscription, and the three customer emails are on.
+3. **Release agent, then Peter.** The release agent takes a Neon snapshot. Peter applies 0027 and
+   confirms the journal, as below. This code reads the new columns on every gated read, so on the
+   older schema every assistant read fails with a 503.
+4. **Release agent.** Ship MCP and app from the same image. Both must move: an older MCP revision
+   keeps gating on the retired clock.
+5. **Peter, then the release agent.** Peter mints the next numeric version of `milton-app-env`, as in
+   the mint steps of [Runtime role (0024)](#runtime-role-0024), with these keys and no others:
+   `APP_ORIGIN`, `MCP_RESOURCE`, `NEON_AUTH_BASE_URL`, `NEON_AUTH_COOKIE_SECRET`, `DATABASE_URL`,
+   `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` and `STRIPE_PRICE_ID`, plus `MILTON_SUPPORT_EMAIL` if
+   it is set. Drop the unread `MILTON_GARDENING_ENABLED` and `MILTON_DERIVATIONS_ENABLED`. dotenvx's
+   own `DOTENV_PUBLIC_KEY` stays. The Stripe values are the live key from step 1, the rolled live
+   secret and the live price. `grep -E '^[A-Z_]+=' <file> | cut -d= -f1 | sort` lists the names with
+   no values. The release agent then redeploys the app only, pinned to that version, and
+   confirms it starts: all three `STRIPE_*` or none, since a partial or malformed set stops it. The
+   MCP service gets no Stripe setting.
+6. **Peter, with the owner connection.** Rerun the data statement below, before the flip: after it, a
+   returning identity's row with no status could start a second trial at sign-in.
+7. **Peter, with the owner connection.** Once the site and privacy copy are published, flip trials
+   on. `milton_runtime` cannot change this setting:
+
+   ```sql
+   UPDATE store_config SET trials_enabled = true WHERE singleton = 1;
+   ```
+
+8. **Peter.** Run the backfill below: the dry run, read its counts, then `--apply`.
+
+Run the SQL in steps 3, 6 and 7 in `psql` as `neondb_owner`, with the login in the environment and
+never a URL on the command line, as in [Runtime role (0024)](#runtime-role-0024).
+
+Before the first natural trial end, 30 days after step 7, run a test clock with the same
+subscription params: the test-mode run forced every trial end.
+
+To apply 0027 in step 3, from a checkout of the released commit that has no `server/.dev.vars`:
 
 ```sh
 read -rs MILTON_OWNER_DATABASE_URL
@@ -520,7 +553,9 @@ bun run --cwd server db:migrate
 unset MILTON_OWNER_DATABASE_URL
 ```
 
-It refuses any database but `milton` and any role but `neondb_owner`, and prints no URL.
+It refuses any database but `milton` and any role but `neondb_owner`, and prints no URL, so its PASS
+does not say which branch it ran on. Confirm the target: `SELECT count(*) FROM
+drizzle.__drizzle_migrations;` must answer 28. If the command hangs, suspect the connection.
 
 **Rollback boundary.** Before trials are on, code rolls back by traffic alone. Once trials are
 on there is no traffic rollback to a pre-billing image: it gates on the retired clock and
@@ -559,20 +594,18 @@ all three are on before `trials_enabled` is flipped:
 Stripe sends no trial reminders in a sandbox, so a test-mode run cannot confirm the first.
 
 **Data statement.** An older image still serving after 0027 can write a returning deleted
-identity's row with no status. Once the new image has all traffic, and before the backfill,
-rerun 0027's statement. It only touches rows with no status, so it never changes one Stripe has
-answered for:
+identity's row with no status. Once the new image has all traffic, before the flip, rerun 0027's
+statement. It only touches rows with no status, so it never changes one Stripe has answered for:
 
     UPDATE trial_accounts t SET subscription_status = 'canceled'
     FROM users u WHERE u.id = t.user_id AND t.started_at < u.created_at
     AND t.subscription_status IS NULL;
 
-**Backfill.** After `trials_enabled` is flipped, Peter gives every existing account its trial.
-This step is his: agents never hold `DOTENV_PRIVATE_KEY`. It runs from a checkout of the released
+**Backfill.** Step 8 gives every existing account its trial. It runs from a checkout of the released
 commit, after `bun install --frozen-lockfile`. The runtime image cannot run it: it is Node with one
 bundled file, no `bun` and no `server/scripts`. Set `MILTON_ENCRYPTED_ENV_FILE` to the app's
 encrypted payload and `DOTENV_PRIVATE_KEY` to its key, at the numeric versions the app mounts
-(`<env>` and `<key>` below). The script prints no value. Read the dry run's counts before `--apply`.
+(`<env>` and `<key>` below). The script prints no value. First the dry run:
 
 ```sh
 umask 077
@@ -582,6 +615,11 @@ export MILTON_ENCRYPTED_ENV_FILE="$dir/app.env"
 export DOTENV_PRIVATE_KEY="$(gcloud secrets versions access <key> --secret=milton-app-key --project=milton-510506)"
 cd server
 bun --no-env-file scripts/backfill-subscriptions.ts
+```
+
+Read the counts. Then, in the same shell:
+
+```sh
 bun --no-env-file scripts/backfill-subscriptions.ts --apply
 cd ..
 unset MILTON_ENCRYPTED_ENV_FILE DOTENV_PRIVATE_KEY
@@ -595,5 +633,6 @@ rows with a status are skipped. It also applies the data statement's rule, so a 
 identity's row is canceled and counted as skipped, but the rerun above still comes first. A row left at NULL is free until a browser sign-in: an approval
 Neon already holds refreshes without any Milton page. A customer it creates has no email
 until its person first opens billing, when Milton copies their sign-in email to Stripe. Everyone
-who can add a card or pay passes through there, so nobody is charged without one, but until then
-Stripe sends that person nothing, including its trial-ending reminder.
+who can add a card or pay passes through there, so nobody is charged without one unless the copy
+fails or sign-in supplied no address; until then Stripe sends that person nothing, including its
+trial-ending reminder.

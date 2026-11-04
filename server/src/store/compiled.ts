@@ -26,9 +26,9 @@ const hash = (value: unknown) =>
   createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const text = z
   .string()
-  .max(32768)
+  .max(131072)
   .refine(
-    (v) => v.isWellFormed() && !v.includes("\0") && utf8Bytes(v) <= 32768,
+    (v) => v.isWellFormed() && !v.includes("\0") && utf8Bytes(v) <= 131072,
   );
 const oneLine = (max: number) =>
   z
@@ -39,7 +39,7 @@ const oneLine = (max: number) =>
     .refine((v) => v.isWellFormed() && !/[\r\n\0]/.test(v));
 const oneKind = "A sample needs kind_id or new_kind, not both.";
 const badRules =
-  "rules takes 1–25 entries, each with a report (one of the five, doc or cover) and non-blank text. Nothing was changed.";
+  "rules takes 1–100 entries, each with a report (one of the five, doc or cover) and non-blank text. Nothing was changed.";
 export const saveMemoInput = z.strictObject({
   text: text
     .refine((v) => v.trim().length > 0)
@@ -62,7 +62,7 @@ export const saveMemoInput = z.strictObject({
       }),
     )
     .min(1)
-    .max(25)
+    .max(100)
     .optional()
     .describe(
       "New rules, one entry each. A rule already on file in that report with the same text is skipped.",
@@ -75,7 +75,7 @@ export const saveMemoInput = z.strictObject({
       }),
     )
     .min(1)
-    .max(100)
+    .max(500)
     .optional()
     .describe(
       "Corrections and removals of existing rules, sent as Corrections in the server instructions says. All edits use the original snapshot. Preserve complete conditions, subjects and scope.",
@@ -88,7 +88,7 @@ export const saveMemoInput = z.strictObject({
       }),
     )
     .min(1)
-    .max(100)
+    .max(500)
     .optional()
     .describe(
       "Optional moves of existing rules, only when the person asks to change where a rule applies. before is copied verbatim from the rule and occurs exactly once across all rules; report is the destination report, or cover for the cover sheet. The rule keeps its exact text.",
@@ -133,12 +133,12 @@ export const saveMemoInput = z.strictObject({
     })
     .optional()
     .describe(
-      "Optional approved sample to file under a report, offered once when the person approves a draft and sent only after they say yes. At most two stay per kind; Milton retires the oldest beyond that and reports it in samples_retired. Text identical to an active sample of the kind files nothing.",
+      "Optional approved sample to file under a report, offered once when the person approves a draft and sent only after they say yes. Every approved sample stays; a report serves the newest two per kind. Remove one with retire_samples or replace it with replaces; either is reported in samples_retired. Text identical to an active sample of the kind files nothing.",
     ),
   retire_samples: z
     .array(z.string().min(1).max(256))
     .min(1)
-    .max(100)
+    .max(500)
     .optional()
     .describe(
       "Optional ids of active samples the person asked to remove, from get_report samples.",

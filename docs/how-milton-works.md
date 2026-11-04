@@ -36,8 +36,8 @@ Files: `server/src/index.ts`, `server/src/cloud-app.ts`, `server/src/http.ts`,
 
 - A request is refused unless its Host matches that service's canonical host.
 - The app rewrites each URL to its configured origin, because TLS ends upstream.
-- Bodies over 64 KiB get a 413 before parsing, auth, or database work.
-- The Stripe webhook is the one exception, with a 256 KiB bound.
+- Bodies over 256 KiB get a 413 before parsing, auth, or database work.
+- The Stripe webhook keeps its own bound, also 256 KiB.
 - `/mcp` goes to the MCP handler on the MCP service and returns 404 on the app.
 - `GET /health` returns ok.
 - `/.well-known/oauth-protected-resource` publishes the resource and its auth issuer.
@@ -107,8 +107,8 @@ Files: `server/src/store/reports.ts`, `server/src/store/compiled.ts`.
 
 - Reports are fixed in code: email, chat, post, document, and speech.
 - Cards print as bullets in insertion order, and an older stored `- ` is not doubled.
-- A report is its heading, "Applies when…", samples newest first as quotes, and then
-  rules.
+- A report is its heading, "Applies when…", the newest two samples of each kind, newest
+  first, as quotes, and then rules.
 - The cover sheet prints a note explaining `Baseline:` whenever any active rule has that
   prefix.
 - `TPS.md` is the cover sheet plus every non-empty report.
@@ -131,7 +131,7 @@ not at all.
 
 ### Admit
 
-- The input schema is strict: 1 to 25 rules, up to 100 edits, moves, or sample removals, a
+- The input schema is strict: 1 to 100 rules, up to 500 edits, moves, or sample removals, a
   UUID request ID, and a version.
 - Only assistants can save, so a save through the web app's store is refused with
   `assistant_required`.
@@ -177,7 +177,9 @@ not at all.
 - A `kind_id` must name a kind in the same report.
 - Replacing a sample requires an active sample of the same kind.
 - Each sample removal must name an active sample, listed once.
-- Each kind keeps its newest two samples, and evictions are reported in `samples_retired`.
+- Every approved sample stays until the person replaces or removes it; reports serve the
+  newest two per kind. `samples_retired` reports what `replaces` and `retire_samples`
+  retired.
 
 ### Publish
 
@@ -298,6 +300,9 @@ Files: `server/src/store/index.ts`, `server/src/store/trials.ts`,
 `server/src/store/billing.ts`, `server/src/billing.tsx`, `server/src/config.ts`.
 
 - Limits live in a single `store_config` row and are validated on read.
+- Each account gets 10,000 attempted MCP calls per UTC day; rule and sample text is capped
+  at 128 KiB, and a save takes up to 100 rules and 500 edits, moves, or sample removals
+  (0032).
 - Trials are switched by `trials_enabled`, and when off, everyone is early access.
 - With trials on, access follows the Stripe subscription status held on the trial row:
   trialing reads as trial, active as paid, and past_due as paid for 3 days from the renewal.

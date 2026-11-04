@@ -515,7 +515,7 @@ test("malformed rules are refused with a message that says how to fix them", asy
     };
     const rule = { report: "chat", text: "Keep it short." };
     for (const rules of [
-      Array.from({ length: 26 }, (_, i) => ({ ...rule, text: `Rule ${i}.` })),
+      Array.from({ length: 101 }, (_, i) => ({ ...rule, text: `Rule ${i}.` })),
       [],
       [{ ...rule, report: "linkedin" }],
       [{ ...rule, text: " \n " }],
@@ -525,7 +525,7 @@ test("malformed rules are refused with a message that says how to fix them", asy
       ).rejects.toMatchObject({
         code: "invalid_input",
         message:
-          "rules takes 1–25 entries, each with a report (one of the five, doc or cover) and non-blank text. Nothing was changed.",
+          "rules takes 1–100 entries, each with a report (one of the five, doc or cover) and non-blank text. Nothing was changed.",
       });
     // Other malformed input names text as the purpose, not as instruction text.
     await expect(
@@ -566,7 +566,7 @@ test("a save without a structured field is refused with invalid_input", async ()
   }
 });
 
-test("reports print a heading, when line, samples newest first and rules; samples replace per kind; card text cannot add headings", async () => {
+test("reports print a heading, when line, the newest two samples per kind and rules; card text cannot add headings", async () => {
   const local = await localStore();
   try {
     await seedUsers(local.pg, "reports");
@@ -646,10 +646,15 @@ test("reports print a heading, when line, samples newest first and rules; sample
     ).toHaveLength(1);
     expect(documents.cover).toBe("- No em dashes.\n\n- Oxford comma.");
     expect(documents.is_empty).toBe(false);
-    // A third sample of one kind retires the oldest; retirement is the only change.
+    // A third sample of one kind stays on file; the report serves the newest two.
     expect(await sample("follow-up", "Third follow-up")).toMatchObject({
       status: "saved",
     });
+    expect(
+      (await store.readDocuments()).reports
+        .find((r) => r.id === "email")!
+        .samples.map((s) => s.body),
+    ).toEqual(["Third follow-up", "Second follow-up"]);
     expect(
       (
         await local.pg.query(
@@ -657,7 +662,7 @@ test("reports print a heading, when line, samples newest first and rules; sample
         )
       ).rows,
     ).toEqual([
-      { body: "Hi [name],\n\nThanks!", live: false },
+      { body: "Hi [name],\n\nThanks!", live: true },
       { body: "Second follow-up", live: true },
       { body: "Third follow-up", live: true },
     ]);
@@ -795,8 +800,8 @@ test("an exact edit and a move of one rule land in one version", async () => {
   }
 });
 
-test("a reused kind_id shares one eviction group; evictions are reported and replay identically", async () => {
-  const f = await filingFixture("kinds-evict");
+test("a reused kind_id shares one kind; every sample stays, the newest two are served, and a save replays identically", async () => {
+  const f = await filingFixture("kinds-keep");
   try {
     const sample = (text: string, kind: object) => ({
       sample: { report: "email", context: "after a call", text, ...kind },
@@ -829,15 +834,20 @@ test("a reused kind_id shares one eviction group; evictions are reported and rep
       ...sample("Three", { kind_id: kind.kind_id }),
     } as SaveMemoInput;
     const saved = await f.store.saveMemo(input);
-    expect(saved).toMatchObject({
-      status: "saved",
-      samples_retired: [{ id: kind.id, reason: "evicted" }],
-    });
+    expect(saved.status).toBe("saved");
+    expect(saved.samples_retired).toBeUndefined();
     expect(await f.store.saveMemo(input)).toEqual(saved);
     expect((await f.report("email")).samples.map((s) => s.body)).toEqual([
       "Three",
       "Two",
     ]);
+    expect(
+      (
+        await f.local.pg.query(
+          "SELECT body FROM samples WHERE user_id='kinds-keep' AND retired_at IS NULL ORDER BY created_at",
+        )
+      ).rows,
+    ).toEqual([{ body: "One" }, { body: "Two" }, { body: "Three" }]);
   } finally {
     await f.local.dispose();
   }
@@ -1037,7 +1047,7 @@ test("an account has no card count limit: 120 creates and 60 removals all save",
   }
 }, 30000);
 
-test("a sample identical to an active one of its kind is unchanged: no copy, no eviction", async () => {
+test("a sample identical to an active one of its kind is unchanged: no copy", async () => {
   const f = await filingFixture("same-sample");
   try {
     const sample = (text: string, kind: object) => ({
@@ -1058,12 +1068,9 @@ test("a sample identical to an active one of its kind is unchanged: no copy, no 
     expect((await f.report("email")).samples).toEqual(before);
     expect((await f.store.getTpsReport()).version).toBe(version);
     // Bytes, not meaning: any other text still files.
-    expect(
-      await f.save(sample("One.", { kind_id: kind.kind_id })),
-    ).toMatchObject({
-      status: "saved",
-      samples_retired: [{ id: kind.id, reason: "evicted" }],
-    });
+    const filed = await f.save(sample("One.", { kind_id: kind.kind_id }));
+    expect(filed.status).toBe("saved");
+    expect(filed.samples_retired).toBeUndefined();
   } finally {
     await f.local.dispose();
   }

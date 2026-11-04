@@ -110,14 +110,17 @@ const coverSheetText = (active: CardHead[]) =>
     ...rules(active, "cover").map(bullet),
   ].join("\n\n");
 const reportIndex = () => REPORTS.map((r) => ({ id: r.id, when: r.when }));
-/** Heading, the when line, samples newest first (context line, quoted body),
- * then rules as bullets. Every stored byte of a rule or sample is preserved,
- * apart from one leading "- " a bullet replaces. */
+/** Samples served per kind; every active sample stays stored. */
+const SERVED_PER_KIND = 2;
+/** Heading, the when line, the newest two samples of each kind, newest first
+ * (context line, quoted body), then rules as bullets. Every stored byte of a
+ * rule or sample is preserved, apart from one leading "- " a bullet replaces. */
 function reportDocument(
   report: (typeof REPORTS)[number],
   active: CardHead[],
   samples: Sample[],
 ): ReportDocument {
+  const served = new Map<string, number>();
   const own = samples
     .filter((s) => s.report === report.id)
     .sort((a, b) =>
@@ -126,7 +129,12 @@ function reportDocument(
         : a.created_at < b.created_at
           ? 1
           : -1,
-    );
+    )
+    .filter((s) => {
+      const count = served.get(s.kind_id) ?? 0;
+      served.set(s.kind_id, count + 1);
+      return count < SERVED_PER_KIND;
+    });
   const parts = [
     `# ${report.title}`,
     `Applies when ${report.when}.`,

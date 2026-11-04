@@ -21,12 +21,12 @@ const createdAt = () =>
 // Changing this default needs a migration. Triggers read name_bytes (memos) and
 // reason_bytes (memo and card versions); no application code reads them.
 const limits = {
-  body_bytes: 32768,
+  body_bytes: 131072,
   name_bytes: 64,
   description_bytes: 500,
   reason_bytes: 500,
   report_body_bytes: 262144,
-  daily_calls: 1000,
+  daily_calls: 10000,
 };
 export const storeConfig = pgTable(
   "store_config",
@@ -267,7 +267,7 @@ export const saveRequests = pgTable(
     check("save_request_id", sql`length(${t.requestId}) = 36`),
     check(
       "save_request_result",
-      sql`jsonb_typeof(${t.result}) = 'object' AND octet_length(${t.result}::text) <= 2048`,
+      sql`jsonb_typeof(${t.result}) = 'object' AND octet_length(${t.result}::text) <= 65536`,
     ),
     check("save_request_outcome", sql`(${t.result}->>'status') IS NOT NULL`),
   ],
@@ -448,7 +448,7 @@ export const samples = pgTable(
     ),
     check(
       "samples_body",
-      sql`btrim(${t.body}) <> '' AND octet_length(${t.body}) <= 32768`,
+      sql`btrim(${t.body}) <> '' AND octet_length(${t.body}) <= 131072`,
     ),
     check(
       "samples_client_object",
@@ -489,7 +489,7 @@ export const acceptedChanges = pgTable(
     primaryKey({ columns: [t.userId, t.requestId] }),
     check(
       "accepted_change_shape",
-      sql`length(${t.requestId})=36 AND ${t.operation} IN ('save_memo','refinement_apply') AND jsonb_typeof(${t.request})='object' AND jsonb_typeof(${t.actor})='object' AND jsonb_typeof(${t.transformation})='object' AND jsonb_typeof(${t.affected})='array' AND jsonb_array_length(${t.affected})<=100`,
+      sql`length(${t.requestId})=36 AND ${t.operation} IN ('save_memo','refinement_apply') AND jsonb_typeof(${t.request})='object' AND jsonb_typeof(${t.actor})='object' AND jsonb_typeof(${t.transformation})='object' AND jsonb_typeof(${t.affected})='array' AND jsonb_array_length(${t.affected})<=1100`,
     ),
     check(
       "accepted_change_hashes",

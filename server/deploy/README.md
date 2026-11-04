@@ -983,9 +983,11 @@ transaction (0029)" and "No history cap (0030)" and add the steps below):
    ```
 
 5. Run the normal runner once: `bun run --cwd server db:migrate`. With 0028, 0029 and 0030
-   pending, one run applies all four in one transaction. 0031 locks `users` in SHARE ROW
-   EXCLUSIVE mode (the foreign key drop needs it; earlier steps in the same run already
-   hold a stronger lock), then drops the table. On a deadlock or lock timeout, rerun it; it
+   pending, one run applies all four in one transaction (all five with 0032; see "Limits
+   (0032)"). 0031 locks `users` in ACCESS
+   EXCLUSIVE mode, as 0030 does (dropping the table's foreign key takes it; in the
+   combined run 0030 already holds it), then drops the table. Reads of `users` wait
+   while it is held. On a deadlock or lock timeout, rerun it; it
    rolls back as a whole.
 6. Smoke test through MCP as `milton_app`: a read, a save on that read's version, a replay
    of that save, a save on a stale version (`conflict`), and two reads in a row returning
@@ -1008,3 +1010,55 @@ would restart at revision 1 and reissue old versions for different content. It r
 shape with fresh revisions, not data; no read served the stored body. The 0031 journal row stays, so re-forwarding means running
 `0031_fingerprint_versions.sql` by hand, as one transaction that stops on the first error:
 `psql -1 -v ON_ERROR_STOP=1 -f server/drizzle/0031_fingerprint_versions.sql`.
+
+## Limits (0032)
+
+Migration 0032 raises the limits with the code that sends larger saves. It widens
+`samples_body` to 131072 bytes, `accepted_change_shape` to 1,100 affected cards and
+`save_request_result` to 65,536 bytes; sets the `limits_json` default to the new values;
+and updates the stored row itself, `daily_calls` to 10000 and `body_bytes` to 131072.
+There is no owner `UPDATE` step: the migration does it. `description_bytes` (500) and
+`report_body_bytes` (262144) stay. The runtime role needs no grant change. Every earlier
+revision reads its limits from the row and keeps its own lower code caps, so it runs on
+either schema.
+
+Release order (it rides the pending 0028-0031 release; follow those sections and add the
+steps below):
+
+1. Ship MCP and app from the same image, after 0029's pre-step. Until step 5, a save that
+   needs a widened check (a sample over 32 KiB, a save changing over 100 cards, a receipt
+   over 2 KiB) fails with `check_violation` and writes nothing, and calls stay at 1,000 a
+   day.
+2. Wait until both services, not one, serve 100% on the new image and the old revisions
+   are idle.
+3. Take a Neon snapshot.
+4. With the owner connection, run the check below with the 0028-0031 checks and record its
+   values. Expect `daily_calls` 1000 and `body_bytes` 32768; any other value was tuned by
+   hand, and 0032 replaces it (the rollback restores 1000 and 32768, not the tuned value).
+
+   ```sql
+   SELECT limits_json->'daily_calls' AS daily_calls, limits_json->'body_bytes' AS body_bytes
+   FROM store_config WHERE singleton = 1;
+   ```
+
+5. Run the normal runner once: `bun run --cwd server db:migrate`. With 0028-0031 pending,
+   one run applies all five in one transaction. 0032 locks `users` in EXCLUSIVE mode (in
+   the combined run 0030 already holds ACCESS EXCLUSIVE), then `store_config`, `samples`,
+   `accepted_changes` and `save_requests` in ACCESS EXCLUSIVE mode, the order a save takes
+   them. On a deadlock or lock timeout, rerun it; it rolls back as a whole.
+6. Rerun the step 4 query: expect 10000 and 131072. Smoke test through MCP as
+   `milton_app`: a read, a save, a replay of that save.
+
+**Rollback order.** Newest first: `rollback/0032_raise_limits.sql` before the 0031, 0030,
+0029 and 0028 rollbacks.
+
+**Rollback boundary.** Code rolls back by traffic alone before and after 0032. To restore
+the old caps, run `server/drizzle/rollback/0032_raise_limits.sql` offline with writers
+stopped. It refuses while any sample is over 32768 bytes, any accepted change lists over
+100 cards or any receipt is over 2048 bytes, since the old checks cannot hold them. It
+restores the checks and the old `limits_json` default and sets the stored `daily_calls`
+and `body_bytes` to the old code defaults, 1000 and 32768, because the values before 0032
+are not recorded. Rule bodies over 32768 bytes stay; the old cap applies only to new
+versions. The 0032 journal row stays, so re-forwarding means running
+`0032_raise_limits.sql` by hand, as one transaction that stops on the first error:
+`psql -1 -v ON_ERROR_STOP=1 -f server/drizzle/0032_raise_limits.sql`.

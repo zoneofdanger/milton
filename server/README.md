@@ -187,12 +187,12 @@ Clients may need to reconnect to load updated guidance.
 
 Exactly four tools are exposed:
 
-| Tool                                                     | Contract                                                                                                                                                                                                                                                                                                                                                    |
-| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `get_cover_sheet()`                                      | Returns `{text, version, is_empty, reports}`: the rules true of all writing, the save fence, whether the whole account is empty, and the index of five reports with their situations; while no rules exist yet (samples do not count), `setup` carries the first-setup script. No model call, no write.                                                     |
-| `get_report({report_id})`                                | One of `email`, `chat`, `post`, `document` (`doc` accepted), `speech`. Returns `{report_id, text, version, is_empty, samples}`: heading, when line, samples newest first, then rules; see below for `samples`. While the report has no rules, `setup` carries that report's setup block, with the cover-sheet questions while the cover sheet has no rules. |
-| `list_reports()`                                         | All five reports as `{reports: [{report_id, text, is_empty, samples, setup?}], version}`, without the cover sheet; a report without rules has a one-line `setup` pointer to `get_report`.                                                                                                                                                                   |
-| `create_memo({text, request_id, expected_version, ...})` | An exact save with at least one of `rules`, `exact_edits`, `moves`, `sample`, `retire_samples`; `text` states its purpose. UUID for the logical request and version from the cover sheet.                                                                                                                                                                   |
+| Tool                                                     | Contract                                                                                                                                                                                                                                                                                                                                                                                |
+| -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `get_cover_sheet()`                                      | Returns `{text, version, is_empty, reports}`: the rules true of all writing, the save fence, whether the whole account is empty, and the index of five reports with their situations; while no rules exist yet (samples do not count), `setup` carries the first-setup script. No model call, no write.                                                                                 |
+| `get_report({report_id})`                                | One of `email`, `chat`, `post`, `document` (`doc` accepted), `speech`. Returns `{report_id, text, version, is_empty, samples}`: heading, when line, the newest two samples of each kind newest first, then rules; see below for `samples`. While the report has no rules, `setup` carries that report's setup block, with the cover-sheet questions while the cover sheet has no rules. |
+| `list_reports()`                                         | All five reports as `{reports: [{report_id, text, is_empty, samples, setup?}], version}`, without the cover sheet; a report without rules has a one-line `setup` pointer to `get_report`.                                                                                                                                                                                               |
+| `create_memo({text, request_id, expected_version, ...})` | An exact save with at least one of `rules`, `exact_edits`, `moves`, `sample`, `retire_samples`; `text` states its purpose. UUID for the logical request and version from the cover sheet.                                                                                                                                                                                               |
 
 `create_memo` returns `saved`, `unchanged`, `conflict`, or `failed`,
 with the request ID and relevant version/error.
@@ -220,7 +220,7 @@ with `invalid_input`: "Name the report and send the rule's text in rules." `text
 the stated purpose for every save: recorded with the accepted change, never stored or
 stored as a rule. Milton runs no model, rewrites nothing and reserves no budget.
 
-New rules go in `rules`, 1-25 entries of `{report, text}`. `report` is one of the five
+New rules go in `rules`, 1-100 entries of `{report, text}`. `report` is one of the five
 reports (`doc` accepted) or `cover`. Each entry becomes one new card holding `text`
 byte for byte; its description is the first non-blank line, trimmed and cut to the
 description cap. Each body must fit the body limit and contain no Markdown heading line
@@ -236,7 +236,7 @@ equal a rule of the setup catalog byte for byte in the report it is served for, 
 naming the closest catalog rule; rules without the prefix are unaffected.
 
 Corrections and removals of existing rules use `exact_edits`, a nonempty array of
-`{before, after}`. Copy each nonempty `before` verbatim from a current rule as printed,
+`{before, after}` (1-500). Copy each nonempty `before` verbatim from a current rule as printed,
 with or without its `- ` bullet; `after`
 is the exact replacement, including an empty string for removal. Each anchor must
 occur once across all printed rules (each card as `- ` plus its text) and fit within
@@ -246,7 +246,7 @@ or overlapping anchors return `failed` with `edit_conflict`, without partial edi
 reread the report and choose unambiguous spans. All matches use the original snapshot,
 so a later edit cannot target text produced by an earlier one. Both strings must
 be valid Unicode, within the existing body limit, and contain no NUL. The complete
-request must fit the 64 KiB request bound.
+request must fit the 256 KiB request bound.
 
 Some text cannot be targeted exactly: identical card bodies have no unique anchor,
 and a span cannot cross memo boundaries. Refuse those edits instead of selecting an
@@ -262,22 +262,24 @@ old one. It does not change first-setup and capture approval rules.
 
 All structured fields can combine in one save: every operation resolves against one
 snapshot and commits together or not at all. `moves` is `[{before, report}]`
-(1-100): `before` is verbatim text identifying one rule, as for `exact_edits`, and
+(1-500): `before` is verbatim text identifying one rule, as for `exact_edits`, and
 `report` is a report or `cover`. A move to the rule's current place is a no-op; an
 unresolvable or repeated move, or a move of a rule the same save removes, fails with
 `move_conflict`. `sample` is `{report, kind_id | new_kind, context, text, replaces?}`.
 `kind_id` must name a kind in that report. A `new_kind` whose label already exists
 there, in any letter case, files under that kind (including a kind whose samples are
 all retired, which reads no longer list); otherwise it creates one. `replaces` names an active sample of the
-same kind, retired as `replaced`. `retire_samples` lists active sample IDs, retired as
-`removed`. After an insert the oldest beyond two per kind is retired as `evicted`.
-A `sample` whose text is byte-identical to an active sample of the same kind inserts
-nothing and evicts nothing (a `replaces` naming another sample still retires it); a
+same kind, retired as `replaced`. `retire_samples` lists 1-500 active sample IDs, retired as
+`removed`. Every approved sample stays active until one of those retires it; nothing
+retires a sample automatically. A `sample` whose text is byte-identical to an active
+sample of the same kind inserts nothing (a `replaces` naming another sample still
+retires it); a
 save that then changes nothing returns `unchanged` and charges nothing.
 Sample errors fail with `sample_conflict`. A `saved` result carries
 `samples_retired: [{id, reason}]` whenever a sample was retired, and replay returns
-it unchanged. Report reads list each active sample as `{id, kind_id, kind, context,
-date}`, newest first; kind labels never appear in report text.
+it unchanged. Reports serve the newest two active samples of each kind, and report
+reads list each served sample as `{id, kind_id, kind, context, date}`, newest first;
+kind labels never appear in report text.
 
 The assistant offers first setup once when empty, uses available explicit
 instructions or asks questions, and shows the full draft for approval before
@@ -401,13 +403,13 @@ save is refused with `tps_body_limit` and every change it made rolls back; the
 receipt stores the refusal, but no source change commits. No read or
 save invokes a model.
 
-| Limit                      | Default                                                      |
-| -------------------------- | ------------------------------------------------------------ |
-| Rule (card) body           | 32 KiB UTF-8                                                 |
-| Cover sheet or report body | 256 KiB UTF-8 each (`report_body_bytes`)                     |
-| Description/reason         | 500 UTF-8 bytes each                                         |
-| Attempted MCP calls        | 1,000 per account per UTC day                                |
-| Request body               | 64 KiB before parsing (`MAX_REQUEST_BYTES` in `src/http.ts`) |
+| Limit                      | Default                                                       |
+| -------------------------- | ------------------------------------------------------------- |
+| Rule or sample text        | 128 KiB UTF-8 (`body_bytes`)                                  |
+| Cover sheet or report body | 256 KiB UTF-8 each (`report_body_bytes`)                      |
+| Description/reason         | 500 UTF-8 bytes each                                          |
+| Attempted MCP calls        | 10,000 per account per UTC day (`daily_calls`)                |
+| Request body               | 256 KiB before parsing (`MAX_REQUEST_BYTES` in `src/http.ts`) |
 
 The attempted-call limit is the only daily bound on saves; there is no separate save
 allowance (see "No memo updates (0028)" below). The former 200-a-day
@@ -441,8 +443,8 @@ Approved samples live in `samples`: report, a free-form `kind` label, one `conte
 line, the `body` exactly as submitted, the filing client, and `retired_at`. A guard
 makes the table append-only: the only update sets `retired_at` once, and rows leave
 only with their account. Filing a sample through `create_memo` with the `sample` field
-makes no model call and reserves no budget. The newest sample per kind wins; at most
-two per kind stay active, and retirement is the only automatic change.
+makes no model call and reserves no budget. Every approved sample stays active until
+the person replaces or removes it; reports serve the newest two per kind.
 
 Assembly is deterministic and runs on read. Every rule prints as one bullet: `- `
 followed by its stored body, with one stored leading `- ` (as the retired compiler
@@ -451,7 +453,8 @@ rule whose own text starts with `- ` (stored as sent) prints as a plain bullet, 
 reader cannot tell that dash is content. Stored cards are not
 edited. The cover sheet is the cover-sheet rules joined by blank lines; the fixed
 report index (one "when" line per report) travels beside it as data. Each report
-prints `# Title`, its when line, its active samples newest first (a context line with
+prints `# Title`, its when line, the newest two active samples of each kind, newest
+first (a context line with
 the date, then the body quoted with `>`), then its rules. The full text (TPS.md and
 the web page) is the cover sheet plus every non-empty report.
 
@@ -490,7 +493,8 @@ per report by `lower(label)`, rows removable only with their account. `samples`
 references its kind through `(user_id, kind_id, report)`, so a sample's report is its
 kind's report by construction, and `replaces_id` through `(user_id, replaces_id,
 kind_id)`, so a replacement is always the same kind. Retirement sets `retired_at`,
-`retire_reason` (`replaced`, `removed`, `evicted`) and the retiring `request_id`
+`retire_reason` (`replaced`, `removed`, `evicted`; current saves no longer evict, and
+`evicted` stays for rows and receipts written before) and the retiring `request_id`
 once, together; nothing else changes. The migration files every existing version in
 its card's report (NULL becomes `cover`), creates one kind per report and case-folded
 label (spelled as its earliest sample), and marks already retired samples `evicted`
@@ -582,6 +586,21 @@ Migration 0010 is additive and copies no legacy request text. Its inverse parks 
 foreign keys, immutability guards and byte charges in `milton_rollback`; forward migration
 restores them exactly. Stop writers during schema rollback and keep them stopped until
 forward recovery: an older runtime cannot guarantee provenance for new saves.
+
+### Limits (0032)
+
+Milton charges now, so the metered caps went up: 10,000 attempted MCP calls per account
+per UTC day (was 1,000), rule and sample text up to 128 KiB (was 32 KiB), 1-100 rules and
+up to 500 exact edits, moves and sample removals per save (were 25 and 100), and a 256 KiB
+request bound (was 64 KiB). Migration 0032 widens the three checks the larger saves would
+hit: `samples_body` to 131072 bytes, `accepted_change_shape` to 1,100 affected cards and
+`save_request_result` to 65,536 bytes (a receipt listing up to 500 retired samples). It
+sets the `limits_json` default to the new values and writes `daily_calls` 10000 and
+`body_bytes` 131072 into the stored row; `description_bytes` (500) and
+`report_body_bytes` (262144) stay. An earlier revision runs on the result under its own
+caps. See [the hosting runbook](deploy/README.md#limits-0032).
+`drizzle/rollback/0032_raise_limits.sql` restores the old checks, default and row values,
+and refuses while any sample, accepted change or receipt is past an old cap.
 
 ### Fingerprint versions (0031)
 

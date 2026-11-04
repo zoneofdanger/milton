@@ -95,9 +95,15 @@ test("an SDK client receives instructions, discovers the four tools, and reads t
     // Assistants see cover sheet and reports, never the retired TPS name.
     for (const served of [client.getInstructions(), ...tools])
       expect(JSON.stringify(served)).not.toMatch(/TPS|tps_report/);
-    // Nothing served mentions the retired memo-update allowance.
+    // Nothing served mentions the retired memo-update allowance, or the
+    // retired automatic sample retirement.
     expect(JSON.stringify([client.getInstructions(), tools])).not.toMatch(
-      /memo.update|counts once/i,
+      /memo.update|counts once|retires the oldest|newest two per kind kept/i,
+    );
+    expect(
+      tools.find((tool) => tool.name === "create_memo")?.description,
+    ).toContain(
+      "every approved sample stays and reports serve the newest two per kind",
     );
     const text = client.getInstructions();
     expect(text).toContain('"Did you get the memo?"');
@@ -543,7 +549,7 @@ test("MCP refuses unsafe transports and oversized bodies before database access"
         headers: { Host: "mcp.meetmilton.com" },
         body: new ReadableStream({
           start(c) {
-            c.enqueue(new Uint8Array(65537));
+            c.enqueue(new Uint8Array(262145));
             c.close();
           },
         }),
@@ -628,12 +634,12 @@ test("one code constant bounds requests: an oversized body is refused once", asy
             text: "Fictional oversized save.",
             request_id: crypto.randomUUID(),
             expected_version: sheet.version,
-            rules: [{ report: "email", text: "x".repeat(65536) }],
+            rules: [{ report: "email", text: "x".repeat(262144) }],
           },
         },
       }),
     );
-    expect(call.byteLength).toBeGreaterThan(65536);
+    expect(call.byteLength).toBeGreaterThan(262144);
     const oversized = await handler(
       new Request(resource, {
         method: "POST",

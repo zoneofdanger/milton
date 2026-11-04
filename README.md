@@ -106,6 +106,7 @@ reliability has not yet been evaluated.
 - [`apps/site`](apps/site/): the Astro page behind `meetmilton.com`.
 - [`packages/theme`](packages/theme/): Milton's design tokens, stylesheets, and contrast check.
 - [`design/`](design/): Milton's portrait and icons.
+- [`docs/how-milton-works.md`](docs/how-milton-works.md): every piece of logic in Milton, one line each.
 - [`SPEC.md`](SPEC.md): the design notes and decisions, in the order they were made.
 
 ## Working locally

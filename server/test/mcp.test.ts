@@ -508,7 +508,7 @@ test("MCP refuses unsafe transports and oversized bodies before database access"
       ["DELETE", "mcp.meetmilton.com", "https://claude.ai", 405],
       ["POST", "untrusted.example", "https://claude.ai", 403],
       ["POST", "localhost:3001", "https://claude.ai", 403],
-      ["POST", "mcp.meetmilton.com", "https://untrusted.example", 403],
+      ["POST", "mcp.meetmilton.com", "https://untrusted.example", 401],
       ["OPTIONS", "mcp.meetmilton.com", "https://claude.ai", 200],
       ["POST", "mcp.meetmilton.com", "https://chatgpt.com", 401],
     ] as const) {

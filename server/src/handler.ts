@@ -1,7 +1,6 @@
 import {
   createMcpHandler,
   hostHeaderValidationResponse,
-  originValidationResponse,
 } from "@modelcontextprotocol/server";
 import { createMiltonServer } from "./mcp";
 import {
@@ -78,10 +77,9 @@ export function validateMcpTransport(
         { status: 405, headers: { Allow: "POST, OPTIONS" } },
       ),
     );
-  const hosts = allowedHosts(config);
-  const refused =
-    hostHeaderValidationResponse(request, hosts) ??
-    originValidationResponse(request, [...hosts, "claude.ai", "chatgpt.com"]);
+  // The Host check stops DNS rebinding and tokens authenticate every call.
+  // Origin is deliberately not allowlisted, so web clients reach auth.
+  const refused = hostHeaderValidationResponse(request, allowedHosts(config));
   if (refused) return withMcpCors(refused);
   if (request.method === "OPTIONS")
     return withMcpCors(new Response(null, { status: 200 }));

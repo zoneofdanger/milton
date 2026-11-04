@@ -12,7 +12,7 @@ import type {
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { page } from "../src/pages";
 import { checkMcp } from "./check-mcp";
-import { localAsset } from "./assets";
+import { localAsset } from "../src/assets";
 
 const { values } = parseArgs({
   args: process.argv.slice(2),

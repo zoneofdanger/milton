@@ -9,7 +9,7 @@ function linear(channel: number): number {
 }
 
 /** Relative luminance of a `#rrggbb` colour: 0 for black, 1 for white. */
-export function luminance(hex: string): number {
+function luminance(hex: string): number {
   if (!HEX.test(hex)) throw new Error(`Not a #rrggbb colour: "${hex}"`);
   const n = Number.parseInt(hex.slice(1), 16);
   return (

@@ -52,7 +52,7 @@ const e7b =
 const p1a =
   "Show your work before it feels ready. ⏎ People catch problems while they're cheap to fix. ⏎ You stop polishing parts nobody needed.";
 
-export const setupBlocks: Block[] = [
+const setupBlocks: Block[] = [
   {
     report: "email",
     piece: "email",
@@ -677,7 +677,7 @@ const STICK = [
  * cover-sheet questions, inline in email's block and after any other's;
  * `next` names the reports still
  * without rules to offer afterwards. Only a `first` block ends with STICK. */
-export function setupText(
+function setupText(
   report: ReportId,
   { first, cover, next }: { first: boolean; cover: boolean; next: ReportId[] },
 ) {

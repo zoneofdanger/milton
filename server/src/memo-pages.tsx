@@ -7,12 +7,7 @@ import type { CompiledReport, Documents } from "./store/compiled";
 import { ruleText } from "./store/reports";
 
 export const isMemoRoute = (path: string) =>
-  path === "/" ||
-  path === "/download" ||
-  path === "/memos" ||
-  path.startsWith("/memos/") ||
-  path === "/tps-report" ||
-  path.startsWith("/tps-report/");
+  path === "/" || path === "/download" || path === "/tps-report";
 
 type PageStore = Pick<PersonStore, "readTpsReport"> &
   Partial<Pick<PersonStore, "trialStatus" | "readDocuments">> & {

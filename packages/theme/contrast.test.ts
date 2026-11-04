@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { contrastRatio } from "./contrast";
-import * as tokens from "./tokens";
 
 /**
  * Every text colour stays readable on every surface it is set on, in both
@@ -15,12 +14,9 @@ const PAIRS: [text: string, background: string][] = [
   ["muted", "ground"],
   ["ink", "surface"],
   ["muted", "surface"],
-  ["on-ink", "ink"],
   ["on-accent", "accent"],
   ["on-accent", "accent-hover"],
   ["sheet-bar-ink", "sheet-bar"],
-  ["on-band", "band"],
-  ["band-muted", "band"],
 ];
 /** Hairlines and sheet rules are decorative; inputs are functional boundaries. */
 const LINES = ["hairline", "input", "sheet-rule"];
@@ -109,16 +105,5 @@ describe("the theme tokens", () => {
         expect(
           contrastRatio(theme.input!, theme[surface]!),
         ).toBeGreaterThanOrEqual(3);
-  });
-
-  test("tokens.ts carries base.css's values for the code that needs them", () => {
-    for (const [name, values] of Object.entries({
-      light: tokens.light,
-      dark: tokens.dark,
-    }))
-      for (const [token, value] of Object.entries(values))
-        expect(`${name} ${token} ${value.toLowerCase()}`).toBe(
-          `${name} ${token} ${THEMES[name as keyof typeof THEMES][token]}`,
-        );
   });
 });

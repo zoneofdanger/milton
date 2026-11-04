@@ -10,7 +10,7 @@ history, the current report snapshot and request receipts; Neon Auth handles sig
 ## Prerequisites
 
 - Bun, using the version pinned in the repository's root `package.json`, and Node 26 LTS.
-- A Neon project with Auth and its OAuth provider plugin enabled. Create a Postgres database named `milton`. The migration and import commands require the `neondb_owner` role; the app and MCP connect as a login role in `milton_runtime` (0024), never the owner. Database connections require TLS.
+- A Neon project with Auth and its OAuth provider plugin enabled. Create a Postgres database named `milton`. The migration and `memo-updates` commands require the `neondb_owner` role; the app and MCP connect as a login role in `milton_runtime` (0024), never the owner. Database connections require TLS.
 - A Google OAuth app, a GitHub OAuth app, or both. Configure their credentials in Neon Auth for your branch.
 - A Google Cloud project for Cloud Run, Artifact Registry, Secret Manager and an HTTPS load balancer.
 - An HTTPS origin for the browser app and an HTTPS URL ending in `/mcp` for assistants. They can share one hostname. The public service uses `app.meetmilton.com` and `mcp.meetmilton.com`; use your own addresses for your installation.
@@ -21,7 +21,7 @@ Hono routes requests and renders escaped JSX on the server. Vite builds the shar
 stylesheet and copies the theme assets; it does not bundle server secrets or add
 browser scripts. Forms work with the existing strict CSP. Bun installs dependencies, builds and tests; production runs Node 26 LTS.
 
-`src/function.ts` is a local compatibility adapter; hosted services use the role-specific Cloud Run entrypoint.
+Hosted services use the role-specific Cloud Run entrypoint:
 `src/cloud-run.ts` serves browser pages and an exact list of public assets with
 `MILTON_SERVICE=app` or the protocol/store code with `MILTON_SERVICE=mcp`; any other
 value fails startup. Each role rejects the other hostname and direct `run.app`
@@ -77,7 +77,7 @@ Set these in the runtime's platform configuration or dotenvx payload before depl
 | `MCP_RESOURCE`            | The exact public MCP resource URL, ending in `/mcp`. Tokens must include this resource in their audience.                                                                                                                                                                                                                                                      |
 | `NEON_AUTH_BASE_URL`      | The exact branch Auth URL copied from Neon, including its database and Auth path, without a trailing slash. It is also the expected token issuer.                                                                                                                                                                                                              |
 | `NEON_AUTH_COOKIE_SECRET` | A fresh random server-only secret of at least 32 characters for browser session cookies.                                                                                                                                                                                                                                                                       |
-| `DATABASE_URL`            | The TLS connection string for the `milton` database. Services use the runtime role's connection (0024); migrations and imports use the owner's.                                                                                                                                                                                                                |
+| `DATABASE_URL`            | The TLS connection string for the `milton` database. Services use the runtime role's connection (0024); migrations use the owner's.                                                                                                                                                                                                                            |
 | `MILTON_SUPPORT_EMAIL`    | Optional. The support address the account pages give; `support@meetmilton.com` when unset. The MCP address pages show is `MCP_RESOURCE`.                                                                                                                                                                                                                       |
 | `STRIPE_SECRET_KEY`       | App service only. The restricted Stripe API key for customers, subscriptions, Checkout and the billing portal. All three unset: the billing routes answer 503, sign-in starts no Stripe trial, the gate allows those accounts, and deleting an account with a Stripe customer refuses. Any one set means all three must be valid, or the app fails at startup. |
 | `STRIPE_WEBHOOK_SECRET`   | App service only. The signing secret of the Stripe endpoint for `POST /billing/webhook`.                                                                                                                                                                                                                                                                       |
@@ -110,7 +110,7 @@ bun run db:migrate
 This command explicitly reads `.dev.vars`. It does not use `.env.local` or an inherited `DATABASE_URL`. It checks the database name and owner role, then applies pending migrations and records them in the Drizzle journal. Rerunning it applies only migrations that have not completed. Run one migration process at a time.
 
 The migrations create the application tables defined in `src/store/schema.ts`.
-Fresh installations start with sign-ups closed.
+Every successful sign-in creates or finds its account; there is no sign-up setting (0025).
 
 Migration `0006_compiled_memos.sql` adds the current report snapshot (`tps_reports`)
 and durable save receipts. It preserves existing memos and their version history,
@@ -125,13 +125,9 @@ migration runner and the disposable rehearsal test verify atomic DDL. For an
 uncertain command outcome, inspect the actual schema and migration journal before
 retrying; an interrupted connection does not prove rollback.
 
-The offline rollback script `drizzle/rollback/0006_compiled_memos.sql` parks the two
-new tables and receipt guard in `milton_rollback`, retaining their rows and all memo
-history. The journal is retained. Re-forward with
-`drizzle/rollback/0006_compiled_memos_reforward.sql`, not by deleting the journal
-entry or rerunning the forward CREATE statements. Stop the application while
-using these scripts. Historical migrations 0000–0005 and their inverses remain
-unchanged; their legacy naming and recovery rules are not the current public API.
+Rollback scripts start at 0018. Rollbacks run newest first, and the 0017 rollback
+refused once any sample existed, so the 0004–0017 scripts were removed. Historical
+migrations 0000–0005 remain unchanged; their legacy naming is not the current public API.
 
 ### Instruction-card upgrade (0008)
 
@@ -151,26 +147,12 @@ This expand phase retains the original memo history and a complete card-history 
 Both copies count toward retained storage. Backfill does not discard history or fail
 merely because the account crosses its ceiling, but subsequent ordinary writes are
 refused until capacity is available. Check headroom before rollout. Later removal of
-legacy copies requires a separate migration; it is not included here. The existing
-count ceiling also bounds card identities, including archived ones.
+legacy copies requires a separate migration; it is not included here.
 
-Signup initialization (the empty `vibes` seed) is the only remaining legacy memo
-write; it synchronizes only untouched one-card memos. Once cards are independently
-edited, legacy writes/deletion refuse with
+Sign-up no longer seeds the empty `vibes` memo, so nothing writes legacy memos. Once
+cards are independently edited, legacy writes/deletion refuse with
 `card_legacy_conflict`; use the current `create_memo` path. No MCP tool or UI reads or
 writes legacy memos.
-
-`drizzle/rollback/0008_instruction_cards.sql` is an offline **pre-write rollback**.
-It proves every card/history row is an unchanged legacy copy, refuses native card data,
-changed grouping or new card-bound audit jobs, then removes only duplicate tables and
-restores retained-byte accounting. TPS, original history, receipts and jobs are not
-restored or overwritten. After native card activity, keep the schema and use a forward
-fix. Never resume an old writer/observer against independently edited cards.
-
-If rolling back a journaled migration, inspect the exact final Drizzle journal row
-and remove only its 0008 hash/timestamp after the successful rollback, in the same
-maintenance window. Re-forward using the normal runner after journal reconciliation;
-never delete journal entries merely to resolve an uncertain migration outcome.
 
 ## Deploy
 
@@ -423,16 +405,15 @@ its bound, the whole publication rolls back with `tps_body_limit`; the failed
 request receipt remains, but no source change or memo-update charge commits. No read or
 save invokes a model.
 
-| Limit                                       | Default                                                           |
-| ------------------------------------------- | ----------------------------------------------------------------- |
-| Internal memos, including archived          | 100 (historical `vibes` row retains its existing guard exemption) |
-| Rule (card) body                            | 32 KiB UTF-8                                                      |
-| Cover sheet or report body                  | 256 KiB UTF-8 each (`report_body_bytes`)                          |
-| Description/reason                          | 500 UTF-8 bytes each                                              |
-| Retained memo versions and bounded receipts | 64 MiB per account                                                |
-| Attempted MCP calls                         | 1,000 per account per UTC day                                     |
-| Launch memo updates (0014, default off)     | 100 successful user-directed batches per account per UTC day      |
-| Request body                                | 64 KiB before parsing (`MAX_REQUEST_BYTES` in `src/http.ts`)      |
+| Limit                                       | Default                                                      |
+| ------------------------------------------- | ------------------------------------------------------------ |
+| Rule (card) body                            | 32 KiB UTF-8                                                 |
+| Cover sheet or report body                  | 256 KiB UTF-8 each (`report_body_bytes`)                     |
+| Description/reason                          | 500 UTF-8 bytes each                                         |
+| Retained memo versions and bounded receipts | 64 MiB per account                                           |
+| Attempted MCP calls                         | 1,000 per account per UTC day                                |
+| Launch memo updates (0014, default off)     | 100 successful user-directed batches per account per UTC day |
+| Request body                                | 64 KiB before parsing (`MAX_REQUEST_BYTES` in `src/http.ts`) |
 
 The memo-update allowance is the only daily save cap: each successful
 `create_memo` that changes rules or samples charges one update, regardless of how
@@ -501,10 +482,6 @@ administrative or migration change, since saves enforce the caps) fails that rea
 bytes per bare rule over the cap until its next save. Card text still cannot contain a Markdown
 heading line (`card_heading`). Each `rules` entry names its card's report; since 0020
 a card moves only through an explicit `moves` list.
-
-`drizzle/rollback/0017_reports.sql` works only while no sample exists and no full
-text exceeds the old 32 KB bound. It does not restore deleted empty groups, which the
-previous runtime never read.
 
 ## Filing moves and sample kinds (0020)
 
@@ -656,33 +633,9 @@ confirmed save. Core quota checks fail closed. Final MCP events contain only kno
 tool/outcome/error values, elapsed time and charge/replay/release state, without
 client/account identity, instruction text or result bodies.
 
-Migration 0014 also added the foreground spend ledger, the alert observer and the
-capability feed key; 0015 added alert email. 0023 removed all of them (see
-[spend subsystem removal](#spend-subsystem-removal-0023)).
-
-The preserving `rollback/0014_memo_updates.sql` requires disabled enforcement and
-drained holds and retains receipt/charge history, counters, events, triggers and
-current key/revocation state. Reforward restores readiness but never enables the
-allowance or restores an older key. After activation use only a runtime compatible
-with accounting; keeping the schema does not make an older runtime compatible. Since
-0023 and 0022, run `rollback/0023_no_spend.sql` and then
-`rollback/0022_no_model_gate.sql` first: they restore the objects 0014 expects.
-
-### Derived-systems removal (0018)
-
-Embeddings, advisory graphs, task-aware retrieval and observation-only gardening are
-removed from the code. Migration 0018 refuses an unexpired gardening lease, deletes
-remaining jobs so `users.retained_bytes` stays reconciled, and drops `gardening_jobs`,
-`card_embeddings`, `card_retrieval_embeddings`, `card_graphs`, `card_links`,
-`retrieval_enrollments`, their two trigger functions, the four `store_config`
-derivation columns with their checks, and the `vector` extension. `gardening_usage`
-and `derivation_usage` stayed as frozen ledgers until 0023 dropped them. The 0018 rollback
-script recreates the dropped objects empty; their data is recoverable only from the
-pre-migration snapshot; since 0022, run `rollback/0022_no_model_gate.sql` first, because the
-0018 rollback re-adds a check on `global_spend_policy`. Release the code before applying 0018; see
-[the hosting runbook](deploy/README.md#derived-systems-removal-0018). The
-[research note](../docs/research/derived-systems-2026.md) records what was measured and
-what would justify rebuilding any of it.
+The daily count is read from `save_requests` (`memo_update_state`,
+`memo_update_day`) under the account lock. `save_requests.reserved_micros` stays,
+always 0, because the save guard covers it.
 
 ### No count limit (0021)
 
@@ -695,45 +648,6 @@ while the current one without 0021 would hit the old lifetime count as
 `store_unavailable`. `drizzle/rollback/0021_no_card_count.sql` restores both previous
 functions and changes no rows; an account already past the old limit keeps its cards
 and cannot add more until it is back under it.
-
-### No model-era gate (0022)
-
-Migration 0022 drops `store_config.global_spend_policy` and
-`foreground_accounting_ready` with the `config_global_spend_policy` check, and narrows
-`config_memo_updates` to a positive daily limit. Both columns had one valid value
-(`alerts_only`, ready) since saves went model-free. Saves no longer lock `store_config`
-or refuse with "Memo updates are not ready."; the spend worker (removed in 0023)
-observed alerts without a policy check. The daily limit, `memo_updates_enabled`, holds, charges and refusals are
-unchanged. Release the code before applying 0022: the current runtime reads neither
-column and runs on either schema, while a pre-0022 runtime fails every save and worker
-tick once the columns are gone. `drizzle/rollback/0022_no_model_gate.sql` re-adds both
-columns with their 0014 defaults (`'capped'`, `false`) and both checks, sets the row to
-`alerts_only` and ready as production held before 0022, and leaves the memo-update
-settings untouched; run it before moving code back to a pre-0022 revision.
-
-### Spend subsystem removal (0023)
-
-Milton no longer meters, alerts on or reports model spending. The spend-alert worker
-(`MILTON_SERVICE=worker`), its scheduler route, alert email through Resend, the
-`/operator/spend-alerts/` capability feed, `scripts/spend-feed.ts` and the
-`memo-updates.ts observe` command are deleted. Migration 0023 drops
-`foreground_usage`, `gardening_usage`, `derivation_usage`, `spend_alerts`,
-`spend_alert_emails`, the `save_foreground_reservation` trigger and its function, the
-alert email guard, and `store_config.spend_feed_key_hash` with its check. Rows are not
-kept; take a snapshot and export them before applying it.
-
-Memo-update accounting is unchanged: the daily count is read from `save_requests`
-(`memo_update_state`, `memo_update_day`) under the account lock, and
-`memo_updates_enabled` and `memo_updates_daily_limit` stay in `store_config`. The daily
-tool-call limit (`usage_daily`), replay, fences and trials are unchanged.
-`save_requests.reserved_micros` stays, always 0, because the save guard covers it.
-
-Release the code before applying 0023: the current runtime reads no dropped object and
-runs on either schema. A pre-0023 app or MCP revision runs on 0023 too; only its feed
-route fails, closed, with 503. `drizzle/rollback/0023_no_spend.sql` recreates every
-dropped object empty (feed key NULL); the data returns only from the pre-0023 snapshot
-or the export. Run it before any older rollback script that touches these objects
-(0015, 0009, 0007). See [the hosting runbook](deploy/README.md#spend-subsystem-removal-0023).
 
 ### Runtime role (0024)
 
@@ -767,7 +681,7 @@ grant; the runtime calls no function directly and runs no statement that needs
 ownership (`SET LOCAL` timeouts, `FOR UPDATE` and `ON CONFLICT` need only these
 grants).
 
-Migrations, imports and `scripts/memo-updates.ts` keep the owner connection and refuse
+Migrations and `scripts/memo-updates.ts` keep the owner connection and refuse
 any other role; changing `store_config` settings is an owner operation.
 `drizzle/rollback/0024_runtime_role.sql` revokes every grant and drops the group role;
 it refuses while a login role is still a member. See

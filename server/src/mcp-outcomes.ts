@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const toolNames = [
+const toolNames = [
   "get_cover_sheet",
   "get_report",
   "list_reports",

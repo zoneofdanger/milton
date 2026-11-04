@@ -5,7 +5,6 @@ const assets: Record<string, string> = {
   "/milton.css": "text/css; charset=utf-8",
   "/favicon.svg": "image/svg+xml",
   "/favicon.ico": "image/x-icon",
-  "/fonts/source-serif-4-semibold.woff2": "font/woff2",
   "/fonts/jetbrains-mono-regular.woff2": "font/woff2",
   "/fonts/geist-latin-variable.woff2": "font/woff2",
 };

@@ -19,7 +19,6 @@
   --ground: #eeeae1;
   --surface: #faf7ef;
   --ink: #242424;
-  --on-ink: #ffffff;
   --muted: #625f58;
   --hairline: #bcb5a8;
   --accent: #242424;
@@ -29,9 +28,6 @@
   --sheet-bar-ink: #242424;
   --sheet-rule: #242424;
   --input: #80786b;
-  --band: #221c19;
-  --on-band: #f3ede3;
-  --band-muted: #aba197;
   --shadow: rgba(34, 31, 27, 0.08);
   --font-display: var(--font-mono);
   --font-display-weight: 400;
@@ -58,7 +54,6 @@
   --text-subtitle: 1.25rem;
   --text-title: 1.2rem;
   --text-page: clamp(2rem, 4vw, 2.5rem);
-  --text-report: clamp(1.8rem, 3.6vw, 2.6rem);
   --text-section: clamp(1.5rem, 2.8vw, 2.1rem);
   --text-hero: clamp(1.85rem, 3.8vw, 3rem);
   /* The cover sheet form's title: large on paper, still fits a 320px phone. */
@@ -81,7 +76,6 @@
     --ground: #1e1d1a;
     --surface: #292722;
     --ink: #f5efdf;
-    --on-ink: #221c19;
     --muted: #c0b7a4;
     --hairline: #66604f;
     --accent: #e9d6aa;
@@ -91,9 +85,6 @@
     --sheet-bar-ink: #f5efdf;
     --sheet-rule: #b9aa87;
     --input: #9a907b;
-    --band: #100d0b;
-    --on-band: #f3ede3;
-    --band-muted: #aba197;
     --shadow: rgba(0, 0, 0, 0.3);
   }
 }
@@ -102,7 +93,6 @@
   --ground: #1e1d1a;
   --surface: #292722;
   --ink: #f5efdf;
-  --on-ink: #221c19;
   --muted: #c0b7a4;
   --hairline: #66604f;
   --accent: #e9d6aa;
@@ -112,9 +102,6 @@
   --sheet-bar-ink: #f5efdf;
   --sheet-rule: #b9aa87;
   --input: #9a907b;
-  --band: #100d0b;
-  --on-band: #f3ede3;
-  --band-muted: #aba197;
   --shadow: rgba(0, 0, 0, 0.3);
 }
 * {
@@ -271,12 +258,6 @@ textarea {
 }
 .sheet-content {
   padding: var(--sheet-padding, var(--space-6));
-}
-.sheet-heading {
-  margin: 0 0 var(--space-4);
-  font: var(--font-display-weight) var(--text-title) / var(--leading-heading)
-    var(--font-display);
-  letter-spacing: -0.045em;
 }
 /* One complete instruction per item; hanging markers keep wrapped text aligned. */
 .instruction-list {

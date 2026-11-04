@@ -179,9 +179,8 @@ test("page fonts and favicons are local while other browser restrictions stay cl
   const html = await response.text();
   expect(html).toContain('href="/favicon.svg?v=printer"');
   expect(html).toContain('href="/favicon.ico?v=printer"');
-  const { localAsset } = await import("../scripts/assets");
+  const { localAsset } = await import("../src/assets");
   for (const [path, type] of [
-    ["/fonts/source-serif-4-semibold.woff2", "font/woff2"],
     ["/fonts/jetbrains-mono-regular.woff2", "font/woff2"],
     ["/favicon.svg", "image/svg+xml"],
     ["/favicon.ico", "image/x-icon"],
@@ -523,7 +522,7 @@ test("Neon server adapter preserves signed queries, cookies, sign-in admission a
     expect(
       (
         await app(
-          new Request(appOrigin + "/memos", {
+          new Request(appOrigin + "/tps-report", {
             method: "POST",
             headers: {
               Host: "localhost:3001",

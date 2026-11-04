@@ -102,19 +102,18 @@ export const BASELINE = "Baseline: ";
  * so every assistant reads what the prefix means. Never stored. */
 export const BASELINE_NOTE =
   "Rules marked Baseline: came from setup picks, not the person's writing; samples and unmarked rules outrank them.";
-export const coverSheetText = (active: CardHead[]) =>
+const coverSheetText = (active: CardHead[]) =>
   [
     ...(active.some((h) => ruleText(h.body).startsWith(BASELINE))
       ? [BASELINE_NOTE]
       : []),
     ...rules(active, "cover").map(bullet),
   ].join("\n\n");
-export const reportIndex = () =>
-  REPORTS.map((r) => ({ id: r.id, when: r.when }));
+const reportIndex = () => REPORTS.map((r) => ({ id: r.id, when: r.when }));
 /** Heading, the when line, samples newest first (context line, quoted body),
  * then rules as bullets. Every stored byte of a rule or sample is preserved,
  * apart from one leading "- " a bullet replaces. */
-export function reportDocument(
+function reportDocument(
   report: (typeof REPORTS)[number],
   active: CardHead[],
   samples: Sample[],

@@ -704,22 +704,6 @@ test("Postgres enforces separate UTF-8 field caps, no memo count, and counts rec
     await expect(append(2, "ok", "", "x".repeat(501))).rejects.toThrow(
       "memo_reason_limit",
     );
-    await local.pg.query(
-      `UPDATE store_config SET limits_json=limits_json || '{"history_bytes":33785}'::jsonb`,
-    );
-    // A legacy append must fit BOTH retained copies, even without details.kind.
-    await local.pg.exec(
-      `UPDATE store_config SET limits_json=limits_json || '{"history_bytes":67590}'::jsonb`,
-    );
-    await expect(
-      local.pg
-        .exec(`INSERT INTO memo_versions(user_id,memo_id,version,description,body,reason,actor_json)
-      VALUES ('m_caps','memo',2,'Sample','New','Edit','{}')`),
-    ).rejects.toThrow("memo_history_limit");
-    await local.pg.exec(
-      `UPDATE store_config SET limits_json=limits_json || '{"history_bytes":67570}'::jsonb`,
-    );
-    await expect(append(2, "ok", "", "")).rejects.toThrow("memo_history_limit");
     expect(
       (await local.pg.query("SELECT count(*)::integer AS n FROM memo_versions"))
         .rows,
@@ -746,7 +730,7 @@ test("Postgres enforces separate UTF-8 field caps, no memo count, and counts rec
           "SELECT retained_bytes FROM users",
         )
       ).rows[0]!.retained_bytes,
-    ).toBeGreaterThan(33785);
+    ).toBeGreaterThan(67570);
     await local.pg.query("DELETE FROM memo_versions WHERE version=2");
     expect(
       (await local.pg.query("SELECT retained_bytes FROM users")).rows,
@@ -759,7 +743,7 @@ test("Postgres enforces separate UTF-8 field caps, no memo count, and counts rec
   }
 }, 30000);
 
-test("Postgres version conflicts and history-cap refusals return typed errors", async () => {
+test("Postgres version conflicts return typed errors", async () => {
   const local = await localStore();
   const userId = "m_00000000-0000-4000-8000-000000000001";
   try {
@@ -776,29 +760,12 @@ test("Postgres version conflicts and history-cap refusals return typed errors", 
       VALUES (${userId},'memo',1,'Sample.','changed','edit','{}')`,
       )
       .catch(databaseFailure);
-    await local.db.query(
-      sql`UPDATE store_config SET limits_json=limits_json || '{"history_bytes":1}'::jsonb`,
-    );
-    const history = await local.db
-      .query(
-        sql`INSERT INTO memo_versions (user_id,memo_id,version,description,body,reason,actor_json)
-      VALUES (${userId},'memo',2,'Sample.','# Imported','edit','{}')`,
-      )
-      .catch(databaseFailure);
     expect(conflict).toBeInstanceOf(StoreError);
-    expect(history).toBeInstanceOf(StoreError);
-    expect([conflict, history]).toMatchObject([
-      {
-        code: "memo_version_conflict",
-        message: "The memo version conflicts with the current memo.",
-        status: 409,
-      },
-      {
-        code: "memo_history_limit",
-        message: "The memo history limit has been reached.",
-        status: 422,
-      },
-    ]);
+    expect(conflict).toMatchObject({
+      code: "memo_version_conflict",
+      message: "The memo version conflicts with the current memo.",
+      status: 409,
+    });
     expect(
       await local.db.query(
         sql`SELECT version,body FROM memo_versions WHERE user_id=${userId}`,
@@ -948,7 +915,7 @@ test("instruction cards edit independently inside a memo, keep write-once groupi
   }
 });
 
-test("accepted change evidence replays once and rolls back with an over-quota save", async () => {
+test("accepted change evidence replays once", async () => {
   const local = await localStore();
   try {
     await seedUsers(local.pg, "provenance");
@@ -1013,28 +980,6 @@ test("accepted change evidence replays once and rolls back with an over-quota sa
     await expect(
       local.pg.exec("DELETE FROM accepted_changes"),
     ).rejects.toThrow();
-    const before = await store.getTpsReport();
-    // Enough room for the source version and receipt, but not the larger request evidence.
-    await local.pg.exec(
-      "UPDATE store_config SET limits_json=jsonb_set(limits_json,'{history_bytes}',to_jsonb((SELECT retained_bytes+5000 FROM users WHERE id='provenance')))",
-    );
-    const refused = await store.saveMemo({
-      text: "purpose ".repeat(2000),
-      exact_edits: [{ before: "brief", after: "concise" }],
-      request_id: crypto.randomUUID(),
-      expected_version: before.version,
-    });
-    expect(refused).toMatchObject({
-      status: "failed",
-      error: "memo_history_limit",
-    });
-    expect(await store.getTpsReport()).toEqual(before);
-    expect(
-      (await local.pg.query("SELECT * FROM accepted_changes")).rows,
-    ).toHaveLength(2);
-    expect(
-      (await local.pg.query("SELECT * FROM instruction_card_versions")).rows,
-    ).toHaveLength(2);
   } finally {
     await local.dispose();
   }

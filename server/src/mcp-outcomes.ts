@@ -40,7 +40,6 @@ export const loggedErrorCodes = new Set([
   "invalid_input",
   "request_too_large",
   "memo_body_limit",
-  "memo_history_limit",
   "request_id_reused",
   "save_outcome_unknown",
   "assistant_required",

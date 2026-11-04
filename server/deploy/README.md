@@ -19,9 +19,9 @@ decommission on 2026-11-01. Hosting rollback now uses Cloud Run revisions.
 
 Project `milton-510506`, Cloud Run/Artifact Registry region `us-east4`. Service manifests in this directory pin an immutable image and
 secret versions. They contain configuration and secret references, never values.
-The manifests pin what is serving now: app `milton-app-open-13f2d93`
-(`sha256:8f205685…`, env 2, key 1) and MCP `milton-mcp-open-13f2d93`
-(`sha256:8f205685…`, env 3, key 1), both connecting as `milton_app`; see the current
+The manifests pin what is serving now: app `milton-app-dead-d03de23`
+(`sha256:29489483…`, env 2, key 1) and MCP `milton-mcp-dead-d03de23`
+(`sha256:29489483…`, env 3, key 1), both connecting as `milton_app`; see the current
 release below. There is no worker service or scheduler job. `memo_updates_enabled` and
 `memo_updates_daily_limit` in `store_config` control admission. Existing positive
 account safeguards remain in effect. Trials and billing remain disabled.
@@ -159,13 +159,71 @@ references. Inspect revision readiness before selecting a recorded revision:
 gcloud run revisions list --service=milton-app --project=milton-510506 --region=us-east4
 ```
 
-Now serving: MCP `milton-mcp-open-13f2d93` (since 2026-11-04 01:15:46Z) and app
-`milton-app-open-13f2d93` (since 01:16:01Z), one image and one commit, on Drizzle journal 26;
+Now serving: MCP `milton-mcp-dead-d03de23` (since 2026-11-04 02:43:40Z) and app
+`milton-app-dead-d03de23` (since 02:43:52Z), one image and one commit, on Drizzle journal 27;
 recorded below. There is no worker service.
 
-Current release open-13f2d93: MCP and app, then migration 0025, from main `13f2d93` (the merge of
+Current release dead-d03de23: the 0026 pre-step, MCP and app, then migration 0026, from main
+`d03de23` (dead-code batches A and B: the legacy sign-up seed no longer writes
+`identities.profile_json`, old fonts are no longer served, retired route prefixes return 404,
+and the code stops writing the dead columns). By a release agent on 2026-11-04. Pre-step at
+02:41:14Z as `neondb_owner`, in one statement string on the direct (unpooled) host:
+`SET lock_timeout = '5s'; ALTER TABLE save_requests ALTER COLUMN reserved_micros SET DEFAULT 0;`
+succeeded on the first attempt; the column then read `default=0`, NOT NULL. The commit tree
+passed `check-types`, `bun test` (97 pass) and `format:check`. Image
+`sha256:29489483e08b2175f0da512d4d1d0a3b6c0bace97c601030c866a91efa71aece` (amd64
+`sha256:08259462355c9cc09e13320cef91eec9c0b82728599fa4b618df01d9d1ed3483`; uid 1000, Node
+26.13.0, no env, key or pem files; the bundle has no `profile_json`, `reserved_micros`,
+`templates_revision`, `daily_writes` or `needs_clarification`). MCP created 02:43:06Z to
+02:43:12Z with `gcloud run services update milton-mcp --image=<digest>
+--revision-suffix=dead-d03de23` (keeps the startup CPU boost the manifest lacks), pinned with
+`update-traffic --to-revisions=milton-mcp-dead-d03de23=100` at 02:43:40Z; the app with
+`gcloud run services replace` from `app.release.json` (a copy naming the revision), Ready
+02:43:52Z, pinned by name at 02:44:06Z. Each revision spec differs from its predecessor only in
+the image (MCP `milton-mcp-env:3`, the unmounted leftover `milton-mcp-env:2` volume,
+`milton-mcp-key:1`; app `milton-app-env:2`, `milton-app-key:1`); no secret version changed. On
+the new code and the 0025 schema the canonical checks matched the baseline and the forms probe
+printed `PASS`. With both services at 100% and no log line from either open-13f2d93 revision
+after its switch, a throwaway branch from production (`rehearsal-0026-dead-columns`) rehearsed
+0026 through the migration runner (journal 26 to 27; only the six columns, their checks, NOT
+NULLs and column grants, the two indexes and the `limits_json` default went, the save guard was
+replaced and `usage_nonnegative` rewritten; 274 rows, every table identical with the dropped
+columns left out), then `rollback/0026` (schema identical to the pre-0026 capture, including
+`reserved_micros DEFAULT 0`), then the hand re-forward `psql -1 -v ON_ERROR_STOP=1 -f
+server/drizzle/0026_dead_columns.sql` (identical to the first forward). On the branch only, a
+rolled-back transaction inserted a receipt without `reserved_micros`, completed it, was refused
+`save_receipt_is_immutable` on a later change, and deleted it, on both the 0026 and the
+rolled-back shape. The branch was deleted. Then Neon snapshot `before-0026-dead-columns`
+(`snap-quiet-brook-b84mpp38`, 02:46:53Z) and 0026 applied 02:47:04Z to 02:47:08Z as
+`neondb_owner` (journal 26 to 27). The production change matched the rehearsal exactly; 17
+tables and 274 rows before and after, every table identical with the dropped columns left out
+(the stored `limits_json` row is unchanged), triggers, indexes other than the two, table grants
+and roles unchanged, 0 unfinished saves. After the migration the canonical checks matched the
+baseline, the probe printed `PASS`, and a fresh headless Claude Code client listed exactly four
+tools and read `get_cover_sheet` with no error, version `5bbb8ddf…` unchanged, memo updates
+0/100. From 02:43:06Z to 02:50:37Z neither service logged an error, `unexpected_error`, 5xx or a
+missing-column error (MCP 30 x 200 and 8 x 401; app 19 x 200, 8 x 403 from the checks and 6 x
+404 from Stripe's `POST /billing/webhook`, which has returned 404 since 01:48Z, before this
+release); the only tool call was the fresh client's read. No save ran: the save check (resend
+one existing cover rule, expect `unchanged`) waits for Peter's go.
+
+Rollback. Since 0026 is applied, open-13f2d93 cannot sign up an account or save (it writes
+`identities.profile_json` and `reserved_micros`). Stop writers, run
+`server/drizzle/rollback/0026_dead_columns.sql` offline as `neondb_owner` (rehearsed; it restores
+shape, not data), then shift traffic and, in the same step, set the manifests' images back to
+`sha256:8f205685dafc34e2a7f3375d0301ac4a4a224c13779db38af29f6d8772bf3b7d`. The 0026 journal row
+stays, so re-forwarding means the hand re-forward above. The dead-d03de23 code runs on either
+schema, so after the rollback script its revisions stay valid. Never restore the
+`before-0026-dead-columns` snapshot to roll back code.
+
+```sh
+gcloud run services update-traffic milton-mcp --to-revisions=milton-mcp-open-13f2d93=100 --project=milton-510506 --region=us-east4
+gcloud run services update-traffic milton-app --to-revisions=milton-app-open-13f2d93=100 --project=milton-510506 --region=us-east4
+```
+
+Release open-13f2d93: MCP and app, then migration 0025, from main `13f2d93` (the merge of
 `agent/open-signup`). Revisions `milton-mcp-open-13f2d93` and `milton-app-open-13f2d93`, switched
-directly at 100% (no users yet) by a release agent on 2026-11-04: MCP created 01:15:24Z to
+directly at 100% (no users yet) by a release agent on 2026-11-04, each serving until dead-d03de23: MCP created 01:15:24Z to
 01:15:30Z with `gcloud run services update milton-mcp --image=<digest>
 --revision-suffix=open-13f2d93` (the live MCP template carries the startup CPU boost, which the
 manifest lacks), then `update-traffic --to-revisions=milton-mcp-open-13f2d93=100` at 01:15:46Z; the
@@ -206,7 +264,7 @@ updates 0/100. From 01:15:24Z to 01:20:35Z neither service logged an error, `une
 checks), and the only tool call was the fresh client's `get_cover_sheet` read. No account was
 created and no save ran, so a first sign-in on the new code was not observed in production.
 
-Rollback. Since 0025 is applied, stick-4272d1d cannot create an account: a traffic shift alone
+Rollback (since 0026, reachable only after the 0026 rollback above). Since 0025 is applied, stick-4272d1d cannot create an account: a traffic shift alone
 breaks first sign-ins (only a first sign-in reads the dropped columns). Stop writers, run
 `server/drizzle/rollback/0025_open_signup.sql` offline as `neondb_owner` (it re-adds both
 columns, sets the row to `open` with an empty list and restores both checks; rehearsed), then
@@ -402,6 +460,10 @@ traffic. The rollback re-adds both columns (defaults `'closed'`, `[]`), sets the
 running `0025_open_signup.sql` by hand.
 
 ## Dead columns (0026)
+
+Applied 2026-11-04 02:47:04Z (journal 27, snapshot `before-0026-dead-columns`,
+`snap-quiet-brook-b84mpp38`), after the pre-step (02:41:14Z) and after the dead-d03de23 code
+served MCP and app (see the release records).
 
 Migration 0026 drops columns nothing reads: `users.profile_json` and `templates_revision`,
 `identities.profile_json`, `usage_daily.writes`, `store_config.updated_at` and

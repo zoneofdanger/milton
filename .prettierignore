@@ -1,10 +1,8 @@
 # generated / vendored
 node_modules/
-.next/
 .astro/
 dist/
 bun.lock
-next-env.d.ts
 server/generated/
 server/public/milton.css
 server/public/fonts/

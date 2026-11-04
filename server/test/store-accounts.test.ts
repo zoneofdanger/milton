@@ -660,7 +660,9 @@ test("the signup seed's empty legacy card changes no read or save", async () => 
   const local = await localStore();
   try {
     await seedUsers(local.pg, "m_bare");
-    await local.pg.exec(`INSERT INTO identities (provider,subject,user_id) VALUES ('neon','bare','m_bare');`);
+    await local.pg.exec(
+      `INSERT INTO identities (provider,subject,user_id) VALUES ('neon','bare','m_bare');`,
+    );
     const seeded = { provider: "neon", subject: "seeded" };
     await resolveIdentityAccount(local.env, seeded);
     const open = async (subject: string) =>

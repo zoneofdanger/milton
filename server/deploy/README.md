@@ -998,10 +998,13 @@ it runs on the 0030 schema; the others follow in their own order.
 **Rollback boundary.** Before 0031 is applied, code rolls back by traffic alone (clients
 conflict once more on the old version form). After it, an earlier revision fails every read
 and save: first run `server/drizzle/rollback/0031_fingerprint_versions.sql` offline with
-writers stopped, then shift traffic. The rollback recreates `tps_reports` empty with its
-keys, checks, default and runtime grant. Empty is a faithful rollback for serving: no read
-served the stored body, and an earlier revision reading an account without a row assembles
-from cards and samples, writes revision 1 and answers with that version. It restores shape,
-not data. The 0031 journal row stays, so re-forwarding means running
+writers stopped, then shift traffic. The rollback recreates `tps_reports` with its keys,
+checks, default and runtime grant, and seeds one row per account at a fresh revision (the
+clock in epoch seconds, above any revision an account reached) with a source hash no
+fingerprint equals. An earlier revision then rebuilds on each account's first read and
+publishes the next revision, a version it never issued, so a conversation still holding a
+pre-0031 version conflicts instead of passing the fence. Recreated empty, every account
+would restart at revision 1 and reissue old versions for different content. It restores
+shape with fresh revisions, not data; no read served the stored body. The 0031 journal row stays, so re-forwarding means running
 `0031_fingerprint_versions.sql` by hand, as one transaction that stops on the first error:
 `psql -1 -v ON_ERROR_STOP=1 -f server/drizzle/0031_fingerprint_versions.sql`.

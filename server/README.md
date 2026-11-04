@@ -592,8 +592,10 @@ checks `tps_revision_positive`, `tps_body_limit` and `tps_source_hash`, and the 
 grant. The `tps_body_limit` error code stays for saves over a cap. A connected client
 conflicts once on its first save after the release and rereads. Release the code first;
 see [the hosting runbook](deploy/README.md#fingerprint-versions-0031).
-`drizzle/rollback/0031_fingerprint_versions.sql` recreates the table empty, which an
-earlier revision needs to read at all.
+`drizzle/rollback/0031_fingerprint_versions.sql` recreates the table, which an earlier
+revision needs to read at all, with one row per account at a revision none reached, so the
+earlier revision rebuilds and never reissues an old version: it restores shape with fresh
+revisions, not data.
 
 ### No history cap (0030)
 

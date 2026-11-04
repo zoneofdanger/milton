@@ -72,7 +72,7 @@ test("a release passes the owner URL in its own variable, checked, and an empty 
   }
 });
 
-test("0031 drops tps_reports and its runtime grant, leaves every version and save as it was, and rolls back to an empty table", async () => {
+test("0031 drops tps_reports and its runtime grant, leaves every version and save as it was, and rolls back with one fresh-revision row per account", async () => {
   const base = await migratedThrough(30);
   const pg = await migratedThrough(30);
   const post = await migratedThrough(31);
@@ -115,7 +115,17 @@ test("0031 drops tps_reports and its runtime grant, leaves every version and sav
     await pg.exec(down);
     expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(base));
     expect(await acl(pg)).toEqual(await acl(base));
-    expect((await pg.query("SELECT * FROM tps_reports")).rows).toEqual([]);
+    // One row per account at a revision none reached, out of date on sight,
+    // so an earlier revision rebuilds and never reissues an old version.
+    expect(
+      (
+        await pg.query(
+          "SELECT user_id,revision>1000000000 AS fresh,body,source_hash=repeat('0',64) AS unmatched FROM tps_reports",
+        )
+      ).rows,
+    ).toEqual([
+      { user_id: "fingerprint", fresh: true, body: "", unmatched: true },
+    ]);
     // Versions never depended on the table, so a save fences on the same one.
     expect(await store.readDocuments()).toEqual(before);
     expect(

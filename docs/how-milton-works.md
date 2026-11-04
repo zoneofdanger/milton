@@ -303,13 +303,15 @@ Files: `server/src/store/index.ts`, `server/src/store/trials.ts`,
 - The three Stripe settings are all or nothing: any one set means all three must be valid,
   or the app fails at startup.
 - With billing unset, both billing routes and a POST to the webhook answer 503.
-- Every Stripe call uses a pinned API version and a 5-second timeout.
+- Every Stripe call uses a pinned API version and a 5-second timeout, through Milton's own
+  fetch client rather than the Stripe SDK, which keys and retries POSTs on its own.
 - Only the app service routes `/billing/webhook`, ahead of the browser pages, so no session,
   cookie, or CSRF check reaches it.
-- The webhook takes only POST with a JSON body, and a signature more than 5 minutes off
+- The webhook takes only POST with a JSON body, and a signature more than 5 minutes old
   fails.
-- The Stripe webhook verifies the signature, then takes only a customer ID from the six
-  handled event types, because Stripe does not guarantee event order.
+- The Stripe webhook verifies the signature with the official `stripe` package, then takes
+  only a customer ID from the six handled event types, because Stripe does not guarantee
+  event order.
 - A handled event Milton cannot parse gets a 400 unrecorded, so Stripe retries it.
 - For a customer Milton holds, the webhook locks the row, reads the customer's
   subscriptions from Stripe, and writes the deciding one where it records the event.

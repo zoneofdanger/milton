@@ -1151,6 +1151,13 @@ test("account deletion removes every tenant row, keeps refusals, stops in-flight
     const fresh = await personStoreForCurrentRequest(local.env, again);
     expect((await fresh.readTpsReport()).is_empty).toBe(true);
     expect((await fresh.trialStatus()).status).toBe("expired");
+    // The status alone marks it; no clock is written backwards.
+    expect(
+      await local.db.query(
+        sql`SELECT t.subscription_status AS status,t.started_at=u.created_at AS plain
+          FROM trial_accounts t JOIN users u ON u.id=t.user_id WHERE u.id=${again.userId}`,
+      ),
+    ).toEqual([{ status: "canceled", plain: true }]);
     const againTools = createStoreMemoTools(
       await storeForCurrentRequest(local.env, again, {
         issuer: "fixture",

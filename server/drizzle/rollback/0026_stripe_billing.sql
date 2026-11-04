@@ -3,9 +3,10 @@
 -- columns, so keep them and their rows. Dropping them loses every link from an
 -- account to its Stripe customer and subscription and the record of applied
 -- events, so refuse while any customer id or event is recorded. The 'canceled'
--- marks on returning deleted identities go too; started_at still records them
--- for the code before 0026, and re-forwarding marks them again. Run as
--- neondb_owner. The 0026 journal row stays, so re-forwarding means running
+-- marks on returning deleted identities go too. Rows written before this code
+-- keep started_at before created_at, so re-forwarding marks them again; rows
+-- written since do not, so those accounts lose the mark for good and a second
+-- trial is possible. Run as neondb_owner. The 0026 journal row stays, so re-forwarding means running
 -- 0026_stripe_billing.sql by hand.
 BEGIN;
 SET LOCAL lock_timeout = '10s';

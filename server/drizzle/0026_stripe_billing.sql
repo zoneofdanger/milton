@@ -8,9 +8,9 @@
 -- current period. All nullable with no default: a NULL status is an account with
 -- no subscription yet, which the gate allows. The webhook finds a row by its
 -- customer. started_at and paid_through stay in place, unread by the gate.
--- The one data statement marks returning deleted identities (started_at before
--- the account's created_at, written by sign-up so they get no second trial)
--- canceled, because the gate no longer reads started_at. It runs while no code
+-- The one data statement marks returning deleted identities canceled: earlier
+-- sign-up code wrote their started_at before the account's created_at, so they
+-- got no second trial, and the gate no longer reads started_at. It runs while no code
 -- that writes these columns exists, so it touches no Stripe state.
 -- milton_runtime gets SELECT, INSERT and UPDATE on stripe_events through the
 -- 0024 default privileges and no DELETE; its table grant on trial_accounts

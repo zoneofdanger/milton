@@ -116,11 +116,9 @@ export async function resolveIdentityAccount(
           // A sign-in identity whose account was deleted gets no second trial:
           // its row starts canceled, so it reads as expired whenever trials are
           // enabled (now or later), has no effect while they are off, and sign-up
-          // creates no subscription for it. started_at still marks it for code
-          // before 0026.
+          // creates no subscription for it.
           await tx.query(sql`INSERT INTO trial_accounts(user_id,started_at,subscription_status)
-            SELECT u.id,CASE WHEN d.identity_hash IS NULL THEN u.created_at
-              ELSE u.created_at - interval '720 hours' END,
+            SELECT u.id,u.created_at,
               CASE WHEN d.identity_hash IS NULL THEN NULL ELSE 'canceled' END
             FROM users u CROSS JOIN store_config c
             LEFT JOIN deleted_identities d

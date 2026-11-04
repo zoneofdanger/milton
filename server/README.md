@@ -552,13 +552,11 @@ the banner names the price as plain text. Existing early access must not acquire
 
 When explicitly enabled, only newly created accounts get a `trial_accounts` row.
 Existing accounts without a row remain early access, including on later sign-ins.
-The account-creation transaction starts a 720-hour trial using the new Milton
-account's `created_at` timestamp. The start is required for every enrolled account;
-reads, first/later saves, failures, replay and later sign-ins never reset it.
+The account-creation transaction writes the row with the new Milton account's
+`created_at` as `started_at`, which nothing reads; Stripe's `trial_end` ends the trial.
 An enrolled account can expire without ever saving preferences. No start-trigger
-explanation is shown in the product. Store
-only the start, a trusted paid-through projection and a reminder milestone; no
-preference bodies or payment details enter these records. Account deletion cascades.
+explanation is shown in the product. Store only Stripe's ids, status and dates and a
+reminder milestone; no preference bodies or payment details enter these records. Account deletion cascades.
 
 Every MCP tool may attach a separate `notice` object to a successful result in the
 last seven days and last day. Atomic account-wide claims offer each milestone at

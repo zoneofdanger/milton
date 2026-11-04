@@ -347,7 +347,7 @@ consents and signs out, best effort; the Neon Auth user record is not deleted.
 
 ## Local development and checks
 
-Use a development Neon branch. Put the runtime environment variables in ignored `server/.env.local`, and configure the app and MCP URLs for your chosen loopback origin and port. Enable loopback access in that branch's Neon Auth settings and set its login, consent, and trusted-origin settings consistently. Apply migrations to that database too.
+Use a development Neon branch. Put the runtime environment variables in ignored `server/.env.local`, and configure the app and MCP URLs for your chosen loopback origin and port. The app's `DATABASE_URL` logs in as `milton_app`, since `milton_runtime` is a group role that cannot log in; see [the runtime role](deploy/README.md#runtime-role-0024). Enable loopback access in that branch's Neon Auth settings and set its login, consent, and trusted-origin settings consistently. Apply migrations to that database too.
 
 The local server uses port 3001 unless you override it with `PORT`. Check that the port is unused before starting. From the repository root:
 

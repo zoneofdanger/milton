@@ -314,7 +314,7 @@ repository (`umask 077; cd "$(mktemp -d)"`).
    already hold the owner's rights, and go on.
 
 4. Mint the next payload version for each service from the encrypted version it mounted
-   then (`milton-app-env:1`, `milton-mcp-env:1`, `milton-mcp-env:2`). For the app (repeat for MCP with its
+   then (`milton-app-env:1`, `milton-mcp-env:2`). For the app (repeat for MCP with its
    own secrets and key):
 
    ```sh

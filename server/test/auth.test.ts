@@ -522,7 +522,7 @@ test("Neon server adapter preserves signed queries, cookies, sign-in admission a
     expect(
       (
         await app(
-          new Request(appOrigin + "/memos", {
+          new Request(appOrigin + "/tps-report", {
             method: "POST",
             headers: {
               Host: "localhost:3001",

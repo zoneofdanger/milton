@@ -342,7 +342,7 @@ Files: `server/drizzle/`, `server/src/store/schema.ts`, `server/src/store/databa
 - Card versions must be sequential, and they cannot be changed or deleted while the card
   exists.
 - Samples and kinds are append-only, and a sample can only be retired.
-- Completed receipts and recorded memo updates cannot change.
+- Completed receipts cannot change, and neither can a receipt's claim time.
 - Audit rows are immutable and must reference real card versions.
 - `retained_bytes` tracks stored history against a cap.
 - History rows never shrink short of account deletion, so that cap is effectively

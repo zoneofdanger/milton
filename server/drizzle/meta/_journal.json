@@ -197,6 +197,13 @@
       "when": 1793760045324,
       "tag": "0027_stripe_billing",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1793772221656,
+      "tag": "0028_no_memo_updates",
+      "breakpoints": true
     }
   ]
 }

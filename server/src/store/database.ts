@@ -115,10 +115,6 @@ export const triggerRefusals = new Map<
     "save_receipt_is_immutable",
     { message: "A completed save receipt cannot be changed.", status: 409 },
   ],
-  [
-    "memo_update_is_immutable",
-    { message: "A recorded memo update cannot be changed.", status: 409 },
-  ],
 ]);
 
 export function databaseFailure(error: unknown): StoreError {

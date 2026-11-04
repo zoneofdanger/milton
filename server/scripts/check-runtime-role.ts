@@ -1,6 +1,6 @@
 // Checks a runtime connection string before a service uses it, through the
 // services' own driver: one HTTP query and one WebSocket transaction (which
-// takes the store_config lock a sign-in takes). Passes only when the session is
+// reads store_config as every request does). Passes only when the session is
 // the expected login role, inherits milton_runtime and holds no elevated
 // attribute. Reads DATABASE_URL from the environment and prints only ok or
 // fail; a driver failure adds the usual one-line error log (class and code,
@@ -25,11 +25,11 @@ export async function checkRuntimeRole(
     const [read] = await db.query<Session>(session);
     if (!passes(read)) return false;
     return await db.transaction(async (tx) => {
-      const [locked] = await tx.query<{ singleton: number }>(
-        sql`SELECT singleton FROM store_config WHERE singleton = 1 FOR UPDATE`,
+      const [config] = await tx.query<{ singleton: number }>(
+        sql`SELECT singleton FROM store_config WHERE singleton = 1`,
       );
       const [inside] = await tx.query<Session>(session);
-      return locked?.singleton === 1 && passes(inside);
+      return config?.singleton === 1 && passes(inside);
     });
   } catch {
     return false;

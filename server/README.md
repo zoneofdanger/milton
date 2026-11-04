@@ -413,7 +413,7 @@ save invokes a model.
 | Request body                                | 64 KiB before parsing (`MAX_REQUEST_BYTES` in `src/http.ts`) |
 
 The attempted-call limit is the only daily bound on saves; there is no separate save
-allowance (see "No memo updates" below). The former 200-a-day
+allowance (see "No memo updates (0028)" below). The former 200-a-day
 technical write quota is retired; 0026 dropped its `usage_daily.writes` column.
 Every attempted MCP call still counts, including retries. There are no public archive/restore exemptions or history controls.
 
@@ -584,7 +584,7 @@ foreign keys, immutability guards and byte charges in `milton_rollback`; forward
 restores them exactly. Stop writers during schema rollback and keep them stopped until
 forward recovery: an older runtime cannot guarantee provenance for new saves.
 
-### No memo updates
+### No memo updates (0028)
 
 The memo-update allowance (0014) is gone. Saves are model-free and cost nothing to
 process, so there is no daily save allowance, no held, charged or released state on a
@@ -596,8 +596,11 @@ attempted-call limit (`limits_json.daily_calls`) bounds saves and reads alike. T
 known tool/outcome/error values and elapsed time, without client/account identity,
 instruction text or result bodies. The runtime no longer reads or writes the config
 columns `memo_updates_enabled` and `memo_updates_daily_limit` or the receipt columns
-`memo_update_state` and `memo_update_day`; they stay in the schema, unread, until a
-migration drops them.
+`memo_update_state` and `memo_update_day`, and migration 0028 drops them with their
+checks and index, and the 0014 trigger `save_memo_update_guard`; the save guard now
+keeps a receipt's `claimed_at` immutable. Release the code first; see
+[the hosting runbook](deploy/README.md#no-memo-updates-0028).
+`drizzle/rollback/0028_no_memo_updates.sql` restores the shape, with the allowance off.
 
 ### No count limit (0021)
 
@@ -625,7 +628,7 @@ trigger it fires, runs on it:
 | SELECT, INSERT, UPDATE         | `save_requests` (claims and receipts), `samples` (retirement), `tps_reports` (snapshot upsert), `trial_accounts` (notice stage), `usage_daily` (daily call upsert)                                |
 | SELECT, INSERT                 | `identities`, `deleted_identities`, `instruction_cards`, `instruction_card_versions`, `sample_kinds`, and the legacy `memos`, `memo_versions` and `memo_cards` (the signup seed and its triggers) |
 | INSERT                         | `accepted_changes`: provenance, written once per save and never read by the runtime                                                                                                               |
-| SELECT, UPDATE (`singleton`)   | `store_config`: settings are read under `FOR UPDATE`, which needs one updatable column; no setting can be changed                                                                                 |
+| SELECT                         | `store_config`: settings are read without a lock; 0028 revoked the `UPDATE (singleton)` the retired sign-in `FOR UPDATE` lock needed, so no setting can be changed                                |
 | USAGE                          | the `instruction_card_position` sequence (new card positions) and schema `public`; CONNECT on the database                                                                                        |
 
 The role owns nothing, so it cannot alter, drop or truncate a table, disable a

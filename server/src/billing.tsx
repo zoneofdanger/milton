@@ -224,6 +224,22 @@ export async function ensureSubscription(
   }
 }
 
+/** Deletes the account's Stripe customer, which ends any subscription at once;
+ * one Stripe no longer has counts as done. Throws on anything else, including a
+ * customer on record with billing unconfigured: a deleted account must not keep
+ * being charged. Issues no refund. */
+export async function endStripeCustomer(config: RuntimeConfig, userId: string) {
+  const { customer } = await billingForAccount(config, userId).account();
+  if (!customer) return;
+  if (!config.billing) throw stripeFailed();
+  const response = await stripeCall(
+    config.billing,
+    "DELETE",
+    `customers/${customer}`,
+  );
+  if (!response.ok && response.status !== 404) throw stripeFailed();
+}
+
 // A subscription that exists and can still be paid: its person manages it in the
 // portal, and a second Checkout would double-bill them.
 const MANAGED = new Set(["trialing", "active", "past_due"]);

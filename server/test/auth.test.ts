@@ -1280,6 +1280,76 @@ const stripeCall = (call: string, fields: Record<string, unknown> = {}) => ({
   ...fields,
 });
 
+test("account deletion ends the Stripe customer first, a Stripe failure deletes nothing, and the page says so", async () => {
+  const unavailable =
+    "Account deletion is unavailable right now. Nothing was deleted. Try again.";
+  const remove = { confirm: "delete my account" };
+  const setUp = async (fixture: Awaited<ReturnType<typeof accountFixture>>) => {
+    await fixture.send("/");
+    await fixture.local.db.query(
+      sql`INSERT INTO trial_accounts(user_id,started_at,stripe_customer_id,subscription_status)
+        SELECT id,clock_timestamp(),'cus_fixture','active' FROM users`,
+    );
+  };
+  const users = async (fixture: Awaited<ReturnType<typeof accountFixture>>) =>
+    (
+      await fixture.local.db.query<{ n: number }>(
+        sql`SELECT count(*)::int AS n FROM users`,
+      )
+    )[0]!.n;
+  // A customer on record with billing unconfigured cannot be ended.
+  const off = await accountFixture();
+  try {
+    await setUp(off);
+    const refused = await off.send("/account/delete", remove);
+    expect(refused.status).toBe(503);
+    expect(await refused.text()).toContain(unavailable);
+    expect(await users(off)).toBe(1);
+  } finally {
+    await off.dispose();
+  }
+  const { stripe, billing } = fakeStripe();
+  const fixture = await accountFixture({ billing });
+  const deleteCall = stripeCall("DELETE /v1/customers/cus_fixture");
+  try {
+    await setUp(fixture);
+    const form = await (await fixture.send("/account/delete")).text();
+    for (const text of [
+      "any subscription end immediately, with no refund",
+      "Stripe keeps past invoices and payment records",
+    ])
+      expect(form).toContain(text);
+    stripe.down = true;
+    const failed = await fixture.send("/account/delete", remove);
+    expect(failed.status).toBe(503);
+    expect(await failed.text()).toContain(unavailable);
+    expect(await users(fixture)).toBe(1);
+    expect(fixture.state.calls.map(({ path }) => path)).not.toContain(
+      "/oauth2/delete-consent",
+    );
+    // Stripe goes first, with the account still here; a 404 counts as done.
+    stripe.down = false;
+    stripe.deleteStatus = 404;
+    stripe.calls.length = 0;
+    let usersAtDelete = -1;
+    stripe.onDelete = async () => {
+      usersAtDelete = await users(fixture);
+    };
+    const done = await fixture.send("/account/delete", remove);
+    expect(done.status).toBe(200);
+    const deleted = await done.text();
+    expect(deleted).toContain(
+      "any subscription ended immediately, with no refund",
+    );
+    expect(deleted).toContain("Stripe keeps past invoices and payment records");
+    expect(stripe.calls).toEqual([deleteCall]);
+    expect(usersAtDelete).toBe(1);
+    expect(await users(fixture)).toBe(0);
+  } finally {
+    await fixture.dispose();
+  }
+}, 30000);
+
 test("signing in starts one Stripe trial, heals after a failure, and never depends on Stripe", async () => {
   const account = async (fixture: {
     local: Awaited<ReturnType<typeof localStore>>;

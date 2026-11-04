@@ -215,6 +215,8 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
 - If the Neon removal fails, the page offers Retry while the refusal stands.
 - Approving an assistant again clears its refusal, retrying once.
 - Deletion requires the exact phrase "delete my account" and a live consent list.
+- Deletion first deletes any Stripe customer, ending its subscription at once with no
+  refund; Stripe's 404 counts as done, and any other failure deletes nothing.
 - Deletion records disconnects and the identity hash, then deletes the user and cascades.
 - Consent removal and sign-out after deletion are best effort.
 
@@ -232,8 +234,8 @@ Files: `server/src/pages.tsx`, `server/src/memo-pages.tsx`,
 - `/download` returns the report as `TPS.md`.
 - `/assistants` lists live consents and looks up at most 20 names per view.
 - The setup prompt changes depending on whether the account is empty.
-- The trial banner shows only near the end or after expiry, and billing is plain text with
-  no route yet.
+- The trial banner shows only in a Stripe trial's last 7 days or after expiry, and billing
+  is plain text with no link yet.
 
 ## Limits and trials
 

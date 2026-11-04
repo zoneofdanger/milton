@@ -246,7 +246,7 @@ or overlapping anchors return `failed` with `edit_conflict`, without partial edi
 reread the report and choose unambiguous spans. All matches use the original snapshot,
 so a later edit cannot target text produced by an earlier one. Both strings must
 be valid Unicode, within the existing body limit, and contain no NUL. The complete
-request must fit the 64 KiB request bound.
+request must fit the 256 KiB request bound.
 
 Some text cannot be targeted exactly: identical card bodies have no unique anchor,
 and a span cannot cross memo boundaries. Refuse those edits instead of selecting an
@@ -401,13 +401,13 @@ save is refused with `tps_body_limit` and every change it made rolls back; the
 receipt stores the refusal, but no source change commits. No read or
 save invokes a model.
 
-| Limit                      | Default                                                      |
-| -------------------------- | ------------------------------------------------------------ |
-| Rule (card) body           | 32 KiB UTF-8                                                 |
-| Cover sheet or report body | 256 KiB UTF-8 each (`report_body_bytes`)                     |
-| Description/reason         | 500 UTF-8 bytes each                                         |
-| Attempted MCP calls        | 1,000 per account per UTC day                                |
-| Request body               | 64 KiB before parsing (`MAX_REQUEST_BYTES` in `src/http.ts`) |
+| Limit                      | Default                                                       |
+| -------------------------- | ------------------------------------------------------------- |
+| Rule (card) body           | 32 KiB UTF-8                                                  |
+| Cover sheet or report body | 256 KiB UTF-8 each (`report_body_bytes`)                      |
+| Description/reason         | 500 UTF-8 bytes each                                          |
+| Attempted MCP calls        | 1,000 per account per UTC day                                 |
+| Request body               | 256 KiB before parsing (`MAX_REQUEST_BYTES` in `src/http.ts`) |
 
 The attempted-call limit is the only daily bound on saves; there is no separate save
 allowance (see "No memo updates (0028)" below). The former 200-a-day

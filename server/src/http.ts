@@ -1,6 +1,6 @@
 /** The one request-size bound, read before parsing, authentication or any
  * database access. */
-export const MAX_REQUEST_BYTES = 65536;
+export const MAX_REQUEST_BYTES = 262144;
 
 export async function boundRequest(
   request: Request,

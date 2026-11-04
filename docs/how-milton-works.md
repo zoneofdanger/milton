@@ -36,8 +36,8 @@ Files: `server/src/index.ts`, `server/src/cloud-app.ts`, `server/src/http.ts`,
 
 - A request is refused unless its Host matches that service's canonical host.
 - The app rewrites each URL to its configured origin, because TLS ends upstream.
-- Bodies over 64 KiB get a 413 before parsing, auth, or database work.
-- The Stripe webhook is the one exception, with a 256 KiB bound.
+- Bodies over 256 KiB get a 413 before parsing, auth, or database work.
+- The Stripe webhook keeps its own bound, also 256 KiB.
 - `/mcp` goes to the MCP handler on the MCP service and returns 404 on the app.
 - `GET /health` returns ok.
 - `/.well-known/oauth-protected-resource` publishes the resource and its auth issuer.

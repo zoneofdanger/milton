@@ -543,7 +543,7 @@ test("MCP refuses unsafe transports and oversized bodies before database access"
         headers: { Host: "mcp.meetmilton.com" },
         body: new ReadableStream({
           start(c) {
-            c.enqueue(new Uint8Array(65537));
+            c.enqueue(new Uint8Array(262145));
             c.close();
           },
         }),
@@ -628,12 +628,12 @@ test("one code constant bounds requests: an oversized body is refused once", asy
             text: "Fictional oversized save.",
             request_id: crypto.randomUUID(),
             expected_version: sheet.version,
-            rules: [{ report: "email", text: "x".repeat(65536) }],
+            rules: [{ report: "email", text: "x".repeat(262144) }],
           },
         },
       }),
     );
-    expect(call.byteLength).toBeGreaterThan(65536);
+    expect(call.byteLength).toBeGreaterThan(262144);
     const oversized = await handler(
       new Request(resource, {
         method: "POST",

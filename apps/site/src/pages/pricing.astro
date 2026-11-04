@@ -138,51 +138,30 @@ const comments = [
 
     <section class="sheet truth" aria-labelledby="truth-heading">
       <div class="sheet-bar">
-        <span>The small print, in large print</span>
+        <h2 id="truth-heading">One plan</h2>
         <span>Not a joke</span>
       </div>
-      <div class="sheet-content truth-body">
-        <div class="truth-price">
-          <h2 id="truth-heading">One Plan</h2>
-          <p class="price">
-            <strong>Free</strong> <span>during early access</span>
-          </p>
-          <p class="price">
-            <strong>$5.01</strong>
-            <span>USD/month, planned at launch</span>
-          </p>
-          <a class="button" href={loginUrl}>
-            Try free early access <span aria-hidden="true">↗</span>
-          </a>
-        </div>
-        <ul class="truth-list">
-          <li>
-            Milton is free during early access. No credit card required, and we
-            don’t collect payment details today.
-          </li>
-          <li>
-            The planned paid offer is one plan at $5.01 USD/month after a 30-day
-            free trial. You won’t be charged unless you subscribe.
-          </li>
-          <li>
-            After an unsubscribed trial ends at paid launch, AI reads and saves
-            will pause. Your cover sheet and reports will remain available on
-            the website to view and download.
-          </li>
-          <li>
-            The source is public, and you can run Milton yourself.{" "}
-            <a href="https://github.com/zoneofdanger/milton">
-              Read the source ↗
-            </a>
-          </li>
-          <li>
-            <strong>This is not a real crowdfunding campaign.</strong> Nobody
-            can pledge, and no money is collected. The Milton who gets moved
-            around below is a fictional clerk, not the software. If anything
-            below disagrees with this sheet, this sheet wins.
-          </li>
-        </ul>
+      <div class="plans">
+        <p class="plan">
+          <strong>Free</strong>
+          <span>during early access</span>
+        </p>
+        <p class="plan">
+          <strong>$5.01</strong>
+          <span>USD/month at launch, after a 30-day free trial</span>
+        </p>
       </div>
+      <div class="truth-action">
+        <p>No credit card. You won’t be charged unless you subscribe.</p>
+        <a class="button" href={loginUrl}>
+          Try free early access <span aria-hidden="true">↗</span>
+        </a>
+      </div>
+      <p class="small-note truth-note">
+        This is not a real crowdfunding campaign. Nobody can pledge. The Milton
+        below is a fictional clerk, not the software. If anything below
+        disagrees with this card, this card wins.
+      </p>
     </section>
 
     <section class="pitch" aria-labelledby="pitch-heading">
@@ -487,21 +466,43 @@ const comments = [
   }
 
   /* The plain block: a form in large type, ahead of every joke. */
-  .truth-body {
+  .truth .sheet-bar h2 {
+    font: inherit;
+    letter-spacing: inherit;
+  }
+  .plans {
     display: grid;
-    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
-    gap: var(--space-10);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .truth h2 {
-    font-size: var(--text-section);
-    letter-spacing: -0.045em;
-  }
-  .truth-price {
+  .plan {
     display: grid;
     align-content: start;
-    justify-items: start;
-    gap: var(--space-4);
+    gap: var(--space-2);
+    padding: var(--sheet-padding);
   }
+  .plan + .plan {
+    border-left: 1px solid var(--hairline);
+  }
+  .plan strong {
+    font: var(--font-display-weight) var(--text-hero) / var(--leading-heading)
+      var(--font-display);
+  }
+  .plan span {
+    color: var(--muted);
+    font-size: var(--text-small);
+  }
+  .truth-action {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4) var(--space-6);
+    padding: var(--sheet-padding);
+    border-top: 1px solid var(--hairline);
+  }
+  .truth-note {
+    padding: 0 var(--sheet-padding) var(--sheet-padding);
+  }
+
   .price {
     display: flex;
     align-items: baseline;
@@ -515,13 +516,6 @@ const comments = [
   .price span {
     color: var(--muted);
     font-size: var(--text-small);
-  }
-  .truth-list {
-    display: grid;
-    gap: var(--space-3);
-    padding-inline-start: var(--space-5);
-    font-size: var(--text-lead);
-    line-height: var(--leading-body);
   }
 
   /* Video on the left, status on the right, as these pages always are. */
@@ -866,7 +860,6 @@ const comments = [
     }
   }
   @media (max-width: 860px) {
-    .truth-body,
     .pitch-body,
     .log-grid,
     .risks {
@@ -878,9 +871,6 @@ const comments = [
     }
     .video-frame {
       aspect-ratio: 16 / 9;
-    }
-    .truth-body {
-      gap: var(--space-6);
     }
   }
   @media (max-width: 767px) {
@@ -895,12 +885,19 @@ const comments = [
       padding-block: var(--space-8) var(--space-12);
     }
     .intro,
-    .section-lead,
-    .truth-list {
+    .section-lead {
       font-size: var(--text-body);
     }
-    .truth-list {
-      padding-inline-start: var(--space-4);
+    .plans {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .plan + .plan {
+      border-top: 1px solid var(--hairline);
+      border-left: 0;
+    }
+    .truth-action {
+      flex-direction: column;
+      align-items: flex-start;
     }
   }
   @media (max-width: 600px) {

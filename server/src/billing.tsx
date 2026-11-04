@@ -83,6 +83,7 @@ const stripePost = async <T,>(
   billing: BillingConfig,
   path:
     | "customers"
+    | `customers/${string}`
     | "subscriptions"
     | "checkout/sessions"
     | "billing_portal/sessions",
@@ -266,6 +267,28 @@ export async function endStripeCustomer(config: RuntimeConfig, userId: string) {
   await store.clearCustomer();
 }
 
+// Copies the sign-in email to a stored customer, so Stripe's receipts and reminders
+// reach this person. A backfilled customer has none until now, and everyone who can
+// add a card or pay comes through here signed in. Never stops them paying. No
+// idempotency key: repeating it is harmless, and a key would refuse a changed email.
+async function copyEmail(
+  billing: BillingConfig,
+  customer: string,
+  email?: string,
+) {
+  if (!email) return;
+  try {
+    await stripePost(
+      billing,
+      `customers/${customer}`,
+      { email },
+      stripeCustomer,
+    );
+  } catch (error) {
+    logUnexpected("billing", error);
+  }
+}
+
 // A subscription its person manages in the portal: a second Checkout would
 // double-bill them. Stripe counts active, past_due, unpaid and paused as an
 // existing subscription (Limit customers to one subscription); a trial is one too.
@@ -313,8 +336,9 @@ async function billingRoute(ctx: PageContext): Promise<Response> {
   const home = config.appOrigin + "/";
   // navigation, not a redirect: form-action 'self' blocks an external Location
   // after a form, and a person could then neither pay nor add a card.
-  const portal = async (customer: string) =>
-    navigation(
+  const portal = async (customer: string) => {
+    await copyEmail(billing, customer, user.email);
+    return navigation(
       (
         await stripePost(
           billing,
@@ -324,6 +348,7 @@ async function billingRoute(ctx: PageContext): Promise<Response> {
         )
       ).url,
     );
+  };
   if (url.pathname === "/billing/portal") {
     if (!account.customer)
       throw new AuthError(
@@ -359,6 +384,7 @@ async function billingRoute(ctx: PageContext): Promise<Response> {
       ),
     );
     if (live) return portal(customer);
+    await copyEmail(billing, customer, user.email);
   }
   const session = await stripePost(
     billing,

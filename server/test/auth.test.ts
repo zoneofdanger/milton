@@ -1281,6 +1281,8 @@ function fakeStripe() {
         return Response.json({}, { status: stripe.deleteStatus });
       }
       if (path === "/v1/customers") return Response.json({ id: "cus_fixture" });
+      if (path === "/v1/customers/cus_fixture" && method === "POST")
+        return Response.json({ id: "cus_fixture" });
       if (path === "/v1/customers/cus_fixture")
         return Response.json(stripe.customer.body, {
           status: stripe.customer.status,
@@ -1671,6 +1673,9 @@ test("billing checkout and portal: 503 without config; signed-in CSRF forms; the
     customer: "cus_fixture",
     return_url: appOrigin + "/",
   });
+  const emailCall = stripeCall("POST /v1/customers/cus_fixture", {
+    email: "fixture@example.invalid",
+  });
   const sessionCall = stripeCall("POST /v1/checkout/sessions", {
     mode: "subscription",
     customer: "cus_fixture",
@@ -1723,6 +1728,7 @@ test("billing checkout and portal: 503 without config; signed-in CSRF forms; the
     expect(stripe.calls.map((call) => call.call)).toEqual([
       "GET /v1/subscriptions?customer=cus_fixture&status=all&limit=10",
       "POST /v1/subscriptions",
+      "POST /v1/customers/cus_fixture",
       "POST /v1/billing_portal/sessions",
     ]);
     // Any subscription Stripe counts as existing, plus a trial, is managed in
@@ -1732,13 +1738,13 @@ test("billing checkout and portal: 503 without config; signed-in CSRF forms; the
     );
     stripe.subscriptions = [];
     for (const [status, location, calls] of [
-      ["trialing", portalUrl, [portalCall]],
-      ["active", portalUrl, [portalCall]],
-      ["past_due", portalUrl, [portalCall]],
-      ["unpaid", portalUrl, [portalCall]],
-      ["paused", portalUrl, [portalCall]],
-      ["canceled", checkoutUrl, [listCall, sessionCall]],
-      ["incomplete_expired", checkoutUrl, [listCall, sessionCall]],
+      ["trialing", portalUrl, [emailCall, portalCall]],
+      ["active", portalUrl, [emailCall, portalCall]],
+      ["past_due", portalUrl, [emailCall, portalCall]],
+      ["unpaid", portalUrl, [emailCall, portalCall]],
+      ["paused", portalUrl, [emailCall, portalCall]],
+      ["canceled", checkoutUrl, [listCall, emailCall, sessionCall]],
+      ["incomplete_expired", checkoutUrl, [listCall, emailCall, sessionCall]],
     ] as const) {
       await local.db.query(
         sql`UPDATE trial_accounts SET subscription_status=${status}`,
@@ -1765,7 +1771,10 @@ test("billing checkout and portal: 503 without config; signed-in CSRF forms; the
       ];
       stripe.calls.length = 0;
       await leavesFor(await send("/billing/checkout", {}), portalUrl);
-      expect([status, stripe.calls]).toEqual([status, [listCall, portalCall]]);
+      expect([status, stripe.calls]).toEqual([
+        status,
+        [listCall, emailCall, portalCall],
+      ]);
       expect((await clock())?.status).toBe(status);
     }
     // A failed read is not "nothing to find": no session is created.
@@ -1802,6 +1811,26 @@ test("billing checkout and portal: 503 without config; signed-in CSRF forms; the
       customer: "cus_fixture",
       status: "canceled",
     });
+    stripe.calls.length = 0;
+    await leavesFor(await send("/billing/portal", {}), portalUrl);
+    expect(stripe.calls).toEqual([emailCall, portalCall]);
+    // A failed email copy never stops someone paying, on either route, and its
+    // log names no address or key. An unknown email makes no call.
+    await local.db.query(
+      sql`UPDATE trial_accounts SET subscription_status='canceled'`,
+    );
+    stripe.down = "POST /v1/customers/cus_fixture";
+    const failing = spyOn(console, "error").mockImplementation(() => {});
+    await leavesFor(await send("/billing/portal", {}), portalUrl);
+    await leavesFor(await send("/billing/checkout", {}), checkoutUrl);
+    expect(failing.mock.calls.map(([line]) => String(line))).toEqual(
+      Array(2).fill(
+        '{"event":"unexpected_error","where":"billing","class":"AuthError","code":"billing_unavailable"}',
+      ),
+    );
+    failing.mockRestore();
+    stripe.down = false;
+    fixture.state.email = undefined;
     stripe.calls.length = 0;
     await leavesFor(await send("/billing/portal", {}), portalUrl);
     expect(stripe.calls).toEqual([portalCall]);

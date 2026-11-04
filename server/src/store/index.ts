@@ -316,7 +316,7 @@ export interface TenantStore {
   appOrigin: string;
   trialNotice?(): Promise<TrialNotice | undefined>;
   readTpsReport(): Promise<CompiledReport>;
-  /** The cover sheet and the five reports at one version; rebuilds a stale snapshot. */
+  /** The cover sheet and the five reports at one version, assembled on read. */
   readDocuments(): Promise<Documents & { version: string }>;
   saveMemo(input: SaveMemoInput): Promise<SaveOutcome>;
   chargeToolCall(): Promise<CallAllowance>;

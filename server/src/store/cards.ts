@@ -16,11 +16,19 @@ export type CardHead = {
 // Cards are read in their write-once insertion position (backfilled in card ID
 // order by 0016); a moved card keeps its position. Report lives on the version
 // (0020), so the fingerprint below fences every card input to assembly.
-export async function cardHeads(tx: StoreSession, userId: string) {
-  return tx.query<CardHead>(sql`SELECT c.id,v.version,v.description,v.body,v.archived,v.report
+/** Every card's head version as one JSON array, so a read can take the heads
+ * and the samples in a single statement. */
+export const cardHeadsJson = (userId: string) =>
+  sql`SELECT coalesce(json_agg(json_build_object('id',c.id,'version',v.version,'description',v.description,'body',v.body,'archived',v.archived,'report',v.report) ORDER BY c.position),'[]'::json)
     FROM instruction_cards c
     JOIN LATERAL (SELECT version,description,body,archived,report FROM instruction_card_versions WHERE user_id=c.user_id AND card_id=c.id ORDER BY version DESC LIMIT 1) v ON true
-    WHERE c.user_id=${userId} ORDER BY c.position`);
+    WHERE c.user_id=${userId}`;
+export async function cardHeads(tx: StoreSession, userId: string) {
+  return (
+    await tx.query<{ heads: CardHead[] }>(
+      sql`SELECT (${cardHeadsJson(userId)}) AS heads`,
+    )
+  )[0]!.heads;
 }
 export const cardFingerprint = (heads: CardHead[]) =>
   createHash("sha256")

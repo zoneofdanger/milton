@@ -240,26 +240,6 @@ export const usageDaily = pgTable(
   ],
 );
 
-// TPS is a replaceable projection. Content history belongs to instruction_card_versions; legacy memo history is retained.
-export const tpsReports = pgTable(
-  "tps_reports",
-  {
-    userId: text("user_id")
-      .primaryKey()
-      .references(() => users.id, { onDelete: "cascade" }),
-    revision: integer("revision").notNull(),
-    body: text("body").notNull(),
-    sourceHash: text("source_hash").notNull(),
-    createdAt: createdAt(),
-  },
-  (t) => [
-    check("tps_revision_positive", sql`${t.revision} > 0`),
-    // The cover sheet plus five reports, each within report_body_bytes (0017).
-    check("tps_body_limit", sql`octet_length(${t.body}) <= 1572864`),
-    check("tps_source_hash", sql`${t.sourceHash} ~ '^[a-f0-9]{64}$'`),
-  ],
-);
-
 export const saveRequests = pgTable(
   "save_requests",
   {

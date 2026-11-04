@@ -93,11 +93,13 @@ Files: `server/src/store/tools.ts`, `server/src/mcp.ts`.
 
 Files: `server/src/store/compiled.ts`, `server/src/store/cards.ts`.
 
-- A read locks the account row, so it serializes with saves.
+- A read takes no lock and writes nothing: one statement loads the latest card versions,
+  the active samples and whether the account is active, so a save shows whole or not at
+  all.
 - Assistant reads are blocked once an account reads as expired, but the person's own web
   view is not.
-- Each read loads the latest card versions and active samples, and fingerprints them.
-- If the stored report lags that fingerprint, the read rebuilds and republishes it.
+- An assistant read is two queries (that statement and the trial gate) and opens no
+  database connection; the web view's is one.
 
 ## Assembling documents
 
@@ -111,7 +113,11 @@ Files: `server/src/store/reports.ts`, `server/src/store/compiled.ts`.
   prefix.
 - `TPS.md` is the cover sheet plus every non-empty report.
 - `is_empty` means no rules and no samples anywhere.
-- The version is a hash of user and revision, and one current snapshot is kept per user.
+- The version is a fingerprint of what is served: a hash of the user, the cover sheet,
+  and each report's text with its samples' IDs and kinds. The same cards and samples
+  always give the same version, and nothing assembled is stored.
+- A client holding a version from before fingerprints (a revision hash) conflicts once
+  on its next save, rereads, and saves on the new version.
 
 ## Saves
 
@@ -175,7 +181,8 @@ not at all.
 
 ### Publish
 
-- Publishing rebuilds and stores the report, then bumps the revision.
+- Publishing checks the assembled documents against their size limits and answers with
+  their new fingerprint; it stores nothing beyond the cards and samples.
 - An audit row records the request, assistant, before and after versions, and affected
   cards.
 - The receipt is written last, once, with the outcome.

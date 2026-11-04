@@ -1,4 +1,4 @@
-import { cardHeads, cardFingerprint } from "./cards";
+import { cardHeadsJson, cardFingerprint, type CardHead } from "./cards";
 import {
   assembleDocuments,
   FILINGS,
@@ -14,7 +14,12 @@ import { databaseFailure } from "./database";
 import { StoreError } from "./errors";
 import { readLimits, utf8Bytes } from "./index";
 import { assertTrialAccess } from "./trials";
-import type { Receipt, Report, SaveContext, SaveOutcome } from "./save-context";
+import type {
+  Receipt,
+  SaveContext,
+  SaveOutcome,
+  Snapshot,
+} from "./save-context";
 import { runSave } from "./save";
 
 const hash = (value: unknown) =>
@@ -164,7 +169,12 @@ export function compiledMemos(
   userId: string,
   actor?: { issuer: string; clientId: string },
 ) {
-  const version = (revision: number) => hash(["tps", userId, revision]);
+  const unavailable = () =>
+    new StoreError(
+      "account_unavailable",
+      "This Milton account is unavailable.",
+      403,
+    );
   async function lock(tx: StoreSession) {
     if (
       !(
@@ -173,65 +183,70 @@ export function compiledMemos(
         )
       ).length
     )
-      throw new StoreError(
-        "account_unavailable",
-        "This Milton account is unavailable.",
-        403,
-      );
+      throw unavailable();
   }
-  async function snapshot(tx: StoreSession) {
-    // All heads (including archive state) and active samples in one
-    // tenant-locked snapshot. Never page this input.
-    const heads = await cardHeads(tx, userId);
-    const samples = await tx.query<Sample>(
-      sql`SELECT s.id,s.report,s.kind_id,k.label AS kind,s.context,s.body,to_char(s.created_at AT TIME ZONE 'UTC','YYYY-MM-DD') AS date,
-      to_char(s.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS created_at
-      FROM samples s JOIN sample_kinds k ON k.user_id=s.user_id AND k.id=s.kind_id
-      WHERE s.user_id=${userId} AND s.retired_at IS NULL ORDER BY s.created_at,s.id`,
-    );
-    const report = (
-      await tx.query<Report>(
-        sql`SELECT revision,body,source_hash FROM tps_reports WHERE user_id=${userId}`,
+  // The version is a fingerprint of what is served: the cover sheet and each
+  // report's text with its samples' IDs and kinds. The same cards and samples
+  // always give the same version, and the user ID keeps it to one account.
+  const version = (documents: Documents) =>
+    hash([
+      "documents",
+      userId,
+      documents.cover,
+      documents.reports.map((r) => [
+        r.id,
+        r.body,
+        r.samples.map((s) => [s.id, s.kind_id, s.kind]),
+      ]),
+    ]);
+  async function snapshot(session: StoreSession): Promise<Snapshot> {
+    // One statement reads every head (including archive state) and the active
+    // samples, so a read without a transaction still sees a save whole or not
+    // at all. Never page this input.
+    const row = (
+      await session.query<{
+        open: boolean;
+        heads: CardHead[];
+        samples: Sample[];
+      }>(
+        sql`SELECT EXISTS(SELECT 1 FROM users WHERE id=${userId} AND status='active') AS open,
+      (${cardHeadsJson(userId)}) AS heads,
+      (SELECT coalesce(json_agg(json_build_object('id',s.id,'report',s.report,'kind_id',s.kind_id,'kind',k.label,'context',s.context,'body',s.body,
+        'date',to_char(s.created_at AT TIME ZONE 'UTC','YYYY-MM-DD'),
+        'created_at',to_char(s.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"')) ORDER BY s.created_at,s.id),'[]'::json)
+        FROM samples s JOIN sample_kinds k ON k.user_id=s.user_id AND k.id=s.kind_id
+        WHERE s.user_id=${userId} AND s.retired_at IS NULL) AS samples`,
       )
-    )[0];
-    // Without samples the fence is the card fingerprint alone, so every
-    // pre-0017 snapshot stays valid.
+    )[0]!;
+    const { heads, samples } = row;
+    // Without samples the source fingerprint is the card fingerprint alone.
     const fingerprint = samples.length
       ? hash([cardFingerprint(heads), samples.map((s) => s.id)])
       : cardFingerprint(heads);
     const active = heads.filter((h) => !h.archived && h.body.trim());
     const documents = assembleDocuments(active, samples);
     return {
+      open: row.open,
       heads,
       samples,
-      report,
       fingerprint,
       active,
       documents,
-      ready: report ? report.source_hash === fingerprint : documents.is_empty,
-      version: version(report?.revision ?? 0),
+      version: version(documents),
     };
   }
-  async function readTpsSession(tx: StoreSession) {
-    await lock(tx);
-    if (actor) await assertTrialAccess(tx, userId);
-    let current = await snapshot(tx);
-    // Assembly is deterministic, so a compiled snapshot that lags its sources is
-    // rebuilt here instead of reported. An empty account without a snapshot is
-    // ready as it is and stays unwritten until its first save. The size cap
-    // bounds saves; a read serves what is already on file.
-    if (!current.ready) {
-      await publish(tx, current, current.documents.full);
-      current = await snapshot(tx);
+  /** A read assembles the documents from cards and samples. It takes no lock
+   * and writes nothing: one statement for the snapshot, then the trial gate
+   * for an assistant. The size cap bounds saves; a read serves what is on file. */
+  async function read() {
+    try {
+      const current = await snapshot(db);
+      if (!current.open) throw unavailable();
+      if (actor) await assertTrialAccess(db, userId);
+      return current;
+    } catch (error) {
+      throw databaseFailure(error);
     }
-    return {
-      report: {
-        text: current.documents.full,
-        version: current.version,
-        is_empty: current.documents.is_empty,
-      },
-      documents: current.documents,
-    };
   }
   async function receipt(tx: StoreSession, id: string) {
     return (
@@ -240,7 +255,7 @@ export function compiledMemos(
       )
     )[0];
   }
-  async function assemble(tx: StoreSession, documents: Documents) {
+  async function checkSize(tx: StoreSession, documents: Documents) {
     // Every source byte is preserved; only headings, when lines, sample context
     // and quoting, and blank lines are added. Each body has its own cap.
     const limits = await readLimits(tx);
@@ -255,36 +270,20 @@ export function compiledMemos(
         "A report exceeds its size limit. Nothing was truncated or published.",
         422,
       );
-    return documents.full;
-  }
-  async function publish(
-    tx: StoreSession,
-    current: Awaited<ReturnType<typeof snapshot>>,
-    body: string,
-  ) {
-    const next = (current.report?.revision ?? 0) + 1;
-    await tx.query(sql`INSERT INTO tps_reports(user_id,revision,body,source_hash) VALUES (${userId},${next},${body},${current.fingerprint})
-      ON CONFLICT(user_id) DO UPDATE SET revision=excluded.revision,body=excluded.body,source_hash=excluded.source_hash,created_at=clock_timestamp()`);
-    return version(next);
   }
   return {
     /** The cover sheet and the five reports at one version. */
     async readDocuments(): Promise<Documents & { version: string }> {
-      return db
-        .transaction(async (tx) => {
-          const current = await readTpsSession(tx);
-          return { ...current.documents, version: current.report.version };
-        })
-        .catch((error) => {
-          throw databaseFailure(error);
-        });
+      const current = await read();
+      return { ...current.documents, version: current.version };
     },
     async getTpsReport(): Promise<CompiledReport> {
-      return db
-        .transaction(async (tx) => (await readTpsSession(tx)).report)
-        .catch((error) => {
-          throw databaseFailure(error);
-        });
+      const current = await read();
+      return {
+        text: current.documents.full,
+        version: current.version,
+        is_empty: current.documents.is_empty,
+      };
     },
     async saveMemo(raw: SaveMemoInput): Promise<SaveOutcome> {
       const parsed = saveMemoInput.safeParse(raw);
@@ -327,8 +326,7 @@ export function compiledMemos(
         lock,
         snapshot,
         receipt,
-        assemble,
-        publish,
+        checkSize,
       };
       return runSave(ctx, structured);
     },

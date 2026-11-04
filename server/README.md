@@ -5,7 +5,7 @@ Connected assistants submit changes through `create_memo` and read the
 cover sheet and reports through `get_cover_sheet`, `get_report` and `list_reports`.
 This directory contains the MCP server and current-report web app,
 rendered with Hono JSX and Vite-built theme assets on Node 26 LTS. Neon Postgres stores instruction cards, samples, internal
-history, the current report snapshot and request receipts; Neon Auth handles sign-in and authorization.
+history and request receipts; Neon Auth handles sign-in and authorization.
 
 ## Prerequisites
 
@@ -111,12 +111,12 @@ This command explicitly reads `.dev.vars`, unless a release sets `MILTON_OWNER_D
 The migrations create the application tables defined in `src/store/schema.ts`.
 Every successful sign-in creates or finds its account; there is no sign-up setting (0025).
 
-Migration `0006_compiled_memos.sql` adds the current report snapshot (`tps_reports`)
+Migration `0006_compiled_memos.sql` adds the report snapshot (`tps_reports`, dropped by 0031)
 and durable save receipts. It preserves existing memos and their version history,
 including content formerly stored under the legacy `vibes` name, which participates
-as an ordinary internal memo. Since 0017 a read whose snapshot lags its sources
-rebuilds it under the account lock (see below); reads never invoke a model. Empty
-accounts read an empty cover sheet and empty reports.
+as an ordinary internal memo. Reads assemble the cover sheet and reports from cards
+and samples (see 0017 below), take no lock and write nothing; reads never invoke a
+model. Empty accounts read an empty cover sheet and empty reports.
 
 There are no old tool aliases or compatibility mode. Apply the
 migration before running this server, and refresh client tool discovery. The
@@ -256,8 +256,7 @@ ones need an administrative fix.
 The caller authors every byte and remains responsible for its meaning and user
 authorization. All other source bytes and descriptions stay exact; an edit whose
 `before` is a whole rule and whose `after` is empty retires it, retaining its internal
-history. When the snapshot already matches its sources, an unchanged replacement leaves
-history and the version alone. This avoids server-side paraphrasing; it does not certify
+history. An unchanged replacement leaves history and the version alone. This avoids server-side paraphrasing; it does not certify
 caller edits, and nothing detects a correction sent as a new rule that contradicts an
 old one. It does not change first-setup and capture approval rules.
 
@@ -377,19 +376,19 @@ The tests use fresh PGlite databases and stubbed Auth responses. `test:client` u
 
 `src/store/save.ts` runs each save in one transaction: it takes the account lock,
 replays a known request, checks the trial gate, snapshots all instruction-card heads,
-resolves the save against that snapshot, writes and publishes, and writes the
-receipt with its outcome. Exact edits and moves name existing
+resolves the save against that snapshot, writes, checks the assembled size limits,
+and writes the receipt with its outcome. Exact edits and moves name existing
 cards only through unique anchors; `rules` entries become new cards with
 server-assigned IDs. Omitted cards keep their exact bodies, descriptions and versions.
 The cover sheet and reports are assembled from the final stored active bodies and
 samples (see 0017 below). Bodies are not trimmed, rewritten or truncated, apart from
 one stored leading `- ` that the printed bullet replaces;
-descriptions are metadata, not an additional instruction source. Card versions, the
-current snapshot and the receipt commit together. Stale or conflicting saves cannot
+descriptions are metadata, not an additional instruction source. Card versions,
+samples and the receipt commit together. Stale or conflicting saves cannot
 partially publish.
 
-Internal `instruction_card_versions` are append-only; legacy `memo_versions` are retained. `tps_reports` holds one replaceable
-snapshot per account, with a monotonic revision and source fingerprint. There is
+Internal `instruction_card_versions` are append-only; legacy `memo_versions` are retained. Nothing assembled is
+stored: the version is a fingerprint of the assembled documents (see 0017 below). There is
 no report content history. Receipts keep input hashes and bounded outcomes, not raw
 submitted text or copies of reports. A receipt is written once, with its
 outcome, and is immutable. A crashed request commits nothing and leaves no receipt.
@@ -397,9 +396,9 @@ outcome, and is immutable. A crashed request commits nothing and leaves no recei
 Saves anchor only in current active cards, never archived versions or a prior snapshot.
 Existing content under the former `vibes` core key is ordinary source. Invalid Unicode
 in submitted text is rejected before a driver can replace it. The database validates
-identity, complete publication and size limits. If a report or the full text exceeds
-its bound, the whole publication rolls back with `tps_body_limit`; the failed
-request receipt remains, but no source change commits. No read or
+identity and size limits. If a report or the full text would exceed its bound, the
+save is refused with `tps_body_limit` and every change it made rolls back; the
+receipt stores the refusal, but no source change commits. No read or
 save invokes a model.
 
 | Limit                      | Default                                                      |
@@ -419,7 +418,7 @@ Retained history has no cap (see "No history cap (0030)" below).
 The website shows the current cover sheet and reports, escapes their text and serves no browser JavaScript.
 It displays one bullet per complete active instruction card, preserving internal
 line breaks and conditions and dropping one stored leading `- ` as assembly does,
-only when a browser-only tenant-locked lookup returns the same version as the
+only when a second read for the page returns the same version as the
 canonical report; it does not compare the text.
 Unavailable or mismatched layout data keeps the original plain-text view. Report
 pages preload the shared Geist and JetBrains Mono fonts; the theme uses
@@ -453,24 +452,27 @@ reader cannot tell that dash is content. Stored cards are not
 edited. The cover sheet is the cover-sheet rules joined by blank lines; the fixed
 report index (one "when" line per report) travels beside it as data. Each report
 prints `# Title`, its when line, its active samples newest first (a context line with
-the date, then the body quoted with `>`), then its rules. `tps_reports` keeps the
-version fence and the full text (cover sheet plus every non-empty report) as last
-published; reads, the web page and TPS.md serve a fresh assembly at that version. The fence is the card
-fingerprint when no samples exist, so pre-0017 snapshots stay valid; with samples it also covers the active sample IDs. A read whose stored fence
-lags its sources rebuilds and publishes under the account lock instead of failing, so
-there is no refresh step and no `tps_report_unavailable` error. An empty account
-without a snapshot stays unwritten.
+the date, then the body quoted with `>`), then its rules. The full text (TPS.md and
+the web page) is the cover sheet plus every non-empty report.
+
+A read takes the card heads, the active samples and the account's status in one
+statement, without a transaction or lock, so a concurrent save shows whole or not at
+all; it writes nothing. An assistant read adds the trial gate: two queries and no
+database connection, where the read before 0031 opened a connection and a transaction
+with the account lock and wrote a lagging snapshot. The version every
+read returns and every save fences on is a fingerprint of what is served: SHA-256 of
+the user ID, the cover sheet, and each report's text with its samples' IDs, kind IDs
+and kind labels. The same cards and samples always give the same version, an empty
+account included, and a save that changes what is served changes it. Versions from
+before 0031 hashed a stored revision, so a client holding one conflicts once on its
+next save (`conflict` with the current version), rereads and saves normally.
 
 Each body has its own cap (`report_body_bytes`, 256 KB by default); the full text is
 bounded at six bodies. Caps measure the printed text, bullets included. A save that
 would exceed a cap is refused with `tps_body_limit` and nothing is truncated or
-published. Reads are not rechecked, including a read that rebuilds a lagging snapshot:
-it publishes what is on file even above a cap lowered since, and only the next save is
-refused. Known limit: the database still holds `tps_reports.body` to 1,572,864 bytes,
-so a lagging snapshot whose full text is larger (reachable only through an
-administrative or migration change, since saves enforce the caps) fails that read with
-`check_violation`. A snapshot last published before rules printed as bullets can read up to two
-bytes per bare rule over the cap until its next save. Card text still cannot contain a Markdown
+published. Reads are not rechecked: a read serves what is on file even above a cap
+lowered since, and only the next save is refused. Rules saved before rules printed as
+bullets can read up to two bytes per bare rule over the cap until the next save. Card text still cannot contain a Markdown
 heading line (`card_heading`). Each `rules` entry names its card's report; since 0020
 a card moves only through an explicit `moves` list.
 
@@ -480,7 +482,7 @@ A card's report lives on each version (`instruction_card_versions.report`, NOT N
 one of the five reports or `cover`); `instruction_cards.report` is dropped. NULL never
 means the cover sheet. A move appends a version with the same description and body
 (`details.kind` `move`); an edited and moved card gets one version carrying both.
-The card fingerprint is unchanged in shape, so a move changes the fence. A moved card
+A move changes the report a rule prints in, so it changes the version. A moved card
 keeps its position. Legacy memo writes append versions in the card's current report.
 
 `sample_kinds` holds immutable kinds: `(user_id, id, report, label)`, labels unique
@@ -566,10 +568,10 @@ Do not reset clocks, erase notices or infer subscription state during recovery.
 ### Durable accepted changes (0010)
 
 Every successful `create_memo` change writes immutable internal provenance in the same
-transaction as card history and the report snapshot. (Records from the removed refinement Apply keep
+transaction as card history. (Records from the removed refinement Apply keep
 their `refinement_apply` operation.) It preserves the exact submitted instruction or
-exact edits, `rules` and stated purpose, actor, request ID, affected before/after card-version references, source/report revision
-hashes and transformation identity. It records only what Milton received, not a conversation
+exact edits, `rules` and stated purpose, actor, request ID, affected before/after card-version references, before/after source fingerprints
+and versions, and transformation identity. It records only what Milton received, not a conversation
 or proof of the human's full intent. Legacy missing request evidence is not reconstructed.
 No-op and failed saves add no accepted-change record.
 Replay adds no duplicate. New saves record transformation pipeline `exact:v1`.
@@ -580,6 +582,20 @@ Migration 0010 is additive and copies no legacy request text. Its inverse parks 
 foreign keys, immutability guards and byte charges in `milton_rollback`; forward migration
 restores them exactly. Stop writers during schema rollback and keep them stopped until
 forward recovery: an older runtime cannot guarantee provenance for new saves.
+
+### Fingerprint versions (0031)
+
+The version is the fingerprint of the assembled documents (see "Reports, samples and the
+cover sheet (0017)" above), so the stored snapshot, which no read served, is gone. The
+code stops reading and writing `tps_reports`; migration 0031 drops it with its keys, its
+checks `tps_revision_positive`, `tps_body_limit` and `tps_source_hash`, and the runtime's
+grant. The `tps_body_limit` error code stays for saves over a cap. A connected client
+conflicts once on its first save after the release and rereads. Release the code first;
+see [the hosting runbook](deploy/README.md#fingerprint-versions-0031).
+`drizzle/rollback/0031_fingerprint_versions.sql` recreates the table, which an earlier
+revision needs to read at all, with one row per account at a revision none reached, so the
+earlier revision rebuilds and never reissues an old version: it restores shape with fresh
+revisions, not data.
 
 ### No history cap (0030)
 
@@ -655,7 +671,7 @@ trigger it fires, runs on it:
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | SELECT, INSERT, UPDATE, DELETE | `users`: sign-up, the account lock and account deletion (its cascades run as the table owner)                                                                                                     |
 | SELECT, INSERT, DELETE         | `assistant_disconnects`: disconnect, the refusal check, reconnect on Allow                                                                                                                        |
-| SELECT, INSERT, UPDATE         | `save_requests` (receipts; the save guard refuses every update), `samples` (retirement), `tps_reports` (snapshot upsert), `trial_accounts` (notice stage), `usage_daily` (daily call upsert)      |
+| SELECT, INSERT, UPDATE         | `save_requests` (receipts; the save guard refuses every update), `samples` (retirement), `trial_accounts` (notice stage), `usage_daily` (daily call upsert)                                       |
 | SELECT, INSERT                 | `identities`, `deleted_identities`, `instruction_cards`, `instruction_card_versions`, `sample_kinds`, and the legacy `memos`, `memo_versions` and `memo_cards` (the signup seed and its triggers) |
 | INSERT                         | `accepted_changes`: provenance, written once per save and never read by the runtime                                                                                                               |
 | SELECT                         | `store_config`: settings are read without a lock; 0028 revoked the `UPDATE (singleton)` the retired sign-in `FOR UPDATE` lock needed, so no setting can be changed                                |

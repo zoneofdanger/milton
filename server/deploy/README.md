@@ -938,3 +938,73 @@ stored value, so an account that grew past it keeps its rows and cannot save. Th
 journal row stays, so re-forwarding means running `0030_no_history_cap.sql` by hand, as
 one transaction that stops on the first error:
 `psql -1 -v ON_ERROR_STOP=1 -f server/drizzle/0030_no_history_cap.sql`.
+
+## Fingerprint versions (0031)
+
+The version every read returns and every save fences on is a fingerprint of the assembled
+documents: SHA-256 of the user ID, the cover sheet, and each report's text with its
+samples' IDs, kind IDs and kind labels. Reads assemble from cards and samples in one
+statement, take no lock and write nothing; saves no longer write `tps_reports`, which no
+read ever served. Migration 0031 drops `tps_reports` and what only it used: its primary
+key, the foreign key `tps_reports_user_id_users_id_fk`, the checks `tps_revision_positive`,
+`tps_body_limit` and `tps_source_hash`, the `created_at` default and `milton_runtime`'s
+SELECT, INSERT and UPDATE grant. No trigger, function, view or policy refers to it; the
+"ready" check (stored source hash equal to the sources) lived in code. The `tps_body_limit`
+error code stays: saves still refuse an assembled report over its cap. This release names
+no part of the table, so it runs on either schema; every earlier revision reads it on every
+read and writes it on every save.
+
+**First save after the release.** Versions before this release hashed a stored revision,
+so the fence value changes form. A connected client holding an older version gets one
+ordinary `conflict` (with the current version) on its next save, rereads, and saves on the
+new version; nothing is written by the conflicting save. While old and new revisions both
+serve, a client that reads through one and saves through the other conflicts the same way.
+
+Release order (it rides the pending 0028, 0029 and 0030 release; follow "Saves in one
+transaction (0029)" and "No history cap (0030)" and add the steps below):
+
+1. Ship MCP and app from the same image, after 0029's pre-step.
+2. Wait until both services, not one, serve 100% on the new image and the old revisions
+   are idle.
+3. Take a Neon snapshot.
+4. With the owner connection, run the check below with the 0028, 0029 and 0030 checks, and
+   record its values. Expect `dependents` 0. `rows` is the number of snapshots 0031 drops;
+   nothing reads them.
+
+   ```sql
+   SELECT
+     (SELECT count(*) FROM pg_depend d JOIN pg_rewrite r ON r.oid = d.objid
+       WHERE d.refobjid = 'tps_reports'::regclass)::int
+     + (SELECT count(*) FROM pg_proc
+       WHERE pronamespace = 'public'::regnamespace AND prosrc ~ 'tps_reports')::int
+     + (SELECT count(*) FROM pg_trigger
+       WHERE tgrelid = 'tps_reports'::regclass AND NOT tgisinternal)::int AS dependents,
+     (SELECT count(*) FROM tps_reports)::int AS rows;
+   ```
+
+5. Run the normal runner once: `bun run --cwd server db:migrate`. With 0028, 0029 and 0030
+   pending, one run applies all four in one transaction. 0031 locks `users` in SHARE ROW
+   EXCLUSIVE mode (the foreign key drop needs it; earlier steps in the same run already
+   hold a stronger lock), then drops the table. On a deadlock or lock timeout, rerun it; it
+   rolls back as a whole.
+6. Smoke test through MCP as `milton_app`: a read, a save on that read's version, a replay
+   of that save, a save on a stale version (`conflict`), and two reads in a row returning
+   the same version.
+
+**Rollback order.** Newest first: `rollback/0031_fingerprint_versions.sql` before the
+0030, 0029 and 0028 rollbacks. It restores no save guard and names no column 0030 drops, so
+it runs on the 0030 schema; the others follow in their own order.
+
+**Rollback boundary.** Before 0031 is applied, code rolls back by traffic alone (clients
+conflict once more on the old version form). After it, an earlier revision fails every read
+and save: first run `server/drizzle/rollback/0031_fingerprint_versions.sql` offline with
+writers stopped, then shift traffic. The rollback recreates `tps_reports` with its keys,
+checks, default and runtime grant, and seeds one row per account at a fresh revision (the
+clock in epoch seconds, above any revision an account reached) with a source hash no
+fingerprint equals. An earlier revision then rebuilds on each account's first read and
+publishes the next revision, a version it never issued, so a conversation still holding a
+pre-0031 version conflicts instead of passing the fence. Recreated empty, every account
+would restart at revision 1 and reissue old versions for different content. It restores
+shape with fresh revisions, not data; no read served the stored body. The 0031 journal row stays, so re-forwarding means running
+`0031_fingerprint_versions.sql` by hand, as one transaction that stops on the first error:
+`psql -1 -v ON_ERROR_STOP=1 -f server/drizzle/0031_fingerprint_versions.sql`.

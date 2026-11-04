@@ -722,9 +722,6 @@ test("closing an account refuses its reads, saves and replays, fences a pending 
         sql`SELECT id,body,retired_at FROM samples WHERE user_id=${userId} ORDER BY id`,
       ),
       await local.db.query(
-        sql`SELECT revision,body FROM tps_reports WHERE user_id=${userId}`,
-      ),
-      await local.db.query(
         sql`SELECT count(*)::int AS n FROM accepted_changes WHERE user_id=${userId}`,
       ),
     ];
@@ -767,7 +764,7 @@ test("closing an account refuses its reads, saves and replays, fences a pending 
     expect(await beta.everything()).toBe(betaSees);
     // Deleting the closing account's row cascades its sources, samples included.
     await local.db.query(sql`DELETE FROM users WHERE id=${alpha.id}`);
-    expect(await sources(alpha.id)).toEqual([[], [], [], [{ n: 0 }]]);
+    expect(await sources(alpha.id)).toEqual([[], [], [{ n: 0 }]]);
     expect(
       await local.db.query(
         sql`SELECT count(*)::int AS n FROM save_requests WHERE user_id=${alpha.id}`,
@@ -897,7 +894,6 @@ test("account deletion removes every tenant row, keeps refusals, waits for an in
       "sample_kinds",
       "accepted_changes",
       "save_requests",
-      "tps_reports",
       "usage_daily",
     ])
       expect(populated[table]).toBeGreaterThan(0);

@@ -258,8 +258,7 @@ export async function applySave(
     creates.length === 0 &&
     retire.length === 0 &&
     updates.every((m) => known.get(m.id)?.body === m.text);
-  if (unchanged && current.ready)
-    return result("unchanged", { version: current.version });
+  if (unchanged) return result("unchanged", { version: current.version });
   const append = async (
     h: Pick<Head, "id" | "version" | "description" | "body" | "report">,
     archived: boolean,

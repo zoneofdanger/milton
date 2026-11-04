@@ -72,6 +72,73 @@ test("a release passes the owner URL in its own variable, checked, and an empty 
   }
 });
 
+test("0031 drops tps_reports and its runtime grant, leaves every version and save as it was, and rolls back with one fresh-revision row per account", async () => {
+  const base = await migratedThrough(30);
+  const pg = await migratedThrough(30);
+  const post = await migratedThrough(31);
+  try {
+    const up = await drizzleSql("0031_fingerprint_versions.sql");
+    const down = await drizzleSql("rollback/0031_fingerprint_versions.sql");
+    const acl = async (db: PGlite) =>
+      (
+        await db.query(
+          "SELECT relacl::text AS acl FROM pg_class WHERE relname='tps_reports'",
+        )
+      ).rows;
+    await seedUsers(pg, "fingerprint");
+    const store = fixtureStore(storeDatabase(pg), "fingerprint", "assistant");
+    const save = async (text: string, version: string) =>
+      store.saveMemo({
+        text,
+        rules: [{ report: "cover", text }],
+        request_id: crypto.randomUUID(),
+        expected_version: version,
+      });
+    // The current code runs on the 0030 schema and leaves the table alone; a
+    // row an earlier revision wrote is never read.
+    const saved = await save(
+      "Saved before 0031.",
+      (await store.getTpsReport()).version,
+    );
+    expect(saved.status).toBe("saved");
+    await pg.exec(`INSERT INTO tps_reports(user_id,revision,body,source_hash)
+      VALUES ('fingerprint',3,'An earlier revision''s snapshot.',repeat('a',64))`);
+    const before = await store.readDocuments();
+    expect(before.version).toBe(saved.version!);
+    const forward = async () => {
+      await pg.exec("BEGIN;" + up + "COMMIT;");
+      expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(post));
+      expect(await acl(pg)).toEqual([]);
+    };
+    await forward();
+    expect(await store.readDocuments()).toEqual(before);
+    await pg.exec(down);
+    expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(base));
+    expect(await acl(pg)).toEqual(await acl(base));
+    // One row per account at a revision none reached, out of date on sight,
+    // so an earlier revision rebuilds and never reissues an old version.
+    expect(
+      (
+        await pg.query(
+          "SELECT user_id,revision>1000000000 AS fresh,body,source_hash=repeat('0',64) AS unmatched FROM tps_reports",
+        )
+      ).rows,
+    ).toEqual([
+      { user_id: "fingerprint", fresh: true, body: "", unmatched: true },
+    ]);
+    // Versions never depended on the table, so a save fences on the same one.
+    expect(await store.readDocuments()).toEqual(before);
+    expect(
+      (await save("Saved after the rollback.", before.version)).status,
+    ).toBe("saved");
+    await forward();
+  } finally {
+    await post.close();
+    await pg.close();
+    await base.close();
+  }
+}, 30000);
+
 test("0030 drops the history cap, its byte triggers and users.retained_bytes, keeps the stored limits, and rolls back with the counter recomputed", async () => {
   const base = await migratedThrough(29);
   const pg = await migratedThrough(29);

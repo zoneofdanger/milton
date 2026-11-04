@@ -93,8 +93,11 @@ export const users = pgTable(
   ],
 );
 // No row means existing early access. Only an explicitly enabled new-account
-// enrollment creates a row. Stripe owns paidThrough through the signed webhook;
-// stripeCustomerId is set by checkout before Stripe sees the account.
+// enrollment creates a row. Stripe owns the trial and the subscription: the
+// stripe_* columns and subscription_status mirror what Stripe last answered, and
+// the gate reads only those. startedAt and paidThrough stay in place, unread by
+// the gate. subscriptionStatus holds any value Stripe sends; NULL means no
+// subscription yet, and the gate allows it.
 export const trialAccounts = pgTable(
   "trial_accounts",
   {
@@ -105,12 +108,31 @@ export const trialAccounts = pgTable(
     paidThrough: timestamp("paid_through", { withTimezone: true }),
     noticeStage: integer("notice_stage").notNull().default(0),
     stripeCustomerId: text("stripe_customer_id").unique(),
+    stripeSubscriptionId: text("stripe_subscription_id").unique(),
+    subscriptionStatus: text("subscription_status"),
+    trialEnd: timestamp("trial_end", { withTimezone: true }),
+    currentPeriodStart: timestamp("current_period_start", {
+      withTimezone: true,
+    }),
+    currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
   },
   (t) => [
     check("trial_notice_stage", sql`${t.noticeStage} BETWEEN 0 AND 2`),
     check(
       "trial_stripe_customer",
       sql`${t.stripeCustomerId} IS NULL OR ${t.stripeCustomerId} ~ '^cus_[A-Za-z0-9]{1,251}$'`,
+    ),
+    check(
+      "trial_stripe_subscription",
+      sql`${t.stripeSubscriptionId} IS NULL OR ${t.stripeSubscriptionId} ~ '^sub_[A-Za-z0-9]{1,251}$'`,
+    ),
+    check(
+      "trial_subscription_status",
+      sql`${t.subscriptionStatus} IS NULL OR char_length(${t.subscriptionStatus}) BETWEEN 1 AND 64`,
+    ),
+    check(
+      "trial_stripe_dates",
+      sql`(${t.trialEnd} IS NULL OR isfinite(${t.trialEnd})) AND (${t.currentPeriodStart} IS NULL OR isfinite(${t.currentPeriodStart})) AND (${t.currentPeriodEnd} IS NULL OR isfinite(${t.currentPeriodEnd}))`,
     ),
     check(
       "trial_finite_dates",

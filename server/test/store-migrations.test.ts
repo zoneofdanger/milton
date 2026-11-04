@@ -50,19 +50,21 @@ const schemaCatalog = async (pg: PGlite) => {
   };
 };
 
-test("0025 adds the Stripe ledger and customer column, the runtime applies an event once, and rollback refuses until both are empty", async () => {
+test("0025 adds the Stripe ledger and subscription columns, marks returning deleted identities canceled, the runtime applies an event once, and rollback refuses until nothing is recorded", async () => {
   const base = await migratedThrough(24);
   const pg = await migratedThrough(24);
   const post = await migratedThrough(25);
   try {
     const up = await drizzleSql("0025_stripe_billing.sql");
     const down = await drizzleSql("rollback/0025_stripe_billing.sql");
-    await pg.exec(`INSERT INTO users(id) VALUES ('billing');
-      INSERT INTO trial_accounts(user_id,started_at) VALUES ('billing','2026-11-01T00:00:00Z')`);
+    // A plain clock starts at created_at; a returning deleted identity's before it.
+    await pg.exec(`INSERT INTO users(id) VALUES ('billing'),('returned');
+      INSERT INTO trial_accounts(user_id,started_at) SELECT id,created_at FROM users WHERE id='billing';
+      INSERT INTO trial_accounts(user_id,started_at) SELECT id,created_at-interval '720 hours' FROM users WHERE id='returned'`);
     const clock = async () =>
       (
         await pg.query(
-          "SELECT user_id,started_at::text,paid_through::text,notice_stage FROM trial_accounts",
+          "SELECT user_id,started_at::text,paid_through::text,notice_stage FROM trial_accounts ORDER BY 1",
         )
       ).rows;
     const kept = await clock();
@@ -87,8 +89,42 @@ test("0025 adds the Stripe ledger and customer column, the runtime applies an ev
     await forward();
     expect(await clock()).toEqual(kept);
     expect(
-      (await pg.query("SELECT stripe_customer_id FROM trial_accounts")).rows,
-    ).toEqual([{ stripe_customer_id: null }]);
+      (
+        await pg.query(
+          "SELECT user_id,stripe_customer_id,subscription_status,trial_end FROM trial_accounts ORDER BY 1",
+        )
+      ).rows,
+    ).toEqual([
+      {
+        user_id: "billing",
+        stripe_customer_id: null,
+        subscription_status: null,
+        trial_end: null,
+      },
+      {
+        user_id: "returned",
+        stripe_customer_id: null,
+        subscription_status: "canceled",
+        trial_end: null,
+      },
+    ]);
+    // Any status Stripe sends stores, within the bound; ids and dates are checked.
+    await pg.exec(
+      "UPDATE trial_accounts SET subscription_status='a_status_stripe_adds_later' WHERE user_id='billing'",
+    );
+    for (const refused of [
+      `subscription_status='${"x".repeat(65)}'`,
+      "stripe_subscription_id='cus_notASubscription'",
+      "trial_end='infinity'",
+      "current_period_start='infinity'",
+      "current_period_end='infinity'",
+    ])
+      await expect(
+        pg.exec(`UPDATE trial_accounts SET ${refused} WHERE user_id='billing'`),
+      ).rejects.toThrow("check constraint");
+    await pg.exec(
+      "UPDATE trial_accounts SET subscription_status=NULL WHERE user_id='billing'",
+    );
 
     await pg.exec(
       "CREATE ROLE milton_app_fixture LOGIN IN ROLE milton_runtime; SET ROLE milton_app_fixture",
@@ -135,7 +171,7 @@ test("0025 adds the Stripe ledger and customer column, the runtime applies an ev
     expect(
       (
         await pg.query(
-          "SELECT stripe_customer_id,paid_through=timestamptz '2026-12-04T00:00:00Z' AS grace FROM trial_accounts",
+          "SELECT stripe_customer_id,paid_through=timestamptz '2026-12-04T00:00:00Z' AS grace FROM trial_accounts WHERE user_id='billing'",
         )
       ).rows,
     ).toEqual([{ stripe_customer_id: "cus_fixture", grace: true }]);

@@ -1,5 +1,5 @@
 {
-  "id": "0571ac05-f06f-401f-bc8c-8e9817b219c2",
+  "id": "1af3f8d2-8ea8-4038-ac04-ff2b17df637f",
   "prevId": "c0b89179-092a-4717-8936-58f2d3df53fc",
   "version": "7",
   "dialect": "postgresql",
@@ -1614,6 +1614,36 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "stripe_subscription_id": {
+          "name": "stripe_subscription_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "subscription_status": {
+          "name": "subscription_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "trial_end": {
+          "name": "trial_end",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "current_period_start": {
+          "name": "current_period_start",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "current_period_end": {
+          "name": "current_period_end",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {},
@@ -1640,6 +1670,13 @@
           "columns": [
             "stripe_customer_id"
           ]
+        },
+        "trial_accounts_stripe_subscription_id_unique": {
+          "name": "trial_accounts_stripe_subscription_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "stripe_subscription_id"
+          ]
         }
       },
       "policies": {},
@@ -1651,6 +1688,18 @@
         "trial_stripe_customer": {
           "name": "trial_stripe_customer",
           "value": "\"trial_accounts\".\"stripe_customer_id\" IS NULL OR \"trial_accounts\".\"stripe_customer_id\" ~ '^cus_[A-Za-z0-9]{1,251}$'"
+        },
+        "trial_stripe_subscription": {
+          "name": "trial_stripe_subscription",
+          "value": "\"trial_accounts\".\"stripe_subscription_id\" IS NULL OR \"trial_accounts\".\"stripe_subscription_id\" ~ '^sub_[A-Za-z0-9]{1,251}$'"
+        },
+        "trial_subscription_status": {
+          "name": "trial_subscription_status",
+          "value": "\"trial_accounts\".\"subscription_status\" IS NULL OR char_length(\"trial_accounts\".\"subscription_status\") BETWEEN 1 AND 64"
+        },
+        "trial_stripe_dates": {
+          "name": "trial_stripe_dates",
+          "value": "(\"trial_accounts\".\"trial_end\" IS NULL OR isfinite(\"trial_accounts\".\"trial_end\")) AND (\"trial_accounts\".\"current_period_start\" IS NULL OR isfinite(\"trial_accounts\".\"current_period_start\")) AND (\"trial_accounts\".\"current_period_end\" IS NULL OR isfinite(\"trial_accounts\".\"current_period_end\"))"
         },
         "trial_finite_dates": {
           "name": "trial_finite_dates",

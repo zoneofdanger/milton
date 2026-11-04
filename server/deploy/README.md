@@ -19,9 +19,9 @@ decommission on 2026-11-01. Hosting rollback now uses Cloud Run revisions.
 
 Project `milton-510506`, Cloud Run/Artifact Registry region `us-east4`. Service manifests in this directory pin an immutable image and
 secret versions. They contain configuration and secret references, never values.
-The manifests pin what is serving now: app `milton-app-rank-c63af7f`
-(`sha256:420c4692…`, env 3, key 1) and MCP `milton-mcp-rank-c63af7f`
-(`sha256:420c4692…`, env 3, key 1), both connecting as `milton_app`; see the current
+The manifests pin what is serving now: app `milton-app-clean-c27869a`
+(`sha256:32df4631…`, env 3, key 1) and MCP `milton-mcp-clean-c27869a`
+(`sha256:32df4631…`, env 3, key 1), both connecting as `milton_app`; see the current
 release below. There is no worker service or scheduler job. There is no memo-update
 allowance; the daily call cap bounds saves. Existing positive account safeguards remain
 in effect. Trials and billing are live (since 2026-11-04).
@@ -183,11 +183,56 @@ references. Inspect revision readiness before selecting a recorded revision:
 gcloud run revisions list --service=milton-app --project=milton-510506 --region=us-east4
 ```
 
-Now serving: MCP `milton-mcp-rank-c63af7f` (since 2026-11-04 16:48:46Z) and app
-`milton-app-rank-c63af7f` (since 16:49:21Z), one image and one commit, on Drizzle journal 34,
-with trials on since about 05:19Z; recorded below. There is no worker service.
+Now serving: MCP `milton-mcp-clean-c27869a` (selected 2026-11-04 18:49:58Z)
+and app `milton-app-clean-c27869a` (18:50:18Z), each pinned by revision at 100%.
+Both use the exact landed main commit `c27869a421634c41cda438158531baaa138079f3`.
+Ingress is `internal-and-cloud-load-balancing`; IAM, limits, startup CPU boost and
+numeric secrets are unchanged (app/MCP env 3, keys 1). There is no worker service.
 
-Current release rank-c63af7f: migration 0033, then MCP and app, from main `c63af7f` (the merge
+Current release clean-c27869a: image index
+`sha256:32df4631750a32c35f52c263a10c61d6bb45ea64d807ebbe98771b499471ad7d`, Linux amd64
+`sha256:22acf1609b35b8c1aff20fbb0b705a1a96b03cce4a002c059a4e49d00919e712` (uid 1000,
+Node 26.13.0; no env/key/pem/dev.vars artifacts; both roles refuse empty configuration).
+The exact archive passed types, 102 tests/2,139 assertions and formatting. Separate
+fictional PGlite and Neon fresh/0033 rehearsals passed catalog/grant parity,
+row/settings/document/version preservation, save/replay, guards, account isolation and
+deletion, atomic refusals and repeated migrations; future generation passed locally.
+Both cleanup revisions served and passed authenticated reads on the old schema first.
+Only the image differs in either predecessor/new revision spec; MCP retains its startup
+CPU boost and its unmounted env-2 volume, with env 3 mounted.
+
+Both ingresses closed at 18:51:24Z and refused canonical entry. After a 187-second
+writer drain, Neon snapshot `before-legacy-cleanup-c27869a`
+(`snap-purple-frog-b8orrux9`, 18:54:42Z) was verified immediately before the exact
+owner-only `psql -X -v ON_ERROR_STOP=1 -f server/scripts/transition-baseline.sql`.
+The transition ran 18:54:43Z–18:54:45Z, exit 0. Journal: exactly one baseline row at
+`1793815543500`, SHA-256
+`4167000e0d8550aa7f2852d648a176a841a5a6d7a01a763d7e73822fc7c48735`.
+All 219 retained rows across 14 tables, retained settings, sequence state and both
+accounts' document hashes/version tokens matched the drained capture; 14 catalog
+sections matched rehearsal. The three retired tables, five functions/six attached
+triggers, unused legacy flag and six obsolete limit keys are gone. The normal migration
+runner ran twice with no changes, exit 0 both times. Ingress reopened at 18:55:17Z.
+Canonical TLS 1.2/1.3 and 1.0/1.1 refusal, health/discovery/401/CORS/308/direct-host
+refusal, signed-out restrictions, forms and invalid Stripe signature checks passed.
+Both encrypted payloads passed the actual runtime-role probe. A fresh authenticated
+client read the unchanged cover/email version, two email samples, four tools and
+required intent; missing intent was refused. Its 4,066-character initialization
+instructions hash matched the exact source. No real-account saves or sign-ins ran.
+The post-reopen observation covered at least five minutes with no unexpected 5xx,
+ERROR, relation/column, permission or lock failures in logs or request metrics.
+
+Rollback candidate: preserve `milton-mcp-rank-c63af7f` and
+`milton-app-rank-c63af7f`, image
+`sha256:420c469210565844d7b50d492b8faf253724d2a1ab6991a9124bf64ff94336dd` (amd64
+`sha256:c1f2cd7cecc5afaba5ac1f646ad4ac1a51567159c2b175bb8ce42dcdfee3d9ee`), env 3/key 1.
+The immutable c63af7f store source read, saved and replayed as `milton_runtime` against
+the cleaned fictional Neon schema, with documents/version matching current code.
+Production traffic was not rolled back; recheck revision readiness and canonical
+behavior before selecting it. There is no reverse migration or automatic snapshot
+restore. Schema recovery requires a separate decision with writers stopped.
+
+Recorded prior release rank-c63af7f: migration 0033, then MCP and app, from main `c63af7f` (the merge
 of `agent/ranking-b`: samples carry optional labels; `get_report` requires an intent and serves
 eight samples ranked by labels, words and recency; the version covers every active sample;
 `notifications/tools/list_changed` goes out on each assistant's first tool call per process and
@@ -235,13 +280,14 @@ session on Peter's go: one fictional follow-up email sample with audience, purpo
 on the email report answered `saved` with a new version, and a `get_report` read with a matching
 intent served it first with its three labels in `samples`.
 
-The compatible previous runtime revisions are `milton-mcp-simp-893d0ce` and
+Older recorded revisions are `milton-mcp-simp-893d0ce` and
 `milton-app-simp-893d0ce`, image
 `sha256:622c2142c54b18ea5ec753ec6e473e97186ecb036d798e60c1fe832ff264fa6e`.
 Keep their recorded numeric secret versions. Select a previous runtime only after
 checking that it supports the current schema. Retired schema rollback chains and
 pre-step commands are no longer part of this checkout; recover forward for schema
-changes. The pending cleanup procedure below does not authorize a release.
+changes. Compatibility of these older simp revisions with the cleaned baseline was
+not verified in this release; use the immediate rank candidate recorded above.
 
 Roll back only affected services, preserve ingress/IAM, then repeat the canonical
 security checks. If a
@@ -475,11 +521,12 @@ trial-ending reminder.
 
 ## Legacy schema cleanup
 
-**Pending; not applied to production.** The services and pins recorded above are still the
-current release, on the 34-entry 0033 journal (latest timestamp `1793779058436`). This
-checkout replaces the old migration files with `server/drizzle/0000_baseline.sql` for empty
-installations and `server/scripts/transition-baseline.sql` for that one known old state.
-No older revision or historical schema rollback chain is supported.
+**Applied to production on 2026-11-04 at 18:54:45Z.** The current release above records
+the snapshot, exact transition and verified preservation. Production now has one baseline
+journal entry at `1793815543500`. `server/drizzle/0000_baseline.sql` is for empty
+installations; `server/scripts/transition-baseline.sql` supports the one known old 34-entry
+0033 state (latest timestamp `1793779058436`). No earlier schema state or historical schema
+rollback chain is supported.
 
 The transition drops only the unused `memos`, `memo_versions`, `memo_cards`, their five
 functions and six triggers, the card-version `legacy` flag, and six obsolete limits keys.

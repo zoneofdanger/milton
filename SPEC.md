@@ -94,9 +94,9 @@ lock and writes nothing; nothing assembled is stored, so there is no refresh ste
 Fresh installations use one Drizzle baseline with the current tables, guards and runtime
 grants. An owner-only, atomic one-time transition supports the known 0033 schema; it
 drops the unused memo layer and preserves card identities, every card version and
-all other current data. Other old revisions are refused. Production cleanup remains
-a separate release gate in the hosting runbook. Cards organize and narrow edits;
-they do not establish semantic correctness.
+all other current data. Other old schema states are refused. Production applied this
+cleanup on 2026-11-04; the hosting runbook records its snapshot and verification.
+Cards organize and narrow edits; they do not establish semantic correctness.
 
 Accepted changes now retain the exact submitted purpose, rules and edits, actor, affected card
 versions and transformation identity atomically with source and history. These internal

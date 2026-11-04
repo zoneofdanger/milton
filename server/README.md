@@ -131,8 +131,9 @@ normal `bun run db:generate` for later schema changes; add any required guard SQ
 generated migration. Migration timestamps must strictly increase. Run one migrator at a
 time. DDL and journal writes commit together; for an uncertain command outcome inspect
 the actual schema and journal before retrying. Take the required pre-migration snapshot;
-there is no reverse SQL that recreates the retired subsystem. This repository cleanup
-has not yet migrated production.
+there is no reverse SQL that recreates the retired subsystem. Production applied this
+cleanup on 2026-11-04; [the hosting runbook](deploy/README.md) records the snapshot,
+baseline journal and preservation checks.
 
 ## Deploy
 

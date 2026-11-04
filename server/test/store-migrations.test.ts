@@ -113,6 +113,24 @@ test("0026 adds the Stripe ledger and subscription columns, marks returning dele
         trial_end: null,
       },
     ]);
+    // Rerun after release, the data statement catches a row an older image wrote
+    // and leaves a returning identity who has since paid alone.
+    await pg.exec(`UPDATE trial_accounts SET subscription_status='active' WHERE user_id='returned';
+      INSERT INTO users(id) VALUES ('late');
+      INSERT INTO trial_accounts(user_id,started_at) SELECT id,created_at-interval '1 hour' FROM users WHERE id='late'`);
+    await pg.exec(up.slice(up.lastIndexOf('UPDATE "trial_accounts"')));
+    expect(
+      (
+        await pg.query(
+          "SELECT user_id,subscription_status FROM trial_accounts WHERE user_id IN ('late','returned') ORDER BY 1",
+        )
+      ).rows,
+    ).toEqual([
+      { user_id: "late", subscription_status: "canceled" },
+      { user_id: "returned", subscription_status: "active" },
+    ]);
+    await pg.exec(`DELETE FROM users WHERE id='late';
+      UPDATE trial_accounts SET subscription_status='canceled' WHERE user_id='returned'`);
     // Any status Stripe sends stores, within the bound; ids and dates are checked.
     await pg.exec(
       "UPDATE trial_accounts SET subscription_status='a_status_stripe_adds_later' WHERE user_id='billing'",

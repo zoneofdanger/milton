@@ -1,6 +1,8 @@
--- Rollback of 0026_stripe_billing. Offline; stop writers first. A runtime
--- rollback does not need this: code before 0026 ignores the ledger and the new
--- columns, so keep them and their rows. Dropping them loses every link from an
+-- Rollback of 0026_stripe_billing. Offline; stop writers first. Code before 0026
+-- can run on this schema, ignoring the ledger and the new columns, but with trials
+-- on it gates on the retired started_at clock and refuses paying customers, so
+-- there is no traffic rollback to it once trials are on. Before then, a runtime
+-- rollback does not need this script. Dropping these loses every link from an
 -- account to its Stripe customer and subscription and the record of applied
 -- events, so refuse while any customer id or event is recorded. The 'canceled'
 -- marks on returning deleted identities go too. Rows written before this code

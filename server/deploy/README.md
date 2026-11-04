@@ -1142,3 +1142,36 @@ no earlier revision can create an account: first run
 traffic. The rollback re-adds both columns (defaults `'closed'`, `[]`), sets the row to
 `open`, and restores both checks; the 0025 journal row stays, so re-forwarding means
 running `0025_open_signup.sql` by hand.
+
+## Stripe billing (0026)
+
+Migration 0026 adds the Stripe webhook ledger and the subscription columns on
+`trial_accounts`, and marks returning deleted identities canceled. Stripe owns the trial; the
+gate reads `subscription_status`.
+
+**Release order.** Take a snapshot, apply 0026, then ship MCP and app from the same image. This
+code reads the new columns on every gated read, so on the older schema every assistant read
+fails with a 503. Both services must move: an older MCP revision keeps gating on the retired
+clock. The three `STRIPE_*` settings go on the app service only; all three or none, since a
+partial or malformed set stops the app at startup.
+
+**Rollback boundary.** Before trials are on, code rolls back by traffic alone. Once trials are
+on there is no traffic rollback to a pre-billing image: it gates on the retired clock and
+refuses paying customers. Recover forward. `server/drizzle/rollback/0026_stripe_billing.sql`
+refuses while any customer id or event is recorded, and its header says what else it loses.
+
+**Stripe mode.** The live key, live webhook secret and live price go in before `trials_enabled`
+is flipped. Test mode runs on a disposable database only, never on production rows: a test id
+does not exist in live mode, so no live event ever names that row, it stays `trialing` for
+free, and the portal fails for that person. If a production row ever holds a test id, clear it
+before going live. A key from the wrong mode against real rows reads as a failed Stripe list:
+webhooks answer 503 and Stripe retries, sign-ins stop with try again, and nobody is marked
+canceled.
+
+**Data statement.** An older image still serving after 0026 can write a returning deleted
+identity's row with no status. Once the new image has all traffic, rerun 0026's statement. It
+only touches rows with no status, so it never changes one Stripe has answered for:
+
+    UPDATE trial_accounts t SET subscription_status = 'canceled'
+    FROM users u WHERE u.id = t.user_id AND t.started_at < u.created_at
+    AND t.subscription_status IS NULL;

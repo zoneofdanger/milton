@@ -89,7 +89,3 @@ reports, memos) and plain text on security screens and anything an assistant rea
 - [ ] #21 (server, low) **Squash migrations for fresh installs** (A22): 21 migrations create and drop
       the derived systems and need pgvector mid-way; 0004-0017 rollbacks are unreachable. Also
       revisit @neondatabase/auth 0.7.0-beta once GA (A21: React, Radix, Tailwind in the install).
-
-- [ ] #22 (docs, low) **Shorten the docs** (A30): about 600 lines of repeated release history across
-      server/README, deploy/README and SPEC; move records to git notes or one archive file. Router and
-      Vite simplification (A31) only when touching the build.

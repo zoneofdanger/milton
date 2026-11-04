@@ -217,7 +217,8 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
 - External redirects use a safe meta-refresh page, because the CSP's `form-action 'self'`
   blocks them otherwise.
 - Every successful sign-in creates or finds its account; sign-ups are always open.
-- First sign-ins lock the `store_config` row, so two at once cannot make two accounts.
+- One identity has one account: two first sign-ins at once both reach it, because the
+  one that loses the identity insert drops its own new account and uses the winner's.
 - A new account starts empty, with a trial row if trials are on.
 - With billing configured, a trial row with no status gets a Stripe customer and a 30-day
   Stripe trial with no card, which cancels at the end if no card was added.

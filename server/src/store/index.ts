@@ -101,16 +101,25 @@ export async function resolveIdentityAccount(
       WHERE i.provider = ${provider} AND i.subject = ${subject} FOR UPDATE OF u`);
       let account = (await lookup())[0];
       if (!account) {
-        // Every sign-in creates or finds its account. Locking the config row
-        // serializes first sign-ins; a separate READ COMMITTED statement then
-        // sees an account that committed while this request waited.
-        await tx.query(
-          sql`SELECT 1 FROM store_config WHERE singleton = 1 FOR UPDATE`,
-        );
-        account = (await lookup())[0];
-        if (!account) {
-          const id = `m_${crypto.randomUUID()}`;
-          await tx.query(sql`INSERT INTO users (id) VALUES (${id})`);
+        // Every sign-in creates or finds its account. The identity's primary key
+        // admits one account: a sign-in that loses the race for it drops the
+        // users row it made, before its trial row, and finds the winner's account
+        // with a separate READ COMMITTED statement.
+        const id = `m_${crypto.randomUUID()}`;
+        await tx.query(sql`INSERT INTO users (id) VALUES (${id})`);
+        const linked =
+          await tx.query(sql`INSERT INTO identities (provider,subject,user_id)
+          VALUES (${provider},${subject},${id})
+          ON CONFLICT (provider,subject) DO NOTHING RETURNING user_id`);
+        if (!linked.length) {
+          await tx.query(sql`DELETE FROM users WHERE id=${id}`);
+          account = (await lookup())[0];
+          if (!account)
+            throw new StoreError(
+              "store_unavailable",
+              "The memo store is unavailable. Try again.",
+            );
+        } else {
           // A sign-in identity whose account was deleted gets no second trial:
           // its row starts canceled, so it reads as expired whenever trials are
           // enabled (now or later), has no effect while they are off, and sign-up
@@ -123,8 +132,6 @@ export async function resolveIdentityAccount(
               ON d.identity_hash=${identityHash(provider, subject)}
             WHERE u.id=${id} AND c.singleton=1
             AND (c.trials_enabled OR d.identity_hash IS NOT NULL)`);
-          await tx.query(sql`INSERT INTO identities (provider,subject,user_id)
-          VALUES (${provider},${subject},${id})`);
           account = { id, status: "active" };
         }
       }

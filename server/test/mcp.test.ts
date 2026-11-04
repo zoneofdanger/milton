@@ -130,7 +130,6 @@ test("two authenticated clients isolate tenants, save once and reject retired to
   const local = await localStore();
   const clients: Client[] = [];
   try {
-    await local.db.query(sql`UPDATE store_config SET signup_mode='open'`);
     for (const subject of ["alpha", "beta"])
       await resolveIdentityAccount(local.env, { provider: "neon", subject });
     const fixture = await tokenFixture();
@@ -380,7 +379,6 @@ test("two authenticated clients isolate tenants, save once and reject retired to
 test("disconnected assistants and assistants of a deleted account are refused, even after re-signup; others keep working", async () => {
   const local = await localStore();
   try {
-    await local.db.query(sql`UPDATE store_config SET signup_mode='open'`);
     for (const subject of ["alpha", "beta"])
       await resolveIdentityAccount(local.env, { provider: "neon", subject });
     const fixture = await tokenFixture();
@@ -561,7 +559,7 @@ test("one code constant bounds requests: limits_json.request_bytes refuses nothi
   try {
     // A lowered stored value must not refuse a body within the code bound.
     await local.db.query(
-      sql`UPDATE store_config SET signup_mode='open', limits_json = limits_json || '{"request_bytes":256}'::jsonb`,
+      sql`UPDATE store_config SET limits_json = limits_json || '{"request_bytes":256}'::jsonb`,
     );
     await resolveIdentityAccount(local.env, {
       provider: "neon",
@@ -717,7 +715,7 @@ test("final outcomes include early refusal/read failure and advisory/logging fai
     client: Client | undefined;
   try {
     await local.pg.exec(
-      "UPDATE store_config SET signup_mode='open',memo_updates_enabled=true,memo_updates_daily_limit=2",
+      "UPDATE store_config SET memo_updates_enabled=true,memo_updates_daily_limit=2",
     );
     await resolveIdentityAccount(local.env, {
       provider: "neon",

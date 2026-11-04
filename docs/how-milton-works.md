@@ -201,7 +201,7 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
   clients.
 - External redirects use a safe meta-refresh page, because the CSP's `form-action 'self'`
   blocks them otherwise.
-- New accounts obey `signup_mode`: closed, allowlist, or open.
+- Every successful sign-in creates or finds its account; sign-ups are always open.
 - A new account starts empty, with a trial row if trials are on.
 - A returning deleted identity gets a trial that has already ended, found through its
   hash.

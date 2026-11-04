@@ -298,7 +298,6 @@ test("Neon server adapter preserves signed queries, cookies, sign-in admission a
     throw new Error("Unexpected upstream endpoint");
   }, calls);
   try {
-    await local.db.query(sql`UPDATE store_config SET signup_mode='open'`);
     const app = appFor(local.env);
     const browse = browser(app, jar);
     const send = (path: string, body?: URLSearchParams, cookie?: string) =>
@@ -569,7 +568,6 @@ test("consent shows an escaped, unverified client ID when the client has no name
     throw new Error("Unexpected upstream endpoint");
   });
   try {
-    await local.db.query(sql`UPDATE store_config SET signup_mode='open'`);
     await resolveIdentityAccount(local.env, {
       provider: "neon",
       subject: "neon-unnamed-client",
@@ -672,7 +670,6 @@ async function accountFixture(
     if (path === "/sign-out") return Response.json({ success: true });
     throw new Error("Unexpected upstream endpoint");
   }, state.calls);
-  await local.db.query(sql`UPDATE store_config SET signup_mode='open'`);
   await resolveIdentityAccount(local.env, { provider: "neon", subject });
   const jar = new Map<string, string>([
     [NEON_AUTH_SESSION_COOKIE_NAME, "fixture-session-token"],
@@ -1168,7 +1165,6 @@ async function memoPageFixture(
   answer?: (path: string) => Response | undefined,
 ) {
   const local = await localStore();
-  await local.db.query(sql`UPDATE store_config SET signup_mode='open'`);
   await resolveIdentityAccount(local.env, {
     provider: "neon",
     subject: "page-fixes",

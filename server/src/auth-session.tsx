@@ -115,7 +115,7 @@ export function pageContext(
     sameSite: "lax",
     log: silentLog,
     context: () => ({
-      // Admission and mutations always ask Neon for a live session, rather
+      // Sign-in and mutations always ask Neon for a live session, rather
       // than accepting the SDK's cached session-data cookie as revocation proof.
       getCookies: () =>
         extractNeonAuthCookies(

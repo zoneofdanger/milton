@@ -49,7 +49,6 @@ const positiveLimit = z.number().int().positive();
 const limitsSchema = z.object({
   body_bytes: positiveLimit,
   description_bytes: positiveLimit,
-  history_bytes: positiveLimit,
   report_body_bytes: positiveLimit,
   daily_calls: positiveLimit,
 });

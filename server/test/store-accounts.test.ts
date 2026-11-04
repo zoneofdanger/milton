@@ -500,7 +500,7 @@ test("tenants with overlapping card, sample and request IDs never read, edit or 
   }
 }, 30000);
 
-test("Postgres accounts per user for immutable contiguous history and plain deletion", async () => {
+test("Postgres keeps immutable contiguous history per user, with plain deletion", async () => {
   const local = await localStore();
   try {
     await seedUsers(local.pg, "m_first", "m_second");
@@ -508,13 +508,6 @@ test("Postgres accounts per user for immutable contiguous history and plain dele
       .exec(`INSERT INTO memos (user_id,id,name) VALUES ('m_first','same-id','sample'),('m_second','same-id','sample');
       INSERT INTO memo_versions (user_id,memo_id,version,description,body,reason,actor_json)
       VALUES ('m_first','same-id',1,'Sample.','hello','seed','{}'),('m_second','same-id',1,'Sample.','hello','seed','{}');`);
-    expect(
-      (await local.pg.query("SELECT id,retained_bytes FROM users ORDER BY id"))
-        .rows,
-    ).toEqual([
-      { id: "m_first", retained_bytes: 40 },
-      { id: "m_second", retained_bytes: 40 },
-    ]);
     await expect(
       local.pg.query("UPDATE memo_versions SET body='changed'"),
     ).rejects.toThrow("memo_version_is_immutable");
@@ -530,12 +523,8 @@ test("Postgres accounts per user for immutable contiguous history and plain dele
       "DELETE FROM memos WHERE user_id='m_first' AND id='same-id'",
     );
     expect(
-      (await local.pg.query("SELECT id,retained_bytes FROM users ORDER BY id"))
-        .rows,
-    ).toEqual([
-      { id: "m_first", retained_bytes: 0 },
-      { id: "m_second", retained_bytes: 40 },
-    ]);
+      (await local.pg.query("SELECT user_id FROM memo_versions")).rows,
+    ).toEqual([{ user_id: "m_second" }]);
     await local.pg.query("DELETE FROM users WHERE id='m_second'");
     expect(
       (await local.pg.query("SELECT count(*)::integer AS n FROM memo_versions"))

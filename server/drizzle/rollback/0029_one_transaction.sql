@@ -6,14 +6,17 @@
 -- '{}'; milton_claim_clock in its pre-step form (pre/0029_one_transaction.sql)
 -- with its trigger save_claim_clock; and the 0028 save guard. It drops
 -- save_request_outcome. Receipts 0029 deleted, open claims that changed
--- nothing, do not come back. Either revision saves on the result. Offline; stop
--- writers first. Every ADD and CREATE fails if the object already exists, so a
+-- nothing, do not come back. Either revision saves on the result, provided 0030 was rolled back
+-- first (its schema has no users.retained_bytes). Offline; stop writers first. Every ADD and CREATE fails if the object already exists, so a
 -- partial or repeated run rolls back as a whole. Run as neondb_owner. The 0029
 -- journal row stays, so re-forwarding means running 0029_one_transaction.sql by
 -- hand.
 BEGIN;
 SET LOCAL lock_timeout = '10s';
 LOCK TABLE "save_requests", "store_config" IN ACCESS EXCLUSIVE MODE;
+-- Refuses on the 0030 schema: the guard this file restores updates users.retained_bytes,
+-- so roll back 0030 first.
+SELECT retained_bytes FROM users LIMIT 0;
 ALTER TABLE "save_requests" DROP CONSTRAINT "save_request_outcome";
 ALTER TABLE "save_requests" ALTER COLUMN "result_json" SET DEFAULT '{}'::jsonb;
 ALTER TABLE "save_requests" ADD COLUMN "completed" boolean DEFAULT true NOT NULL;

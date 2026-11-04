@@ -114,6 +114,30 @@ outside the working directory. Pass secret values to platform CLIs through stdin
 or protected files, never `--value` or shell arguments. Preserve each rollback
 revision's image and numeric secret versions together with its configuration.
 
+## Alerts
+
+Cloud Monitoring in `milton-510506` holds eight alert policies, four per service, created
+2026-11-04. Every policy notifies one email channel, `milton-ops-email`
+(`notificationChannels/9917162819460717518`, Peter's address), and closes an incident
+30 minutes after its condition clears. Each condition reads `cloud_run_revision`
+resources filtered to its service and sums across revisions.
+
+| Policy                                             | Condition                                                                                                      |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `milton-app-5xx-ratio`, `milton-mcp-5xx-ratio`     | `run.googleapis.com/request_count` with `response_code_class = "5xx"` over all requests > 0.02 for 5 min       |
+| `milton-app-latency-p95`, `milton-mcp-latency-p95` | `run.googleapis.com/request_latencies`, 95th percentile across revisions > 2000 ms for 10 min                  |
+| `milton-app-instances`, `milton-mcp-instances`     | `run.googleapis.com/container/instance_count`, max per minute summed across revisions and states > 8 for 5 min |
+| `milton-app-errors-log`, `milton-mcp-errors-log`   | Log match: the service's entries with `severity >= ERROR`; at most one notification per 10 min                 |
+
+The instance alert is a traffic-spike signal, not a failure. The 5xx ratio fires only
+when there are 5xx responses: with none there is no numerator series. Cloud Run's own
+request log writes a 5xx at ERROR, so a burst of 5xx also triggers the log alert.
+
+To change a policy, edit it in the console or `PATCH` it through the Monitoring API
+(`https://monitoring.googleapis.com/v3/projects/milton-510506/alertPolicies/<id>`); list
+them with `GET .../alertPolicies`. Stripe's webhook-failure emails and Neon's compute
+alerts are Dashboard settings, not these policies.
+
 ## Release verification and rollback
 
 For an incompatible coordinated schema release, stage the image with `gcloud run deploy --no-traffic`

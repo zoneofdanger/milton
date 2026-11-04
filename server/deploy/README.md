@@ -493,15 +493,26 @@ answered for:
     FROM users u WHERE u.id = t.user_id AND t.started_at < u.created_at
     AND t.subscription_status IS NULL;
 
-**Backfill.** After `trials_enabled` is flipped, give every existing account its trial. Peter or
-the release agent runs it from a checkout of the released commit, in `server/` after
-`bun install --frozen-lockfile`. The runtime image cannot run it: it is Node with one bundled
-file, no `bun` and no `server/scripts`. Settings arrive as for `scripts/memo-updates.ts`: the app's
-dotenvx payload in `MILTON_ENCRYPTED_ENV_FILE` with `DOTENV_PRIVATE_KEY`, or explicit environment
-variables, never as command arguments. The script prints no value.
+**Backfill.** After `trials_enabled` is flipped, Peter gives every existing account its trial.
+This step is his: agents never hold `DOTENV_PRIVATE_KEY`. It runs from a checkout of the released
+commit, after `bun install --frozen-lockfile`. The runtime image cannot run it: it is Node with one
+bundled file, no `bun` and no `server/scripts`. Set `MILTON_ENCRYPTED_ENV_FILE` to the app's
+encrypted payload and `DOTENV_PRIVATE_KEY` to its key, at the numeric versions the app mounts
+(`<env>` and `<key>` below). The script prints no value. Read the dry run's counts before `--apply`.
 
-    bun --no-env-file scripts/backfill-subscriptions.ts          # dry run
-    bun --no-env-file scripts/backfill-subscriptions.ts --apply
+```sh
+umask 077
+dir="$(mktemp -d)"
+gcloud secrets versions access <env> --secret=milton-app-env --project=milton-510506 > "$dir/app.env"
+export MILTON_ENCRYPTED_ENV_FILE="$dir/app.env"
+export DOTENV_PRIVATE_KEY="$(gcloud secrets versions access <key> --secret=milton-app-key --project=milton-510506)"
+cd server
+bun --no-env-file scripts/backfill-subscriptions.ts
+bun --no-env-file scripts/backfill-subscriptions.ts --apply
+cd ..
+unset MILTON_ENCRYPTED_ENV_FILE DOTENV_PRIVATE_KEY
+rm -rf "$dir"
+```
 
 It prints only counts (total, created, skipped, failed, still NULL), at about 5 accounts a second,
 and refuses without `trials_enabled` and a live key. `--allow-test-key` is for disposable

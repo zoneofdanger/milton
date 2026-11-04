@@ -43,17 +43,16 @@ export async function linkStripeCustomer(
 }
 
 /** Locks the row for the rest of the transaction if it still has no subscription,
- * and says whether it does. A second attempt waits here and then finds it set. */
+ * and returns it. A second attempt waits here and then finds it set. */
 export async function lockWaitingSubscription(
   db: StoreSession,
   userId: string,
 ) {
   return (
-    (
-      await db.query(sql`SELECT 1 FROM trial_accounts
+    await db.query<{ customer: string | null }>(sql`
+    SELECT stripe_customer_id AS customer FROM trial_accounts
     WHERE user_id=${userId} AND subscription_status IS NULL FOR UPDATE`)
-    ).length > 0
-  );
+  )[0];
 }
 
 /** Writes what Stripe answered. Callers hold the row, so an older read cannot

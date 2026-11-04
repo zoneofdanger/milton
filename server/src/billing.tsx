@@ -160,8 +160,9 @@ const redirectTo = (origin: string) =>
 // A key that lasts one UTC minute. Stripe replays a stored error for the same key
 // for 24 hours or more, and refuses the same key with other params; under the
 // rule that a failure stops the sign-in, a fixed key would lock the person out for
-// a day. Double submits within a minute still dedupe, and listing first under the
-// row lock guards every later retry.
+// a day. Double submits within a minute still dedupe, and listing under the row
+// lock reconciles a later retry, with one gap: a create that timed out here and is
+// still running at Stripe can be missed once the minute has turned.
 const idempotencyKey = (kind: "customer" | "subscription", userId: string) =>
   `milton-${kind}-${userId}-${Math.floor(Date.now() / 60000)}`;
 
@@ -169,20 +170,21 @@ const idempotencyKey = (kind: "customer" | "subscription", userId: string) =>
 // findable.
 async function createCustomer(
   billing: BillingConfig,
-  store: ReturnType<typeof billingForAccount>,
+  userId: string,
+  link: (customer: string) => Promise<string | undefined>,
   email?: string,
 ) {
   const created = await stripePost(
     billing,
     "customers",
     {
-      "metadata[milton_user_id]": store.userId,
+      "metadata[milton_user_id]": userId,
       ...(email ? { email } : {}),
     },
     stripeCustomer,
-    idempotencyKey("customer", store.userId),
+    idempotencyKey("customer", userId),
   );
-  const customer = await store.linkCustomer(created.id);
+  const customer = await link(created.id);
   if (!customer) throw stripeFailed();
   return customer;
 }
@@ -202,13 +204,17 @@ export async function ensureSubscription(
     const store = billingForAccount(config, userId);
     const account = await store.account();
     if (!account.enrolled || account.status !== null) return;
-    const customer =
-      account.customer ?? (await createCustomer(billing, store, email));
-    // Two attempts across a minute boundary have different keys, so only the row
-    // lock stops both listing nothing and each starting a trial, which could
-    // charge the person twice.
-    await store.whileWaiting(async (save) =>
-      save(
+    // The row stays locked across customer, list and create. Two attempts across
+    // a minute boundary have different keys, so only the lock stops each making a
+    // customer, or each listing nothing and starting a trial, which could charge
+    // the person twice. That is at most three Stripe calls, 15 s; a waiter gives up
+    // at the 10 s lock_timeout with the same 503. A reply lost after Stripe made the
+    // customer can still leave an orphan once the minute turns: it is never
+    // charged, may hold an email, and is removed by hand in Stripe if ever needed.
+    await store.whileWaiting(async ({ customer: stored, link, save }) => {
+      const customer =
+        stored ?? (await createCustomer(billing, userId, link, email));
+      await save(
         decidingSubscription(await listSubscriptions(billing, customer)) ??
           (await stripePost(
             billing,
@@ -224,8 +230,8 @@ export async function ensureSubscription(
             stripeSubscription,
             idempotencyKey("subscription", userId),
           )),
-      ),
-    );
+      );
+    });
   } catch (error) {
     logUnexpected("billing", error);
     throw new AuthError(
@@ -340,7 +346,13 @@ export async function billingRoutes(ctx: PageContext): Promise<Response> {
     {
       mode: "subscription",
       customer:
-        account.customer ?? (await createCustomer(billing, store, user.email)),
+        account.customer ??
+        (await createCustomer(
+          billing,
+          store.userId,
+          store.linkCustomer,
+          user.email,
+        )),
       payment_method_collection: "always",
       "line_items[0][price]": billing.priceId,
       "line_items[0][quantity]": "1",

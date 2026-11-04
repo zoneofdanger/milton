@@ -158,11 +158,13 @@ test("0026 adds the Stripe ledger and subscription columns, marks returning dele
       expect(await lockStripeCustomer(db, "cus_fixture")).toEqual({
         subscription: null,
       });
-      expect(await lockWaitingSubscription(db, "billing")).toBe(true);
+      expect(await lockWaitingSubscription(db, "billing")).toEqual({
+        customer: "cus_fixture",
+      });
       expect(
         await recordStripeEvent(db, paid, { customer: "cus_fixture", state }),
       ).toEqual({ recorded: true, updated: 1 });
-      expect(await lockWaitingSubscription(db, "billing")).toBe(false);
+      expect(await lockWaitingSubscription(db, "billing")).toBeUndefined();
       // The same event id again changes nothing, whatever it carries.
       expect(
         await recordStripeEvent(db, paid, {

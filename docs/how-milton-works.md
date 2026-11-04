@@ -210,8 +210,11 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
 - A Stripe failure stops that step with a 503 saying to try again, and charges nothing;
   repeating the sign-in is the retry.
 - With billing unset, no row, or a status already set, no step calls Stripe.
-- What Stripe already has is listed first, holding the row, so a retry or a concurrent
-  attempt stores the subscription rather than starting a second trial.
+- The row stays locked across customer, list, and create, so a concurrent attempt finds the
+  result rather than making a second customer or trial.
+- What Stripe already has is listed first, so a retry stores it rather than starting again.
+- A reply lost after Stripe made a customer can leave an orphan: never charged, may hold an
+  email, removed by hand in Stripe if ever needed.
 - Idempotency keys carry the UTC minute, because Stripe replays a stored error for a day.
 - A returning deleted identity gets a row already marked canceled, found through its hash,
   so it reads as expired and gets no Stripe trial.

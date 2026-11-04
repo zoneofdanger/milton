@@ -458,16 +458,32 @@ export function billingForAccount(bindings: StoreBindings, userId: string) {
         if (state) await saveStripeSubscription(tx, userId, state);
         return state;
       }),
-    /** Runs `work` holding the row, only while it has no subscription. */
-    whileWaiting: (
-      work: (
-        save: (state: StripeSubscriptionState) => Promise<void>,
-      ) => Promise<void>,
-    ) =>
-      db.transaction(async (tx) => {
-        if (await lockWaitingSubscription(tx, userId))
-          await work((state) => saveStripeSubscription(tx, userId, state));
-      }),
+    /** Runs `work` holding the row, only while it has no subscription. What it
+     * stored before failing still commits: a customer must stay findable when the
+     * subscription call after it fails. */
+    whileWaiting: async (
+      work: (row: {
+        customer: string | null;
+        link: (customer: string) => Promise<string | undefined>;
+        save: (state: StripeSubscriptionState) => Promise<void>;
+      }) => Promise<void>,
+    ) => {
+      let failed: { error: unknown } | undefined;
+      await db.transaction(async (tx) => {
+        const row = await lockWaitingSubscription(tx, userId);
+        if (!row) return;
+        try {
+          await work({
+            customer: row.customer,
+            link: (customer) => linkStripeCustomer(tx, userId, customer),
+            save: (state) => saveStripeSubscription(tx, userId, state),
+          });
+        } catch (error) {
+          failed = { error };
+        }
+      });
+      if (failed) throw failed.error;
+    },
   };
 }
 

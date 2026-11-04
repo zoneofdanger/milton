@@ -291,8 +291,9 @@ Files: `server/src/pages.tsx`, `server/src/memo-pages.tsx`, `server/src/auth.tsx
 - An unknown error there reads as a 503 and is logged.
 - The home page shows a marketing page signed out and the cover sheet signed in.
 - `/tps-report` shows the same cover sheet as the signed-in home page.
-- The cover sheet renders as a TPS form with counts, rules, samples, and a random joke
-  comment.
+- The cover sheet renders as a TPS form filed by Milton, with counted section links,
+  report counts and subheadings, exact sample descriptions above wrapping metadata,
+  native sample disclosures, rules, and a random joke comment.
 - It shows setup prompts for reports without rules.
 - If the structured read fails, it falls back to plain report text.
 - `/download` returns the report as `TPS.md`.

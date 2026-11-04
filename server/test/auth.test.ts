@@ -2425,9 +2425,35 @@ test("report bullets require exact revision and complete text parity; optional l
     () => "",
   );
   const titledPage = await titled.text();
-  expect(titledPage).toContain(
-    '<section class="form-section"><h2>Email</h2><p class="applies">Applies when fictional.</p><p class="sub-label">Approved samples:</p><details class="form-sample"><summary><span class="box" aria-hidden="true">☑</span><span class="typed">After a call</span><span class="labels">client, follow up</span><span class="date">2026-11-02</span></summary><pre class="memo-text"><span>Hi &lt;there&gt;,\n\nThanks.</span></pre></details><p class="sub-label">Rules:</p><ol class="ruled"><li class="line"><span class="typed">One.</span></li><li class="line"><span class="typed">Two\nlines.</span></li></ol></section>',
-  ); // A report without rules says how to ask for its setup.
+  const emailSection =
+    titledPage.match(
+      /<section class="form-section"><h2 id="report-email">Email<\/h2>([\s\S]*?)<\/section>/,
+    )?.[1] ?? "";
+  // Keep exact text and sample/rule order within the same report section.
+  let offset = 0;
+  for (const fragment of [
+    '<p class="report-counts">1 sample · 2 rules</p>',
+    '<p class="applies">Applies when fictional.</p>',
+    '<h3 class="sub-label">Approved samples (1)</h3>',
+    '<details class="form-sample">',
+    "<summary>",
+    '<span class="typed">after a call</span>',
+    '<span class="labels">client, follow up</span>',
+    '<span class="date">2026-11-02</span>',
+    "</summary>",
+    '<pre class="memo-text"><span>Hi &lt;there&gt;,\n\nThanks.</span></pre>',
+    "</details>",
+    '<h3 class="sub-label">Rules (2)</h3>',
+    '<ol class="ruled">',
+    '<li class="line"><span class="typed">One.</span></li>',
+    '<li class="line"><span class="typed">Two\nlines.</span></li>',
+    "</ol>",
+  ]) {
+    const remaining = emailSection.slice(offset);
+    expect(remaining).toContain(fragment);
+    offset += remaining.indexOf(fragment) + fragment.length;
+  }
+  // A report without rules says how to ask for its setup.
   expect(titledPage).toContain(
     '<h2>Not set up yet</h2><p class="applies">Tell any connected assistant: set up my chat report.</p></section>',
   );

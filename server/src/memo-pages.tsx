@@ -148,8 +148,8 @@ const ruled = (bodies: string[]) => (
     ))}
   </ol>
 );
-const capitalised = (text: string) =>
-  text.charAt(0).toUpperCase() + text.slice(1);
+const counted = (n: number, label: string) =>
+  `${n} ${label}${n === 1 ? "" : "s"}`;
 /** A sample's labels as one line, or "" when it has none. */
 const labelLine = (s: Sample) =>
   [s.audience, s.purpose, s.register].filter(Boolean).join(", ");
@@ -196,7 +196,7 @@ function sheet({ report, documents, email, date, comment }: SheetView) {
             {field("Samples", counts.samples)}
           </dl>
         )}
-        <dl class="row">{field("Approved by", "Milton", true)}</dl>
+        <dl class="row">{field("Filed by", "Milton", true)}</dl>
       </div>
       {report.is_empty ? (
         <div class="form-empty">
@@ -208,31 +208,65 @@ function sheet({ report, documents, email, date, comment }: SheetView) {
         </div>
       ) : docs ? (
         <>
+          {(docs.cover_rules.length > 0 || filed.length > 0) && (
+            <nav class="report-index" aria-label="On this report">
+              <p>On this report</p>
+              <ul>
+                {docs.cover_rules.length > 0 && (
+                  <li>
+                    <a href="#report-always">
+                      <span>Always</span>
+                      <span class="report-counts">
+                        {counted(docs.cover_rules.length, "rule")}
+                      </span>
+                    </a>
+                  </li>
+                )}
+                {filed.map((r) => (
+                  <li>
+                    <a href={`#report-${r.id}`}>
+                      <span>{r.title}</span>
+                      <span class="report-counts">
+                        {`${counted(r.samples.length, "sample")} · ${counted(r.rules.length, "rule")}`}
+                      </span>
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </nav>
+          )}
           {docs.cover_rules.length > 0 && (
             <section class="form-section">
-              <h2>Always</h2>
+              <h2 id="report-always">Always</h2>
+              <p class="report-counts">
+                {counted(docs.cover_rules.length, "rule")}
+              </p>
               <p class="applies">Applies to everything you write.</p>
               {ruled(docs.cover_rules)}
             </section>
           )}
           {filed.map((r) => (
             <section class="form-section">
-              <h2>{r.title}</h2>
+              <h2 id={`report-${r.id}`}>{r.title}</h2>
+              <p class="report-counts">
+                {`${counted(r.samples.length, "sample")} · ${counted(r.rules.length, "rule")}`}
+              </p>
               <p class="applies">Applies when {r.when}.</p>
               {r.samples.length > 0 && (
                 <>
-                  <p class="sub-label">Approved samples:</p>
+                  <h3 class="sub-label">
+                    Approved samples ({r.samples.length})
+                  </h3>
                   {r.samples.map((s) => (
                     <details class="form-sample">
                       <summary>
-                        <span class="box" aria-hidden="true">
-                          ☑
+                        <span class="typed">{s.context}</span>
+                        <span class="sample-meta">
+                          {labelLine(s) && (
+                            <span class="labels">{labelLine(s)}</span>
+                          )}
+                          <span class="date">{s.date}</span>
                         </span>
-                        <span class="typed">{capitalised(s.context)}</span>
-                        {labelLine(s) && (
-                          <span class="labels">{labelLine(s)}</span>
-                        )}
-                        <span class="date">{s.date}</span>
                       </summary>
                       {plain(s.body)}
                     </details>
@@ -241,7 +275,7 @@ function sheet({ report, documents, email, date, comment }: SheetView) {
               )}
               {r.rules.length > 0 && (
                 <>
-                  <p class="sub-label">Rules:</p>
+                  <h3 class="sub-label">Rules ({r.rules.length})</h3>
                   {ruled(r.rules)}
                 </>
               )}

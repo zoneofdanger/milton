@@ -825,7 +825,17 @@ both):
    It replaces `milton_claim_clock` so a receipt inserted with its result is filled in as
    complete, its deadline its claim time. Every earlier revision inserts claims without a
    result and is unaffected, and either revision replays the other's receipts, so code
-   rolls back by traffic alone until 0029. Retry on a lock timeout.
+   rolls back by traffic alone until 0029. Retry on a lock timeout. Then verify it:
+
+   ```sql
+   SELECT prosrc ~ 'result_json' AS pre_step FROM pg_proc
+     WHERE pronamespace = 'public'::regnamespace AND proname = 'milton_claim_clock';
+   ```
+
+   Do not ship the image until this returns true. Without the pre-step every save on the
+   new image fails: its receipt insert omits the NOT NULL `deadline`, so each save answers
+   `store_unavailable` and writes nothing until traffic moves back to the old revision.
+
 2. Ship MCP and app from the same image.
 3. Wait until both services, not one, serve 100% on the new image and the old revisions
    are idle, then 40 seconds more: an older revision's claim stays open up to its deadline.

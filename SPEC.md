@@ -15,15 +15,20 @@ report and sends its exact approved wording, and Milton stores those bytes. Comp
 instructions, including conditions and exceptions, are independently versioned cards. Each card belongs to one of five fixed
 reports (`email`, `chat`, `post`, `document`, `speech`) or to the cover sheet, the
 rules true of all writing. Approved samples are stored exactly as sent in their own
-append-only table; every approved sample stays, and reports serve the newest two per kind.
+append-only table; every approved sample stays, and a report read serves the eight that best
+fit the assistant's intent (0033).
 Assembly is deterministic and runs on read: the cover sheet is its rules in
 write-once insertion order, after one fixed note on the `Baseline: ` prefix while any
-active rule carries it; each report prints its heading, its when line, its
-newest two samples of each kind, newest first, then its rules (0017). Every rule prints as one bullet, with
+active rule carries it; each report prints its heading, its when line, eight samples,
+then its rules (0017). `get_report` requires an intent (a one-line situation, with an
+optional audience and purpose) and serves the eight samples ranked by label overlap with
+it, then Postgres full-text rank of the situation against context and body, then
+recency; without an intent (`list_reports`, the web page, TPS.md) a report serves its
+newest eight (0033). Every rule prints as one bullet, with
 one stored leading `- ` dropped first so rules filed by the retired compiler and rules
 stored as sent read alike. Card text cannot contain Markdown
 headings. The version is a fingerprint of the assembled cover sheet and reports
-(with sample IDs and kinds), so the same cards and samples always give the same
+(with every active sample's ID and kind), the same for every intent, so the same cards and samples always give the same
 version and every save fences on what the assistant read. The memo group tables (0016) remain as history only.
 
 Filing is correctable (0020): a card's report (or `cover`) lives on each version, so

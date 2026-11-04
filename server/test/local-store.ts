@@ -91,6 +91,14 @@ const checkpoint = (idx: number) => {
   return dump;
 };
 
+// Migration 0033 on top of an earlier schema (0020 or later): the current store
+// reads its sample columns, so a rehearsal of an earlier migration that runs
+// the store adds it to every database it compares.
+export const addSampleLabels = async (...databases: PGlite[]) => {
+  const up = await drizzleSql("0033_sample_labels.sql");
+  for (const pg of databases) await pg.exec("BEGIN;" + up + "COMMIT;");
+};
+
 // A new database with migrations 0000 through `idx` applied; close it after use.
 export const migratedThrough = async (idx: number) =>
   PGlite.create({

@@ -9,7 +9,13 @@ import {
   type Filing,
 } from "../src/store/reports";
 import { setupCatalog, setupHint } from "../src/store/setup";
-import { coverSheet, reportEnvelope, reportList } from "../src/store/tools";
+import {
+  coverSheet,
+  missingIntent,
+  reportEnvelope,
+  reportInput,
+  reportList,
+} from "../src/store/tools";
 import { subscriptionRequired, trialEndingMessage } from "../src/store/trials";
 
 // Fields every save carries, as the instructions name them.
@@ -261,6 +267,20 @@ test("every create_memo shape the server instructions describe parses against sa
       { before: "Another fictional rule.", after: "" },
     ],
   });
+  // The read the instructions, the tool description and the refusal describe.
+  says(
+    "get_report for each matching report with intent: one line on the situation, plus audience and purpose",
+  );
+  for (const situation of [
+    "declining a client's request for a discount",
+    between(missingIntent, 'such as "', '"'),
+  ])
+    expect(
+      reportInput.safeParse({
+        report_id: "email",
+        intent: { situation, audience: "client", purpose: "decline" },
+      }).error?.issues ?? [],
+    ).toEqual([]);
   says("pass moves: before verbatim from the rule and its new report");
   parses({
     ...envelope(),

@@ -107,14 +107,19 @@ Files: `server/src/store/reports.ts`, `server/src/store/compiled.ts`.
 
 - Reports are fixed in code: email, chat, post, document, and speech.
 - Cards print as bullets in insertion order, and an older stored `- ` is not doubled.
-- A report is its heading, "Applies when…", the newest two samples of each kind, newest
-  first, as quotes, and then rules.
+- A report is its heading, "Applies when…", eight samples as quotes, and then rules.
+- `get_report` takes a required intent (situation, optional audience and purpose) and
+  serves the eight samples ranked in one SQL statement: label overlap with the intent,
+  then `ts_rank` of the situation (any of its words) over the stored `search` vector of
+  context and body, then newest, then id (0033). Without an intent (`list_reports`, the
+  web page, `TPS.md`) a report serves its newest eight.
 - The cover sheet prints a note explaining `Baseline:` whenever any active rule has that
   prefix.
 - `TPS.md` is the cover sheet plus every non-empty report.
 - `is_empty` means no rules and no samples anywhere.
-- The version is a fingerprint of what is served: a hash of the user, the cover sheet,
-  and each report's text with its samples' IDs and kinds. The same cards and samples
+- The version is a fingerprint of what any read can serve: a hash of the user, the cover
+  sheet, and each report's text (newest eight) with every active sample's ID and kind, so
+  it is the same for every intent. The same cards and samples
   always give the same version, and nothing assembled is stored.
 - A client holding a version from before fingerprints (a revision hash) conflicts once
   on its next save, rereads, and saves on the new version.
@@ -179,8 +184,8 @@ not at all.
   lists, or the save is refused as `invalid_input`; they are stored as sent (0033).
 - Replacing a sample requires an active sample of the same kind.
 - Each sample removal must name an active sample, listed once.
-- Every approved sample stays until the person replaces or removes it; reports serve the
-  newest two per kind. `samples_retired` reports what `replaces` and `retire_samples`
+- Every approved sample stays until the person replaces or removes it; a report read
+  serves the eight that best fit its intent. `samples_retired` reports what `replaces` and `retire_samples`
   retired.
 
 ### Publish

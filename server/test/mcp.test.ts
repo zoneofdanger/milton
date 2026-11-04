@@ -103,7 +103,7 @@ test("an SDK client receives instructions, discovers the four tools, and reads t
     expect(
       tools.find((tool) => tool.name === "create_memo")?.description,
     ).toContain(
-      "every approved sample stays and reports serve the newest two per kind",
+      "every approved sample stays, and a report read serves the eight that best fit its intent",
     );
     const text = client.getInstructions();
     expect(text).toContain('"Did you get the memo?"');
@@ -130,6 +130,81 @@ test("an SDK client receives instructions, discovers the four tools, and reads t
       "Edits cannot overlap",
     ])
       expect(served.split(once).length - 1).toBe(1);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
+test("get_report requires an intent: without a well-formed one it refuses, saying what to send; with one the store ranks for it", async () => {
+  const calls: ToolCall[] = [];
+  const intents: unknown[] = [];
+  const stub = stubStore();
+  const server = createMiltonServer(
+    {
+      ...stub,
+      readDocuments: (intent) => {
+        intents.push(intent);
+        return stub.readDocuments();
+      },
+    },
+    (call) => calls.push(call),
+  );
+  const client = new Client({ name: "sdk-test", version: "0.0.0" });
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
+  try {
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    const schema = (await client.listTools()).tools.find(
+      (tool) => tool.name === "get_report",
+    )!.inputSchema;
+    expect(schema.required).toEqual(["report_id", "intent"]);
+    // A client holding the old schema sends no intent; a bad label is refused alike.
+    for (const args of [
+      { report_id: "email" },
+      { report_id: "email", intent: { situation: " " } },
+      {
+        report_id: "email",
+        intent: { situation: "a reply", audience: "investor" },
+      },
+    ]) {
+      const reply = await client.callTool({
+        name: "get_report",
+        arguments: args,
+      });
+      expect(reply.isError).toBe(true);
+      const refusal = JSON.parse((reply.content as [{ text: string }])[0].text);
+      expect(refusal.error).toBe("invalid_input");
+      expect(refusal.message).toContain(
+        "reconnect your assistant if it has no intent field",
+      );
+      expect(refusal.message).toContain('"confirming what is on file"');
+    }
+    expect(intents).toEqual([]);
+    expect(calls.map((c) => [c.outcome, c.error_code])).toEqual(
+      Array(3).fill(["refused", "invalid_input"]),
+    );
+    const read = await client.callTool({
+      name: "get_report",
+      arguments: {
+        report_id: "doc",
+        intent: {
+          situation: "declining a client's request for a discount",
+          audience: "client",
+          purpose: "decline",
+        },
+      },
+    });
+    expect(read.isError).toBeUndefined();
+    expect(intents).toEqual([
+      {
+        report: "document",
+        situation: "declining a client's request for a discount",
+        audience: "client",
+        purpose: "decline",
+      },
+    ]);
   } finally {
     await client.close();
     await server.close();
@@ -298,7 +373,12 @@ test("two authenticated clients isolate tenants, save once and reject retired to
       ],
     });
     // Reports read by id (doc is an alias); an empty one is a heading and a when line.
-    const document = (await call(0, "get_report", { report_id: "doc" })).value;
+    const document = (
+      await call(0, "get_report", {
+        report_id: "doc",
+        intent: { situation: "confirming what is on file" },
+      })
+    ).value;
     expect(document).toMatchObject({
       report_id: "document",
       is_empty: true,
@@ -319,7 +399,10 @@ test("two authenticated clients isolate tenants, save once and reject retired to
       (
         await clients[0]!.callTool({
           name: "get_report",
-          arguments: { report_id: "memo" },
+          arguments: {
+            report_id: "memo",
+            intent: { situation: "confirming what is on file" },
+          },
         })
       ).isError,
     ).toBe(true);

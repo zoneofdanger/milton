@@ -1,8 +1,10 @@
 import { z } from "zod";
 import { StoreError, type TenantStore } from "./index";
-import type { SaveMemoInput } from "./compiled";
+import { oneLine, type SaveMemoInput } from "./compiled";
 import { subscriptionRequired } from "./trials";
 import {
+  AUDIENCES,
+  PURPOSES,
   REPORT_IDS,
   resolveReportId,
   type Documents,
@@ -11,13 +13,35 @@ import {
 import { noRules, reportSetup, setupHint } from "./setup";
 
 export const coverSheetInput = z.strictObject({});
+export const intentInput = z
+  .strictObject({
+    situation: oneLine(200).describe(
+      'One line on what you are writing, to whom and why, such as "declining a client\'s request for a discount". When not drafting, why you are reading, such as "confirming what is on file".',
+    ),
+    audience: z
+      .enum(AUDIENCES)
+      .optional()
+      .describe("Who will read it, when you know."),
+    purpose: z
+      .enum(PURPOSES)
+      .optional()
+      .describe("What it must do, when you know."),
+  })
+  .describe(
+    "What the read is for. The report serves the eight samples that best fit it.",
+  );
 export const reportInput = z.strictObject({
   report_id: z
     .enum([...REPORT_IDS, "doc"])
     .describe(
       "email, chat, post, document (doc is accepted), or speech: the writing situation the task matches.",
     ),
+  intent: intentInput,
 });
+/** The refusal for a get_report call whose intent is missing or malformed,
+ * such as from a client still holding the schema before intent existed. */
+export const missingIntent =
+  'get_report needs intent: situation, one line on what you are writing, to whom and why (or why you are reading, such as "confirming what is on file"), plus audience and purpose from their lists when you know them; reconnect your assistant if it has no intent field. Nothing was read.';
 export const listReportsInput = z.strictObject({});
 
 type ToolResult = {
@@ -44,7 +68,7 @@ export function coverSheet(documents: Documents & { version: string }) {
     ...(noRules(documents) ? { setup: reportSetup(documents, "email") } : {}),
   };
 }
-/** Active samples without their bodies (those stay in text), newest first, so
+/** Served samples without their bodies (those stay in text), in served order, so
  * an assistant can reuse a kind or name a sample to replace or remove. Labels
  * appear only when the sample has them. */
 const sampleIndex = (report: ReportDocument) =>
@@ -129,16 +153,17 @@ export function createStoreMemoTools(store: TenantStore) {
         storeResult(await withNotice(coverSheet(await store.readDocuments()))),
       ),
     get_report: (input: z.infer<typeof reportInput>) =>
-      run(async () =>
-        storeResult(
+      run(async () => {
+        const report = resolveReportId(input.report_id)!;
+        return storeResult(
           await withNotice(
             reportEnvelope(
-              await store.readDocuments(),
-              resolveReportId(input.report_id)!,
+              await store.readDocuments({ ...input.intent, report }),
+              report,
             ),
           ),
-        ),
-      ),
+        );
+      }),
     list_reports: () =>
       run(async () =>
         storeResult(await withNotice(reportList(await store.readDocuments()))),

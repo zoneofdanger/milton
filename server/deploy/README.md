@@ -1098,6 +1098,12 @@ and writes, so it runs on the 0033 schema unchanged. The 0033 code reads the lab
 6. Smoke test through MCP: `get_report` with an intent, `get_report` without one (refused
    as `invalid_input`), a save with a labeled sample, then `get_report` again.
 
+**First save after the code release.** The version now covers every active sample and
+reports serve eight per report, so versions change form for accounts with samples: a
+client holding an older version gets one ordinary `conflict` on its next save, rereads
+and saves. Clients that cached the old `get_report` schema are refused with
+`invalid_input` until they refresh it.
+
 **Rollback order.** Code first, then schema. Code rolls back by traffic alone at any time:
 the previous revision runs on the 0033 schema. Only after traffic is off the 0033 code,
 run `server/drizzle/rollback/0033_sample_labels.sql` offline with writers stopped. It

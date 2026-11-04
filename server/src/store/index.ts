@@ -31,6 +31,7 @@ import {
   type SaveMemoInput,
   type SaveOutcome,
 } from "./compiled";
+import type { ReportIntent } from "./reports";
 export { StoreError } from "./errors";
 export type { StripeSubscriptionState } from "./billing";
 
@@ -316,8 +317,11 @@ export interface TenantStore {
   appOrigin: string;
   trialNotice?(): Promise<TrialNotice | undefined>;
   readTpsReport(): Promise<CompiledReport>;
-  /** The cover sheet and the five reports at one version, assembled on read. */
-  readDocuments(): Promise<Documents & { version: string }>;
+  /** The cover sheet and the five reports at one version, assembled on read;
+   * with an intent, that report serves the eight samples ranked for it. */
+  readDocuments(
+    intent?: ReportIntent,
+  ): Promise<Documents & { version: string }>;
   saveMemo(input: SaveMemoInput): Promise<SaveOutcome>;
   chargeToolCall(): Promise<CallAllowance>;
 }

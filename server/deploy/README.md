@@ -440,7 +440,9 @@ Migration 0027 adds the Stripe webhook ledger and the subscription columns on
 `trial_accounts`, and marks returning deleted identities canceled. Stripe owns the trial; the
 gate reads `subscription_status`.
 
-**Release order.** Take a snapshot, apply 0027, then ship MCP and app from the same image. This
+**Release order.** Dead columns (0026) must be fully released first, code then migration: the
+runner applies everything pending, and 0027 runs before its own code, the opposite of 0026. Then
+take a snapshot, apply 0027, and ship MCP and app from the same image. This
 code reads the new columns on every gated read, so on the older schema every assistant read
 fails with a 503. Both services must move: an older MCP revision keeps gating on the retired
 clock. The three `STRIPE_*` settings go on the app service only; all three or none, since a

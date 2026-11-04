@@ -147,9 +147,8 @@ refused until capacity is available. Check headroom before rollout. Later remova
 legacy copies requires a separate migration; it is not included here. The existing
 count ceiling also bounds card identities, including archived ones.
 
-Signup initialization (the empty `vibes` seed) is the only remaining legacy memo
-write; it synchronizes only untouched one-card memos. Once cards are independently
-edited, legacy writes/deletion refuse with
+Sign-up no longer seeds the empty `vibes` memo, so nothing writes legacy memos. Once
+cards are independently edited, legacy writes/deletion refuse with
 `card_legacy_conflict`; use the current `create_memo` path. No MCP tool or UI reads or
 writes legacy memos.
 

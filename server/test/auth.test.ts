@@ -826,6 +826,35 @@ test("served pages take the MCP address and support address from configuration",
   expect(() =>
     runtimeConfig({ ...env, MILTON_SUPPORT_EMAIL: "not an address" }),
   ).toThrow();
+  // Stripe is all or nothing: a partial or malformed set fails at startup, the
+  // same way, naming no value. All unset stays legal.
+  const stripe = {
+    STRIPE_SECRET_KEY: "rk_test_fixtureNotAKey",
+    STRIPE_WEBHOOK_SECRET: "whsec_fixtureNotASecret",
+    STRIPE_PRICE_ID: "price_fixture",
+  };
+  expect(runtimeConfig(env).billing).toBeUndefined();
+  expect(runtimeConfig({ ...env, ...stripe }).billing?.priceId).toBe(
+    "price_fixture",
+  );
+  for (const broken of [
+    { STRIPE_SECRET_KEY: stripe.STRIPE_SECRET_KEY },
+    { ...stripe, STRIPE_PRICE_ID: undefined },
+    { ...stripe, STRIPE_WEBHOOK_SECRET: "" },
+    { ...stripe, STRIPE_SECRET_KEY: "pk_test_fixtureNotAKey" },
+    { ...stripe, STRIPE_PRICE_ID: "prod_fixture" },
+  ]) {
+    let refused: unknown;
+    try {
+      runtimeConfig({ ...env, ...broken });
+    } catch (error) {
+      refused = error;
+    }
+    expect(refused).toMatchObject({
+      code: "configuration",
+      message: "Milton's server configuration is unavailable.",
+    });
+  }
   const configured = await accountFixture({
     supportEmail: "help@example.invalid",
   });

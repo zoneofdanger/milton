@@ -22,14 +22,22 @@ export interface BillingConfig {
   fetch?: (url: string, init: RequestInit) => Promise<Response>;
 }
 
-// Any missing or malformed value leaves billing off: the billing routes answer
-// 503 and the rest of the app runs. Values are never logged or echoed.
+// All unset leaves billing off: the billing routes answer 503 and the rest of the
+// app runs. Any one set means all three must be valid, or startup fails: a typo
+// must not silently switch off the rule that no assistant connects without a
+// subscription. Values are never logged or echoed.
 export function billingConfig(
   env: NodeJS.ProcessEnv,
 ): BillingConfig | undefined {
   const secretKey = env.STRIPE_SECRET_KEY;
   const webhookSecret = env.STRIPE_WEBHOOK_SECRET;
   const priceId = env.STRIPE_PRICE_ID;
+  if (
+    secretKey === undefined &&
+    webhookSecret === undefined &&
+    priceId === undefined
+  )
+    return undefined;
   if (
     !secretKey ||
     !webhookSecret ||
@@ -38,7 +46,10 @@ export function billingConfig(
     !/^whsec_[A-Za-z0-9+/=]{8,250}$/.test(webhookSecret) ||
     !/^price_[A-Za-z0-9]{1,250}$/.test(priceId)
   )
-    return undefined;
+    throw new StoreError(
+      "configuration",
+      "Milton's server configuration is unavailable.",
+    );
   return { secretKey, webhookSecret, priceId };
 }
 

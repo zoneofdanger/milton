@@ -260,6 +260,8 @@ Files: `server/src/store/index.ts`, `server/src/store/trials.ts`,
 - A trial notice is claimed once per stage, 7 days and 1 day before `trial_end`, only
   while trialing.
 - Expired accounts are blocked for assistants, while the web view and download stay open.
+- The three Stripe settings are all or nothing: any one set means all three must be valid,
+  or the app fails at startup.
 - The Stripe webhook verifies the signature, then takes only a customer ID from the six
   handled event types, because Stripe does not guarantee event order.
 - For a customer Milton holds, the webhook locks the row, reads the customer's

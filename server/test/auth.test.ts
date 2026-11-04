@@ -1250,6 +1250,8 @@ function fakeStripe() {
     // A path or "METHOD path" answers 500; true fails every call.
     down: false as boolean | string,
     deleteStatus: 200,
+    // What a read of the customer answers after a DELETE 404.
+    customer: { status: 404, body: {} as Record<string, unknown> },
     subscriptions: [] as Record<string, unknown>[],
     calls: [] as Record<string, unknown>[],
     onDelete: async () => {},
@@ -1279,6 +1281,10 @@ function fakeStripe() {
         return Response.json({}, { status: stripe.deleteStatus });
       }
       if (path === "/v1/customers") return Response.json({ id: "cus_fixture" });
+      if (path === "/v1/customers/cus_fixture")
+        return Response.json(stripe.customer.body, {
+          status: stripe.customer.status,
+        });
       if (path === "/v1/subscriptions" && method === "GET")
         return Response.json({ data: stripe.subscriptions });
       if (path === "/v1/subscriptions") {
@@ -1354,9 +1360,28 @@ test("account deletion ends the Stripe customer first, a Stripe failure deletes 
     expect(fixture.state.calls.map(({ path }) => path)).not.toContain(
       "/oauth2/delete-consent",
     );
-    // Stripe goes first, with the account still here; a 404 counts as done.
+    // A 404 alone proves nothing: a key from the wrong mode gets one for a live
+    // customer, whose subscription would go on charging. Nothing is deleted.
     stripe.down = false;
     stripe.deleteStatus = 404;
+    stripe.calls.length = 0;
+    for (const customer of [
+      { status: 404, body: {} },
+      { status: 200, body: { id: "cus_fixture", deleted: false } },
+      { status: 500, body: {} },
+    ]) {
+      stripe.customer = customer;
+      const unproven = await fixture.send("/account/delete", remove);
+      expect(unproven.status).toBe(503);
+      expect(await unproven.text()).toContain(unavailable);
+      expect(await users(fixture)).toBe(1);
+    }
+    // Stripe goes first, with the account still here; only a customer Stripe
+    // reports as deleted counts as done.
+    stripe.customer = {
+      status: 200,
+      body: { id: "cus_fixture", deleted: true },
+    };
     stripe.calls.length = 0;
     let usersAtDelete = -1;
     stripe.onDelete = async () => {
@@ -1369,7 +1394,10 @@ test("account deletion ends the Stripe customer first, a Stripe failure deletes 
       "any subscription ended immediately, with no refund",
     );
     expect(deleted).toContain("Stripe keeps past invoices and payment records");
-    expect(stripe.calls).toEqual([deleteCall]);
+    expect(stripe.calls).toEqual([
+      deleteCall,
+      stripeCall("GET /v1/customers/cus_fixture"),
+    ]);
     expect(usersAtDelete).toBe(1);
     expect(await users(fixture)).toBe(0);
   } finally {

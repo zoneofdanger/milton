@@ -71,17 +71,17 @@ Milton supplies the login and consent pages. Neon supplies authorization, token 
 
 Set these in the runtime's platform configuration or dotenvx payload before deploying. Keep credentials in secret storage or ignored environment files.
 
-| Name                      | Meaning                                                                                                                                                                         |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `APP_ORIGIN`              | The browser app's absolute HTTPS origin, without a path, query, or fragment.                                                                                                    |
-| `MCP_RESOURCE`            | The exact public MCP resource URL, ending in `/mcp`. Tokens must include this resource in their audience.                                                                       |
-| `NEON_AUTH_BASE_URL`      | The exact branch Auth URL copied from Neon, including its database and Auth path, without a trailing slash. It is also the expected token issuer.                               |
-| `NEON_AUTH_COOKIE_SECRET` | A fresh random server-only secret of at least 32 characters for browser session cookies.                                                                                        |
-| `DATABASE_URL`            | The TLS connection string for the `milton` database. Services use the runtime role's connection (0024); migrations and imports use the owner's.                                 |
-| `MILTON_SUPPORT_EMAIL`    | Optional. The support address the account pages give; `support@meetmilton.com` when unset. The MCP address pages show is `MCP_RESOURCE`.                                        |
-| `STRIPE_SECRET_KEY`       | App service only. The restricted Stripe API key for customers, Checkout and the billing portal. Unset or malformed: the billing routes answer 503 and the rest of the app runs. |
-| `STRIPE_WEBHOOK_SECRET`   | App service only. The signing secret of the Stripe endpoint for `POST /billing/webhook`.                                                                                        |
-| `STRIPE_PRICE_ID`         | App service only. The one recurring price Checkout subscribes to.                                                                                                               |
+| Name                      | Meaning                                                                                                                                                                                                                                                                                                   |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `APP_ORIGIN`              | The browser app's absolute HTTPS origin, without a path, query, or fragment.                                                                                                                                                                                                                              |
+| `MCP_RESOURCE`            | The exact public MCP resource URL, ending in `/mcp`. Tokens must include this resource in their audience.                                                                                                                                                                                                 |
+| `NEON_AUTH_BASE_URL`      | The exact branch Auth URL copied from Neon, including its database and Auth path, without a trailing slash. It is also the expected token issuer.                                                                                                                                                         |
+| `NEON_AUTH_COOKIE_SECRET` | A fresh random server-only secret of at least 32 characters for browser session cookies.                                                                                                                                                                                                                  |
+| `DATABASE_URL`            | The TLS connection string for the `milton` database. Services use the runtime role's connection (0024); migrations and imports use the owner's.                                                                                                                                                           |
+| `MILTON_SUPPORT_EMAIL`    | Optional. The support address the account pages give; `support@meetmilton.com` when unset. The MCP address pages show is `MCP_RESOURCE`.                                                                                                                                                                  |
+| `STRIPE_SECRET_KEY`       | App service only. The restricted Stripe API key for customers, subscriptions, Checkout and the billing portal. Unset or malformed: the billing routes answer 503, sign-in starts no Stripe trial, the gate allows those accounts, and deleting an account with a Stripe customer refuses until it is set. |
+| `STRIPE_WEBHOOK_SECRET`   | App service only. The signing secret of the Stripe endpoint for `POST /billing/webhook`.                                                                                                                                                                                                                  |
+| `STRIPE_PRICE_ID`         | App service only. The one recurring price sign-in's trial and Checkout subscribe to.                                                                                                                                                                                                                      |
 
 Saves are model-free: Milton stores the exact text the assistant sends and calls no
 model on any read or save, so it needs no model credential, project or budget. The
@@ -578,8 +578,9 @@ Future Stripe price configuration must use 501 USD cents, replacing the earlier
 $5 proposal. Current early access remains free; no payment price exists in this slice.
 Billing is not launched. Do not enable it until authenticated `/billing` checkout,
 verified provider entitlement synchronization and the remaining launch policies are
-implemented and tested. This slice contains no Stripe API/webhook, checkout page,
-credentials or live subscription actions. Until `/billing` exists, the trial notice,
+implemented and tested. Stripe's routes and webhook exist (0025) and Stripe owns the
+trial; the rest of this section describes the 0012 groundwork, and where it differs,
+`docs/how-milton-works.md` is current. Until the subscribe link ships, the trial notice,
 the page banner and the `subscription_required` refusal carry no subscription link;
 the banner names the price as plain text. Existing early access must not acquire a payment gate implicitly.
 
@@ -609,13 +610,13 @@ claimed and again under the publication lock; a save that crosses expiry fails
 without publishing. Exact replay still
 recovers an already accepted receipt. Web view/download remains available.
 
-A trusted future subscription integration sets `paid_through`; the next request
-rechecks access, so reconnecting an assistant is unnecessary. This field is not
-writable through any MCP/browser input in this slice. Preserve `started_at` and
-its original trial end when subscribing early; the future checkout must delay the
-first charge until that end. No checkout or billing-date behavior is claimed tested
-by the local paid-through fixture. Cancellation, failed-payment grace, existing-user
-transition, retention duration and paid allowances still require selected policies.
+The signed Stripe webhook keeps `subscription_status` and the dates current; the next
+request rechecks access, so reconnecting an assistant is unnecessary. These fields are
+not writable through any MCP/browser input. The gate reads neither `started_at` nor
+`paid_through`, which stay in place until a later migration. Subscribing early keeps
+the trial: an account in a trial goes to the Stripe portal, where a card takes effect at
+`trial_end`. Stripe's retry settings, retention duration, the existing-user transition
+and paid allowances still require selected policies.
 
 Migration 0012 is additive and performs no enrollment/backfill. Rehearse on disposable
 PostgreSQL before any rollout. The rollback parks `trial_accounts` intact and disables

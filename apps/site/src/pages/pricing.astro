@@ -55,37 +55,6 @@ const stretchGoals = [
   },
 ];
 
-const risks = [
-  {
-    risk: "The company has one founder and no staff. If Peter is hit by a bus, nobody is left to apologize.",
-    mitigation:
-      "The source is public, and you can run Milton yourself. Peter has also been told to look both ways.",
-  },
-  {
-    risk: "Your AI may not read the memo.",
-    mitigation:
-      "We ask your AI to read it, and following it is still up to the AI. Our position is enterprise-grade asking nicely.",
-  },
-  {
-    risk: "The filing cabinet came down the stairs once, and the stairs have not been the same since.",
-    mitigation:
-      "We have budgeted $109,999.99 and one person to lift the other end. We have not found the person.",
-  },
-  {
-    risk: "The Milton in this story, who is a fictional clerk, was let go some time ago. Nobody told him. His pay stopped when someone fixed the glitch, and he still comes in.",
-    mitigation:
-      "We sent him a memo, to his previous desk. This concerns the fictional clerk only, not the software or what you pay for it.",
-  },
-  {
-    risk: "Earlier plans to get the clerk out of the office ended with the building unavailable.",
-    mitigation: "His current plan B involves a beach.",
-  },
-  {
-    risk: "Peter reaches the corner office and starts asking the plant to circle back.",
-    mitigation: "This risk is scheduled for February 85,360.",
-  },
-];
-
 const updates = [
   "Milton’s desk was moved two rows back from the window. Nobody told him why.",
   "Milton’s desk was moved next to the copier, which faces away from the window. Nobody told him why.",
@@ -324,21 +293,6 @@ const comments = [
       </ol>
     </section>
 
-    <section class="section" aria-labelledby="risks-heading">
-      <p class="eyebrow">## Risks and challenges</p>
-      <h2 id="risks-heading">We disclose the following.</h2>
-      <dl class="risks">
-        {risks.map(({ risk, mitigation }) => (
-          <div>
-            <dt>{risk}</dt>
-            <dd>
-              <span class="line-label">Mitigation:</span> {mitigation}
-            </dd>
-          </div>
-        ))}
-      </dl>
-    </section>
-
     <section class="section log-grid" aria-label="Updates and comments">
       <div>
         <p class="eyebrow">## Creator updates</p>
@@ -412,6 +366,25 @@ const comments = [
         <p>
           The source is public, and you can run Milton yourself. We recommend
           starting soon.
+        </p>
+      </details>
+      <details>
+        <summary>Who keeps Milton running?</summary>
+        <p>
+          The company has one founder and no staff. If Peter is hit by a bus,
+          nobody is left to apologize.
+        </p>
+        <p>
+          The source is public, and you can run Milton yourself. Peter has also
+          been told to look both ways.
+        </p>
+      </details>
+      <details>
+        <summary>Will my AI always read the memo?</summary>
+        <p>Your AI may not read the memo.</p>
+        <p>
+          We ask your AI to read it, and following it is still up to the AI. Our
+          position is enterprise-grade asking nicely.
         </p>
       </details>
     </section>
@@ -744,24 +717,6 @@ const comments = [
     color: var(--muted);
   }
 
-  .risks {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--space-6) var(--space-8);
-  }
-  .risks dt {
-    font-weight: 600;
-  }
-  .risks dd {
-    margin-top: var(--space-2);
-    color: var(--muted);
-  }
-  .line-label {
-    color: var(--ink);
-    font-family: var(--font-mono);
-    font-size: var(--text-small);
-  }
-
   .log-grid {
     display: grid;
     grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
@@ -853,8 +808,7 @@ const comments = [
   }
   @media (max-width: 860px) {
     .pitch-body,
-    .log-grid,
-    .risks {
+    .log-grid {
       grid-template-columns: minmax(0, 1fr);
     }
     .video {

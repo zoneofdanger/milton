@@ -84,7 +84,8 @@ model on any read or save, so it needs no model credential, project or budget. T
 runtime no longer reads `MILTON_GEMINI_*` or `MILTON_MODEL_*_BUDGET_USD`;
 `MILTON_GLOBAL_SPEND_POLICY` or any `MILTON_SPEND_*` or `RESEND_API_KEY` setting either.
 0022 dropped the SQL spend policy and readiness columns and 0023 the spend ledgers: memo updates depend only on `memo_updates_enabled` and
-`memo_updates_daily_limit` in `store_config`. Every claim reserves 0.
+`memo_updates_daily_limit` in `store_config`. Claims reserve nothing; 0026 dropped
+`save_requests.reserved_micros`.
 
 Use separate Neon branches and matching environment settings for development and previews. Redeploy after changing runtime configuration.
 
@@ -415,9 +416,8 @@ The memo-update allowance is the only daily save cap: each successful
 many internal memos it touches (0014). No-op, conflict, failed saves and receipt
 replays charge nothing. While the allowance is off (the 0014 default), the
 attempted-call limit is the only daily bound on saves. The former 200-a-day
-technical write quota is retired; its `usage_daily.writes` column stays unread
-until a migration drops it. Every attempted MCP call still counts, including retries. There are no
-public archive/restore exemptions or history controls.
+technical write quota is retired; 0026 dropped its `usage_daily.writes` column.
+Every attempted MCP call still counts, including retries. There are no public archive/restore exemptions or history controls.
 
 The website shows the current cover sheet and reports, escapes their text and serves no browser JavaScript.
 It displays one bullet per complete active instruction card, preserving internal
@@ -624,8 +624,7 @@ tool/outcome/error values, elapsed time and charge/replay/release state, without
 client/account identity, instruction text or result bodies.
 
 The daily count is read from `save_requests` (`memo_update_state`,
-`memo_update_day`) under the account lock. `save_requests.reserved_micros` stays,
-always 0, because the save guard covers it.
+`memo_update_day`) under the account lock.
 
 ### No count limit (0021)
 

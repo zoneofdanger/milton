@@ -595,13 +595,6 @@ test("exact caller edits preserve conditions and scope without a model, with ato
         )
       ).rows,
     ).toEqual([{ version: 1 }]);
-    expect(
-      (
-        await local.pg.query(
-          "SELECT reserved_micros FROM save_requests WHERE user_id='exact'",
-        )
-      ).rows,
-    ).toEqual([{ reserved_micros: 0 }]);
     await expect(
       store.saveMemo({
         ...input,

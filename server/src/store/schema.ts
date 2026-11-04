@@ -18,13 +18,9 @@ import {
 
 const createdAt = () =>
   timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
-// Changing this default needs a migration, so retired keys stay. Triggers still
-// read name_bytes (memos) and reason_bytes (memo and card versions); no
-// application code reads them, page_size or daily_writes (the technical write
-// cap is retired; the memo-update allowance is the daily save cap). Nothing
-// reads memos since 0021 removed the count limit.
+// Changing this default needs a migration. Triggers read name_bytes (memos) and
+// reason_bytes (memo and card versions); no application code reads them.
 const limits = {
-  memos: 100,
   body_bytes: 32768,
   name_bytes: 64,
   description_bytes: 500,
@@ -32,10 +28,6 @@ const limits = {
   history_bytes: 67108864,
   report_body_bytes: 262144,
   daily_calls: 1000,
-  daily_writes: 200,
-  // Unread: the request bound is MAX_REQUEST_BYTES in src/http.ts.
-  request_bytes: 65536,
-  page_size: 50,
 };
 export const storeConfig = pgTable(
   "store_config",

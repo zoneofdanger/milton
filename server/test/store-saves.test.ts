@@ -413,11 +413,7 @@ test("saves anchor in every active memo, never archived or foreign text, and hav
       (await send("Instruction m-51", "Instruction m-51 changed")).status,
     ).toBe("saved");
     base = (await store.getTpsReport()).version;
-    // The stored daily_writes key is retired: a value of 1 refuses nothing, and
-    // saves leave no per-day write counter. The memo-update cap is the save cap.
-    await local.pg.exec(
-      `UPDATE store_config SET limits_json=limits_json || '{"daily_writes":1}'::jsonb`,
-    );
+    // Saves leave no per-day write counter. The memo-update cap is the save cap.
     expect(
       (await send("Instruction m-50", "Instruction m-50 changed")).status,
     ).toBe("saved");
@@ -697,10 +693,7 @@ test("Postgres enforces separate UTF-8 field caps, no memo count, and counts rec
   const local = await localStore();
   try {
     await seedUsers(local.pg, "m_caps");
-    await local.pg.exec(
-      `UPDATE store_config SET limits_json=limits_json || '{"memos":1}'::jsonb;`,
-    );
-    // limits_json.memos is unread since 0021: memos have no count limit.
+    // Memos have no count limit since 0021.
     await local.pg.query(
       "INSERT INTO memos (user_id,id,name) VALUES ('m_caps','memo',$1)",
       ["a".repeat(64)],

@@ -415,9 +415,8 @@ The memo-update allowance is the only daily save cap: each successful
 many internal memos it touches (0014). No-op, conflict, failed saves and receipt
 replays charge nothing. While the allowance is off (the 0014 default), the
 attempted-call limit is the only daily bound on saves. The former 200-a-day
-technical write quota is retired; its
-`daily_writes` key and `usage_daily.writes` column stay unread until a migration
-drops them. Every attempted MCP call still counts, including retries. There are no
+technical write quota is retired; its `usage_daily.writes` column stays unread
+until a migration drops it. Every attempted MCP call still counts, including retries. There are no
 public archive/restore exemptions or history controls.
 
 The website shows the current cover sheet and reports, escapes their text and serves no browser JavaScript.

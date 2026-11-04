@@ -434,6 +434,16 @@ expired and Checkout will not sell over it, and nothing confirms the portal can 
 Payment methods come from the Dashboard's default payment method configuration, which is
 Peter's. No code sets payment method types.
 
+Stripe's customer emails are Dashboard settings too, and no code sends them. In live mode, check
+all three are on before `trials_enabled` is flipped:
+
+- Trial-ending reminder: "Send a reminder email 7 days before a free trial ends", with the link
+  to a Stripe-hosted page.
+- Payment receipts: "Successful payments", under Customer emails.
+- Failed-payment emails: "Send emails when card payments fail".
+
+Stripe sends no trial reminders in a sandbox, so a test-mode run cannot confirm the first.
+
 **Data statement.** An older image still serving after 0026 can write a returning deleted
 identity's row with no status. Once the new image has all traffic, and before the backfill,
 rerun 0026's statement. It only touches rows with no status, so it never changes one Stripe has

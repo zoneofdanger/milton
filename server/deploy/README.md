@@ -159,14 +159,84 @@ references. Inspect revision readiness before selecting a recorded revision:
 gcloud run revisions list --service=milton-app --project=milton-510506 --region=us-east4
 ```
 
-Now serving: MCP `milton-mcp-dead-d03de23` (since 2026-11-04 02:43:40Z) and app
-`milton-app-dead-d03de23` (since 02:43:52Z), one image and one commit, on Drizzle journal 27;
-recorded below. There is no worker service.
+Now serving: MCP `milton-mcp-bill-fa7a2cb` (since 2026-11-04 04:52:19Z) and app
+`milton-app-bill3-fa7a2cb` (since 05:10:17Z), one image and one commit, on Drizzle journal 28,
+with trials on since about 05:19Z; recorded below. There is no worker service.
 
-Current release dead-d03de23: the 0026 pre-step, MCP and app, then migration 0026, from main
+Current release bill-fa7a2cb: migration 0027, MCP and app, the app's Stripe settings, then the
+data statement, the flip and the backfill, from main `fa7a2cb` (the merge of `agent/billing-1`:
+Stripe owns the trial, the gate reads `subscription_status`, billing routes, the webhook ledger
+and the backfill script). On 2026-11-04, by two release agents (snapshot, image, 0027, both
+deploys and their checks), Lead (data statement, flip, backfill) and Peter (the Stripe Dashboard
+gates and the `milton-app-env:3` mint). Before it, dead-d03de23 served both services on journal
+27 with trials off and `trial_accounts` empty. Neon snapshot `before-0027-billing`
+(`snap-restless-cloud-b83a3hem`, 04:47:53Z). The commit tree passed `check-types`, `bun test`
+(109 pass) and `format:check`. Image
+`sha256:f90ab52937e360181fe7ed64fb4eda5453b81d37d0c7f095fb3b55b582863db5` (amd64
+`sha256:cc481ed017f7f605edb549431697f0067b4e3620eb61306a457c3c6f41fe37fc`; uid 1000, Node
+26.13.0, no env, key, pem or `.dev.vars` files, build bases unchanged; with empty configuration
+both services stop at startup). A throwaway branch from production (`rehearsal-0027-billing`)
+rehearsed 0027 through the migration runner (journal 27 to 28; only `stripe_events`, the six
+nullable `trial_accounts` columns, two unique constraints and their indexes, four checks and the
+`milton_runtime` grants were added; 275 rows, every existing table identical; a rerun changed
+nothing), then `rollback/0027` (schema identical to the pre-0027 capture) and a hand re-forward
+(identical to the first forward); the branch was deleted. No scheduler job exists, so nothing was
+paused. The release agent applied 0027 at 04:51:15Z to 04:51:17Z with `bun run --cwd server
+db:migrate` from a checkout of `fa7a2cb` with no `server/.dev.vars`, the owner URL held only in
+the process environment (captured from `neonctl connection-string` for `neondb_owner` on
+`milton`, checked by role, database and host, then unset): `PASS`, journal 28, 18 tables and 275
+rows before and after, the production change identical to the rehearsal, 0 rows marked canceled
+(0 rows started before their user). MCP created 04:52:06Z to 04:52:11Z with `gcloud run services
+update milton-mcp --image=<digest> --revision-suffix=bill-fa7a2cb` (keeps the startup CPU
+boost), pinned with `update-traffic --to-revisions=milton-mcp-bill-fa7a2cb=100` at 04:52:19Z; app
+`milton-app-bill-fa7a2cb` with `gcloud run services replace` from `app.release.json`, pinned by
+name at 04:52:31Z. Each spec differed from dead-d03de23 only in the image (MCP
+`milton-mcp-env:3`, the unmounted leftover `milton-mcp-env:2` volume, `milton-mcp-key:1`; app
+`milton-app-env:2`, `milton-app-key:1`); neither carried a `STRIPE_*` setting. On the new code
+with trials off the canonical checks matched the baseline, the probe printed `PASS`, a fresh
+headless Claude Code client listed four tools, saw instructions of 4,094 characters identical to
+the source and read `get_cover_sheet` with no error or notice (version `5bbb8ddf…` unchanged),
+and `POST /billing/webhook` answered 503 JSON `billing_unavailable`. Peter minted
+`milton-app-env:3` (05:08:25Z) with the step 5 keys; the release agent redeployed the app only as
+`milton-app-bill3-fa7a2cb`, whose spec differs from `milton-app-bill-fa7a2cb` only in the env
+version, Ready 05:10:08Z and pinned at 05:10:17Z; MCP was untouched. On `:3` the canonical
+checks and probe matched, a bad or missing `Stripe-Signature` answered 400 `signature_invalid`
+(the Stripe settings loaded), and a fresh client's cover-sheet read showed no notice. From
+04:52:06Z to 05:15:28Z neither service logged a 5xx or an error other than the release agent's
+own five 503 checks on `:2`. Lead reran the data statement at about 05:16Z (0 rows), Designer
+published the site copy (`022c816`), and Lead set `trials_enabled` true at about 05:19Z. At
+05:24Z Lead ran the backfill from the `fa7a2cb` checkout as in the Backfill recipe (`<env>` 3,
+`<key>` 1, secrets only in the process environment): the dry run, then `--apply` with total 2,
+created 2, failed 0, still NULL 0; a dry rerun skipped 2. Both `trial_accounts` rows are
+`trialing` with `cus_` and `sub_` ids and trial end 2026-12-04. `stripe_events` holds 4 rows (2
+`customer.subscription.created`, 2 `invoice.paid`, 05:24:22Z to 05:24:25Z), and each of Stripe's
+four deliveries got a 200, so the installed webhook secret verifies live deliveries; the ledger
+has no failure column (`id`, `type`, `received_at`, `payload_sha256`). Lead's cover-sheet read
+through MCP at 05:24:41Z returned `read` with no notice. From 05:19:00Z to 05:25:37Z neither
+service logged a 5xx or an error (MCP 1 x 200; app 4 x 200, all Stripe's deliveries), no older
+revision logged a line, and no log line in the window held `sk_`, `rk_`, `whsec_`, `price_1`, a
+Postgres URL, an `encrypted:` value or a secret's name. At 05:26:08Z `/health` answered 200 on
+both and traffic was 100% `milton-mcp-bill-fa7a2cb` (generation 75) and
+`milton-app-bill3-fa7a2cb` (generation 63). Not checked by an agent: Stripe's own list of live
+customers and the Dashboard's delivery view, that no row holds a test id (the `cus_` and `sub_`
+prefixes do not tell modes apart), and Peter opening billing on an account to see the live
+portal. `milton-app-env:3` still carries the retired `MILTON_GEMINI_API_KEY`,
+`MILTON_GEMINI_PROJECT_ID`, `MILTON_MODEL_ACCOUNT_BUDGET_USD` and
+`MILTON_MODEL_GLOBAL_BUDGET_USD`, which no code reads; a later version drops them.
+
+Rollback. Trials are on, so there is no traffic rollback: dead-d03de23 and every earlier
+revision gate on the retired clock and refuse paying customers. `milton-app-bill-fa7a2cb` (same
+image, `milton-app-env:2`) is no fallback either: without Stripe settings its webhook answers 503
+and Stripe retries. Recover forward with a new image. To stop new charges and gating, Peter can
+set `UPDATE store_config SET trials_enabled = false WHERE singleton = 1;` as `neondb_owner`,
+which returns everyone to allowed; existing Stripe subscriptions keep running and charging, so
+tell Peter before doing it. Do not run `rollback/0027_stripe_billing.sql`: it refuses once any
+customer or event is recorded. Never restore `before-0027-billing` over rows written since it.
+
+Release dead-d03de23: the 0026 pre-step, MCP and app, then migration 0026, from main
 `d03de23` (dead-code batches A and B: the legacy sign-up seed no longer writes
 `identities.profile_json`, old fonts are no longer served, retired route prefixes return 404,
-and the code stops writing the dead columns). By a release agent on 2026-11-04. Pre-step at
+and the code stops writing the dead columns). By a release agent on 2026-11-04, each serving until bill-fa7a2cb. Pre-step at
 02:41:14Z as `neondb_owner`, in one statement string on the direct (unpooled) host:
 `SET lock_timeout = '5s'; ALTER TABLE save_requests ALTER COLUMN reserved_micros SET DEFAULT 0;`
 succeeded on the first attempt; the column then read `default=0`, NOT NULL. The commit tree
@@ -207,7 +277,7 @@ missing-column error (MCP 30 x 200 and 8 x 401; app 19 x 200, 8 x 403 from the c
 release); the only tool call was the fresh client's read. No save ran: the save check (resend
 one existing cover rule, expect `unchanged`) waits for Peter's go.
 
-Rollback. Since 0026 is applied, open-13f2d93 cannot sign up an account or save (it writes
+Rollback (since trials went on, unreachable: see bill-fa7a2cb). Since 0026 is applied, open-13f2d93 cannot sign up an account or save (it writes
 `identities.profile_json` and `reserved_micros`). Stop writers, run
 `server/drizzle/rollback/0026_dead_columns.sql` offline as `neondb_owner` (rehearsed; it restores
 shape, not data), then shift traffic and, in the same step, set the manifests' images back to
@@ -498,13 +568,17 @@ error: `psql -1 -v ON_ERROR_STOP=1 -f server/drizzle/0026_dead_columns.sql`.
 
 ## Stripe billing (0027)
 
+Applied 2026-11-04 04:51:15Z (journal 28, snapshot `before-0027-billing`,
+`snap-restless-cloud-b83a3hem`); trials on since about 05:19Z (see the release records).
+
 Migration 0027 adds the Stripe webhook ledger and the subscription columns on
 `trial_accounts`, and marks returning deleted identities canceled. Stripe owns the trial; the
 gate reads `subscription_status`.
 
-**Release order.** Dead columns (0026) is already released, so only 0027 is pending. Agents never
-hold the owner connection or `DOTENV_PRIVATE_KEY`, so Peter runs every step that needs either. A
-release agent takes the snapshot and ships the images. Run these in order:
+**Release order.** Dead columns (0026) is already released, so only 0027 is pending. Peter runs the
+Stripe Dashboard steps and mints secret versions. A release agent takes the snapshot, applies
+0027 and ships the images. The owner connection and `DOTENV_PRIVATE_KEY` live only in a process
+environment, never on a command line, in a file or in a log. Run these in order:
 
 1. **Peter, in the Stripe Dashboard.** Roll both webhook signing secrets, test and live, expiring
    the old ones immediately, and create the live restricted key (Write on Customers, Subscriptions,
@@ -512,8 +586,8 @@ release agent takes the snapshot and ships the images. Run these in order:
    appeared in a transcript.
 2. **Peter, in the Stripe Dashboard, live mode.** Confirm the settings below on the day: failed
    payments cancel the subscription, and the three customer emails are on.
-3. **Release agent, then Peter.** The release agent takes a Neon snapshot. Peter applies 0027 and
-   confirms the journal, as below. This code reads the new columns on every gated read, so on the
+3. **Release agent.** Take a Neon snapshot, then apply 0027 from an owner URL held in the
+   environment and confirm the journal, as below. This code reads the new columns on every gated read, so on the
    older schema every assistant read fails with a 503.
 4. **Release agent.** Ship MCP and app from the same image. Both must move: an older MCP revision
    keeps gating on the retired clock.
@@ -526,7 +600,9 @@ release agent takes the snapshot and ships the images. Run these in order:
    secret and the live price. `grep -E '^[A-Z_]+=' <file> | cut -d= -f1 | sort` lists the names with
    no values. The release agent then redeploys the app only, pinned to that version, and
    confirms it starts: all three `STRIPE_*` or none, since a partial or malformed set stops it. The
-   MCP service gets no Stripe setting.
+   MCP service gets no Stripe setting. (Release bill-fa7a2cb's `milton-app-env:3` also kept the
+   retired `MILTON_GEMINI_*` and `MILTON_MODEL_*` keys, which no code reads; a later version
+   drops them.)
 6. **Peter, with the owner connection.** Rerun the data statement below, before the flip: after it, a
    returning identity's row with no status could start a second trial at sign-in.
 7. **Peter, with the owner connection.** Once the site and privacy copy are published, flip trials
@@ -544,14 +620,17 @@ never a URL on the command line, as in [Runtime role (0024)](#runtime-role-0024)
 Before the first natural trial end, 30 days after step 7, run a test clock with the same
 subscription params: the test-mode run forced every trial end.
 
-To apply 0027 in step 3, from a checkout of the released commit that has no `server/.dev.vars`:
+To apply 0027 in step 3, from a checkout of the released commit that has no `server/.dev.vars`,
+the release agent puts the owner URL straight into the process environment from the Neon CLI,
+checks its role, database and host without printing it, then migrates:
 
 ```sh
-read -rs MILTON_OWNER_DATABASE_URL
-export MILTON_OWNER_DATABASE_URL
+export MILTON_OWNER_DATABASE_URL="$(bunx neonctl@8.18.0 connection-string br-muddy-mode-b88xfprl --project-id gentle-flower-39594008 --database-name milton --role-name neondb_owner)"
 bun run --cwd server db:migrate
 unset MILTON_OWNER_DATABASE_URL
 ```
+
+A URL pasted by hand works the same way through `read -rs MILTON_OWNER_DATABASE_URL` and `export`.
 
 It refuses any database but `milton` and any role but `neondb_owner`, and prints no URL, so its PASS
 does not say which branch it ran on. Confirm the target: `SELECT count(*) FROM

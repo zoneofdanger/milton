@@ -21,7 +21,7 @@ export const consentList = z.array(
   }),
 );
 // Name lookups per page view; later rows show the client id unverified.
-const NAMED_ASSISTANTS = 20;
+const NAMED_ASSISTANTS = 100;
 export const clientHost = (clientId: string) => {
   try {
     const id = new URL(clientId);

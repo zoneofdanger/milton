@@ -588,7 +588,7 @@ test("exact caller edits preserve conditions and scope without a model, with ato
         code: "invalid_input",
       });
     expect(
-      (await send([{ before: "α", after: "x".repeat(32768) }])).error,
+      (await send([{ before: "α", after: "x".repeat(131072) }])).error,
     ).toBe("memo_body_limit");
     expect((await send([{ before: "α", after: "α" }])).status).toBe(
       "unchanged",

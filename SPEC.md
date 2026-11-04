@@ -45,7 +45,7 @@ only with the person's yes; no automatic capture. Closed-client execution and ac
 instruction adherence remain outside the server's guarantee.
 
 Every save is exact. `create_memo` needs at least one structured field: `rules`
-(1 to 25 entries of `{ report, text }`, `report` one of the five or `cover`),
+(1 to 100 entries of `{ report, text }`, `report` one of the five or `cover`),
 `exact_edits`, `moves`, `sample` or `retire_samples`. A save with none is refused
 with `invalid_input` ("Name the report and send the rule's text in rules."). Each
 `rules` entry becomes one new card stored byte for byte; its description is its first

@@ -220,7 +220,7 @@ with `invalid_input`: "Name the report and send the rule's text in rules." `text
 the stated purpose for every save: recorded with the accepted change, never stored or
 stored as a rule. Milton runs no model, rewrites nothing and reserves no budget.
 
-New rules go in `rules`, 1-25 entries of `{report, text}`. `report` is one of the five
+New rules go in `rules`, 1-100 entries of `{report, text}`. `report` is one of the five
 reports (`doc` accepted) or `cover`. Each entry becomes one new card holding `text`
 byte for byte; its description is the first non-blank line, trimmed and cut to the
 description cap. Each body must fit the body limit and contain no Markdown heading line
@@ -236,7 +236,7 @@ equal a rule of the setup catalog byte for byte in the report it is served for, 
 naming the closest catalog rule; rules without the prefix are unaffected.
 
 Corrections and removals of existing rules use `exact_edits`, a nonempty array of
-`{before, after}`. Copy each nonempty `before` verbatim from a current rule as printed,
+`{before, after}` (1-500). Copy each nonempty `before` verbatim from a current rule as printed,
 with or without its `- ` bullet; `after`
 is the exact replacement, including an empty string for removal. Each anchor must
 occur once across all printed rules (each card as `- ` plus its text) and fit within
@@ -262,14 +262,14 @@ old one. It does not change first-setup and capture approval rules.
 
 All structured fields can combine in one save: every operation resolves against one
 snapshot and commits together or not at all. `moves` is `[{before, report}]`
-(1-100): `before` is verbatim text identifying one rule, as for `exact_edits`, and
+(1-500): `before` is verbatim text identifying one rule, as for `exact_edits`, and
 `report` is a report or `cover`. A move to the rule's current place is a no-op; an
 unresolvable or repeated move, or a move of a rule the same save removes, fails with
 `move_conflict`. `sample` is `{report, kind_id | new_kind, context, text, replaces?}`.
 `kind_id` must name a kind in that report. A `new_kind` whose label already exists
 there, in any letter case, files under that kind (including a kind whose samples are
 all retired, which reads no longer list); otherwise it creates one. `replaces` names an active sample of the
-same kind, retired as `replaced`. `retire_samples` lists active sample IDs, retired as
+same kind, retired as `replaced`. `retire_samples` lists 1-500 active sample IDs, retired as
 `removed`. Every approved sample stays active until one of those retires it; nothing
 retires a sample automatically. A `sample` whose text is byte-identical to an active
 sample of the same kind inserts nothing (a `replaces` naming another sample still

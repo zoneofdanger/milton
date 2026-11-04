@@ -131,7 +131,7 @@ not at all.
 
 ### Admit
 
-- The input schema is strict: 1 to 25 rules, up to 100 edits, moves, or sample removals, a
+- The input schema is strict: 1 to 100 rules, up to 500 edits, moves, or sample removals, a
   UUID request ID, and a version.
 - Only assistants can save, so a save through the web app's store is refused with
   `assistant_required`.

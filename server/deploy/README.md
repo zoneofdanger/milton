@@ -426,6 +426,11 @@ before going live. A key from the wrong mode against real rows reads as a failed
 webhooks answer 503 and Stripe retries, sign-ins stop with try again, nobody is marked
 canceled, and account deletion refuses rather than leave a live subscription charging.
 
+A row holding an id the key cannot see, such as a test id under a live key, refuses deletion every
+time until an operator clears it, and that person's deletion request waits meanwhile. First confirm
+the key is the right one: a wrong key is fixed, not worked around. Then clear the row's
+`stripe_customer_id` and `stripe_subscription_id` and set `subscription_status` to `canceled`.
+
 **Stripe Dashboard settings.** Failed payments must be set to "Cancel the subscription" in both
 test and live mode; check it before `trials_enabled` is flipped. The gate reads `unpaid` as
 expired and Checkout will not sell over it, and nothing confirms the portal can settle it, so

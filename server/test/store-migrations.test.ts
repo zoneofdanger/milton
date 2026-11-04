@@ -7,6 +7,7 @@ import {
 } from "./local-store";
 import { fixtureStore, seedUsers } from "./store-fixtures";
 import { checkRuntimeRole } from "../scripts/check-runtime-role";
+import type { SaveMemoInput } from "../src/store/compiled";
 import { migrationUrl } from "../scripts/migrate";
 import {
   linkStripeCustomer,
@@ -18,6 +19,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
 import { createHash } from "node:crypto";
+import { z } from "zod";
 import { appendFile, cp, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -71,6 +73,95 @@ test("a release passes the owner URL in its own variable, checked, and an empty 
     );
   }
 });
+
+test("0032 widens the sample, accepted-change and receipt checks, raises the stored daily_calls and body_bytes, and rolls back refusing rows past the old caps", async () => {
+  const base = await migratedThrough(31);
+  const pg = await migratedThrough(31);
+  const post = await migratedThrough(32);
+  try {
+    const up = await drizzleSql("0032_raise_limits.sql");
+    const down = await drizzleSql("rollback/0032_raise_limits.sql");
+    await seedUsers(pg, "limits");
+    const store = fixtureStore(storeDatabase(pg), "limits", "assistant");
+    const save = async (text: string) =>
+      store.saveMemo({
+        text,
+        rules: [{ report: "cover", text }],
+        request_id: crypto.randomUUID(),
+        expected_version: (await store.getTpsReport()).version,
+      });
+    expect((await save("Saved before 0032.")).status).toBe("saved");
+    const limits = async () =>
+      z
+        .object({ limits_json: z.record(z.string(), z.unknown()) })
+        .parse((await pg.query("SELECT limits_json FROM store_config")).rows[0])
+        .limits_json;
+    const before = await limits();
+    expect(before).toMatchObject({ daily_calls: 1000, body_bytes: 32768 });
+    const forward = async () => {
+      await pg.exec("BEGIN;" + up + "COMMIT;");
+      expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(post));
+      // Only the two raised keys change; every other stored key stays.
+      expect(await limits()).toEqual({
+        ...before,
+        daily_calls: 10000,
+        body_bytes: 131072,
+      });
+    };
+    await forward();
+    // One row past each old cap, each in its own account.
+    await seedUsers(pg, "sample", "change", "receipt");
+    const hex = (c: string) => `repeat('${c}',64)`;
+    await pg.exec(`INSERT INTO sample_kinds(user_id,id,report,label) VALUES ('sample','k','email','long');
+      INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json)
+      VALUES ('sample','s','email','k','A long sample.',repeat('x',131072),'{}');
+      INSERT INTO save_requests(user_id,request_id,input_hash,source_hash,result_json)
+      VALUES ('receipt','${crypto.randomUUID()}',${hex("a")},${hex("c")},jsonb_build_object('status','saved','pad',repeat('x',60000)));`);
+    // A save that changes 101 cards: 100 rules, then 100 edits and one more.
+    const change = fixtureStore(storeDatabase(pg), "change", "assistant");
+    const changeSave = async (extra: object) =>
+      change.saveMemo({
+        text: "Fictional change.",
+        request_id: crypto.randomUUID(),
+        expected_version: (await change.getTpsReport()).version,
+        ...extra,
+      } as SaveMemoInput);
+    for (let b = 0; b < 4; b++)
+      await changeSave({
+        rules: Array.from({ length: 25 }, (_, i) => ({
+          report: "email",
+          text: `Rule ${b * 25 + i}.`,
+        })),
+      });
+    expect(
+      await changeSave({
+        rules: [{ report: "email", text: "One more." }],
+        exact_edits: Array.from({ length: 100 }, (_, i) => ({
+          before: `Rule ${i}.`,
+          after: `Rule ${i}!`,
+        })),
+      }),
+    ).toMatchObject({ status: "saved" });
+    for (const [account, message] of [
+      ["sample", "raise_limits_rollback_requires_samples_within_32768_bytes"],
+      ["change", "raise_limits_rollback_requires_changes_within_100_cards"],
+      ["receipt", "raise_limits_rollback_requires_receipts_within_2048_bytes"],
+    ]) {
+      await expect(pg.exec(down)).rejects.toThrow(message);
+      await pg.exec("ROLLBACK");
+      await pg.query("DELETE FROM users WHERE id=$1", [account]);
+    }
+    await pg.exec(down);
+    expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(base));
+    expect(await limits()).toEqual(before);
+    expect((await save("Saved after the rollback.")).status).toBe("saved");
+    await forward();
+  } finally {
+    await post.close();
+    await pg.close();
+    await base.close();
+  }
+}, 30000);
 
 test("0031 drops tps_reports and its runtime grant, leaves every version and save as it was, and rolls back with one fresh-revision row per account", async () => {
   const base = await migratedThrough(30);

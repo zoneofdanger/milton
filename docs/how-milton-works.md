@@ -300,6 +300,9 @@ Files: `server/src/store/index.ts`, `server/src/store/trials.ts`,
 `server/src/store/billing.ts`, `server/src/billing.tsx`, `server/src/config.ts`.
 
 - Limits live in a single `store_config` row and are validated on read.
+- Each account gets 10,000 attempted MCP calls per UTC day; rule and sample text is capped
+  at 128 KiB, and a save takes up to 100 rules and 500 edits, moves, or sample removals
+  (0032).
 - Trials are switched by `trials_enabled`, and when off, everyone is early access.
 - With trials on, access follows the Stripe subscription status held on the trial row:
   trialing reads as trial, active as paid, and past_due as paid for 3 days from the renewal.

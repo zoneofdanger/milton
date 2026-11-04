@@ -645,7 +645,7 @@ test("Postgres enforces separate UTF-8 field caps and no memo count", async () =
         "INSERT INTO memo_versions (user_id,memo_id,version,description,body,reason,actor_json,details_json) VALUES ('m_caps','memo',$1,$2,$3,$4,'{}',$5)",
         [version, description, body, reason, JSON.stringify({ kind })],
       );
-    await append(1, "é".repeat(250), "é".repeat(16384), "x".repeat(500));
+    await append(1, "é".repeat(250), "é".repeat(65536), "x".repeat(500));
     await local.pg.query(
       "INSERT INTO memos (user_id,id,name) VALUES ('m_caps','vibes','vibes')",
     );
@@ -661,7 +661,7 @@ test("Postgres enforces separate UTF-8 field caps and no memo count", async () =
     await expect(append(2, "é".repeat(250) + "x", "", "")).rejects.toThrow(
       "memo_description_limit",
     );
-    await expect(append(2, "ok", "é".repeat(16384) + "x", "")).rejects.toThrow(
+    await expect(append(2, "ok", "é".repeat(65536) + "x", "")).rejects.toThrow(
       "memo_body_limit",
     );
     await expect(append(2, "ok", "", "x".repeat(501))).rejects.toThrow(

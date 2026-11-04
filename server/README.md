@@ -405,10 +405,10 @@ save invokes a model.
 
 | Limit                      | Default                                                       |
 | -------------------------- | ------------------------------------------------------------- |
-| Rule (card) body           | 32 KiB UTF-8                                                  |
+| Rule or sample text        | 128 KiB UTF-8 (`body_bytes`)                                  |
 | Cover sheet or report body | 256 KiB UTF-8 each (`report_body_bytes`)                      |
 | Description/reason         | 500 UTF-8 bytes each                                          |
-| Attempted MCP calls        | 1,000 per account per UTC day                                 |
+| Attempted MCP calls        | 10,000 per account per UTC day (`daily_calls`)                |
 | Request body               | 256 KiB before parsing (`MAX_REQUEST_BYTES` in `src/http.ts`) |
 
 The attempted-call limit is the only daily bound on saves; there is no separate save
@@ -586,6 +586,21 @@ Migration 0010 is additive and copies no legacy request text. Its inverse parks 
 foreign keys, immutability guards and byte charges in `milton_rollback`; forward migration
 restores them exactly. Stop writers during schema rollback and keep them stopped until
 forward recovery: an older runtime cannot guarantee provenance for new saves.
+
+### Limits (0032)
+
+Milton charges now, so the metered caps went up: 10,000 attempted MCP calls per account
+per UTC day (was 1,000), rule and sample text up to 128 KiB (was 32 KiB), 1-100 rules and
+up to 500 exact edits, moves and sample removals per save (were 25 and 100), and a 256 KiB
+request bound (was 64 KiB). Migration 0032 widens the three checks the larger saves would
+hit: `samples_body` to 131072 bytes, `accepted_change_shape` to 1,100 affected cards and
+`save_request_result` to 65,536 bytes (a receipt listing up to 500 retired samples). It
+sets the `limits_json` default to the new values and writes `daily_calls` 10000 and
+`body_bytes` 131072 into the stored row; `description_bytes` (500) and
+`report_body_bytes` (262144) stay. An earlier revision runs on the result under its own
+caps. See [the hosting runbook](deploy/README.md#limits-0032).
+`drizzle/rollback/0032_raise_limits.sql` restores the old checks, default and row values,
+and refuses while any sample, accepted change or receipt is past an old cap.
 
 ### Fingerprint versions (0031)
 

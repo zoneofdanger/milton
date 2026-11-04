@@ -161,8 +161,8 @@ const redirectTo = (origin: string) =>
 // A key that lasts one UTC minute. Stripe replays a stored error for the same key
 // for 24 hours or more, and refuses the same key with other params; under the
 // rule that a failure stops the sign-in, a fixed key would lock the person out for
-// a day. Double submits within a minute still dedupe, and listing first guards
-// every later retry.
+// a day. Double submits within a minute still dedupe, and listing first under the
+// row lock guards every later retry.
 const idempotencyKey = (kind: "customer" | "subscription", userId: string) =>
   `milton-${kind}-${userId}-${Math.floor(Date.now() / 60000)}`;
 
@@ -205,21 +205,27 @@ export async function ensureSubscription(
     if (!account.enrolled || account.status !== null) return;
     const customer =
       account.customer ?? (await createCustomer(billing, store, email));
-    await store.saveSubscription(
-      decidingSubscription(await listSubscriptions(billing, customer)) ??
-        (await stripePost(
-          billing,
-          "subscriptions",
-          {
-            customer,
-            "items[0][price]": billing.priceId,
-            trial_period_days: "30",
-            "payment_settings[save_default_payment_method]": "on_subscription",
-            "trial_settings[end_behavior][missing_payment_method]": "cancel",
-          },
-          stripeSubscription,
-          idempotencyKey("subscription", userId),
-        )),
+    // Two attempts across a minute boundary have different keys, so only the row
+    // lock stops both listing nothing and each starting a trial, which could
+    // charge the person twice.
+    await store.whileWaiting(async (save) =>
+      save(
+        decidingSubscription(await listSubscriptions(billing, customer)) ??
+          (await stripePost(
+            billing,
+            "subscriptions",
+            {
+              customer,
+              "items[0][price]": billing.priceId,
+              trial_period_days: "30",
+              "payment_settings[save_default_payment_method]":
+                "on_subscription",
+              "trial_settings[end_behavior][missing_payment_method]": "cancel",
+            },
+            stripeSubscription,
+            idempotencyKey("subscription", userId),
+          )),
+      ),
     );
   } catch (error) {
     logUnexpected("billing", error);

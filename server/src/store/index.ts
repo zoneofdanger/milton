@@ -13,6 +13,7 @@ import {
   billingAccount,
   linkStripeCustomer,
   lockStripeCustomer,
+  lockWaitingSubscription,
   recordStripeEvent,
   saveStripeSubscription,
   stripeEventRecorded,
@@ -445,8 +446,16 @@ export function billingForAccount(bindings: StoreBindings, userId: string) {
     account: () => wrap(billingAccount(db, userId)),
     linkCustomer: (customer: string) =>
       wrap(linkStripeCustomer(db, userId, customer)),
-    saveSubscription: (state: StripeSubscriptionState) =>
-      wrap(saveStripeSubscription(db, userId, state)),
+    /** Runs `work` holding the row, only while it has no subscription. */
+    whileWaiting: (
+      work: (
+        save: (state: StripeSubscriptionState) => Promise<void>,
+      ) => Promise<void>,
+    ) =>
+      db.transaction(async (tx) => {
+        if (await lockWaitingSubscription(tx, userId))
+          await work((state) => saveStripeSubscription(tx, userId, state));
+      }),
   };
 }
 

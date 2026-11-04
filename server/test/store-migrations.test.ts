@@ -10,6 +10,7 @@ import { checkRuntimeRole } from "../scripts/check-runtime-role";
 import {
   linkStripeCustomer,
   lockStripeCustomer,
+  lockWaitingSubscription,
   recordStripeEvent,
 } from "../src/store/billing";
 import { PGlite } from "@electric-sql/pglite";
@@ -157,9 +158,11 @@ test("0026 adds the Stripe ledger and subscription columns, marks returning dele
       expect(await lockStripeCustomer(db, "cus_fixture")).toEqual({
         subscription: null,
       });
+      expect(await lockWaitingSubscription(db, "billing")).toBe(true);
       expect(
         await recordStripeEvent(db, paid, { customer: "cus_fixture", state }),
       ).toEqual({ recorded: true, updated: 1 });
+      expect(await lockWaitingSubscription(db, "billing")).toBe(false);
       // The same event id again changes nothing, whatever it carries.
       expect(
         await recordStripeEvent(db, paid, {

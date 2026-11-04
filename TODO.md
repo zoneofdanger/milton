@@ -10,7 +10,7 @@ landed and the item is still open), `blocked: <why or #id>`. A bolded headline o
 or fewer states the task; one item is one landing. **A section heading and its preamble are
 shared context for every item beneath it.**
 
-**next-id: 24.** Ids are never reused, so this counter survives deleting the newest item.
+**next-id: 25.** Ids are never reused, so this counter survives deleting the newest item.
 
 ## MVP
 
@@ -73,6 +73,14 @@ reports, memos) and plain text on security screens and anything an assistant rea
       whoever handles billing, and name it on the pricing section, the FAQ "Will I be charged"
       answer, and the subscription_required message. Until then it does not exist; the landing
       page's unread joke address is a different alias.
+
+- [ ] #24 (server, low) **Drop the legacy memo layer and squash the migrations.** Decided
+      2026-11-03 (Peter reversed "legacy memo history is retained"): export tables memos,
+      memo_versions and memo_cards to ~/code/milton-archive as a bundle, then one migration drops
+      them with their six plpgsql functions and the eight refusal mappings, and the migration
+      history is squashed into one baseline for fresh installs (#21), dropping the pgvector test
+      dependency and the 0018-0024 rehearsal tests. Runs after billing's migration 0027 lands so
+      the baseline is final. Inventory: .agents/tmp/dead-code/report.md (D2, D4).
 
 ## From the audit of 2026-11-02 (`.agents/tmp/audit/report.md`)
 

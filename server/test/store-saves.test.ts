@@ -965,7 +965,7 @@ test("a conflict or refusal stores a receipt with its outcome and replays it", a
     // A refusal decided against the request replays the same way.
     const oversized = {
       ...rule("Large.", (await store.getTpsReport()).version),
-      rules: ["a", "b", "c"].map((c) => ({
+      rules: [..."abcdefghi"].map((c) => ({
         report: "cover" as const,
         text: c.repeat(30000),
       })),

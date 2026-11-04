@@ -30,50 +30,12 @@ export const triggerRefusals = new Map<
     },
   ],
   [
-    "card_group_conflict",
-    { message: "The instruction card grouping changed.", status: 409 },
-  ],
-  [
-    "card_legacy_conflict",
-    {
-      message:
-        "This memo contains independently edited cards. Use create_memo instead of a legacy memo write.",
-      status: 409,
-    },
-  ],
-  [
     "card_version_is_immutable",
     { message: "Instruction card versions cannot be changed.", status: 409 },
   ],
   [
     "card_identity_is_immutable",
     { message: "Instruction card identity cannot be changed.", status: 409 },
-  ],
-  [
-    "card_legacy_invalid",
-    {
-      message: "Legacy card history must match its original source.",
-      status: 409,
-    },
-  ],
-  [
-    "memo_recovery_invalid",
-    { message: "Recovery must copy an eligible stored version.", status: 422 },
-  ],
-  [
-    "memo_version_conflict",
-    {
-      message: "The memo version conflicts with the current memo.",
-      status: 409,
-    },
-  ],
-  [
-    "memo_version_is_immutable",
-    { message: "Memo versions cannot be changed.", status: 409 },
-  ],
-  [
-    "memo_metadata_is_immutable",
-    { message: "Memo metadata cannot be changed.", status: 409 },
   ],
   [
     "memo_body_limit",
@@ -86,10 +48,6 @@ export const triggerRefusals = new Map<
   [
     "memo_reason_limit",
     { message: "The memo reason exceeds its size limit.", status: 422 },
-  ],
-  [
-    "memo_name_limit",
-    { message: "The memo name exceeds its size limit.", status: 422 },
   ],
   [
     "account_unavailable",

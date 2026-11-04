@@ -21,11 +21,10 @@ const tsvector = customType<{ data: string }>({ dataType: () => "tsvector" });
 
 const createdAt = () =>
   timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
-// Changing this default needs a migration. Triggers read name_bytes (memos) and
-// reason_bytes (memo and card versions); no application code reads them.
+// Changing this default needs a migration. The card version guard also reads
+// reason_bytes; application code reads the other four limits.
 const limits = {
   body_bytes: 131072,
-  name_bytes: 64,
   description_bytes: 500,
   reason_bytes: 500,
   report_body_bytes: 262144,
@@ -160,74 +159,6 @@ export const deletedIdentities = pgTable(
     check("deleted_identities_hash", sql`${t.identityHash} ~ '^[a-f0-9]{64}$'`),
   ],
 );
-export const memos = pgTable(
-  "memos",
-  {
-    userId: text("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    id: text("id")
-      .notNull()
-      .default(sql`gen_random_uuid()::text`),
-    name: text("name").notNull(),
-    // Rendered once above the group's cards in TPS. Set once; see 0016.
-    title: text("title"),
-    createdAt: createdAt(),
-  },
-  (t) => [
-    primaryKey({ columns: [t.userId, t.id] }),
-    unique("memos_user_name").on(t.userId, t.name),
-    check(
-      "memos_slug",
-      sql`${t.name} ~ '^[a-z0-9]+(-[a-z0-9]+)*$' AND ${t.name} !~ '[^a-z0-9-]'`,
-    ),
-    check(
-      "memos_title",
-      sql`${t.title} IS NULL OR (char_length(${t.title}) BETWEEN 1 AND 120 AND position(chr(10) in ${t.title})=0 AND position(chr(13) in ${t.title})=0 AND btrim(${t.title})=${t.title})`,
-    ),
-  ],
-);
-export const memoVersions = pgTable(
-  "memo_versions",
-  {
-    userId: text("user_id").notNull(),
-    memoId: text("memo_id").notNull(),
-    version: integer("version").notNull(),
-    description: text("description").notNull(),
-    body: text("body").notNull(),
-    archived: boolean("archived").notNull().default(false),
-    reason: text("reason").notNull(),
-    actorJson: text("actor_json").notNull(),
-    detailsJson: text("details_json").notNull().default("{}"),
-    payloadBytes: bigint("payload_bytes", { mode: "number" })
-      .notNull()
-      .generatedAlwaysAs(
-        sql`octet_length(description)::bigint + octet_length(body) + octet_length(reason) + octet_length(actor_json) + octet_length(details_json)`,
-      ),
-    createdAt: createdAt(),
-  },
-  (t) => [
-    primaryKey({ columns: [t.userId, t.memoId, t.version] }),
-    foreignKey({
-      name: "memo_versions_memo",
-      columns: [t.userId, t.memoId],
-      foreignColumns: [memos.userId, memos.id],
-    }).onDelete("cascade"),
-    check("memo_versions_positive", sql`${t.version} >= 1`),
-    check(
-      "memo_versions_description",
-      sql`${t.description} <> '' AND position(chr(10) in ${t.description}) = 0 AND position(chr(13) in ${t.description}) = 0`,
-    ),
-    check(
-      "memo_versions_actor_object",
-      sql`jsonb_typeof(${t.actorJson}::jsonb) = 'object'`,
-    ),
-    check(
-      "memo_versions_details_object",
-      sql`jsonb_typeof(${t.detailsJson}::jsonb) = 'object'`,
-    ),
-  ],
-);
 export const usageDaily = pgTable(
   "usage_daily",
   {
@@ -252,7 +183,7 @@ export const saveRequests = pgTable(
     requestId: text("request_id").notNull(),
     inputHash: text("input_hash").notNull(),
     sourceHash: text("source_hash").notNull(),
-    // Written once, with the save's outcome, in the save's transaction (0029).
+    // Written once, with the save's outcome, in the save's transaction.
     result: jsonb("result_json").notNull(),
     createdAt: createdAt(),
     payloadBytes: bigint("payload_bytes", { mode: "number" })
@@ -276,22 +207,25 @@ export const saveRequests = pgTable(
   ],
 );
 
-// Instruction identities and content history are independent from memo grouping.
+// Stable instruction identities and append-only, account-scoped content history.
 export const instructionCards = pgTable(
   "instruction_cards",
   {
-    userId: text("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull(),
     id: text("id").notNull(),
-    // TPS order. Assigned once at insert, in insertion order; see 0016.
+    // TPS order. Assigned once at insert, in insertion order.
     position: bigint("position", { mode: "number" })
       .notNull()
       .default(sql`nextval('instruction_card_position')`),
     createdAt: createdAt(),
   },
   (t) => [
-    primaryKey({ columns: [t.userId, t.id] }),
+    primaryKey({ name: "instruction_cards_pkey", columns: [t.userId, t.id] }),
+    foreignKey({
+      name: "instruction_cards_user_id_fkey",
+      columns: [t.userId],
+      foreignColumns: [users.id],
+    }).onDelete("cascade"),
     unique("instruction_cards_position").on(t.userId, t.position),
     check("card_id_nonempty", sql`${t.id} <> ''`),
   ],
@@ -306,12 +240,11 @@ export const instructionCardVersions = pgTable(
     body: text("body").notNull(),
     archived: boolean("archived").notNull().default(false),
     // Where this version files the rule: one of the five reports or 'cover', the
-    // cover sheet. A move is a new version; see 0020.
+    // cover sheet. A move is a new version.
     report: text("report").notNull(),
     reason: text("reason").notNull(),
     actorJson: text("actor_json").notNull(),
     detailsJson: text("details_json").notNull().default("{}"),
-    legacy: boolean("legacy").notNull().default(false),
     payloadBytes: bigint("payload_bytes", { mode: "number" })
       .notNull()
       .generatedAlwaysAs(
@@ -320,8 +253,12 @@ export const instructionCardVersions = pgTable(
     createdAt: createdAt(),
   },
   (t) => [
-    primaryKey({ columns: [t.userId, t.cardId, t.version] }),
+    primaryKey({
+      name: "instruction_card_versions_pkey",
+      columns: [t.userId, t.cardId, t.version],
+    }),
     foreignKey({
+      name: "instruction_card_versions_user_id_card_id_fkey",
       columns: [t.userId, t.cardId],
       foreignColumns: [instructionCards.userId, instructionCards.id],
     }).onDelete("cascade"),
@@ -344,32 +281,9 @@ export const instructionCardVersions = pgTable(
     ),
   ],
 );
-export const memoCards = pgTable(
-  "memo_cards",
-  {
-    userId: text("user_id").notNull(),
-    cardId: text("card_id").notNull(),
-    memoId: text("memo_id").notNull(),
-    version: integer("version").notNull().default(1),
-  },
-  (t) => [
-    primaryKey({ columns: [t.userId, t.cardId] }),
-    foreignKey({
-      columns: [t.userId, t.cardId],
-      foreignColumns: [instructionCards.userId, instructionCards.id],
-    }).onDelete("cascade"),
-    foreignKey({
-      columns: [t.userId, t.memoId],
-      foreignColumns: [memos.userId, memos.id],
-    }).onDelete("cascade"),
-    index("memo_cards_by_memo").on(t.userId, t.memoId),
-    check("memo_cards_version_check", sql`${t.version} > 0`),
-  ],
-);
-
 // A stable, named kind of sample within one report. Labels are unique per
 // report regardless of case and never change; rows leave only with their
-// account; see 0020.
+// account.
 export const sampleKinds = pgTable(
   "sample_kinds",
   {

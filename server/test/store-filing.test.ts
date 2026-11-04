@@ -1,9 +1,10 @@
 import { cardHeads, cardFingerprint } from "../src/store/cards";
+import type { ReportIntent } from "../src/store/reports";
 import type { SaveMemoInput } from "../src/store/compiled";
 import { expect, test } from "bun:test";
 import { sql } from "drizzle-orm";
 import { localStore } from "./local-store";
-import { fixtureStore, seedUsers } from "./store-fixtures";
+import { fixtureStore, seedRule, seedUsers } from "./store-fixtures";
 import { coverSheet, reportEnvelope } from "../src/store/tools";
 
 test("rules are stored byte for byte, one card each", async () => {
@@ -570,10 +571,7 @@ test("reports print a heading, when line, the newest eight samples and rules; ca
   const local = await localStore();
   try {
     await seedUsers(local.pg, "reports");
-    await local.pg
-      .exec(`INSERT INTO memos(user_id,id,name) VALUES ('reports','w','working');
-      INSERT INTO memo_versions(user_id,memo_id,version,description,body,reason,actor_json) VALUES
-      ('reports','w',1,'One','- No em dashes.','Fixture','{}');`);
+    await seedRule(local.pg, "reports", "w", "- No em dashes.");
     const store = fixtureStore(local.db, "reports", "assistant");
     const save = async (extra: object) =>
       store.saveMemo({
@@ -585,7 +583,7 @@ test("reports print a heading, when line, the newest eight samples and rules; ca
     const create = (text: string, report: string) => ({
       rules: [{ text, report }],
     });
-    // Legacy cards are cover-sheet rules; the cover sheet is the whole text.
+    // Cover-sheet rules print their exact text.
     expect((await store.getTpsReport()).text).toBe("- No em dashes.");
     expect(await save(create("# Email\n\n- Two.", "email"))).toMatchObject({
       status: "failed",
@@ -810,6 +808,12 @@ test("a reused kind_id shares one kind; every sample stays and is served, and a 
     await f.save(sample("One", { new_kind: "Follow-up" }));
     const kind = (await f.report("email")).samples[0]!;
     expect(kind.kind).toBe("Follow-up");
+    await expect(
+      f.local.pg.query(
+        "UPDATE sample_kinds SET label='Other' WHERE user_id='kinds-keep'",
+      ),
+    ).rejects.toThrow("sample_kind_is_immutable");
+
     await expect(
       f.save(sample("Both", { kind_id: kind.kind_id, new_kind: "Follow-up" })),
     ).rejects.toMatchObject({
@@ -1125,5 +1129,73 @@ test("retiring a sample and re-adding its text in one save keeps one active copy
     expect(samples[0]!.id).not.toBe(old!.id);
   } finally {
     await f.local.dispose();
+  }
+});
+
+test("sample labels stay immutable and ranking uses intent, full text and recency within the report", async () => {
+  const local = await localStore();
+  const pg = local.pg;
+  try {
+    await seedUsers(pg, "ranked");
+    await pg.exec(`INSERT INTO sample_kinds(user_id,id,report,label) VALUES ('ranked','k','email','note');
+      INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,created_at)
+        VALUES ('ranked','old','email','k','A fictional budget decline.','Budget numbers attached.','{}','2026-02-01');`);
+    // Only listed labels are stored, and a stored label never changes.
+    await pg.exec(`INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,audience,purpose,register)
+      VALUES ('ranked','new','email','k','A fictional decline.','No, thank you.','{}','client','follow up','plain');`);
+    await expect(
+      pg.exec(`INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,audience)
+        VALUES ('ranked','bad','email','k','A fictional note.','Hello.','{}','investor');`),
+    ).rejects.toThrow("samples_labels");
+    await expect(
+      pg.exec(
+        "UPDATE samples SET retired_at=now(),retire_reason='removed',audience='boss' WHERE id='new'",
+      ),
+    ).rejects.toThrow("sample_is_append_only");
+    // A report read serves eight: label overlap with the intent, then
+    // full-text rank of the situation, then newest. Retired samples and other
+    // reports never compete.
+    const at = (day: number) => `'2026-01-0${day}T00:00:00Z'`;
+    await pg.exec(`INSERT INTO sample_kinds(user_id,id,report,label) VALUES ('ranked','c','chat','note');
+      INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,created_at,audience,purpose) VALUES
+      ('ranked','a','email','k','A fictional note.','See you soon.','{}',${at(1)},'client','thank'),
+      ('ranked','b','email','k','A fictional note.','Budget numbers attached.','{}',${at(2)},'client','thank'),
+      ('ranked','c','email','k','A fictional note.','Budget numbers attached.','{}',${at(3)},'boss','thank'),
+      ('ranked','d','email','k','A fictional note.','No budget this year.','{}',${at(4)},'client','decline'),
+      ('ranked','f','email','k','A fictional note.','Budget.','{}',${at(5)},NULL,NULL),
+      ('ranked','h','email','k','A fictional note.','Hello.','{}',${at(7)},NULL,NULL),
+      ('ranked','g','email','k','A fictional note.','Lunch?','{}',${at(8)},'other','other'),
+      ('ranked','e','email','k','A fictional note.','We moved house.','{}',${at(9)},'friend','announce'),
+      ('ranked','x','chat','c','A fictional note.','Budget numbers attached.','{}',${at(9)},'client','thank');
+      INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,created_at,audience,purpose,retired_at,retire_reason) VALUES
+      ('ranked','r','email','k','A fictional note.','Budget numbers attached.','{}',${at(6)},'client','thank',now(),'removed');`);
+    const store = fixtureStore(local.db, "ranked", "assistant");
+    const served = async (intent?: ReportIntent) => {
+      const documents = await store.readDocuments(intent);
+      const email = documents.reports.find((r) => r.id === "email")!;
+      return {
+        version: documents.version,
+        ids: email.samples.map((s) => s.id),
+      };
+    };
+    const intent = {
+      report: "email",
+      situation: "budget numbers for the client",
+      audience: "client",
+      purpose: "thank",
+    } as const;
+    const ranked = await served(intent);
+    expect(ranked.ids).toEqual(["b", "a", "c", "d", "new", "old", "f", "e"]);
+    // Without labels, full-text rank then recency decide: two matching words
+    // outrank one, and equal ranks go newest first.
+    expect(
+      (await served({ report: "email", situation: intent.situation })).ids,
+    ).toEqual(["old", "c", "b", "f", "d", "new", "e", "g"]);
+    // Without an intent, the newest eight; the version is the same either way.
+    const newest = await served();
+    expect(newest.ids).toEqual(["new", "old", "e", "g", "h", "f", "d", "c"]);
+    expect(newest.version).toBe(ranked.version);
+  } finally {
+    await local.dispose();
   }
 });

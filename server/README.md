@@ -10,7 +10,7 @@ history and request receipts; Neon Auth handles sign-in and authorization.
 ## Prerequisites
 
 - Bun, using the version pinned in the repository's root `package.json`, and Node 26 LTS.
-- A Neon project with Auth and its OAuth provider plugin enabled. Create a Postgres database named `milton`. The migration command requires the `neondb_owner` role; the app and MCP connect as a login role in `milton_runtime` (0024), never the owner. Database connections require TLS.
+- A Neon project with Auth and its OAuth provider plugin enabled. Create a Postgres database named `milton`. The migration command requires the `neondb_owner` role; the app and MCP connect as a login role in `milton_runtime`, never the owner. Database connections require TLS.
 - A Google OAuth app, a GitHub OAuth app, or both. Configure their credentials in Neon Auth for your branch.
 - A Google Cloud project for Cloud Run, Artifact Registry, Secret Manager and an HTTPS load balancer.
 - An HTTPS origin for the browser app and an HTTPS URL ending in `/mcp` for assistants. They can share one hostname. The public service uses `app.meetmilton.com` and `mcp.meetmilton.com`; use your own addresses for your installation.
@@ -76,7 +76,7 @@ Set these in the runtime's platform configuration or dotenvx payload before depl
 | `MCP_RESOURCE`            | The exact public MCP resource URL, ending in `/mcp`. Tokens must include this resource in their audience.                                                                                                                                                                                                                                                      |
 | `NEON_AUTH_BASE_URL`      | The exact branch Auth URL copied from Neon, including its database and Auth path, without a trailing slash. It is also the expected token issuer.                                                                                                                                                                                                              |
 | `NEON_AUTH_COOKIE_SECRET` | A fresh random server-only secret of at least 32 characters for browser session cookies.                                                                                                                                                                                                                                                                       |
-| `DATABASE_URL`            | The TLS connection string for the `milton` database. Services use the runtime role's connection (0024); migrations use the owner's.                                                                                                                                                                                                                            |
+| `DATABASE_URL`            | The TLS connection string for the `milton` database. Services use the runtime role's connection; migrations use the owner's.                                                                                                                                                                                                                                   |
 | `MILTON_SUPPORT_EMAIL`    | Optional. The support address the account pages give; `support@meetmilton.com` when unset. The MCP address pages show is `MCP_RESOURCE`.                                                                                                                                                                                                                       |
 | `STRIPE_SECRET_KEY`       | App service only. The restricted Stripe API key for customers, subscriptions, Checkout and the billing portal. All three unset: the billing routes answer 503, sign-in starts no Stripe trial, the gate allows those accounts, and deleting an account with a Stripe customer refuses. Any one set means all three must be valid, or the app fails at startup. |
 | `STRIPE_WEBHOOK_SECRET`   | App service only. The signing secret of the Stripe endpoint for `POST /billing/webhook`.                                                                                                                                                                                                                                                                       |
@@ -108,48 +108,31 @@ bun run db:migrate
 
 This command explicitly reads `.dev.vars`, unless a release sets `MILTON_OWNER_DATABASE_URL` to the owner connection, which it then uses instead. It does not use `.env.local` or an inherited `DATABASE_URL`. It checks the database name and owner role, then applies pending migrations and records them in the Drizzle journal. Rerunning it applies only migrations that have not completed. Run one migration process at a time.
 
-The migrations create the application tables defined in `src/store/schema.ts`.
-Every successful sign-in creates or finds its account; there is no sign-up setting (0025).
+`drizzle/0000_baseline.sql` creates the 14 current tables defined in `src/store/schema.ts`,
+the instruction-position sequence, seven guard functions and triggers, the `milton_runtime`
+role and its grants/default privileges, and the singleton `store_config` seed. Every
+successful sign-in creates or finds its account; a new account reads empty documents.
+Reads assemble cards and samples, take no lock, write nothing and invoke no model.
 
-Migration `0006_compiled_memos.sql` adds the report snapshot (`tps_reports`, dropped by 0031)
-and durable save receipts. It preserves existing memos and their version history,
-including content formerly stored under the legacy `vibes` name, which participates
-as an ordinary internal memo. Reads assemble the cover sheet and reports from cards
-and samples (see 0017 below), take no lock and write nothing; reads never invoke a
-model. Empty accounts read an empty cover sheet and empty reports.
+The baseline requires an empty database. For the one known existing schema through 0033
+(34 journal entries, latest timestamp `1793779058436`), use the owner-only
+`scripts/transition-baseline.sql` once, following [the hosting runbook](deploy/README.md#legacy-schema-cleanup).
+It atomically drops `memos`, `memo_versions`, `memo_cards`, their unused functions and
+triggers, the unused `instruction_card_versions.legacy` flag, and obsolete limits keys.
+Every other card-version field and row, current data and configured limit value stays.
+It replaces the old journal with one baseline entry at `1793815543500`, so the normal
+migrator skips the baseline and applies future migrations normally. A repeat transition
+reports `baseline_transition_already_done`; a different journal refuses with a useful error.
+Older revisions are unsupported. Direct baseline use on a populated old database refuses
+and points to the transition.
 
-There are no old tool aliases or compatibility mode. Apply the
-migration before running this server, and refresh client tool discovery. The
-migration runner and the disposable rehearsal test verify atomic DDL. For an
-uncertain command outcome, inspect the actual schema and migration journal before
-retrying; an interrupted connection does not prove rollback.
-
-Rollback scripts start at 0018. Rollbacks run newest first, and the 0017 rollback
-refused once any sample existed, so the 0004–0017 scripts were removed. Historical
-migrations 0000–0005 remain unchanged; their legacy naming is not the current public API.
-
-### Instruction-card upgrade (0008)
-
-This is a coordinated offline migration, not a rolling mixed-writer upgrade. Disable
-capture/review, stop and drain app/MCP writers and worker leases, then take a database
-backup and counts/hashes of TPS, source history, receipts and gardening records. Apply
-`0008_instruction_cards.sql` through the normal migration runner before starting the
-matching app/MCP/worker code. Verify per-account TPS bytes, revision and source hash
-are unchanged before reopening writes. This work does not itself authorize a live migration.
-
-Each legacy memo, including archived/empty heads, becomes one stable card with the
-same ID and full version history. Its text and timestamps are copied exactly; no
-model call or speculative split occurs. 0008 also added the `memo_cards` membership
-table; since 0017 assembly no longer reads it, and it remains as history only.
-
-This expand phase retains the original memo history and a complete card-history copy.
-Both copies counted toward the retained-history cap until 0030 removed it. Later removal
-of legacy copies requires a separate migration; it is not included here.
-
-Sign-up no longer seeds the empty `vibes` memo, so nothing writes legacy memos. Once
-cards are independently edited, legacy writes/deletion refuse with
-`card_legacy_conflict`; use the current `create_memo` path. No MCP tool or UI reads or
-writes legacy memos.
+Historical migrations, snapshots, rollback scripts and pre-steps are removed. Use the
+normal `bun run db:generate` for later schema changes; add any required guard SQL to the
+generated migration. Migration timestamps must strictly increase. Run one migrator at a
+time. DDL and journal writes commit together; for an uncertain command outcome inspect
+the actual schema and journal before retrying. Take the required pre-migration snapshot;
+there is no reverse SQL that recreates the retired subsystem. This repository cleanup
+has not yet migrated production.
 
 ## Deploy
 
@@ -168,7 +151,7 @@ or report data when changing a runtime release. The old Vercel app/MCP project i
 
 Every successful social sign-in creates or finds a Milton account; there is no admission setting and no account-count cap.
 
-The first sign-in starts with an empty cover sheet, empty reports and no active rules. Existing memo bodies and history are preserved. The browser views the current report; connected assistants submit user-directed changes.
+The first sign-in starts with an empty cover sheet, empty reports and no active rules. Existing instruction bodies and card history are preserved. The browser views the current report; connected assistants submit user-directed changes.
 
 ## Connect an assistant
 
@@ -288,8 +271,7 @@ retires it); a
 save that then changes nothing returns `unchanged` and charges nothing.
 Sample errors fail with `sample_conflict`. A `saved` result carries
 `samples_retired: [{id, reason}]` whenever a sample was retired, and replay returns
-it unchanged. A report read serves eight active samples (see "Sample labels and ranking
-(0033)"), and report reads list each served sample as `{id, kind_id, kind, context,
+it unchanged. A report read serves eight active samples (see "Sample labels and ranking"), and report reads list each served sample as `{id, kind_id, kind, context,
 date}`, plus each label it has, in served order;
 kind labels never appear in report text.
 
@@ -360,7 +342,7 @@ consents and signs out, best effort; the Neon Auth user record is not deleted.
 
 ## Local development and checks
 
-Use a development Neon branch. Put the runtime environment variables in ignored `server/.env.local`, and configure the app and MCP URLs for your chosen loopback origin and port. The app's `DATABASE_URL` logs in as `milton_app`, since `milton_runtime` is a group role that cannot log in; see [the runtime role](deploy/README.md#runtime-role-0024). Enable loopback access in that branch's Neon Auth settings and set its login, consent, and trusted-origin settings consistently. Apply migrations to that database too.
+Use a development Neon branch. Put the runtime environment variables in ignored `server/.env.local`, and configure the app and MCP URLs for your chosen loopback origin and port. The app's `DATABASE_URL` logs in as `milton_app`, since `milton_runtime` is a group role that cannot log in; see [the runtime role](deploy/README.md#runtime-role). Enable loopback access in that branch's Neon Auth settings and set its login, consent, and trusted-origin settings consistently. Apply migrations to that database too.
 
 The local server uses port 3001 unless you override it with `PORT`. Check that the port is unused before starting. From the repository root:
 
@@ -395,20 +377,20 @@ and writes the receipt with its outcome. Exact edits and moves name existing
 cards only through unique anchors; `rules` entries become new cards with
 server-assigned IDs. Omitted cards keep their exact bodies, descriptions and versions.
 The cover sheet and reports are assembled from the final stored active bodies and
-samples (see 0017 below). Bodies are not trimmed, rewritten or truncated, apart from
+samples (see below). Bodies are not trimmed, rewritten or truncated, apart from
 one stored leading `- ` that the printed bullet replaces;
 descriptions are metadata, not an additional instruction source. Card versions,
 samples and the receipt commit together. Stale or conflicting saves cannot
 partially publish.
 
-Internal `instruction_card_versions` are append-only; legacy `memo_versions` are retained. Nothing assembled is
-stored: the version is a fingerprint of the assembled documents (see 0017 below). There is
+Internal `instruction_card_versions` are append-only. Nothing assembled is
+stored: the version is a fingerprint of the assembled documents. There is
 no report content history. Receipts keep input hashes and bounded outcomes, not raw
 submitted text or copies of reports. A receipt is written once, with its
 outcome, and is immutable. A crashed request commits nothing and leaves no receipt.
 
 Saves anchor only in current active cards, never archived versions or a prior snapshot.
-Existing content under the former `vibes` core key is ordinary source. Invalid Unicode
+Invalid Unicode
 in submitted text is rejected before a driver can replace it. The database validates
 identity and size limits. If a report or the full text would exceed its bound, the
 save is refused with `tps_body_limit` and every change it made rolls back; the
@@ -424,10 +406,9 @@ save invokes a model.
 | Request body               | 256 KiB before parsing (`MAX_REQUEST_BYTES` in `src/http.ts`) |
 
 The attempted-call limit is the only daily bound on saves; there is no separate save
-allowance (see "No memo updates (0028)" below). The former 200-a-day
-technical write quota is retired; 0026 dropped its `usage_daily.writes` column.
+allowance.
 Every attempted MCP call still counts, including retries. There are no public archive/restore exemptions or history controls.
-Retained history has no cap (see "No history cap (0030)" below).
+Retained history has no cap.
 
 The website shows the current cover sheet and reports, escapes their text and serves no browser JavaScript.
 It displays one bullet per complete active instruction card, preserving internal
@@ -440,18 +421,14 @@ pages preload the shared Geist and JetBrains Mono fonts; the theme uses
 `/download` returns the unchanged exact report text as `TPS.md`. Old memo/history/recovery
 routes return 404.
 
-## Reports, samples and the cover sheet (0017)
+## Reports, samples and the cover sheet
 
-A report is the unit of the assembled output. 0017 gave each instruction card a
-`report`: one of `email`, `chat`, `post`, `document` or `speech`, or NULL
-for a rule that applies to all writing (0020 moves it onto card versions; see below).
-The migration backfilled it from the group
-title a card was filed under (a title naming a report becomes that report; every
-other card, including archived working-style rules, belongs to the cover sheet) and
-deletes groups that never held a card or a legacy version. Group tables remain as
-history only; assembly no longer reads them.
+A report is the unit of the assembled output. Every instruction-card version has a
+`report`: one of `email`, `chat`, `post`, `document` or `speech`, or `cover`
+for a rule that applies to all writing. Card identities keep their insertion order;
+moving a card appends a version without changing its identity or position.
 
-Approved samples live in `samples`: report, a free-form `kind` label, one `context`
+Approved samples live in `samples`: report, a reference to an immutable sample kind, one `context`
 line, the `body` exactly as submitted, the filing client, and `retired_at`. A guard
 makes the table append-only: the only update sets `retired_at` once, and rows leave
 only with their account. Filing a sample through `create_memo` with the `sample` field
@@ -493,14 +470,14 @@ bullets can read up to two bytes per bare rule over the cap until the next save.
 heading line (`card_heading`). Each `rules` entry names its card's report; since 0020
 a card moves only through an explicit `moves` list.
 
-## Filing moves and sample kinds (0020)
+## Filing moves and sample kinds
 
 A card's report lives on each version (`instruction_card_versions.report`, NOT NULL,
-one of the five reports or `cover`); `instruction_cards.report` is dropped. NULL never
+one of the five reports or `cover`). NULL never
 means the cover sheet. A move appends a version with the same description and body
 (`details.kind` `move`); an edited and moved card gets one version carrying both.
 A move changes the report a rule prints in, so it changes the version. A moved card
-keeps its position. Legacy memo writes append versions in the card's current report.
+keeps its position.
 
 `sample_kinds` holds immutable kinds: `(user_id, id, report, label)`, labels unique
 per report by `lower(label)`, rows removable only with their account. `samples`
@@ -509,20 +486,7 @@ kind's report by construction, and `replaces_id` through `(user_id, replaces_id,
 kind_id)`, so a replacement is always the same kind. Retirement sets `retired_at`,
 `retire_reason` (`replaced`, `removed`, `evicted`; current saves no longer evict, and
 `evicted` stays for rows and receipts written before) and the retiring `request_id`
-once, together; nothing else changes. The migration files every existing version in
-its card's report (NULL becomes `cover`), creates one kind per report and case-folded
-label (spelled as its earliest sample), and marks already retired samples `evicted`
-with no request ID.
-
-The previous runtime evicted by exact `kind`, so "Follow-up" and "follow-up" could
-each hold two active samples. 0020 merges them into one kind that can briefly hold up
-to four. They stay listed until the next sample of that kind, whose save evicts the
-oldest beyond two, which may be samples the person did not touch, and reports them in
-`samples_retired`.
-
-`drizzle/rollback/0020_filing_kinds.sql` is lossy: each card returns to its latest
-version's report, and retirement reasons, retiring request IDs and replacement
-lineage are dropped. Case variants of one label return as that kind's label.
+once, together; nothing else changes.
 
 ### Trial transition groundwork (0012, inactive)
 
@@ -576,14 +540,7 @@ the trial: an account in a trial goes to the Stripe portal, where a card takes e
 `trial_end`. Stripe's retry settings, retention duration, the existing-user transition
 and paid allowances still require selected policies.
 
-Migration 0012 is additive and performs no enrollment/backfill. Rehearse on disposable
-PostgreSQL before any rollout. The rollback parks `trial_accounts` intact and disables
-enforcement; its `_reforward.sql` restores the same rows with enforcement still off.
-Stop trial-aware runtimes before this inverse. Old runtimes do not enforce access
-and are not paid-service rollback candidates; recover forward with compatible code.
-Do not reset clocks, erase notices or infer subscription state during recovery.
-
-### Durable accepted changes (0010)
+### Durable accepted changes
 
 Every successful `create_memo` change writes immutable internal provenance in the same
 transaction as card history. (Records from the removed refinement Apply keep
@@ -594,14 +551,10 @@ or proof of the human's full intent. Legacy missing request evidence is not reco
 No-op and failed saves add no accepted-change record.
 Replay adds no duplicate. New saves record transformation pipeline `exact:v1`.
 
-Records live as long as internal history and are removed with account deletion. Their
-serialized payload bytes counted against the retained-history cap until 0030 removed it.
-Migration 0010 is additive and copies no legacy request text. Its inverse parks evidence,
-foreign keys, immutability guards and byte charges in `milton_rollback`; forward migration
-restores them exactly. Stop writers during schema rollback and keep them stopped until
-forward recovery: an older runtime cannot guarantee provenance for new saves.
+Records live as long as internal history and are removed with account deletion.
+Generated payload byte fields remain, with no lifetime history cap.
 
-### Sample labels and ranking (0033)
+### Sample labels and ranking
 
 A report read serves eight samples per report, chosen for the assistant's intent.
 `get_report` requires `intent: {situation, audience?, purpose?}`: `situation` is one line
@@ -632,123 +585,41 @@ Every active sample's ID now enters the version, and reports serve eight per rep
 rather than two per kind, so a client holding a version from before this release
 conflicts once on its next save, rereads and saves.
 
-Migration 0033 adds three optional labels to `samples`, `audience`, `purpose` and
-`register`, nullable text held to fixed lists by the check `samples_labels`, and `search`,
-a stored generated `tsvector` of context and body, computed once on insert. The
-append-only guard holds the labels like every other stored field. Earlier samples stay
-unlabeled; nothing is backfilled. It is additive, so the migration ships before the code
-that reads it. See [the hosting runbook](deploy/README.md#sample-labels-0033).
-`drizzle/rollback/0033_sample_labels.sql` restores the guard and drops the check and the
-four columns.
+Samples carry three optional labels, `audience`, `purpose` and `register`, nullable text
+held to fixed lists by `samples_labels`, plus `search`, a stored generated `tsvector` of
+context and body. The append-only guard holds labels like every other stored field.
+Unlabeled samples remain unlabeled; no backfill invents labels.
 
-### Limits (0032)
+### Limits and save invariants
 
-Milton charges now, so the metered caps went up: 10,000 attempted MCP calls per account
-per UTC day (was 1,000), rule and sample text up to 128 KiB (was 32 KiB), 1-100 rules and
-up to 500 exact edits, moves and sample removals per save (were 25 and 100), and a 256 KiB
-request bound (was 64 KiB). Migration 0032 widens the three checks the larger saves would
-hit: `samples_body` to 131072 bytes, `accepted_change_shape` to 1,100 affected cards and
-`save_request_result` to 65,536 bytes (a receipt listing up to 500 retired samples). It
-sets the `limits_json` default to the new values and writes `daily_calls` 10000 and
-`body_bytes` 131072 into the stored row; `description_bytes` (500) and
-`report_body_bytes` (262144) stay. An earlier revision runs on the result under its own
-caps. See [the hosting runbook](deploy/README.md#limits-0032).
-`drizzle/rollback/0032_raise_limits.sql` restores the old checks, default and row values,
-and refuses while any sample, accepted change or receipt is past an old cap.
+The byte and attempted-call caps above apply alongside 1-100 rules and up to 500
+exact edits, moves and sample removals per save, with a 256 KiB request bound.
+`samples_body` allows 131072 bytes, `accepted_change_shape` allows 1,100 affected cards,
+and `save_request_result` allows 65,536 bytes. The five stored limits are `body_bytes`,
+`description_bytes`, `reason_bytes`, `report_body_bytes` and `daily_calls`.
+There is no card count, daily save allowance or lifetime history cap.
 
-### Fingerprint versions (0031)
+A save and its outcome receipt commit in one transaction. Every receipt holds an
+outcome and refuses updates; a crash before commit leaves no receipt. Reads assemble
+sources without storing a snapshot, and the fingerprint version fences saves.
 
-The version is the fingerprint of the assembled documents (see "Reports, samples and the
-cover sheet (0017)" above), so the stored snapshot, which no read served, is gone. The
-code stops reading and writing `tps_reports`; migration 0031 drops it with its keys, its
-checks `tps_revision_positive`, `tps_body_limit` and `tps_source_hash`, and the runtime's
-grant. The `tps_body_limit` error code stays for saves over a cap. A connected client
-conflicts once on its first save after the release and rereads. Release the code first;
-see [the hosting runbook](deploy/README.md#fingerprint-versions-0031).
-`drizzle/rollback/0031_fingerprint_versions.sql` recreates the table, which an earlier
-revision needs to read at all, with one row per account at a revision none reached, so the
-earlier revision rebuilds and never reissues an old version: it restores shape with fresh
-revisions, not data.
+### Runtime role
 
-### No history cap (0030)
-
-History rows never shrink short of account deletion, so the 64-MiB lifetime cap
-(`limits_json.history_bytes`) left an account that reached it unable to save, with no way
-to free space. The runtime no longer reads `history_bytes` and no longer maps or logs
-`memo_history_limit`, which now appears only in older receipts and logs. Migration 0030
-drops the byte triggers `memo_versions_bytes`, `instruction_card_versions_bytes` and
-`accepted_changes_bytes` with their functions, makes the save guard refuse receipt
-updates and saves to an inactive account without counting bytes, drops
-`users.retained_bytes` (no code read it) with `users_bytes`, and drops `history_bytes`
-from the `limits_json` default; the stored row keeps it, unread, so an earlier revision
-still runs. Release the code first; see
-[the hosting runbook](deploy/README.md#no-history-cap-0030).
-`drizzle/rollback/0030_no_history_cap.sql` restores the cap, the counter recomputed from
-the rows it counted.
-
-### Saves in one transaction (0029)
-
-Saves are deterministic, so the two-phase save (a claim with a 40-second deadline,
-an apply in a second transaction, `in_progress`, `request_expired` and the recovery
-that completed open claims) is gone: a save and its receipt commit in one
-transaction. The runtime no longer reads or writes `save_requests.completed`,
-`deadline` or `claimed_at`. Migration 0029 deletes the claims earlier revisions left
-open (none of them changed anything), drops those columns with
-`save_request_claim_clock` and the 0014 trigger `save_claim_clock`, drops the
-`result_json` default, adds `save_request_outcome` so every receipt holds an outcome,
-and makes the save guard refuse every UPDATE. `request_expired` appears only in
-older receipts and logs; `in_progress` and `request_unavailable` only in older logs.
-A pre-step, `drizzle/pre/0029_one_transaction.sql`, lets this code save before 0029;
-see [the hosting runbook](deploy/README.md#saves-in-one-transaction-0029).
-`drizzle/rollback/0029_one_transaction.sql` restores the shape, every receipt complete.
-
-### No memo updates (0028)
-
-The memo-update allowance (0014) is gone. Saves are model-free and cost nothing to
-process, so there is no daily save allowance, no held, charged or released state on a
-receipt, no `memo_updates` balance or `memo_update` object on a tool reply, no "Memo
-updates today" field on the signed-in cover sheet and no `scripts/memo-updates.ts`. The
-attempted-call limit (`limits_json.daily_calls`) bounds saves and reads alike. The
-`memo_updates_exhausted` and `memo_updates_pending` refusals came before a claim and
-wrote no receipt, so they appear only in older logs; the retired `model_budget_reached`
-appears only in older receipts. Final MCP events contain only
-known tool/outcome/error values and elapsed time, without client/account identity,
-instruction text or result bodies. The runtime no longer reads or writes the config
-columns `memo_updates_enabled` and `memo_updates_daily_limit` or the receipt columns
-`memo_update_state` and `memo_update_day`, and migration 0028 drops them with their
-checks and index, and the 0014 trigger `save_memo_update_guard`; the save guard now
-keeps a receipt's `claimed_at` immutable. Release the code first; see
-[the hosting runbook](deploy/README.md#no-memo-updates-0028).
-`drizzle/rollback/0028_no_memo_updates.sql` restores the shape, with the allowance off.
-
-### No count limit (0021)
-
-Migration 0021 replaces `milton_card_guard` and `milton_memo_guard` without their count
-checks; card identity stays immutable, writes still need an active account and memo
-names keep their byte cap. `limits_json.memos` stays in the row, unread. Saves stay
-bounded by the tool-call rate limit and the byte caps. Apply 0021 before releasing the code: the previous runtime runs on either guard,
-while the current one without 0021 would hit the old lifetime count as
-`store_unavailable`. `drizzle/rollback/0021_no_card_count.sql` restores both previous
-functions and changes no rows; an account already past the old limit keeps its cards
-and cannot add more until it is back under it.
-
-### Runtime role (0024)
-
-The app and MCP do not connect as the database owner. Migration 0024 creates
+The app and MCP do not connect as the database owner. The baseline creates
 `milton_runtime`, a NOLOGIN group role, and the services connect as `milton_app`, a
 login role created with SQL whose only membership is `milton_runtime` (membership
 inherits, so no `SET ROLE`). Each table gets only the statements the runtime, or a
 trigger it fires, runs on it:
 
-| Grant                          | Tables and why                                                                                                                                                                                    |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| SELECT, INSERT, UPDATE, DELETE | `users`: sign-up, the account lock and account deletion (its cascades run as the table owner)                                                                                                     |
-| SELECT, INSERT, DELETE         | `assistant_disconnects`: disconnect, the refusal check, reconnect on Allow                                                                                                                        |
-| SELECT, INSERT, UPDATE         | `save_requests` (receipts; the save guard refuses every update), `samples` (retirement), `trial_accounts` (notice stage), `usage_daily` (daily call upsert)                                       |
-| SELECT, INSERT                 | `identities`, `deleted_identities`, `instruction_cards`, `instruction_card_versions`, `sample_kinds`, and the legacy `memos`, `memo_versions` and `memo_cards` (the signup seed and its triggers) |
-| INSERT                         | `accepted_changes`: provenance, written once per save and never read by the runtime                                                                                                               |
-| SELECT                         | `store_config`: settings are read without a lock; 0028 revoked the `UPDATE (singleton)` the retired sign-in `FOR UPDATE` lock needed, so no setting can be changed                                |
-| USAGE                          | the `instruction_card_position` sequence (new card positions) and schema `public`; CONNECT on the database                                                                                        |
+| Grant                          | Tables and why                                                                                                                                                                              |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| SELECT, INSERT, UPDATE, DELETE | `users`: sign-up, the account lock and account deletion (its cascades run as the table owner)                                                                                               |
+| SELECT, INSERT, DELETE         | `assistant_disconnects`: disconnect, the refusal check, reconnect on Allow                                                                                                                  |
+| SELECT, INSERT, UPDATE         | `save_requests` (receipts; the save guard refuses every update), `samples` (retirement), `trial_accounts` (notice stage), `usage_daily` (daily call upsert), `stripe_events` (event ledger) |
+| SELECT, INSERT                 | `identities`, `deleted_identities`, `instruction_cards`, `instruction_card_versions`, `sample_kinds`                                                                                        |
+| INSERT                         | `accepted_changes`: provenance, written once per save and never read by the runtime                                                                                                         |
+| SELECT                         | `store_config`: settings are read without a lock; no setting can be changed                                                                                                                 |
+| USAGE                          | the `instruction_card_position` sequence (new card positions) and schema `public`; CONNECT on the database                                                                                  |
 
 The role owns nothing, so it cannot alter, drop or truncate a table, disable a
 trigger, set `session_replication_role`, create objects in `public` or read the
@@ -766,8 +637,7 @@ grants).
 
 Migrations keep the owner connection and refuse any other role; changing
 `store_config` settings is an owner operation.
-`drizzle/rollback/0024_runtime_role.sql` revokes every grant and drops the group role;
-it refuses while a login role is still a member. See
-[the hosting runbook](deploy/README.md#runtime-role-0024) for creating `milton_app`
+See
+[the hosting runbook](deploy/README.md#runtime-role) for creating `milton_app`
 (with SQL, because Neon puts console and API roles in `neon_superuser`) and switching
 the services' secrets.

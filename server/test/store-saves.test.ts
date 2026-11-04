@@ -6,7 +6,12 @@ import { databaseFailure } from "../src/store/database";
 import { StoreError } from "../src/store/errors";
 import { BASELINE_NOTE } from "../src/store/reports";
 import { localStore } from "./local-store";
-import { fixtureStore, insideTransactions, seedUsers } from "./store-fixtures";
+import {
+  fixtureStore,
+  insideTransactions,
+  seedRule,
+  seedUsers,
+} from "./store-fixtures";
 
 test("compiled saves publish memos and TPS together and charge once with durable replay", async () => {
   const local = await localStore();
@@ -58,6 +63,13 @@ test("compiled saves publish memos and TPS together and charge once with durable
     await expect(
       store.saveMemo({ ...input, text: "Changed" }),
     ).rejects.toMatchObject({ code: "request_id_reused" });
+    await expect(
+      local.pg.query(
+        `INSERT INTO save_requests(user_id,request_id,input_hash,source_hash,result_json)
+      VALUES ('compiled-a',$1,repeat('a',64),repeat('b',64),'{}')`,
+        [crypto.randomUUID()],
+      ),
+    ).rejects.toThrow("save_request_outcome");
     // A receipt is immutable, so a replay can only return what was saved.
     await expect(
       local.pg.exec(
@@ -88,15 +100,21 @@ test("TPS preserves every active source body verbatim and refreshes only the der
     const companion = "  Keep units explicit: µm.\r\nDo not infer a model.  ";
     // Each rule prints as a bullet ahead of its exact stored bytes.
     const exact = "- " + companion + "\n\n- " + source;
-    await local.db.query(sql`INSERT INTO memos(user_id,id,name) VALUES
-      ('fidelity','z','product-naming'),('fidelity','a','units'),('fidelity','retired','old');`);
-    await local.db
-      .query(sql`INSERT INTO memo_versions(user_id,memo_id,version,description,body,archived,reason,actor_json) VALUES
-      ('fidelity','a',1,'Units',${companion},false,'Fixture','{}'),
-      ('fidelity','z',1,'Product naming',${source},false,'Fixture','{}'),
-      ('fidelity','retired',1,'Old','Archived instructions must stay out.',true,'Fixture','{}')`);
+    await seedRule(local.pg, "fidelity", "a", companion, {
+      description: "Units",
+    });
+    await seedRule(local.pg, "fidelity", "z", source, {
+      description: "Product naming",
+    });
+    await seedRule(
+      local.pg,
+      "fidelity",
+      "retired",
+      "Archived instructions must stay out.",
+      { archived: true },
+    );
     const store = fixtureStore(local.db, "fidelity", "assistant");
-    // Legacy sources assemble on first read, in stored position order.
+    // Sources assemble on every read, in stored position order.
     const initial = await store.getTpsReport();
     expect(initial.text).toBe(exact);
     const same = "Keep exceptions intact.";
@@ -133,13 +151,13 @@ test("TPS preserves every active source body verbatim and refreshes only the der
     const preserved = async () =>
       (
         await local.pg.query<{
-          memos: unknown;
+          cards: unknown;
           versions: unknown;
           receipts: unknown;
           usage: unknown;
         }>(`SELECT
-      (SELECT jsonb_agg(m) FROM memos m WHERE user_id='fidelity') AS memos,
-      (SELECT jsonb_agg(v) FROM memo_versions v WHERE user_id='fidelity') AS versions,
+      (SELECT jsonb_agg(c) FROM instruction_cards c WHERE user_id='fidelity') AS cards,
+      (SELECT jsonb_agg(v) FROM instruction_card_versions v WHERE user_id='fidelity') AS versions,
       (SELECT jsonb_agg(r) FROM save_requests r WHERE user_id='fidelity') AS receipts,
       (SELECT jsonb_agg(d) FROM usage_daily d WHERE user_id='fidelity') AS usage`)
       ).rows;
@@ -150,9 +168,9 @@ test("TPS preserves every active source body verbatim and refreshes only the der
     expect((await store.getTpsReport()).version).toBe(canonical.version);
     expect(await preserved()).toEqual(before);
     await local.pg
-      .exec(`INSERT INTO memo_versions(user_id,memo_id,version,description,body,reason,actor_json)
-      SELECT user_id,memo_id,2,description,body || 'Updated condition.','Fixture','{}'
-      FROM memo_versions WHERE user_id='fidelity' AND memo_id='z' AND version=1`);
+      .exec(`INSERT INTO instruction_card_versions(user_id,card_id,version,description,body,report,reason,actor_json)
+      SELECT user_id,card_id,2,description,body || 'Updated condition.',report,'Fixture','{}'
+      FROM instruction_card_versions WHERE user_id='fidelity' AND card_id='z' AND version=1`);
     const rebuilt = await admin.getTpsReport();
     expect(rebuilt.version).not.toBe(canonical.version);
     expect(rebuilt.text).toBe(exact + "Updated condition.");
@@ -160,9 +178,9 @@ test("TPS preserves every active source body verbatim and refreshes only the der
     // A new card version with the same text keeps the version; a save fenced
     // on a version a source change superseded conflicts.
     await local.pg
-      .exec(`INSERT INTO memo_versions(user_id,memo_id,version,description,body,reason,actor_json)
-      SELECT user_id,memo_id,3,description,body,'Fixture','{}'
-      FROM memo_versions WHERE user_id='fidelity' AND memo_id='z' AND version=2`);
+      .exec(`INSERT INTO instruction_card_versions(user_id,card_id,version,description,body,report,reason,actor_json)
+      SELECT user_id,card_id,3,description,body,report,'Fixture','{}'
+      FROM instruction_card_versions WHERE user_id='fidelity' AND card_id='z' AND version=2`);
     const changed = await admin.getTpsReport();
     expect(changed.version).toBe(rebuilt.version);
     expect((await save(canonical.version)).status).toBe("conflict");
@@ -182,7 +200,7 @@ test("TPS preserves every active source body verbatim and refreshes only the der
     ).toBe("tps_body_limit");
     const boundedAfter = await preserved();
     expect(boundedAfter[0]!.versions).toEqual(boundedBefore[0]!.versions);
-    expect(boundedAfter[0]!.memos).toEqual(boundedBefore[0]!.memos);
+    expect(boundedAfter[0]!.cards).toEqual(boundedBefore[0]!.cards);
     expect(boundedAfter[0]!.usage).toEqual(boundedBefore[0]!.usage);
     await local.pg.exec(
       "UPDATE store_config SET limits_json=limits_json || '{\"report_body_bytes\":262144}'::jsonb",
@@ -334,14 +352,13 @@ test("saves anchor in every active memo, never archived or foreign text, and hav
   const local = await localStore();
   try {
     await seedUsers(local.pg, "collection", "other");
-    await local.pg
-      .exec(`INSERT INTO memos(user_id,id,name) SELECT 'collection','m-'||n,'memo-'||n FROM generate_series(1,52) n;
-      INSERT INTO memo_versions(user_id,memo_id,version,description,body,archived,reason,actor_json)
-        SELECT user_id,id,1,'Scoped instruction','Instruction '||id,id='m-52','Fixture','{}' FROM memos;
-      INSERT INTO memos(user_id,id,name) VALUES ('other','foreign-id','other');
-      INSERT INTO memo_versions(user_id,memo_id,version,description,body,reason,actor_json) VALUES ('other','foreign-id',1,'Other','Never exposed','Fixture','{}');`);
+    for (let n = 1; n <= 52; n++)
+      await seedRule(local.pg, "collection", `m-${n}`, `Instruction m-${n}`, {
+        archived: n === 52,
+      });
+    await seedRule(local.pg, "other", "foreign-id", "Never exposed");
     const store = fixtureStore(local.db, "collection");
-    // Legacy sources without a compiled snapshot assemble on first read.
+    // Every read assembles current sources.
     let base = (await store.getTpsReport()).version;
     const send = (before: string, after = before) =>
       store.saveMemo({
@@ -353,7 +370,7 @@ test("saves anchor in every active memo, never archived or foreign text, and hav
     // The read assembled the sources, so an edit that changes nothing is unchanged.
     expect((await send("Instruction m-51")).status).toBe("unchanged");
     base = (await store.getTpsReport()).version;
-    // Every active memo is in the snapshot; archived and foreign text is not.
+    // Every active rule is served; archived and foreign text is excluded.
     for (const anchor of ["Instruction m-52", "Never exposed"])
       expect((await send(anchor, "Changed")).error).toBe("edit_conflict");
     expect((await store.getTpsReport()).version).toBe(base);
@@ -380,10 +397,10 @@ test("targeted saves preserve omitted memos and reject invalid changes atomicall
   const local = await localStore();
   try {
     await seedUsers(local.pg, "targeted");
-    await local.pg
-      .exec(`INSERT INTO memos(user_id,id,name) VALUES ('targeted','a','a'),('targeted','b','b'),('targeted','c','c');
-      INSERT INTO memo_versions(user_id,memo_id,version,description,body,reason,actor_json)
-        SELECT user_id,id,1,'Instruction '||id,'Preserve '||id||' exactly.','Fixture','{}' FROM memos;`);
+    for (const id of ["a", "b", "c"])
+      await seedRule(local.pg, "targeted", id, `Preserve ${id} exactly.`, {
+        description: `Instruction ${id}`,
+      });
     const store = fixtureStore(local.db, "targeted");
     const initial = await store.getTpsReport();
     const request = {
@@ -483,14 +500,10 @@ test("exact caller edits preserve conditions and scope without a model, with ato
       },
       { id: "c", body: "Preserve literal α and 😀 exactly." },
     ];
-    for (const m of sources) {
-      await local.db.query(
-        sql`INSERT INTO memos(user_id,id,name) VALUES ('exact',${m.id},${m.id})`,
-      );
-      await local.db.query(
-        sql`INSERT INTO memo_versions(user_id,memo_id,version,description,body,reason,actor_json) VALUES ('exact',${m.id},1,${"Instruction " + m.id},${m.body},'Fixture','{}')`,
-      );
-    }
+    for (const m of sources)
+      await seedRule(local.pg, "exact", m.id, m.body, {
+        description: "Instruction " + m.id,
+      });
     const store = fixtureStore(local.db, "exact");
     const initial = await store.getTpsReport();
     const input = {
@@ -625,39 +638,25 @@ test("exact caller edits preserve conditions and scope without a model, with ato
   }
 });
 
-test("Postgres enforces separate UTF-8 field caps and no memo count", async () => {
+test("Postgres enforces separate UTF-8 field caps and no card count", async () => {
   const local = await localStore();
   try {
     await seedUsers(local.pg, "m_caps");
-    // Memos have no count limit since 0021.
     await local.pg.query(
-      "INSERT INTO memos (user_id,id,name) VALUES ('m_caps','memo',$1)",
-      ["a".repeat(64)],
+      "INSERT INTO instruction_cards(user_id,id) VALUES ('m_caps','card'),('m_caps','second'),('m_caps','third')",
     );
     const append = (
       version: number,
       description: string,
       body: string,
       reason: string,
-      kind = "seed",
     ) =>
       local.pg.query(
-        "INSERT INTO memo_versions (user_id,memo_id,version,description,body,reason,actor_json,details_json) VALUES ('m_caps','memo',$1,$2,$3,$4,'{}',$5)",
-        [version, description, body, reason, JSON.stringify({ kind })],
+        `INSERT INTO instruction_card_versions(user_id,card_id,version,description,body,reason,report,actor_json)
+        VALUES ('m_caps','card',$1,$2,$3,$4,'cover','{}')`,
+        [version, description, body, reason],
       );
     await append(1, "é".repeat(250), "é".repeat(65536), "x".repeat(500));
-    await local.pg.query(
-      "INSERT INTO memos (user_id,id,name) VALUES ('m_caps','vibes','vibes')",
-    );
-    await expect(
-      local.pg.query(
-        "INSERT INTO memos (user_id,id,name) VALUES ('m_caps','too-long',$1)",
-        ["a".repeat(65)],
-      ),
-    ).rejects.toThrow("memo_name_limit");
-    await local.pg.query(
-      "INSERT INTO memos (user_id,id,name) VALUES ('m_caps','second','second')",
-    );
     await expect(append(2, "é".repeat(250) + "x", "", "")).rejects.toThrow(
       "memo_description_limit",
     );
@@ -668,59 +667,84 @@ test("Postgres enforces separate UTF-8 field caps and no memo count", async () =
       "memo_reason_limit",
     );
     expect(
-      (await local.pg.query("SELECT count(*)::integer AS n FROM memo_versions"))
-        .rows,
+      (
+        await local.pg.query(
+          "SELECT count(*)::int AS n FROM instruction_card_versions",
+        )
+      ).rows,
     ).toEqual([{ n: 1 }]);
-    await expect(append(2, "ok", "", "", "revert")).rejects.toThrow(
-      "memo_recovery_invalid",
-    );
-    const forgedRecovery = await local.pg
-      .query(
-        `INSERT INTO memo_versions (user_id,memo_id,version,description,body,reason,actor_json,details_json)
-      VALUES ('m_caps','memo',2,'ok','arbitrary recovery','','{"kind":"person"}','{"kind":"revert","source_version":1}')`,
-      )
-      .catch(databaseFailure);
-    expect(forgedRecovery).toMatchObject({
-      code: "memo_recovery_invalid",
-      status: 422,
-    });
+    await append(2, "ok", "", "reason");
+    expect(
+      (
+        await local.pg.query(
+          "SELECT version FROM instruction_card_versions ORDER BY version",
+        )
+      ).rows,
+    ).toEqual([{ version: 1 }, { version: 2 }]);
+    // One row past each old cap, each in its own account.
+    await seedUsers(local.pg, "sample", "change", "receipt");
+    const hex = (c: string) => `repeat('${c}',64)`;
     await local.pg
-      .query(`INSERT INTO memo_versions (user_id,memo_id,version,description,body,archived,reason,actor_json,details_json)
-      SELECT user_id,memo_id,2,description,body,archived,'','{"kind":"person"}','{"kind":"revert","source_version":1}' FROM memo_versions WHERE version=1`);
-    await local.pg.query(
-      "INSERT INTO memos (user_id,id,name) VALUES ('m_caps','third','third')",
-    );
+      .exec(`INSERT INTO sample_kinds(user_id,id,report,label) VALUES ('sample','k','email','long');
+      INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json)
+      VALUES ('sample','s','email','k','A long sample.',repeat('x',131072),'{}');
+      INSERT INTO save_requests(user_id,request_id,input_hash,source_hash,result_json)
+      VALUES ('receipt','${crypto.randomUUID()}',${hex("a")},${hex("c")},jsonb_build_object('status','saved','pad',repeat('x',60000)));`);
+    // A save that changes 101 cards: 100 rules, then 100 edits and one more.
+    const change = fixtureStore(local.db, "change", "assistant");
+    const changeSave = async (
+      extra: Pick<SaveMemoInput, "rules" | "exact_edits">,
+    ) =>
+      change.saveMemo({
+        text: "Fictional change.",
+        request_id: crypto.randomUUID(),
+        expected_version: (await change.getTpsReport()).version,
+        ...extra,
+      });
+    for (let b = 0; b < 4; b++)
+      await changeSave({
+        rules: Array.from({ length: 25 }, (_, i) => ({
+          report: "email",
+          text: `Rule ${b * 25 + i}.`,
+        })),
+      });
+    expect(
+      await changeSave({
+        rules: [{ report: "email", text: "One more." }],
+        exact_edits: Array.from({ length: 100 }, (_, i) => ({
+          before: `Rule ${i}.`,
+          after: `Rule ${i}!`,
+        })),
+      }),
+    ).toMatchObject({ status: "saved" });
   } finally {
     await local.dispose();
   }
-}, 30000);
+});
 
 test("Postgres version conflicts return typed errors", async () => {
   const local = await localStore();
   const userId = "m_00000000-0000-4000-8000-000000000001";
   try {
     await seedUsers(local.pg, userId);
-    await local.db.query(
-      sql`INSERT INTO memos (user_id,id,name) VALUES (${userId},'memo','sample')`,
-    );
-    await local.db
-      .query(sql`INSERT INTO memo_versions (user_id,memo_id,version,description,body,reason,actor_json)
-      VALUES (${userId},'memo',1,'Sample.','hello','seed','{}')`);
+    await seedRule(local.pg, userId, "card", "hello", {
+      description: "Sample.",
+    });
     const conflict = await local.db
       .query(
-        sql`INSERT INTO memo_versions (user_id,memo_id,version,description,body,reason,actor_json)
-      VALUES (${userId},'memo',1,'Sample.','changed','edit','{}')`,
+        sql`INSERT INTO instruction_card_versions (user_id,card_id,version,description,body,reason,report,actor_json)
+      VALUES (${userId},'card',1,'Sample.','changed','edit','cover','{}')`,
       )
       .catch(databaseFailure);
     expect(conflict).toBeInstanceOf(StoreError);
     expect(conflict).toMatchObject({
-      code: "memo_version_conflict",
-      message: "The memo version conflicts with the current memo.",
+      code: "card_version_conflict",
+      message: "The instruction card changed. Read the current report.",
       status: 409,
     });
     expect(
       await local.db.query(
-        sql`SELECT version,body FROM memo_versions WHERE user_id=${userId}`,
+        sql`SELECT version,body FROM instruction_card_versions WHERE user_id=${userId}`,
       ),
     ).toEqual([{ version: 1, body: "hello" }]);
   } finally {
@@ -728,15 +752,20 @@ test("Postgres version conflicts return typed errors", async () => {
   }
 }, 30000);
 
-test("instruction cards edit independently inside a memo, keep write-once grouping, and fence stale changes", async () => {
+test("instruction cards edit independently, keep write-once identity, and fence stale changes", async () => {
   const local = await localStore();
   try {
     await seedUsers(local.pg, "cards");
-    await local.pg
-      .exec(`INSERT INTO memos(user_id,id,name) VALUES ('cards','a','writing'),('cards','b','actions');
-      INSERT INTO memo_versions(user_id,memo_id,version,description,body,reason,actor_json) VALUES
-      ('cards','a',1,'Writing','When comparing products, include units.','Fixture','{}'),
-      ('cards','b',1,'Actions','Ask before sending.','Fixture','{}');`);
+    await seedRule(
+      local.pg,
+      "cards",
+      "a",
+      "When comparing products, include units.",
+      { description: "Writing" },
+    );
+    await seedRule(local.pg, "cards", "b", "Ask before sending.", {
+      description: "Actions",
+    });
     const store = fixtureStore(local.db, "cards", "assistant");
     const before = await store.getTpsReport();
     const versions = (
@@ -744,12 +773,7 @@ test("instruction cards edit independently inside a memo, keep write-once groupi
         "SELECT * FROM instruction_card_versions ORDER BY card_id,version",
       )
     ).rows;
-    // Membership and position are write-once, so the source fingerprint fences TPS.
-    await expect(
-      local.pg.query(
-        "UPDATE memo_cards SET memo_id='a',version=2 WHERE user_id='cards' AND card_id='b'",
-      ),
-    ).rejects.toThrow("card_group_conflict");
+    // Identity and position are write-once.
     await expect(
       local.pg.query(
         "UPDATE instruction_cards SET position=position+10 WHERE user_id='cards'",
@@ -817,9 +841,6 @@ test("instruction cards edit independently inside a memo, keep write-once groupi
         "DELETE FROM instruction_card_versions WHERE card_id='b' AND version=2",
       ),
     ).rejects.toThrow("card_version_is_immutable");
-    await expect(
-      local.pg.exec("DELETE FROM memos WHERE user_id='cards' AND id='b'"),
-    ).rejects.toThrow("card_legacy_conflict");
     const next = await store.saveMemo({
       text: "Add a document rule.",
       rules: [
@@ -832,19 +853,12 @@ test("instruction cards edit independently inside a memo, keep write-once groupi
       request_id: crypto.randomUUID(),
     });
     expect(next.status).toBe("saved");
-    // New cards carry their report; legacy group membership is untouched history.
+    // Every card version carries its report.
     expect((await cardHeads(local.db, "cards")).map((h) => h.report)).toEqual([
       "cover",
       "cover",
       "document",
     ]);
-    expect(
-      (
-        await local.pg.query(
-          "SELECT memo_id FROM memo_cards WHERE user_id='cards' ORDER BY memo_id",
-        )
-      ).rows,
-    ).toEqual([{ memo_id: "a" }, { memo_id: "b" }]);
     await expect(
       local.pg.query(
         "UPDATE instruction_card_versions SET report='email' WHERE user_id='cards' AND report='document'",

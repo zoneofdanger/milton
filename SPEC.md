@@ -42,7 +42,7 @@ request, and nothing retires a sample automatically; every retirement is reporte
 stay out of report text.
 
 Embeddings, advisory card graphs, task-aware retrieval and observation-only gardening
-were built, measured and removed; migration 0018 drops their schema. What they showed
+were built, measured and removed; their schema is absent from the baseline. What they showed
 and what would justify rebuilding any of them is in
 [the research note](docs/research/derived-systems-2026.md).
 
@@ -76,8 +76,9 @@ picks the report and wording, and a free-text correction sent as a new rule leav
 two rules that disagree. Nothing detects that; the instructions require exact_edits
 for every correction.
 
-History belongs to internal instruction cards; legacy memo history is retained. The
-cover sheet and reports keep only a current snapshot and a version. The website shows
+History belongs to internal instruction cards; obsolete memo tables are removed by the
+repository cleanup. The
+cover sheet and reports expose only the current documents and a version. The website shows
 them and downloads TPS.md; it exposes no memo-management or history/recovery UI. There are no legacy tool aliases or
 compatibility rollout paths. See server/README.md for the current contracts,
 configuration, migration and local verification instructions.
@@ -90,13 +91,16 @@ records stay in the database unchanged.
 A read assembles the documents from cards and samples in one statement, takes no
 lock and writes nothing; nothing assembled is stored, so there is no refresh step.
 
-Migration 0008 conservatively carries each complete legacy memo into one card,
-keeping IDs, versions, source order, exact text and all old history. No model splits
-existing instructions. Cards organize and narrow edits; they do not establish semantic correctness.
+Fresh installations use one Drizzle baseline with the current tables, guards and runtime
+grants. An owner-only, atomic one-time transition supports the known 0033 schema; it
+drops the unused memo layer and preserves card identities, every card version and
+all other current data. Other old revisions are refused. Production cleanup remains
+a separate release gate in the hosting runbook. Cards organize and narrow edits;
+they do not establish semantic correctness.
 
 Accepted changes now retain the exact submitted purpose, rules and edits, actor, affected card
-versions and transformation identity atomically with source, history and the report snapshot. These internal
-records follow the account-deletion policy, with no history cap. Missing legacy
+versions and transformation identity atomically with source and history. These internal
+records follow the account-deletion policy, with no history cap. Missing historical
 request evidence remains unavailable.
 
 No sign-up cap anywhere, hosted or self-hosted (Peter, 2026-10-30). Sign-ups are open and
@@ -105,7 +109,7 @@ the only mode; the allow-list and closed modes are gone (Peter, 2026-11-03).
 One shared Postgres database on Neon holds every account, with the user id on every row
 behind a mandatory tenant access layer. The services connect as a role that reads and
 writes rows but owns nothing, so the triggers that guard the data hold against them; only
-migrations run as the owner (0024). Neon's point-in-time history for the whole branch is
+migrations run as the owner. Neon's point-in-time history for the whole branch is
 the backup (the retention is a project setting). Rehearsals run on a throwaway Neon branch
 made from production and deleted afterwards, never on the production branch.
 

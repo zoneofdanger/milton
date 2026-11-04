@@ -1,4 +1,5 @@
 import type { PGlite } from "@electric-sql/pglite";
+import type { ReportId } from "../src/store/reports";
 import { compiledMemos } from "../src/store/compiled";
 import type { StoreDatabase, StoreSession } from "../src/store/database";
 
@@ -33,3 +34,33 @@ export const fixtureStore = (
   userId: string,
   clientId = "fixture",
 ) => compiledMemos(db, userId, { issuer: "fixture", clientId });
+
+// One current rule, with a stable identity and its first immutable version.
+export const seedRule = async (
+  pg: PGlite,
+  userId: string,
+  id: string,
+  body: string,
+  options: {
+    description?: string;
+    report?: ReportId | "cover";
+    archived?: boolean;
+  } = {},
+) => {
+  await pg.query("INSERT INTO instruction_cards(user_id,id) VALUES ($1,$2)", [
+    userId,
+    id,
+  ]);
+  await pg.query(
+    `INSERT INTO instruction_card_versions(user_id,card_id,version,description,body,report,archived,reason,actor_json)
+    VALUES ($1,$2,1,$3,$4,$5,$6,'Fixture','{}')`,
+    [
+      userId,
+      id,
+      options.description ?? "Fictional instruction",
+      body,
+      options.report ?? "cover",
+      options.archived ?? false,
+    ],
+  );
+};

@@ -7,6 +7,7 @@ import {
   backfillExitCode,
   backfillSubscriptions,
 } from "../scripts/backfill-subscriptions";
+import { linkStripeCustomer } from "../src/store/billing";
 import { localStore } from "./local-store";
 
 const appOrigin = "http://localhost:3001";
@@ -174,6 +175,23 @@ test("the gate follows the subscription status: unknown or missing is allowed, p
       current_period_end=clock_timestamp()+interval '29 days'
       WHERE user_id=${userId}`);
   try {
+    // The customer link is stable; later calls cannot replace it.
+    expect(await linkStripeCustomer(local.db, userId, "cus_second")).toBe(
+      "cus_fixture",
+    );
+    for (const refused of [
+      `subscription_status='${"x".repeat(65)}'`,
+      "stripe_customer_id='sub_notACustomer'",
+      "stripe_subscription_id='cus_notASubscription'",
+      "trial_end='infinity'",
+      "current_period_start='infinity'",
+      "current_period_end='infinity'",
+    ])
+      await expect(
+        local.pg.exec(
+          `UPDATE trial_accounts SET ${refused} WHERE user_id='${userId}'`,
+        ),
+      ).rejects.toThrow("check constraint");
     for (const [stripe, expected] of [
       ["trialing", "trial"],
       ["active", "paid"],

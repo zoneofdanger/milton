@@ -52,7 +52,6 @@
       },
       "devDependencies": {
         "@electric-sql/pglite": "0.5.13",
-        "@electric-sql/pglite-pgvector": "0.0.14",
         "@modelcontextprotocol/sdk": "1.32.2",
         "@types/bun": "catalog:",
         "@types/node": "catalog:",
@@ -203,8 +202,6 @@
     "@drizzle-team/brocli": ["@drizzle-team/brocli@0.10.2", "", {}, "sha512-z33Il7l5dKjUgGULTqBsQBQwckHh5AbIuxhdsIxDDiZAzBOrZO6q9ogcWC65kU382AfynTfgNumVcNIjuIua6w=="],
 
     "@electric-sql/pglite": ["@electric-sql/pglite@0.5.13", "", {}, "sha512-4rZuxK1k07w6sSpJzjMri0B9+HuXuC7V9pxVB51pR0T9KPqXg6TD0mdaEwBA9rkcL4jdht4tGDf/wYzAiGhT7g=="],
-
-    "@electric-sql/pglite-pgvector": ["@electric-sql/pglite-pgvector@0.0.14", "", { "peerDependencies": { "@electric-sql/pglite": "0.5.13" } }, "sha512-sJCsaVnuqo18CJyPV32pbVCDlhjV+iFCSlwOW7+kTkzIRJSWkju+LnQ9DlWpRR+S+V5m//LA+w4+Ne2afBQ0wg=="],
 
     "@emmetio/abbreviation": ["@emmetio/abbreviation@2.3.3", "", { "dependencies": { "@emmetio/scanner": "^1.0.4" } }, "sha512-mgv58UrU3rh4YgbE/TzgLQwJ3pFsHHhCLqY20aJq+9comytTXUDNGG/SMtSeMJdkpxgXSXunBGLD8Boka3JyVA=="],
 

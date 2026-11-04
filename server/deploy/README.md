@@ -194,14 +194,9 @@ eight samples ranked by labels, words and recency; the version covers every acti
 on every missing-intent refusal). By a release agent on 2026-11-04; secrets unchanged. Before
 it, simp-893d0ce served both services on journal 33. The commit tree (a `git archive` of
 `c63af7f`) passed `check-types`, `bun test` (114 pass) and `format:check`. A throwaway branch
-from production (`rehearsal-0033-sample-labels`) rehearsed 0033 through `bun run --cwd server
-db:migrate` (journal 33 to 34; only the four `samples` columns, `samples_labels` and
-`milton_sample_guard` changed; 17 tables and 281 rows, every row identical with the new columns
-left out; `unlabeled` 2 of 2 `samples`, `unsearched` 0; a rerun changed nothing), then
-`rollback/0033` with `psql -1 -v ON_ERROR_STOP=1 -f` (schema and every row identical to the
-pre-0033 capture; psql warns that the file's own `BEGIN` and `COMMIT` nest in its `-1`
-transaction, harmlessly), then the hand re-forward the same way (identical to the first
-forward); the branch was deleted. Image
+from production rehearsed 0033 before release, including preservation of existing
+rows and a no-op repeated migration. The historical inverse rehearsal is no longer a
+current recovery procedure. Image
 `sha256:420c469210565844d7b50d492b8faf253724d2a1ab6991a9124bf64ff94336dd` (amd64
 `sha256:c1f2cd7cecc5afaba5ac1f646ad4ac1a51567159c2b175bb8ce42dcdfee3d9ee`; uid 1000, Node
 26.13.0, no env, key, pem or `.dev.vars` files, build bases unchanged; with empty configuration
@@ -240,286 +235,13 @@ session on Peter's go: one fictional follow-up email sample with audience, purpo
 on the email report answered `saved` with a new version, and a `get_report` read with a matching
 intent served it first with its three labels in `samples`.
 
-Rollback. Code rolls back by traffic alone at any time: the simp revisions run on the 0033
-schema (checked above). Shift traffic and, in the same step, set the manifests' images back to
-`sha256:622c2142c54b18ea5ec753ec6e473e97186ecb036d798e60c1fe832ff264fa6e`. Only once traffic is
-off the 0033 code, and only if the schema must go too, stop writers and run
-`server/drizzle/rollback/0033_sample_labels.sql` offline as `neondb_owner` (rehearsed); labels
-saved since 0033 leave the table. The 0033 journal row stays, so re-forwarding means `psql -1 -v
-ON_ERROR_STOP=1 -f server/drizzle/0033_sample_labels.sql`. Never restore the
-`before-0033-sample-labels` snapshot to roll back code.
-
-```sh
-gcloud run services update-traffic milton-mcp --to-revisions=milton-mcp-simp-893d0ce=100 --project=milton-510506 --region=us-east4
-gcloud run services update-traffic milton-app --to-revisions=milton-app-simp-893d0ce=100 --project=milton-510506 --region=us-east4
-```
-
-Release simp-893d0ce: the 0029 pre-step, MCP and app, then migrations 0028 to 0032 in one
-runner pass, from main `893d0ce` (the simplifications: no memo-update allowance, saves in one
-transaction, no history cap, fingerprint versions, raised limits; first sign-ins take no
-`store_config` lock). By a release agent on 2026-11-04, serving until rank-c63af7f; secrets unchanged. Before
-it, bill-fa7a2cb served both services on journal 28 with trials on. The commit tree (a `git archive`
-of `893d0ce`) passed `check-types`, `bun test` (112 pass) and `format:check`. A throwaway branch
-from production (`rehearsal-0028-0032-simplifications`) rehearsed the whole sequence from that
-tree: the pre-step (`pre_step` true; only `milton_claim_clock` changed), the five checks (the
-same values as production below), `bun run --cwd server db:migrate` (journal 28 to 33; only the
-objects the five sections list went or changed; 18 to 17 tables, 281 to 279 rows: the one open
-claim and the one `tps_reports` row; every other row identical with the dropped columns left
-out; a rerun changed nothing), `rollback/0028` on that schema refusing (`retained_bytes` does
-not exist), then `rollback/0032`, `0031`, `0030`, `0029` and `0028` in that order (schema
-identical to the post-pre-step capture; limits back to 1000 and 32768), then the hand re-forward
-of 0028 to 0032, each with `psql -1 -v ON_ERROR_STOP=1 -f` (identical to the first forward, rows
-included); the branch was deleted. The pre-step ran on production at 07:58:20Z to 07:58:21Z as
-`neondb_owner` on the first attempt, the login in `PG*` variables taken from the Neon CLI rather
-than the URL on the `psql` command line; its query then returned true. Image
-`sha256:622c2142c54b18ea5ec753ec6e473e97186ecb036d798e60c1fe832ff264fa6e` (amd64
-`sha256:7df2da95c439f8fdbdd5a9e997b423d5b49e091f4a84583820623dcbe19779c9`; uid 1000, Node
-26.13.0, no env, key, pem or `.dev.vars` files, build bases unchanged; the bundle has no
-`memo_update_state`, `retained_bytes`, `history_bytes`, `tps_reports` or `claimed_at`; with empty
-configuration both services stop at startup). MCP created 07:59:26Z to 07:59:31Z with `gcloud
-run services update milton-mcp --image=<digest> --revision-suffix=simp-893d0ce` (keeps the
-startup CPU boost), pinned with `update-traffic --to-revisions=milton-mcp-simp-893d0ce=100` at
-07:59:39Z (generation 77); the app with `gcloud run services replace` from `app.release.json`
-(the manifest naming the revision) at 07:59:39Z to 07:59:49Z, pinned by name at 07:59:52Z
-(generation 65). Each revision spec differs from its predecessor only in the image (MCP
-`milton-mcp-env:3`, the unmounted leftover `milton-mcp-env:2` volume, `milton-mcp-key:1`; app
-`milton-app-env:3`, `milton-app-key:1`). No log line from either bill revision after its switch;
-40 seconds after the app pin, Neon snapshot `before-0028-0032-simplifications`
-(`snap-frosty-pond-b8lwsw06`, 08:00:36Z). The checks before migrating, as `neondb_owner`: 0028
-`functions` `milton_memo_update_guard`, `views` 0, `runtime_update` `singleton`, `held` 0,
-`enabled` true, `daily_limit` 100; 0029 `pre_step` true, `open` 1, `live_open` 0, `outcomeless`
-0; 0030 `functions` the expected four, `cap` 67108864, `largest` 213963; 0031 `dependents` 0,
-`rows` 1; 0032 `daily_calls` 1000, `body_bytes` 32768. `bun run --cwd server db:migrate` from
-the checkout, the owner URL only in the process environment (from `neonctl connection-string`,
-checked by role, database and host, then unset), applied 0028 to 0032 at 08:01:02Z to 08:01:08Z
-on the first attempt: `PASS`, journal 33, `daily_calls` 10000 and `body_bytes` 131072, the
-production change identical to the rehearsal's, 281 to 279 rows as rehearsed. After it the
-canonical checks matched the baseline, the forms probe printed `PASS`, `/health` answered 200 on
-both, and a fresh headless Claude Code client listed exactly four tools and read
-`get_cover_sheet` (keys `text, version, is_empty, reports`, no `memo_updates`) and `get_report`
-(`email`), both at the same version `c83d91a3…` (it was `5bbb8ddf…` before, as the old form).
-Through MCP as `milton_app`, with Peter's go: two reads in a row returned the same version;
-resending the existing cover rule "Use the Oxford comma." on it answered `unchanged`; the same
-rule on the pre-release version answered `conflict` with the current version; the first request
-replayed with its request ID and input answered the same `unchanged`. Two receipts were stored
-(`unchanged`, `conflict`); card versions, accepted changes, memo versions and samples kept
-their counts, and the cover sheet read the same afterwards. `POST /billing/webhook` with a bad or
-missing signature answered 400 `signature_invalid`. From 07:59:26Z to 08:06:18Z neither service
-logged a 5xx, an ERROR, `unexpected_error`, `store_unavailable`, `permission denied`, `does not
-exist`, `check_violation`, `save_outcome_unknown` or a secret-shaped string (MCP 28 x 200 and
-8 x 401; app 15 x 200, 4 x 400 and 7 x 403, all from the checks), and the only tool calls were
-the checks above. A first sign-in was not observed: no account was created. Instead `a3c05bf`
-(the sign-in inserts its user and identity with `ON CONFLICT DO NOTHING` and, on losing the race,
-deletes its own user and returns the winner's; no `store_config` lock, so 0028's revoke cannot
-refuse it) and its test (a rival committing between lookup and insert leaves one user and one
-trial row) were read; the test passed in the suite above.
-
-Rollback (since rank-c63af7f, reachable only after its rollback above, 0033 included). Code
-before this release fails every read and save on the 0031 schema and cannot save
-on the 0029 schema, so a traffic shift alone breaks the service. Stop writers, run the rollbacks
-offline as `neondb_owner`, newest first: `rollback/0032_raise_limits.sql`,
-`rollback/0031_fingerprint_versions.sql`, `rollback/0030_no_history_cap.sql`,
-`rollback/0029_one_transaction.sql`, then `rollback/0028_no_memo_updates.sql` (rehearsed in this
-order; the 0028 and 0029 files refuse while 0030 is applied). The 0028 rollback brings the
-allowance back off at 100: set `memo_updates_enabled` true and `memo_updates_daily_limit` 100,
-the recorded values, as the owner before shifting traffic. The 0032 rollback restores
-`daily_calls` 1000 and `body_bytes` 32768, the recorded values. Then shift traffic and, in the
-same step, set the manifests' images back to
-`sha256:f90ab52937e360181fe7ed64fb4eda5453b81d37d0c7f095fb3b55b582863db5`. The pre-step stays;
-it is harmless to every revision. The journal rows stay at 33, so re-forwarding means running
-0028 to 0032 by hand in order, each with `psql -1 -v ON_ERROR_STOP=1 -f`. Never restore the
-`before-0028-0032-simplifications` snapshot to roll back code.
-
-```sh
-gcloud run services update-traffic milton-mcp --to-revisions=milton-mcp-bill-fa7a2cb=100 --project=milton-510506 --region=us-east4
-gcloud run services update-traffic milton-app --to-revisions=milton-app-bill3-fa7a2cb=100 --project=milton-510506 --region=us-east4
-```
-
-Release bill-fa7a2cb: migration 0027, MCP and app, the app's Stripe settings, then the
-data statement, the flip and the backfill, from main `fa7a2cb` (the merge of `agent/billing-1`:
-Stripe owns the trial, the gate reads `subscription_status`, billing routes, the webhook ledger
-and the backfill script), serving until simp-893d0ce. On 2026-11-04, by two release agents (snapshot, image, 0027, both
-deploys and their checks), Lead (data statement, flip, backfill) and Peter (the Stripe Dashboard
-gates and the `milton-app-env:3` mint). Before it, dead-d03de23 served both services on journal
-27 with trials off and `trial_accounts` empty. Neon snapshot `before-0027-billing`
-(`snap-restless-cloud-b83a3hem`, 04:47:53Z). The commit tree passed `check-types`, `bun test`
-(109 pass) and `format:check`. Image
-`sha256:f90ab52937e360181fe7ed64fb4eda5453b81d37d0c7f095fb3b55b582863db5` (amd64
-`sha256:cc481ed017f7f605edb549431697f0067b4e3620eb61306a457c3c6f41fe37fc`; uid 1000, Node
-26.13.0, no env, key, pem or `.dev.vars` files, build bases unchanged; with empty configuration
-both services stop at startup). A throwaway branch from production (`rehearsal-0027-billing`)
-rehearsed 0027 through the migration runner (journal 27 to 28; only `stripe_events`, the six
-nullable `trial_accounts` columns, two unique constraints and their indexes, four checks and the
-`milton_runtime` grants were added; 275 rows, every existing table identical; a rerun changed
-nothing), then `rollback/0027` (schema identical to the pre-0027 capture) and a hand re-forward
-(identical to the first forward); the branch was deleted. No scheduler job exists, so nothing was
-paused. The release agent applied 0027 at 04:51:15Z to 04:51:17Z with `bun run --cwd server
-db:migrate` from a checkout of `fa7a2cb` with no `server/.dev.vars`, the owner URL held only in
-the process environment (captured from `neonctl connection-string` for `neondb_owner` on
-`milton`, checked by role, database and host, then unset): `PASS`, journal 28, 18 tables and 275
-rows before and after, the production change identical to the rehearsal, 0 rows marked canceled
-(0 rows started before their user). MCP created 04:52:06Z to 04:52:11Z with `gcloud run services
-update milton-mcp --image=<digest> --revision-suffix=bill-fa7a2cb` (keeps the startup CPU
-boost), pinned with `update-traffic --to-revisions=milton-mcp-bill-fa7a2cb=100` at 04:52:19Z; app
-`milton-app-bill-fa7a2cb` with `gcloud run services replace` from `app.release.json`, pinned by
-name at 04:52:31Z. Each spec differed from dead-d03de23 only in the image (MCP
-`milton-mcp-env:3`, the unmounted leftover `milton-mcp-env:2` volume, `milton-mcp-key:1`; app
-`milton-app-env:2`, `milton-app-key:1`); neither carried a `STRIPE_*` setting. On the new code
-with trials off the canonical checks matched the baseline, the probe printed `PASS`, a fresh
-headless Claude Code client listed four tools, saw instructions of 4,094 characters identical to
-the source and read `get_cover_sheet` with no error or notice (version `5bbb8ddf…` unchanged),
-and `POST /billing/webhook` answered 503 JSON `billing_unavailable`. Peter minted
-`milton-app-env:3` (05:08:25Z) with the step 5 keys; the release agent redeployed the app only as
-`milton-app-bill3-fa7a2cb`, whose spec differs from `milton-app-bill-fa7a2cb` only in the env
-version, Ready 05:10:08Z and pinned at 05:10:17Z; MCP was untouched. On `:3` the canonical
-checks and probe matched, a bad or missing `Stripe-Signature` answered 400 `signature_invalid`
-(the Stripe settings loaded), and a fresh client's cover-sheet read showed no notice. From
-04:52:06Z to 05:15:28Z neither service logged a 5xx or an error other than the release agent's
-own five 503 checks on `:2`. Lead reran the data statement at about 05:16Z (0 rows), Designer
-published the site copy (`022c816`), and Lead set `trials_enabled` true at about 05:19Z. At
-05:24Z Lead ran the backfill from the `fa7a2cb` checkout as in the Backfill recipe (`<env>` 3,
-`<key>` 1, secrets only in the process environment): the dry run, then `--apply` with total 2,
-created 2, failed 0, still NULL 0; a dry rerun skipped 2. Both `trial_accounts` rows are
-`trialing` with `cus_` and `sub_` ids and trial end 2026-12-04. `stripe_events` holds 4 rows (2
-`customer.subscription.created`, 2 `invoice.paid`, 05:24:22Z to 05:24:25Z), and each of Stripe's
-four deliveries got a 200, so the installed webhook secret verifies live deliveries; the ledger
-has no failure column (`id`, `type`, `received_at`, `payload_sha256`). Lead's cover-sheet read
-through MCP at 05:24:41Z returned `read` with no notice. From 05:19:00Z to 05:25:37Z neither
-service logged a 5xx or an error (MCP 1 x 200; app 4 x 200, all Stripe's deliveries), no older
-revision logged a line, and no log line in the window held `sk_`, `rk_`, `whsec_`, `price_1`, a
-Postgres URL, an `encrypted:` value or a secret's name. At 05:26:08Z `/health` answered 200 on
-both and traffic was 100% `milton-mcp-bill-fa7a2cb` (generation 75) and
-`milton-app-bill3-fa7a2cb` (generation 63). Not checked by an agent: Stripe's own list of live
-customers and the Dashboard's delivery view, that no row holds a test id (the `cus_` and `sub_`
-prefixes do not tell modes apart), and Peter opening billing on an account to see the live
-portal. `milton-app-env:3` still carries the retired `MILTON_GEMINI_API_KEY`,
-`MILTON_GEMINI_PROJECT_ID`, `MILTON_MODEL_ACCOUNT_BUDGET_USD` and
-`MILTON_MODEL_GLOBAL_BUDGET_USD`, which no code reads; a later version drops them.
-
-Rollback (since simp-893d0ce, reachable only after its rollbacks above). Trials are on, so there is no traffic rollback: dead-d03de23 and every earlier
-revision gate on the retired clock and refuse paying customers. `milton-app-bill-fa7a2cb` (same
-image, `milton-app-env:2`) is no fallback either: without Stripe settings its webhook answers 503
-and Stripe retries. Recover forward with a new image. To stop new charges and gating, Peter can
-set `UPDATE store_config SET trials_enabled = false WHERE singleton = 1;` as `neondb_owner`,
-which returns everyone to allowed; existing Stripe subscriptions keep running and charging, so
-tell Peter before doing it. Do not run `rollback/0027_stripe_billing.sql`: it refuses once any
-customer or event is recorded. Never restore `before-0027-billing` over rows written since it.
-
-Release dead-d03de23: the 0026 pre-step, MCP and app, then migration 0026, from main
-`d03de23` (dead-code batches A and B: the legacy sign-up seed no longer writes
-`identities.profile_json`, old fonts are no longer served, retired route prefixes return 404,
-and the code stops writing the dead columns). By a release agent on 2026-11-04, each serving until bill-fa7a2cb. Pre-step at
-02:41:14Z as `neondb_owner`, in one statement string on the direct (unpooled) host:
-`SET lock_timeout = '5s'; ALTER TABLE save_requests ALTER COLUMN reserved_micros SET DEFAULT 0;`
-succeeded on the first attempt; the column then read `default=0`, NOT NULL. The commit tree
-passed `check-types`, `bun test` (97 pass) and `format:check`. Image
-`sha256:29489483e08b2175f0da512d4d1d0a3b6c0bace97c601030c866a91efa71aece` (amd64
-`sha256:08259462355c9cc09e13320cef91eec9c0b82728599fa4b618df01d9d1ed3483`; uid 1000, Node
-26.13.0, no env, key or pem files; the bundle has no `profile_json`, `reserved_micros`,
-`templates_revision`, `daily_writes` or `needs_clarification`). MCP created 02:43:06Z to
-02:43:12Z with `gcloud run services update milton-mcp --image=<digest>
---revision-suffix=dead-d03de23` (keeps the startup CPU boost the manifest lacks), pinned with
-`update-traffic --to-revisions=milton-mcp-dead-d03de23=100` at 02:43:40Z; the app with
-`gcloud run services replace` from `app.release.json` (a copy naming the revision), Ready
-02:43:52Z, pinned by name at 02:44:06Z. Each revision spec differs from its predecessor only in
-the image (MCP `milton-mcp-env:3`, the unmounted leftover `milton-mcp-env:2` volume,
-`milton-mcp-key:1`; app `milton-app-env:2`, `milton-app-key:1`); no secret version changed. On
-the new code and the 0025 schema the canonical checks matched the baseline and the forms probe
-printed `PASS`. With both services at 100% and no log line from either open-13f2d93 revision
-after its switch, a throwaway branch from production (`rehearsal-0026-dead-columns`) rehearsed
-0026 through the migration runner (journal 26 to 27; only the six columns, their checks, NOT
-NULLs and column grants, the two indexes and the `limits_json` default went, the save guard was
-replaced and `usage_nonnegative` rewritten; 274 rows, every table identical with the dropped
-columns left out), then `rollback/0026` (schema identical to the pre-0026 capture, including
-`reserved_micros DEFAULT 0`), then the hand re-forward `psql -1 -v ON_ERROR_STOP=1 -f
-server/drizzle/0026_dead_columns.sql` (identical to the first forward). On the branch only, a
-rolled-back transaction inserted a receipt without `reserved_micros`, completed it, was refused
-`save_receipt_is_immutable` on a later change, and deleted it, on both the 0026 and the
-rolled-back shape. The branch was deleted. Then Neon snapshot `before-0026-dead-columns`
-(`snap-quiet-brook-b84mpp38`, 02:46:53Z) and 0026 applied 02:47:04Z to 02:47:08Z as
-`neondb_owner` (journal 26 to 27). The production change matched the rehearsal exactly; 17
-tables and 274 rows before and after, every table identical with the dropped columns left out
-(the stored `limits_json` row is unchanged), triggers, indexes other than the two, table grants
-and roles unchanged, 0 unfinished saves. After the migration the canonical checks matched the
-baseline, the probe printed `PASS`, and a fresh headless Claude Code client listed exactly four
-tools and read `get_cover_sheet` with no error, version `5bbb8ddf…` unchanged, memo updates
-0/100. From 02:43:06Z to 02:50:37Z neither service logged an error, `unexpected_error`, 5xx or a
-missing-column error (MCP 30 x 200 and 8 x 401; app 19 x 200, 8 x 403 from the checks and 6 x
-404 from Stripe's `POST /billing/webhook`, which has returned 404 since 01:48Z, before this
-release); the only tool call was the fresh client's read. No save ran: the save check (resend
-one existing cover rule, expect `unchanged`) waits for Peter's go.
-
-Rollback (since trials went on, unreachable: see bill-fa7a2cb). Since 0026 is applied, open-13f2d93 cannot sign up an account or save (it writes
-`identities.profile_json` and `reserved_micros`). Stop writers, run
-`server/drizzle/rollback/0026_dead_columns.sql` offline as `neondb_owner` (rehearsed; it restores
-shape, not data), then shift traffic and, in the same step, set the manifests' images back to
-`sha256:8f205685dafc34e2a7f3375d0301ac4a4a224c13779db38af29f6d8772bf3b7d`. The 0026 journal row
-stays, so re-forwarding means the hand re-forward above. The dead-d03de23 code runs on either
-schema, so after the rollback script its revisions stay valid. Never restore the
-`before-0026-dead-columns` snapshot to roll back code.
-
-```sh
-gcloud run services update-traffic milton-mcp --to-revisions=milton-mcp-open-13f2d93=100 --project=milton-510506 --region=us-east4
-gcloud run services update-traffic milton-app --to-revisions=milton-app-open-13f2d93=100 --project=milton-510506 --region=us-east4
-```
-
-Release open-13f2d93: MCP and app, then migration 0025, from main `13f2d93` (the merge of
-`agent/open-signup`). Revisions `milton-mcp-open-13f2d93` and `milton-app-open-13f2d93`, switched
-directly at 100% (no users yet) by a release agent on 2026-11-04, each serving until dead-d03de23: MCP created 01:15:24Z to
-01:15:30Z with `gcloud run services update milton-mcp --image=<digest>
---revision-suffix=open-13f2d93` (the live MCP template carries the startup CPU boost, which the
-manifest lacks), then `update-traffic --to-revisions=milton-mcp-open-13f2d93=100` at 01:15:46Z; the
-app with `gcloud run services replace` from `app.release.json` (a copy naming the revision) at
-01:15:54Z, Ready 01:16:01Z, pinned by name with `update-traffic` at 01:16:06Z. Both run image
-`sha256:8f205685dafc34e2a7f3375d0301ac4a4a224c13779db38af29f6d8772bf3b7d` (amd64
-`sha256:6648c10392312cd67ad81573ed1d748db593abfb252522eccaafa9705eb1fa0e`; uid 1000, Node
-26.13.0, no env, key or pem files; build stage `oven/bun:1.4.4`; the bundle has no
-`signup_mode`, `allowed_identities` or `admission_refused`). Each revision spec differs from its
-predecessor only in the image (MCP keeps the startup CPU boost, the mount `milton-mcp-env:3`, the
-unmounted leftover `milton-mcp-env:2` volume and `milton-mcp-key:1`; app `milton-app-env:2`,
-`milton-app-key:1`); no secret version changed. Change: the admission gate is gone; every
-successful sign-in creates or finds its account. Release order: code first, because
-stick-4272d1d reads both dropped columns on a first sign-in. Before the release the commit tree
-passed `check-types`, `bun test` (100 pass) and `format:check`. First, a throwaway branch from
-production (`rehearsal-0025-open-signup-2`) rehearsed 0025 through `migrateStore` (journal 25 to
-26; only the two columns, their two checks and NOT NULLs, and the column grants that went with
-them were gone; 274 rows, every other table and every function, trigger, index and grant
-unchanged), then `rollback/0025` (the schema matched the pre-0025 capture exactly, row `open`),
-then a hand re-forward with `0025_open_signup.sql` (identical to the first forward); the branch
-was deleted. An earlier attempt on a first throwaway branch failed in the helper before
-migrating and was discarded with its branch. On the new code and the 0024 schema the canonical
-checks matched the baseline and `bun scripts/probe-forms.ts` printed `PASS`. Then Neon snapshot
-`before-0025-open-signup` (`snap-shiny-dream-b8j4jq7z`, 01:16:20Z) and 0025 applied at 01:16:32Z
-to 01:16:33Z through `migrateStore` as `neondb_owner` (Drizzle journal 25 to 26). `store_config`
-lost `signup_mode` and `allowed_identities_json` with `config_signup_mode` and
-`config_allowlist_array`; its other fields are unchanged (`memo_updates_enabled` true,
-`memo_updates_daily_limit` 100), 17 tables and 274 rows before and after, the other 16 tables
-kept identical hashes, and functions, triggers, indexes and table grants are unchanged. Before
-the drop the row was `open` and held one allow-list identity, now kept only in the snapshot.
-After the migration the canonical checks again matched the baseline (MCP and app `/health` 200,
-discovery 200, unauthenticated `/mcp` 401 with resource metadata, app `/` and `/login` 200 with
-its CSRF field, signed-out `/assistants`, `/account/delete` and `/download` 403, HTTP 308,
-`run.app` 404), the probe printed `PASS`, and a fresh headless Claude Code client listed exactly
-four tools and read `get_cover_sheet` with no error, version `5bbb8ddf…` unchanged and memo
-updates 0/100. From 01:15:24Z to 01:20:35Z neither service logged an error, `unexpected_error`,
-`does not exist` or 5xx (MCP 21 x 200 and 8 x 401; app 17 x 200 and 8 x 403, all from the
-checks), and the only tool call was the fresh client's `get_cover_sheet` read. No account was
-created and no save ran, so a first sign-in on the new code was not observed in production.
-
-Rollback (since 0026, reachable only after the 0026 rollback above). Since 0025 is applied, stick-4272d1d cannot create an account: a traffic shift alone
-breaks first sign-ins (only a first sign-in reads the dropped columns). Stop writers, run
-`server/drizzle/rollback/0025_open_signup.sql` offline as `neondb_owner` (it re-adds both
-columns, sets the row to `open` with an empty list and restores both checks; rehearsed), then
-shift traffic and, in the same step, set the manifests' images back to
-`sha256:ce6fc19c5fb4ab4007cad1c6aa7f9bc1437f31461a787e2073522f07cabf9e4a`. The
-0025 journal row stays, so re-forwarding means running `0025_open_signup.sql` by hand. The new
-code runs on either schema, so after the rollback script the open-13f2d93 revisions stay valid.
-Never restore the `before-0025-open-signup` snapshot to roll back code.
-
-```sh
-gcloud run services update-traffic milton-mcp --to-revisions=milton-mcp-stick-4272d1d=100 --project=milton-510506 --region=us-east4
-gcloud run services update-traffic milton-app --to-revisions=milton-app-stick-4272d1d=100 --project=milton-510506 --region=us-east4
-```
+The compatible previous runtime revisions are `milton-mcp-simp-893d0ce` and
+`milton-app-simp-893d0ce`, image
+`sha256:622c2142c54b18ea5ec753ec6e473e97186ecb036d798e60c1fe832ff264fa6e`.
+Keep their recorded numeric secret versions. Select a previous runtime only after
+checking that it supports the current schema. Retired schema rollback chains and
+pre-step commands are no longer part of this checkout; recover forward for schema
+changes. The pending cleanup procedure below does not authorize a release.
 
 Roll back only affected services, preserve ingress/IAM, then repeat the canonical
 security checks. If a
@@ -534,13 +256,11 @@ auto-suspends; it contains no production copies. Recreate isolated hosting expli
 for future validation. Do not delete validation or production resources as part of an
 ordinary release.
 
-## Runtime role (0024)
+## Runtime role
 
-Applied 2026-11-03 07:41:10Z (journal 25, snapshot `before-0024-runtime-role`,
-`snap-green-smoke-b8z8gpou`); app and MCP connect as `milton_app` since the role-0851a8c
-release. Migration 0024 creates `milton_runtime`, a NOLOGIN group role with
+The baseline creates `milton_runtime`, a NOLOGIN group role with
 only the statements the runtime runs on each table (DELETE only on `users` and
-`assistant_disconnects`; `store_config` read-only, its lock grant revoked by 0028), USAGE on the
+`assistant_disconnects`; `store_config` read-only), USAGE on the
 `instruction_card_position` sequence and schema `public`, CONNECT on the database, and
 SELECT, INSERT and UPDATE by default on tables later migrations create (see the server
 README for the table list). It owns nothing, so it cannot alter, drop or truncate a
@@ -552,7 +272,7 @@ keeps the `neondb_owner` connection and refuses any other role.
 **Create `milton_app` with SQL, not the console or API.** Neon makes every role created
 in the console, CLI or API a member of `neon_superuser`, which brings
 `pg_read_all_data`, `pg_write_all_data`, CREATEROLE, CREATEDB, BYPASSRLS and REPLICATION
-and so undoes most of what 0024 removes. A role created with SQL has only what is
+and so defeats the runtime role's least privilege. A role created with SQL has only what is
 granted.
 
 **The password touches no file and no command argument.** It is generated into a shell
@@ -566,16 +286,13 @@ verifier. Statement logging on the production project was checked on 2026-11-03:
 even if it fails. `pg_stat_statements` is preloaded with `track_utility` on, so it may
 keep the `CREATE ROLE` text; step 3 checks for it and clears the entry.
 
-Release order: 0024 is additive and the current image runs on either schema, so
-traffic may stay open. Work in a shell that keeps no history (zsh: start it with
-`HISTFILE=/dev/null zsh`) and inside a private temporary directory outside the
-repository (`umask 077; cd "$(mktemp -d)"`).
+For a fresh installation, apply the baseline as the owner before creating the login.
+Existing services already use `milton_app`; the legacy cleanup changes no credentials.
+Work in a shell that keeps no history (zsh: start it with `HISTFILE=/dev/null zsh`)
+and inside a private temporary directory outside the repository (`umask 077`).
 
-1. Rehearse steps 2 to 5 on a throwaway Neon branch made from production, with that
-   branch's owner connection and a throwaway password, then delete the branch. On the
-   branch, note whether `pg_stat_statements` shows the password in step 3.
-2. Take a Neon snapshot, then apply 0024 with the normal runner (`bun run db:migrate`,
-   owner connection in `server/.dev.vars`). It changes no table or row.
+1. Rehearse the role and payload setup on a fictional disposable installation first.
+2. Confirm the current baseline and `milton_runtime` grants with the owner connection.
 3. Create `milton_app`. Export the owner connection as `PGHOST` (the host the service
    payloads use), `PGUSER=neondb_owner`, `PGDATABASE=milton`, `PGSSLMODE=require` and
    `PGPASSWORD` (read with `read -rs PGPASSWORD`), then:
@@ -614,11 +331,11 @@ repository (`umask 077; cd "$(mktemp -d)"`).
    already hold the owner's rights, and go on.
 
 4. Mint the next payload version for each service from the encrypted version it mounted
-   then (`milton-app-env:1`, `milton-mcp-env:2`). For the app (repeat for MCP with its
+   then (`milton-app-env:3`, `milton-mcp-env:3`). For the app (repeat for MCP with its
    own secrets and key):
 
    ```sh
-   gcloud secrets versions access 1 --secret=milton-app-env --project=milton-510506 > app-current.env
+   gcloud secrets versions access 3 --secret=milton-app-env --project=milton-510506 > app-current.env
    export DOTENV_PRIVATE_KEY="$(gcloud secrets versions access 1 --secret=milton-app-key --project=milton-510506)"
    dotenvx decrypt -f app-current.env --stdout \
      | awk '/^DATABASE_URL=/ { sub(/:\/\/[^@]*@/, "://milton_app:" ENVIRON["MILTON_APP_PASSWORD"] "@") } { print }' \
@@ -644,7 +361,7 @@ repository (`umask 077; cd "$(mktemp -d)"`).
      ```
 
      It must print `ok`. It runs one HTTP query and one WebSocket transaction that
-     locks `store_config` as a sign-in does. It passes only as `milton_app`, a plain
+     reads `store_config` as requests do. It passes only as `milton_app`, a plain
      member of `milton_runtime`, and prints only `ok` or `fail`; a driver failure adds
      the usual one-line error log (class and code, never the URL) on stderr.
 
@@ -682,136 +399,12 @@ the owner connection kept for migrations, and disable both old versions
 After that, moving a service back to the owner connection means minting a fresh owner
 payload first.
 
-## Open sign-ups (0025)
+## Stripe billing
 
-Applied 2026-11-04 01:16:32Z (journal 26, snapshot `before-0025-open-signup`,
-`snap-shiny-dream-b8j4jq7z`), after the open-13f2d93 code served MCP and app (see the release
-records).
-
-Migration 0025 drops `store_config.signup_mode` and `allowed_identities_json` with their
-checks: every successful sign-in creates or finds its account (see the server README).
-Every revision before this release locks and reads both columns on a first sign-in; this
-release reads neither and runs on either schema. Release order: ship MCP and app from the
-same image, take a snapshot, then apply 0025.
-
-**Rollback boundary.** Before 0025 is applied, code rolls back by traffic alone. After it,
-no earlier revision can create an account: first run
-`server/drizzle/rollback/0025_open_signup.sql` offline with writers stopped, then shift
-traffic. The rollback re-adds both columns (defaults `'closed'`, `[]`), sets the row to
-`open`, and restores both checks; the 0025 journal row stays, so re-forwarding means
-running `0025_open_signup.sql` by hand.
-
-## Dead columns (0026)
-
-Applied 2026-11-04 02:47:04Z (journal 27, snapshot `before-0026-dead-columns`,
-`snap-quiet-brook-b84mpp38`), after the pre-step (02:41:14Z) and after the dead-d03de23 code
-served MCP and app (see the release records).
-
-Migration 0026 drops columns nothing reads: `users.profile_json` and `templates_revision`,
-`identities.profile_json`, `usage_daily.writes`, `store_config.updated_at` and
-`save_requests.reserved_micros`, with their checks; the indexes `save_requests_by_day` and
-`save_requests_by_account_day`; and the keys `memos`, `daily_writes`, `request_bytes` and
-`page_size` from the `limits_json` default (the stored row keeps them, unread). It replaces
-the save guard without `reserved_micros`. The runtime role needs no grant change: a dropped
-column takes its privileges with it. Every revision before this release writes
-`identities.profile_json` on a first sign-in and `reserved_micros` on every save claim;
-this release writes neither.
-
-Release order:
-
-1. As the owner, give `reserved_micros` a default so this release can claim before 0026,
-   with a lock timeout so a stuck transaction cannot stall every save:
-   `SET lock_timeout = '5s'; ALTER TABLE save_requests ALTER COLUMN reserved_micros SET DEFAULT 0;`
-   Retry on a timeout. The running revision names the column and is unaffected; 0026 drops
-   the column and its default.
-2. Ship MCP and app from the same image.
-3. Only once both services are fully on the new revision (traffic at 100% and the old
-   revision idle), take a Neon snapshot, then apply 0026 with the normal runner.
-
-**Rollback boundary.** Before 0026 is applied, code rolls back by traffic alone. After it,
-an earlier revision cannot sign up an account or save: first run
-`server/drizzle/rollback/0026_dead_columns.sql` offline with writers stopped, then shift
-traffic. The rollback re-adds the columns at their defaults (`reserved_micros` keeps
-`DEFAULT 0`, so either revision saves), their checks, both indexes (built over current
-rows), the previous `limits_json` default and the 0006 save guard; it restores shape, not
-data (`templates_revision` comes back 0). The 0026 journal row stays, so re-forwarding
-means running `0026_dead_columns.sql` by hand, as one transaction that stops on the first
-error: `psql -1 -v ON_ERROR_STOP=1 -f server/drizzle/0026_dead_columns.sql`.
-
-## Stripe billing (0027)
-
-Applied 2026-11-04 04:51:15Z (journal 28, snapshot `before-0027-billing`,
-`snap-restless-cloud-b83a3hem`); trials on since about 05:19Z (see the release records).
-
-Migration 0027 adds the Stripe webhook ledger and the subscription columns on
-`trial_accounts`, and marks returning deleted identities canceled. Stripe owns the trial; the
-gate reads `subscription_status`.
-
-**Release order.** Dead columns (0026) is already released, so only 0027 is pending. Peter runs the
-Stripe Dashboard steps and mints secret versions. A release agent takes the snapshot, applies
-0027 and ships the images. The owner connection and `DOTENV_PRIVATE_KEY` live only in a process
-environment, never on a command line, in a file or in a log. Run these in order:
-
-1. **Peter, in the Stripe Dashboard.** Roll both webhook signing secrets, test and live, expiring
-   the old ones immediately, and create the live restricted key (Write on Customers, Subscriptions,
-   Checkout Sessions and Customer portal). Install only a rolled secret, never one that has
-   appeared in a transcript.
-2. **Peter, in the Stripe Dashboard, live mode.** Confirm the settings below on the day: failed
-   payments cancel the subscription, and the three customer emails are on.
-3. **Release agent.** Take a Neon snapshot, then apply 0027 from an owner URL held in the
-   environment and confirm the journal, as below. This code reads the new columns on every gated read, so on the
-   older schema every assistant read fails with a 503.
-4. **Release agent.** Ship MCP and app from the same image. Both must move: an older MCP revision
-   keeps gating on the retired clock.
-5. **Peter, then the release agent.** Peter mints the next numeric version of `milton-app-env`, as in
-   the mint steps of [Runtime role (0024)](#runtime-role-0024), with these keys and no others:
-   `APP_ORIGIN`, `MCP_RESOURCE`, `NEON_AUTH_BASE_URL`, `NEON_AUTH_COOKIE_SECRET`, `DATABASE_URL`,
-   `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` and `STRIPE_PRICE_ID`, plus `MILTON_SUPPORT_EMAIL` if
-   it is set. Drop the unread `MILTON_GARDENING_ENABLED` and `MILTON_DERIVATIONS_ENABLED`. dotenvx's
-   own `DOTENV_PUBLIC_KEY` stays. The Stripe values are the live key from step 1, the rolled live
-   secret and the live price. `grep -E '^[A-Z_]+=' <file> | cut -d= -f1 | sort` lists the names with
-   no values. The release agent then redeploys the app only, pinned to that version, and
-   confirms it starts: all three `STRIPE_*` or none, since a partial or malformed set stops it. The
-   MCP service gets no Stripe setting. (Release bill-fa7a2cb's `milton-app-env:3` also kept the
-   retired `MILTON_GEMINI_*` and `MILTON_MODEL_*` keys, which no code reads; a later version
-   drops them.)
-6. **Peter, with the owner connection.** Rerun the data statement below, before the flip: after it, a
-   returning identity's row with no status could start a second trial at sign-in.
-7. **Peter, with the owner connection.** Once the site and privacy copy are published, flip trials
-   on. `milton_runtime` cannot change this setting:
-
-   ```sql
-   UPDATE store_config SET trials_enabled = true WHERE singleton = 1;
-   ```
-
-8. **Peter.** Run the backfill below: the dry run, read its counts, then `--apply`.
-
-Run the SQL in steps 3, 6 and 7 in `psql` as `neondb_owner`, with the login in the environment and
-never a URL on the command line, as in [Runtime role (0024)](#runtime-role-0024).
-
-Before the first natural trial end, 30 days after step 7, run a test clock with the same
-subscription params: the test-mode run forced every trial end.
-
-To apply 0027 in step 3, from a checkout of the released commit that has no `server/.dev.vars`,
-the release agent puts the owner URL straight into the process environment from the Neon CLI,
-checks its role, database and host without printing it, then migrates:
-
-```sh
-export MILTON_OWNER_DATABASE_URL="$(bunx neonctl@8.18.0 connection-string br-muddy-mode-b88xfprl --project-id gentle-flower-39594008 --database-name milton --role-name neondb_owner)"
-bun run --cwd server db:migrate
-unset MILTON_OWNER_DATABASE_URL
-```
-
-A URL pasted by hand works the same way through `read -rs MILTON_OWNER_DATABASE_URL` and `export`.
-
-It refuses any database but `milton` and any role but `neondb_owner`, and prints no URL, so its PASS
-does not say which branch it ran on. Confirm the target: `SELECT count(*) FROM
-drizzle.__drizzle_migrations;` must answer 28. If the command hangs, suspect the connection.
-
-**Rollback boundary.** Before trials are on, code rolls back by traffic alone. Once trials are
-on there is no traffic rollback to a pre-billing image: it gates on the retired clock and
-refuses paying customers. Recover forward. `server/drizzle/rollback/0027_stripe_billing.sql`
-refuses while any customer id or event is recorded, and its header says what else it loses.
+Trials and billing are live. No billing migration or trial flip is pending in this cleanup.
+Keep the app's current encrypted payload and numeric secret references; the MCP service
+gets no Stripe setting. Owner changes to `store_config` and subscription backfills are
+separate operations and need their own authorization.
 
 **Stripe mode.** The live key, live webhook secret and live price go in before `trials_enabled`
 is flipped. Test mode runs on a disposable database only, never on production rows: a test id
@@ -844,15 +437,7 @@ all three are on before `trials_enabled` is flipped:
 
 Stripe sends no trial reminders in a sandbox, so a test-mode run cannot confirm the first.
 
-**Data statement.** An older image still serving after 0027 can write a returning deleted
-identity's row with no status. Once the new image has all traffic, before the flip, rerun 0027's
-statement. It only touches rows with no status, so it never changes one Stripe has answered for:
-
-    UPDATE trial_accounts t SET subscription_status = 'canceled'
-    FROM users u WHERE u.id = t.user_id AND t.started_at < u.created_at
-    AND t.subscription_status IS NULL;
-
-**Backfill.** Step 8 gives every existing account its trial. It runs from a checkout of the released
+**Backfill.** The subscription backfill gives existing accounts their trial. It runs from a checkout of the released
 commit, after `bun install --frozen-lockfile`. The runtime image cannot run it: it is Node with one
 bundled file, no `bun` and no `server/scripts`. Set `MILTON_ENCRYPTED_ENV_FILE` to the app's
 encrypted payload and `DOTENV_PRIVATE_KEY` to its key, at the numeric versions the app mounts
@@ -880,400 +465,66 @@ rm -rf "$dir"
 It prints only counts (total, created, skipped, failed, still NULL), at about 5 accounts a second,
 and refuses without `trials_enabled` and a live key. `--allow-test-key` is for disposable
 databases only. With `--apply` it exits nonzero if any account still has no status; rerun it, since
-rows with a status are skipped. It also applies the data statement's rule, so a returning deleted
-identity's row is canceled and counted as skipped, but the rerun above still comes first. A row left at NULL is free until a browser sign-in: an approval
+rows with a status are skipped. A returning deleted
+identity's row is canceled and counted as skipped. A row left at NULL is free until a browser sign-in: an approval
 Neon already holds refreshes without any Milton page. A customer it creates has no email
 until its person first opens billing, when Milton copies their sign-in email to Stripe. Everyone
 who can add a card or pay passes through there, so nobody is charged without one unless the copy
 fails or sign-in supplied no address; until then Stripe sends that person nothing, including its
 trial-ending reminder.
 
-## No memo updates (0028)
+## Legacy schema cleanup
 
-Applied 2026-11-04 08:01:02Z with 0029 to 0032 in one runner pass (journal 33, snapshot
-`before-0028-0032-simplifications`, `snap-frosty-pond-b8lwsw06`), after the simp-893d0ce code
-served MCP and app (see the release records).
+**Pending; not applied to production.** The services and pins recorded above are still the
+current release, on the 34-entry 0033 journal (latest timestamp `1793779058436`). This
+checkout replaces the old migration files with `server/drizzle/0000_baseline.sql` for empty
+installations and `server/scripts/transition-baseline.sql` for that one known old state.
+No older revision or historical schema rollback chain is supported.
 
-Migration 0028 drops the memo-update allowance: `store_config.memo_updates_enabled` and
-`memo_updates_daily_limit` with `config_memo_updates`; `save_requests.memo_update_day` and
-`memo_update_state` with `save_request_memo_update` and the partial index
-`save_requests_memo_updates`; and the 0014 trigger `save_memo_update_guard` with
-`milton_memo_update_guard`. The save guard takes `claimed_at` into its immutable tuple first,
-so a receipt's claim time still cannot change. It also revokes `milton_runtime`'s
-`UPDATE (singleton)` on `store_config`, which only the retired sign-in `FOR UPDATE` lock
-used; the role keeps SELECT, and `check-runtime-role` now reads the row without locking it.
-Every revision before this release reads and writes the receipt columns on each save and
-reads the config columns on each tool call; this release touches none of them.
+The transition drops only the unused `memos`, `memo_versions`, `memo_cards`, their five
+functions and six triggers, the card-version `legacy` flag, and six obsolete limits keys.
+The rewritten card-version guard keeps sequential, immutable, account-scoped history.
+All other fields and rows survive, including card history copied from the retired subsystem,
+samples, accounts, billing and receipts. Current configured limits, including `reason_bytes`,
+stay unchanged. No archive is required.
 
-Release order:
+1. From the landed main commit, rehearse a fresh install and the exact 0033 transition on a
+   disposable branch with fictional data. Compare catalogs, grants/default privileges, every
+   surviving row, configured limits and served report versions; exercise save/replay,
+   immutability, account isolation, least privilege and account deletion. Repeat the transition
+   and normal migrator. A wrong journal and an injected failure must refuse atomically.
+2. Preserve the current Cloud Run revisions, image digests and numeric secret versions. Release
+   the matching cleanup image to MCP and app from main; confirm both serve it. The cleanup code
+   reads the same current fields on both schemas. No active read depends on a dropped field.
+3. Close ingress and drain writers as above. Confirm the owner connection's database, role and
+   branch without printing its URL. Take and record a Neon snapshot immediately before the
+   transition. Capture current row hashes/counts and report versions privately for comparison;
+   never put content, connection strings or key values in logs or the repository.
+4. With the owner login held only in process `PG*` variables and shell/psql history disabled, run
+   from the repository root:
 
-1. Ship MCP and app from the same image.
-2. Wait until both services, not one, serve 100% on the new image and the old revisions
-   are idle. An older revision writes the dropped columns on every save and, before the
-   sign-in lock removal, locks `store_config` at a first sign-in, which 0028's revoke refuses.
-3. Take a Neon snapshot.
-4. With the owner connection, run the check below. Expect `functions` to be
-   `milton_memo_update_guard` only, `views` 0 and `runtime_update` `singleton`. Record
-   `enabled` and `daily_limit`: the rollback restores neither. `held` may be nonzero: claims
-   that expired while held keep that state, and 0028 drops it with the column.
-
-   ```sql
-   SELECT
-     (SELECT string_agg(proname, ',') FROM pg_proc
-       WHERE pronamespace = 'public'::regnamespace AND prosrc ~ 'memo_update') AS functions,
-     (SELECT count(*) FROM pg_views
-       WHERE schemaname = 'public' AND definition ~ 'memo_update')::int AS views,
-     (SELECT string_agg(t.attname, ',') FROM pg_attribute t
-       CROSS JOIN LATERAL aclexplode(t.attacl) a
-       WHERE t.attrelid = 'store_config'::regclass AND a.grantee = 'milton_runtime'::regrole
-         AND a.privilege_type = 'UPDATE') AS runtime_update,
-     (SELECT count(*) FROM save_requests WHERE memo_update_state = 'held')::int AS held,
-     (SELECT memo_updates_enabled FROM store_config WHERE singleton = 1) AS enabled,
-     (SELECT memo_updates_daily_limit FROM store_config WHERE singleton = 1) AS daily_limit;
+   ```sh
+   psql -X -v ON_ERROR_STOP=1 -f server/scripts/transition-baseline.sql
    ```
 
-5. Apply 0028 with the normal runner, promptly. Between the deploy and 0028, a replay of a
-   claim an old revision left `held` and that has since expired gets a 422 `check_violation`
-   instead of `request_expired`: the new code completes the receipt without moving it out of
-   `held`, which the 0014 check refuses. Nothing is written, and 0028 ends it by dropping the
-   check. If 0028 fails on a deadlock, rerun it; it rolls back as a whole. The
-   one-transaction image (0029) completes no old claim: there the replay answers
-   `save_outcome_unknown` and writes nothing until 0029 deletes the claim.
-6. Smoke test through MCP as `milton_app`: a save, a replay of that save (same request ID
-   and input, same outcome), and a first sign-in of a new identity.
+   The script requires `neondb_owner`, locks the journal and tables, and checks all 34 journal
+   timestamps and hashes against the known 0033 fingerprint. Any other state visibly refuses;
+   do not edit the journal to bypass it. The single statement commits DDL, limits pruning and
+   journal replacement together. A repeat prints `baseline_transition_already_done` and changes
+   nothing. On an uncertain connection outcome, inspect the schema and journal before retrying.
 
-**Rollback order across 0028, 0029 and 0030.** Newest first: `rollback/0030_no_history_cap.sql`, then `rollback/0029_one_transaction.sql`, then `rollback/0028_no_memo_updates.sql`. The 0028 and 0029 rollbacks restore save guards that update `users.retained_bytes`, so each refuses while 0030 is still applied; running them out of order makes every save fail with `store_unavailable`.
+5. Set `MILTON_OWNER_DATABASE_URL` only in the process environment, run the regular
+   `bun run --cwd server db:migrate` twice and unset it. Both runs must be no-ops. The journal
+   now has one baseline entry at `1793815543500`; later generated migrations start at `0001`.
+   Compare every surviving row (excluding only `legacy` and the six removed limit keys), the
+   catalog and configured limits with the rehearsal, and confirm report versions are unchanged.
+6. Restore ingress and repeat canonical TLS/health/discovery/auth/forms checks, a fresh-client
+   report read, and the runtime-role check. Do save/replay and deletion checks in the isolated
+   environment; a write to a real account still needs the person's exact approval. Inspect logs
+   for `does not exist`, permission errors and lock timeouts. Record the release evidence and
+   delete TODO #24 only after this gate passes.
 
-**Rollback boundary.** Before 0028 is applied, code rolls back by traffic alone. After it,
-an earlier revision cannot save or read through MCP: first run
-`server/drizzle/rollback/0028_no_memo_updates.sql` offline with writers stopped, then shift
-traffic. The rollback re-adds both config columns at their 0014 defaults (the allowance comes
-back **off** at a limit of 100; set `memo_updates_enabled` and `memo_updates_daily_limit`
-to the recorded values as the owner if that revision should enforce it), both receipt
-columns with every receipt at `none`, the check, the index, the 0014 guard, the 0026 save
-guard and the runtime's `UPDATE (singleton)` grant, which a revision from before
-the sign-in lock removal needs. It restores shape, not data. The 0028 journal row stays, so
-re-forwarding means running `0028_no_memo_updates.sql` by hand, as one transaction that stops
-on the first error: `psql -1 -v ON_ERROR_STOP=1 -f server/drizzle/0028_no_memo_updates.sql`.
-
-## Saves in one transaction (0029)
-
-Pre-step applied 2026-11-04 07:58:20Z; 0029 applied 08:01:02Z with 0028 to 0032 (see No memo
-updates (0028) and the release records).
-
-Migration 0029 removes what only the two-phase save used. It deletes the claims earlier
-revisions left open (`NOT completed`): an earlier revision completed the receipt in the
-transaction that applied a change, so an open claim changed nothing, and a replay of one
-runs as a new save, fenced by its `expected_version`. It drops `save_requests.completed`,
-`deadline` and `claimed_at` with `save_request_claim_clock`, the 0014 trigger
-`save_claim_clock` with `milton_claim_clock`, and the `result_json` default; adds
-`save_request_outcome` (every receipt holds a `status`); and replaces the save guard so it
-refuses every UPDATE. Every revision before this release inserts a claim with a deadline
-and completes it later; this release writes each receipt once, with its result, and names
-none of the three columns. `deadline` is NOT NULL without a default, so this release
-cannot save on the old schema without the pre-step. The image also carries 0028's code,
-so 0028 and 0029 release together.
-
-Release order (it replaces 0028's: 0028's check runs at step 5 and one runner pass applies
-both):
-
-1. As the owner, while the current revision serves, apply the pre-step:
-   `psql -v ON_ERROR_STOP=1 -f server/drizzle/pre/0029_one_transaction.sql`, with the owner login supplied through `PGHOST`, `PGDATABASE`, `PGUSER`, `PGPASSWORD` and `PGSSLMODE` in the process environment rather than a URL on the command line (a command argument shows in process listings and shell history).
-   It replaces `milton_claim_clock` so a receipt inserted with its result is filled in as
-   complete, its deadline its claim time. Every earlier revision inserts claims without a
-   result and is unaffected, and either revision replays the other's receipts, so code
-   rolls back by traffic alone until 0029. Retry on a lock timeout. Then verify it:
-
-   ```sql
-   SELECT prosrc ~ 'result_json' AS pre_step FROM pg_proc
-     WHERE pronamespace = 'public'::regnamespace AND proname = 'milton_claim_clock';
-   ```
-
-   Do not ship the image until this returns true. Without the pre-step every save on the
-   new image fails: its receipt insert omits the NOT NULL `deadline`, so each save answers
-   `store_unavailable` and writes nothing until traffic moves back to the old revision.
-
-2. Ship MCP and app from the same image.
-3. Wait until both services, not one, serve 100% on the new image and the old revisions
-   are idle, then 40 seconds more: an older revision's claim stays open up to its deadline.
-4. Take a Neon snapshot.
-5. With the owner connection, run both checks before migrating, and record their values.
-   If 0028 is not applied yet, run its check first ("No memo updates (0028)" step 4) and
-   record `enabled` and `daily_limit`. Then run the 0029 check below. Expect `pre_step`
-   true and `live_open` and `outcomeless` 0; if `live_open` is nonzero, wait 40 seconds and
-   rerun. `open` is the number of claims 0029 deletes.
-
-   ```sql
-   SELECT
-     (SELECT prosrc ~ 'result_json' FROM pg_proc
-       WHERE pronamespace = 'public'::regnamespace AND proname = 'milton_claim_clock') AS pre_step,
-     (SELECT count(*) FROM save_requests WHERE NOT completed)::int AS open,
-     (SELECT count(*) FROM save_requests
-       WHERE NOT completed AND deadline > clock_timestamp())::int AS live_open,
-     (SELECT count(*) FROM save_requests
-       WHERE completed AND result_json->>'status' IS NULL)::int AS outcomeless;
-   ```
-
-6. Run the normal runner once, promptly: `bun run --cwd server db:migrate`. It applies
-   every pending migration in one transaction, so with 0028 pending one run applies 0028
-   and 0029 together; there is no point between them to check. Both lock `users` in
-   EXCLUSIVE mode first (reads continue; account locks wait), then `save_requests` and
-   `store_config`, the order a save takes them. On a deadlock or lock timeout, rerun it; it
-   rolls back as a whole. Between the deploy and this step, a replay of a claim an older
-   revision left open answers `save_outcome_unknown` and writes nothing; afterwards the
-   same request runs as a new save.
-7. Smoke test through MCP as `milton_app`: a save, a replay of that save (same request ID
-   and input, same outcome), a save on a stale version (`conflict`), and a first sign-in of
-   a new identity.
-
-**Rollback order across 0028, 0029 and 0030.** Newest first: `rollback/0030_no_history_cap.sql`, then `rollback/0029_one_transaction.sql`, then `rollback/0028_no_memo_updates.sql`. The 0028 and 0029 rollbacks restore save guards that update `users.retained_bytes`, so each refuses while 0030 is still applied; running them out of order makes every save fail with `store_unavailable`.
-
-**Rollback boundary.** Before 0029 is applied, code rolls back by traffic alone; the
-pre-step stays and is harmless to every revision. After it, an earlier revision cannot
-save: first run `server/drizzle/rollback/0029_one_transaction.sql` offline with writers
-stopped, then shift traffic. The rollback re-adds `completed` (every receipt true, default
-false), `deadline` (`-infinity` on every receipt, no default) and `claimed_at` (NULL) with
-`save_request_claim_clock`, the `result_json` default, `milton_claim_clock` in its
-pre-step form with `save_claim_clock`, and the 0028 save guard, and drops
-`save_request_outcome`. Either revision saves on the result, provided 0030 was rolled back first: the restored guard updates `users.retained_bytes`, which 0030 drops, and the rollback file refuses on the 0030 schema. It restores shape, not data:
-the claims 0029 deleted do not come back. The 0029 journal row stays, so re-forwarding
-means running `0029_one_transaction.sql` by hand, as one transaction that stops on the
-first error: `psql -1 -v ON_ERROR_STOP=1 -f server/drizzle/0029_one_transaction.sql`.
-
-## No history cap (0030)
-
-Applied 2026-11-04 08:01:02Z with 0028 to 0032 (see No memo updates (0028)).
-
-Migration 0030 removes the lifetime history cap: an account that reached
-`limits_json.history_bytes` (64 MiB) could not save again and had no way to free space. It
-drops the byte triggers `memo_versions_bytes`, `instruction_card_versions_bytes` and
-`accepted_changes_bytes` with `milton_memo_version_bytes`, `milton_card_version_bytes` and
-`milton_accepted_change_bytes`; replaces the save guard so it still refuses every receipt
-UPDATE and a save to an account that is not active, without counting bytes or refusing
-`memo_history_limit`; drops `users.retained_bytes` with `users_bytes`; and drops
-`history_bytes` from the `limits_json` default. The stored row keeps the key, unread. The
-runtime role needs no grant change: the account lock still needs UPDATE on `users`. This
-release reads neither the key nor the column. Every earlier revision reads its limits from
-the stored row and names no dropped object, so it runs on either schema.
-
-Release order (it rides the pending 0028 and 0029 release; follow "Saves in one
-transaction (0029)" and add the steps below):
-
-1. Ship MCP and app from the same image, after 0029's pre-step.
-2. Wait until both services, not one, serve 100% on the new image and the old revisions
-   are idle.
-3. Take a Neon snapshot.
-4. With the owner connection, run the check below with the 0028 and 0029 checks, and
-   record its values. Expect `functions` to be
-   `milton_accepted_change_bytes,milton_card_version_bytes,milton_memo_version_bytes,milton_save_request_guard`.
-   `largest` above `cap` means an account is already refused; 0030 lets it save again.
-
-   ```sql
-   SELECT
-     (SELECT string_agg(proname, ',' ORDER BY proname) FROM pg_proc
-       WHERE pronamespace = 'public'::regnamespace AND prosrc ~ 'history_bytes') AS functions,
-     (SELECT limits_json->>'history_bytes' FROM store_config WHERE singleton = 1) AS cap,
-     (SELECT max(retained_bytes) FROM users) AS largest;
-   ```
-
-5. Run the normal runner once: `bun run --cwd server db:migrate`. With 0028 and 0029
-   pending, one run applies all three in one transaction. 0030 locks `users` in ACCESS
-   EXCLUSIVE mode first (sign-ins, reads and saves wait), then `store_config` and the
-   three history tables, the order a save takes them. On a deadlock or lock timeout, rerun
-   it; it rolls back as a whole. Between the deploy and this step, a save past the cap
-   answers `store_unavailable` instead of `memo_history_limit` and writes nothing.
-6. Smoke test through MCP as `milton_app`: a save, a replay of that save, and a read.
-
-**Rollback order across 0028, 0029 and 0030.** Newest first: `rollback/0030_no_history_cap.sql`, then `rollback/0029_one_transaction.sql`, then `rollback/0028_no_memo_updates.sql`. The 0028 and 0029 rollbacks restore save guards that update `users.retained_bytes`, so each refuses while 0030 is still applied; running them out of order makes every save fail with `store_unavailable`.
-
-**Rollback boundary.** Code rolls back by traffic alone before and after 0030. To restore
-the cap, run `server/drizzle/rollback/0030_no_history_cap.sql` offline with writers
-stopped. It re-adds `users.retained_bytes` with `users_bytes`, each account's value
-recomputed from the rows the triggers counted, the three byte functions and triggers, the
-0029 save guard and the previous `limits_json` default; the cap applies again at the
-stored value, so an account that grew past it keeps its rows and cannot save. The 0030
-journal row stays, so re-forwarding means running `0030_no_history_cap.sql` by hand, as
-one transaction that stops on the first error:
-`psql -1 -v ON_ERROR_STOP=1 -f server/drizzle/0030_no_history_cap.sql`.
-
-## Fingerprint versions (0031)
-
-Applied 2026-11-04 08:01:02Z with 0028 to 0032 (see No memo updates (0028)).
-
-The version every read returns and every save fences on is a fingerprint of the assembled
-documents: SHA-256 of the user ID, the cover sheet, and each report's text with its
-samples' IDs, kind IDs and kind labels. Reads assemble from cards and samples in one
-statement, take no lock and write nothing; saves no longer write `tps_reports`, which no
-read ever served. Migration 0031 drops `tps_reports` and what only it used: its primary
-key, the foreign key `tps_reports_user_id_users_id_fk`, the checks `tps_revision_positive`,
-`tps_body_limit` and `tps_source_hash`, the `created_at` default and `milton_runtime`'s
-SELECT, INSERT and UPDATE grant. No trigger, function, view or policy refers to it; the
-"ready" check (stored source hash equal to the sources) lived in code. The `tps_body_limit`
-error code stays: saves still refuse an assembled report over its cap. This release names
-no part of the table, so it runs on either schema; every earlier revision reads it on every
-read and writes it on every save.
-
-**First save after the release.** Versions before this release hashed a stored revision,
-so the fence value changes form. A connected client holding an older version gets one
-ordinary `conflict` (with the current version) on its next save, rereads, and saves on the
-new version; nothing is written by the conflicting save. While old and new revisions both
-serve, a client that reads through one and saves through the other conflicts the same way.
-
-Release order (it rides the pending 0028, 0029 and 0030 release; follow "Saves in one
-transaction (0029)" and "No history cap (0030)" and add the steps below):
-
-1. Ship MCP and app from the same image, after 0029's pre-step.
-2. Wait until both services, not one, serve 100% on the new image and the old revisions
-   are idle.
-3. Take a Neon snapshot.
-4. With the owner connection, run the check below with the 0028, 0029 and 0030 checks, and
-   record its values. Expect `dependents` 0. `rows` is the number of snapshots 0031 drops;
-   nothing reads them.
-
-   ```sql
-   SELECT
-     (SELECT count(*) FROM pg_depend d JOIN pg_rewrite r ON r.oid = d.objid
-       WHERE d.refobjid = 'tps_reports'::regclass)::int
-     + (SELECT count(*) FROM pg_proc
-       WHERE pronamespace = 'public'::regnamespace AND prosrc ~ 'tps_reports')::int
-     + (SELECT count(*) FROM pg_trigger
-       WHERE tgrelid = 'tps_reports'::regclass AND NOT tgisinternal)::int AS dependents,
-     (SELECT count(*) FROM tps_reports)::int AS rows;
-   ```
-
-5. Run the normal runner once: `bun run --cwd server db:migrate`. With 0028, 0029 and 0030
-   pending, one run applies all four in one transaction (all five with 0032; see "Limits
-   (0032)"). 0031 locks `users` in ACCESS
-   EXCLUSIVE mode, as 0030 does (dropping the table's foreign key takes it; in the
-   combined run 0030 already holds it), then drops the table. Reads of `users` wait
-   while it is held. On a deadlock or lock timeout, rerun it; it
-   rolls back as a whole.
-6. Smoke test through MCP as `milton_app`: a read, a save on that read's version, a replay
-   of that save, a save on a stale version (`conflict`), and two reads in a row returning
-   the same version.
-
-**Rollback order.** Newest first: `rollback/0031_fingerprint_versions.sql` before the
-0030, 0029 and 0028 rollbacks. It restores no save guard and names no column 0030 drops, so
-it runs on the 0030 schema; the others follow in their own order.
-
-**Rollback boundary.** Before 0031 is applied, code rolls back by traffic alone (clients
-conflict once more on the old version form). After it, an earlier revision fails every read
-and save: first run `server/drizzle/rollback/0031_fingerprint_versions.sql` offline with
-writers stopped, then shift traffic. The rollback recreates `tps_reports` with its keys,
-checks, default and runtime grant, and seeds one row per account at a fresh revision (the
-clock in epoch seconds, above any revision an account reached) with a source hash no
-fingerprint equals. An earlier revision then rebuilds on each account's first read and
-publishes the next revision, a version it never issued, so a conversation still holding a
-pre-0031 version conflicts instead of passing the fence. Recreated empty, every account
-would restart at revision 1 and reissue old versions for different content. It restores
-shape with fresh revisions, not data; no read served the stored body. The 0031 journal row stays, so re-forwarding means running
-`0031_fingerprint_versions.sql` by hand, as one transaction that stops on the first error:
-`psql -1 -v ON_ERROR_STOP=1 -f server/drizzle/0031_fingerprint_versions.sql`.
-
-## Limits (0032)
-
-Applied 2026-11-04 08:01:02Z with 0028 to 0031 (see No memo updates (0028)); the stored row
-reads `daily_calls` 10000 and `body_bytes` 131072.
-
-Migration 0032 raises the limits with the code that sends larger saves. It widens
-`samples_body` to 131072 bytes, `accepted_change_shape` to 1,100 affected cards and
-`save_request_result` to 65,536 bytes; sets the `limits_json` default to the new values;
-and updates the stored row itself, `daily_calls` to 10000 and `body_bytes` to 131072.
-There is no owner `UPDATE` step: the migration does it. `description_bytes` (500) and
-`report_body_bytes` (262144) stay. The runtime role needs no grant change. Every earlier
-revision reads its limits from the row and keeps its own lower code caps, so it runs on
-either schema.
-
-Release order (it rides the pending 0028-0031 release; follow those sections and add the
-steps below):
-
-1. Ship MCP and app from the same image, after 0029's pre-step. Until step 5, a save that
-   needs a widened check (a sample over 32 KiB, a save changing over 100 cards, a receipt
-   over 2 KiB) fails with `check_violation` and writes nothing, and calls stay at 1,000 a
-   day.
-2. Wait until both services, not one, serve 100% on the new image and the old revisions
-   are idle.
-3. Take a Neon snapshot.
-4. With the owner connection, run the check below with the 0028-0031 checks and record its
-   values. Expect `daily_calls` 1000 and `body_bytes` 32768; any other value was tuned by
-   hand, and 0032 replaces it (the rollback restores 1000 and 32768, not the tuned value).
-
-   ```sql
-   SELECT limits_json->'daily_calls' AS daily_calls, limits_json->'body_bytes' AS body_bytes
-   FROM store_config WHERE singleton = 1;
-   ```
-
-5. Run the normal runner once: `bun run --cwd server db:migrate`. With 0028-0031 pending,
-   one run applies all five in one transaction. 0032 locks `users` in EXCLUSIVE mode (in
-   the combined run 0030 already holds ACCESS EXCLUSIVE), then `store_config`, `samples`,
-   `accepted_changes` and `save_requests` in ACCESS EXCLUSIVE mode, the order a save takes
-   them. On a deadlock or lock timeout, rerun it; it rolls back as a whole.
-6. Rerun the step 4 query: expect 10000 and 131072. Smoke test through MCP as
-   `milton_app`: a read, a save, a replay of that save.
-
-**Rollback order.** Newest first: `rollback/0032_raise_limits.sql` before the 0031, 0030,
-0029 and 0028 rollbacks.
-
-**Rollback boundary.** Code rolls back by traffic alone before and after 0032. To restore
-the old caps, run `server/drizzle/rollback/0032_raise_limits.sql` offline with writers
-stopped. It refuses while any sample is over 32768 bytes, any accepted change lists over
-100 cards or any receipt is over 2048 bytes, since the old checks cannot hold them. It
-restores the checks and the old `limits_json` default and sets the stored `daily_calls`
-and `body_bytes` to the old code defaults, 1000 and 32768, because the values before 0032
-are not recorded. Rule bodies over 32768 bytes stay; the old cap applies only to new
-versions. The 0032 journal row stays, so re-forwarding means running
-`0032_raise_limits.sql` by hand, as one transaction that stops on the first error:
-`psql -1 -v ON_ERROR_STOP=1 -f server/drizzle/0032_raise_limits.sql`.
-
-## Sample labels (0033)
-
-Applied 2026-11-04 16:47:39Z to 16:47:41Z, before the code (see rank-c63af7f): journal 34,
-`samples` 2, `unlabeled` 2, `unsearched` 0.
-
-Migration 0033 is additive and ships in its own release, after the 0028-0032 release is
-done. It adds three optional labels to `samples` (`audience`, `purpose`, `register`:
-nullable text held to fixed lists by one check, `samples_labels`), a stored generated
-`tsvector` column `search` over context and body, and the labels to the append-only guard
-`milton_sample_guard`. No GIN index: a report read ranks every active sample of one report
-and filters on no text match. Existing samples stay unlabeled; there is no backfill. The
-runtime role needs no grant change (its table grants cover new columns).
-
-**Order: migration first, then code.** The previous revision names every column it reads
-and writes, so it runs on the 0033 schema unchanged. The 0033 code reads the labels and
-`search` on every read, so it fails on the 0032 schema; there is no feature check.
-
-1. Take a Neon snapshot.
-2. Run the normal runner once: `bun run --cwd server db:migrate`. 0033 locks `samples` in
-   ACCESS EXCLUSIVE mode and rewrites it once to fill `search`; reads and saves wait while
-   it runs. On a lock timeout, rerun it; it rolls back as a whole.
-3. Check the result with the owner connection. Expect `unlabeled` equal to `samples` and
-   `unsearched` 0.
-
-   ```sql
-   SELECT count(*)::int AS samples,
-     count(*) FILTER (WHERE audience IS NULL AND purpose IS NULL AND register IS NULL)::int AS unlabeled,
-     count(*) FILTER (WHERE search IS NULL)::int AS unsearched
-   FROM samples;
-   ```
-
-4. Smoke test the running (previous) revision through MCP as `milton_app`: a read and a
-   save.
-5. Ship MCP and app from the same image. Wait until both serve 100% and the old revisions
-   are idle.
-6. Smoke test through MCP: `get_report` with an intent, `get_report` without one (refused
-   as `invalid_input`), a save with a labeled sample, then `get_report` again.
-
-**First save after the code release.** The version now covers every active sample and
-reports serve eight per report, so versions change form for accounts with samples: a
-client holding an older version gets one ordinary `conflict` on its next save, rereads
-and saves. Clients that cached the old `get_report` schema are refused with
-`invalid_input` until they refresh it.
-
-**Rollback order.** Code first, then schema. Code rolls back by traffic alone at any time:
-the previous revision runs on the 0033 schema. Only after traffic is off the 0033 code,
-run `server/drizzle/rollback/0033_sample_labels.sql` offline with writers stopped. It
-restores the guard and drops the check and the four columns. Labels saved since 0033 leave
-the table; every save's request in `accepted_changes` and `save_requests` still records the
-labels it sent. The 0033 journal row stays, so re-forwarding means running
-`0033_sample_labels.sql` by hand, as one transaction that stops on the first error:
-`psql -1 -v ON_ERROR_STOP=1 -f server/drizzle/0033_sample_labels.sql`.
+There is no reverse migration that restores the retired memo layer. If schema recovery is
+required, stop writers and use the pre-cleanup snapshot under a separate recovery decision.
+Do not restore a database snapshot merely to change runtime traffic. Never point a fresh
+baseline at a populated old database: it refuses and directs the operator to the transition.

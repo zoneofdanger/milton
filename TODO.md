@@ -67,13 +67,11 @@ reports, memos) and plain text on security screens and anything an assistant rea
       answer, and the subscription_required message. Until then it does not exist; the landing
       page's unread joke address is a different alias.
 
-- [ ] #24 (server, low) **Drop the legacy memo layer and squash the migrations.** Decided
-      2026-11-03 (Peter reversed "legacy memo history is retained"): export tables memos,
-      memo_versions and memo_cards to ~/code/milton-archive as a bundle, then one migration drops
-      them with their six plpgsql functions and the eight refusal mappings, and the migration
-      history is squashed into one baseline for fresh installs (#21), dropping the pgvector test
-      dependency and the 0018-0024 rehearsal tests. Runs after billing's migration 0027 lands so
-      the baseline is final. Inventory: .agents/tmp/dead-code/report.md (D2, D4).
+- [ ] #24 (server, low, doing) **Release the legacy schema cleanup.** Follow the hosting runbook's
+      "Legacy schema cleanup" gate: rehearse the landed baseline and one-time 0033 transition on
+      a disposable branch, release the matching app/MCP image from main, snapshot, transition,
+      verify current rows and unchanged report versions, then confirm save/replay and deletion
+      in the isolated environment. Production cleanup has not run.
 
 ## From the audit of 2026-11-02 (`.agents/tmp/audit/report.md`)
 
@@ -87,6 +85,5 @@ reports, memos) and plain text on security screens and anything an assistant rea
       claim is parsed but never enforced and clock tolerance does not apply to expiry (A27). Both
       harmless today; write them into server/README.
 
-- [ ] #21 (server, low) **Squash migrations for fresh installs** (A22): 21 migrations create and drop
-      the derived systems and need pgvector mid-way; 0004-0017 rollbacks are unreachable. Also
-      revisit @neondatabase/auth 0.7.0-beta once GA (A21: React, Radix, Tailwind in the install).
+- [ ] #21 (server, low) **Revisit the auth SDK after GA.** Revisit @neondatabase/auth 0.7.0-beta
+      once GA (A21: React, Radix, Tailwind in the install).

@@ -30,7 +30,6 @@
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.5.13",
-    "@electric-sql/pglite-pgvector": "0.0.14",
     "@modelcontextprotocol/sdk": "1.32.2",
     "@types/bun": "catalog:",
     "@types/node": "catalog:",

@@ -1,28 +1,14 @@
 import { expect, test } from "bun:test";
-import {
-  addSampleLabels,
-  drizzleSql,
-  migratedThrough,
-  migrationsThrough,
-  storeDatabase,
-} from "./local-store";
+import { localStore, storeDatabase } from "./local-store";
 import { fixtureStore, seedUsers } from "./store-fixtures";
 import { checkRuntimeRole } from "../scripts/check-runtime-role";
-import type { SaveMemoInput } from "../src/store/compiled";
-import type { ReportIntent } from "../src/store/reports";
 import { migrationUrl } from "../scripts/migrate";
-import {
-  linkStripeCustomer,
-  lockStripeCustomer,
-  lockWaitingSubscription,
-  recordStripeEvent,
-} from "../src/store/billing";
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
-import { createHash } from "node:crypto";
-import { z } from "zod";
-import { appendFile, cp, mkdtemp, rm } from "node:fs/promises";
+import { generateDrizzleJson, generateMigration } from "drizzle-kit/api";
+import * as schema from "../src/store/schema";
+import { cp, mkdtemp, rm, appendFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -76,793 +62,115 @@ test("a release passes the owner URL in its own variable, checked, and an empty 
   }
 });
 
-test("0033 adds sample labels and a stored search vector, holds labels to the append-only guard, and rolls back to the 0032 shape", async () => {
-  const base = await migratedThrough(32);
-  const pg = await migratedThrough(32);
-  const post = await migratedThrough(33);
+test("the fresh baseline installs once and refuses populated pre-baseline databases atomically", async () => {
+  const folder = new URL("../drizzle/", import.meta.url).pathname;
+  const pg = new PGlite();
   try {
-    const up = await drizzleSql("0033_sample_labels.sql");
-    const down = await drizzleSql("rollback/0033_sample_labels.sql");
-    await seedUsers(pg, "ranked");
-    // A sample saved before 0033, as the previous revision writes it.
-    await pg.exec(`INSERT INTO sample_kinds(user_id,id,report,label) VALUES ('ranked','k','email','reply');
-      INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json)
-      VALUES ('ranked','old','email','k','A fictional reply.','Thanks for the budget numbers.','{}');`);
-    const forward = async () => {
-      await pg.exec("BEGIN;" + up + "COMMIT;");
-      expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(post));
+    const journal = (await Bun.file(folder + "meta/_journal.json").json()) as {
+      entries: { idx: number; tag: string; when: number }[];
     };
-    await forward();
-    // The earlier sample stays unlabeled and gains its search vector.
-    expect(
-      (
-        await pg.query(
-          "SELECT audience,purpose,register,search::text AS search FROM samples WHERE id='old'",
-        )
-      ).rows,
-    ).toEqual([
-      {
-        audience: null,
-        purpose: null,
-        register: null,
-        search: "'budget':7 'fiction':2 'number':8 'repli':3 'thank':4",
-      },
-    ]);
-    // Only listed labels are stored, and a stored label never changes.
-    await pg.exec(`INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,audience,purpose,register)
-      VALUES ('ranked','new','email','k','A fictional decline.','No, thank you.','{}','client','follow up','plain');`);
-    await expect(
-      pg.exec(`INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,audience)
-        VALUES ('ranked','bad','email','k','A fictional note.','Hello.','{}','investor');`),
-    ).rejects.toThrow("samples_labels");
-    await expect(
-      pg.exec(
-        "UPDATE samples SET retired_at=now(),retire_reason='removed',audience='boss' WHERE id='new'",
-      ),
-    ).rejects.toThrow("sample_is_append_only");
-    // A report read serves eight: label overlap with the intent, then
-    // full-text rank of the situation, then newest. Retired samples and other
-    // reports never compete.
-    const at = (day: number) => `'2026-01-0${day}T00:00:00Z'`;
-    await pg.exec(`INSERT INTO sample_kinds(user_id,id,report,label) VALUES ('ranked','c','chat','note');
-      INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,created_at,audience,purpose) VALUES
-      ('ranked','a','email','k','A fictional note.','See you soon.','{}',${at(1)},'client','thank'),
-      ('ranked','b','email','k','A fictional note.','Budget numbers attached.','{}',${at(2)},'client','thank'),
-      ('ranked','c','email','k','A fictional note.','Budget numbers attached.','{}',${at(3)},'boss','thank'),
-      ('ranked','d','email','k','A fictional note.','No budget this year.','{}',${at(4)},'client','decline'),
-      ('ranked','f','email','k','A fictional note.','Budget.','{}',${at(5)},NULL,NULL),
-      ('ranked','h','email','k','A fictional note.','Hello.','{}',${at(7)},NULL,NULL),
-      ('ranked','g','email','k','A fictional note.','Lunch?','{}',${at(8)},'other','other'),
-      ('ranked','e','email','k','A fictional note.','We moved house.','{}',${at(9)},'friend','announce'),
-      ('ranked','x','chat','c','A fictional note.','Budget numbers attached.','{}',${at(9)},'client','thank');
-      INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,created_at,audience,purpose,retired_at,retire_reason) VALUES
-      ('ranked','r','email','k','A fictional note.','Budget numbers attached.','{}',${at(6)},'client','thank',now(),'removed');`);
-    const store = fixtureStore(storeDatabase(pg), "ranked", "assistant");
-    const served = async (intent?: ReportIntent) => {
-      const documents = await store.readDocuments(intent);
-      const email = documents.reports.find((r) => r.id === "email")!;
-      return {
-        version: documents.version,
-        ids: email.samples.map((s) => s.id),
-      };
-    };
-    const intent = {
-      report: "email",
-      situation: "budget numbers for the client",
-      audience: "client",
-      purpose: "thank",
-    } as const;
-    const ranked = await served(intent);
-    expect(ranked.ids).toEqual(["b", "a", "c", "d", "new", "old", "f", "e"]);
-    // Without labels, full-text rank then recency decide: two matching words
-    // outrank one, and equal ranks go newest first.
-    expect(
-      (await served({ report: "email", situation: intent.situation })).ids,
-    ).toEqual(["old", "c", "b", "f", "d", "new", "e", "g"]);
-    // Without an intent, the newest eight; the version is the same either way.
-    const newest = await served();
-    expect(newest.ids).toEqual(["new", "old", "e", "g", "h", "f", "d", "c"]);
-    expect(newest.version).toBe(ranked.version);
-    await pg.exec(down);
-    expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(base));
-    expect(
-      (await pg.query("SELECT count(*)::int AS n FROM samples")).rows,
-    ).toEqual([{ n: 12 }]);
-    await forward();
-  } finally {
-    await post.close();
-    await pg.close();
-    await base.close();
-  }
-}, 30000);
-
-test("0032 widens the sample, accepted-change and receipt checks, raises the stored daily_calls and body_bytes, and rolls back refusing rows past the old caps", async () => {
-  const base = await migratedThrough(31);
-  const pg = await migratedThrough(31);
-  const post = await migratedThrough(32);
-  try {
-    await addSampleLabels(base, pg, post);
-    const up = await drizzleSql("0032_raise_limits.sql");
-    const down = await drizzleSql("rollback/0032_raise_limits.sql");
-    await seedUsers(pg, "limits");
-    const store = fixtureStore(storeDatabase(pg), "limits", "assistant");
-    const save = async (text: string) =>
-      store.saveMemo({
-        text,
-        rules: [{ report: "cover", text }],
-        request_id: crypto.randomUUID(),
-        expected_version: (await store.getTpsReport()).version,
-      });
-    expect((await save("Saved before 0032.")).status).toBe("saved");
-    const limits = async () =>
-      z
-        .object({ limits_json: z.record(z.string(), z.unknown()) })
-        .parse((await pg.query("SELECT limits_json FROM store_config")).rows[0])
-        .limits_json;
-    const before = await limits();
-    expect(before).toMatchObject({ daily_calls: 1000, body_bytes: 32768 });
-    const forward = async () => {
-      await pg.exec("BEGIN;" + up + "COMMIT;");
-      expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(post));
-      // Only the two raised keys change; every other stored key stays.
-      expect(await limits()).toEqual({
-        ...before,
-        daily_calls: 10000,
-        body_bytes: 131072,
-      });
-    };
-    await forward();
-    // One row past each old cap, each in its own account.
-    await seedUsers(pg, "sample", "change", "receipt");
-    const hex = (c: string) => `repeat('${c}',64)`;
-    await pg.exec(`INSERT INTO sample_kinds(user_id,id,report,label) VALUES ('sample','k','email','long');
-      INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json)
-      VALUES ('sample','s','email','k','A long sample.',repeat('x',131072),'{}');
-      INSERT INTO save_requests(user_id,request_id,input_hash,source_hash,result_json)
-      VALUES ('receipt','${crypto.randomUUID()}',${hex("a")},${hex("c")},jsonb_build_object('status','saved','pad',repeat('x',60000)));`);
-    // A save that changes 101 cards: 100 rules, then 100 edits and one more.
-    const change = fixtureStore(storeDatabase(pg), "change", "assistant");
-    const changeSave = async (extra: object) =>
-      change.saveMemo({
-        text: "Fictional change.",
-        request_id: crypto.randomUUID(),
-        expected_version: (await change.getTpsReport()).version,
-        ...extra,
-      } as SaveMemoInput);
-    for (let b = 0; b < 4; b++)
-      await changeSave({
-        rules: Array.from({ length: 25 }, (_, i) => ({
-          report: "email",
-          text: `Rule ${b * 25 + i}.`,
-        })),
-      });
-    expect(
-      await changeSave({
-        rules: [{ report: "email", text: "One more." }],
-        exact_edits: Array.from({ length: 100 }, (_, i) => ({
-          before: `Rule ${i}.`,
-          after: `Rule ${i}!`,
-        })),
-      }),
-    ).toMatchObject({ status: "saved" });
-    for (const [account, message] of [
-      ["sample", "raise_limits_rollback_requires_samples_within_32768_bytes"],
-      ["change", "raise_limits_rollback_requires_changes_within_100_cards"],
-      ["receipt", "raise_limits_rollback_requires_receipts_within_2048_bytes"],
-    ]) {
-      await expect(pg.exec(down)).rejects.toThrow(message);
-      await pg.exec("ROLLBACK");
-      await pg.query("DELETE FROM users WHERE id=$1", [account]);
-    }
-    await pg.exec(down);
-    expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(base));
-    expect(await limits()).toEqual(before);
-    expect((await save("Saved after the rollback.")).status).toBe("saved");
-    await forward();
-  } finally {
-    await post.close();
-    await pg.close();
-    await base.close();
-  }
-}, 30000);
-
-test("0031 drops tps_reports and its runtime grant, leaves every version and save as it was, and rolls back with one fresh-revision row per account", async () => {
-  const base = await migratedThrough(30);
-  const pg = await migratedThrough(30);
-  const post = await migratedThrough(31);
-  try {
-    await addSampleLabels(base, pg, post);
-    const up = await drizzleSql("0031_fingerprint_versions.sql");
-    const down = await drizzleSql("rollback/0031_fingerprint_versions.sql");
-    const acl = async (db: PGlite) =>
-      (
-        await db.query(
-          "SELECT relacl::text AS acl FROM pg_class WHERE relname='tps_reports'",
-        )
-      ).rows;
-    await seedUsers(pg, "fingerprint");
-    const store = fixtureStore(storeDatabase(pg), "fingerprint", "assistant");
-    const save = async (text: string, version: string) =>
-      store.saveMemo({
-        text,
-        rules: [{ report: "cover", text }],
-        request_id: crypto.randomUUID(),
-        expected_version: version,
-      });
-    // The current code runs on the 0030 schema and leaves the table alone; a
-    // row an earlier revision wrote is never read.
-    const saved = await save(
-      "Saved before 0031.",
-      (await store.getTpsReport()).version,
-    );
-    expect(saved.status).toBe("saved");
-    await pg.exec(`INSERT INTO tps_reports(user_id,revision,body,source_hash)
-      VALUES ('fingerprint',3,'An earlier revision''s snapshot.',repeat('a',64))`);
-    const before = await store.readDocuments();
-    expect(before.version).toBe(saved.version!);
-    const forward = async () => {
-      await pg.exec("BEGIN;" + up + "COMMIT;");
-      expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(post));
-      expect(await acl(pg)).toEqual([]);
-    };
-    await forward();
-    expect(await store.readDocuments()).toEqual(before);
-    await pg.exec(down);
-    expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(base));
-    expect(await acl(pg)).toEqual(await acl(base));
-    // One row per account at a revision none reached, out of date on sight,
-    // so an earlier revision rebuilds and never reissues an old version.
-    expect(
-      (
-        await pg.query(
-          "SELECT user_id,revision>1000000000 AS fresh,body,source_hash=repeat('0',64) AS unmatched FROM tps_reports",
-        )
-      ).rows,
-    ).toEqual([
-      { user_id: "fingerprint", fresh: true, body: "", unmatched: true },
-    ]);
-    // Versions never depended on the table, so a save fences on the same one.
-    expect(await store.readDocuments()).toEqual(before);
-    expect(
-      (await save("Saved after the rollback.", before.version)).status,
-    ).toBe("saved");
-    await forward();
-  } finally {
-    await post.close();
-    await pg.close();
-    await base.close();
-  }
-}, 30000);
-
-test("0030 drops the history cap, its byte triggers and users.retained_bytes, keeps the stored limits, and rolls back with the counter recomputed", async () => {
-  const base = await migratedThrough(29);
-  const pg = await migratedThrough(29);
-  const post = await migratedThrough(30);
-  try {
-    await addSampleLabels(base, pg, post);
-    const up = await drizzleSql("0030_no_history_cap.sql");
-    const down = await drizzleSql("rollback/0030_no_history_cap.sql");
-    const store = fixtureStore(storeDatabase(pg), "cap", "assistant");
-    const save = async (text: string) =>
-      store.saveMemo({
-        text,
-        rules: [{ report: "cover", text }],
-        request_id: crypto.randomUUID(),
-        expected_version: (await store.getTpsReport()).version,
-      });
-    // Rows in all four counted tables, and an account with none.
-    await pg.exec(`INSERT INTO users(id) VALUES ('cap'),('none');
-      INSERT INTO memos(user_id,id,name) VALUES ('cap','memo','sample');
-      INSERT INTO memo_versions(user_id,memo_id,version,description,body,reason,actor_json)
-      VALUES ('cap','memo',1,'Sample.','hello','seed','{}');`);
-    expect((await save("Saved before 0030.")).status).toBe("saved");
-    const receipt = () =>
-      pg.exec(`INSERT INTO save_requests(user_id,request_id,input_hash,source_hash,result_json)
-        VALUES ('cap','${crypto.randomUUID()}',repeat('a',64),repeat('c',64),'{"status":"saved"}')`);
-    // The cap at what the account holds, so its next row is past it.
-    await pg.exec(
-      "UPDATE store_config SET limits_json=jsonb_set(limits_json,'{history_bytes}',to_jsonb((SELECT retained_bytes FROM users WHERE id='cap')))",
-    );
-    await expect(receipt()).rejects.toThrow("memo_history_limit");
-    const limits = async () =>
-      (await pg.query("SELECT limits_json FROM store_config")).rows;
-    const stored = await limits();
-    const forward = async () => {
-      await pg.exec("BEGIN;" + up + "COMMIT;");
-      expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(post));
-      expect(await limits()).toEqual(stored);
-    };
-    await forward();
-    // The row keeps history_bytes, unread: saves go past it.
-    expect((await save("Saved past the old cap.")).status).toBe("saved");
-    await receipt();
-    await pg.exec(down);
-    expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(base));
-    expect(
-      (
-        await pg.query(
-          `SELECT id FROM users u WHERE retained_bytes <> (SELECT coalesce(sum(payload_bytes),0) FROM memo_versions WHERE user_id=u.id)
-            + (SELECT coalesce(sum(payload_bytes),0) FROM instruction_card_versions WHERE user_id=u.id)
-            + (SELECT coalesce(sum(payload_bytes),0) FROM accepted_changes WHERE user_id=u.id)
-            + (SELECT coalesce(sum(payload_bytes),0) FROM save_requests WHERE user_id=u.id)`,
-        )
-      ).rows,
-    ).toEqual([]);
-    // The cap is back at its stored value, and this code saves under it.
-    await expect(receipt()).rejects.toThrow("memo_history_limit");
-    await pg.exec(
-      `UPDATE store_config SET limits_json=limits_json || '{"history_bytes":67108864}'::jsonb`,
-    );
-    stored[0] = (await limits())[0];
-    expect((await save("Saved after the rollback.")).status).toBe("saved");
-    await forward();
-  } finally {
-    await post.close();
-    await pg.close();
-    await base.close();
-  }
-}, 30000);
-
-test("0029 deletes open claims, drops the two-phase receipt columns and claim trigger, holds every receipt to an outcome, and rolls back to the pre-step shape", async () => {
-  const preStep = await drizzleSql("pre/0029_one_transaction.sql");
-  const base = await migratedThrough(28);
-  const pg = await migratedThrough(28);
-  const post = await migratedThrough(29);
-  try {
-    await addSampleLabels(base, pg, post);
-    await base.exec(preStep);
-    const up = await drizzleSql("0029_one_transaction.sql");
-    const down = await drizzleSql("rollback/0029_one_transaction.sql");
-    const id = (n: number) => `00000000-0000-4000-8000-0000000000${n}`;
-    const store = fixtureStore(storeDatabase(pg), "once", "assistant");
-    // A save's input in schema order, hashed as the store hashes it.
-    const input = (n: number, text: string, version: string) => {
-      const value = {
-        text,
-        rules: [{ report: "cover" as const, text }],
-        request_id: id(n),
-        expected_version: version,
-      };
-      return {
-        value,
-        hash: createHash("sha256").update(JSON.stringify(value)).digest("hex"),
-      };
-    };
-    await pg.exec("INSERT INTO users(id) VALUES ('once')");
-    const empty = (await store.getTpsReport()).version;
-    // Receipts as the two-phase code wrote them: one completed, one open.
-    const open = input(11, "An open claim.", empty);
-    await pg.exec(`INSERT INTO save_requests(user_id,request_id,input_hash,source_hash,deadline,completed,result_json) VALUES
-      ('once','${id(10)}',repeat('a',64),repeat('c',64),now(),true,'{"status":"saved","request_id":"${id(10)}"}'),
-      ('once','${id(11)}','${open.hash}',repeat('c',64),now(),false,'{}')`);
-    await pg.exec(preStep);
-    // After the pre-step the two-phase claim still opens, and the
-    // one-transaction code saves and replays on the 0028 schema.
-    const twoPhase = (n: number) =>
-      pg.exec(`INSERT INTO save_requests(user_id,request_id,input_hash,source_hash,deadline,claimed_at,created_at)
-        VALUES ('once','${id(n)}',repeat('b',64),repeat('c',64),now(),now(),now());
-        UPDATE save_requests SET completed=true,result_json='{"status":"saved"}' WHERE request_id='${id(n)}';
-        DELETE FROM save_requests WHERE request_id='${id(n)}';`);
-    await twoPhase(12);
-    const first = input(13, "Saved before 0029.", empty);
-    const saved = await store.saveMemo(first.value);
-    expect(saved.status).toBe("saved");
-    expect(await store.saveMemo(first.value)).toEqual(saved);
-    // Complete, so the two-phase code replays it too.
-    expect(
-      (
-        await pg.query(
-          `SELECT completed,deadline=created_at AND claimed_at=created_at AS clocked FROM save_requests WHERE request_id='${id(13)}'`,
-        )
-      ).rows,
-    ).toEqual([{ completed: true, clocked: true }]);
-    // An open claim has no outcome to replay until 0029 deletes it.
-    await expect(store.saveMemo(open.value)).rejects.toMatchObject({
-      code: "save_outcome_unknown",
+    const baseline = journal.entries[0]!;
+    expect(baseline).toMatchObject({
+      idx: 0,
+      tag: "0000_baseline",
+      when: 1793815543500,
     });
-    const retained = async () =>
-      (
-        await pg.query(
-          `SELECT id FROM users u WHERE retained_bytes <> (SELECT coalesce(sum(payload_bytes),0) FROM save_requests WHERE user_id=u.id)
-            + (SELECT coalesce(sum(payload_bytes),0) FROM instruction_card_versions WHERE user_id=u.id)
-            + (SELECT coalesce(sum(payload_bytes),0) FROM accepted_changes WHERE user_id=u.id)`,
-        )
-      ).rows;
-    const rows = async () =>
-      (
-        await pg.query<{ request_id: string; result_json: unknown }>(
-          "SELECT request_id,result_json FROM save_requests ORDER BY request_id",
-        )
-      ).rows;
-    expect(await retained()).toEqual([]);
-    const kept = (await rows()).filter((row) => row.request_id !== id(11));
-    const forward = async () => {
-      await pg.exec("BEGIN;" + up + "COMMIT;");
-      expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(post));
-      expect(await retained()).toEqual([]);
-      // Every receipt holds an outcome and never changes.
-      await expect(
-        pg.exec(`UPDATE save_requests SET result_json='{"status":"failed"}'`),
-      ).rejects.toThrow("save_receipt_is_immutable");
-      await expect(
-        pg.exec(`INSERT INTO save_requests(user_id,request_id,input_hash,source_hash,result_json)
-          VALUES ('once','${id(14)}',repeat('b',64),repeat('c',64),'{}')`),
-      ).rejects.toThrow("save_request_outcome");
-    };
-    await forward();
-    expect(await rows()).toEqual(kept);
-    // The deleted open claim's request now runs as a new save, fenced by its
-    // version, which the save before 0029 moved on.
-    expect(await store.saveMemo(open.value)).toMatchObject({
-      status: "conflict",
+    expect(
+      journal.entries.filter((entry) => entry.tag.endsWith("_baseline")),
+    ).toHaveLength(1);
+    await migrate(drizzle(pg), { migrationsFolder: folder });
+    expect(
+      (await pg.query("SELECT * FROM drizzle.__drizzle_migrations")).rows,
+    ).toHaveLength(journal.entries.length);
+    await migrate(drizzle(pg), { migrationsFolder: folder });
+    expect(
+      (await pg.query("SELECT * FROM drizzle.__drizzle_migrations")).rows,
+    ).toHaveLength(journal.entries.length);
+    // Drizzle skips an equal timestamp even with a different hash. The one-time
+    // transition writes the baseline timestamp; future migrations work normally.
+    await pg.exec(
+      "UPDATE drizzle.__drizzle_migrations SET hash='ignored-by-drizzle'",
+    );
+    await migrate(drizzle(pg), { migrationsFolder: folder });
+    expect(
+      (await pg.query("SELECT hash FROM drizzle.__drizzle_migrations")).rows,
+    ).toEqual(journal.entries.map(() => ({ hash: "ignored-by-drizzle" })));
+    await pg.exec(
+      "DELETE FROM drizzle.__drizzle_migrations; INSERT INTO drizzle.__drizzle_migrations(hash,created_at) VALUES ('pre-baseline',1793779058436); INSERT INTO users(id) VALUES ('kept')",
+    );
+    const before = await schemaCatalog(pg);
+    await expect(
+      migrate(drizzle(pg), { migrationsFolder: folder }),
+    ).rejects.toMatchObject({
+      cause: { message: "baseline_requires_empty_database" },
     });
-    const after = await rows();
-    await pg.exec(down);
-    expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(base));
-    expect(await rows()).toEqual(after);
-    expect(
-      (
-        await pg.query(
-          "SELECT DISTINCT completed,deadline='-infinity' AS expired,claimed_at FROM save_requests",
-        )
-      ).rows,
-    ).toEqual([{ completed: true, expired: true, claimed_at: null }]);
-    // Both revisions save on the rolled-back shape.
-    await twoPhase(15);
-    const second = input(16, "Saved after the rollback.", saved.version!);
-    expect((await store.saveMemo(second.value)).status).toBe("saved");
-    await forward();
-  } finally {
-    await post.close();
-    await pg.close();
-    await base.close();
-  }
-}, 30000);
-
-test("0028 drops the memo-update columns, guard and the runtime's store_config UPDATE, keeps every receipt, and rolls back to the 0027 shape", async () => {
-  const base = await migratedThrough(27);
-  const pg = await migratedThrough(27);
-  const post = await migratedThrough(28);
-  try {
-    const up = await drizzleSql("0028_no_memo_updates.sql");
-    const down = await drizzleSql("rollback/0028_no_memo_updates.sql");
-    const id = (n: number) => `00000000-0000-4000-8000-0000000000${n}`;
-    // Receipts as the pre-0028 code wrote them: charged, released, held, none.
-    await pg.exec(`INSERT INTO users(id) VALUES ('memo');
-      INSERT INTO save_requests(user_id,request_id,input_hash,source_hash,deadline,completed,result_json,memo_update_day,memo_update_state) VALUES
-      ('memo','${id(10)}',repeat('a',64),repeat('c',64),now(),true,'{"status":"saved"}','2026-11-01','charged'),
-      ('memo','${id(11)}',repeat('a',64),repeat('c',64),now(),true,'{"status":"unchanged"}','2026-11-01','released'),
-      ('memo','${id(12)}',repeat('a',64),repeat('c',64),now(),false,'{}','2026-11-02','held'),
-      ('memo','${id(13)}',repeat('a',64),repeat('c',64),now(),false,'{}',NULL,'none');
-      UPDATE store_config SET memo_updates_enabled=true;`);
-    const rows = async () =>
-      (
-        await pg.query(
-          `SELECT (SELECT retained_bytes FROM users WHERE id='memo') AS bytes,
-            (SELECT jsonb_agg(jsonb_build_array(request_id,completed,result_json,claimed_at=created_at) ORDER BY request_id) FROM save_requests) AS saves,
-            (SELECT limits_json FROM store_config) AS limits`,
-        )
-      ).rows;
-    const kept = await rows();
-    const configUpdate = async () =>
-      (
-        await pg.query(
-          `SELECT t.attname FROM pg_attribute t CROSS JOIN LATERAL aclexplode(t.attacl) a
-           WHERE t.attrelid='store_config'::regclass AND a.grantee='milton_runtime'::regrole AND a.privilege_type='UPDATE'`,
-        )
-      ).rows;
-    // An open receipt's claim time stays fixed under either guard.
-    const reclaim = (message: string) =>
-      expect(
-        pg.exec(
-          `UPDATE save_requests SET claimed_at=NULL WHERE request_id='${id(12)}'`,
-        ),
-      ).rejects.toThrow(message);
-    const forward = async () => {
-      await pg.exec("BEGIN;" + up + "COMMIT;");
-      expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(post));
-      expect(await rows()).toEqual(kept);
-      expect(await configUpdate()).toEqual([]);
-      await reclaim("save_receipt_is_immutable");
-    };
-    await forward();
-    // The current code's claim and completion, on a receipt removed after.
-    await pg.exec(`INSERT INTO save_requests(user_id,request_id,input_hash,source_hash,deadline,claimed_at,created_at)
-      VALUES ('memo','${id(14)}',repeat('b',64),repeat('c',64),now(),now(),now());
-      UPDATE save_requests SET completed=true,result_json='{"status":"saved"}' WHERE request_id='${id(14)}';
-      DELETE FROM save_requests WHERE request_id='${id(14)}';`);
-    expect(await rows()).toEqual(kept);
-    await pg.exec(down);
-    expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(base));
-    expect(await rows()).toEqual(kept);
-    expect(await configUpdate()).toEqual([{ attname: "singleton" }]);
-    // Shape, not data: the allowance comes back off and every receipt uncharged.
-    expect(
-      (
-        await pg.query(
-          "SELECT (SELECT memo_updates_enabled FROM store_config) AS enabled,(SELECT jsonb_agg(DISTINCT memo_update_state) FROM save_requests) AS states",
-        )
-      ).rows,
-    ).toEqual([{ enabled: false, states: ["none"] }]);
-    await reclaim("memo_update_is_immutable");
-    await forward();
-  } finally {
-    await post.close();
-    await pg.close();
-    await base.close();
-  }
-}, 30000);
-
-test("0027 adds the Stripe ledger and subscription columns, marks returning deleted identities canceled, the runtime applies an event once, and rollback refuses until nothing is recorded", async () => {
-  const base = await migratedThrough(26);
-  const pg = await migratedThrough(26);
-  const post = await migratedThrough(27);
-  try {
-    const up = await drizzleSql("0027_stripe_billing.sql");
-    const down = await drizzleSql("rollback/0027_stripe_billing.sql");
-    // A plain clock starts at created_at; a returning deleted identity's before it.
-    await pg.exec(`INSERT INTO users(id) VALUES ('billing'),('returned');
-      INSERT INTO trial_accounts(user_id,started_at) SELECT id,created_at FROM users WHERE id='billing';
-      INSERT INTO trial_accounts(user_id,started_at) SELECT id,created_at-interval '720 hours' FROM users WHERE id='returned'`);
-    const clock = async () =>
-      (
-        await pg.query(
-          "SELECT user_id,started_at::text,paid_through::text,notice_stage FROM trial_accounts ORDER BY 1",
-        )
-      ).rows;
-    const kept = await clock();
-    // The runtime's privileges on the new objects, through 0024's defaults.
-    const grants = async () =>
-      (
-        await pg.query(
-          `SELECT c.relname,string_agg(a.privilege_type,',' ORDER BY a.privilege_type) AS privileges
-           FROM pg_class c CROSS JOIN LATERAL aclexplode(c.relacl) a
-           WHERE a.grantee='milton_runtime'::regrole AND c.relname IN ('stripe_events','trial_accounts')
-           GROUP BY 1 ORDER BY 1`,
-        )
-      ).rows;
-    const forward = async () => {
-      await pg.exec("BEGIN;" + up + "COMMIT;");
-      expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(post));
-      expect(await grants()).toEqual([
-        { relname: "stripe_events", privileges: "INSERT,SELECT,UPDATE" },
-        { relname: "trial_accounts", privileges: "INSERT,SELECT,UPDATE" },
-      ]);
-    };
-    await forward();
-    expect(await clock()).toEqual(kept);
-    expect(
-      (
-        await pg.query(
-          "SELECT user_id,stripe_customer_id,subscription_status,trial_end FROM trial_accounts ORDER BY 1",
-        )
-      ).rows,
-    ).toEqual([
-      {
-        user_id: "billing",
-        stripe_customer_id: null,
-        subscription_status: null,
-        trial_end: null,
-      },
-      {
-        user_id: "returned",
-        stripe_customer_id: null,
-        subscription_status: "canceled",
-        trial_end: null,
-      },
+    expect(await schemaCatalog(pg)).toEqual(before);
+    expect((await pg.query("SELECT id FROM users")).rows).toEqual([
+      { id: "kept" },
     ]);
-    // Rerun after release, the data statement catches a row an older image wrote
-    // and leaves a returning identity who has since paid alone.
-    await pg.exec(`UPDATE trial_accounts SET subscription_status='active' WHERE user_id='returned';
-      INSERT INTO users(id) VALUES ('late');
-      INSERT INTO trial_accounts(user_id,started_at) SELECT id,created_at-interval '1 hour' FROM users WHERE id='late'`);
-    await pg.exec(up.slice(up.lastIndexOf('UPDATE "trial_accounts"')));
     expect(
       (
         await pg.query(
-          "SELECT user_id,subscription_status FROM trial_accounts WHERE user_id IN ('late','returned') ORDER BY 1",
+          "SELECT hash,created_at FROM drizzle.__drizzle_migrations",
         )
       ).rows,
-    ).toEqual([
-      { user_id: "late", subscription_status: "canceled" },
-      { user_id: "returned", subscription_status: "active" },
-    ]);
-    await pg.exec(`DELETE FROM users WHERE id='late';
-      UPDATE trial_accounts SET subscription_status='canceled' WHERE user_id='returned'`);
-    // Any status Stripe sends stores, within the bound; ids and dates are checked.
-    await pg.exec(
-      "UPDATE trial_accounts SET subscription_status='a_status_stripe_adds_later' WHERE user_id='billing'",
-    );
-    for (const refused of [
-      `subscription_status='${"x".repeat(65)}'`,
-      "stripe_subscription_id='cus_notASubscription'",
-      "trial_end='infinity'",
-      "current_period_start='infinity'",
-      "current_period_end='infinity'",
-    ])
-      await expect(
-        pg.exec(`UPDATE trial_accounts SET ${refused} WHERE user_id='billing'`),
-      ).rejects.toThrow("check constraint");
-    await pg.exec(
-      "UPDATE trial_accounts SET subscription_status=NULL WHERE user_id='billing'",
-    );
-
-    await pg.exec(
-      "CREATE ROLE milton_app_fixture LOGIN IN ROLE milton_runtime; SET ROLE milton_app_fixture",
-    );
-    const db = storeDatabase(pg);
+    ).toEqual([{ hash: "pre-baseline", created_at: 1793779058436 }]);
+    await pg.exec("DELETE FROM drizzle.__drizzle_migrations");
+    await expect(
+      migrate(drizzle(pg), { migrationsFolder: folder }),
+    ).rejects.toMatchObject({
+      cause: { message: "baseline_requires_empty_database" },
+    });
+    expect(await schemaCatalog(pg)).toEqual(before);
+    // A failing baseline rolls back its DDL and journal row together.
+    const scratch = await mkdtemp(join(tmpdir(), "milton-baseline-"));
+    const empty = new PGlite();
     try {
-      expect(await linkStripeCustomer(db, "billing", "cus_fixture")).toBe(
-        "cus_fixture",
+      await cp(folder, scratch, { recursive: true });
+      await appendFile(
+        join(scratch, baseline.tag + ".sql"),
+        "\n--> statement-breakpoint\nSELECT 1/0;\n",
       );
-      // A second customer never replaces the stored one.
-      expect(await linkStripeCustomer(db, "billing", "cus_other")).toBe(
-        "cus_fixture",
-      );
-      const paid = {
-        id: "evt_fixture",
-        type: "invoice.paid",
-        payloadSha256: "a".repeat(64),
-      };
-      const state = {
-        id: "sub_fixture",
-        status: "active",
-        trialEnd: null,
-        periodStart: Date.parse("2026-11-01T00:00:00Z") / 1000,
-        periodEnd: Date.parse("2026-12-01T00:00:00Z") / 1000,
-      };
-      expect(await lockStripeCustomer(db, "cus_fixture")).toEqual({
-        subscription: null,
-      });
-      expect(await lockWaitingSubscription(db, "billing")).toEqual({
-        customer: "cus_fixture",
-      });
+      await expect(
+        migrate(drizzle(empty), { migrationsFolder: scratch }),
+      ).rejects.toMatchObject({ cause: { code: "22012" } });
+      expect(await publicTables(empty)).toEqual([]);
       expect(
-        await recordStripeEvent(db, paid, { customer: "cus_fixture", state }),
-      ).toEqual({ recorded: true, updated: 1 });
-      expect(await lockWaitingSubscription(db, "billing")).toBeUndefined();
-      // The same event id again changes nothing, whatever it carries.
-      expect(
-        await recordStripeEvent(db, paid, {
-          customer: "cus_fixture",
-          state: "canceled",
-        }),
-      ).toEqual({ recorded: false, updated: 0 });
-      for (const statement of [
-        "DELETE FROM stripe_events",
-        "DELETE FROM trial_accounts",
-      ])
-        await expect(pg.query(statement)).rejects.toThrow("permission denied");
+        (await empty.query("SELECT * FROM drizzle.__drizzle_migrations")).rows,
+      ).toEqual([]);
     } finally {
-      await pg.exec("RESET ROLE");
+      await empty.close();
+      await rm(scratch, { recursive: true, force: true });
     }
-    await pg.exec("DROP ROLE milton_app_fixture");
-    expect(
-      (
-        await pg.query(
-          "SELECT stripe_customer_id,stripe_subscription_id,subscription_status,current_period_end=timestamptz '2026-12-01T00:00:00Z' AS period FROM trial_accounts WHERE user_id='billing'",
-        )
-      ).rows,
-    ).toEqual([
-      {
-        stripe_customer_id: "cus_fixture",
-        stripe_subscription_id: "sub_fixture",
-        subscription_status: "active",
-        period: true,
-      },
-    ]);
-
-    await expect(pg.exec(down)).rejects.toThrow(
-      "stripe_billing_rollback_requires_no_customers",
-    );
-    await pg.exec("ROLLBACK");
-    await pg.exec("UPDATE trial_accounts SET stripe_customer_id=NULL");
-    await expect(pg.exec(down)).rejects.toThrow(
-      "stripe_billing_rollback_requires_no_events",
-    );
-    await pg.exec("ROLLBACK");
-    await pg.exec("DELETE FROM stripe_events");
-    await pg.exec(down);
-    expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(base));
-    await forward();
   } finally {
-    await post.close();
     await pg.close();
-    await base.close();
   }
-}, 30000);
+});
 
-test("0026 drops the dead columns and save_requests indexes, keeps every row, and rolls back to the 0025 shape", async () => {
-  const base = await migratedThrough(25);
-  const pg = await migratedThrough(25);
-  const post = await migratedThrough(26);
+test("schema declarations generate the same surviving tables, constraints and indexes as the baseline", async () => {
+  const local = await localStore();
+  const generated = new PGlite();
   try {
-    const up = await drizzleSql("0026_dead_columns.sql");
-    const down = await drizzleSql("rollback/0026_dead_columns.sql");
-    // The pre-release step (deploy/README.md "Dead columns (0026)"): a default
-    // lets the current code omit reserved_micros before 0026 runs.
-    const preStep =
-      "ALTER TABLE save_requests ALTER COLUMN reserved_micros SET DEFAULT 0";
-    const id = (n: number) => `00000000-0000-4000-8000-0000000000${n}`;
-    // Rows as the pre-0026 code writes them.
-    await pg.exec(`INSERT INTO users(id) VALUES ('dead');
-      INSERT INTO identities(provider,subject,user_id) VALUES ('neon','dead','dead');
-      INSERT INTO usage_daily(user_id,day_utc,tool_calls) VALUES ('dead','2026-11-01',3);
-      INSERT INTO save_requests(user_id,request_id,input_hash,source_hash,reserved_micros,deadline,completed,result_json) VALUES
-      ('dead','${id(26)}',repeat('a',64),repeat('c',64),0,now(),true,'{"status":"saved"}');`);
-    // The production check: every dropped column is still at its default.
-    expect(
-      (
-        await pg.query(
-          "SELECT (SELECT count(*) FROM users WHERE profile_json<>'{}'::jsonb)::int AS users_profile,(SELECT count(*) FROM identities WHERE profile_json<>'{}'::jsonb)::int AS identity_profile,(SELECT count(*) FROM usage_daily WHERE writes<>0)::int AS writes,(SELECT count(*) FROM save_requests WHERE reserved_micros<>0)::int AS reserved",
-        )
-      ).rows,
-    ).toEqual([
-      { users_profile: 0, identity_profile: 0, writes: 0, reserved: 0 },
-    ]);
-    await pg.exec(preStep);
-    await base.exec(preStep);
-    const save = (n: number) =>
-      pg.exec(`INSERT INTO save_requests(user_id,request_id,input_hash,source_hash,deadline,completed,result_json) VALUES
-        ('dead','${id(n)}',repeat('b',64),repeat('c',64),now(),true,'{"status":"saved"}')`);
-    // The current code's claim, which omits reserved_micros, works before 0026.
-    await save(27);
-    const rows = async () =>
-      (
-        await pg.query(
-          `SELECT (SELECT jsonb_agg(jsonb_build_object('id',id,'bytes',retained_bytes)) FROM users) AS users,
-            (SELECT jsonb_agg(user_id) FROM identities) AS identities,
-            (SELECT jsonb_agg(tool_calls) FROM usage_daily) AS calls,
-            (SELECT jsonb_agg(request_id ORDER BY request_id) FROM save_requests) AS saves`,
-        )
-      ).rows;
-    const kept = await rows();
-    const immutable = () =>
-      expect(
-        pg.exec(
-          `UPDATE save_requests SET input_hash=repeat('e',64) WHERE request_id='${id(26)}'`,
-        ),
-      ).rejects.toThrow("save_receipt_is_immutable");
-    const forward = async () => {
-      await pg.exec("BEGIN;" + up + "COMMIT;");
-      expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(post));
-      expect(await rows()).toEqual(kept);
-      await immutable();
-    };
-    await forward();
-    await save(28);
-    await pg.exec(`DELETE FROM save_requests WHERE request_id='${id(28)}'`);
-    await pg.exec(down);
-    expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(base));
-    expect(await rows()).toEqual(kept);
-    await immutable();
-    await save(28);
-    await pg.exec(`DELETE FROM save_requests WHERE request_id='${id(28)}'`);
-    await forward();
+    const statements = await generateMigration(
+      generateDrizzleJson({}),
+      generateDrizzleJson(schema),
+    );
+    await generated.exec("CREATE SEQUENCE instruction_card_position AS bigint");
+    await generated.exec(statements.join("\n"));
+    const actual = await schemaCatalog(local.pg),
+      expected = await schemaCatalog(generated);
+    for (const key of ["tables", "columns", "constraints", "indexes"] as const)
+      expect(actual[key]).toEqual(expected[key]);
   } finally {
-    await post.close();
-    await pg.close();
-    await base.close();
+    await generated.close();
+    await local.dispose();
   }
-}, 30000);
+});
 
-test("0024 runtime role saves through its grants, cannot change the schema or bypass a trigger, and rolls back", async () => {
-  const base = await migratedThrough(23);
-  const pg = await migratedThrough(23);
-  const post = await migratedThrough(24);
+test("the runtime has only current grants, its guards hold, and later tables inherit limited privileges", async () => {
+  const local = await localStore();
+  const pg = local.pg;
   try {
-    // The current code omits reserved_micros and the receipt columns 0029
-    // drops: before those migrations it needs the deploy pre-steps
-    // (deploy/README.md "Dead columns (0026)" and "Saves in one transaction (0029)").
-    const preStep0029 = await drizzleSql("pre/0029_one_transaction.sql");
-    for (const db of [base, pg, post]) {
-      await db.exec(
-        "ALTER TABLE save_requests ALTER COLUMN reserved_micros SET DEFAULT 0",
-      );
-      await db.exec(preStep0029);
-    }
-    const up = await drizzleSql("0024_runtime_role.sql");
-    const down = await drizzleSql("rollback/0024_runtime_role.sql");
     const roles = async (db: PGlite) =>
       (
         await db.query(
@@ -909,8 +217,7 @@ test("0024 runtime role saves through its grants, cannot change the schema or by
       ).rows,
     });
     // What the runtime and the triggers it fires run on each table. DELETE
-    // only where the runtime deletes; store_config was then locked FOR UPDATE,
-    // which needed one updatable column (0028 revokes it).
+    // only where the runtime deletes; store_config is read-only.
     const used: Record<string, string> = {
       accepted_changes: "INSERT",
       assistant_disconnects: "DELETE,INSERT,SELECT",
@@ -918,78 +225,55 @@ test("0024 runtime role saves through its grants, cannot change the schema or by
       identities: "INSERT,SELECT",
       instruction_card_versions: "INSERT,SELECT",
       instruction_cards: "INSERT,SELECT",
-      memo_cards: "INSERT,SELECT",
-      memo_versions: "INSERT,SELECT",
-      memos: "INSERT,SELECT",
       sample_kinds: "INSERT,SELECT",
       samples: "INSERT,SELECT,UPDATE",
       save_requests: "INSERT,SELECT,UPDATE",
       store_config: "SELECT",
-      tps_reports: "INSERT,SELECT,UPDATE",
+      stripe_events: "INSERT,SELECT,UPDATE",
       trial_accounts: "INSERT,SELECT,UPDATE",
       usage_daily: "INSERT,SELECT,UPDATE",
       users: "DELETE,INSERT,SELECT,UPDATE",
     };
-    const forward = async () => {
-      await pg.exec("BEGIN;" + up + "COMMIT;");
-      expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(post));
-      expect(await roles(pg)).toEqual(await roles(post));
-      expect(await roles(pg)).toEqual([
+    expect(await roles(pg)).toEqual([
+      {
+        rolname: "milton_runtime",
+        rolcanlogin: false,
+        rolsuper: false,
+        rolcreatedb: false,
+        rolcreaterole: false,
+        rolreplication: false,
+        rolbypassrls: false,
+      },
+    ]);
+    const granted = await grants(pg);
+    // Every application table is listed; the sequence, USAGE only; nothing
+    // in drizzle; no CREATE anywhere.
+    expect(Object.keys(used)).toEqual(await publicTables(pg));
+    expect(granted.objects).toEqual(
+      [
+        ...Object.entries(used).map(([relname, privileges]) => ({
+          relname,
+          relkind: "r",
+          privileges,
+        })),
         {
-          rolname: "milton_runtime",
-          rolcanlogin: false,
-          rolsuper: false,
-          rolcreatedb: false,
-          rolcreaterole: false,
-          rolreplication: false,
-          rolbypassrls: false,
+          relname: "instruction_card_position",
+          relkind: "S",
+          privileges: "USAGE",
         },
-      ]);
-      const granted = await grants(pg);
-      expect(granted).toEqual(await grants(post));
-      // Every application table is listed; the sequence, USAGE only; nothing
-      // in drizzle; no CREATE anywhere.
-      expect(Object.keys(used)).toEqual(await publicTables(pg));
-      expect(granted.objects).toEqual(
-        [
-          ...Object.entries(used).map(([relname, privileges]) => ({
-            relname,
-            relkind: "r",
-            privileges,
-          })),
-          {
-            relname: "instruction_card_position",
-            relkind: "S",
-            privileges: "USAGE",
-          },
-        ].sort((a, b) => (a.relname < b.relname ? -1 : 1)),
-      );
-      expect(granted.columns).toEqual([
-        { relname: "store_config", attname: "singleton", privileges: "UPDATE" },
-      ]);
-      expect(granted.schemas).toEqual([
-        { nspname: "drizzle", usage: false, create: false },
-        { nspname: "public", usage: true, create: false },
-      ]);
-      expect(granted.connect).toEqual([{ connect: true }]);
-      expect(granted.defaults).toEqual([
-        { kind: "S", privileges: "USAGE" },
-        { kind: "r", privileges: "INSERT,SELECT,UPDATE" },
-      ]);
-    };
-    await forward();
-    // Re-running the forward script by hand is a no-op.
-    await pg.exec("BEGIN;" + up + "COMMIT;");
-    expect(await grants(pg)).toEqual(await grants(post));
-
-    await seedUsers(pg, "runtime");
-    // The store's trial gate reads 0027's columns and its reads 0033's, so the
-    // runtime checks below run with them in place; both come back out, newest
-    // first, before 0024's rollback.
-    await pg.exec(
-      "BEGIN;" + (await drizzleSql("0027_stripe_billing.sql")) + "COMMIT;",
+      ].sort((a, b) => (a.relname < b.relname ? -1 : 1)),
     );
-    await addSampleLabels(pg);
+    expect(granted.columns).toEqual([]);
+    expect(granted.schemas).toEqual([
+      { nspname: "drizzle", usage: false, create: false },
+      { nspname: "public", usage: true, create: false },
+    ]);
+    expect(granted.connect).toEqual([{ connect: true }]);
+    expect(granted.defaults).toEqual([
+      { kind: "S", privileges: "USAGE" },
+      { kind: "r", privileges: "INSERT,SELECT,UPDATE" },
+    ]);
+    await seedUsers(pg, "runtime");
     // A login role in the group, as milton_app is in Neon. Membership
     // inherits: the session needs no SET ROLE milton_runtime. PGlite's session
     // user is a superuser, so SET ROLE stands in for logging in; what is checked
@@ -1034,7 +318,7 @@ test("0024 runtime role saves through its grants, cannot change the schema or by
         "ALTER TABLE samples DISABLE TRIGGER ALL",
         "ALTER TABLE users DROP COLUMN status",
         "DROP TABLE samples",
-        "DROP FUNCTION milton_sample_guard() CASCADE",
+        "DROP FUNCTION milton_sample_guard()",
         "TRUNCATE samples",
         "CREATE TABLE public.runtime_made (id int)",
         "SELECT * FROM drizzle.__drizzle_migrations",
@@ -1047,7 +331,7 @@ test("0024 runtime role saves through its grants, cannot change the schema or by
         "DELETE FROM deleted_identities",
         "DELETE FROM identities",
         "UPDATE identities SET user_id=user_id",
-        "UPDATE store_config SET memo_updates_enabled=true",
+        "UPDATE store_config SET trials_enabled=true",
         "SELECT * FROM accepted_changes",
       ])
         await expect(pg.query(statement)).rejects.toThrow(
@@ -1078,693 +362,7 @@ test("0024 runtime role saves through its grants, cannot change the schema or by
     } finally {
       await pg.exec("RESET ROLE");
     }
-    await pg.exec(await drizzleSql("rollback/0033_sample_labels.sql"));
-    await pg.exec(await drizzleSql("rollback/0027_stripe_billing.sql"));
-
-    // Rollback refuses while a login role is still in the group.
-    await expect(pg.exec(down)).rejects.toThrow(
-      "milton_runtime_has_login_members",
-    );
-    await pg.exec("ROLLBACK");
-    expect(await grants(pg)).toEqual(await grants(post));
-    await pg.exec("DROP ROLE milton_app_fixture");
-    await pg.exec(down);
-    expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(base));
-    expect(await roles(pg)).toEqual([]);
-    expect(
-      (await pg.query("SELECT count(*)::int AS n FROM pg_default_acl")).rows,
-    ).toEqual([{ n: 0 }]);
-    expect(
-      (await pg.query("SELECT body FROM samples WHERE user_id='runtime'")).rows,
-    ).toEqual([{ body: "Runtime sample body." }]);
-    await forward();
   } finally {
-    await post.close();
-    await pg.close();
-    await base.close();
-  }
-}, 30000);
-
-test("0023 drops the spend subsystem, keeps memo-update accounting, and rolls back to the empty 0022 shape", async () => {
-  const base = await migratedThrough(22);
-  const pg = await migratedThrough(22);
-  const post = await migratedThrough(23);
-  try {
-    const up = await drizzleSql("0023_no_spend.sql");
-    const down = await drizzleSql("rollback/0023_no_spend.sql");
-    const spend = [
-      "derivation_usage",
-      "foreground_usage",
-      "gardening_usage",
-      "spend_alert_emails",
-      "spend_alerts",
-    ];
-    const day = "(clock_timestamp() AT TIME ZONE 'UTC')::date";
-    // Production's shape: memo updates on, one charged and one held update
-    // today, every spend table populated and a feed key installed.
-    await pg.exec(`UPDATE store_config SET memo_updates_enabled=true,memo_updates_daily_limit=80,spend_feed_key_hash=repeat('a',64);
-      INSERT INTO users(id) VALUES ('spend');
-      INSERT INTO save_requests(user_id,request_id,input_hash,source_hash,reserved_micros,deadline,completed,result_json,memo_update_day,memo_update_state) VALUES
-      ('spend','00000000-0000-4000-8000-000000000023',repeat('a',64),repeat('c',64),100,now(),true,'{"status":"saved"}',${day},'charged'),
-      ('spend','00000000-0000-4000-8000-000000000024',repeat('b',64),repeat('c',64),0,now()+interval '1 minute',false,'{}',${day},'held');
-      INSERT INTO gardening_usage(user_id,day_utc,reserved_micros) VALUES ('spend','2026-11-01',90);
-      INSERT INTO derivation_usage(user_id,day_utc,reserved_micros) VALUES ('spend','2026-11-01',110);
-      INSERT INTO spend_alerts(id,day_utc,metric,threshold_micros,filing_micros,review_micros,derived_micros,status,published_at) VALUES
-      ('00000000-0000-4000-8000-000000000001','2026-11-01','model_reservations',100,100,0,0,'published',now());
-      INSERT INTO spend_alert_emails(alert_id,envelope) VALUES ('00000000-0000-4000-8000-000000000001','{}');`);
-    expect(
-      (
-        await pg.query(
-          "SELECT reserved_micros::int AS micros FROM foreground_usage",
-        )
-      ).rows,
-    ).toEqual([{ micros: 100 }]);
-    const accounting = async () => ({
-      settings: (
-        await pg.query(
-          "SELECT memo_updates_enabled AS enabled,memo_updates_daily_limit AS lim FROM store_config",
-        )
-      ).rows,
-      updates: (
-        await pg.query(
-          "SELECT request_id,memo_update_day::text,memo_update_state,completed FROM save_requests ORDER BY request_id",
-        )
-      ).rows,
-    });
-    const kept = await accounting();
-    expect(kept.updates).toHaveLength(2);
-    const forward = async () => {
-      await pg.exec("BEGIN;" + up + "COMMIT;");
-      expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(post));
-      const catalog = await schemaCatalog(pg);
-      expect(catalog.tables.filter((t) => spend.includes(t))).toEqual([]);
-      expect(
-        catalog.columns.filter((c) => c.column_name === "spend_feed_key_hash"),
-      ).toEqual([]);
-      expect(catalog.triggers.map((t) => t.tgname)).not.toContain(
-        "save_foreground_reservation",
-      );
-      expect(await accounting()).toEqual(kept);
-    };
-    await forward();
-    // A receipt that reserves spend no longer feeds a ledger.
-    await pg.exec(`INSERT INTO save_requests(user_id,request_id,input_hash,source_hash,reserved_micros,deadline,completed,result_json) VALUES
-      ('spend','00000000-0000-4000-8000-000000000025',repeat('d',64),repeat('c',64),100,now(),true,'{"status":"saved"}')`);
-    await pg.exec(
-      "DELETE FROM save_requests WHERE request_id='00000000-0000-4000-8000-000000000025'",
-    );
-    await pg.exec(down);
-    expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(base));
-    for (const table of spend)
-      expect(
-        (await pg.query(`SELECT count(*)::int AS n FROM ${table}`)).rows,
-      ).toEqual([{ n: 0 }]);
-    expect(
-      (await pg.query("SELECT spend_feed_key_hash AS hash FROM store_config"))
-        .rows,
-    ).toEqual([{ hash: null }]);
-    expect(await accounting()).toEqual(kept);
-    await forward();
-  } finally {
-    await post.close();
-    await pg.close();
-    await base.close();
-  }
-}, 30000);
-
-test("0022 drops the model-era spend fields, keeps the memo-update settings, and rolls back to the 0021 shape", async () => {
-  const base = await migratedThrough(21);
-  const pg = await migratedThrough(21);
-  const post = await migratedThrough(22);
-  try {
-    const up = await drizzleSql("0022_no_model_gate.sql");
-    const down = await drizzleSql("rollback/0022_no_model_gate.sql");
-    const settings =
-      "SELECT memo_updates_enabled AS enabled,memo_updates_daily_limit AS lim FROM store_config";
-    // Production's shape: alerts_only, ready, memo updates on.
-    await pg.exec(`UPDATE store_config SET global_spend_policy='alerts_only',foreground_accounting_ready=true,
-      memo_updates_enabled=true,memo_updates_daily_limit=80`);
-    const forward = async () => {
-      await pg.exec("BEGIN;" + up + "COMMIT;");
-      expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(post));
-      expect((await pg.query(settings)).rows).toEqual([
-        { enabled: true, lim: 80 },
-      ]);
-    };
-    await forward();
-    // Memo updates switch on and off without the readiness flag.
-    await pg.exec("UPDATE store_config SET memo_updates_enabled=false");
-    await pg.exec("UPDATE store_config SET memo_updates_enabled=true");
-    await expect(
-      pg.exec("UPDATE store_config SET memo_updates_daily_limit=0"),
-    ).rejects.toThrow("config_memo_updates");
-    await pg.exec(down);
-    expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(base));
-    expect(
-      (
-        await pg.query(
-          "SELECT global_spend_policy AS policy,foreground_accounting_ready AS ready,memo_updates_enabled AS enabled,memo_updates_daily_limit AS lim FROM store_config",
-        )
-      ).rows,
-    ).toEqual([{ policy: "alerts_only", ready: true, enabled: true, lim: 80 }]);
-    await forward();
-  } finally {
-    await post.close();
-    await pg.close();
-    await base.close();
-  }
-}, 30000);
-
-test("0021 removes the card and memo count limits, keeps every other guard, and rolls back to the 0020 guards", async () => {
-  const base = await migratedThrough(20);
-  const pg = await migratedThrough(20);
-  try {
-    const up = await drizzleSql("0021_no_card_count.sql");
-    const down = await drizzleSql("rollback/0021_no_card_count.sql");
-    await pg.exec(`UPDATE store_config SET limits_json=limits_json || '{"memos":1}'::jsonb;
-      INSERT INTO users(id) VALUES ('count');
-      INSERT INTO users(id,status) VALUES ('leaving','deleting');
-      INSERT INTO instruction_cards(user_id,id) VALUES ('count','c1');`);
-    const card = (id: string, user = "count") =>
-      pg.query("INSERT INTO instruction_cards(user_id,id) VALUES ($1,$2)", [
-        user,
-        id,
-      ]);
-    const memo = (id: string, name = id) =>
-      pg.query("INSERT INTO memos(user_id,id,name) VALUES ('count',$1,$2)", [
-        id,
-        name,
-      ]);
-    await memo("m1");
-    await expect(card("c2")).rejects.toThrow("memo_count_limit");
-    await expect(memo("m2")).rejects.toThrow("memo_count_limit");
-    const forward = async () => {
-      await pg.exec("BEGIN;" + up + "COMMIT;");
-      expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(post));
-    };
-    const post = await migratedThrough(21);
-    try {
-      await forward();
-      await card("c2");
-      await card("c3");
-      await memo("m2");
-      // The other checks still hold.
-      await expect(
-        pg.query("UPDATE instruction_cards SET id='c9' WHERE id='c1'"),
-      ).rejects.toThrow("card_identity_is_immutable");
-      await expect(card("c4", "leaving")).rejects.toThrow(
-        "account_unavailable",
-      );
-      await expect(memo("m3", "a".repeat(65))).rejects.toThrow(
-        "memo_name_limit",
-      );
-      await pg.exec(down);
-      expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(base));
-      expect(
-        (await pg.query("SELECT id FROM instruction_cards ORDER BY id")).rows,
-      ).toEqual([{ id: "c1" }, { id: "c2" }, { id: "c3" }]);
-      await expect(card("c4")).rejects.toThrow("memo_count_limit");
-      await expect(memo("m3")).rejects.toThrow("memo_count_limit");
-      await forward();
-      await card("c4");
-    } finally {
-      await post.close();
-    }
-  } finally {
-    await pg.close();
-    await base.close();
-  }
-}, 30000);
-
-test("filing-kinds migration files every version and gives samples kinds; rollback restores the previous shape", async () => {
-  const pg = await migratedThrough(19);
-  try {
-    await pg.exec(`INSERT INTO users(id) VALUES ('kinds');
-      INSERT INTO instruction_cards(user_id,id,report) VALUES ('kinds','c1',NULL),('kinds','c2','email');
-      INSERT INTO instruction_card_versions(user_id,card_id,version,description,body,reason,actor_json) VALUES
-      ('kinds','c1',1,'One','- Cover rule.','Fixture','{}'),('kinds','c2',1,'Two','- Email rule.','Fixture','{}'),
-      ('kinds','c2',2,'Two','- Email rule, edited.','Fixture','{}');
-      INSERT INTO samples(user_id,id,report,kind,context,body,client_json,created_at,retired_at) VALUES
-      ('kinds','s1','email','Follow-up','after a call','One','{}','2026-01-01',now()),
-      ('kinds','s2','email','follow-up','after a call','Two','{}','2026-01-02',NULL),
-      ('kinds','s3','chat','follow-up','after a call','Three','{}','2026-01-03',NULL);`);
-    const up = await Bun.file(
-      new URL("../drizzle/0020_filing_kinds.sql", import.meta.url),
-    ).text();
-    const down = await Bun.file(
-      new URL("../drizzle/rollback/0020_filing_kinds.sql", import.meta.url),
-    ).text();
-    const forward = async () => {
-      await pg.exec("BEGIN;" + up + "COMMIT;");
-      expect(
-        (
-          await pg.query(
-            "SELECT card_id,version,report FROM instruction_card_versions ORDER BY card_id,version",
-          )
-        ).rows,
-      ).toEqual([
-        { card_id: "c1", version: 1, report: "cover" },
-        { card_id: "c2", version: 1, report: "email" },
-        { card_id: "c2", version: 2, report: "email" },
-      ]);
-      expect(
-        (
-          await pg.query(
-            "SELECT s.id,s.report,k.label,s.retire_reason,s.retired_request_id FROM samples s JOIN sample_kinds k ON k.user_id=s.user_id AND k.id=s.kind_id ORDER BY s.id",
-          )
-        ).rows,
-      ).toEqual([
-        {
-          id: "s1",
-          report: "email",
-          label: "Follow-up",
-          retire_reason: "evicted",
-          retired_request_id: null,
-        },
-        {
-          id: "s2",
-          report: "email",
-          label: "Follow-up",
-          retire_reason: null,
-          retired_request_id: null,
-        },
-        {
-          id: "s3",
-          report: "chat",
-          label: "follow-up",
-          retire_reason: null,
-          retired_request_id: null,
-        },
-      ]);
-    };
-    await forward();
-    await expect(
-      pg.query("UPDATE sample_kinds SET label='Other'"),
-    ).rejects.toThrow("sample_kind_is_immutable");
-    await pg.exec(down);
-    expect(
-      (await pg.query("SELECT id,report FROM instruction_cards ORDER BY id"))
-        .rows,
-    ).toEqual([
-      { id: "c1", report: null },
-      { id: "c2", report: "email" },
-    ]);
-    expect(
-      (await pg.query("SELECT id,kind FROM samples ORDER BY id")).rows,
-    ).toEqual([
-      { id: "s1", kind: "Follow-up" },
-      { id: "s2", kind: "Follow-up" },
-      { id: "s3", kind: "follow-up" },
-    ]);
-    await forward();
-  } finally {
-    await pg.close();
-  }
-}, 30000);
-
-test("0018 removes derived systems without changing retained data, refuses a live lease, and rolls back to the empty pre-0018 shape", async () => {
-  // Rehearse 0018 as the newest migration; later migrations are out of scope.
-  const folder = await migrationsThrough(18);
-  const pg = await migratedThrough(17);
-  const derived = [
-    "card_embeddings",
-    "card_graphs",
-    "card_links",
-    "card_retrieval_embeddings",
-    "gardening_jobs",
-    "retrieval_enrollments",
-  ];
-  const derivedColumns = [
-    "derivation_account_budget_micros",
-    "derivation_global_budget_micros",
-    "derivation_budget_revision",
-    "derivation_cursor",
-  ];
-  const rows = async (statement: string) =>
-    (await pg.query<Record<string, unknown>>(statement)).rows;
-  // Full row dumps of every retained table. store_config loses only the four
-  // derivation columns; users.retained_bytes is checked on its own.
-  const retained = async () => {
-    const dump: Record<string, unknown> = {};
-    for (const table of (await publicTables(pg)).filter(
-      (t) => !derived.includes(t),
-    )) {
-      const strip =
-        table === "store_config"
-          ? derivedColumns.map((c) => ` - '${c}'`).join("")
-          : table === "users"
-            ? " - 'retained_bytes'"
-            : "";
-      dump[table] = (
-        await rows(
-          `SELECT coalesce(jsonb_agg(r ORDER BY r::text),'[]') AS rows FROM (SELECT to_jsonb(t)${strip} AS r FROM ${table} t) x`,
-        )
-      )[0]!.rows;
-    }
-    return dump;
-  };
-  const bytes = async () =>
-    Object.fromEntries(
-      (
-        await pg.query<{ id: string; retained_bytes: number }>(
-          "SELECT id,retained_bytes::bigint::float8 AS retained_bytes FROM users ORDER BY id",
-        )
-      ).rows.map((row) => [row.id, row.retained_bytes]),
-    );
-  const catalog = () => schemaCatalog(pg);
-  try {
-    // Populate every derived table and both frozen ledgers at journal 17.
-    const unit = `('[1' || repeat(',0',767) || ']')::vector`;
-    await pg.exec(`INSERT INTO users(id) VALUES ('derived-a'),('derived-b');
-      INSERT INTO memos(user_id,id,name) VALUES ('derived-a','a','writing'),('derived-a','b','narrative'),('derived-b','a','other');
-      INSERT INTO memo_versions(user_id,memo_id,version,description,body,reason,actor_json) VALUES
-      ('derived-a','a',1,'Review format','In code reviews, use bullets.','Fixture','{}'),
-      ('derived-a','b',1,'Narrative format','Use prose for narrative reviews.','Fixture','{}'),
-      ('derived-b','a',1,'Other account','Never send without approval.','Fixture','{}');
-      INSERT INTO tps_reports(user_id,revision,body,source_hash) VALUES
-      ('derived-a',1,'In code reviews, use bullets.',repeat('c',64)),('derived-b',1,'Never send without approval.',repeat('d',64));
-      INSERT INTO samples(user_id,id,report,kind,context,body,client_json) VALUES ('derived-a','s1','email','follow-up','after a call','Hi there','{}');
-      INSERT INTO save_requests(user_id,request_id,input_hash,source_hash,reserved_micros,deadline,completed,result_json) VALUES
-      ('derived-a','00000000-0000-4000-8000-000000000001',repeat('a',64),repeat('c',64),100,now(),true,'{"status":"saved"}'),
-      ('derived-a','00000000-0000-4000-8000-000000000002',repeat('b',64),repeat('c',64),100,now(),true,'{"status":"saved"}');
-      UPDATE store_config SET derivation_account_budget_micros=100,derivation_global_budget_micros=1000,derivation_budget_revision=1,derivation_cursor=1;
-      INSERT INTO card_embeddings(user_id,card_id,version,model,body_hash,embedding,status,attempt_id,lease_until) VALUES
-      ('derived-a','a',1,'fixture-embedding',repeat('e',64),${unit},'ready','00000000-0000-4000-8000-0000000000e1',now()),
-      ('derived-b','a',1,'fixture-embedding',repeat('e',64),NULL,'failed','00000000-0000-4000-8000-0000000000e2',now());
-      INSERT INTO retrieval_enrollments(user_id,baseline) VALUES ('derived-a','[{"id":"a","version":1}]');
-      INSERT INTO card_retrieval_embeddings(user_id,card_id,version,model,body_hash,embedding,status,attempt_id,lease_until) VALUES
-      ('derived-a','a',1,'fixture-embedding',repeat('e',64),${unit},'ready','00000000-0000-4000-8000-0000000000e3',now());
-      INSERT INTO card_graphs(user_id,source_hash,model,status,attempt_id,lease_until,finished_at) VALUES
-      ('derived-a',repeat('c',64),'fixture-graph','ready','00000000-0000-4000-8000-0000000000e4',now(),now());
-      INSERT INTO card_links(user_id,from_id,from_version,to_id,to_version,source_hash,kind,from_quote,to_quote,reason) VALUES
-      ('derived-a','b',1,'a',1,repeat('c',64),'possible_exception','narrative reviews','code reviews','Fictional advisory link.');
-      INSERT INTO derivation_usage(user_id,day_utc,reserved_micros) VALUES ('derived-a','2026-11-01',110);
-      INSERT INTO gardening_usage(user_id,day_utc,reserved_micros) VALUES ('derived-a','2026-11-01',90);`);
-    const before = await bytes();
-    // A pending job carries reserved bytes on the account.
-    await pg.exec(`INSERT INTO gardening_jobs(user_id,request_id,payload_json,report_revision,source_hash)
-      VALUES ('derived-a','00000000-0000-4000-8000-000000000001','{"request":{"text":"Keep context."},"before":[],"after":[{"id":"a","version":1}]}',1,repeat('c',64))`);
-    const [job] = await rows(
-      "SELECT payload_bytes::float8 AS n FROM gardening_jobs",
-    );
-    const jobBytes = job!.n as number;
-    expect(jobBytes).toBeGreaterThan(0);
-    expect((await bytes())["derived-a"]).toBe(before["derived-a"]! + jobBytes);
-    for (const table of derived)
-      expect(
-        (await rows(`SELECT count(*)::int AS n FROM ${table}`))[0]!.n,
-      ).toBeGreaterThan(0);
-    // A live lease refuses the whole migration; nothing changes.
-    await pg.exec(`INSERT INTO gardening_jobs(user_id,request_id,payload_json,report_revision,source_hash)
-      VALUES ('derived-a','00000000-0000-4000-8000-000000000002','{"request":{"text":"Leased."},"before":[],"after":[]}',1,repeat('c',64));
-      UPDATE gardening_jobs SET status='running',attempt_id='00000000-0000-4000-8000-0000000000f1',attempted_at=now(),lease_until=now()+interval '5 minutes',reserved_micros=10
-      WHERE request_id='00000000-0000-4000-8000-000000000002';`);
-    const leased = await retained();
-    const leasedCatalog = await catalog();
-    const leasedBytes = await bytes();
-    await expect(
-      migrate(drizzle(pg), { migrationsFolder: folder }),
-    ).rejects.toMatchObject({
-      cause: { message: "remove_derived_requires_no_live_gardening_lease" },
-    });
-    expect(await retained()).toEqual(leased);
-    expect(await catalog()).toEqual(leasedCatalog);
-    expect(await bytes()).toEqual(leasedBytes);
-    expect(
-      (
-        await rows(
-          "SELECT count(*)::int AS n FROM drizzle.__drizzle_migrations",
-        )
-      )[0]!.n,
-    ).toBe(18);
-    // Clear the leased job; its delete returns its bytes.
-    await pg.exec(
-      "DELETE FROM gardening_jobs WHERE request_id='00000000-0000-4000-8000-000000000002'",
-    );
-    expect((await bytes())["derived-a"]).toBe(before["derived-a"]! + jobBytes);
-    // A live derivation lease refuses it too; nothing changes.
-    await pg.exec(
-      "UPDATE card_embeddings SET status='running',lease_until=now()+interval '5 minutes' WHERE user_id='derived-b'",
-    );
-    const derivationLeased = await retained();
-    const derivationLeasedBytes = await bytes();
-    await expect(
-      migrate(drizzle(pg), { migrationsFolder: folder }),
-    ).rejects.toMatchObject({
-      cause: { message: "remove_derived_requires_no_live_derivation_lease" },
-    });
-    expect(await retained()).toEqual(derivationLeased);
-    expect(await catalog()).toEqual(leasedCatalog);
-    expect(await bytes()).toEqual(derivationLeasedBytes);
-    expect(
-      (
-        await rows(
-          "SELECT count(*)::int AS n FROM drizzle.__drizzle_migrations",
-        )
-      )[0]!.n,
-    ).toBe(18);
-    await pg.exec(
-      "UPDATE card_embeddings SET status='failed',lease_until=now() WHERE user_id='derived-b'",
-    );
-    const kept = await retained();
-    const preCatalog = await catalog();
-    const preBytes = await bytes();
-    const ledgers = await rows(
-      "SELECT 'derivation' AS ledger,user_id,day_utc::text,reserved_micros::int FROM derivation_usage UNION ALL SELECT 'gardening',user_id,day_utc::text,reserved_micros::int FROM gardening_usage ORDER BY 1",
-    );
-    expect(ledgers).toHaveLength(2);
-
-    await migrate(drizzle(pg), { migrationsFolder: folder });
-    expect(await retained()).toEqual(kept);
-    expect(await bytes()).toEqual({
-      ...preBytes,
-      "derived-a": preBytes["derived-a"]! - jobBytes,
-    });
-    expect((await bytes())["derived-a"]).toBe(before["derived-a"]!);
-    expect(
-      await rows(
-        "SELECT 'derivation' AS ledger,user_id,day_utc::text,reserved_micros::int FROM derivation_usage UNION ALL SELECT 'gardening',user_id,day_utc::text,reserved_micros::int FROM gardening_usage ORDER BY 1",
-      ),
-    ).toEqual(ledgers);
-    const postCatalog = await catalog();
-    expect(postCatalog.tables).toEqual([
-      "accepted_changes",
-      "derivation_usage",
-      "foreground_usage",
-      "gardening_usage",
-      "identities",
-      "instruction_card_versions",
-      "instruction_cards",
-      "memo_cards",
-      "memo_versions",
-      "memos",
-      "samples",
-      "save_requests",
-      "spend_alert_emails",
-      "spend_alerts",
-      "store_config",
-      "tps_reports",
-      "trial_accounts",
-      "usage_daily",
-      "users",
-    ]);
-    expect(postCatalog.extensions).toEqual([]);
-    expect(postCatalog.functions.map((f) => f.proname as string)).not.toContain(
-      "milton_gardening_guard",
-    );
-    expect(postCatalog.functions.map((f) => f.proname as string)).not.toContain(
-      "milton_card_link_guard",
-    );
-    expect(
-      postCatalog.columns.filter(
-        (c) =>
-          derivedColumns.includes(c.column_name as string) ||
-          derived.includes(c.table_name as string),
-      ),
-    ).toEqual([]);
-    expect(
-      postCatalog.constraints.filter(
-        (c) =>
-          derived.includes(c.tbl as string) ||
-          (c.conname as string).startsWith("config_derivation"),
-      ),
-    ).toEqual([]);
-
-    // The rollback restores the pre-0018 shape, empty.
-    const down = await Bun.file(
-      new URL("../drizzle/rollback/0018_remove_derived.sql", import.meta.url),
-    ).text();
-    await pg.exec(down);
-    expect(await catalog()).toEqual(preCatalog);
-    expect(await retained()).toEqual(kept);
-    for (const table of derived)
-      expect(await rows(`SELECT * FROM ${table}`)).toEqual([]);
-    // A 0017-era statement set runs against it.
-    expect(
-      await rows(
-        `SELECT ${derivedColumns.join(",")} FROM store_config WHERE singleton=1`,
-      ),
-    ).toEqual([
-      {
-        derivation_account_budget_micros: null,
-        derivation_global_budget_micros: null,
-        derivation_budget_revision: 0,
-        derivation_cursor: 0,
-      },
-    ]);
-    const restoredBytes = await bytes();
-    await pg.exec(`INSERT INTO gardening_jobs(user_id,request_id,payload_json,report_revision,source_hash)
-      VALUES ('derived-a','00000000-0000-4000-8000-000000000001','{"request":{"text":"Again."},"before":[],"after":[]}',1,repeat('c',64));
-      INSERT INTO retrieval_enrollments(user_id,baseline) VALUES ('derived-a','[]');
-      INSERT INTO card_retrieval_embeddings(user_id,card_id,version,model,body_hash,embedding,status,attempt_id,lease_until) VALUES
-      ('derived-a','a',1,'fixture-embedding',repeat('e',64),${unit},'ready','00000000-0000-4000-8000-0000000000e5',now());
-      UPDATE store_config SET derivation_account_budget_micros=100,derivation_global_budget_micros=1000,derivation_budget_revision=1;`);
-    const [again] = await rows(
-      "SELECT payload_bytes::float8 AS n FROM gardening_jobs",
-    );
-    expect((await bytes())["derived-a"]).toBe(
-      restoredBytes["derived-a"]! + (again!.n as number),
-    );
-    await expect(
-      pg.exec("UPDATE gardening_jobs SET payload_json='{}'"),
-    ).rejects.toThrow("gardening_job_is_immutable");
-    await expect(
-      pg.exec(
-        `INSERT INTO card_links(user_id,from_id,from_version,to_id,to_version,source_hash,kind,from_quote,to_quote,reason) VALUES
-        ('derived-a','b',1,'a',1,repeat('c',64),'possible_exception','narrative reviews','code reviews','No graph.')`,
-      ),
-    ).rejects.toThrow("card_link_invalid");
-    // Forward again over the restored shape returns the post-0018 catalog.
-    await pg.exec(
-      "BEGIN;\n" + (await drizzleSql("0018_remove_derived.sql")) + "\nCOMMIT;",
-    );
-    expect(await catalog()).toEqual(postCatalog);
-    expect(await bytes()).toEqual(restoredBytes);
-  } finally {
-    await pg.close();
-  }
-}, 30000);
-
-test("0019 rollback refuses while disconnects or deleted identities exist and restores the pre-0019 shape when empty", async () => {
-  const base = await migratedThrough(18);
-  const pg = await migratedThrough(19);
-  try {
-    const down = await Bun.file(
-      new URL(
-        "../drizzle/rollback/0019_assistant_disconnects.sql",
-        import.meta.url,
-      ),
-    ).text();
-    const refused = async (seed: string, code: string) => {
-      await pg.exec(seed);
-      await expect(pg.exec(down)).rejects.toThrow(code);
-      await pg.exec("ROLLBACK");
-      expect(await publicTables(pg)).toContain("assistant_disconnects");
-    };
-    await pg.exec("INSERT INTO users(id) VALUES ('rollback-a')");
-    await refused(
-      "INSERT INTO assistant_disconnects(provider,subject,client_id) VALUES ('neon','fixture','client-a')",
-      "assistant_disconnects_rollback_requires_no_disconnects",
-    );
-    await pg.exec("DELETE FROM assistant_disconnects");
-    await refused(
-      `INSERT INTO deleted_identities(identity_hash) VALUES (repeat('a',64))`,
-      "deleted_identities_rollback_requires_no_deleted_identities",
-    );
-    await pg.exec("DELETE FROM deleted_identities");
-    await pg.exec(down);
-    expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(base));
-    expect((await pg.query("SELECT id FROM users")).rows).toEqual([
-      { id: "rollback-a" },
-    ]);
-  } finally {
-    await pg.close();
-    await base.close();
-  }
-});
-
-test("a failing migration changes no table, row or journal entry, empty or populated", async () => {
-  const bad = await mkdtemp(join(tmpdir(), "milton-migration-"));
-  const pg = new PGlite();
-  const failure = "\n--> statement-breakpoint\nSELECT 1/0;\n";
-  let populated: PGlite | undefined;
-  try {
-    await cp(new URL("../drizzle/", import.meta.url), bad, { recursive: true });
-    await appendFile(join(bad, "0001_store_invariants.sql"), failure);
-    await expect(
-      migrate(drizzle(pg), { migrationsFolder: bad }),
-    ).rejects.toMatchObject({ cause: { code: "22012" } });
-    expect(
-      (
-        await pg.query(
-          "SELECT tablename FROM pg_tables WHERE schemaname='public'",
-        )
-      ).rows,
-    ).toEqual([]);
-    expect(
-      (
-        await pg.query(
-          "SELECT count(*)::integer AS n FROM drizzle.__drizzle_migrations",
-        )
-      ).rows,
-    ).toEqual([{ n: 0 }]);
-    // Over populated data, the newest migration failing changes nothing; the
-    // fixed migration then applies.
-    await cp(
-      new URL("../drizzle/0001_store_invariants.sql", import.meta.url),
-      join(bad, "0001_store_invariants.sql"),
-    );
-    const { entries } = (await Bun.file(
-      join(bad, "meta/_journal.json"),
-    ).json()) as { entries: { idx: number; tag: string }[] };
-    const newest = entries.at(-1)!;
-    populated = await migratedThrough(newest.idx - 1);
-    const db = populated;
-    await db.exec(`INSERT INTO users(id) VALUES ('kept-a'),('kept-b');
-      INSERT INTO identities(provider,subject,user_id) VALUES ('neon','kept-a','kept-a');`);
-    const state = async () => {
-      const tables: Record<string, unknown> = {};
-      for (const table of await publicTables(db))
-        tables[table] = (
-          await db.query<{ rows: unknown }>(
-            `SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text),'[]') AS rows FROM ${table} t`,
-          )
-        ).rows[0]!.rows;
-      return {
-        tables,
-        catalog: await schemaCatalog(db),
-        journal: (
-          await db.query(
-            "SELECT * FROM drizzle.__drizzle_migrations ORDER BY id",
-          )
-        ).rows,
-      };
-    };
-    const before = await state();
-    await appendFile(join(bad, newest.tag + ".sql"), failure);
-    await expect(
-      migrate(drizzle(db), { migrationsFolder: bad }),
-    ).rejects.toMatchObject({ cause: { code: "22012" } });
-    expect(await state()).toEqual(before);
-    await cp(
-      new URL(`../drizzle/${newest.tag}.sql`, import.meta.url),
-      join(bad, newest.tag + ".sql"),
-    );
-    await migrate(drizzle(db), { migrationsFolder: bad });
-    expect(
-      (
-        await db.query(
-          "SELECT count(*)::integer AS n FROM drizzle.__drizzle_migrations",
-        )
-      ).rows,
-    ).toEqual([{ n: entries.length }]);
-    expect((await db.query("SELECT id FROM users ORDER BY id")).rows).toEqual([
-      { id: "kept-a" },
-      { id: "kept-b" },
-    ]);
-  } finally {
-    await pg.close();
-    await populated?.close();
-    await rm(bad, { recursive: true, force: true });
+    await local.dispose();
   }
 });

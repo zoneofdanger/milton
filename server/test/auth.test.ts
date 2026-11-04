@@ -2142,7 +2142,7 @@ test("web shows only current TPS and rejects all retired history and mutation ro
     ])
       expect(html).not.toContain(absent);
     const before = await fixture.db.query(
-      sql`SELECT * FROM memo_versions ORDER BY user_id,memo_id,version`,
+      sql`SELECT * FROM instruction_card_versions ORDER BY user_id,card_id,version`,
     );
     for (const path of [
       "/memos",
@@ -2161,7 +2161,7 @@ test("web shows only current TPS and rejects all retired history and mutation ro
     }
     expect(
       await fixture.db.query(
-        sql`SELECT * FROM memo_versions ORDER BY user_id,memo_id,version`,
+        sql`SELECT * FROM instruction_card_versions ORDER BY user_id,card_id,version`,
       ),
     ).toEqual(before);
     const download = await fixture.send("/download");

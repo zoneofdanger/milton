@@ -2,7 +2,12 @@ import { expect, jest, spyOn, test } from "bun:test";
 import { sql } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { localStore } from "./local-store";
-import { insideTransactions, read, seedUsers } from "./store-fixtures";
+import {
+  insideTransactions,
+  read,
+  seedRule,
+  seedUsers,
+} from "./store-fixtures";
 import { createStoreMemoTools } from "../src/store/tools";
 import { createHash } from "node:crypto";
 import type { StoreDatabase } from "../src/store/database";
@@ -509,31 +514,31 @@ test("Postgres keeps immutable contiguous history per user, with plain deletion"
   const local = await localStore();
   try {
     await seedUsers(local.pg, "m_first", "m_second");
-    await local.pg
-      .exec(`INSERT INTO memos (user_id,id,name) VALUES ('m_first','same-id','sample'),('m_second','same-id','sample');
-      INSERT INTO memo_versions (user_id,memo_id,version,description,body,reason,actor_json)
-      VALUES ('m_first','same-id',1,'Sample.','hello','seed','{}'),('m_second','same-id',1,'Sample.','hello','seed','{}');`);
+    await seedRule(local.pg, "m_first", "same-id", "hello");
+    await seedRule(local.pg, "m_second", "same-id", "hello");
     await expect(
-      local.pg.query("UPDATE memo_versions SET body='changed'"),
-    ).rejects.toThrow("memo_version_is_immutable");
+      local.pg.query("UPDATE instruction_card_versions SET body='changed'"),
+    ).rejects.toThrow("card_version_is_immutable");
     await expect(
       local.pg.query(
-        "INSERT INTO memo_versions (user_id,memo_id,version,description,body,reason,actor_json) VALUES ('m_first','same-id',3,'Sample.','hello','seed','{}')",
+        "INSERT INTO instruction_card_versions (user_id,card_id,version,description,body,reason,report,actor_json) VALUES ('m_first','same-id',3,'Sample.','hello','seed','cover','{}')",
       ),
-    ).rejects.toThrow("memo_version_conflict");
+    ).rejects.toThrow("card_version_conflict");
     await expect(
       local.pg.query("UPDATE users SET id='other' WHERE id='m_first'"),
     ).rejects.toThrow("user_id_is_immutable");
-    await local.pg.query(
-      "DELETE FROM memos WHERE user_id='m_first' AND id='same-id'",
-    );
+    await local.pg.query("DELETE FROM users WHERE id='m_first'");
     expect(
-      (await local.pg.query("SELECT user_id FROM memo_versions")).rows,
+      (await local.pg.query("SELECT user_id FROM instruction_card_versions"))
+        .rows,
     ).toEqual([{ user_id: "m_second" }]);
     await local.pg.query("DELETE FROM users WHERE id='m_second'");
     expect(
-      (await local.pg.query("SELECT count(*)::integer AS n FROM memo_versions"))
-        .rows,
+      (
+        await local.pg.query(
+          "SELECT count(*)::integer AS n FROM instruction_card_versions",
+        )
+      ).rows,
     ).toEqual([{ n: 0 }]);
   } finally {
     await local.dispose();
@@ -576,7 +581,7 @@ test("identity lookup never admits or seeds an MCP caller", async () => {
     expect(
       await local.db.query(sql`SELECT count(*)::integer AS n FROM users`),
     ).toEqual([{ n: 0 }]);
-    // Preserve concurrent sign-up; sign-up writes no legacy memo.
+    // Preserve concurrent sign-up; new accounts have no rule history.
     const same = await Promise.all([
       resolveIdentityAccount(local.env, identity),
       resolveIdentityAccount(local.env, identity),
@@ -588,7 +593,7 @@ test("identity lookup never admits or seeds an MCP caller", async () => {
     );
     expect(
       await local.db.query(
-        sql`SELECT count(*)::integer AS n FROM memo_versions`,
+        sql`SELECT count(*)::integer AS n FROM instruction_card_versions`,
       ),
     ).toEqual([{ n: 0 }]);
     const concurrent = await Promise.allSettled([
@@ -834,14 +839,10 @@ test("account deletion removes every tenant row, keeps refusals, waits for an in
     };
     const gone = await open("leaving");
     const kept = await open("staying");
-    // A legacy memo with history, beside the signup seed.
-    await local.db.query(
-      sql`INSERT INTO memos (user_id,id,name) VALUES (${gone.auth.userId},'legacy','legacy')`,
-    );
+    await seedRule(local.pg, gone.auth.userId, "history", "A fictional rule.");
     await local.db
-      .query(sql`INSERT INTO memo_versions (user_id,memo_id,version,description,body,reason,actor_json)
-      VALUES (${gone.auth.userId},'legacy',1,'Fictional','A legacy rule.','Fixture','{}'),
-        (${gone.auth.userId},'legacy',2,'Fictional','A legacy rule, revised.','Fixture','{}')`);
+      .query(sql`INSERT INTO instruction_card_versions(user_id,card_id,version,description,body,reason,report,actor_json)
+      VALUES (${gone.auth.userId},'history',2,'Fictional','A fictional rule, revised.','Fixture','cover','{}')`);
     expect((await gone.save()).status).toBe("saved");
     // A kind, a sample replaced by another (lineage) and an active pair.
     const goneSamples = () =>
@@ -893,11 +894,8 @@ test("account deletion removes every tenant row, keeps refusals, waits for an in
     for (const table of [
       "identities",
       "trial_accounts",
-      "memos",
-      "memo_versions",
       "instruction_cards",
       "instruction_card_versions",
-      "memo_cards",
       "samples",
       "sample_kinds",
       "accepted_changes",

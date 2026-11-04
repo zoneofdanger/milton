@@ -378,8 +378,10 @@ Files: `server/drizzle/`, `server/src/store/schema.ts`, `server/src/store/databa
 - User IDs cannot change.
 - Disconnects and identity hashes have no foreign key to users, so they outlive the account.
 - `stripe_events` keeps each event's ID, type, and body hash, never the payload.
-- The older `memos`, `memo_versions`, and `memo_cards` tables remain, and no server code
-  reads or writes them.
+- The database holds cards and their immutable versions; the obsolete memo tables and
+  the unused card-version `legacy` flag are removed by the cleanup.
+- Fresh installs use one Drizzle baseline; the exact 0033 journal has an atomic owner-only
+  transition that preserves current data and marks that baseline applied. Other old states refuse.
 - The runtime role has least privilege, owns nothing, and can delete only from `users` and
   `assistant_disconnects`.
 - The runtime role can read and lock the `store_config` row but cannot change its settings.

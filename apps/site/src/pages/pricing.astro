@@ -348,26 +348,6 @@ const comments = [
             </a>
           </div>
         </div>
-        <div class="testimonial-column">
-          <figure class="employee-testimonial" id="employee-testimonial">
-            <blockquote>
-              “Milton lets me say ‘Did you get that memo?’ to software. I have
-              never felt more qualified for management.”
-            </blockquote>
-            <figcaption>
-              <strong>Michael Bolton</strong>
-              <span>Senior Founding AI Forward Deployed Product Engineer</span>
-            </figcaption>
-          </figure>
-          <ul class="social-proof">
-            <li>Would recommend: 1 of 1 founders.</li>
-            <li>Reduced rewrites by an amount we did not measure.</li>
-            <li>
-              Wall of love: one quote. We put it next to the price so it would
-              look like more.
-            </li>
-          </ul>
-        </div>
       </div>
       <ul class="tiers">
         {jokeTiers.map(({ name, price, text, delivery }, index) => (
@@ -755,7 +735,6 @@ const comments = [
     font-size: var(--text-lead);
   }
 
-  /* The real tier first, testimonial beside it; both share a centre line. */
   .pricing-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -835,32 +814,6 @@ const comments = [
     border: 1px solid var(--ink);
     background: var(--surface);
     font: var(--text-body) / 1 var(--font-mono);
-  }
-
-  .employee-testimonial blockquote {
-    margin: 0 0 var(--space-6);
-    font: var(--font-display-weight) var(--text-section) /
-      var(--leading-heading) var(--font-display);
-  }
-  .employee-testimonial figcaption {
-    display: grid;
-    gap: var(--space-2);
-    font-size: var(--text-small);
-  }
-  .employee-testimonial figcaption span {
-    color: var(--muted);
-  }
-  /* Fine print where a case study would show its metrics: plain lines under
-     the caption, set off by a hairline, and kept with the figure. */
-  .social-proof {
-    display: grid;
-    gap: var(--space-2);
-    margin: var(--space-6) 0 0;
-    padding: var(--space-4) 0 0;
-    border-top: 1px solid var(--hairline);
-    list-style: none;
-    color: var(--muted);
-    font-size: var(--text-small);
   }
 
   /* The rubber stamp from the routing slip. Decorative only. */

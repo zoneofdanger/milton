@@ -137,6 +137,22 @@ import FilingComparison from "../components/FilingComparison.astro";
       </span>
     </div>
   </section>
+  <section class="section" aria-label="Employee testimonial">
+    <figure class="employee-testimonial" id="employee-testimonial">
+      <blockquote>
+        “Milton lets me say ‘Did you get that memo?’ to software. I have never
+        felt more qualified for management.”
+      </blockquote>
+      <figcaption>
+        <strong>Michael Bolton</strong>
+        <span>Senior Founding AI Forward Deployed Product Engineer</span>
+      </figcaption>
+    </figure>
+    <ul class="social-proof">
+      <li>Would recommend: 1 of 1 founders.</li>
+      <li>Reduced rewrites by an amount we did not measure.</li>
+    </ul>
+  </section>
   <section class="section faq" aria-labelledby="faq-heading">
     <p class="eyebrow">## A few things to know</p>
     <h2 id="faq-heading">Before you connect.</h2>
@@ -509,6 +525,35 @@ import FilingComparison from "../components/FilingComparison.astro";
       font-size: var(--text-subtitle);
     }
   }
+  .employee-testimonial blockquote {
+    margin: 0 0 var(--space-6);
+    font: var(--font-display-weight) var(--text-section) /
+      var(--leading-heading) var(--font-display);
+  }
+  .employee-testimonial figcaption {
+    display: grid;
+    gap: var(--space-2);
+    font-size: var(--text-small);
+  }
+  .employee-testimonial figcaption span {
+    color: var(--muted);
+  }
+  /* Fine print where a case study would show its metrics: plain lines under
+     the caption, set off by a hairline, one column each across the container. */
+  .social-proof {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-2) var(--space-8);
+    margin: var(--space-6) 0 0;
+    padding: var(--space-4) 0 0;
+    border-top: 1px solid var(--hairline);
+    list-style: none;
+    color: var(--muted);
+    font-size: var(--text-small);
+  }
+  .social-proof li {
+    text-wrap: pretty;
+  }
   .faq details {
     border-top: 1px solid var(--hairline);
     padding-block: var(--space-3);
@@ -580,6 +625,9 @@ import FilingComparison from "../components/FilingComparison.astro";
     }
     .section-lead {
       font-size: var(--text-body);
+    }
+    .social-proof {
+      grid-template-columns: minmax(0, 1fr);
     }
   }
 </style>

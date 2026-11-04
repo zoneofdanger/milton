@@ -12,6 +12,7 @@ import { claimTrialNotice, trialStatus, type TrialNotice } from "./trials";
 import {
   backfillAccounts,
   billingAccount,
+  cancelReturningIdentities,
   clearStripeCustomer,
   enrollForBackfill,
   linkStripeCustomer,
@@ -470,6 +471,7 @@ export function subscriptionBackfill(bindings: StoreBindings) {
         )
       )[0]?.enabled === true,
     accounts: () => backfillAccounts(db),
+    cancelReturning: () => cancelReturningIdentities(db),
     enroll: (userId: string) => enrollForBackfill(db, userId),
   };
 }

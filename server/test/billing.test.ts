@@ -394,7 +394,7 @@ test("the backfill refuses without trials or a live key, dry-runs, creates, leav
     );
   try {
     await local.db.query(
-      sql`INSERT INTO users(id) VALUES ('a-no-row'),('b-null'),('c-canceled'),('d-gone')`,
+      sql`INSERT INTO users(id) VALUES ('a-no-row'),('b-null'),('c-canceled'),('d-gone'),('e-returned')`,
     );
     await local.db.query(
       sql`UPDATE users SET status='deleting' WHERE id='d-gone'`,
@@ -404,6 +404,11 @@ test("the backfill refuses without trials or a live key, dry-runs, creates, leav
     );
     await local.db.query(
       sql`INSERT INTO trial_accounts(user_id,started_at,subscription_status) SELECT id,created_at,'canceled' FROM users WHERE id='c-canceled'`,
+    );
+    // A returning deleted identity an older image wrote: no status, a start
+    // before the account. It must never get a trial.
+    await local.db.query(
+      sql`INSERT INTO trial_accounts(user_id,started_at) SELECT id,created_at-interval '1 hour' FROM users WHERE id='e-returned'`,
     );
     const refused = (
       target: Parameters<typeof backfillSubscriptions>[0],
@@ -425,9 +430,9 @@ test("the backfill refuses without trials or a live key, dry-runs, creates, leav
     };
     const dry = await backfillSubscriptions(live, {}, pause);
     expect(dry).toEqual({
-      total: 3,
+      total: 4,
       created: 0,
-      skipped: 1,
+      skipped: 2,
       failed: 0,
       still_null: 2,
     });
@@ -447,9 +452,9 @@ test("the backfill refuses without trials or a live key, dry-runs, creates, leav
     );
     quiet.mockRestore();
     expect(failed).toEqual({
-      total: 3,
+      total: 4,
       created: 0,
-      skipped: 1,
+      skipped: 2,
       failed: 2,
       still_null: 2,
     });
@@ -464,9 +469,9 @@ test("the backfill refuses without trials or a live key, dry-runs, creates, leav
       pause,
     );
     expect(done).toEqual({
-      total: 3,
+      total: 4,
       created: 2,
-      skipped: 1,
+      skipped: 2,
       failed: 0,
       still_null: 0,
     });
@@ -478,7 +483,9 @@ test("the backfill refuses without trials or a live key, dry-runs, creates, leav
       ["b-null", "trialing"],
       ["c-canceled", "canceled"],
       ["d-gone", null],
+      ["e-returned", "canceled"],
     ]);
+    expect(after.find(({ id }) => id === "e-returned")?.customer).toBeNull();
     // A rerun touches nothing.
     calls.length = 0;
     const rerun = await backfillSubscriptions(
@@ -487,9 +494,9 @@ test("the backfill refuses without trials or a live key, dry-runs, creates, leav
       pause,
     );
     expect(rerun).toEqual({
-      total: 3,
+      total: 4,
       created: 0,
-      skipped: 3,
+      skipped: 4,
       failed: 0,
       still_null: 0,
     });

@@ -22,7 +22,8 @@ const refuse = (message: string) => new StoreError("configuration", message);
 
 /** Starts the 30-day Stripe trial for every active account still without a
  * subscription. Dry run unless apply is set. Rows with a status are skipped, so a
- * rerun is safe and canceled rows never get a trial. Sends Stripe no email, since
+ * rerun is safe and canceled rows never get a trial, and a returning deleted
+ * identity an older image left with no status is canceled and counted as skipped. Sends Stripe no email, since
  * Milton holds none. created counts accounts that now hold a subscription, whether
  * started here or found at Stripe. */
 export async function backfillSubscriptions(
@@ -41,8 +42,11 @@ export async function backfillSubscriptions(
     throw refuse(
       "Billing has no live key. Pass --allow-test-key only on a disposable database.",
     );
+  if (apply) await store.cancelReturning();
   const accounts = await store.accounts();
-  const waiting = accounts.filter(({ status }) => status === null);
+  const waiting = accounts.filter(
+    ({ status, returning }) => status === null && !returning,
+  );
   const counts = {
     total: accounts.length,
     created: 0,
@@ -61,10 +65,11 @@ export async function backfillSubscriptions(
       }
       await pause();
     }
-  const after = apply ? await store.accounts() : accounts;
   return {
     ...counts,
-    still_null: after.filter(({ status }) => status === null).length,
+    still_null: apply
+      ? (await store.accounts()).filter(({ status }) => status === null).length
+      : waiting.length,
   };
 }
 

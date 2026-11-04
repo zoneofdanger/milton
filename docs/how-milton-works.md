@@ -219,6 +219,8 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
 - `scripts/backfill-subscriptions.ts` does the same for every active account, paced at about
   5 a second: a dry run unless told otherwise, it skips rows with a status, sends no email,
   prints only counts, and refuses without `trials_enabled` and a live key.
+- The backfill cancels a returning deleted identity left with no status, by 0026's rule,
+  and counts it as skipped, so it never gets a trial.
 - A reply lost after Stripe made a customer can leave an orphan: never charged, may hold an
   email, removed by hand in Stripe if ever needed.
 - Idempotency keys carry the UTC minute, because Stripe replays a stored error for a day.

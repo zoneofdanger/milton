@@ -117,11 +117,25 @@ export async function recordStripeEvent(
   return { recorded: row.recorded === 1, updated: row.updated };
 }
 
-/** Every active account and its status, null with no row or no status yet. */
+/** 0026's data statement: a returning deleted identity an older image wrote, with
+ * no status and a start before its account, is canceled, never given a trial. */
+export async function cancelReturningIdentities(db: StoreSession) {
+  await db.query(sql`UPDATE trial_accounts t SET subscription_status='canceled'
+    FROM users u WHERE u.id=t.user_id AND t.started_at < u.created_at
+    AND t.subscription_status IS NULL`);
+}
+
+/** Every active account and its status, null with no row or no status yet.
+ * returning marks a row cancelReturningIdentities has not reached. */
 export async function backfillAccounts(db: StoreSession) {
-  return db.query<{ id: string; status: string | null }>(sql`
-    SELECT u.id, t.subscription_status AS status FROM users u
-    LEFT JOIN trial_accounts t ON t.user_id=u.id
+  return db.query<{
+    id: string;
+    status: string | null;
+    returning: boolean;
+  }>(sql`
+    SELECT u.id, t.subscription_status AS status,
+      coalesce(t.subscription_status IS NULL AND t.started_at < u.created_at,false) AS returning
+    FROM users u LEFT JOIN trial_accounts t ON t.user_id=u.id
     WHERE u.status='active' ORDER BY u.id`);
 }
 

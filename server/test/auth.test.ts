@@ -1444,6 +1444,13 @@ test("signing in starts one Stripe trial, heals after a failure, and never depen
     expect((await fixture.send("/login")).status).toBe(302);
     expect(stripe.calls).toEqual([list]);
     expect((await account(fixture))?.status).toBe("trialing");
+    // A returning deleted identity's canceled row never starts a trial.
+    await fixture.local.db.query(
+      sql`UPDATE trial_accounts SET subscription_status='canceled'`,
+    );
+    stripe.calls.length = 0;
+    expect((await fixture.send("/login")).status).toBe(302);
+    expect(stripe.calls).toEqual([]);
   } finally {
     logged.mockRestore();
     await fixture.dispose();

@@ -415,11 +415,14 @@ this release writes neither.
 
 Release order:
 
-1. As the owner, give `reserved_micros` a default so this release can claim before 0026:
-   `ALTER TABLE save_requests ALTER COLUMN reserved_micros SET DEFAULT 0;` The running
-   revision names the column and is unaffected; 0026 drops the column and its default.
+1. As the owner, give `reserved_micros` a default so this release can claim before 0026,
+   with a lock timeout so a stuck transaction cannot stall every save:
+   `SET lock_timeout = '5s'; ALTER TABLE save_requests ALTER COLUMN reserved_micros SET DEFAULT 0;`
+   Retry on a timeout. The running revision names the column and is unaffected; 0026 drops
+   the column and its default.
 2. Ship MCP and app from the same image.
-3. Take a Neon snapshot, then apply 0026 with the normal runner.
+3. Only once both services are fully on the new revision (traffic at 100% and the old
+   revision idle), take a Neon snapshot, then apply 0026 with the normal runner.
 
 **Rollback boundary.** Before 0026 is applied, code rolls back by traffic alone. After it,
 an earlier revision cannot sign up an account or save: first run
@@ -428,4 +431,5 @@ traffic. The rollback re-adds the columns at their defaults (`reserved_micros` k
 `DEFAULT 0`, so either revision saves), their checks, both indexes (built over current
 rows), the previous `limits_json` default and the 0006 save guard; it restores shape, not
 data (`templates_revision` comes back 0). The 0026 journal row stays, so re-forwarding
-means running `0026_dead_columns.sql` by hand.
+means running `0026_dead_columns.sql` by hand, as one transaction that stops on the first
+error: `psql -1 -v ON_ERROR_STOP=1 -f server/drizzle/0026_dead_columns.sql`.

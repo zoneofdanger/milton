@@ -392,9 +392,9 @@ const comments = [
       </div>
     </section>
 
-    <section class="section faq-items" aria-labelledby="billing-faq-heading">
-      <p class="eyebrow">## A few things to know</p>
-      <h2 id="billing-faq-heading">Before you subscribe.</h2>
+    <section class="section faq-items" aria-labelledby="faq-heading">
+      <p class="eyebrow">## FAQ</p>
+      <h2 id="faq-heading">Frequently asked, by Peter.</h2>
       <details>
         <summary>Will I be charged after signing up?</summary>
         <p>
@@ -415,35 +415,28 @@ const comments = [
           We’ve been assured the accounting software is working as intended.
         </p>
       </details>
-    </section>
-
-    <section class="section" aria-labelledby="faq-heading">
-      <p class="eyebrow">## FAQ</p>
-      <h2 id="faq-heading">Frequently asked, by Peter.</h2>
-      <dl class="faq">
-        <div>
-          <dt>Is this a real crowdfunding campaign?</dt>
-          <dd>
-            No. Nobody can pledge, and no money is collected. The real pricing
-            is in the large print at the top of this page.
-          </dd>
-        </div>
-        <div>
-          <dt>What happens if the goal is not reached?</dt>
-          <dd>Nothing happens. Nothing also happens if it is reached.</dd>
-        </div>
-        <div>
-          <dt>Can I pay more to speed things up?</dt>
-          <dd>No. There is one plan, and we admire the impulse.</dd>
-        </div>
-        <div>
-          <dt>Will Milton still be around in February 85,360?</dt>
-          <dd>
-            The source is public, and you can run Milton yourself. We recommend
-            starting soon.
-          </dd>
-        </div>
-      </dl>
+      <details>
+        <summary>Is this a real crowdfunding campaign?</summary>
+        <p>
+          No. Nobody can pledge, and no money is collected. The real pricing is
+          in the large print at the top of this page.
+        </p>
+      </details>
+      <details>
+        <summary>What happens if the goal is not reached?</summary>
+        <p>Nothing happens. Nothing also happens if it is reached.</p>
+      </details>
+      <details>
+        <summary>Can I pay more to speed things up?</summary>
+        <p>No. There is one plan, and we admire the impulse.</p>
+      </details>
+      <details>
+        <summary>Will Milton still be around in February 85,360?</summary>
+        <p>
+          The source is public, and you can run Milton yourself. We recommend
+          starting soon.
+        </p>
+      </details>
     </section>
 
     <section class="closing" aria-labelledby="closing-heading">
@@ -757,12 +750,10 @@ const comments = [
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: var(--space-6) var(--space-8);
   }
-  .risks dt,
-  .faq dt {
+  .risks dt {
     font-weight: 600;
   }
-  .risks dd,
-  .faq dd {
+  .risks dd {
     margin-top: var(--space-2);
     color: var(--muted);
   }
@@ -809,12 +800,6 @@ const comments = [
     margin-top: var(--space-2);
     color: var(--muted);
     font: var(--text-caption) / var(--leading-label) var(--font-mono);
-  }
-
-  .faq {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--space-6) var(--space-8);
   }
 
   /* The same list as the home page's FAQ. Its divider closes the last item,
@@ -871,8 +856,7 @@ const comments = [
   @media (max-width: 860px) {
     .truth-body,
     .log-grid,
-    .risks,
-    .faq {
+    .risks {
       grid-template-columns: minmax(0, 1fr);
     }
     .truth-body {

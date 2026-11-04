@@ -235,9 +235,10 @@ missing signature answered 400 `signature_invalid`, signed-out `/tps-report` ans
 `does not exist`, `42703`, `samples_labels`, `lock timeout` or a secret-shaped string (MCP 31 x
 200, 4 x 401, and 2 x 202 and 2 x 405 from a Codex client's notification POST and GET stream
 probe; app 9 x 200, 2 x 400 and 5 x 403), every request landed on the rank revisions, and the
-only tool calls were the checks above. Not run: a save with a labeled sample (step 6), which
-needs Peter's go in his own session; labels on a stored sample were therefore not observed in
-production, only in the page test and the store tests.
+only tool calls were the checks above. Step 6's labeled-sample save ran afterwards from Lead's
+session on Peter's go: one fictional follow-up email sample with audience, purpose and register
+on the email report answered `saved` with a new version, and a `get_report` read with a matching
+intent served it first with its three labels in `samples`.
 
 Rollback. Code rolls back by traffic alone at any time: the simp revisions run on the 0033
 schema (checked above). Shift traffic and, in the same step, set the manifests' images back to

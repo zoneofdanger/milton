@@ -1122,6 +1122,118 @@ test("a conflict or refusal in the claim phase stores a receipt and replays like
   }
 });
 
+test("an expired open claim completes as request_expired, and a lost claim acknowledgment dispatches nothing and replays in_progress", async () => {
+  const local = await localStore();
+  try {
+    await seedUsers(local.pg, "expired", "uncertain");
+    let calls = 0;
+    let paused: { entered: () => void; gate: Promise<void> } | undefined;
+    const store = (id: string, db = local.db) =>
+      fixtureStore(
+        betweenPhases(db, async () => {
+          calls++;
+          const hold = paused;
+          paused = undefined;
+          if (hold) {
+            hold.entered();
+            await hold.gate;
+          }
+        }),
+        id,
+        "assistant",
+      );
+    const input = async (s: ReturnType<typeof store>, text: string) => ({
+      text,
+      rules: [{ report: "cover" as const, text }],
+      request_id: crypto.randomUUID(),
+      expected_version: (await s.getTpsReport()).version,
+    });
+    // The receipt guard forbids moving a deadline, so the fixture lifts it.
+    const expire = async (requestId: string) => {
+      await local.pg.exec(
+        "ALTER TABLE save_requests DISABLE TRIGGER save_request_guard",
+      );
+      await local.db.query(
+        sql`UPDATE save_requests SET deadline=clock_timestamp()-interval '1 second' WHERE request_id=${requestId}`,
+      );
+      await local.pg.exec(
+        "ALTER TABLE save_requests ENABLE TRIGGER save_request_guard",
+      );
+    };
+    // Apply phase: a claim that outlives its deadline publishes nothing.
+    const expired = store("expired");
+    const expiredInput = await input(expired, "Expired rule.");
+    let release!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      paused = {
+        entered: resolve,
+        gate: new Promise<void>((done) => (release = done)),
+      };
+    });
+    const pending = expired.saveMemo(expiredInput);
+    await entered;
+    expect((await expired.saveMemo(expiredInput)).status).toBe("in_progress");
+    await expire(expiredInput.request_id);
+    release();
+    expect(await pending).toMatchObject({
+      status: "failed",
+      error: "request_expired",
+    });
+    expect((await expired.getTpsReport()).is_empty).toBe(true);
+    expect(await expired.saveMemo(expiredInput)).toMatchObject({
+      status: "failed",
+      error: "request_expired",
+    });
+    // Claim phase: the claim commits but its acknowledgment and the recovery
+    // lookup are both lost, so nothing is dispatched.
+    let loseClaim = true,
+      loseRecovery = true;
+    const uncertainClaim = {
+      ...local.db,
+      async transaction<T>(
+        work: Parameters<typeof local.db.transaction<T>>[0],
+      ) {
+        if (!loseClaim && loseRecovery) {
+          loseRecovery = false;
+          throw new Error("Fictional unavailable recovery");
+        }
+        const result = await local.db.transaction(work);
+        if (
+          loseClaim &&
+          typeof result === "object" &&
+          result !== null &&
+          "current" in result
+        ) {
+          loseClaim = false;
+          throw new Error("Fictional lost claim acknowledgment");
+        }
+        return result;
+      },
+    };
+    const uncertain = store("uncertain", uncertainClaim);
+    const claimInput = await input(uncertain, "Uncertain rule.");
+    const before = calls;
+    await expect(uncertain.saveMemo(claimInput)).rejects.toMatchObject({
+      code: "save_outcome_unknown",
+    });
+    expect(calls).toBe(before);
+    expect((await store("uncertain").saveMemo(claimInput)).status).toBe(
+      "in_progress",
+    );
+    // Its replay past the deadline completes the receipt in the claim phase.
+    await expire(claimInput.request_id);
+    for (let i = 0; i < 2; i++)
+      expect(await store("uncertain").saveMemo(claimInput)).toMatchObject({
+        status: "failed",
+        error: "request_expired",
+      });
+    expect(calls).toBe(before);
+    expect((await store("uncertain").getTpsReport()).is_empty).toBe(true);
+  } finally {
+    await local.dispose();
+  }
+});
+
 test("a Baseline: rule must be a setup rule byte for byte in its report, filed new, edited or moved", async () => {
   const local = await localStore();
   try {

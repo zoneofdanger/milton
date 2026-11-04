@@ -12,7 +12,7 @@
 -- means running 0028_no_memo_updates.sql by hand.
 BEGIN;
 SET LOCAL lock_timeout = '10s';
-LOCK TABLE "store_config", "save_requests" IN ACCESS EXCLUSIVE MODE;
+LOCK TABLE "save_requests", "store_config" IN ACCESS EXCLUSIVE MODE;
 ALTER TABLE "store_config" ADD COLUMN "memo_updates_enabled" boolean DEFAULT false NOT NULL;
 ALTER TABLE "store_config" ADD COLUMN "memo_updates_daily_limit" integer DEFAULT 100 NOT NULL;
 ALTER TABLE "store_config" ADD CONSTRAINT "config_memo_updates" CHECK ("store_config"."memo_updates_daily_limit">0);

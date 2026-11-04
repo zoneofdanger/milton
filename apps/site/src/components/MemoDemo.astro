@@ -21,6 +21,7 @@ import { memoExample } from "./memo-example";
         ))}
       </span>
     </span>
+    <span data-scene-progress aria-hidden="true"></span>
   </div>
   <div class="scene-stage sheet-content">
     {memoExample.scenes.map((scene, index) => (
@@ -41,7 +42,9 @@ import { memoExample } from "./memo-example";
               {turn.excerpt && (
                 <blockquote class="excerpt">
                   <p data-stream>{turn.excerpt.body}</p>
-                  <p data-stream>{turn.excerpt.signature}</p>
+                  {turn.excerpt.signature && (
+                    <p data-stream>{turn.excerpt.signature}</p>
+                  )}
                 </blockquote>
               )}
             </li>
@@ -50,134 +53,232 @@ import { memoExample } from "./memo-example";
       </section>
     ))}
   </div>
+  <div class="demo-controls" data-demo-controls hidden>
+    <button
+      class="secondary"
+      type="button"
+      data-playback
+      aria-controls="memo-demo"
+      aria-label="Pause animation"
+    >
+      Pause
+    </button>
+    <button
+      class="secondary"
+      type="button"
+      data-replay
+      aria-controls="memo-demo"
+      aria-label="Replay animation"
+    >
+      Replay
+    </button>
+    <span class="playback-status" data-playback-status role="status"></span>
+  </div>
 </figure>
 
 <script>
   const demo = document.querySelector<HTMLElement>("[data-memo-demo]");
   if (demo) {
-    const panels = Array.from(
-      demo.querySelectorAll<HTMLElement>("[data-scene]"),
-    );
+    const story = demo.querySelector<HTMLElement>(".scene-stage")!;
+    const controls = demo.querySelector<HTMLElement>("[data-demo-controls]")!;
+    const toggle = demo.querySelector<HTMLButtonElement>("[data-playback]")!;
+    const replay = demo.querySelector<HTMLButtonElement>("[data-replay]")!;
+    const status = demo.querySelector<HTMLElement>("[data-playback-status]")!;
+    const progress = demo.querySelector<HTMLElement>("[data-scene-progress]")!;
     const names = Array.from(
       demo.querySelectorAll<HTMLElement>("[data-scene-name]"),
     );
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+    // The complete semantic story stays intact. Only this hidden-from-AT copy
+    // types or switches scenes, so no typed characters are announced.
+    const visual = story.cloneNode(true) as HTMLElement;
+    visual.className = "motion-story sheet-content";
+    visual.setAttribute("aria-hidden", "true");
+    visual
+      .querySelectorAll("[id]")
+      .forEach((node) => node.removeAttribute("id"));
+    visual
+      .querySelectorAll("[aria-labelledby]")
+      .forEach((node) => node.removeAttribute("aria-labelledby"));
+    controls.before(visual);
+    const panels = Array.from(visual.querySelectorAll<HTMLElement>(".scene"));
     const messages = panels.map((panel) =>
       Array.from(panel.querySelectorAll<HTMLElement>(".chat > li")).map(
         (unit) => {
-          // A message types its lines in order: its text, then any excerpt's body
-          // and signature.
           const lines = Array.from(
             unit.querySelectorAll<HTMLElement>("[data-stream]"),
           ).map((paragraph) => {
-            const text =
-              paragraph.textContent?.replace(/\s+/g, " ").trim() ?? "";
-            // Keep the complete text for layout and assistive technology. Only its
-            // aria-hidden visual copy types in, so line wrapping never moves the card.
+            const text = paragraph.textContent ?? "";
+            // The full copy reserves each line's final height while typing.
             const source = document.createElement("span");
             source.className = "stream-source";
             source.textContent = text;
-            const visual = document.createElement("span");
-            visual.className = "stream-visual";
-            visual.setAttribute("aria-hidden", "true");
+            const copy = document.createElement("span");
+            copy.className = "stream-visual";
             paragraph.classList.add("stream-line");
-            paragraph.replaceChildren(source, visual);
-            return { text, visual };
+            paragraph.replaceChildren(source, copy);
+            return { text, copy };
           });
           return { unit, lines };
         },
       ),
     );
-    // One typing speed for every character: main's 900 ms per message averaged
-    // 30.6 ms per character, rounded up. The holds follow each message.
-    const timing = {
-      character: 31,
-      between: 300,
-      scene: 1000,
-      end: 1600,
-      entrance: 350,
-    };
-    let scene = 0;
-    let message = 0;
-    let line = 0;
-    let character = 0;
-    let sceneComplete = false;
-    let inView = false;
-    let delay = timing.entrance;
-    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const scene2Start = 5800;
+    const cues = [
+      [
+        { at: 0, type: 0 },
+        { at: 450, type: 650 },
+        { at: 1500, type: 0 },
+        { at: 3200, type: 450 },
+      ],
+      [
+        { at: scene2Start, type: 0 },
+        { at: scene2Start + 250, type: 320 },
+        { at: scene2Start + 900, type: 0 },
+        { at: scene2Start + 1950, type: 600 },
+      ],
+    ];
+    const finalCue = cues[1][3];
+    const duration = finalCue.at + finalCue.type;
+    let elapsed = 0;
+    let playing = true;
+    let visible = false;
+    let frame = 0;
+    let last: number | null = null;
 
     const render = () => {
-      panels.forEach((panel, index) => {
-        const inactive = !reduced.matches && index !== scene;
-        panel.classList.toggle("active", index === scene);
-        panel.inert = inactive;
-        panel.setAttribute("aria-hidden", String(inactive));
-      });
+      const scene = elapsed < scene2Start ? 0 : 1;
       names.forEach((name, index) =>
         name.classList.toggle("active", index === scene),
       );
-      demo.classList.toggle("enhanced", !reduced.matches);
+      progress.textContent = `${scene + 1} / ${panels.length}`;
+      panels.forEach((panel, index) =>
+        panel.classList.toggle("active", index === scene),
+      );
+      messages.forEach((items, index) =>
+        items.forEach(({ unit, lines }, turn) => {
+          const cue = cues[index][turn];
+          unit.classList.toggle("pending", elapsed < cue.at);
+          const fraction = cue.type
+            ? Math.max(0, Math.min(1, (elapsed - cue.at) / cue.type))
+            : 1;
+          let remaining = Math.ceil(
+            lines.reduce((length, line) => length + line.text.length, 0) *
+              fraction,
+          );
+          lines.forEach(({ text, copy }) => {
+            copy.textContent = text.slice(0, Math.max(0, remaining));
+            remaining -= text.length;
+          });
+        }),
+      );
     };
-    const resetScene = () => {
-      message = 0;
-      line = 0;
-      character = 0;
-      sceneComplete = false;
-      messages[scene].forEach(({ unit, lines }) => {
-        unit.classList.add("pending");
-        lines.forEach(({ visual }) => (visual.textContent = ""));
-      });
+    const announce = () => {
+      const ended = elapsed >= duration;
+      toggle.textContent = ended ? "Complete" : playing ? "Pause" : "Play";
+      toggle.setAttribute(
+        "aria-label",
+        ended
+          ? "Animation complete"
+          : playing
+            ? "Pause animation"
+            : "Play animation",
+      );
+      toggle.setAttribute("aria-disabled", String(ended));
+      status.textContent = ended
+        ? "Complete"
+        : !playing
+          ? "Paused"
+          : visible && !document.hidden
+            ? "Playing"
+            : "Waiting";
+    };
+    const advance = (now: number) => {
+      // A frame's timestamp can precede schedule's performance.now(). Keep the
+      // clock monotonic, including the first frame after Replay or resume.
+      const current = Math.max(now, last ?? now);
+      if (last !== null) elapsed = Math.min(duration, elapsed + current - last);
+      last = current;
       render();
     };
+    const tick = (now: number) => {
+      advance(now);
+      if (elapsed < duration) frame = requestAnimationFrame(tick);
+      else {
+        playing = false;
+        last = null;
+        announce();
+      }
+    };
     const schedule = () => {
-      clearTimeout(timer);
-      if (!reduced.matches && inView && !document.hidden)
-        timer = setTimeout(tick, delay);
+      cancelAnimationFrame(frame);
+      last = null;
+      if (
+        playing &&
+        visible &&
+        !reduced.matches &&
+        !document.hidden &&
+        elapsed < duration
+      ) {
+        last = performance.now();
+        frame = requestAnimationFrame(tick);
+      }
+      announce();
     };
-    const tick = () => {
-      if (sceneComplete) {
-        scene = (scene + 1) % panels.length;
-        resetScene();
-      }
-      const current = messages[scene][message];
-      current.unit.classList.remove("pending");
-      const typing = current.lines[line];
-      if (typing) {
-        character += 1;
-        typing.visual.textContent = typing.text.slice(0, character);
-        if (character >= typing.text.length) {
-          line += 1;
-          character = 0;
-        }
-        delay = timing.character;
-      } else if (message < messages[scene].length - 1) {
-        message += 1;
-        line = 0;
-        character = 0;
-        delay = timing.between;
-      } else {
-        sceneComplete = true;
-        delay = scene === panels.length - 1 ? timing.end : timing.scene;
-      }
+    toggle.addEventListener("click", () => {
+      if (elapsed >= duration) return;
+      if (last !== null) advance(performance.now());
+      playing = !playing;
       schedule();
-    };
-    reduced.addEventListener("change", () => {
-      resetScene();
-      delay = timing.entrance;
+    });
+    replay.addEventListener("click", () => {
+      elapsed = 0;
+      playing = true;
+      render();
       schedule();
     });
     document.addEventListener("visibilitychange", schedule);
-    resetScene();
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (inView !== entry.isIntersecting) {
-          inView = entry.isIntersecting;
+    let observer: IntersectionObserver | undefined;
+    let requiredVisibility = 0.35;
+    const observeVisibility = () => {
+      const maximum = Math.min(
+        1,
+        document.documentElement.clientHeight /
+          demo.getBoundingClientRect().height,
+      );
+      // Keep 35% unless the viewport cannot show that much of the card. In that
+      // case require 80% of the available viewport, still observed before play.
+      const threshold = maximum < 0.35 ? 0.8 * maximum : 0.35;
+      if (observer && threshold === requiredVisibility) return;
+      observer?.disconnect();
+      requiredVisibility = threshold;
+      visible = false;
+      schedule();
+      observer = new IntersectionObserver(
+        (entries) => {
+          const entry = entries[entries.length - 1];
+          visible =
+            entry.isIntersecting && entry.intersectionRatio >= threshold;
           schedule();
-        }
-      },
-      { threshold: 0.4 },
-    );
-    observer.observe(demo);
+        },
+        { threshold },
+      );
+      observer.observe(demo);
+    };
+    const resize = new ResizeObserver(observeVisibility);
+    resize.observe(demo, { box: "border-box" });
+    window.addEventListener("resize", observeVisibility);
+    const preference = () => {
+      demo.classList.toggle("enhanced", !reduced.matches);
+      controls.hidden = reduced.matches;
+      observeVisibility();
+      schedule();
+    };
+    reduced.addEventListener("change", preference);
+    render();
+    preference();
   }
 </script>
 
@@ -189,13 +290,10 @@ import { memoExample } from "./memo-example";
   .stream-line {
     position: relative;
   }
+  .stream-line :global(.stream-source) {
+    visibility: hidden;
+  }
   .stream-line :global(.stream-visual) {
-    display: none;
-  }
-  .enhanced .stream-line :global(.stream-source) {
-    opacity: 0;
-  }
-  .enhanced .stream-line :global(.stream-visual) {
     display: block;
     position: absolute;
     inset: 0;
@@ -210,8 +308,11 @@ import { memoExample } from "./memo-example";
   .scene {
     min-width: 0;
   }
-  .enhanced .scene-stage {
-    gap: 0;
+  .motion-story {
+    display: none;
+  }
+  .enhanced .motion-story {
+    display: grid;
   }
   /* Animated, the header names the active scene and each scene's own label is
      kept for assistive technology only. Static, each scene shows its label. */
@@ -228,26 +329,23 @@ import { memoExample } from "./memo-example";
   .scene-name.active {
     visibility: visible;
   }
-  .enhanced .scene-label {
+  .enhanced > .scene-stage,
+  .motion-story .scene-label {
     position: absolute;
     width: 1px;
     height: 1px;
+    padding: 0;
+    margin: -1px;
     overflow: hidden;
     clip-path: inset(50%);
     white-space: nowrap;
   }
-  .enhanced .scene {
+  .motion-story .scene {
     grid-area: 1 / 1;
     visibility: hidden;
-    opacity: 0;
-    transition: opacity 160ms ease;
-    display: flex;
-    flex-direction: column;
-    justify-content: flex-start;
   }
-  .enhanced .scene.active {
+  .motion-story .scene.active {
     visibility: visible;
-    opacity: 1;
   }
   .chat {
     list-style: none;
@@ -286,10 +384,32 @@ import { memoExample } from "./memo-example";
   }
   p {
     margin: 0;
+    text-wrap: pretty;
   }
-  @media (prefers-reduced-motion: reduce) {
-    .enhanced .scene {
-      transition: none;
-    }
+  .demo-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--sheet-padding);
+    border-top: 1px solid var(--hairline);
+  }
+  .demo-controls[hidden] {
+    display: none;
+  }
+  .demo-controls button {
+    min-height: var(--touch-target);
+    padding: var(--space-2) var(--space-4);
+  }
+  .demo-controls button[aria-disabled="true"] {
+    color: var(--muted);
+    border-color: var(--muted);
+    background: var(--ground);
+    cursor: default;
+  }
+  .playback-status {
+    flex-basis: 100%;
+    color: var(--muted);
+    font: var(--text-caption) / var(--leading-label) var(--font-mono);
   }
 </style>

@@ -1,9 +1,9 @@
 // Every line of the hero conversation, once. MemoDemo renders it in order.
 
-/** A saved-report excerpt: the text as kept, then the signature on its own line. */
+/** An email excerpt, with its signature on a separate line when supplied. */
 interface MemoExcerpt {
   body: string;
-  signature: string;
+  signature?: string;
 }
 
 interface MemoTurn {
@@ -40,7 +40,9 @@ export const memoExample: { scenes: MemoScene[] } = {
         },
         {
           speaker: "Claude",
-          text: "Hi Bill! Thanks so much for reaching out. Unfortunately I won’t be able to...",
+          excerpt: {
+            body: "Hi Bill! Thanks so much for reaching out. Unfortunately I won’t be able to...",
+          },
         },
         {
           speaker: "You",

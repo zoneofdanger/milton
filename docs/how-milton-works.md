@@ -397,8 +397,14 @@ Files: `server/drizzle/`, `server/src/store/schema.ts`, `server/src/store/databa
 Files: `apps/site/`.
 
 - Astro builds static pages and copies shared fonts from the theme.
-- The hero demo types out a scripted conversation.
-- The demo pauses off-screen or in a hidden tab, and respects reduced motion.
+- The hero demo plays its eight-turn conversation once on one clock, then holds the final
+  draft until Replay; requests and the approved email appear whole, and AI replies type.
+- Pause and Play preserve the demo's position; Replay starts from the first request;
+  the completed control stays focusable and ignores activation.
+- Playback waits for 35% card visibility, or 80% of the maximum visible card area when a
+  short viewport cannot show 35%; resizing updates that threshold, and playback pauses
+  off-screen or in a hidden tab without overriding manual Pause.
+- Reduced motion or disabled JavaScript shows the complete story without playback controls.
 - The setup widget copies a prompt, falls back to manual selection, and closes on Escape
   or an outside click.
 - The fake crowdfunding campaign on `/pricing` is static data.

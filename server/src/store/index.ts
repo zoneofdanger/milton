@@ -18,9 +18,6 @@ import {
 } from "./compiled";
 export { StoreError } from "./errors";
 
-// Stable legacy storage key: preserve existing identities and opaque version tags.
-export const TPS_REPORT_KEY = "vibes";
-
 export interface StoreBindings {
   DATABASE_URL?: string;
   // Private dependency injection for the embedded fixture; never populated from a request.
@@ -40,7 +37,7 @@ const limitsSchema = z.object({
   report_body_bytes: positiveLimit,
   daily_calls: positiveLimit,
 });
-export type StoreLimits = z.infer<typeof limitsSchema>;
+type StoreLimits = z.infer<typeof limitsSchema>;
 
 export async function readLimits(db: StoreSession): Promise<StoreLimits> {
   let value: unknown;
@@ -61,7 +58,7 @@ export async function readLimits(db: StoreSession): Promise<StoreLimits> {
 export const utf8Bytes = (value: string) =>
   new TextEncoder().encode(value).length;
 
-export interface VerifiedIdentity {
+interface VerifiedIdentity {
   provider: string;
   subject: string;
   profile?: Record<string, unknown>;
@@ -84,9 +81,8 @@ export async function resolveIdentityAccount(
         tx.query<{
           id: string;
           status: string;
-          templates_revision: number;
         }>(sql`
-      SELECT u.id, u.status, u.templates_revision FROM identities i JOIN users u ON u.id = i.user_id
+      SELECT u.id, u.status FROM identities i JOIN users u ON u.id = i.user_id
       WHERE i.provider = ${provider} AND i.subject = ${subject} FOR UPDATE OF u`);
       let account = (await lookup())[0];
       if (!account) {
@@ -113,7 +109,7 @@ export async function resolveIdentityAccount(
             AND (c.trials_enabled OR d.identity_hash IS NOT NULL)`);
           await tx.query(sql`INSERT INTO identities (provider,subject,user_id,profile_json)
           VALUES (${provider},${subject},${id},${JSON.stringify(identity.profile ?? {})}::jsonb)`);
-          account = { id, status: "active", templates_revision: 0 };
+          account = { id, status: "active" };
         }
       }
       if (account.status !== "active")
@@ -122,35 +118,6 @@ export async function resolveIdentityAccount(
           "This Milton account is unavailable.",
           403,
         );
-      if (account.templates_revision === 0) {
-        // Use this tenant-locked transaction; never open a nested repair transaction.
-        const current = (
-          await tx.query<{
-            id: string;
-            description: string;
-            body: string;
-            version: number;
-            archived: boolean;
-          }>(sql`SELECT r.id,r.name,v.description,v.body,v.version,v.archived
-          FROM memos r JOIN memo_versions v ON v.user_id=r.user_id AND v.memo_id=r.id
-          WHERE r.user_id=${account.id} AND r.name=${TPS_REPORT_KEY} ORDER BY v.version DESC LIMIT 1`)
-        )[0];
-        if (current?.archived) {
-          await tx.query(sql`INSERT INTO memo_versions (user_id,memo_id,version,description,body,archived,reason,actor_json,details_json)
-            VALUES (${account.id},${current.id},${current.version + 1},${current.description},${current.body},false,'Restored TPS Report','{"kind":"system"}',${JSON.stringify({ kind: "restore", source_version: current.version })})`);
-        } else if (!current) {
-          await tx.query(
-            sql`INSERT INTO memos (user_id,name) VALUES (${account.id},${TPS_REPORT_KEY}) ON CONFLICT (user_id,name) DO NOTHING`,
-          );
-          const description = "How you want your assistants to work with you.";
-          await tx.query(sql`INSERT INTO memo_versions (user_id,memo_id,version,description,body,reason,actor_json,details_json)
-            SELECT ${account.id},id,1,${description},'','Created TPS Report','{"kind":"system"}','{"kind":"create"}'
-            FROM memos WHERE user_id=${account.id} AND name=${TPS_REPORT_KEY}`);
-        }
-        await tx.query(
-          sql`UPDATE users SET templates_revision=2 WHERE id=${account.id}`,
-        );
-      }
       return { miltonUserId: account.id };
     })
     .catch((error) => {
@@ -165,7 +132,7 @@ export interface VerifiedStoreAuth {
 }
 
 // An assistant is one OAuth client acting for one sign-in identity.
-export interface AssistantIdentity {
+interface AssistantIdentity {
   provider: string;
   subject: string;
   clientId: string;
@@ -320,7 +287,7 @@ export async function deleteAccount(
     });
 }
 
-export type CallAllowance =
+type CallAllowance =
   { allowed: true } | { allowed: false; retry_at_ms: number; limit: "day" };
 export interface TenantStore {
   trialNotice?(): Promise<TrialNotice | undefined>;

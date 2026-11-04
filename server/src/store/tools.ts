@@ -1,5 +1,4 @@
 import { z } from "zod";
-import type { ToolResult } from "../tools";
 import { StoreError, type TenantStore } from "./index";
 import type { SaveMemoInput } from "./compiled";
 import { subscriptionRequired } from "./trials";
@@ -21,6 +20,11 @@ export const reportInput = z.strictObject({
     ),
 });
 export const listReportsInput = z.strictObject({});
+
+type ToolResult = {
+  content: [{ type: "text"; text: string }];
+  isError?: boolean;
+};
 
 export function storeResult(value: unknown, isError = false): ToolResult {
   return {

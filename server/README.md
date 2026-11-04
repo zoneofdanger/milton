@@ -21,7 +21,7 @@ Hono routes requests and renders escaped JSX on the server. Vite builds the shar
 stylesheet and copies the theme assets; it does not bundle server secrets or add
 browser scripts. Forms work with the existing strict CSP. Bun installs dependencies, builds and tests; production runs Node 26 LTS.
 
-`src/function.ts` is a local compatibility adapter; hosted services use the role-specific Cloud Run entrypoint.
+Hosted services use the role-specific Cloud Run entrypoint:
 `src/cloud-run.ts` serves browser pages and an exact list of public assets with
 `MILTON_SERVICE=app` or the protocol/store code with `MILTON_SERVICE=mcp`; any other
 value fails startup. Each role rejects the other hostname and direct `run.app`
@@ -122,6 +122,10 @@ migration runner and the disposable rehearsal test verify atomic DDL. For an
 uncertain command outcome, inspect the actual schema and migration journal before
 retrying; an interrupted connection does not prove rollback.
 
+Rollback scripts start at 0018. Rollbacks run newest first, and the 0017 rollback
+refused once any sample existed, so the 0004–0017 scripts were removed. Historical
+migrations 0000–0005 remain unchanged; their legacy naming is not the current public API.
+
 ### Instruction-card upgrade (0008)
 
 This is a coordinated offline migration, not a rolling mixed-writer upgrade. Disable
@@ -142,9 +146,8 @@ merely because the account crosses its ceiling, but subsequent ordinary writes a
 refused until capacity is available. Check headroom before rollout. Later removal of
 legacy copies requires a separate migration; it is not included here.
 
-Signup initialization (the empty `vibes` seed) is the only remaining legacy memo
-write; it synchronizes only untouched one-card memos. Once cards are independently
-edited, legacy writes/deletion refuse with
+Sign-up no longer seeds the empty `vibes` memo, so nothing writes legacy memos. Once
+cards are independently edited, legacy writes/deletion refuse with
 `card_legacy_conflict`; use the current `create_memo` path. No MCP tool or UI reads or
 writes legacy memos.
 
@@ -477,10 +480,6 @@ bytes per bare rule over the cap until its next save. Card text still cannot con
 heading line (`card_heading`). Each `rules` entry names its card's report; since 0020
 a card moves only through an explicit `moves` list.
 
-`drizzle/rollback/0017_reports.sql` works only while no sample exists and no full
-text exceeds the old 32 KB bound. It does not restore deleted empty groups, which the
-previous runtime never read.
-
 ## Filing moves and sample kinds (0020)
 
 A card's report lives on each version (`instruction_card_versions.report`, NOT NULL,
@@ -630,14 +629,6 @@ client/account identity, instruction text or result bodies.
 The daily count is read from `save_requests` (`memo_update_state`,
 `memo_update_day`) under the account lock. `save_requests.reserved_micros` stays,
 always 0, because the save guard covers it.
-
-The preserving `rollback/0014_memo_updates.sql` requires disabled enforcement and
-drained holds and retains receipt/charge history, counters, events, triggers and
-current key/revocation state. Reforward restores readiness but never enables the
-allowance or restores an older key. After activation use only a runtime compatible
-with accounting; keeping the schema does not make an older runtime compatible. Since
-0023 and 0022, run `rollback/0023_no_spend.sql` and then
-`rollback/0022_no_model_gate.sql` first: they restore the objects 0014 expects.
 
 ### No count limit (0021)
 

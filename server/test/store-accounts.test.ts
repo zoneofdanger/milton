@@ -575,7 +575,7 @@ test("identity lookup never admits or seeds an MCP caller", async () => {
     expect(
       await local.db.query(sql`SELECT count(*)::integer AS n FROM users`),
     ).toEqual([{ n: 0 }]);
-    // Preserve concurrent sign-up, repeatable seeding, and failed sign-up rollback.
+    // Preserve concurrent sign-up; sign-up writes no legacy memo.
     const same = await Promise.all([
       resolveIdentityAccount(local.env, identity),
       resolveIdentityAccount(local.env, identity),
@@ -589,12 +589,7 @@ test("identity lookup never admits or seeds an MCP caller", async () => {
       await local.db.query(
         sql`SELECT count(*)::integer AS n FROM memo_versions`,
       ),
-    ).toEqual([{ n: 1 }]);
-    expect(
-      await local.db.query(
-        sql`SELECT r.name,v.body,u.templates_revision FROM users u JOIN memos r ON r.user_id=u.id JOIN memo_versions v ON v.user_id=r.user_id AND v.memo_id=r.id WHERE u.id=${admitted.miltonUserId}`,
-      ),
-    ).toEqual([{ name: "vibes", body: "", templates_revision: 2 }]);
+    ).toEqual([{ n: 0 }]);
     const concurrent = await Promise.allSettled([
       resolveIdentityAccount(local.env, {
         provider: "neon",
@@ -612,20 +607,6 @@ test("identity lookup never admits or seeds an MCP caller", async () => {
     expect(
       (await resolveIdentityAccount(local.env, identity)).miltonUserId,
     ).toBe(admitted.miltonUserId);
-    expect(
-      await local.db.query(
-        sql`SELECT count(*)::integer AS n FROM memo_versions`,
-      ),
-    ).toEqual([{ n: 3 }]);
-    await local.db.query(
-      sql`UPDATE store_config SET limits_json=limits_json || '{"description_bytes":1}'::jsonb`,
-    );
-    await expect(
-      resolveIdentityAccount(local.env, {
-        provider: "neon",
-        subject: "failed-seed",
-      }),
-    ).rejects.toMatchObject({ code: "memo_description_limit", status: 422 });
     expect(
       await local.db.query(sql`SELECT count(*)::integer AS n FROM users`),
     ).toEqual([{ n: 3 }]);
@@ -646,80 +627,6 @@ test("identity lookup never admits or seeds an MCP caller", async () => {
     await expect(
       resolveIdentityAccount(local.env, identity),
     ).rejects.toMatchObject({ code: "account_unavailable", status: 403 });
-    expect(
-      await local.db.query(
-        sql`SELECT count(*)::integer AS n FROM memo_versions`,
-      ),
-    ).toEqual([{ n: 3 }]);
-  } finally {
-    await local.dispose();
-  }
-}, 30000);
-
-test("the signup seed's empty legacy card changes no read or save", async () => {
-  const local = await localStore();
-  try {
-    await seedUsers(local.pg, "m_bare");
-    await local.pg.exec(
-      `INSERT INTO identities (provider,subject,user_id) VALUES ('neon','bare','m_bare');`,
-    );
-    const seeded = { provider: "neon", subject: "seeded" };
-    await resolveIdentityAccount(local.env, seeded);
-    const open = async (subject: string) =>
-      createStoreMemoTools(
-        await storeForCurrentRequest(
-          local.env,
-          await lookupIdentityAccount(local.env, { provider: "neon", subject }),
-          { issuer: "fixture", clientId: "seed" },
-        ),
-      );
-    const cards = (userId: string) =>
-      local.db.query(
-        sql`SELECT count(*)::integer AS n FROM instruction_cards WHERE user_id=${userId}`,
-      );
-    const seededId = (await lookupIdentityAccount(local.env, seeded)).userId;
-    // The seeded account holds one empty legacy card; the bare one holds none.
-    expect(await cards(seededId)).toEqual([{ n: 1 }]);
-    expect(await cards("m_bare")).toEqual([{ n: 0 }]);
-    const tools = { seeded: await open("seeded"), bare: await open("bare") };
-    const read = async (t: typeof tools.bare) => {
-      const sheet = JSON.parse((await t.get_cover_sheet()).content[0].text);
-      const all = JSON.parse((await t.list_reports()).content[0].text);
-      return { sheet, all };
-    };
-    const withoutVersion = (value: unknown) =>
-      JSON.parse(
-        JSON.stringify(value, (key, item) =>
-          key === "version" ? undefined : item,
-        ),
-      );
-    expect(withoutVersion(await read(tools.seeded))).toEqual(
-      withoutVersion(await read(tools.bare)),
-    );
-    expect((await read(tools.bare)).sheet.is_empty).toBe(true);
-    for (const t of [tools.seeded, tools.bare]) {
-      const version = (await read(t)).sheet.version;
-      const saved = JSON.parse(
-        (
-          await t.create_memo({
-            text: "File two rules.",
-            rules: [
-              { report: "cover", text: "Fictional rule for all writing." },
-              { report: "email", text: "Fictional email rule." },
-            ],
-            request_id: crypto.randomUUID(),
-            expected_version: version,
-          })
-        ).content[0].text,
-      );
-      expect(saved.status).toBe("saved");
-    }
-    const after = {
-      seeded: await read(tools.seeded),
-      bare: await read(tools.bare),
-    };
-    expect(withoutVersion(after.seeded)).toEqual(withoutVersion(after.bare));
-    expect(after.bare.sheet.text).toContain("Fictional rule for all writing.");
   } finally {
     await local.dispose();
   }
@@ -842,115 +749,6 @@ test("closing an account refuses its reads, saves and replays, fences a pending 
     const betaAfter = await beta.everything();
     expect(betaAfter).toContain("Beta signs as Bo");
     expect(betaAfter).toContain("Alpha signs as Ada");
-  } finally {
-    await local.dispose();
-  }
-}, 30000);
-
-test("unfinished initialization creates only empty TPS at retained-history capacity", async () => {
-  const local = await localStore();
-  try {
-    await seedUsers(local.pg, "m_unfinished");
-    await local.pg.exec(`
-      INSERT INTO identities (provider,subject,user_id) VALUES ('neon','unfinished','m_unfinished');
-      INSERT INTO memos (user_id,id,name) VALUES ('m_unfinished','ordinary','email-voice');
-      INSERT INTO memo_versions (user_id,memo_id,version,description,body,reason,actor_json)
-        VALUES ('m_unfinished','ordinary',1,'Keep exact.',E'café\\r\\n','Original reason','{"kind":"assistant","client_id":"fixture"}');
-      UPDATE store_config SET limits_json=jsonb_set(limits_json,'{history_bytes}',
-        to_jsonb((SELECT retained_bytes FROM users WHERE id='m_unfinished')));
-    `);
-    const before = await local.db.query(
-      sql`SELECT row_to_json(v) AS row FROM memo_versions v WHERE memo_id='ordinary'`,
-    );
-    const identity = { provider: "neon", subject: "unfinished" };
-    expect(
-      (await resolveIdentityAccount(local.env, identity)).miltonUserId,
-    ).toBe("m_unfinished");
-    expect(
-      await local.db.query(
-        sql`SELECT row_to_json(v) AS row FROM memo_versions v WHERE memo_id='ordinary'`,
-      ),
-    ).toEqual(before);
-    expect(
-      await local.db.query(
-        sql`SELECT name,version,body,reason,actor_json,details_json FROM memos r JOIN memo_versions v ON v.user_id=r.user_id AND v.memo_id=r.id WHERE r.name='vibes'`,
-      ),
-    ).toEqual([
-      {
-        name: "vibes",
-        version: 1,
-        body: "",
-        reason: "Created TPS Report",
-        actor_json: '{"kind":"system"}',
-        details_json: '{"kind":"create"}',
-      },
-    ]);
-    expect(
-      await local.db.query(
-        sql`SELECT templates_revision,retained_bytes=(SELECT sum(payload_bytes) FROM memo_versions WHERE user_id=u.id)+(SELECT sum(payload_bytes) FROM instruction_card_versions WHERE user_id=u.id) AS accounted FROM users u WHERE id='m_unfinished'`,
-      ),
-    ).toEqual([{ templates_revision: 2, accounted: true }]);
-    await resolveIdentityAccount(local.env, identity);
-    expect(
-      await local.db.query(
-        sql`SELECT count(*)::integer AS n FROM memo_versions`,
-      ),
-    ).toEqual([{ n: 2 }]);
-    await local.db.query(
-      sql`UPDATE users SET templates_revision=0 WHERE id='m_unfinished'`,
-    );
-    await local.db.query(
-      sql`UPDATE store_config SET limits_json=jsonb_set(limits_json,'{history_bytes}','67108864')`,
-    );
-    await local.db
-      .query(sql`INSERT INTO memo_versions (user_id,memo_id,version,description,body,archived,reason,actor_json,details_json)
-      SELECT user_id,memo_id,2,description,body,true,'Legacy archive','{}','{}' FROM memo_versions WHERE user_id='m_unfinished' AND memo_id=(SELECT id FROM memos WHERE user_id='m_unfinished' AND name='vibes') AND version=1`);
-    await local.db.query(
-      sql`UPDATE store_config SET limits_json=jsonb_set(limits_json,'{history_bytes}','1')`,
-    );
-    const legacy = await local.db.query(
-      sql`SELECT row_to_json(v) AS row FROM memo_versions v ORDER BY memo_id,version`,
-    );
-    await resolveIdentityAccount(local.env, identity);
-    expect(
-      await local.db.query(
-        sql`SELECT row_to_json(v) AS row FROM memo_versions v WHERE version<3 ORDER BY memo_id,version`,
-      ),
-    ).toEqual(legacy);
-    expect(
-      await local.db.query(
-        sql`SELECT version,body,archived,reason,details_json FROM memo_versions WHERE version=3`,
-      ),
-    ).toEqual([
-      {
-        version: 3,
-        body: "",
-        archived: false,
-        reason: "Restored TPS Report",
-        details_json: '{"kind":"restore","source_version":2}',
-      },
-    ]);
-    await local.db.query(
-      sql`UPDATE users SET templates_revision=0 WHERE id='m_unfinished'`,
-    );
-    const active = await local.db.query(
-      sql`SELECT row_to_json(v) AS row FROM memo_versions v ORDER BY memo_id,version`,
-    );
-    await resolveIdentityAccount(local.env, identity);
-    expect(
-      await local.db.query(
-        sql`SELECT row_to_json(v) AS row FROM memo_versions v ORDER BY memo_id,version`,
-      ),
-    ).toEqual(active);
-    await local.db.query(
-      sql`UPDATE users SET templates_revision=1 WHERE id='m_unfinished'`,
-    );
-    await resolveIdentityAccount(local.env, identity);
-    expect(
-      await local.db.query(
-        sql`SELECT templates_revision FROM users WHERE id='m_unfinished'`,
-      ),
-    ).toEqual([{ templates_revision: 1 }]);
   } finally {
     await local.dispose();
   }

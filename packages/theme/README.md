@@ -20,8 +20,8 @@ carry the office-paperwork treatment across both products.
   uses its real regular weight. `--radius-button` keeps square buttons separate from rounded text fields.
 - `--leading-*`, `--radius-*`, `--control-height`, `--touch-target` and
   `--shadow-sheet` keep rhythm, controls and surfaces consistent.
-- `.eyebrow`, `.button`/`button`, `input`, `.sheet`, `.sheet-bar`, `.sheet-content`
-  and `.sheet-heading` are reusable CSS pieces. A sheet owns `--sheet-padding`,
+- `.eyebrow`, `.button`/`button`, `input`, `.sheet`, `.sheet-bar` and `.sheet-content`
+  are reusable CSS pieces. A sheet owns `--sheet-padding`,
   including its mobile value, so its bar, title and body can share aligned edges.
 
 Shared components use ordinary HTML classes, so Astro and Hono JSX consume the
@@ -33,7 +33,7 @@ same CSS without a client runtime or framework-specific wrapper library:
 | Helper text | `.small-note` supplies muted, small text, including inside sheets.                | Position and margins; add `role="status"` only for an actual status update. |
 | Text fields | `input` and `textarea` share borders, surface, padding, and inherited typography. | Labels, validation, field width, and textarea resizing.                     |
 | Buttons     | `.button` or `button`, optionally `.secondary`.                                   | Link destinations, form actions, and labels.                                |
-| Documents   | `.sheet`, `.sheet-bar`, `.sheet-content`, `.sheet-heading`.                       | Document semantics and app-specific cover-sheet layout.                     |
+| Documents   | `.sheet`, `.sheet-bar`, `.sheet-content`.                                         | Document semantics and app-specific cover-sheet layout.                     |
 
 Use a local class alongside these shared classes when positioning a component.
 For example, the site's `class="access-note small-note"` sets its margin locally;
@@ -45,8 +45,7 @@ structure stay in `server/src/pages.css` until another consumer needs them.
 The landing page owns its editorial grids and examples; `server/src/pages.css`
 owns app layout and the TPS document's special title treatment. Neither should
 redefine the shared palette, control appearance or sheet bar. Use existing tokens
-before adding another size. Keep tokens in CSS; `tokens.ts` only mirrors palette
-values that JavaScript actually needs.
+before adding another size. Keep tokens in CSS.
 
 The fonts in `public/fonts` are self-hosted, with their upstream licenses:
 
@@ -55,10 +54,7 @@ The fonts in `public/fonts` are self-hosted, with their upstream licenses:
 - `jetbrains-mono-regular.woff2`: JetBrains Mono, upright 400; display headings,
   report titles, brand, labels and code. `--font-display` and `--font-mono` share
   this one file. `--font-display-weight` avoids synthesizing a heavier display face.
-- Instrument Serif and Source Serif 4 remain as legacy assets with their licenses;
-  current CSS neither requests nor preloads them.
 
-Instrument Serif source: https://fonts.gstatic.com/s/instrumentserif/v5/jizBRFtNs2ka5fXjeivQ4LroWlx-6zUTjnTLgNs.woff2
 Geist source: https://fonts.gstatic.com/s/geist/v5/gyByhwUxId8gMEwcGFWNOITd.woff2
 Their SIL Open Font Licenses are included beside the files. JetBrains source:
 https://raw.githubusercontent.com/JetBrains/JetBrainsMono/master/fonts/webfonts/JetBrainsMono-Regular.woff2
@@ -75,7 +71,7 @@ copy these same masters, so www, app and mcp serve identical icons. When editing
 the SVG, regenerate the ICO frames and update the cache revision in `faviconLinks`.
 App pages allow only same-origin images and fonts (`img-src 'self'`,
 `font-src 'self'`); scripts and external images remain blocked.
-`server/scripts/assets.ts` mirrors the exact built asset URLs for local servers;
+`server/src/assets.ts` lists the exact built asset URLs for local servers;
 Vercel serves the server's `public` directory in production.
 
 ### Instruction lists

@@ -105,7 +105,7 @@ reliability has not yet been evaluated.
   Auth (Google and GitHub); memos live in Neon Postgres. See its README to run your own.
 - [`apps/site`](apps/site/): the Astro page behind `meetmilton.com`.
 - [`packages/theme`](packages/theme/): Milton's design tokens, stylesheets, and contrast check.
-- [`design/`](design/): Milton's portrait and icons.
+- [`design/`](design/): Milton's portrait.
 - [`docs/how-milton-works.md`](docs/how-milton-works.md): every piece of logic in Milton, one line each.
 - [`SPEC.md`](SPEC.md): the design notes and decisions, in the order they were made.
 

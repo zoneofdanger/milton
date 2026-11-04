@@ -259,6 +259,10 @@ Files: `server/src/store/index.ts`, `server/src/store/trials.ts`,
 - An empty list or a 404 with a stored subscription writes canceled.
 - A failed Stripe read answers 503 unrecorded so Stripe retries; a replayed event, an
   unknown type, or a customer Milton does not hold calls nothing.
+- `/billing/checkout` sends trialing, active, and past_due to the Stripe portal.
+- An account still waiting on its trial takes it first, then the portal, or a 503 if it did
+  not start, so paying early cannot lose the 30 days.
+- Any other status gets Checkout in subscription mode, card required, no trial.
 - Daily memo updates count charged and held saves, reset at 00:00 UTC, and are enforced
   only when enabled.
 

@@ -224,10 +224,15 @@ export async function ensureSubscription(
   }
 }
 
+// A subscription that exists and can still be paid: its person manages it in the
+// portal, and a second Checkout would double-bill them.
+const MANAGED = new Set(["trialing", "active", "past_due"]);
+
 /** POST /billing/checkout and POST /billing/portal: signed-in forms with the
- * page CSRF check. Checkout finds or creates the account's Stripe customer,
- * stores it on the clock row, and redirects to a subscription Checkout for the
- * one price; an account already paid goes to the portal instead. */
+ * page CSRF check. Checkout sends a live subscription to the portal, and anything
+ * else to a subscription Checkout for the one price, card required, no trial. An
+ * account still waiting on its trial takes it first: paying now would lose the
+ * 30 days. */
 export async function billingRoutes(ctx: PageContext): Promise<Response> {
   const { config, request, url, readForm, signedIn } = ctx;
   const billing = config.billing;
@@ -249,7 +254,7 @@ export async function billingRoutes(ctx: PageContext): Promise<Response> {
       })
     ).userId,
   );
-  const account = await store.account();
+  let account = await store.account();
   const home = config.appOrigin + "/";
   const portal = async (customer: string) =>
     Response.redirect(
@@ -278,16 +283,21 @@ export async function billingRoutes(ctx: PageContext): Promise<Response> {
       "Subscriptions open when your Milton trial starts.",
       409,
     );
-  if (account.paid && account.customer) return portal(account.customer);
-  const customer =
-    account.customer ?? (await createCustomer(billing, store, user.email));
+  if (account.status === null) {
+    await ensureSubscription(config, store.userId, user.email);
+    account = await store.account();
+    if (account.status === null) throw stripeFailed();
+  }
+  if (account.customer && MANAGED.has(account.status))
+    return portal(account.customer);
   const session = await stripePost(
     billing,
     "checkout/sessions",
     {
       mode: "subscription",
-      customer,
-      client_reference_id: store.userId,
+      customer:
+        account.customer ?? (await createCustomer(billing, store, user.email)),
+      payment_method_collection: "always",
       "line_items[0][price]": billing.priceId,
       "line_items[0][quantity]": "1",
       success_url: home,

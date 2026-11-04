@@ -1380,7 +1380,7 @@ test("signing in starts one Stripe trial, heals after a failure, and never depen
   }
 }, 30000);
 
-test("billing checkout and portal: 503 without config; signed-in CSRF forms; one stored customer; redirects to Stripe", async () => {
+test("billing checkout and portal: 503 without config; signed-in CSRF forms; the status picks the portal or Checkout; a healed sign-up keeps its trial", async () => {
   const off = await accountFixture();
   try {
     await off.send("/");
@@ -1393,43 +1393,30 @@ test("billing checkout and portal: 503 without config; signed-in CSRF forms; one
   } finally {
     await off.dispose();
   }
-  // Answers Stripe's API with fixture objects; each call is recorded.
-  const stripe = { down: false, calls: [] as Record<string, unknown>[] };
-  const billing = {
-    secretKey: "rk_test_fixtureNotAKey",
-    webhookSecret: "whsec_fixtureNotASecret",
-    priceId: "price_fixture",
-    fetch: async (url: string, init: RequestInit) => {
-      const path = new URL(url).pathname;
-      const headers = new Headers(init.headers);
-      stripe.calls.push({
-        path,
-        idempotency: headers.get("Idempotency-Key"),
-        bearer:
-          headers.get("Authorization") === "Bearer rk_test_fixtureNotAKey",
-        ...Object.fromEntries(new URLSearchParams(String(init.body))),
-      });
-      if (stripe.down) return Response.json({}, { status: 500 });
-      if (path === "/v1/customers") return Response.json({ id: "cus_fixture" });
-      if (path === "/v1/checkout/sessions")
-        return Response.json({
-          url: "https://checkout.stripe.com/c/pay/cs_test_fixture",
-        });
-      if (path === "/v1/billing_portal/sessions")
-        return Response.json({
-          url: "https://billing.stripe.com/p/session/test_fixture",
-        });
-      throw new Error("Unexpected Stripe endpoint");
-    },
-  };
+  const { stripe, billing } = fakeStripe();
   const fixture = await accountFixture({ billing });
   const { send, local } = fixture;
   const clock = async () =>
     (
-      await local.db.query<{ customer: string | null }>(
-        sql`SELECT stripe_customer_id AS customer FROM trial_accounts`,
+      await local.db.query<{ customer: string | null; status: string | null }>(
+        sql`SELECT stripe_customer_id AS customer,subscription_status AS status FROM trial_accounts`,
       )
     )[0];
+  const portalUrl = "https://billing.stripe.com/p/session/test_fixture";
+  const checkoutUrl = "https://checkout.stripe.com/c/pay/cs_test_fixture";
+  const portalCall = stripeCall("POST /v1/billing_portal/sessions", {
+    customer: "cus_fixture",
+    return_url: appOrigin + "/",
+  });
+  const sessionCall = stripeCall("POST /v1/checkout/sessions", {
+    mode: "subscription",
+    customer: "cus_fixture",
+    payment_method_collection: "always",
+    "line_items[0][price]": "price_fixture",
+    "line_items[0][quantity]": "1",
+    success_url: appOrigin + "/",
+    cancel_url: appOrigin + "/",
+  });
   try {
     await send("/");
     // Without a trial clock there is no subscription to start or manage.
@@ -1452,64 +1439,71 @@ test("billing checkout and portal: 503 without config; signed-in CSRF forms; one
     expect(
       (await send("/billing/checkout", { csrf: "x".repeat(43) })).status,
     ).toBe(403);
-    stripe.down = true;
+    expect(stripe.calls).toEqual([]);
+    // Waiting on a healed sign-up: paying now would lose the 30 days, so it
+    // takes the trial and the portal, and answers 503 if the trial did not start.
+    stripe.down = "POST /v1/subscriptions";
     const down = await send("/billing/checkout", {});
     expect(down.status).toBe(503);
     expect(await down.text()).toContain(
       "Billing is unavailable right now. Nothing was charged. Try again.",
     );
-    expect(await clock()).toEqual({ customer: null });
+    expect(await clock()).toEqual({ customer: "cus_fixture", status: null });
+    expect(stripe.calls.map((call) => call.call)).not.toContain(
+      "POST /v1/checkout/sessions",
+    );
     stripe.down = false;
     stripe.calls.length = 0;
-    const checkout = await send("/billing/checkout", {});
-    expect(checkout.status).toBe(303);
-    expect(checkout.headers.get("Location")).toBe(
-      "https://checkout.stripe.com/c/pay/cs_test_fixture",
-    );
-    const userId = (
-      await local.db.query<{ id: string }>(sql`SELECT id FROM users`)
-    )[0]!.id;
-    expect(await clock()).toEqual({ customer: "cus_fixture" });
-    const session = {
-      path: "/v1/checkout/sessions",
-      idempotency: null,
-      bearer: true,
-      mode: "subscription",
+    const healed = await send("/billing/checkout", {});
+    expect(healed.status).toBe(303);
+    expect(healed.headers.get("Location")).toBe(portalUrl);
+    expect(await clock()).toEqual({
       customer: "cus_fixture",
-      client_reference_id: userId,
-      "line_items[0][price]": "price_fixture",
-      "line_items[0][quantity]": "1",
-      success_url: appOrigin + "/",
-      cancel_url: appOrigin + "/",
-    };
-    expect(stripe.calls).toEqual([
-      {
-        path: "/v1/customers",
-        idempotency: `milton-customer-${userId}`,
-        bearer: true,
-        "metadata[milton_user_id]": userId,
-      },
-      session,
+      status: "trialing",
+    });
+    expect(stripe.calls.map((call) => call.call)).toEqual([
+      "GET /v1/subscriptions?customer=cus_fixture&status=all&limit=10",
+      "POST /v1/subscriptions",
+      "POST /v1/billing_portal/sessions",
     ]);
-    // A second checkout reuses the stored customer.
+    // Trialing, active and past_due manage; anything else subscribes, no trial.
+    for (const [status, location, call] of [
+      ["trialing", portalUrl, portalCall],
+      ["active", portalUrl, portalCall],
+      ["past_due", portalUrl, portalCall],
+      ["canceled", checkoutUrl, sessionCall],
+      ["unpaid", checkoutUrl, sessionCall],
+      ["incomplete_expired", checkoutUrl, sessionCall],
+    ] as const) {
+      await local.db.query(
+        sql`UPDATE trial_accounts SET subscription_status=${status}`,
+      );
+      stripe.calls.length = 0;
+      const answer = await send("/billing/checkout", {});
+      expect([status, answer.status]).toEqual([status, 303]);
+      expect(answer.headers.get("Location")).toBe(location);
+      expect(stripe.calls).toEqual([call]);
+    }
+    // A returning deleted identity has no customer yet.
+    await local.db.query(
+      sql`UPDATE trial_accounts SET stripe_customer_id=NULL,subscription_status='canceled'`,
+    );
     stripe.calls.length = 0;
-    expect((await send("/billing/checkout", {})).status).toBe(303);
-    expect(stripe.calls).toEqual([session]);
+    const back = await send("/billing/checkout", {});
+    expect(back.headers.get("Location")).toBe(checkoutUrl);
+    expect(stripe.calls.map((call) => call.call)).toEqual([
+      "POST /v1/customers",
+      "POST /v1/checkout/sessions",
+    ]);
+    expect(await clock()).toEqual({
+      customer: "cus_fixture",
+      status: "canceled",
+    });
     stripe.calls.length = 0;
     const portal = await send("/billing/portal", {});
     expect(portal.status).toBe(303);
-    expect(portal.headers.get("Location")).toBe(
-      "https://billing.stripe.com/p/session/test_fixture",
-    );
-    expect(stripe.calls).toEqual([
-      {
-        path: "/v1/billing_portal/sessions",
-        idempotency: null,
-        bearer: true,
-        customer: "cus_fixture",
-        return_url: appOrigin + "/",
-      },
-    ]);
+    expect(portal.headers.get("Location")).toBe(portalUrl);
+    expect(stripe.calls).toEqual([portalCall]);
   } finally {
     await fixture.dispose();
   }

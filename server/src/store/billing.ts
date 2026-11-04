@@ -19,18 +19,13 @@ const subscriptionColumns = (state: StripeSubscriptionState) =>
 
 export async function billingAccount(db: StoreSession, userId: string) {
   const row = (
-    await db.query<{
-      customer: string | null;
-      status: string | null;
-      paid: boolean;
-    }>(sql`
-    SELECT stripe_customer_id AS customer, subscription_status AS status,
-      coalesce(paid_through > clock_timestamp(),false) AS paid
+    await db.query<{ customer: string | null; status: string | null }>(sql`
+    SELECT stripe_customer_id AS customer, subscription_status AS status
     FROM trial_accounts WHERE user_id=${userId}`)
   )[0];
   return row
     ? { enrolled: true, ...row }
-    : { enrolled: false, customer: null, status: null, paid: false };
+    : { enrolled: false, customer: null, status: null };
 }
 
 /** Stores the customer on the clock row unless one is already stored; returns

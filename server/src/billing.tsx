@@ -1,5 +1,6 @@
 /** @jsxImportSource hono/jsx */
-import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { createHash } from "node:crypto";
+import Stripe from "stripe";
 import { z } from "zod";
 import type { BillingConfig, RuntimeConfig } from "./config";
 import {
@@ -412,43 +413,9 @@ async function billingRoute(ctx: PageContext): Promise<Response> {
 
 /** The webhook body bound, read before the signature check. */
 export const WEBHOOK_MAX_BYTES = 262144;
+// Checked by Stripe's own SDK: the v1 HMAC-SHA256 of `${t}.${body}` with the
+// endpoint secret, compared in constant time, t at most five minutes old.
 const SIGNATURE_TOLERANCE_SECONDS = 300;
-
-/** Stripe's v1 scheme: HMAC-SHA256 of `${t}.${body}` with the endpoint secret,
- * any listed v1 matching in constant time, t within five minutes of now. */
-export function verifyStripeSignature(
-  body: Uint8Array,
-  header: string | null,
-  secret: string,
-  nowSeconds = Date.now() / 1000,
-) {
-  if (!header || header.length > 4096) return false;
-  let timestamp: string | undefined;
-  const signatures: string[] = [];
-  for (const part of header.split(",")) {
-    const at = part.indexOf("=");
-    if (at < 0) continue;
-    const key = part.slice(0, at).trim();
-    const value = part.slice(at + 1).trim();
-    if (key === "t") timestamp = value;
-    else if (key === "v1") signatures.push(value);
-  }
-  if (
-    !timestamp ||
-    !/^\d{1,12}$/.test(timestamp) ||
-    Math.abs(nowSeconds - Number(timestamp)) > SIGNATURE_TOLERANCE_SECONDS
-  )
-    return false;
-  const expected = createHmac("sha256", secret)
-    .update(`${timestamp}.`)
-    .update(body)
-    .digest();
-  return signatures.some(
-    (signature) =>
-      /^[a-f0-9]{64}$/.test(signature) &&
-      timingSafeEqual(Buffer.from(signature, "hex"), expected),
-  );
-}
 
 const stripeEvent = z.object({
   id: z.string().regex(/^evt_[A-Za-z0-9]{1,251}$/),
@@ -510,20 +477,29 @@ export function stripeWebhook(config: RuntimeConfig) {
     const bounded = await boundRequest(request, WEBHOOK_MAX_BYTES);
     if (bounded instanceof Response) return bounded;
     const body = new Uint8Array(await bounded.arrayBuffer());
-    if (
-      !verifyStripeSignature(
+    let verified: unknown;
+    try {
+      // The async variant: under Bun the SDK resolves to its web build, whose
+      // crypto is async only. A signed body that is not JSON is event_invalid.
+      verified = await Stripe.webhooks.constructEventAsync(
         body,
-        request.headers.get("Stripe-Signature"),
+        request.headers.get("Stripe-Signature") ?? "",
         billing.webhookSecret,
-      )
-    )
-      return answer(400, { error: "signature_invalid" });
+        SIGNATURE_TOLERANCE_SECONDS,
+      );
+    } catch (error) {
+      // Only a signed body that is not JSON is event_invalid; every other
+      // failure, including the SDK's own argument errors on a malformed
+      // header, is a bad signature.
+      return answer(400, {
+        error:
+          error instanceof SyntaxError ? "event_invalid" : "signature_invalid",
+      });
+    }
     let event: z.infer<typeof stripeEvent>;
     let customer: string | null = null;
     try {
-      event = stripeEvent.parse(
-        JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body)),
-      );
+      event = stripeEvent.parse(verified);
       // A handled type Milton cannot read is refused unrecorded, so Stripe
       // retries it and shows the failure, rather than access silently not moving.
       if (HANDLED_EVENTS.has(event.type))

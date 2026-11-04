@@ -262,9 +262,10 @@ Files: `server/src/store/index.ts`, `server/src/store/trials.ts`,
 - For a customer Milton holds, the webhook locks the row, reads the customer's
   subscriptions from Stripe, and writes the deciding one where it records the event.
 - The deciding subscription is active, then trialing, then past_due, otherwise the newest.
-- An empty list or a 404 with a stored subscription writes canceled.
-- A failed Stripe read answers 503 unrecorded so Stripe retries; a replayed event, an
-  unknown type, or a customer Milton does not hold calls nothing.
+- Only a successful empty list with a stored subscription writes canceled.
+- Any non-2xx from Stripe's list, 404 included, is a failed read: the webhook answers 503
+  unrecorded so Stripe retries, and sign-in stops with try again.
+- A replayed event, an unknown type, or a customer Milton does not hold calls nothing.
 - `/billing/checkout` sends trialing, active, and past_due to the Stripe portal.
 - An account still waiting on its trial takes it first, then the portal, or a 503 if it did
   not start, so paying early cannot lose the 30 days.

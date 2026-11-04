@@ -122,18 +122,17 @@ const stripeSubscription = z
   }));
 type StripeSubscription = StripeSubscriptionState & { created: number };
 
-// Every subscription the customer has, canceled included. A customer Stripe no
-// longer has has none.
+// Every subscription the customer has, canceled included. Any non-2xx is a failed
+// read, 404 too: an unknown customer proves nothing, and a key from the wrong mode
+// would otherwise mark paying people canceled.
 async function listSubscriptions(billing: BillingConfig, customer: string) {
-  const response = await stripeCall(
-    billing,
-    "GET",
-    `subscriptions?customer=${customer}&status=all&limit=10`,
-  );
-  if (response.status === 404) return [];
   return (
     await stripeAnswer(
-      response,
+      await stripeCall(
+        billing,
+        "GET",
+        `subscriptions?customer=${customer}&status=all&limit=10`,
+      ),
       z.object({ data: z.array(stripeSubscription) }),
     )
   ).data;
@@ -397,8 +396,8 @@ const HANDLED_EVENTS = new Set([
 const eventObject = z.object({ customer: customerId.nullable() });
 
 /** The state Stripe holds now for a customer Milton has stored: the one
- * subscription that decides access, or "canceled" when Stripe no longer has the
- * stored one, or nothing when neither side has one yet. */
+ * subscription that decides access, or "canceled" when a successful read lists
+ * none for a stored one, or nothing when neither side has one yet. */
 async function currentSubscription(
   billing: BillingConfig,
   customer: string,

@@ -280,24 +280,36 @@ test("a verified event only triggers a re-read: the list decides, a replay and a
         ["active", "trialing", "past_due", "incomplete_expired"][i]!,
       );
     }
-    // An empty list or a 404 with a stored subscription reads as canceled.
-    for (const [i, answer] of [
-      Response.json({ data: [] }),
-      Response.json({}, { status: 404 }),
-    ].entries()) {
-      await local.db.query(
-        sql`UPDATE trial_accounts SET subscription_status='active'`,
-      );
-      stripe.answer = answer;
-      expect(
-        await post(
-          event(`evt_gone${i}`, "customer.subscription.deleted", {
-            customer: "cus_fixture",
-          }),
-        ),
-      ).toEqual([200, '{"received":true}']);
-      expect((await row())!.status).toBe("canceled");
-    }
+    // A successful empty list with a stored subscription reads as canceled.
+    await local.db.query(
+      sql`UPDATE trial_accounts SET subscription_status='active'`,
+    );
+    list();
+    expect(
+      await post(
+        event("evt_gone", "customer.subscription.deleted", {
+          customer: "cus_fixture",
+        }),
+      ),
+    ).toEqual([200, '{"received":true}']);
+    expect((await row())!.status).toBe("canceled");
+    // An unknown customer is no proof of cancellation: a key from the wrong
+    // mode would otherwise mark paying people canceled. It stays unrecorded.
+    await local.db.query(
+      sql`UPDATE trial_accounts SET subscription_status='active'`,
+    );
+    stripe.answer = Response.json({}, { status: 404 });
+    expect(
+      await post(
+        event("evt_unknownToStripe", "customer.subscription.updated", {
+          customer: "cus_fixture",
+        }),
+      ),
+    ).toEqual([503, '{"error":"server_unavailable"}']);
+    expect((await row())!.status).toBe("active");
+    expect((await ledger()).map(({ id }) => id)).not.toContain(
+      "evt_unknownToStripe",
+    );
     // Without a stored subscription nothing is known to have ended.
     await local.db.query(
       sql`UPDATE trial_accounts SET stripe_subscription_id=NULL,subscription_status=NULL`,

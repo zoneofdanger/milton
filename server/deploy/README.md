@@ -19,9 +19,9 @@ decommission on 2026-11-01. Hosting rollback now uses Cloud Run revisions.
 
 Project `milton-510506`, Cloud Run/Artifact Registry region `us-east4`. Service manifests in this directory pin an immutable image and
 secret versions. They contain configuration and secret references, never values.
-The manifests pin what is serving now: app `milton-app-simp-893d0ce`
-(`sha256:622c2142…`, env 3, key 1) and MCP `milton-mcp-simp-893d0ce`
-(`sha256:622c2142…`, env 3, key 1), both connecting as `milton_app`; see the current
+The manifests pin what is serving now: app `milton-app-rank-c63af7f`
+(`sha256:420c4692…`, env 3, key 1) and MCP `milton-mcp-rank-c63af7f`
+(`sha256:420c4692…`, env 3, key 1), both connecting as `milton_app`; see the current
 release below. There is no worker service or scheduler job. There is no memo-update
 allowance; the daily call cap bounds saves. Existing positive account safeguards remain
 in effect. Trials and billing are live (since 2026-11-04).
@@ -183,15 +183,81 @@ references. Inspect revision readiness before selecting a recorded revision:
 gcloud run revisions list --service=milton-app --project=milton-510506 --region=us-east4
 ```
 
-Now serving: MCP `milton-mcp-simp-893d0ce` (since 2026-11-04 07:59:39Z) and app
-`milton-app-simp-893d0ce` (since 07:59:52Z), one image and one commit, on Drizzle journal 33,
+Now serving: MCP `milton-mcp-rank-c63af7f` (since 2026-11-04 16:48:46Z) and app
+`milton-app-rank-c63af7f` (since 16:49:21Z), one image and one commit, on Drizzle journal 34,
 with trials on since about 05:19Z; recorded below. There is no worker service.
 
-Current release simp-893d0ce: the 0029 pre-step, MCP and app, then migrations 0028 to 0032 in one
+Current release rank-c63af7f: migration 0033, then MCP and app, from main `c63af7f` (the merge
+of `agent/ranking-b`: samples carry optional labels; `get_report` requires an intent and serves
+eight samples ranked by labels, words and recency; the version covers every active sample;
+`notifications/tools/list_changed` goes out on each assistant's first tool call per process and
+on every missing-intent refusal). By a release agent on 2026-11-04; secrets unchanged. Before
+it, simp-893d0ce served both services on journal 33. The commit tree (a `git archive` of
+`c63af7f`) passed `check-types`, `bun test` (114 pass) and `format:check`. A throwaway branch
+from production (`rehearsal-0033-sample-labels`) rehearsed 0033 through `bun run --cwd server
+db:migrate` (journal 33 to 34; only the four `samples` columns, `samples_labels` and
+`milton_sample_guard` changed; 17 tables and 281 rows, every row identical with the new columns
+left out; `unlabeled` 2 of 2 `samples`, `unsearched` 0; a rerun changed nothing), then
+`rollback/0033` with `psql -1 -v ON_ERROR_STOP=1 -f` (schema and every row identical to the
+pre-0033 capture; psql warns that the file's own `BEGIN` and `COMMIT` nest in its `-1`
+transaction, harmlessly), then the hand re-forward the same way (identical to the first
+forward); the branch was deleted. Image
+`sha256:420c469210565844d7b50d492b8faf253724d2a1ab6991a9124bf64ff94336dd` (amd64
+`sha256:c1f2cd7cecc5afaba5ac1f646ad4ac1a51567159c2b175bb8ce42dcdfee3d9ee`; uid 1000, Node
+26.13.0, no env, key, pem or `.dev.vars` files, build bases unchanged; with empty configuration
+both services stop at startup). Neon snapshot `before-0033-sample-labels`
+(`snap-round-wind-b80bomdm`, 16:47:17Z). `bun run --cwd server db:migrate` from the checkout,
+the owner URL only in the process environment (from `neonctl connection-string`, checked by
+role, database and host, then unset), applied 0033 at 16:47:39Z to 16:47:41Z on the first
+attempt: `PASS`, journal 34, `samples` 2, `unlabeled` 2, `unsearched` 0, the production change
+identical to the rehearsal's. On the 0033 schema the simp revisions kept serving: the canonical
+checks matched the baseline and a fresh headless Claude Code client read the cover sheet and
+`email` at the unchanged version `c83d91a3…`. MCP created 16:48:23Z to 16:48:29Z with `gcloud
+run services update milton-mcp --image=<digest> --revision-suffix=rank-c63af7f` (keeps the
+startup CPU boost), pinned with `update-traffic --to-revisions=milton-mcp-rank-c63af7f=100` at
+16:48:46Z (generation 79); the app with `gcloud run services replace` from `app.release.json`
+(the manifest naming the revision) at 16:49:02Z to 16:49:11Z, pinned by name at 16:49:21Z
+(generation 67). Each revision spec differs from its predecessor only in the image (MCP
+`milton-mcp-env:3`, the unmounted leftover `milton-mcp-env:2` volume, `milton-mcp-key:1`; app
+`milton-app-env:3`, `milton-app-key:1`). No log line from either simp revision after its switch.
+On the new code a fresh headless client listed four tools, with `intent` required on
+`get_report`; the served instructions in its transcript equal the source, 4,066 characters; it
+read the cover sheet and `email` with an intent at `c83d91a3…` (the version did not change form
+for this account: both active samples were already served), one sample and no label fields (it
+has none); without an intent it was refused `invalid_input` with the reconnect hint, and with a
+201-character situation `invalid_input` naming the 200-character limit, without the hint. A
+client holding the pre-release schema was refused the same way. Through MCP as `milton_app`:
+resending the cover rule "Use the Oxford comma." on `c83d91a3…` answered `unchanged`; on the
+stale `5bbb8ddf…` `conflict`; the first request replayed `unchanged`. Two receipts were stored
+and nothing else changed. The forms probe printed `PASS`, `POST /billing/webhook` with a bad or
+missing signature answered 400 `signature_invalid`, signed-out `/tps-report` answered 403 and
+`/health` 200 on both. From 16:48:23Z to 16:55:48Z neither service logged a 5xx, an ERROR,
+`does not exist`, `42703`, `samples_labels`, `lock timeout` or a secret-shaped string (MCP 31 x
+200, 4 x 401, and 2 x 202 and 2 x 405 from a Codex client's notification POST and GET stream
+probe; app 9 x 200, 2 x 400 and 5 x 403), every request landed on the rank revisions, and the
+only tool calls were the checks above. Not run: a save with a labeled sample (step 6), which
+needs Peter's go in his own session; labels on a stored sample were therefore not observed in
+production, only in the page test and the store tests.
+
+Rollback. Code rolls back by traffic alone at any time: the simp revisions run on the 0033
+schema (checked above). Shift traffic and, in the same step, set the manifests' images back to
+`sha256:622c2142c54b18ea5ec753ec6e473e97186ecb036d798e60c1fe832ff264fa6e`. Only once traffic is
+off the 0033 code, and only if the schema must go too, stop writers and run
+`server/drizzle/rollback/0033_sample_labels.sql` offline as `neondb_owner` (rehearsed); labels
+saved since 0033 leave the table. The 0033 journal row stays, so re-forwarding means `psql -1 -v
+ON_ERROR_STOP=1 -f server/drizzle/0033_sample_labels.sql`. Never restore the
+`before-0033-sample-labels` snapshot to roll back code.
+
+```sh
+gcloud run services update-traffic milton-mcp --to-revisions=milton-mcp-simp-893d0ce=100 --project=milton-510506 --region=us-east4
+gcloud run services update-traffic milton-app --to-revisions=milton-app-simp-893d0ce=100 --project=milton-510506 --region=us-east4
+```
+
+Release simp-893d0ce: the 0029 pre-step, MCP and app, then migrations 0028 to 0032 in one
 runner pass, from main `893d0ce` (the simplifications: no memo-update allowance, saves in one
 transaction, no history cap, fingerprint versions, raised limits; first sign-ins take no
-`store_config` lock). By a release agent on 2026-11-04; secrets unchanged. Before it,
-bill-fa7a2cb served both services on journal 28 with trials on. The commit tree (a `git archive`
+`store_config` lock). By a release agent on 2026-11-04, serving until rank-c63af7f; secrets unchanged. Before
+it, bill-fa7a2cb served both services on journal 28 with trials on. The commit tree (a `git archive`
 of `893d0ce`) passed `check-types`, `bun test` (112 pass) and `format:check`. A throwaway branch
 from production (`rehearsal-0028-0032-simplifications`) rehearsed the whole sequence from that
 tree: the pre-step (`pre_step` true; only `milton_claim_clock` changed), the five checks (the
@@ -247,7 +313,8 @@ deletes its own user and returns the winner's; no `store_config` lock, so 0028's
 refuse it) and its test (a rival committing between lookup and insert leaves one user and one
 trial row) were read; the test passed in the suite above.
 
-Rollback. Code before this release fails every read and save on the 0031 schema and cannot save
+Rollback (since rank-c63af7f, reachable only after its rollback above, 0033 included). Code
+before this release fails every read and save on the 0031 schema and cannot save
 on the 0029 schema, so a traffic shift alone breaks the service. Stop writers, run the rollbacks
 offline as `neondb_owner`, newest first: `rollback/0032_raise_limits.sql`,
 `rollback/0031_fingerprint_versions.sql`, `rollback/0030_no_history_cap.sql`,
@@ -1158,6 +1225,9 @@ versions. The 0032 journal row stays, so re-forwarding means running
 `psql -1 -v ON_ERROR_STOP=1 -f server/drizzle/0032_raise_limits.sql`.
 
 ## Sample labels (0033)
+
+Applied 2026-11-04 16:47:39Z to 16:47:41Z, before the code (see rank-c63af7f): journal 34,
+`samples` 2, `unlabeled` 2, `unsearched` 0.
 
 Migration 0033 is additive and ships in its own release, after the 0028-0032 release is
 done. It adds three optional labels to `samples` (`audience`, `purpose`, `register`:

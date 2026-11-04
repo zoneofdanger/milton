@@ -71,7 +71,7 @@ copy these same masters, so www, app and mcp serve identical icons. When editing
 the SVG, regenerate the ICO frames and update the cache revision in `faviconLinks`.
 App pages allow only same-origin images and fonts (`img-src 'self'`,
 `font-src 'self'`); scripts and external images remain blocked.
-`server/scripts/assets.ts` mirrors the exact built asset URLs for local servers;
+`server/src/assets.ts` lists the exact built asset URLs for local servers;
 Vercel serves the server's `public` directory in production.
 
 ### Instruction lists

@@ -21,7 +21,7 @@ Hono routes requests and renders escaped JSX on the server. Vite builds the shar
 stylesheet and copies the theme assets; it does not bundle server secrets or add
 browser scripts. Forms work with the existing strict CSP. Bun installs dependencies, builds and tests; production runs Node 26 LTS.
 
-`src/function.ts` is a local compatibility adapter; hosted services use the role-specific Cloud Run entrypoint.
+Hosted services use the role-specific Cloud Run entrypoint:
 `src/cloud-run.ts` serves browser pages and an exact list of public assets with
 `MILTON_SERVICE=app` or the protocol/store code with `MILTON_SERVICE=mcp`; any other
 value fails startup. Each role rejects the other hostname and direct `run.app`

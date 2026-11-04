@@ -55,10 +55,7 @@ The fonts in `public/fonts` are self-hosted, with their upstream licenses:
 - `jetbrains-mono-regular.woff2`: JetBrains Mono, upright 400; display headings,
   report titles, brand, labels and code. `--font-display` and `--font-mono` share
   this one file. `--font-display-weight` avoids synthesizing a heavier display face.
-- Instrument Serif and Source Serif 4 remain as legacy assets with their licenses;
-  current CSS neither requests nor preloads them.
 
-Instrument Serif source: https://fonts.gstatic.com/s/instrumentserif/v5/jizBRFtNs2ka5fXjeivQ4LroWlx-6zUTjnTLgNs.woff2
 Geist source: https://fonts.gstatic.com/s/geist/v5/gyByhwUxId8gMEwcGFWNOITd.woff2
 Their SIL Open Font Licenses are included beside the files. JetBrains source:
 https://raw.githubusercontent.com/JetBrains/JetBrainsMono/master/fonts/webfonts/JetBrainsMono-Regular.woff2

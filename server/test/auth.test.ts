@@ -181,7 +181,6 @@ test("page fonts and favicons are local while other browser restrictions stay cl
   expect(html).toContain('href="/favicon.ico?v=printer"');
   const { localAsset } = await import("../scripts/assets");
   for (const [path, type] of [
-    ["/fonts/source-serif-4-semibold.woff2", "font/woff2"],
     ["/fonts/jetbrains-mono-regular.woff2", "font/woff2"],
     ["/favicon.svg", "image/svg+xml"],
     ["/favicon.ico", "image/x-icon"],

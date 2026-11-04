@@ -1,17 +1,9 @@
 import { z } from "zod";
 import type { StoreSession } from "./database";
-import { StoreError } from "./errors";
-import { databaseFailure } from "./database";
 import { recordAcceptedChange } from "./provenance";
-import {
-  outcomeSchema,
-  retiredSample,
-  type SaveContext,
-  type Snapshot,
-} from "./save-context";
+import { retiredSample, type SaveContext, type Snapshot } from "./save-context";
 
-/** Publish: rebuild and publish the report, record the accepted change, and
- * complete the receipt. */
+/** Publish: rebuild and publish the report and record the accepted change. */
 export async function publishSave(
   ctx: SaveContext,
   tx: StoreSession,
@@ -19,7 +11,7 @@ export async function publishSave(
   retired: z.infer<typeof retiredSample>[],
   attribution: string,
 ) {
-  const { userId, input, result, snapshot, complete, assemble, publish } = ctx;
+  const { userId, input, result, snapshot, assemble, publish } = ctx;
   const updated = await snapshot(tx);
   const body = await assemble(tx, updated.documents);
   const publishedVersion = await publish(tx, updated, body);
@@ -44,43 +36,8 @@ export async function publishSave(
     beforeSource: before.fingerprint,
     afterSource: updated.fingerprint,
   });
-  return complete(
-    tx,
-    result("saved", {
-      version: publishedVersion,
-      ...(retired.length ? { samples_retired: retired } : {}),
-    }),
-  );
-}
-
-/** After a failed validation or apply: a committed result wins; otherwise the
- * claimed receipt completes as failed. */
-export function recoverSave(ctx: SaveContext, error: unknown) {
-  const { db, input, result, lock, receipt, complete } = ctx;
-  const failure = databaseFailure(error);
-  // A committed result wins even when the connection failed while returning it.
-  return db
-    .transaction(async (tx) => {
-      await lock(tx);
-      const existing = await receipt(tx, input.request_id);
-      if (existing?.completed) return outcomeSchema.parse(existing.result_json);
-      if (!existing) throw failure;
-      // databaseFailure yields only StoreErrors, whose messages are written
-      // for clients; unknown errors carry its generic message.
-      return complete(
-        tx,
-        result("failed", {
-          error: failure.code,
-          message: failure.message,
-        }),
-      );
-    })
-    .catch(() => {
-      throw new StoreError(
-        "save_outcome_unknown",
-        "Repeat the exact same request ID and input to recover the outcome. Do not submit a new request yet.",
-        503,
-        { request_id: input.request_id },
-      );
-    });
+  return result("saved", {
+    version: publishedVersion,
+    ...(retired.length ? { samples_retired: retired } : {}),
+  });
 }

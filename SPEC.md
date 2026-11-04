@@ -55,14 +55,14 @@ nothing. `text` is the stated purpose: recorded with the accepted change, never 
 as a rule. A rule stored starting with `Baseline: ` must match the first-setup
 catalog byte for byte, in the report it is served for (`baseline_unknown` otherwise); the setup script served on the
 cover sheet and on each report without rules is rendered from the same data. Corrections go through `exact_edits`; an edit whose `before` is a whole rule
-and whose `after` is empty retires it. All fields resolve against one claimed snapshot
+and whose `after` is empty retires it. All fields resolve against one locked snapshot
 and apply atomically. Anchors resolve uniquely within active card bodies, never
 against generated text; overlapping edits fail. The source/report fences, receipt and
 replay, history, size and heading limits still apply; reservation is always zero. A
 report exceeding its bound refuses the entire save; source instructions are never
 truncated. There is no separate save allowance: the 1,000/day attempted-call limit
-bounds saves and reads alike, with the retained-history limit. A save's claim takes
-only the account lock and reads `store_config` without locking it.
+bounds saves and reads alike, with the retained-history limit. A save runs in one
+transaction, takes only the account lock and reads `store_config` without locking it.
 
 Removing the model removes paraphrase drift, not interpretation risk: the assistant
 picks the report and wording, and a free-text correction sent as a new rule leaves

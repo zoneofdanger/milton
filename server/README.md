@@ -87,7 +87,7 @@ model on any read or save, so it needs no model credential, project or budget. T
 runtime no longer reads `MILTON_GEMINI_*` or `MILTON_MODEL_*_BUDGET_USD`;
 `MILTON_GLOBAL_SPEND_POLICY` or any `MILTON_SPEND_*` or `RESEND_API_KEY` setting either.
 0022 dropped the SQL spend policy and readiness columns and 0023 the spend ledgers.
-Claims reserve nothing; 0026 dropped `save_requests.reserved_micros`.
+Saves reserve nothing; 0026 dropped `save_requests.reserved_micros`.
 
 Use separate Neon branches and matching environment settings for development and previews. Redeploy after changing runtime configuration.
 
@@ -196,23 +196,26 @@ Exactly four tools are exposed:
 | `list_reports()`                                         | All five reports as `{reports: [{report_id, text, is_empty, samples, setup?}], version}`, without the cover sheet; a report without rules has a one-line `setup` pointer to `get_report`.                                                                                                                                                                   |
 | `create_memo({text, request_id, expected_version, ...})` | An exact save with at least one of `rules`, `exact_edits`, `moves`, `sample`, `retire_samples`; `text` states its purpose. UUID for the logical request and version from the cover sheet.                                                                                                                                                                   |
 
-`create_memo` returns `saved`, `unchanged`, `conflict`, `in_progress`, or `failed`,
+`create_memo` returns `saved`, `unchanged`, `conflict`, or `failed`,
 with the request ID and relevant version/error.
 `saved` confirms a committed write; `unchanged` confirms no write. Neither alone
 proves the requested meaning is on file: reread the cover sheet or report and compare it
 with the requested change before confirming that. Reuse the exact same
-arguments to recover an uncertain request; a completed receipt returns its original
+arguments to recover an uncertain request; its receipt returns the original
 outcome. That receipt's version may be
 older than the current report. Reusing an ID with different arguments is rejected.
 For a conflict, reread the cover sheet and reconsider a new request. No blind retry.
 
-Replay does not depend on the phase. Account gates checked before a claim (trial
-access) answer without a receipt, so the same request can
-succeed once the gate opens. Every outcome decided after them completes a receipt,
-whether found while claiming (a version conflict, `request_too_large`,
-`memo_body_limit`) or while applying (a conflict, an edit, move, sample or size
-refusal, or a trial that ended mid-save): the same request ID and input replay that
-outcome, and different input under that ID is `request_id_reused`.
+A save runs in one transaction under the account lock, so a concurrent save of the
+same request waits and then replays; there is no pending state. Account gates (trial
+access) answer without a receipt, so the same request can succeed once the gate
+opens. Every outcome decided after them writes the receipt with that outcome in the
+same transaction, whether a version conflict, `request_too_large`, `memo_body_limit`,
+or an edit, move, sample or size refusal: the same request ID and input replay that
+outcome, and different input under that ID is `request_id_reused`. When the commit's
+acknowledgment is lost, Milton looks the receipt up under the account lock and returns
+it; with no receipt nothing was written and the store error stands. Only when that
+lookup fails too is the answer `save_outcome_unknown`: repeat the same request.
 
 Every save needs at least one structured field; a save with only `text` is refused
 with `invalid_input`: "Name the report and send the rule's text in rules." `text` is
@@ -374,26 +377,25 @@ The tests use fresh PGlite databases and stubbed Auth responses. `test:client` u
 
 ## Store, history, and limits
 
-`src/store/compiled.ts` snapshots all instruction-card heads under the account lock and
-claims the request in a short transaction, then resolves the save against that
-snapshot and publishes in a second transaction. Exact edits and moves name existing
+`src/store/save.ts` runs each save in one transaction: it takes the account lock,
+replays a known request, checks the trial gate, snapshots all instruction-card heads,
+resolves the save against that snapshot, writes and publishes, and writes the
+receipt with its outcome. Exact edits and moves name existing
 cards only through unique anchors; `rules` entries become new cards with
 server-assigned IDs. Omitted cards keep their exact bodies, descriptions and versions.
 The cover sheet and reports are assembled from the final stored active bodies and
 samples (see 0017 below). Bodies are not trimmed, rewritten or truncated, apart from
 one stored leading `- ` that the printed bullet replaces;
-descriptions are metadata, not an additional instruction source. Publication rechecks
-the account, request deadline, source fingerprint and report version; card versions,
-the current snapshot and receipt commit together. Stale or conflicting
-saves cannot partially publish.
+descriptions are metadata, not an additional instruction source. Card versions, the
+current snapshot and the receipt commit together. Stale or conflicting saves cannot
+partially publish.
 
 Internal `instruction_card_versions` are append-only; legacy `memo_versions` are retained. `tps_reports` holds one replaceable
 snapshot per account, with a monotonic revision and source fingerprint. There is
 no report content history. Receipts keep input hashes and bounded outcomes, not raw
-submitted text or copies of reports. Their maximum 2-KiB result space plus metadata is
-reserved against retained-history capacity when claimed, so terminal failures fit.
-Completed receipts are immutable. A crashed request can expire; the same ID never
-applies again.
+submitted text or copies of reports, and count their maximum 2-KiB result space plus
+metadata against retained-history capacity. A receipt is written once, with its
+outcome, and is immutable. A crashed request commits nothing and leaves no receipt.
 
 Saves anchor only in current active cards, never archived versions or a prior snapshot.
 Existing content under the former `vibes` core key is ordinary source. Invalid Unicode
@@ -540,9 +542,8 @@ Report text, version, downloads and saved receipts contain no billing notices.
 Expired unsubscribed accounts receive a tool error `subscription_required` with
 `retryable:false` and the signed-in app home as the one link in its message, as the
 instructions say. This is not an
-authentication failure or an empty successful report. New saves are checked when
-claimed and again under the publication lock; a save that crosses expiry fails
-without publishing. Exact replay still
+authentication failure or an empty successful report. New saves are checked under
+the account lock, in the transaction that would publish them. Exact replay still
 recovers an already accepted receipt. Web view/download remains available.
 
 With billing configured, no new approval lands until the account has a subscription:
@@ -583,6 +584,22 @@ Migration 0010 is additive and copies no legacy request text. Its inverse parks 
 foreign keys, immutability guards and byte charges in `milton_rollback`; forward migration
 restores them exactly. Stop writers during schema rollback and keep them stopped until
 forward recovery: an older runtime cannot guarantee provenance for new saves.
+
+### Saves in one transaction (0029)
+
+Saves are deterministic, so the two-phase save (a claim with a 40-second deadline,
+an apply in a second transaction, `in_progress`, `request_expired` and the recovery
+that completed open claims) is gone: a save and its receipt commit in one
+transaction. The runtime no longer reads or writes `save_requests.completed`,
+`deadline` or `claimed_at`. Migration 0029 deletes the claims earlier revisions left
+open (none of them changed anything), drops those columns with
+`save_request_claim_clock` and the 0014 trigger `save_claim_clock`, drops the
+`result_json` default, adds `save_request_outcome` so every receipt holds an outcome,
+and makes the save guard refuse every UPDATE. `request_expired` appears only in
+older receipts and logs; `in_progress` and `request_unavailable` only in older logs.
+A pre-step, `drizzle/pre/0029_one_transaction.sql`, lets this code save before 0029;
+see [the hosting runbook](deploy/README.md#saves-in-one-transaction-0029).
+`drizzle/rollback/0029_one_transaction.sql` restores the shape, every receipt complete.
 
 ### No memo updates (0028)
 
@@ -626,7 +643,7 @@ trigger it fires, runs on it:
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | SELECT, INSERT, UPDATE, DELETE | `users`: sign-up, the account lock, retained bytes kept by triggers, and account deletion (its cascades run as the table owner)                                                                   |
 | SELECT, INSERT, DELETE         | `assistant_disconnects`: disconnect, the refusal check, reconnect on Allow                                                                                                                        |
-| SELECT, INSERT, UPDATE         | `save_requests` (claims and receipts), `samples` (retirement), `tps_reports` (snapshot upsert), `trial_accounts` (notice stage), `usage_daily` (daily call upsert)                                |
+| SELECT, INSERT, UPDATE         | `save_requests` (receipts; the save guard refuses every update), `samples` (retirement), `tps_reports` (snapshot upsert), `trial_accounts` (notice stage), `usage_daily` (daily call upsert)      |
 | SELECT, INSERT                 | `identities`, `deleted_identities`, `instruction_cards`, `instruction_card_versions`, `sample_kinds`, and the legacy `memos`, `memo_versions` and `memo_cards` (the signup seed and its triggers) |
 | INSERT                         | `accepted_changes`: provenance, written once per save and never read by the runtime                                                                                                               |
 | SELECT                         | `store_config`: settings are read without a lock; 0028 revoked the `UPDATE (singleton)` the retired sign-in `FOR UPDATE` lock needed, so no setting can be changed                                |

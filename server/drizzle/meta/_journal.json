@@ -204,6 +204,13 @@
       "when": 1793772221656,
       "tag": "0028_no_memo_updates",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1793773715282,
+      "tag": "0029_one_transaction",
+      "breakpoints": true
     }
   ]
 }

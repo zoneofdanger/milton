@@ -15,9 +15,7 @@ import { StoreError } from "./errors";
 import { readLimits, utf8Bytes } from "./index";
 import { assertTrialAccess } from "./trials";
 import type { Receipt, Report, SaveContext, SaveOutcome } from "./save-context";
-import { claimSave } from "./save-claim";
-import { applySave } from "./save-apply";
-import { recoverSave } from "./save-publish";
+import { runSave } from "./save";
 
 const hash = (value: unknown) =>
   createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -238,25 +236,9 @@ export function compiledMemos(
   async function receipt(tx: StoreSession, id: string) {
     return (
       await tx.query<Receipt>(
-        sql`SELECT input_hash,source_hash,completed,deadline>clock_timestamp() AS live,result_json
-        FROM save_requests WHERE user_id=${userId} AND request_id=${id}`,
+        sql`SELECT input_hash,result_json FROM save_requests WHERE user_id=${userId} AND request_id=${id}`,
       )
     )[0];
-  }
-  async function complete(tx: StoreSession, result: SaveOutcome) {
-    const rows = await tx.query(
-      sql`UPDATE save_requests SET completed=true,result_json=${JSON.stringify(result)}::jsonb
-      WHERE user_id=${userId} AND request_id=${result.request_id} AND NOT completed
-      RETURNING request_id`,
-    );
-    // Callers hold the account lock and complete only an open receipt.
-    if (!rows.length)
-      throw new StoreError(
-        "request_unavailable",
-        "The save request is unavailable.",
-        503,
-      );
-    return result;
   }
   async function assemble(tx: StoreSession, documents: Documents) {
     // Every source byte is preserved; only headings, when lines, sample context
@@ -345,17 +327,10 @@ export function compiledMemos(
         lock,
         snapshot,
         receipt,
-        complete,
         assemble,
         publish,
       };
-      const claim = await claimSave(ctx, structured);
-      if (claim.outcome) return claim.outcome;
-      try {
-        return await applySave(ctx, claim);
-      } catch (error) {
-        return recoverSave(ctx, error);
-      }
+      return runSave(ctx, structured);
     },
   };
 }

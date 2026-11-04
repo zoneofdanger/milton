@@ -8,26 +8,13 @@ const toolNames = [
 ] as const;
 export type ToolCall = {
   tool: (typeof toolNames)[number] | "unknown";
-  outcome:
-    | "read"
-    | "saved"
-    | "unchanged"
-    | "conflict"
-    | "in_progress"
-    | "refused"
-    | "failed";
+  outcome: "read" | "saved" | "unchanged" | "conflict" | "refused" | "failed";
   elapsed_ms: number;
   error_code?: string;
 };
 export const knownTool = (name: unknown): ToolCall["tool"] =>
   toolNames.find((tool) => tool === name) ?? "unknown";
-const statuses = z.enum([
-  "saved",
-  "unchanged",
-  "conflict",
-  "in_progress",
-  "failed",
-]);
+const statuses = z.enum(["saved", "unchanged", "conflict", "failed"]);
 const payload = z.object({
   status: statuses.optional(),
   error: z.string().max(64).optional(),
@@ -55,8 +42,6 @@ export const loggedErrorCodes = new Set([
   "memo_body_limit",
   "memo_history_limit",
   "request_id_reused",
-  "request_expired",
-  "request_unavailable",
   "save_outcome_unknown",
   "assistant_required",
   "edit_conflict",

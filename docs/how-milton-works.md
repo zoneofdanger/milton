@@ -115,11 +115,15 @@ Files: `server/src/store/reports.ts`, `server/src/store/compiled.ts`.
 
 ## Saves
 
-Files: `server/src/store/compiled.ts`, `server/src/store/save-claim.ts`,
+Files: `server/src/store/compiled.ts`, `server/src/store/save.ts`,
 `server/src/store/save-apply.ts`, `server/src/store/save-publish.ts`,
 `server/src/store/provenance.ts`, `server/src/exact-edits.ts`.
 
-### Claim
+A save runs in one transaction under the account lock: replay or gates, then
+validation, the writes, publishing and the receipt, which commits with its result or
+not at all.
+
+### Admit
 
 - The input schema is strict: 1 to 25 rules, up to 100 edits, moves, or sample removals, a
   UUID request ID, and a version.
@@ -128,14 +132,15 @@ Files: `server/src/store/compiled.ts`, `server/src/store/save-claim.ts`,
 - Input is hashed, and the same request ID with the same input replays the original
   result.
 - The same request ID with different input is refused.
-- A running request returns `in_progress`, and an expired one returns `request_expired`.
+- A concurrent save of the same request waits on the account lock, then replays.
 - A stale `expected_version` returns `conflict` with the current version.
 - A request with no rules, edits, moves, or sample changes is refused, but only after
   replay, so an older receipt still recovers.
 - Oversized input fails, and that decision is stored on the receipt so it replays.
 - Trial and daily-limit refusals write no receipt, so the same request can succeed later.
-- Admission writes a receipt with a 40-second deadline.
-- If the claim's outcome is uncertain, Milton checks the receipt or returns
+- If the commit's acknowledgment is lost, Milton looks up the receipt under the account
+  lock: present, it returns the stored outcome; absent, nothing was written and the
+  store error stands. Only when that lookup fails too does it return
   `save_outcome_unknown`.
 
 ### Validate
@@ -153,7 +158,8 @@ Files: `server/src/store/compiled.ts`, `server/src/store/save-claim.ts`,
 
 ### Apply
 
-- The apply step locks again and rechecks the receipt, trial, fingerprint, and version.
+- Validation and writes run after a savepoint; a refusal or failure rolls back to it,
+  so nothing changes and the receipt stores the failure.
 - Rule changes append new versions, so nothing is overwritten.
 - An edit plus a move on the same rule produces one version.
 - Moving a rule to the report it is already in changes nothing.
@@ -172,10 +178,7 @@ Files: `server/src/store/compiled.ts`, `server/src/store/save-claim.ts`,
 - Publishing rebuilds and stores the report, then bumps the revision.
 - An audit row records the request, assistant, before and after versions, and affected
   cards.
-- The receipt completes, and the hold is charged only if something changed. Otherwise it
-  is released.
-- On failure, a committed result wins. Otherwise the receipt fails and the hold is
-  released.
+- The receipt is written last, once, with the outcome.
 
 ## First setup
 
@@ -344,7 +347,7 @@ Files: `server/drizzle/`, `server/src/store/schema.ts`, `server/src/store/databa
 - Card versions must be sequential, and they cannot be changed or deleted while the card
   exists.
 - Samples and kinds are append-only, and a sample can only be retired.
-- Completed receipts cannot change, and neither can a receipt's claim time.
+- A receipt is written once with its outcome and cannot change.
 - Audit rows are immutable and must reference real card versions.
 - `retained_bytes` tracks stored history against a cap.
 - History rows never shrink short of account deletion, so that cap is effectively

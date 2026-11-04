@@ -2,7 +2,7 @@ import { expect, jest, spyOn, test } from "bun:test";
 import { sql } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { localStore } from "./local-store";
-import { betweenPhases, read, seedUsers } from "./store-fixtures";
+import { insideTransactions, read, seedUsers } from "./store-fixtures";
 import { createStoreMemoTools } from "../src/store/tools";
 import { createHash } from "node:crypto";
 import type { StoreDatabase } from "../src/store/database";
@@ -46,20 +46,8 @@ test("trial transition preserves saves and TPS while notices and access follow t
         await personStoreForCurrentRequest(local.env, neverSaved)
       ).readTpsReport(),
     ).resolves.toMatchObject({ is_empty: true });
-    // Claims that reached the write phase; one can expire the trial there.
-    let calls = 0,
-      expireWhileSaving = false;
     const store = await storeForCurrentRequest(
-      {
-        appOrigin: "http://localhost:3001",
-        storeDatabase: betweenPhases(local.db, async () => {
-          calls++;
-          if (expireWhileSaving)
-            await local.db.query(
-              sql`UPDATE trial_accounts SET subscription_status='canceled' WHERE user_id=${auth.userId}`,
-            );
-        }),
-      },
+      { appOrigin: "http://localhost:3001", storeDatabase: local.db },
       auth,
       { issuer: "fixture", clientId: "one" },
     );
@@ -221,18 +209,28 @@ test("trial transition preserves saves and TPS while notices and access follow t
       "trial_ending_1_day",
     );
     expect(result(await tools.get_cover_sheet()).notice).toBeUndefined();
-    expireWhileSaving = true;
+    // The subscription ends after the tools were built: the save's gate,
+    // under the account lock, refuses it before any write or receipt.
+    await local.db.query(
+      sql`UPDATE trial_accounts SET subscription_status='canceled' WHERE user_id=${auth.userId}`,
+    );
+    const receipts = async () =>
+      (
+        await local.db.query(
+          sql`SELECT count(*)::int AS n FROM save_requests WHERE user_id=${auth.userId}`,
+        )
+      )[0]!.n;
+    const receiptsBefore = await receipts();
     const racingSave = result(
       await tools.create_memo({
-        text: "Expires while saving",
+        text: "Expires before saving",
         rules: [{ report: "cover", text: "Lead with the answer." }],
         expected_version: report.version,
         request_id: crypto.randomUUID(),
       }),
     );
-    expireWhileSaving = false;
+    expect(racingSave.status).toBeUndefined();
     expect(racingSave).toMatchObject({
-      status: "failed",
       error: "subscription_required",
       retryable: false,
     });
@@ -248,7 +246,6 @@ test("trial transition preserves saves and TPS while notices and access follow t
     });
     expect(result(denied).text).toBeUndefined();
     expect(result(denied).message).toBe(racingSave.message);
-    const beforeCalls = calls;
     expect(
       result(
         await tools.create_memo({
@@ -258,7 +255,7 @@ test("trial transition preserves saves and TPS while notices and access follow t
         }),
       ).error,
     ).toBe("subscription_required");
-    expect(calls).toBe(beforeCalls);
+    expect(await receipts()).toBe(receiptsBefore);
     // An accepted write's receipt stays recoverable even after access expires.
     expect(result(await tools.create_memo(input))).toEqual(saved);
     expect(await person.readTpsReport()).toEqual(report);
@@ -302,17 +299,13 @@ test("trial transition preserves saves and TPS while notices and access follow t
 });
 
 // Two signed-up accounts behind the real tool layer.
-async function tenantPair(
-  local: Awaited<ReturnType<typeof localStore>>,
-  between: () => Promise<unknown> = async () => {},
-) {
-  const storeDatabase = betweenPhases(local.db, between);
+async function tenantPair(local: Awaited<ReturnType<typeof localStore>>) {
   const tenant = async (subject: string) => {
     const identity = { provider: "neon", subject };
     await resolveIdentityAccount(local.env, identity);
     const auth = await lookupIdentityAccount(local.env, identity);
     const tools = createStoreMemoTools(
-      await storeForCurrentRequest({ ...local.env, storeDatabase }, auth, {
+      await storeForCurrentRequest(local.env, auth, {
         issuer: "fixture",
         clientId: subject,
       }),
@@ -697,11 +690,8 @@ test("a first sign-in that loses the identity race returns the winner's account 
 
 test("closing an account refuses its reads, saves and replays, fences a pending save, and spares other tenants", async () => {
   const local = await localStore();
-  let closeDuringSave: (() => Promise<unknown>) | undefined;
   try {
-    const [alpha, beta] = await tenantPair(local, async () => {
-      await closeDuringSave?.();
-    });
+    const [alpha, beta] = await tenantPair(local);
     // Tools are built while Alpha is active, so every refusal below comes from
     // the per-call account lock, not from sign-in.
     const accepted = {
@@ -750,23 +740,19 @@ test("closing an account refuses its reads, saves and replays, fences a pending 
       ),
     ];
     const alphaBefore = await sources(alpha.id);
-    // (f) The claim commits while active; the account closes before the write phase.
-    closeDuringSave = () =>
-      local.db.query(
-        sql`UPDATE users SET status='deleting' WHERE id=${alpha.id}`,
-      );
+    // (f) The account closes after the tools were built; the save's account
+    // lock refuses it and nothing is applied.
+    await local.db.query(
+      sql`UPDATE users SET status='deleting' WHERE id=${alpha.id}`,
+    );
     const raced = {
       ...emailRule("- Applied after closing."),
       request_id: crypto.randomUUID(),
       expected_version: alphaVersion,
     };
     const racedOutcome = read(await alpha.tools.create_memo(raced));
-    closeDuringSave = undefined;
-    // Either refusal is acceptable; what matters is that nothing was applied.
     expect(racedOutcome.status).toBeUndefined();
-    expect(["account_unavailable", "save_outcome_unknown"]).toContain(
-      racedOutcome.error,
-    );
+    expect(racedOutcome.error).toBe("account_unavailable");
     expect(await sources(alpha.id)).toEqual(alphaBefore);
     const refusals = async () => {
       for (const result of [
@@ -817,13 +803,13 @@ test("closing an account refuses its reads, saves and replays, fences a pending 
   }
 }, 30000);
 
-test("account deletion removes every tenant row, keeps refusals, stops in-flight saves, and allows no second trial", async () => {
+test("account deletion removes every tenant row, keeps refusals, waits for an in-flight save and removes it too, and allows no second trial", async () => {
   const local = await localStore();
   try {
     await local.pg.exec("UPDATE store_config SET trials_enabled=true");
     const neon = (subject: string) => ({ provider: "neon", subject });
     let hold: { entered: () => void; gate: Promise<void> } | undefined;
-    const storeDatabase = betweenPhases(local.db, async () => {
+    const storeDatabase = insideTransactions(local.db, async () => {
       if (hold) {
         hold.entered();
         await hold.gate;
@@ -888,19 +874,6 @@ test("account deletion removes every tenant row, keeps refusals, stops in-flight
     }
     await gone.store.chargeToolCall();
     expect((await kept.save()).status).toBe("saved");
-    // A save that claimed before deletion and has not reached its write phase.
-    let release!: () => void;
-    let entered!: () => void;
-    const compiling = new Promise<void>((resolve) => (entered = resolve));
-    hold = {
-      entered,
-      gate: new Promise<void>((resolve) => (release = resolve)),
-    };
-    const inflight = gone.save({
-      rules: [{ report: "cover", text: "An in-flight fictional rule." }],
-    });
-    await compiling;
-    hold = undefined;
     const tenantTables = (
       await local.db.query<{ table_name: string }>(
         sql`SELECT DISTINCT c.table_name FROM information_schema.columns c
@@ -946,22 +919,32 @@ test("account deletion removes every tenant row, keeps refusals, stops in-flight
         )
       ).length,
     ).toBe(1);
-    expect(
-      (
-        await local.db.query(
-          sql`SELECT 1 FROM save_requests WHERE user_id=${gone.auth.userId} AND NOT completed`,
-        )
-      ).length,
-    ).toBe(1);
     const keptBefore = await counts(kept.auth.userId);
-
-    await deleteAccount(local.env, neon("leaving"), ["client-c", "client-d"]);
-    release();
-    // Its apply step finds no active account, so nothing is written (the
-    // counts below); the existing save path reports the outcome as unknown.
-    await expect(inflight).rejects.toMatchObject({
-      code: "save_outcome_unknown",
+    // A save in flight when deletion starts holds the account lock: deletion
+    // waits for it to commit, then removes its rows with the rest.
+    const version = (await gone.store.readTpsReport()).version;
+    let release!: () => void;
+    let entered!: () => void;
+    const saving = new Promise<void>((resolve) => (entered = resolve));
+    hold = {
+      entered,
+      gate: new Promise<void>((resolve) => (release = resolve)),
+    };
+    const inflight = gone.store.saveMemo({
+      text: "An in-flight fictional rule.",
+      rules: [{ report: "cover", text: "An in-flight fictional rule." }],
+      request_id: crypto.randomUUID(),
+      expected_version: version,
     });
+    await saving;
+    hold = undefined;
+    const deleting = deleteAccount(local.env, neon("leaving"), [
+      "client-c",
+      "client-d",
+    ]);
+    release();
+    expect((await inflight).status).toBe("saved");
+    await deleting;
     expect(Object.values(await counts(gone.auth.userId))).toEqual(
       tenantTables.map(() => 0),
     );

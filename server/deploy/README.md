@@ -784,7 +784,9 @@ Release order:
    claim an old revision left `held` and that has since expired gets a 422 `check_violation`
    instead of `request_expired`: the new code completes the receipt without moving it out of
    `held`, which the 0014 check refuses. Nothing is written, and 0028 ends it by dropping the
-   check. If 0028 fails on a deadlock, rerun it; it rolls back as a whole.
+   check. If 0028 fails on a deadlock, rerun it; it rolls back as a whole. The
+   one-transaction image (0029) completes no old claim: there the replay answers
+   `save_outcome_unknown` and writes nothing until 0029 deletes the claim.
 6. Smoke test through MCP as `milton_app`: a save, a replay of that save (same request ID
    and input, same outcome), and a first sign-in of a new identity.
 
@@ -799,3 +801,82 @@ guard and the runtime's `UPDATE (singleton)` grant, which a revision from before
 the sign-in lock removal needs. It restores shape, not data. The 0028 journal row stays, so
 re-forwarding means running `0028_no_memo_updates.sql` by hand, as one transaction that stops
 on the first error: `psql -1 -v ON_ERROR_STOP=1 -f server/drizzle/0028_no_memo_updates.sql`.
+
+## Saves in one transaction (0029)
+
+Migration 0029 removes what only the two-phase save used. It deletes the claims earlier
+revisions left open (`NOT completed`): an earlier revision completed the receipt in the
+transaction that applied a change, so an open claim changed nothing, and a replay of one
+runs as a new save, fenced by its `expected_version`. It drops `save_requests.completed`,
+`deadline` and `claimed_at` with `save_request_claim_clock`, the 0014 trigger
+`save_claim_clock` with `milton_claim_clock`, and the `result_json` default; adds
+`save_request_outcome` (every receipt holds a `status`); and replaces the save guard so it
+refuses every UPDATE. Every revision before this release inserts a claim with a deadline
+and completes it later; this release writes each receipt once, with its result, and names
+none of the three columns. `deadline` is NOT NULL without a default, so this release
+cannot save on the old schema without the pre-step. The image also carries 0028's code,
+so 0028 and 0029 release together.
+
+Release order (it replaces 0028's: 0028's check runs at step 5 and one runner pass applies
+both):
+
+1. As the owner, while the current revision serves, apply the pre-step:
+   `psql "$MILTON_OWNER_DATABASE_URL" -v ON_ERROR_STOP=1 -f server/drizzle/pre/0029_one_transaction.sql`.
+   It replaces `milton_claim_clock` so a receipt inserted with its result is filled in as
+   complete, its deadline its claim time. Every earlier revision inserts claims without a
+   result and is unaffected, and either revision replays the other's receipts, so code
+   rolls back by traffic alone until 0029. Retry on a lock timeout. Then verify it:
+
+   ```sql
+   SELECT prosrc ~ 'result_json' AS pre_step FROM pg_proc
+     WHERE pronamespace = 'public'::regnamespace AND proname = 'milton_claim_clock';
+   ```
+
+   Do not ship the image until this returns true. Without the pre-step every save on the
+   new image fails: its receipt insert omits the NOT NULL `deadline`, so each save answers
+   `store_unavailable` and writes nothing until traffic moves back to the old revision.
+
+2. Ship MCP and app from the same image.
+3. Wait until both services, not one, serve 100% on the new image and the old revisions
+   are idle, then 40 seconds more: an older revision's claim stays open up to its deadline.
+4. Take a Neon snapshot.
+5. With the owner connection, run both checks before migrating, and record their values.
+   If 0028 is not applied yet, run its check first ("No memo updates (0028)" step 4) and
+   record `enabled` and `daily_limit`. Then run the 0029 check below. Expect `pre_step`
+   true and `live_open` and `outcomeless` 0; if `live_open` is nonzero, wait 40 seconds and
+   rerun. `open` is the number of claims 0029 deletes.
+
+   ```sql
+   SELECT
+     (SELECT prosrc ~ 'result_json' FROM pg_proc
+       WHERE pronamespace = 'public'::regnamespace AND proname = 'milton_claim_clock') AS pre_step,
+     (SELECT count(*) FROM save_requests WHERE NOT completed)::int AS open,
+     (SELECT count(*) FROM save_requests
+       WHERE NOT completed AND deadline > clock_timestamp())::int AS live_open,
+     (SELECT count(*) FROM save_requests
+       WHERE completed AND result_json->>'status' IS NULL)::int AS outcomeless;
+   ```
+
+6. Run the normal runner once, promptly: `bun run --cwd server db:migrate`. It applies
+   every pending migration in one transaction, so with 0028 pending one run applies 0028
+   and 0029 together; there is no point between them to check. Both lock `users` in
+   EXCLUSIVE mode first (reads continue; account locks wait), then `save_requests` and
+   `store_config`, the order a save takes them. On a deadlock or lock timeout, rerun it; it
+   rolls back as a whole. Between the deploy and this step, a replay of a claim an older
+   revision left open answers `save_outcome_unknown` and writes nothing; afterwards the
+   same request runs as a new save.
+7. Smoke test through MCP as `milton_app`: a save, a replay of that save (same request ID
+   and input, same outcome), a save on a stale version (`conflict`), and a first sign-in of
+   a new identity.
+
+**Rollback boundary.** Before 0029 is applied, code rolls back by traffic alone; the
+pre-step stays and is harmless to every revision. After it, an earlier revision cannot
+save: first run `server/drizzle/rollback/0029_one_transaction.sql` offline with writers
+stopped, then shift traffic. The rollback re-adds `completed` (every receipt true, default
+false), `deadline` (`-infinity` on every receipt, no default) and `claimed_at` (NULL) with
+`save_request_claim_clock`, the `result_json` default, `milton_claim_clock` in its
+pre-step form with `save_claim_clock`, and the 0028 save guard, and drops
+`save_request_outcome`. Either revision saves on the result. It restores shape, not data:
+the claims 0029 deleted do not come back. The 0029 journal row stays, so re-forwarding
+means running `0029_one_transaction.sql` by hand, as one transaction that stops on the
+first error: `psql -1 -v ON_ERROR_STOP=1 -f server/drizzle/0029_one_transaction.sql`.

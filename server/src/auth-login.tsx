@@ -9,6 +9,7 @@ import {
   resolveIdentityAccount,
 } from "./store";
 import { AuthError } from "./token";
+import { ensureSubscription } from "./billing";
 import { navigation, page } from "./pages";
 import {
   cookieValue,
@@ -64,6 +65,9 @@ function oauthQuery(
   return query;
 }
 
+const retryLogin = (query: string) =>
+  query ? "/login?flow=" + encodeURIComponent(query) : "/login";
+
 /** Sign-in, consent and sign-out: the landing page, /login, /consent and
  * /logout, after the router has checked the path and method. */
 export const signInRoutes = async (ctx: PageContext): Promise<Response> => {
@@ -77,12 +81,30 @@ export const signInRoutes = async (ctx: PageContext): Promise<Response> => {
     rotateCsrf,
     auth,
     session,
-    identity,
+    signedIn,
     readForm,
     renderMemos,
     csrfName,
     loopName,
   } = ctx;
+  // No new approval lands until the account has a subscription. Every Milton step
+  // that can lead to one comes through here: /login with a session, and the consent
+  // page and form, which a live session reaches without /login. A failure stops the
+  // step with a 503 and a way back to sign-in, which is the retry. An approval Neon
+  // already holds skips these pages and refreshes without Milton, so existing
+  // accounts depend on the backfill.
+  const requireSubscription = async (
+    userId: string,
+    email: string | undefined,
+    query: string,
+  ) => {
+    try {
+      await ensureSubscription(config, userId, email);
+    } catch (error) {
+      ctx.loginRecovery = retryLogin(query);
+      throw error;
+    }
+  };
   if (request.method === "GET") {
     // The toolkit skips callback exchange on its configured login pathname.
     // Our public landing page is its fallback; /login stays in skipRoutes
@@ -140,15 +162,14 @@ export const signInRoutes = async (ctx: PageContext): Promise<Response> => {
     const query = oauthQuery(request, config);
     const hidden = <input type="hidden" name="oauth_query" value={query} />;
     if (url.pathname === "/login") {
-      ctx.loginRecovery = query
-        ? "/login?flow=" + encodeURIComponent(query)
-        : "/login";
+      ctx.loginRecovery = retryLogin(query);
       const user = await session();
       if (user) {
-        await resolveIdentityAccount(config, {
+        const { miltonUserId } = await resolveIdentityAccount(config, {
           provider: "neon",
           subject: user.id,
         });
+        await requireSubscription(miltonUserId, user.email, query);
         rotateCsrf();
         if (!query) return Response.redirect(config.appOrigin + "/", 302);
         const params = new URLSearchParams(query);
@@ -198,7 +219,12 @@ export const signInRoutes = async (ctx: PageContext): Promise<Response> => {
         </>,
       );
     }
-    await lookupIdentityAccount(config, await identity());
+    const user = await signedIn();
+    const { userId } = await lookupIdentityAccount(config, {
+      provider: "neon",
+      subject: user.id,
+    });
+    await requireSubscription(userId, user.email, query);
     const params = new URLSearchParams(query);
     const result = await timed(
       auth.oauth2.publicClient({
@@ -260,9 +286,7 @@ export const signInRoutes = async (ctx: PageContext): Promise<Response> => {
   }
   const query = oauthQuery(request, config, form.get("oauth_query") ?? "");
   if (url.pathname === "/login") {
-    ctx.loginRecovery = query
-      ? "/login?flow=" + encodeURIComponent(query)
-      : "/login";
+    ctx.loginRecovery = retryLogin(query);
     const provider = form.get("provider");
     if (provider !== "google" && provider !== "github")
       throw new AuthError(
@@ -291,11 +315,14 @@ export const signInRoutes = async (ctx: PageContext): Promise<Response> => {
     rotateCsrf();
     return navigation(result.data.url);
   }
-  const who = await identity();
-  await lookupIdentityAccount(config, who);
+  const user = await signedIn();
+  const who = { provider: "neon", subject: user.id };
+  const { userId } = await lookupIdentityAccount(config, who);
   const decision = form.get("decision");
   if (decision !== "allow" && decision !== "deny")
     throw new AuthError("authorization_invalid", "Choose Allow or Deny.", 400);
+  if (decision === "allow")
+    await requireSubscription(userId, user.email, query);
   const result = await timed(
     auth.oauth2.consent({
       accept: decision === "allow",

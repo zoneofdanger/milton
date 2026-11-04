@@ -10,6 +10,7 @@ import { assistants } from "./auth-assistants";
 import { accountDeletion } from "./auth-account";
 import { signInRoutes } from "./auth-login";
 import { logUnexpected } from "./error-log";
+import { billingRoutes } from "./billing";
 
 export function browserPages(config: RuntimeConfig) {
   const secure = !isLoopback(new URL(config.appOrigin).hostname);
@@ -27,6 +28,11 @@ export function browserPages(config: RuntimeConfig) {
       )
         return assistants(ctx);
       if (url.pathname === "/account/delete") return accountDeletion(ctx);
+      if (
+        url.pathname === "/billing/checkout" ||
+        url.pathname === "/billing/portal"
+      )
+        return billingRoutes(ctx);
       if (!["/", "/login", "/consent", "/logout"].includes(url.pathname))
         return page("Not found", <p>This page does not exist.</p>, 404);
       if (
@@ -69,6 +75,12 @@ export function browserPages(config: RuntimeConfig) {
               <a class="button" href={ctx.loginRecovery}>
                 Back to sign-in
               </a>
+              {ctx.loginRecovery === "/login" && (
+                <>
+                  {" "}
+                  <a href="/">Milton home</a>
+                </>
+              )}
             </p>
           ) : url.pathname.startsWith("/assistants") ||
             failure.code === "reconnect_incomplete" ? (

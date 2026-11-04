@@ -11,6 +11,7 @@ import { assembleDocuments } from "../src/store/reports";
 export function stubStore(): TenantStore {
   const documents = { ...assembleDocuments([], []), version: "stub" };
   return {
+    appOrigin: "http://localhost:3001",
     readTpsReport: async () => ({ text: "", version: "stub", is_empty: true }),
     readDocuments: async () => documents,
     saveMemo: async () => {

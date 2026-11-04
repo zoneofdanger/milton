@@ -68,7 +68,11 @@ export const users = pgTable(
   ],
 );
 // No row means existing early access. Only an explicitly enabled new-account
-// enrollment creates a row; a subscription provider will own paidThrough.
+// enrollment creates a row. Stripe owns the trial and the subscription: the
+// stripe_* columns and subscription_status mirror what Stripe last answered, and
+// the gate reads only those. startedAt and paidThrough stay in place, unread by
+// the gate. subscriptionStatus holds any value Stripe sends; NULL means no
+// subscription yet, and the gate allows it.
 export const trialAccounts = pgTable(
   "trial_accounts",
   {
@@ -78,9 +82,33 @@ export const trialAccounts = pgTable(
     startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
     paidThrough: timestamp("paid_through", { withTimezone: true }),
     noticeStage: integer("notice_stage").notNull().default(0),
+    stripeCustomerId: text("stripe_customer_id").unique(),
+    stripeSubscriptionId: text("stripe_subscription_id").unique(),
+    subscriptionStatus: text("subscription_status"),
+    trialEnd: timestamp("trial_end", { withTimezone: true }),
+    currentPeriodStart: timestamp("current_period_start", {
+      withTimezone: true,
+    }),
+    currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
   },
   (t) => [
     check("trial_notice_stage", sql`${t.noticeStage} BETWEEN 0 AND 2`),
+    check(
+      "trial_stripe_customer",
+      sql`${t.stripeCustomerId} IS NULL OR ${t.stripeCustomerId} ~ '^cus_[A-Za-z0-9]{1,251}$'`,
+    ),
+    check(
+      "trial_stripe_subscription",
+      sql`${t.stripeSubscriptionId} IS NULL OR ${t.stripeSubscriptionId} ~ '^sub_[A-Za-z0-9]{1,251}$'`,
+    ),
+    check(
+      "trial_subscription_status",
+      sql`${t.subscriptionStatus} IS NULL OR char_length(${t.subscriptionStatus}) BETWEEN 1 AND 64`,
+    ),
+    check(
+      "trial_stripe_dates",
+      sql`(${t.trialEnd} IS NULL OR isfinite(${t.trialEnd})) AND (${t.currentPeriodStart} IS NULL OR isfinite(${t.currentPeriodStart})) AND (${t.currentPeriodEnd} IS NULL OR isfinite(${t.currentPeriodEnd}))`,
+    ),
     check(
       "trial_finite_dates",
       sql`(${t.startedAt} IS NULL OR isfinite(${t.startedAt})) AND (${t.paidThrough} IS NULL OR isfinite(${t.paidThrough}))`,
@@ -509,6 +537,26 @@ export const acceptedChanges = pgTable(
     check(
       "accepted_change_hashes",
       sql`${t.beforeTps} ~ '^[a-f0-9]{64}$' AND ${t.afterTps} ~ '^[a-f0-9]{64}$' AND ${t.beforeSource} ~ '^[a-f0-9]{64}$' AND ${t.afterSource} ~ '^[a-f0-9]{64}$'`,
+    ),
+  ],
+);
+
+// Stripe webhook events already applied, by event id: a redelivery changes
+// nothing. Holds the id, type and a sha256 of the raw body, never the payload.
+export const stripeEvents = pgTable(
+  "stripe_events",
+  {
+    id: text("id").primaryKey(),
+    type: text("type").notNull(),
+    receivedAt: timestamp("received_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    payloadSha256: text("payload_sha256").notNull(),
+  },
+  (t) => [
+    check(
+      "stripe_event_shape",
+      sql`${t.id} ~ '^evt_[A-Za-z0-9]{1,251}$' AND char_length(${t.type}) BETWEEN 1 AND 128 AND ${t.payloadSha256} ~ '^[a-f0-9]{64}$'`,
     ),
   ],
 );

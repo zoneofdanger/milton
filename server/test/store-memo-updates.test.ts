@@ -343,7 +343,7 @@ test("memo-update holds fence last-slot dispatch, expired claims, activation and
       ).rows,
     ).toEqual([]);
     await local.pg.exec(
-      "INSERT INTO trial_accounts(user_id,started_at) VALUES ('hold-commit',clock_timestamp()-interval '31 days'); UPDATE store_config SET trials_enabled=true",
+      "INSERT INTO trial_accounts(user_id,started_at,subscription_status) VALUES ('hold-commit',clock_timestamp()-interval '31 days','canceled'); UPDATE store_config SET trials_enabled=true",
     );
     expect((await committed.saveMemo(commitInput)).status).toBe("saved");
     await expect(

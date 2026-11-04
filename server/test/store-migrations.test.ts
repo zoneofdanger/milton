@@ -7,6 +7,13 @@ import {
 } from "./local-store";
 import { fixtureStore, seedUsers } from "./store-fixtures";
 import { checkRuntimeRole } from "../scripts/check-runtime-role";
+import { migrationUrl } from "../scripts/migrate";
+import {
+  linkStripeCustomer,
+  lockStripeCustomer,
+  lockWaitingSubscription,
+  recordStripeEvent,
+} from "../src/store/billing";
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
@@ -48,6 +55,200 @@ const schemaCatalog = async (pg: PGlite) => {
     ),
   };
 };
+
+test("a release passes the owner URL in its own variable, checked, and an empty one is refused", async () => {
+  const url = "postgresql://owner:fixture@db.example.invalid/milton";
+  expect(await migrationUrl({ MILTON_OWNER_DATABASE_URL: url })).toBe(url);
+  for (const bad of [
+    "",
+    "postgresql://owner:fixture@db.example.invalid/other",
+  ]) {
+    const refused = migrationUrl({ MILTON_OWNER_DATABASE_URL: bad });
+    await expect(refused).rejects.toMatchObject({ code: "configuration" });
+    expect(String(await refused.catch((error) => error.message))).not.toContain(
+      "fixture",
+    );
+  }
+});
+
+test("0027 adds the Stripe ledger and subscription columns, marks returning deleted identities canceled, the runtime applies an event once, and rollback refuses until nothing is recorded", async () => {
+  const base = await migratedThrough(26);
+  const pg = await migratedThrough(26);
+  const post = await migratedThrough(27);
+  try {
+    const up = await drizzleSql("0027_stripe_billing.sql");
+    const down = await drizzleSql("rollback/0027_stripe_billing.sql");
+    // A plain clock starts at created_at; a returning deleted identity's before it.
+    await pg.exec(`INSERT INTO users(id) VALUES ('billing'),('returned');
+      INSERT INTO trial_accounts(user_id,started_at) SELECT id,created_at FROM users WHERE id='billing';
+      INSERT INTO trial_accounts(user_id,started_at) SELECT id,created_at-interval '720 hours' FROM users WHERE id='returned'`);
+    const clock = async () =>
+      (
+        await pg.query(
+          "SELECT user_id,started_at::text,paid_through::text,notice_stage FROM trial_accounts ORDER BY 1",
+        )
+      ).rows;
+    const kept = await clock();
+    // The runtime's privileges on the new objects, through 0024's defaults.
+    const grants = async () =>
+      (
+        await pg.query(
+          `SELECT c.relname,string_agg(a.privilege_type,',' ORDER BY a.privilege_type) AS privileges
+           FROM pg_class c CROSS JOIN LATERAL aclexplode(c.relacl) a
+           WHERE a.grantee='milton_runtime'::regrole AND c.relname IN ('stripe_events','trial_accounts')
+           GROUP BY 1 ORDER BY 1`,
+        )
+      ).rows;
+    const forward = async () => {
+      await pg.exec("BEGIN;" + up + "COMMIT;");
+      expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(post));
+      expect(await grants()).toEqual([
+        { relname: "stripe_events", privileges: "INSERT,SELECT,UPDATE" },
+        { relname: "trial_accounts", privileges: "INSERT,SELECT,UPDATE" },
+      ]);
+    };
+    await forward();
+    expect(await clock()).toEqual(kept);
+    expect(
+      (
+        await pg.query(
+          "SELECT user_id,stripe_customer_id,subscription_status,trial_end FROM trial_accounts ORDER BY 1",
+        )
+      ).rows,
+    ).toEqual([
+      {
+        user_id: "billing",
+        stripe_customer_id: null,
+        subscription_status: null,
+        trial_end: null,
+      },
+      {
+        user_id: "returned",
+        stripe_customer_id: null,
+        subscription_status: "canceled",
+        trial_end: null,
+      },
+    ]);
+    // Rerun after release, the data statement catches a row an older image wrote
+    // and leaves a returning identity who has since paid alone.
+    await pg.exec(`UPDATE trial_accounts SET subscription_status='active' WHERE user_id='returned';
+      INSERT INTO users(id) VALUES ('late');
+      INSERT INTO trial_accounts(user_id,started_at) SELECT id,created_at-interval '1 hour' FROM users WHERE id='late'`);
+    await pg.exec(up.slice(up.lastIndexOf('UPDATE "trial_accounts"')));
+    expect(
+      (
+        await pg.query(
+          "SELECT user_id,subscription_status FROM trial_accounts WHERE user_id IN ('late','returned') ORDER BY 1",
+        )
+      ).rows,
+    ).toEqual([
+      { user_id: "late", subscription_status: "canceled" },
+      { user_id: "returned", subscription_status: "active" },
+    ]);
+    await pg.exec(`DELETE FROM users WHERE id='late';
+      UPDATE trial_accounts SET subscription_status='canceled' WHERE user_id='returned'`);
+    // Any status Stripe sends stores, within the bound; ids and dates are checked.
+    await pg.exec(
+      "UPDATE trial_accounts SET subscription_status='a_status_stripe_adds_later' WHERE user_id='billing'",
+    );
+    for (const refused of [
+      `subscription_status='${"x".repeat(65)}'`,
+      "stripe_subscription_id='cus_notASubscription'",
+      "trial_end='infinity'",
+      "current_period_start='infinity'",
+      "current_period_end='infinity'",
+    ])
+      await expect(
+        pg.exec(`UPDATE trial_accounts SET ${refused} WHERE user_id='billing'`),
+      ).rejects.toThrow("check constraint");
+    await pg.exec(
+      "UPDATE trial_accounts SET subscription_status=NULL WHERE user_id='billing'",
+    );
+
+    await pg.exec(
+      "CREATE ROLE milton_app_fixture LOGIN IN ROLE milton_runtime; SET ROLE milton_app_fixture",
+    );
+    const db = storeDatabase(pg);
+    try {
+      expect(await linkStripeCustomer(db, "billing", "cus_fixture")).toBe(
+        "cus_fixture",
+      );
+      // A second customer never replaces the stored one.
+      expect(await linkStripeCustomer(db, "billing", "cus_other")).toBe(
+        "cus_fixture",
+      );
+      const paid = {
+        id: "evt_fixture",
+        type: "invoice.paid",
+        payloadSha256: "a".repeat(64),
+      };
+      const state = {
+        id: "sub_fixture",
+        status: "active",
+        trialEnd: null,
+        periodStart: Date.parse("2026-11-01T00:00:00Z") / 1000,
+        periodEnd: Date.parse("2026-12-01T00:00:00Z") / 1000,
+      };
+      expect(await lockStripeCustomer(db, "cus_fixture")).toEqual({
+        subscription: null,
+      });
+      expect(await lockWaitingSubscription(db, "billing")).toEqual({
+        customer: "cus_fixture",
+      });
+      expect(
+        await recordStripeEvent(db, paid, { customer: "cus_fixture", state }),
+      ).toEqual({ recorded: true, updated: 1 });
+      expect(await lockWaitingSubscription(db, "billing")).toBeUndefined();
+      // The same event id again changes nothing, whatever it carries.
+      expect(
+        await recordStripeEvent(db, paid, {
+          customer: "cus_fixture",
+          state: "canceled",
+        }),
+      ).toEqual({ recorded: false, updated: 0 });
+      for (const statement of [
+        "DELETE FROM stripe_events",
+        "DELETE FROM trial_accounts",
+      ])
+        await expect(pg.query(statement)).rejects.toThrow("permission denied");
+    } finally {
+      await pg.exec("RESET ROLE");
+    }
+    await pg.exec("DROP ROLE milton_app_fixture");
+    expect(
+      (
+        await pg.query(
+          "SELECT stripe_customer_id,stripe_subscription_id,subscription_status,current_period_end=timestamptz '2026-12-01T00:00:00Z' AS period FROM trial_accounts WHERE user_id='billing'",
+        )
+      ).rows,
+    ).toEqual([
+      {
+        stripe_customer_id: "cus_fixture",
+        stripe_subscription_id: "sub_fixture",
+        subscription_status: "active",
+        period: true,
+      },
+    ]);
+
+    await expect(pg.exec(down)).rejects.toThrow(
+      "stripe_billing_rollback_requires_no_customers",
+    );
+    await pg.exec("ROLLBACK");
+    await pg.exec("UPDATE trial_accounts SET stripe_customer_id=NULL");
+    await expect(pg.exec(down)).rejects.toThrow(
+      "stripe_billing_rollback_requires_no_events",
+    );
+    await pg.exec("ROLLBACK");
+    await pg.exec("DELETE FROM stripe_events");
+    await pg.exec(down);
+    expect(await schemaCatalog(pg)).toEqual(await schemaCatalog(base));
+    await forward();
+  } finally {
+    await post.close();
+    await pg.close();
+    await base.close();
+  }
+}, 30000);
 
 test("0026 drops the dead columns and save_requests indexes, keeps every row, and rolls back to the 0025 shape", async () => {
   const base = await migratedThrough(25);
@@ -256,6 +457,11 @@ test("0024 runtime role saves through its grants, cannot change the schema or by
     expect(await grants(pg)).toEqual(await grants(post));
 
     await seedUsers(pg, "runtime");
+    // The store's trial gate reads 0027's columns, so the runtime checks below
+    // run with them in place; 0027 comes back out before 0024's rollback.
+    await pg.exec(
+      "BEGIN;" + (await drizzleSql("0027_stripe_billing.sql")) + "COMMIT;",
+    );
     // A login role in the group, as milton_app is in Neon. Membership
     // inherits: the session needs no SET ROLE milton_runtime. PGlite's session
     // user is a superuser, so SET ROLE stands in for logging in; what is checked
@@ -344,6 +550,7 @@ test("0024 runtime role saves through its grants, cannot change the schema or by
     } finally {
       await pg.exec("RESET ROLE");
     }
+    await pg.exec(await drizzleSql("rollback/0027_stripe_billing.sql"));
 
     // Rollback refuses while a login role is still in the group.
     await expect(pg.exec(down)).rejects.toThrow(

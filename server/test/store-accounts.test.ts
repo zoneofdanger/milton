@@ -12,7 +12,7 @@ import {
   personStoreForCurrentRequest,
 } from "../src/store";
 
-test("trial transition preserves saves and TPS while notices and access follow the account clock", async () => {
+test("trial transition preserves saves and TPS while notices and access follow the Stripe subscription state", async () => {
   const local = await localStore();
   try {
     const identity = (subject: string) => ({ provider: "neon", subject });
@@ -28,7 +28,7 @@ test("trial transition preserves saves and TPS while notices and access follow t
       identity("never-saved"),
     );
     await local.db.query(
-      sql`UPDATE trial_accounts SET started_at=clock_timestamp()-interval '31 days' WHERE user_id=${neverSaved.userId}`,
+      sql`UPDATE trial_accounts SET subscription_status='canceled' WHERE user_id=${neverSaved.userId}`,
     );
     const idleTools = createStoreMemoTools(
       await storeForCurrentRequest(local.env, neverSaved, {
@@ -49,11 +49,12 @@ test("trial transition preserves saves and TPS while notices and access follow t
       expireWhileSaving = false;
     const store = await storeForCurrentRequest(
       {
+        appOrigin: "http://localhost:3001",
         storeDatabase: betweenPhases(local.db, async () => {
           calls++;
           if (expireWhileSaving)
             await local.db.query(
-              sql`UPDATE trial_accounts SET started_at=clock_timestamp()-interval '31 days' WHERE user_id=${auth.userId}`,
+              sql`UPDATE trial_accounts SET subscription_status='canceled' WHERE user_id=${auth.userId}`,
             );
         }),
       },
@@ -88,6 +89,10 @@ test("trial transition preserves saves and TPS while notices and access follow t
     );
     await resolveIdentityAccount(local.env, identity("trial"));
     expect((await account()).started_at).toEqual(start);
+    // What Stripe's answer writes once the subscription exists.
+    await local.db.query(
+      sql`UPDATE trial_accounts SET subscription_status='trialing',trial_end=clock_timestamp()+interval '30 days' WHERE user_id=${auth.userId}`,
+    );
     const empty = result(await tools.get_cover_sheet());
     expect(empty.notice).toBeUndefined();
     expect(
@@ -174,21 +179,22 @@ test("trial transition preserves saves and TPS while notices and access follow t
       fakeAbort.mockRestore();
       jest.useRealTimers();
     }
-    await local.db.query(
-      sql`UPDATE trial_accounts SET paid_through=clock_timestamp()+interval '60 days' WHERE user_id=${auth.userId}`,
+    const trialEnd = String(
+      (
+        await local.db.query(
+          sql`SELECT trial_end FROM trial_accounts WHERE user_id=${auth.userId}`,
+        )
+      )[0]!.trial_end,
     );
     expect((await person.trialStatus()).trial_ends_at).toBe(
-      new Date(new Date(String(start)).getTime() + 30 * 86400000).toISOString(),
-    );
-    await local.db.query(
-      sql`UPDATE trial_accounts SET paid_through=NULL WHERE user_id=${auth.userId}`,
+      new Date(trialEnd).toISOString(),
     );
     const report = await person.readTpsReport();
     // Only cover-sheet rules exist, so the cover sheet text is the full report.
     expect(result(await tools.get_cover_sheet())).toMatchObject(report);
-    // Move only fixture clocks; real writes never reset started_at.
+    // Move only fixture dates; Stripe's answer is the real writer of trial_end.
     await local.db.query(
-      sql`UPDATE trial_accounts SET started_at=clock_timestamp()-interval '24 days' WHERE user_id=${auth.userId}`,
+      sql`UPDATE trial_accounts SET trial_end=clock_timestamp()+interval '6 days' WHERE user_id=${auth.userId}`,
     );
     const otherTools = createStoreMemoTools(
       await storeForCurrentRequest(local.env, auth, {
@@ -207,7 +213,7 @@ test("trial transition preserves saves and TPS while notices and access follow t
     expect(await person.readTpsReport()).toEqual(report);
     expect(result(await tools.get_cover_sheet()).notice).toBeUndefined();
     await local.db.query(
-      sql`UPDATE trial_accounts SET started_at=clock_timestamp()-interval '29 days 1 hour' WHERE user_id=${auth.userId}`,
+      sql`UPDATE trial_accounts SET trial_end=clock_timestamp()+interval '23 hours' WHERE user_id=${auth.userId}`,
     );
     expect(result(await tools.get_cover_sheet()).notice.code).toBe(
       "trial_ending_1_day",
@@ -228,9 +234,9 @@ test("trial transition preserves saves and TPS while notices and access follow t
       error: "subscription_required",
       retryable: false,
     });
+    // The one link is in the message, the signed-in app home.
     expect(racingSave).not.toHaveProperty("subscription_url");
-    // The instructions say to give no link, so the refusal carries none.
-    expect(JSON.stringify(racingSave)).not.toMatch(/_url|https?:/);
+    expect(racingSave.message).toEndWith("Subscribe at http://localhost:3001/");
     expect(await person.readTpsReport()).toEqual(report);
     const denied = await tools.get_cover_sheet();
     expect(denied.isError).toBe(true);
@@ -239,7 +245,7 @@ test("trial transition preserves saves and TPS while notices and access follow t
       retryable: false,
     });
     expect(result(denied).text).toBeUndefined();
-    expect(JSON.stringify(result(denied))).not.toMatch(/_url|https?:/);
+    expect(result(denied).message).toBe(racingSave.message);
     const beforeCalls = calls;
     expect(
       result(
@@ -255,14 +261,20 @@ test("trial transition preserves saves and TPS while notices and access follow t
     expect(result(await tools.create_memo(input))).toEqual(saved);
     expect(await person.readTpsReport()).toEqual(report);
     const expiredStart = (await account()).started_at;
-    // This is a trusted-provider projection fixture, not a client subscription action.
+    // A paid_through ahead no longer opens the gate; only the status does.
     await local.db.query(
       sql`UPDATE trial_accounts SET paid_through=clock_timestamp()+interval '30 days' WHERE user_id=${auth.userId}`,
     );
+    expect((await person.trialStatus()).status).toBe("expired");
+    // This is a trusted-provider projection fixture, not a client subscription action.
+    await local.db.query(
+      sql`UPDATE trial_accounts SET subscription_status='active' WHERE user_id=${auth.userId}`,
+    );
+    expect((await person.trialStatus()).status).toBe("paid");
     expect(result(await tools.get_cover_sheet())).toMatchObject(report);
     expect((await account()).started_at).toEqual(expiredStart);
     await local.db.query(
-      sql`UPDATE trial_accounts SET paid_through=NULL WHERE user_id=${auth.userId}`,
+      sql`UPDATE trial_accounts SET subscription_status='canceled' WHERE user_id=${auth.userId}`,
     );
     await local.pg.exec("UPDATE store_config SET trials_enabled=false");
     expect(result(await tools.get_cover_sheet())).toMatchObject(report);
@@ -298,7 +310,7 @@ async function tenantPair(
     await resolveIdentityAccount(local.env, identity);
     const auth = await lookupIdentityAccount(local.env, identity);
     const tools = createStoreMemoTools(
-      await storeForCurrentRequest({ storeDatabase }, auth, {
+      await storeForCurrentRequest({ ...local.env, storeDatabase }, auth, {
         issuer: "fixture",
         clientId: subject,
       }),
@@ -771,10 +783,14 @@ test("account deletion removes every tenant row, keeps refusals, stops in-flight
     const open = async (subject: string) => {
       await resolveIdentityAccount(local.env, neon(subject));
       const auth = await lookupIdentityAccount(local.env, neon(subject));
-      const store = await storeForCurrentRequest({ storeDatabase }, auth, {
-        issuer: "fixture",
-        clientId: "client-c",
-      });
+      const store = await storeForCurrentRequest(
+        { ...local.env, storeDatabase },
+        auth,
+        {
+          issuer: "fixture",
+          clientId: "client-c",
+        },
+      );
       const save = async (extra: Record<string, unknown> = {}) =>
         store.saveMemo({
           text: "Fictional rule, with its exception.",
@@ -930,14 +946,21 @@ test("account deletion removes every tenant row, keeps refusals, stops in-flight
     expect(
       (await local.pg.query("SELECT 1 FROM assistant_disconnects")).rows,
     ).toHaveLength(2);
-    // Re-signup: a fresh, empty account whose trial has already ended, so
-    // assistant reads pause; a never-deleted identity still gets a trial.
+    // Re-signup: a fresh, empty account already marked canceled, so assistant
+    // reads pause; a never-deleted identity's row still waits for its trial.
     await resolveIdentityAccount(local.env, neon("leaving"));
     const again = await lookupIdentityAccount(local.env, neon("leaving"));
     expect(again.userId).not.toBe(gone.auth.userId);
     const fresh = await personStoreForCurrentRequest(local.env, again);
     expect((await fresh.readTpsReport()).is_empty).toBe(true);
     expect((await fresh.trialStatus()).status).toBe("expired");
+    // The status alone marks it; no clock is written backwards.
+    expect(
+      await local.db.query(
+        sql`SELECT t.subscription_status AS status,t.started_at=u.created_at AS plain
+          FROM trial_accounts t JOIN users u ON u.id=t.user_id WHERE u.id=${again.userId}`,
+      ),
+    ).toEqual([{ status: "canceled", plain: true }]);
     const againTools = createStoreMemoTools(
       await storeForCurrentRequest(local.env, again, {
         issuer: "fixture",
@@ -953,16 +976,17 @@ test("account deletion removes every tenant row, keeps refusals, stops in-flight
           await personStoreForCurrentRequest(local.env, kept.auth)
         ).trialStatus()
       ).status,
-    ).toBe("trial");
+    ).toBe("early_access");
     await resolveIdentityAccount(local.env, neon("newcomer"));
     const newcomer = await lookupIdentityAccount(local.env, neon("newcomer"));
+    // A newcomer's row waits for Stripe's answer; the gate allows it meanwhile.
     expect(
       (
         await (
           await personStoreForCurrentRequest(local.env, newcomer)
         ).trialStatus()
       ).status,
-    ).toBe("trial");
+    ).toBe("early_access");
     // Re-signup while trials are off: no effect until trials are enabled.
     await deleteAccount(local.env, neon("leaving"), []);
     await local.pg.exec("UPDATE store_config SET trials_enabled=false");

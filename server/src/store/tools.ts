@@ -119,7 +119,11 @@ export function createStoreMemoTools(store: TenantStore) {
           }
         })) ?? result
       );
-    } catch (error) {
+    } catch (thrown) {
+      const error =
+        thrown instanceof StoreError && thrown.code === "subscription_required"
+          ? subscriptionRequired(store.appOrigin)
+          : thrown;
       return storeResult(
         {
           ...(error instanceof StoreError ? error.details : {}),
@@ -157,7 +161,7 @@ export function createStoreMemoTools(store: TenantStore) {
       run(async () => {
         const outcome = await store.saveMemo(input);
         if (outcome.error === "subscription_required") {
-          const error = subscriptionRequired();
+          const error = subscriptionRequired(store.appOrigin);
           return storeResult(
             { ...outcome, ...error.details, message: error.message },
             true,

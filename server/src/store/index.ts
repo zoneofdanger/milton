@@ -10,6 +10,21 @@ import {
 import { StoreError } from "./errors";
 import { claimTrialNotice, trialStatus, type TrialNotice } from "./trials";
 import {
+  backfillAccounts,
+  billingAccount,
+  cancelReturningIdentities,
+  clearStripeCustomer,
+  enrollForBackfill,
+  linkStripeCustomer,
+  lockStripeCustomer,
+  lockWaitingSubscription,
+  recordStripeEvent,
+  saveStripeSubscription,
+  stripeEventRecorded,
+  type StripeEvent,
+  type StripeSubscriptionState,
+} from "./billing";
+import {
   compiledMemos,
   type CompiledReport,
   type Documents,
@@ -17,6 +32,7 @@ import {
   type SaveOutcome,
 } from "./compiled";
 export { StoreError } from "./errors";
+export type { StripeSubscriptionState } from "./billing";
 
 export interface StoreBindings {
   DATABASE_URL?: string;
@@ -96,11 +112,12 @@ export async function resolveIdentityAccount(
           const id = `m_${crypto.randomUUID()}`;
           await tx.query(sql`INSERT INTO users (id) VALUES (${id})`);
           // A sign-in identity whose account was deleted gets no second trial:
-          // its trial row has already ended, so it reads as expired whenever
-          // trials are enabled (now or later) and has no effect while they are off.
-          await tx.query(sql`INSERT INTO trial_accounts(user_id,started_at)
-            SELECT u.id,CASE WHEN d.identity_hash IS NULL THEN u.created_at
-              ELSE u.created_at - interval '720 hours' END
+          // its row starts canceled, so it reads as expired whenever trials are
+          // enabled (now or later), has no effect while they are off, and sign-up
+          // creates no subscription for it.
+          await tx.query(sql`INSERT INTO trial_accounts(user_id,started_at,subscription_status)
+            SELECT u.id,u.created_at,
+              CASE WHEN d.identity_hash IS NULL THEN NULL ELSE 'canceled' END
             FROM users u CROSS JOIN store_config c
             LEFT JOIN deleted_identities d
               ON d.identity_hash=${identityHash(provider, subject)}
@@ -289,6 +306,8 @@ export async function deleteAccount(
 type CallAllowance =
   { allowed: true } | { allowed: false; retry_at_ms: number; limit: "day" };
 export interface TenantStore {
+  /** The app's origin, for the one link served to assistants. */
+  appOrigin: string;
   trialNotice?(): Promise<TrialNotice | undefined>;
   memoUpdates?(): Promise<import("./memo-updates").MemoUpdates | undefined>;
   readTpsReport(): Promise<CompiledReport>;
@@ -314,7 +333,7 @@ async function resolveActiveUser(db: StoreSession, userId: string) {
 }
 
 export async function storeForCurrentRequest(
-  bindings: StoreBindings,
+  bindings: StoreBindings & { appOrigin: string },
   auth: VerifiedStoreAuth,
   assistant?: { issuer: string; clientId: string },
 ): Promise<TenantStore> {
@@ -324,11 +343,12 @@ export async function storeForCurrentRequest(
   await resolveActiveUser(db, userId);
   const compiled = compiledMemos(db, userId, assistant);
   return {
+    appOrigin: bindings.appOrigin,
     trialNotice: () =>
       db.transaction(async (tx) => {
         await tx.query(sql`SET LOCAL lock_timeout='250ms'`);
         await tx.query(sql`SET LOCAL statement_timeout='500ms'`);
-        return claimTrialNotice(tx, userId);
+        return claimTrialNotice(tx, userId, bindings.appOrigin);
       }),
     memoUpdates: compiled.memoUpdates,
     readTpsReport: compiled.getTpsReport,
@@ -371,13 +391,120 @@ export async function storeForCurrentRequest(
 
 // The web app reads with the person's own session: no assistant, so no saves.
 export async function personStoreForCurrentRequest(
-  bindings: StoreBindings,
+  bindings: StoreBindings & { appOrigin: string },
   auth: VerifiedStoreAuth,
 ) {
   const store = await storeForCurrentRequest(bindings, auth);
   const db = database(bindings);
   return { ...store, trialStatus: () => trialStatus(db, auth.userId) };
 }
+/** The account's billing status, for the menu on pages with no person store. */
+export const accountTrialStatus = (bindings: StoreBindings, userId: string) =>
+  trialStatus(database(bindings), userId);
 export type PersonStore = Awaited<
   ReturnType<typeof personStoreForCurrentRequest>
 >;
+
+/** One account's billing state, for sign-in and the checkout and portal routes. */
+export function billingForAccount(bindings: StoreBindings, userId: string) {
+  const db = database(bindings);
+  const wrap = async <T>(work: Promise<T>) => {
+    try {
+      return await work;
+    } catch (error) {
+      throw databaseFailure(error);
+    }
+  };
+  return {
+    userId,
+    account: () => wrap(billingAccount(db, userId)),
+    linkCustomer: (customer: string) =>
+      wrap(linkStripeCustomer(db, userId, customer)),
+    clearCustomer: () => wrap(clearStripeCustomer(db, userId)),
+    /** Reads Stripe holding the customer's row, as the webhook does, and stores
+     * what the read returns, if anything. */
+    syncSubscription: (
+      customer: string,
+      read: () => Promise<StripeSubscriptionState | undefined>,
+    ) =>
+      db.transaction(async (tx) => {
+        await lockStripeCustomer(tx, customer);
+        const state = await read();
+        if (state) await saveStripeSubscription(tx, userId, state);
+        return state;
+      }),
+    /** Runs `work` holding the row, only while it has no subscription. What it
+     * stored before failing still commits: a customer must stay findable when the
+     * subscription call after it fails. */
+    whileWaiting: async (
+      work: (row: {
+        customer: string | null;
+        link: (customer: string) => Promise<string | undefined>;
+        save: (state: StripeSubscriptionState) => Promise<void>;
+      }) => Promise<void>,
+    ) => {
+      let failed: { error: unknown } | undefined;
+      await db.transaction(async (tx) => {
+        const row = await lockWaitingSubscription(tx, userId);
+        if (!row) return;
+        try {
+          await work({
+            customer: row.customer,
+            link: (customer) => linkStripeCustomer(tx, userId, customer),
+            save: (state) => saveStripeSubscription(tx, userId, state),
+          });
+        } catch (error) {
+          failed = { error };
+        }
+      });
+      if (failed) throw failed.error;
+    },
+  };
+}
+
+/** What server/scripts/backfill-subscriptions.ts reads and writes. */
+export function subscriptionBackfill(bindings: StoreBindings) {
+  const db = database(bindings);
+  return {
+    trialsEnabled: async () =>
+      (
+        await db.query<{ enabled: boolean }>(
+          sql`SELECT trials_enabled AS enabled FROM store_config WHERE singleton=1`,
+        )
+      )[0]?.enabled === true,
+    accounts: () => backfillAccounts(db),
+    cancelReturning: () => cancelReturningIdentities(db),
+    enroll: (userId: string) => enrollForBackfill(db, userId),
+  };
+}
+
+/**
+ * Records a verified Stripe event, once per id. When it names a customer Milton
+ * holds, `read` asks Stripe for that customer's state and the answer is written
+ * in the statement that records the event. The row stays locked across the read;
+ * a `read` that throws leaves nothing recorded, so Stripe redelivers.
+ */
+export async function applyStripeEvent(
+  bindings: StoreBindings,
+  event: StripeEvent,
+  customer: string | null,
+  read: (
+    customer: string,
+    stored: string | null,
+  ) => Promise<StripeSubscriptionState | "canceled" | undefined>,
+) {
+  const db = database(bindings);
+  if (!customer) return recordStripeEvent(db, event);
+  return db.transaction(async (tx) => {
+    const row = await lockStripeCustomer(tx, customer);
+    if (!row) return recordStripeEvent(tx, event);
+    if (await stripeEventRecorded(tx, event.id))
+      return { recorded: false, updated: 0 };
+    const state = await read(customer, row.subscription);
+    return recordStripeEvent(
+      tx,
+      event,
+      state ? { customer, state } : undefined,
+    );
+  });
+}

@@ -224,6 +224,30 @@ textarea {
   font-size: var(--text-small);
   color: var(--muted);
 }
+.billing-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3) var(--space-4);
+  margin-block: var(--space-4);
+}
+.billing-note p {
+  flex: 1 1 20rem;
+  margin: 0;
+}
+/* No block margin, so a page's form spacing can't push the button off center. */
+.billing-note form {
+  margin-block: 0;
+  margin-inline-start: auto;
+}
+/* Beside text, the text fills the row, so a wrapped button starts under it. */
+.billing-note p + form {
+  margin-inline-start: 0;
+}
+.billing-note button {
+  min-height: auto;
+  padding: var(--space-2) var(--space-4);
+}
 .sheet {
   --sheet-padding: var(--space-6);
   background: var(--surface);

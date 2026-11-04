@@ -7,13 +7,19 @@ import {
   type McpConfig,
 } from "./handler";
 import { browserPages } from "./auth";
+import { stripeWebhook } from "./billing";
 import { boundRequest } from "./http";
 import { logUnexpected } from "./error-log";
 import { unavailablePage } from "./pages";
 import { Hono } from "hono";
 
 export function createMiltonApp(config: RuntimeConfig, browserOnly = false) {
-  return createHttpApp(config, browserPages(config), browserOnly);
+  return createHttpApp(
+    config,
+    browserPages(config),
+    browserOnly,
+    stripeWebhook(config),
+  );
 }
 
 export function createMcpApp(config: McpConfig) {
@@ -29,7 +35,8 @@ export function createMcpApp(config: McpConfig) {
 }
 
 // A browser asking for a page: GET or HEAD, Accept lists text/html, and not
-// the MCP endpoint, the health check or resource discovery (all JSON).
+// the MCP endpoint, the health check or resource discovery (all JSON). The
+// Stripe webhook is POST only, so its errors are always JSON.
 function isPageRequest(request: Request) {
   const path = new URL(request.url).pathname;
   return (
@@ -47,6 +54,7 @@ function createHttpApp(
   config: McpConfig,
   pages?: ReturnType<typeof browserPages>,
   browserOnly = false,
+  webhook?: ReturnType<typeof stripeWebhook>,
 ) {
   const mcp = createMiltonHandler(config);
   const app = new Hono();
@@ -103,6 +111,10 @@ function createHttpApp(
         "GET, OPTIONS",
       );
     });
+  // Stripe's webhook owns its body bound and signature check. It is routed
+  // before the browser pages, so no session, cookie or CSRF check reaches it.
+  if (webhook)
+    app.all("/billing/webhook", (context) => webhook(context.req.raw));
   app.all("*", async (context) => {
     const request = context.req.raw;
     const resourceHost = new URL(config.resource).host;

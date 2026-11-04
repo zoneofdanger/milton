@@ -3,6 +3,8 @@ import { z } from "zod";
 import type { Child } from "hono/jsx";
 import { deleteAccount, lookupIdentityAccount, StoreError } from "./store";
 import { AuthError } from "./token";
+import { endStripeCustomer } from "./billing";
+import { logUnexpected } from "./error-log";
 import { page } from "./pages";
 import { supportEmail } from "./config";
 import { timed, type PageContext, type SessionUser } from "./auth-session";
@@ -11,6 +13,12 @@ import { consentList, readConsents } from "./auth-assistants";
 // Account deletion. The phrase must match exactly; nothing is deleted
 // until Milton has recorded a disconnect for every live consent.
 const deletePhrase = "delete my account";
+const deletionUnavailable = () =>
+  new AuthError(
+    "deletion_unavailable",
+    "Account deletion is unavailable right now. Nothing was deleted. Try again.",
+    503,
+  );
 const activeAccount = async (ctx: PageContext, user: SessionUser) => {
   const { config } = ctx;
   try {
@@ -28,13 +36,15 @@ const activeAccount = async (ctx: PageContext, user: SessionUser) => {
     throw error;
   }
 };
-const deletionPage = (
-  { csrfField, config }: PageContext,
+const deletionPage = async (
+  ctx: PageContext,
   user: SessionUser,
   notice: Child = null,
   status = 200,
-) =>
-  page(
+) => {
+  const { csrfField, config } = ctx;
+  const billing = await ctx.accountBilling(user);
+  return page(
     "Delete your account",
     <>
       {notice}
@@ -46,7 +56,9 @@ const deletionPage = (
       <p>
         Your rules, approved samples, report and its history, save receipts,
         usage counters, and Milton's link to your sign-in. Every connected
-        assistant is disconnected and you are signed out.
+        assistant is disconnected and you are signed out. If you have a Stripe
+        customer record, it and any subscription end immediately, with no
+        refund.
       </p>
       <h2>Kept</h2>
       <ul>
@@ -67,6 +79,7 @@ const deletionPage = (
           our sign-in provider. To remove it, email{" "}
           <a href={`mailto:${supportEmail(config)}`}>{supportEmail(config)}</a>.
         </li>
+        <li>Stripe keeps past invoices and payment records.</li>
         <li>
           Copies in database backups are not erased immediately; they are
           removed when those backups expire or are deleted.
@@ -91,8 +104,9 @@ const deletionPage = (
     </>,
     status,
     null,
-    { account: { csrf: csrfField, email: user.email } },
+    { account: { csrf: csrfField, email: user.email, billing } },
   );
+};
 export const accountDeletion = async (ctx: PageContext): Promise<Response> => {
   const {
     config,
@@ -133,11 +147,20 @@ export const accountDeletion = async (ctx: PageContext): Promise<Response> => {
   } catch (error) {
     if (error instanceof AuthError && error.code === "session_required")
       throw error;
-    throw new AuthError(
-      "deletion_unavailable",
-      "Account deletion is unavailable right now. Nothing was deleted. Try again.",
-      503,
-    );
+    throw deletionUnavailable();
+  }
+  // Stripe first: otherwise a deleted account keeps being charged and Milton has
+  // lost the customer id. If the delete below fails, the row no longer holds the
+  // customer, so a retry has nothing to call.
+  const { userId } = await lookupIdentityAccount(config, {
+    provider: "neon",
+    subject: user.id,
+  });
+  try {
+    await endStripeCustomer(config, userId);
+  } catch (error) {
+    logUnexpected("billing", error);
+    throw deletionUnavailable();
   }
   await deleteAccount(
     config,
@@ -169,6 +192,11 @@ export const accountDeletion = async (ctx: PageContext): Promise<Response> => {
         {signedOut
           ? " This browser is signed out."
           : " Signing this browser out did not finish; sign out of your Google or GitHub account if this is a shared computer."}
+      </p>
+      <p>
+        If you had a Stripe customer record, it and any subscription ended
+        immediately, with no refund. Stripe keeps past invoices and payment
+        records.
       </p>
       <p>
         Copies in database backups are not erased immediately; they are removed

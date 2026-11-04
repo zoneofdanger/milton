@@ -10,11 +10,13 @@ import {
 import { z } from "zod";
 import type { RuntimeConfig } from "./config";
 import {
+  accountTrialStatus,
   lookupIdentityAccount,
   personStoreForCurrentRequest,
   type VerifiedStoreAuth,
 } from "./store";
 import { memoPages } from "./memo-pages";
+import { billingItem } from "./pages";
 import { AuthError } from "./token";
 
 const sessionSchema = z.object({
@@ -161,10 +163,6 @@ export function pageContext(
       );
     return user;
   };
-  const identity = async () => ({
-    provider: "neon",
-    subject: (await signedIn()).id,
-  });
   const readForm = async () => {
     const origin = request.headers.get("Origin");
     const sameOrigin =
@@ -215,7 +213,23 @@ export function pageContext(
       subject: user.id,
     });
     const store = await personStoreForCurrentRequest(config, verified);
-    return memoPages(request, store, csrfField, user.email);
+    return memoPages(request, store, csrfField, user.email, {
+      billing: !!config.billing,
+    });
+  };
+  // The account menu's billing item on pages that do not read the status anyway.
+  // It is chrome: any failure here shows no item, never a failed page.
+  const accountBilling = async (user: SessionUser) => {
+    if (!config.billing) return undefined;
+    try {
+      const { userId } = await lookupIdentityAccount(config, {
+        provider: "neon",
+        subject: user.id,
+      });
+      return billingItem(await accountTrialStatus(config, userId));
+    } catch {
+      return undefined;
+    }
   };
   return {
     config,
@@ -232,9 +246,9 @@ export function pageContext(
     auth,
     session,
     signedIn,
-    identity,
     readForm,
     renderMemos,
+    accountBilling,
   };
 }
 export type PageContext = ReturnType<typeof pageContext>;

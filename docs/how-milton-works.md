@@ -202,12 +202,38 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
   blocks them otherwise.
 - Every successful sign-in creates or finds its account; sign-ups are always open.
 - A new account starts empty, with a trial row if trials are on.
-- A returning deleted identity gets a trial that has already ended, found through its
-  hash.
+- With billing configured, a trial row with no status gets a Stripe customer and a 30-day
+  Stripe trial with no card, which cancels at the end if no card was added.
+- No new approval lands until then: `/login`, the consent page, and an Allow on the consent
+  form each ensure it first, and denying needs nothing.
+- An approval Neon already holds skips those pages and refreshes without Milton, so existing
+  accounts depend on the backfill.
+- A Stripe failure stops that step with a 503 saying to try again, and charges nothing;
+  repeating the sign-in is the retry.
+- On a plain web sign-in, with no assistant involved, that page also links to Milton home.
+- With billing unset, no row, or a status already set, no step calls Stripe.
+- The row stays locked across customer, list, and create, so a concurrent attempt finds the
+  result rather than making a second customer or trial.
+- What Stripe already has is listed first, so a retry stores it rather than starting again.
+- `scripts/backfill-subscriptions.ts` does the same for every active account, paced at about
+  5 a second: a dry run unless told otherwise, it skips rows with a status, sends no email,
+  prints only counts, and refuses without `trials_enabled` and a live key.
+- The backfill cancels a returning deleted identity left with no status, by 0027's rule,
+  and counts it as skipped, so it never gets a trial.
+- A reply lost after Stripe made a customer can leave an orphan: never charged, may hold an
+  email, removed by hand in Stripe if ever needed.
+- Idempotency keys carry the UTC minute, because Stripe replays a stored error for a day.
+- A returning deleted identity gets a row already marked canceled, found through its hash,
+  so it reads as expired and gets no Stripe trial.
 - Disconnecting writes Milton's refusal first, then removes the consent at Neon.
 - If the Neon removal fails, the page offers Retry while the refusal stands.
 - Approving an assistant again clears its refusal, retrying once.
 - Deletion requires the exact phrase "delete my account" and a live consent list.
+- Deletion first deletes any Stripe customer, ending its subscription at once with no
+  refund; after any failed delete, only a read that reports the customer deleted counts as
+  done, and any other result deletes nothing.
+- The row then clears the customer and subscription and reads canceled, so if Milton's own
+  delete fails, a retry calls nothing and a later Checkout makes a new customer.
 - Deletion records disconnects and the identity hash, then deletes the user and cascades.
 - Consent removal and sign-out after deletion are best effort.
 
@@ -225,8 +251,12 @@ Files: `server/src/pages.tsx`, `server/src/memo-pages.tsx`,
 - `/download` returns the report as `TPS.md`.
 - `/assistants` lists live consents and looks up at most 20 names per view.
 - The setup prompt changes depending on whether the account is empty.
-- The trial banner shows only near the end or after expiry, and billing is plain text with
-  no route yet.
+- With billing configured, the account menu on every signed-in page offers Add a card in a
+  trial, Subscribe when expired, and Manage billing when paid; early access shows nothing.
+- If the status read fails, the page still renders, with no billing item.
+- A note above the report shows only in a trial's last 7 days or when expired, with the same
+  button; it shows nothing when paid or earlier in a trial.
+- Without billing configured there are no buttons.
 
 ## Limits and trials
 
@@ -234,10 +264,42 @@ Files: `server/src/store/index.ts`, `server/src/store/trials.ts`,
 `server/src/store/memo-updates.ts`.
 
 - Limits live in a single `store_config` row and are validated on read.
-- Trials last 720 hours and are switched by `trials_enabled`, and when off, everyone is
-  early access.
-- A trial notice is claimed once per stage, 7 days and 1 day before the end.
-- Expired trials block assistants, while the web view and download stay open.
+- Trials are switched by `trials_enabled`, and when off, everyone is early access.
+- With trials on, access follows the Stripe subscription status held on the trial row:
+  trialing reads as trial, active as paid, and past_due as paid for 3 days from the renewal.
+- Past that grace, canceled, unpaid, incomplete, incomplete_expired, and paused read as
+  expired.
+- No row, no status, or a status Milton does not know reads as early access, so a Stripe
+  outage never cuts off a connected assistant, and reads never call Stripe.
+- A trial notice is claimed once per stage, 7 days and 1 day before `trial_end`, only
+  while trialing, and carries the one link, the signed-in app home.
+- Expired accounts are blocked for assistants with a refusal carrying that link, while the
+  web view and download stay open.
+- The three Stripe settings are all or nothing: any one set means all three must be valid,
+  or the app fails at startup.
+- The Stripe webhook verifies the signature, then takes only a customer ID from the six
+  handled event types, because Stripe does not guarantee event order.
+- For a customer Milton holds, the webhook locks the row, reads the customer's
+  subscriptions from Stripe, and writes the deciding one where it records the event.
+- The deciding subscription is active, then trialing, then past_due, otherwise the newest.
+- Only a successful empty list with a stored subscription writes canceled.
+- Any non-2xx from Stripe's list, 404 included, is a failed read: the webhook answers 503
+  unrecorded so Stripe retries, and sign-in stops with try again.
+- A replayed event, an unknown type, or a customer Milton does not hold calls nothing.
+- `/billing/checkout` sends trialing, active, past_due, unpaid, and paused to the Stripe
+  portal.
+- With a stored customer, it lists Stripe first and goes to the portal if any such
+  subscription exists, storing it, so a late webhook cannot sell a second subscription.
+- An account still waiting on its trial takes it first, then the portal, or a 503 if it did
+  not start, so paying early cannot lose the 30 days.
+- Any other status gets Checkout in subscription mode, card required, no trial.
+- `/billing/portal` sends an account with a stored customer to the Stripe portal, and
+  answers 409 without one.
+- Before opening Stripe, both routes copy the sign-in email to a stored customer, so a
+  backfilled customer gets one before it can add a card; a failed copy is logged and never
+  stops anyone paying.
+- Both routes leave through a page that navigates, because `form-action 'self'` blocks an
+  external redirect after a form.
 - Daily memo updates count charged and held saves, reset at 00:00 UTC, and are enforced
   only when enabled.
 
@@ -277,6 +339,8 @@ Files: `packages/theme/`, `server/scripts/`, `.github/workflows/checks.yml`.
 
 - A shared theme supplies fonts, favicons, and tokens, with a WCAG contrast test.
 - `migrate.ts` runs only against the `milton` database as `neondb_owner`.
+- It takes the owner connection from `MILTON_OWNER_DATABASE_URL` for a release, otherwise
+  from `server/.dev.vars`, and never from an inherited `DATABASE_URL`.
 - `check-mcp` confirms the instructions, exactly four tools, and a read, without saving.
 - `check-runtime-role` confirms a connection has no elevated rights.
 - `probe-forms` confirms a signed-out form post passes CSRF.

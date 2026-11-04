@@ -666,6 +666,8 @@ async function accountFixture(
           (body.accept ? "code=fixture-code" : "error=access_denied"),
         redirect: true,
       });
+    if (path === "/oauth2/continue")
+      return Response.json({ url: "http://localhost:9999/callback?code=c" });
     if (path === "/sign-out") return Response.json({ success: true });
     throw new Error("Unexpected upstream endpoint");
   }, state.calls);
@@ -823,6 +825,35 @@ test("served pages take the MCP address and support address from configuration",
   expect(() =>
     runtimeConfig({ ...env, MILTON_SUPPORT_EMAIL: "not an address" }),
   ).toThrow();
+  // Stripe is all or nothing: a partial or malformed set fails at startup, the
+  // same way, naming no value. All unset stays legal.
+  const stripe = {
+    STRIPE_SECRET_KEY: "rk_test_fixtureNotAKey",
+    STRIPE_WEBHOOK_SECRET: "whsec_fixtureNotASecret",
+    STRIPE_PRICE_ID: "price_fixture",
+  };
+  expect(runtimeConfig(env).billing).toBeUndefined();
+  expect(runtimeConfig({ ...env, ...stripe }).billing?.priceId).toBe(
+    "price_fixture",
+  );
+  for (const broken of [
+    { STRIPE_SECRET_KEY: stripe.STRIPE_SECRET_KEY },
+    { ...stripe, STRIPE_PRICE_ID: undefined },
+    { ...stripe, STRIPE_WEBHOOK_SECRET: "" },
+    { ...stripe, STRIPE_SECRET_KEY: "pk_test_fixtureNotAKey" },
+    { ...stripe, STRIPE_PRICE_ID: "prod_fixture" },
+  ]) {
+    let refused: unknown;
+    try {
+      runtimeConfig({ ...env, ...broken });
+    } catch (error) {
+      refused = error;
+    }
+    expect(refused).toMatchObject({
+      code: "configuration",
+      message: "Milton's server configuration is unavailable.",
+    });
+  }
   const configured = await accountFixture({
     supportEmail: "help@example.invalid",
   });
@@ -1198,6 +1229,710 @@ async function memoPageFixture(
   };
 }
 
+const stripeSubscription = (status: string, created?: number) => {
+  const now = Math.floor(Date.now() / 1000);
+  return {
+    id: "sub_fixture",
+    status,
+    created: created ?? now,
+    trial_end: now + 30 * 86400,
+    items: {
+      data: [
+        { current_period_start: now, current_period_end: now + 30 * 86400 },
+      ],
+    },
+  };
+};
+
+// Answers Stripe's API with fixture objects; each call is recorded.
+function fakeStripe() {
+  const stripe = {
+    // A path or "METHOD path" answers 500; true fails every call.
+    down: false as boolean | string,
+    deleteStatus: 200,
+    // What a read of the customer answers after a DELETE 404.
+    customer: { status: 404, body: {} as Record<string, unknown> },
+    subscriptions: [] as Record<string, unknown>[],
+    calls: [] as Record<string, unknown>[],
+    onDelete: async () => {},
+  };
+  const billing = {
+    secretKey: "rk_test_fixtureNotAKey",
+    webhookSecret: "whsec_fixtureNotASecret",
+    priceId: "price_fixture",
+    fetch: async (url: string, init: RequestInit) => {
+      const { pathname: path, search } = new URL(url);
+      const headers = new Headers(init.headers);
+      const method = init.method!;
+      stripe.calls.push({
+        call: `${method} ${path}${search}`,
+        idempotency: headers.get("Idempotency-Key"),
+        bearer:
+          headers.get("Authorization") === "Bearer rk_test_fixtureNotAKey",
+        version: headers.get("Stripe-Version"),
+        ...(init.body
+          ? Object.fromEntries(new URLSearchParams(String(init.body)))
+          : {}),
+      });
+      if (stripe.down === true || stripe.down === `${method} ${path}`)
+        return Response.json({}, { status: 500 });
+      if (method === "DELETE") {
+        await stripe.onDelete();
+        return Response.json({}, { status: stripe.deleteStatus });
+      }
+      if (path === "/v1/customers") return Response.json({ id: "cus_fixture" });
+      if (path === "/v1/customers/cus_fixture" && method === "POST")
+        return Response.json({ id: "cus_fixture" });
+      if (path === "/v1/customers/cus_fixture")
+        return Response.json(stripe.customer.body, {
+          status: stripe.customer.status,
+        });
+      if (path === "/v1/subscriptions" && method === "GET")
+        return Response.json({ data: stripe.subscriptions });
+      if (path === "/v1/subscriptions") {
+        const created = stripeSubscription("trialing");
+        stripe.subscriptions = [created];
+        return Response.json(created);
+      }
+      if (path === "/v1/checkout/sessions")
+        return Response.json({
+          url: "https://checkout.stripe.com/c/pay/cs_test_fixture",
+        });
+      if (path === "/v1/billing_portal/sessions")
+        return Response.json({
+          url: "https://billing.stripe.com/p/session/test_fixture",
+        });
+      throw new Error("Unexpected Stripe endpoint");
+    },
+  };
+  return { stripe, billing };
+}
+const stripeCall = (call: string, fields: Record<string, unknown> = {}) => ({
+  call,
+  idempotency: null,
+  bearer: true,
+  version: "2026-10-28.endive",
+  ...fields,
+});
+
+test("account deletion ends the Stripe customer first, a Stripe failure deletes nothing, and the page says so", async () => {
+  const unavailable =
+    "Account deletion is unavailable right now. Nothing was deleted. Try again.";
+  const remove = { confirm: "delete my account" };
+  const setUp = async (fixture: Awaited<ReturnType<typeof accountFixture>>) => {
+    await fixture.send("/");
+    await fixture.local.db.query(
+      sql`INSERT INTO trial_accounts(user_id,started_at,stripe_customer_id,subscription_status)
+        SELECT id,clock_timestamp(),'cus_fixture','active' FROM users`,
+    );
+  };
+  const users = async (fixture: Awaited<ReturnType<typeof accountFixture>>) =>
+    (
+      await fixture.local.db.query<{ n: number }>(
+        sql`SELECT count(*)::int AS n FROM users`,
+      )
+    )[0]!.n;
+  // A customer on record with billing unconfigured cannot be ended.
+  const off = await accountFixture();
+  try {
+    await setUp(off);
+    const refused = await off.send("/account/delete", remove);
+    expect(refused.status).toBe(503);
+    expect(await refused.text()).toContain(unavailable);
+    expect(await users(off)).toBe(1);
+  } finally {
+    await off.dispose();
+  }
+  const { stripe, billing } = fakeStripe();
+  const fixture = await accountFixture({ billing });
+  const deleteCall = stripeCall("DELETE /v1/customers/cus_fixture");
+  try {
+    await setUp(fixture);
+    const form = await (await fixture.send("/account/delete")).text();
+    for (const text of [
+      "any subscription end immediately, with no refund",
+      "Stripe keeps past invoices and payment records",
+    ])
+      expect(form).toContain(text);
+    stripe.down = true;
+    const failed = await fixture.send("/account/delete", remove);
+    expect(failed.status).toBe(503);
+    expect(await failed.text()).toContain(unavailable);
+    expect(await users(fixture)).toBe(1);
+    expect(fixture.state.calls.map(({ path }) => path)).not.toContain(
+      "/oauth2/delete-consent",
+    );
+    // A failed DELETE proves nothing, 404 included: a key from the wrong mode gets
+    // one for a live customer, whose subscription would go on charging. Nothing
+    // is deleted.
+    stripe.down = false;
+    stripe.calls.length = 0;
+    for (const deleteStatus of [404, 409])
+      for (const customer of [
+        { status: 404, body: {} },
+        { status: 200, body: { id: "cus_fixture", deleted: false } },
+        { status: 500, body: {} },
+      ]) {
+        stripe.deleteStatus = deleteStatus;
+        stripe.customer = customer;
+        const unproven = await fixture.send("/account/delete", remove);
+        expect(unproven.status).toBe(503);
+        expect(await unproven.text()).toContain(unavailable);
+        expect(await users(fixture)).toBe(1);
+      }
+    // Stripe goes first, with the account still here. A repeat DELETE on a deleted
+    // customer may answer anything: only a read reporting it deleted is done.
+    stripe.customer = {
+      status: 200,
+      body: { id: "cus_fixture", deleted: true },
+    };
+    stripe.calls.length = 0;
+    let usersAtDelete = -1;
+    stripe.onDelete = async () => {
+      usersAtDelete = await users(fixture);
+    };
+    const done = await fixture.send("/account/delete", remove);
+    expect(done.status).toBe(200);
+    const deleted = await done.text();
+    expect(deleted).toContain(
+      "any subscription ended immediately, with no refund",
+    );
+    expect(deleted).toContain("Stripe keeps past invoices and payment records");
+    expect(stripe.calls).toEqual([
+      deleteCall,
+      stripeCall("GET /v1/customers/cus_fixture"),
+    ]);
+    expect(usersAtDelete).toBe(1);
+    expect(await users(fixture)).toBe(0);
+  } finally {
+    await fixture.dispose();
+  }
+  // Stripe's delete lands and Milton's fails: the row forgets the dead customer,
+  // so a retry calls nothing and a later subscription starts a new customer.
+  const half = fakeStripe();
+  const stuck = await accountFixture({ billing: half.billing });
+  const quiet = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    await setUp(stuck);
+    await stuck.local.pg.exec(`
+      UPDATE trial_accounts SET stripe_subscription_id='sub_fixture';
+      CREATE FUNCTION refuse_delete() RETURNS trigger LANGUAGE plpgsql AS
+        $$ BEGIN RAISE EXCEPTION 'fixture refusal'; END $$;
+      CREATE TRIGGER refuse_delete BEFORE DELETE ON users
+        FOR EACH ROW EXECUTE FUNCTION refuse_delete()`);
+    expect((await stuck.send("/account/delete", remove)).status).toBe(503);
+    expect(half.stripe.calls).toEqual([deleteCall]);
+    expect(
+      await stuck.local.db.query(
+        sql`SELECT stripe_customer_id AS customer,stripe_subscription_id AS subscription,subscription_status AS status FROM trial_accounts`,
+      ),
+    ).toEqual([{ customer: null, subscription: null, status: "canceled" }]);
+    await stuck.local.pg.exec("DROP TRIGGER refuse_delete ON users");
+    half.stripe.calls.length = 0;
+    expect((await stuck.send("/account/delete", remove)).status).toBe(200);
+    expect(half.stripe.calls).toEqual([]);
+    expect(await users(stuck)).toBe(0);
+  } finally {
+    quiet.mockRestore();
+    await stuck.dispose();
+  }
+}, 30000);
+
+const tryAgain =
+  "Milton could not start your subscription. Nothing was charged. Try again.";
+
+test("signing in starts one Stripe trial, stops on a Stripe failure, and the repeat completes and continues", async () => {
+  const account = async (fixture: {
+    local: Awaited<ReturnType<typeof localStore>>;
+  }) =>
+    (
+      await fixture.local.db.query<Record<string, unknown>>(
+        sql`SELECT u.id,t.stripe_customer_id AS customer,t.stripe_subscription_id AS subscription,
+          t.subscription_status AS status,t.trial_end IS NOT NULL AS has_end
+          FROM users u JOIN trial_accounts t ON t.user_id=u.id`,
+      )
+    )[0];
+  // Trials on, and the fixture's account gone, so /login is a real sign-up.
+  const fresh = async (fixture: {
+    local: Awaited<ReturnType<typeof localStore>>;
+  }) => {
+    await fixture.local.db.query(
+      sql`UPDATE store_config SET trials_enabled=true`,
+    );
+    await fixture.local.db.query(sql`DELETE FROM users`);
+  };
+  // Billing unset: no Stripe, and sign-in proceeds.
+  const off = await accountFixture();
+  try {
+    await fresh(off);
+    const signedUp = await off.send("/login");
+    expect(signedUp.status).toBe(302);
+    expect((await account(off))?.status).toBeNull();
+  } finally {
+    await off.dispose();
+  }
+  const { stripe, billing } = fakeStripe();
+  const fixture = await accountFixture({ billing });
+  const logged = spyOn(console, "error").mockImplementation(() => {});
+  const flow = "/login?" + signedQuery;
+  const continued = () =>
+    fixture.state.calls.filter(({ path }) => path === "/oauth2/continue");
+  // Fixed inside one UTC minute; moved on to show the keys follow it.
+  let time = Math.floor(Date.now() / 60000) * 60000 + 1000;
+  const clock = spyOn(Date, "now").mockImplementation(() => time);
+  const minute = () => Math.floor(time / 60000);
+  try {
+    await fresh(fixture);
+    stripe.down = true;
+    const refused = await fixture.send(flow);
+    expect(refused.status).toBe(503);
+    expect(refused.headers.get("Location")).toBeNull();
+    const page = await refused.text();
+    expect(page).toContain(tryAgain);
+    expect(page).toContain('href="/login?flow=');
+    expect(continued()).toEqual([]);
+    expect(await account(fixture)).toMatchObject({
+      customer: null,
+      status: null,
+    });
+    expect(logged.mock.calls.map(([line]) => String(line))).toEqual([
+      '{"event":"unexpected_error","where":"billing","class":"AuthError","code":"billing_unavailable"}',
+    ]);
+    expect(page).not.toContain('<a href="/">Milton home</a>');
+    // A plain web sign-in involves no assistant, so web view stays one link away.
+    const plain = await (await fixture.send("/login")).text();
+    expect(plain).toContain(tryAgain);
+    expect(plain).toContain('href="/login"');
+    expect(plain).toContain('<a href="/">Milton home</a>');
+    // The customer lands, the subscription fails: the customer is kept.
+    stripe.down = "POST /v1/subscriptions";
+    stripe.calls.length = 0;
+    expect((await fixture.send(flow)).status).toBe(503);
+    expect(continued()).toEqual([]);
+    const { id } = (await account(fixture))!;
+    expect(await account(fixture)).toMatchObject({
+      customer: "cus_fixture",
+      status: null,
+    });
+    const list = stripeCall(
+      "GET /v1/subscriptions?customer=cus_fixture&status=all&limit=10",
+    );
+    const subscribe = () =>
+      stripeCall("POST /v1/subscriptions", {
+        idempotency: `milton-subscription-${id}-${minute()}`,
+        customer: "cus_fixture",
+        "items[0][price]": "price_fixture",
+        trial_period_days: "30",
+        "payment_settings[save_default_payment_method]": "on_subscription",
+        "trial_settings[end_behavior][missing_payment_method]": "cancel",
+      });
+    expect(stripe.calls).toEqual([
+      stripeCall("POST /v1/customers", {
+        idempotency: `milton-customer-${id}-${minute()}`,
+        "metadata[milton_user_id]": id,
+        email: "fixture@example.invalid",
+      }),
+      list,
+      subscribe(),
+    ]);
+    // Within the minute the key repeats, so a double submit dedupes.
+    stripe.calls.length = 0;
+    expect((await fixture.send(flow)).status).toBe(503);
+    expect(stripe.calls).toEqual([list, subscribe()]);
+    // A new minute is a new key, so Stripe's stored error cannot trap the retry.
+    const before = subscribe();
+    time += 60000;
+    stripe.down = false;
+    stripe.calls.length = 0;
+    const done = await fixture.send(flow);
+    expect(done.status).toBe(200);
+    expect(await done.text()).toContain("http://localhost:9999/callback");
+    expect(stripe.calls).toEqual([list, subscribe()]);
+    expect(subscribe()).not.toEqual(before);
+    expect(continued()).toHaveLength(1);
+    expect(await account(fixture)).toMatchObject({
+      subscription: "sub_fixture",
+      status: "trialing",
+      has_end: true,
+    });
+    // Later sign-ins call nothing.
+    stripe.calls.length = 0;
+    expect((await fixture.send("/login")).status).toBe(302);
+    expect(stripe.calls).toEqual([]);
+    // A subscription Stripe has and Milton lost is stored, never re-created.
+    await fixture.local.db.query(
+      sql`UPDATE trial_accounts SET stripe_subscription_id=NULL,subscription_status=NULL`,
+    );
+    expect((await fixture.send("/login")).status).toBe(302);
+    expect(stripe.calls).toEqual([list]);
+    expect((await account(fixture))?.status).toBe("trialing");
+    // A returning deleted identity's canceled row never starts a trial.
+    await fixture.local.db.query(
+      sql`UPDATE trial_accounts SET subscription_status='canceled'`,
+    );
+    stripe.calls.length = 0;
+    expect((await fixture.send("/login")).status).toBe(302);
+    expect(stripe.calls).toEqual([]);
+  } finally {
+    clock.mockRestore();
+    logged.mockRestore();
+    await fixture.dispose();
+  }
+}, 30000);
+
+test("consent reached with a live session grants nothing until the account has a subscription", async () => {
+  const { stripe, billing } = fakeStripe();
+  const fixture = await accountFixture({ billing });
+  const { send, state, local } = fixture;
+  const consentPath = "/consent?" + signedQuery;
+  const decide = (decision: string) =>
+    send("/consent", { decision, oauth_query: signedQuery });
+  const granted = () =>
+    state.calls.filter(({ path }) => path === "/oauth2/consent");
+  const logged = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    await send("/");
+    stripe.down = true;
+    // No clock row: trials off, no Stripe call, and consent proceeds.
+    expect(await (await send(consentPath)).text()).toContain('value="allow"');
+    expect(stripe.calls).toEqual([]);
+    await local.db.query(sql`UPDATE store_config SET trials_enabled=true`);
+    await local.db.query(
+      sql`INSERT INTO trial_accounts(user_id,started_at) SELECT id,clock_timestamp() FROM users`,
+    );
+    // Status NULL with Stripe failing: no page to approve, and a posted approval
+    // reaches nobody. Denying grants nothing, so it still goes through.
+    const refused = await send(consentPath);
+    expect(refused.status).toBe(503);
+    const page = await refused.text();
+    expect(page).toContain(tryAgain);
+    expect(page).toContain('href="/login?flow=');
+    expect(page).not.toContain('value="allow"');
+    const posted = await decide("allow");
+    expect(posted.status).toBe(503);
+    expect(await posted.text()).toContain(tryAgain);
+    expect(granted()).toEqual([]);
+    expect((await decide("deny")).status).toBe(200);
+    expect(granted().map(({ body }) => body.accept)).toEqual([false]);
+    // Stripe back: the same page starts the trial, then the approval lands.
+    stripe.down = false;
+    expect(await (await send(consentPath)).text()).toContain('value="allow"');
+    expect(
+      (
+        await local.db.query<{ status: string }>(
+          sql`SELECT subscription_status AS status FROM trial_accounts`,
+        )
+      )[0]!.status,
+    ).toBe("trialing");
+    stripe.calls.length = 0;
+    expect((await decide("allow")).status).toBe(200);
+    expect(granted().map(({ body }) => body.accept)).toEqual([false, true]);
+    // Status set: no Stripe call on either step.
+    expect(await (await send(consentPath)).text()).toContain('value="allow"');
+    expect(stripe.calls).toEqual([]);
+  } finally {
+    logged.mockRestore();
+    await fixture.dispose();
+  }
+}, 30000);
+
+test("billing checkout and portal: 503 without config; signed-in CSRF forms; the status picks the portal or Checkout; a healed sign-up keeps its trial", async () => {
+  const off = await accountFixture();
+  try {
+    await off.send("/");
+    const refused = await off.send("/billing/checkout", {});
+    expect(refused.status).toBe(503);
+    expect(await refused.text()).toBe(
+      '{"error":"billing_unavailable","message":"Billing is not available yet."}',
+    );
+    expect((await off.send("/billing/portal", {})).status).toBe(503);
+  } finally {
+    await off.dispose();
+  }
+  const { stripe, billing } = fakeStripe();
+  const fixture = await accountFixture({ billing });
+  const { send, local } = fixture;
+  const clock = async () =>
+    (
+      await local.db.query<{ customer: string | null; status: string | null }>(
+        sql`SELECT stripe_customer_id AS customer,subscription_status AS status FROM trial_accounts`,
+      )
+    )[0];
+  const portalUrl = "https://billing.stripe.com/p/session/test_fixture";
+  const checkoutUrl = "https://checkout.stripe.com/c/pay/cs_test_fixture";
+  // form-action 'self' blocks an external Location after a form, so the answer
+  // is a page that navigates, as sign-in's is.
+  const leavesFor = async (response: Response, target: string) => {
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Location")).toBeNull();
+    const html = await response.text();
+    expect(html).toContain(`http-equiv="refresh" content="0;url=${target}"`);
+    expect(html).not.toContain("sign-in");
+  };
+  const portalCall = stripeCall("POST /v1/billing_portal/sessions", {
+    customer: "cus_fixture",
+    return_url: appOrigin + "/",
+  });
+  const emailCall = stripeCall("POST /v1/customers/cus_fixture", {
+    email: "fixture@example.invalid",
+  });
+  const sessionCall = stripeCall("POST /v1/checkout/sessions", {
+    mode: "subscription",
+    customer: "cus_fixture",
+    payment_method_collection: "always",
+    "line_items[0][price]": "price_fixture",
+    "line_items[0][quantity]": "1",
+    success_url: appOrigin + "/",
+    cancel_url: appOrigin + "/",
+  });
+  try {
+    await send("/");
+    // Without a trial clock there is no subscription to start or manage.
+    expect((await send("/billing/checkout", {})).status).toBe(409);
+    const nothing = await send("/billing/portal", {});
+    expect(nothing.status).toBe(409);
+    expect(await nothing.text()).toContain(
+      "There is no Milton subscription to manage yet.",
+    );
+    await local.db.query(sql`UPDATE store_config SET trials_enabled=true`);
+    await local.db.query(
+      sql`INSERT INTO trial_accounts(user_id,started_at) SELECT id,clock_timestamp() FROM users`,
+    );
+    // Forms only: GET, a foreign origin or a missing CSRF token start nothing.
+    expect((await send("/billing/checkout")).status).toBe(405);
+    expect(
+      (await send("/billing/checkout", {}, { Origin: "https://evil.example" }))
+        .status,
+    ).toBe(403);
+    expect(
+      (await send("/billing/checkout", { csrf: "x".repeat(43) })).status,
+    ).toBe(403);
+    expect(stripe.calls).toEqual([]);
+    // Waiting on a healed sign-up: paying now would lose the 30 days, so it
+    // takes the trial and the portal, and answers 503 if the trial did not start.
+    stripe.down = "POST /v1/subscriptions";
+    const down = await send("/billing/checkout", {});
+    expect(down.status).toBe(503);
+    expect(await down.text()).toContain(tryAgain);
+    expect(await clock()).toEqual({ customer: "cus_fixture", status: null });
+    expect(stripe.calls.map((call) => call.call)).not.toContain(
+      "POST /v1/checkout/sessions",
+    );
+    stripe.down = false;
+    stripe.calls.length = 0;
+    await leavesFor(await send("/billing/checkout", {}), portalUrl);
+    expect(await clock()).toEqual({
+      customer: "cus_fixture",
+      status: "trialing",
+    });
+    expect(stripe.calls.map((call) => call.call)).toEqual([
+      "GET /v1/subscriptions?customer=cus_fixture&status=all&limit=10",
+      "POST /v1/subscriptions",
+      "POST /v1/customers/cus_fixture",
+      "POST /v1/billing_portal/sessions",
+    ]);
+    // Any subscription Stripe counts as existing, plus a trial, is managed in
+    // the portal; anything else subscribes, no trial, after Stripe confirms it.
+    const listCall = stripeCall(
+      "GET /v1/subscriptions?customer=cus_fixture&status=all&limit=10",
+    );
+    stripe.subscriptions = [];
+    for (const [status, location, calls] of [
+      ["trialing", portalUrl, [emailCall, portalCall]],
+      ["active", portalUrl, [emailCall, portalCall]],
+      ["past_due", portalUrl, [emailCall, portalCall]],
+      ["unpaid", portalUrl, [emailCall, portalCall]],
+      ["paused", portalUrl, [emailCall, portalCall]],
+      ["canceled", checkoutUrl, [listCall, emailCall, sessionCall]],
+      ["incomplete_expired", checkoutUrl, [listCall, emailCall, sessionCall]],
+    ] as const) {
+      await local.db.query(
+        sql`UPDATE trial_accounts SET subscription_status=${status}`,
+      );
+      stripe.calls.length = 0;
+      await leavesFor(await send("/billing/checkout", {}), location);
+      expect([status, stripe.calls]).toEqual([status, [...calls]]);
+    }
+    // A webhook that has not landed: the stored copy says canceled, Stripe has a
+    // live one. No second subscription, and the row catches up.
+    for (const status of [
+      "active",
+      "trialing",
+      "past_due",
+      "unpaid",
+      "paused",
+    ]) {
+      await local.db.query(
+        sql`UPDATE trial_accounts SET subscription_status='canceled'`,
+      );
+      stripe.subscriptions = [
+        stripeSubscription("canceled", 2_000_000_000),
+        stripeSubscription(status, 1_900_000_000),
+      ];
+      stripe.calls.length = 0;
+      await leavesFor(await send("/billing/checkout", {}), portalUrl);
+      expect([status, stripe.calls]).toEqual([
+        status,
+        [listCall, emailCall, portalCall],
+      ]);
+      expect((await clock())?.status).toBe(status);
+    }
+    // A failed read is not "nothing to find": no session is created.
+    await local.db.query(
+      sql`UPDATE trial_accounts SET subscription_status='canceled'`,
+    );
+    stripe.down = "GET /v1/subscriptions";
+    stripe.calls.length = 0;
+    const logged = spyOn(console, "error").mockImplementation(() => {});
+    expect((await send("/billing/checkout", {})).status).toBe(503);
+    expect(stripe.calls).toEqual([listCall]);
+    stripe.down = "POST /v1/billing_portal/sessions";
+    expect((await send("/billing/portal", {})).status).toBe(503);
+    // Logged as a sign-in failure is: where, class and code, nothing of Stripe's.
+    expect(logged.mock.calls.map(([line]) => String(line))).toEqual(
+      Array(2).fill(
+        '{"event":"unexpected_error","where":"billing","class":"AuthError","code":"billing_unavailable"}',
+      ),
+    );
+    logged.mockRestore();
+    stripe.down = false;
+    stripe.subscriptions = [];
+    // A returning deleted identity has no customer yet.
+    await local.db.query(
+      sql`UPDATE trial_accounts SET stripe_customer_id=NULL,subscription_status='canceled'`,
+    );
+    stripe.calls.length = 0;
+    await leavesFor(await send("/billing/checkout", {}), checkoutUrl);
+    expect(stripe.calls.map((call) => call.call)).toEqual([
+      "POST /v1/customers",
+      "POST /v1/checkout/sessions",
+    ]);
+    expect(await clock()).toEqual({
+      customer: "cus_fixture",
+      status: "canceled",
+    });
+    stripe.calls.length = 0;
+    await leavesFor(await send("/billing/portal", {}), portalUrl);
+    expect(stripe.calls).toEqual([emailCall, portalCall]);
+    // A failed email copy never stops someone paying, on either route, and its
+    // log names no address or key. An unknown email makes no call.
+    await local.db.query(
+      sql`UPDATE trial_accounts SET subscription_status='canceled'`,
+    );
+    stripe.down = "POST /v1/customers/cus_fixture";
+    const failing = spyOn(console, "error").mockImplementation(() => {});
+    await leavesFor(await send("/billing/portal", {}), portalUrl);
+    await leavesFor(await send("/billing/checkout", {}), checkoutUrl);
+    expect(failing.mock.calls.map(([line]) => String(line))).toEqual(
+      Array(2).fill(
+        '{"event":"unexpected_error","where":"billing","class":"AuthError","code":"billing_unavailable"}',
+      ),
+    );
+    failing.mockRestore();
+    stripe.down = false;
+    fixture.state.email = undefined;
+    stripe.calls.length = 0;
+    await leavesFor(await send("/billing/portal", {}), portalUrl);
+    expect(stripe.calls).toEqual([portalCall]);
+  } finally {
+    await fixture.dispose();
+  }
+}, 30000);
+
+test("the account menu offers the way to pay on every signed-in page, and the note shows only near the end or when paused", async () => {
+  const { billing } = fakeStripe();
+  const fixture = await accountFixture({ billing });
+  const { local, send } = fixture;
+  const set = (status: string, left = "11 days 12 hours", renewed = "1 day") =>
+    local.db.query(sql`UPDATE trial_accounts SET subscription_status=${status},
+      trial_end=clock_timestamp()+${left}::interval,
+      current_period_start=clock_timestamp()-${renewed}::interval`);
+  // The two places billing can appear on a page, cut out of its HTML.
+  const read = async (path = "/") => {
+    const html = await (await send(path)).text();
+    const panel = html.slice(
+      html.indexOf('<div class="menu-panel">'),
+      html.indexOf("</details>"),
+    );
+    const start = html.indexOf('aria-label="Milton subscription"');
+    return {
+      menu: /<form method="post" action="\/billing\/(\w+)">.*?<button class="menu-item">([^<]+)</
+        .exec(panel)
+        ?.slice(1),
+      csrf: /action="\/billing\/\w+"><input type="hidden" name="csrf"/.test(
+        panel,
+      ),
+      note:
+        start < 0 ? null : html.slice(start, html.indexOf("</aside>", start)),
+    };
+  };
+  const quiet = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    // Early access: nothing anywhere, even with billing on.
+    expect(await read()).toMatchObject({ menu: undefined, note: null });
+    await local.db.query(sql`UPDATE store_config SET trials_enabled=true`);
+    await local.db.query(
+      sql`INSERT INTO trial_accounts(user_id,started_at) SELECT id,created_at FROM users`,
+    );
+    // Every signed-in page carries the menu item, with its own CSRF field.
+    await set("trialing");
+    for (const path of ["/", "/tps-report", "/assistants", "/account/delete"])
+      expect([path, await read(path)]).toEqual([
+        path,
+        { menu: ["checkout", "Add a card"], csrf: true, note: null },
+      ]);
+    // Seven days or fewer: the note joins the menu, with its button.
+    await set("trialing", "6 days 12 hours");
+    const ending = await read();
+    expect(ending.menu).toEqual(["checkout", "Add a card"]);
+    expect(ending.note).toContain("7 days left in your Milton trial");
+    expect(ending.note).toContain("Unless you&#39;ve already added a card");
+    expect(ending.note).toContain('action="/billing/checkout"');
+    expect(ending.note).toContain(">Add a card</button>");
+    await set("trialing", "2 hours");
+    expect((await read()).note).toContain("1 day left in your Milton trial");
+    // Eight days rounds up past the line: nothing above the report.
+    await set("trialing", "7 days 1 hour");
+    expect((await read()).note).toBeNull();
+    for (const status of ["canceled", "unpaid"]) {
+      await set(status);
+      const paused = await read();
+      expect(paused.menu).toEqual(["checkout", "Subscribe"]);
+      expect(paused.note).toContain(
+        "paused until you subscribe for $5.01/month",
+      );
+      expect(paused.note).toContain(">Subscribe</button>");
+      expect(paused.note).not.toContain("trial has ended");
+    }
+    // Past grace reads as expired, inside it as paid.
+    await set("past_due", "1 day", "4 days");
+    expect((await read()).menu).toEqual(["checkout", "Subscribe"]);
+    for (const status of ["active", "past_due"]) {
+      await set(status);
+      expect(await read()).toEqual({
+        menu: ["portal", "Manage billing"],
+        csrf: true,
+        note: null,
+      });
+    }
+    // A failed status read costs the item, never the page.
+    await local.db.query(
+      sql`ALTER TABLE trial_accounts RENAME TO hidden_clock`,
+    );
+    for (const path of ["/", "/assistants", "/account/delete"]) {
+      const response = await send(path);
+      expect([path, response.status]).toEqual([path, 200]);
+      expect(await response.text()).not.toContain('action="/billing');
+    }
+    await local.db.query(
+      sql`ALTER TABLE hidden_clock RENAME TO trial_accounts`,
+    );
+  } finally {
+    quiet.mockRestore();
+    await fixture.dispose();
+  }
+}, 30000);
+
 test("trial reminders stay outside TPS and expired accounts retain web view and download", async () => {
   const fixture = await memoPageFixture();
   try {
@@ -1211,35 +1946,37 @@ test("trial reminders stay outside TPS and expired accounts retain web view and 
     expect(saved.status).toBe("saved");
     const report = await fixture.store.readTpsReport();
     expect(await (await fixture.send("/")).text()).not.toContain(
-      "Subscribe for $5.01/month",
+      "Milton subscription",
     );
     await fixture.db.query(sql`UPDATE store_config SET trials_enabled=true`);
     await fixture.db.query(
-      sql`INSERT INTO trial_accounts(user_id,started_at) SELECT id,created_at FROM users`,
+      sql`INSERT INTO trial_accounts(user_id,started_at,subscription_status,trial_end) SELECT id,created_at,'trialing',clock_timestamp()+interval '30 days' FROM users`,
     );
     const freshTrial = await (await fixture.send("/")).text();
     expect(freshTrial).not.toContain("trial starts");
-    expect(freshTrial).not.toContain("Subscribe for $5.01/month");
+    expect(freshTrial).not.toContain("Milton subscription");
     await fixture.db.query(
-      sql`UPDATE trial_accounts SET started_at=clock_timestamp()-interval '24 days'`,
+      sql`UPDATE trial_accounts SET trial_end=clock_timestamp()+interval '6 days'`,
     );
     const warning = await fixture.send("/");
     expect(warning.status).toBe(200);
     const warned = await warning.text();
-    expect(warned).toContain("Subscribe for $5.01/month.");
-    expect(warned).not.toContain('href="/billing"');
+    expect(warned).toContain("days left in your Milton trial");
+    // Without billing configured there is nothing to press.
+    expect(warned).not.toContain('action="/billing');
     // Page views do not consume an assistant's reminder milestone.
     expect(
       (await fixture.db.query(sql`SELECT notice_stage FROM trial_accounts`))[0]!
         .notice_stage,
     ).toBe(0);
     await fixture.db.query(
-      sql`UPDATE trial_accounts SET started_at=clock_timestamp()-interval '31 days'`,
+      sql`UPDATE trial_accounts SET subscription_status='canceled'`,
     );
     const expired = await fixture.send("/tps-report");
     expect(expired.status).toBe(200);
     const html = await expired.text();
-    expect(html).toContain("Assistant reads and saves are paused.");
+    expect(html).toContain("Assistant reads and saves are paused until");
+    expect(html).not.toContain('action="/billing');
     expect(html).not.toContain("ask a connected assistant to save");
     expect(html).toContain("Be concise.");
     const download = await fixture.send("/download");
@@ -1274,7 +2011,7 @@ test("no served page, trial notice or subscription refusal links to a route that
     });
     await fixture.db.query(sql`UPDATE store_config SET trials_enabled=true`);
     await fixture.db.query(
-      sql`INSERT INTO trial_accounts(user_id,started_at) SELECT id,clock_timestamp()-interval '24 days' FROM users`,
+      sql`INSERT INTO trial_accounts(user_id,started_at,subscription_status,trial_end) SELECT id,created_at,'trialing',clock_timestamp()+interval '6 days' FROM users`,
     );
     // Every link Milton serves: page hrefs, and URL fields in the notice and
     // the refusal assistants receive. Only same-origin paths are checked.
@@ -1328,7 +2065,7 @@ test("no served page, trial notice or subscription refusal links to a route that
     expect(notice?.code).toBe("trial_ending_7_days");
     collect(notice);
     await fixture.db.query(
-      sql`UPDATE trial_accounts SET started_at=clock_timestamp()-interval '31 days'`,
+      sql`UPDATE trial_accounts SET subscription_status='canceled'`,
     );
     await visit();
     const refused = await fixture.author
@@ -1441,7 +2178,7 @@ test("pages and download show only the session account, whatever the query names
   // The browser session belongs to page-fixes; a second account shares the store.
   const fixture = await memoPageFixture();
   try {
-    const bindings = { storeDatabase: fixture.db };
+    const bindings = { storeDatabase: fixture.db, appOrigin };
     const identity = { provider: "neon", subject: "page-alpha" };
     await resolveIdentityAccount(bindings, identity);
     const alpha = await lookupIdentityAccount(bindings, identity);
@@ -1773,6 +2510,11 @@ test("an unexpected error shows a browser page PC LOAD LETTER and answers everyt
         },
         body: "{}",
       }),
+      failing("/billing/webhook", {
+        method: "POST",
+        headers: { Accept: "text/html", "Content-Type": "application/json" },
+        body: "{}",
+      }),
     ]) {
       const response = await app(request);
       expect(response.status).toBe(503);
@@ -1783,7 +2525,7 @@ test("an unexpected error shows a browser page PC LOAD LETTER and answers everyt
     }
     expect(
       logged.mock.calls.map(([line]) => JSON.parse(String(line)).where),
-    ).toEqual(["http", "http", "http", "http", "http"]);
+    ).toEqual(["http", "http", "http", "http", "http", "http"]);
   } finally {
     logged.mockRestore();
   }

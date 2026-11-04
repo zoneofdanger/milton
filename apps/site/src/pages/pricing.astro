@@ -3,47 +3,9 @@ import SiteLayout from "../layouts/SiteLayout.astro";
 
 const loginUrl = "https://app.meetmilton.com/login";
 
-/* The goal and stretch goals are multiples of the real price, and the tiers
-   each end in the cent for accounting. The goal is one million months of Milton. Peter covers month one, so 999,999 months remain: 83,333
-   years and three months from November 2026 is February 85,360. */
-const jokeTiers = [
-  {
-    name: "Return of the stapler Milton already owns",
-    price: "$0.01",
-    text: "Milton is not buying a stapler. It is his, it was taken, and he would like it back. The price is the one cent for accounting.",
-    delivery: "when someone admits to having it",
-  },
-  {
-    name: "One slice of cake",
-    price: "$7.01",
-    text: "This reserves one slice at the next office birthday. The plate is passed along the table and runs out before it reaches Milton.",
-    delivery: "to the person next to Milton",
-  },
-  {
-    name: "A plant",
-    price: "$34.01",
-    text: "The plant becomes Peter’s first direct report, doubles the company’s headcount, and gets a one-on-one every time it is watered.",
-    delivery: "after the window tier, for obvious reasons",
-  },
-  {
-    name: "A chair with wheels",
-    price: "$412.01",
-    text: "The wheels offer lateral mobility only. Upward mobility is sold separately.",
-    delivery: "when someone carries it down the stairs",
-  },
-  {
-    name: "A window facing an air shaft",
-    price: "$86,000.01",
-    text: "Natural light arrives on Tuesdays from 11:40 to 11:55 a.m. The view is of another window, behind which someone has a plant.",
-    delivery: "when we have a wall that touches outdoors",
-  },
-  {
-    name: "The corner office",
-    price: "$4,900,000.01",
-    text: "It has two walls of window, a door that closes, and the view. Michael Bolton has requested it in writing. He is fictional, and so is the funding.",
-    delivery: "February 85,360",
-  },
-];
+/* The goal and stretch goals are multiples of the real price. The goal is one
+   million months of Milton. Peter covers month one, so 999,999 months remain:
+   83,333 years and three months from November 2026 is February 85,360. */
 
 /* Adds up to the goal; the shares are rounded to two places, except the penny. */
 const funds = [
@@ -291,35 +253,8 @@ const comments = [
             Peter pledged from one pocket to the other, so no money was
             collected. Accounting is looking for the penny.
           </p>
-          <a class="button secondary" href="#tiers">
-            See the one real tier
-          </a>
         </div>
       </div>
-    </section>
-
-    <section class="section" id="tiers" aria-labelledby="tiers-heading">
-      <p class="eyebrow">## One plan. We resisted making three columns.</p>
-      <h2 id="tiers-heading">We did make seven tiers. Six are imaginary.</h2>
-      <ul class="tiers">
-        {jokeTiers.map(({ name, price, text, delivery }, index) => (
-          <li class="sheet tier tier-void">
-            <div class="sheet-bar">
-              <span>Tier {index + 2}</span>
-              <span>Not available</span>
-            </div>
-            <div class="sheet-content">
-              <h3>{name}</h3>
-              <p class="tier-price">{price}</p>
-              <p>{text}</p>
-              <p class="tier-meta">Estimated delivery: {delivery}.</p>
-              <span class="stamp stamp-small" aria-hidden="true">
-                VOID
-              </span>
-            </div>
-          </li>
-        ))}
-      </ul>
     </section>
 
     <section class="section" aria-labelledby="funds-heading">
@@ -687,53 +622,6 @@ const comments = [
     font-size: var(--text-lead);
   }
 
-  /* Every tier here is a voided form. */
-  .tiers {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: var(--space-6);
-    margin-top: var(--space-8);
-    padding: 0;
-    list-style: none;
-  }
-  .tier {
-    display: flex;
-    flex-direction: column;
-  }
-  .tier .sheet-content {
-    position: relative;
-    display: flex;
-    flex: 1;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: var(--space-3);
-  }
-  .tier .sheet-content > p {
-    margin: 0;
-  }
-  .tier h3 {
-    font-size: var(--text-title);
-    letter-spacing: -0.045em;
-    padding-right: var(--space-16);
-  }
-  .tier-price {
-    font: var(--font-display-weight) var(--text-section) /
-      var(--leading-heading) var(--font-display);
-  }
-  .tier .tier-meta {
-    margin-top: auto;
-    padding-top: var(--space-3);
-    color: var(--muted);
-    font: var(--text-caption) / var(--leading-label) var(--font-mono);
-  }
-  .tier-void {
-    box-shadow: none;
-    border-style: dashed;
-  }
-  .tier-void .tier-price {
-    color: var(--muted);
-  }
-
   /* The rubber stamp from the routing slip. Decorative only. */
   .stamp {
     position: absolute;
@@ -750,13 +638,6 @@ const comments = [
     letter-spacing: 0.2em;
     pointer-events: none;
     user-select: none;
-  }
-  .stamp-small {
-    top: var(--space-5);
-    right: var(--space-4);
-    bottom: auto;
-    padding: calc(var(--space-2) / 2) var(--space-2);
-    font-size: var(--text-small);
   }
 
   .funds-grid {
@@ -982,9 +863,6 @@ const comments = [
   }
 
   @media (max-width: 1000px) {
-    .tiers {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
     .funds-grid,
     .pitch {
       grid-template-columns: minmax(0, 1fr);
@@ -1023,9 +901,6 @@ const comments = [
     }
   }
   @media (max-width: 600px) {
-    .tiers {
-      grid-template-columns: minmax(0, 1fr);
-    }
     .stretch li {
       grid-template-columns: minmax(0, 1fr);
       gap: 0;
@@ -1035,9 +910,6 @@ const comments = [
     }
     .stamp {
       font-size: var(--text-subtitle);
-    }
-    .stamp-small {
-      font-size: var(--text-small);
     }
   }
 </style>

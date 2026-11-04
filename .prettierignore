@@ -3,7 +3,6 @@ node_modules/
 .astro/
 dist/
 bun.lock
-server/generated/
 server/public/milton.css
 server/public/fonts/
 server/drizzle/meta/

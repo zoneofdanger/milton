@@ -3,7 +3,9 @@ import type { StoreSession } from "./database";
 import { recordAcceptedChange } from "./provenance";
 import { retiredSample, type SaveContext, type Snapshot } from "./save-context";
 
-/** Publish: rebuild and publish the report and record the accepted change. */
+/** Publish: check the assembled documents against their size limits, record
+ * the accepted change and answer with the new version. Nothing is stored
+ * beyond the cards and samples; reads assemble the documents. */
 export async function publishSave(
   ctx: SaveContext,
   tx: StoreSession,
@@ -11,10 +13,9 @@ export async function publishSave(
   retired: z.infer<typeof retiredSample>[],
   attribution: string,
 ) {
-  const { userId, input, result, snapshot, assemble, publish } = ctx;
+  const { userId, input, result, snapshot, checkSize } = ctx;
   const updated = await snapshot(tx);
-  const body = await assemble(tx, updated.documents);
-  const publishedVersion = await publish(tx, updated, body);
+  await checkSize(tx, updated.documents);
   await recordAcceptedChange(tx, {
     userId,
     requestId: input.request_id,
@@ -32,12 +33,12 @@ export async function publishSave(
     before: before.heads,
     after: updated.heads,
     beforeTps: before.version,
-    afterTps: publishedVersion,
+    afterTps: updated.version,
     beforeSource: before.fingerprint,
     afterSource: updated.fingerprint,
   });
   return result("saved", {
-    version: publishedVersion,
+    version: updated.version,
     ...(retired.length ? { samples_retired: retired } : {}),
   });
 }

@@ -22,8 +22,9 @@ active rule carries it; each report prints its heading, its when line, its
 samples newest first, then its rules (0017). Every rule prints as one bullet, with
 one stored leading `- ` dropped first so rules filed by the retired compiler and rules
 stored as sent read alike. Card text cannot contain Markdown
-headings. The card fingerprint, extended by active sample IDs, fences every
-published version. The memo group tables (0016) remain as history only.
+headings. The version is a fingerprint of the assembled cover sheet and reports
+(with sample IDs and kinds), so the same cards and samples always give the same
+version and every save fences on what the assistant read. The memo group tables (0016) remain as history only.
 
 Filing is correctable (0020): a card's report (or `cover`) lives on each version, so
 an explicit `moves` entry appends a version that keeps the card's identity, text and
@@ -80,9 +81,8 @@ Apply and Discard) has been removed; its routes return 404. Wording changes go t
 `create_memo`, including `exact_edits`. Historical refinement receipts and accepted-change
 records stay in the database unchanged.
 
-A read whose stored snapshot lags its sources rebuilds and publishes it under the
-account lock (0017), without changing card history, invoking a model or fabricating a
-save; there is no separate refresh step.
+A read assembles the documents from cards and samples in one statement, takes no
+lock and writes nothing; nothing assembled is stored, so there is no refresh step.
 
 Migration 0008 conservatively carries each complete legacy memo into one card,
 keeping IDs, versions, source order, exact text and all old history. No model splits

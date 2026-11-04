@@ -74,13 +74,6 @@ test("compiled saves publish memos and TPS together and charge once with durable
         )
       ).rows,
     ).toEqual([{ n: 2 }]);
-    expect(
-      (
-        await local.pg.query(
-          "SELECT count(*)::int AS n FROM tps_reports WHERE user_id='compiled-a'",
-        )
-      ).rows,
-    ).toEqual([{ n: 1 }]);
   } finally {
     await local.dispose();
   }
@@ -152,11 +145,7 @@ test("TPS preserves every active source body verbatim and refreshes only the der
       (SELECT jsonb_agg(d) FROM usage_daily d WHERE user_id='fidelity') AS usage,
       (SELECT retained_bytes FROM users WHERE id='fidelity') AS retained_bytes`)
       ).rows;
-    // A stored paraphrase with the right source fence is kept: the fence, not the
-    // text, decides whether assembly runs. A source change rebuilds on read.
-    await local.pg.exec(
-      "UPDATE tps_reports SET body='Identify products by full model names.' WHERE user_id='fidelity'",
-    );
+    // Reads write nothing; a source change shows on the next read.
     const before = await preserved();
     const admin = compiledMemos(local.db, "fidelity"); // No actor or model configuration.
     expect((await admin.getTpsReport()).text).toBe(exact);
@@ -170,13 +159,15 @@ test("TPS preserves every active source body verbatim and refreshes only the der
     expect(rebuilt.version).not.toBe(canonical.version);
     expect(rebuilt.text).toBe(exact + "Updated condition.");
     expect((await store.getTpsReport()).version).toBe(rebuilt.version);
-    // A save fenced on a version that a later read superseded conflicts.
+    // A new card version with the same text keeps the version; a save fenced
+    // on a version a source change superseded conflicts.
     await local.pg
       .exec(`INSERT INTO memo_versions(user_id,memo_id,version,description,body,reason,actor_json)
       SELECT user_id,memo_id,3,description,body,'Fixture','{}'
       FROM memo_versions WHERE user_id='fidelity' AND memo_id='z' AND version=2`);
     const changed = await admin.getTpsReport();
-    expect((await save(rebuilt.version)).status).toBe("conflict");
+    expect(changed.version).toBe(rebuilt.version);
+    expect((await save(canonical.version)).status).toBe("conflict");
     expect(changed.text).toBe(exact + "Updated condition.");
     // Each body fits; the assembled cover sheet does not. Nothing is truncated.
     await local.pg.exec(
@@ -209,20 +200,13 @@ test("TPS preserves every active source body verbatim and refreshes only the der
     ).toBe("saved");
     expect((await store.getTpsReport()).text).toBe("");
     expect((await store.getTpsReport()).is_empty).toBe(true);
-    // An account that never held anything is not written by a read.
+    // An account that never held anything reads at a stable version.
     const other = compiledMemos(local.db, "fidelity-other");
     expect(await other.getTpsReport()).toEqual({
       text: "",
       version: (await other.getTpsReport()).version,
       is_empty: true,
     });
-    expect(
-      (
-        await local.pg.query(
-          "SELECT count(*)::int AS n FROM tps_reports WHERE user_id='fidelity-other'",
-        )
-      ).rows,
-    ).toEqual([{ n: 0 }]);
   } finally {
     await local.dispose();
   }
@@ -320,7 +304,7 @@ test("stale and failed compiled saves preserve current memos, receipts and charg
     );
     await local.pg
       .exec(`CREATE FUNCTION reject_report() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fixture report failure'; END $$;
-      CREATE TRIGGER reject_report BEFORE UPDATE ON tps_reports FOR EACH ROW EXECUTE FUNCTION reject_report();`);
+      CREATE TRIGGER reject_report BEFORE INSERT ON accepted_changes FOR EACH ROW EXECUTE FUNCTION reject_report();`);
     const failed = await store.saveMemo({
       text: "A changed instruction.",
       exact_edits: [
@@ -343,13 +327,6 @@ test("stale and failed compiled saves preserve current memos, receipts and charg
         )
       ).rows,
     ).toEqual([{ n: 2 }]);
-    expect(
-      (
-        await local.pg.query(
-          "SELECT count(*)::int AS n FROM tps_reports WHERE user_id='race'",
-        )
-      ).rows,
-    ).toEqual([{ n: 1 }]);
     expect(
       (
         await local.pg.query(`SELECT id FROM users u WHERE retained_bytes <>

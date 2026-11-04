@@ -19,17 +19,18 @@ export const outcomeSchema = z.object({
   samples_retired: z.array(retiredSample).optional(),
 });
 export type SaveOutcome = z.infer<typeof outcomeSchema>;
-export type Report = { revision: number; body: string; source_hash: string };
 export type Receipt = { input_hash: string; result_json: unknown };
-/** What `snapshot` reads inside a transaction. */
+/** What `snapshot` reads in one statement. */
 export type Snapshot = {
+  /** The account exists and is active. */
+  open: boolean;
   heads: CardHead[];
   samples: Sample[];
-  report: Report | undefined;
+  /** The source fingerprint: card heads and active sample IDs. */
   fingerprint: string;
   active: CardHead[];
   documents: Documents;
-  ready: boolean;
+  /** The fingerprint of the assembled documents; every save fences on it. */
   version: string;
 };
 /** One save's input and the account helpers its transaction uses. Built once
@@ -47,10 +48,5 @@ export type SaveContext = {
   lock: (tx: StoreSession) => Promise<void>;
   snapshot: (tx: StoreSession) => Promise<Snapshot>;
   receipt: (tx: StoreSession, id: string) => Promise<Receipt | undefined>;
-  assemble: (tx: StoreSession, documents: Documents) => Promise<string>;
-  publish: (
-    tx: StoreSession,
-    current: Snapshot,
-    body: string,
-  ) => Promise<string>;
+  checkSize: (tx: StoreSession, documents: Documents) => Promise<void>;
 };

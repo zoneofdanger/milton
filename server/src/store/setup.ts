@@ -670,7 +670,7 @@ const coverQuestions = () =>
 const STICK = [
   "7. Before the next report or stopping, make it stick: offer to keep this line in your own standing instructions, so you read Milton without being asked:",
   "Show exactly: Before writing anything for me, call Milton's get_cover_sheet, then get_report for the matching report.",
-  "Where you can edit a startup instructions file, add it there after the person approves: ~/.claude/CLAUDE.md for Claude Code, ~/.codex/AGENTS.md for Codex, User Rules in Cursor's settings. Where you have custom instructions, project instructions or memory, keep it there instead. If you have none of these, show the line and say where the person can paste it. Then say setup is complete.",
+  "Where you can edit a startup instructions file, add it there after the person approves: ~/.claude/CLAUDE.md for Claude Code, ~/.codex/AGENTS.md for Codex, User Rules in Cursor's settings. Where you have custom instructions, project instructions or memory, keep it there instead. If you have none of these, show the line and say where the person can paste it. Then, on a pick, run that report's setup; otherwise say setup is complete.",
 ].join("\n");
 /** The setup script for one report's block. `first` (no rules anywhere yet)
  * adds the opening lines; `cover` (the cover sheet has no rules) attaches the

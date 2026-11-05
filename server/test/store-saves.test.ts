@@ -687,7 +687,7 @@ test("Postgres enforces separate UTF-8 field caps and no card count", async () =
     await local.pg
       .exec(`INSERT INTO sample_kinds(user_id,id,report,label) VALUES ('sample','k','email','long');
       INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json)
-      VALUES ('sample','s','email','k','A long sample.',repeat('x',131072),'{}');
+      VALUES ('sample','s','email','k','{"version":1,"summary":"A long sample."}',repeat('x',131072),'{}');
       INSERT INTO save_requests(user_id,request_id,input_hash,source_hash,result_json)
       VALUES ('receipt','${crypto.randomUUID()}',${hex("a")},${hex("c")},jsonb_build_object('status','saved','pad',repeat('x',60000)));`);
     // A save that changes 101 cards: 100 rules, then 100 edits and one more.

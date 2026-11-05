@@ -656,7 +656,7 @@ export function reportSetup(documents: Documents, report: ReportId) {
     "Setup permission authorizes this conversation only, not mailbox access, account changes, transcript import or saving unseen text. Milton keeps approved writing word for word and does not read an inbox. Do not connect an inbox, request Gmail permissions, bulk import or save unseen text.",
     "1. Read the current cover sheet and relevant reports; preserve all existing rules and samples. If relevant examples exist, use them and offer adding examples only when useful. Do not rerun setup because rules are absent. Rules remain supported when explicitly requested: show the complete proposed list and save only exact approved wording; do not infer standing rules from one example or turn sample facts into preferences.",
     `2. Ask for a few ${firstEmail ? "emails or DMs" : examples} the person likes, or let them skip. If the person asks you to find candidates and you already have authorized access, use only that access; otherwise accept pasted examples. Never promise access. Exclude automated, forwarded and third-party text. Do not assume a sent item represents the person's voice; let the person choose what sounds like them.`,
-    `3. Show each proposed sample with private details replaced by placeholders; preserve the wording and style otherwise, make excerpts explicit, and ask for exact retention approval of the displayed text. A yes to saving that exact displayed text is sufficient. Do not silently sanitize after approval; ask again only if the proposed text changes, including redaction.${firstEmail ? " File emails under email, and DMs, texts or Slack messages under chat." : ""} Save each approved sample separately with create_memo: use a valid kind_id from the relevant report, or a concise new_kind only when none fits, minimal non-private context and supported labels. Use the cover sheet version as expected_version and a new request_id per save; retry an uncertain outcome with the same request_id and exact input. Reread after saved, unchanged or conflict and compare exact text before confirming retention. Resolve a changed version before saving without re-asking about unchanged text; never invent approval.`,
+    `3. Show each proposed sample with private details replaced by placeholders; preserve the wording and style otherwise, make excerpts explicit, and ask for exact retention approval of the displayed text AND proposed useful non-private context on EVERY save. A yes to saving that displayed proposal is sufficient; unchanged approved metadata needs no second approval. Do not silently sanitize after approval; ask again only if the proposed text or context changes, including redaction.${firstEmail ? " File emails under email, and DMs, texts or Slack messages under chat." : ""} Save each approved sample separately with create_memo: use a valid kind_id from the relevant report, or a concise new_kind only when none fits, the approved context object (version 1, summary, optional known purposes, medium, audience, interaction, whole/excerpt scope and language). Use the cover sheet version as expected_version and a new request_id per save; retry an uncertain outcome with the same request_id and exact input. Reread after saved, unchanged or conflict and compare exact text before confirming retention. Resolve a changed version before saving without re-asking about unchanged text; never invent approval.`,
     "Sample save example (fictional, replace with the approved sample):\n```json\n" +
       JSON.stringify(
         {
@@ -666,10 +666,14 @@ export function reportSetup(documents: Documents, report: ReportId) {
           sample: {
             report,
             new_kind: `${task} example`,
-            context: `A fictional ${task}.`,
-            audience: "colleague",
-            purpose: "update",
-            register: "plain",
+            context: {
+              version: 1,
+              summary: `A fictional ${task}.`,
+              audience: { relationship: "colleague" },
+              purposes: ["update"],
+              register: "plain",
+              scope: { unit: "whole" },
+            },
             text,
           },
         },
@@ -677,7 +681,7 @@ export function reportSetup(documents: Documents, report: ReportId) {
         2,
       ) +
       "\n```\nThis illustrates the save shape, not permission to save this fictional text. Reuse kind_id instead of new_kind when a kind fits; never send both.",
-    `4. Ask what the next real ${firstEmail ? "email or DM" : task} should accomplish. Read the relevant report with that intent, then draft using its examples and the cover sheet. If examples are skipped, help with the real draft without claiming to know the voice. No need to fill all five reports or accumulate rules before drafting. After a draft is approved, show the exact text before the single offer to keep it as a sample; use the same approval rule above. Praise or permission to send is not retention permission.`,
+    `4. Ask what the next real ${firstEmail ? "email or DM" : task} should accomplish. Read the relevant report with that intent, then draft using its examples and the cover sheet. If examples are skipped, help with the real draft without claiming to know the voice. No need to fill all five reports or accumulate rules before drafting. After a draft is approved, show the exact text and proposed context before the single offer to keep it as a sample; use the same approval rule above. Praise or permission to send is not retention permission.`,
     "5. Offer the standing instruction separately: Before writing anything for me, call Milton's get_cover_sheet, then get_report for the matching report. Offer to add it where this assistant supports standing instructions, only after separate consent; otherwise show where the person can paste it. Verify an actual successful read before confirming the connection works. Setup completion does not guarantee the assistant follows the instruction.",
   ].join("\n\n");
 }

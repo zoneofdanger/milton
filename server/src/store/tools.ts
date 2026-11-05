@@ -3,13 +3,12 @@ import { StoreError, type TenantStore } from "./index";
 import { oneLine, type SaveMemoInput } from "./compiled";
 import { subscriptionRequired } from "./trials";
 import {
-  AUDIENCES,
-  PURPOSES,
   REPORT_IDS,
   resolveReportId,
   type Documents,
   type ReportDocument,
 } from "./reports";
+import { contextDimensions } from "./sample-context";
 import { reportSetup, setupHint } from "./setup";
 
 export const coverSheetInput = z.strictObject({});
@@ -18,14 +17,19 @@ export const intentInput = z
     situation: oneLine(200).describe(
       'One line on what you are writing, to whom and why, such as "declining a client\'s request for a discount". When not drafting, why you are reading, such as "confirming what is on file".',
     ),
-    audience: z
-      .enum(AUDIENCES)
+    kind_id: z
+      .string()
+      .min(1)
+      .max(256)
       .optional()
-      .describe("Who will read it, when you know."),
-    purpose: z
-      .enum(PURPOSES)
+      .describe(
+        "An existing personal kind from get_report.kinds, which lists every kind with an active sample in this report regardless of intent or sample selection. Prefer it and fill sparse matches with broader examples; invalid or foreign ids are refused. Never create a kind on read.",
+      ),
+    context: contextDimensions
       .optional()
-      .describe("What it must do, when you know."),
+      .describe(
+        "Relevant known purposes, medium, audience, interaction, whole/excerpt scope and language, using the same dimensions as sample context.",
+      ),
   })
   .describe(
     "What the read is for. The report serves the eight samples that best fit it.",
@@ -41,7 +45,7 @@ export const reportInput = z.strictObject({
 /** The refusal for a get_report call with no intent, as from a client still
  * holding the schema before intent existed. */
 export const missingIntent =
-  'get_report needs intent: situation, one line on what you are writing, to whom and why (or why you are reading, such as "confirming what is on file"), plus audience and purpose from their lists when you know them; reconnect your assistant if it has no intent field. Nothing was read.';
+  'get_report needs intent: situation, one line on what you are writing, to whom and why (or why you are reading, such as "confirming what is on file"), plus kind_id and relevant context when known; reconnect your assistant if it has no intent field. Nothing was read.';
 /** The refusal for a get_report intent that is present but malformed: each
  * limit it broke, and no reconnect hint, since the client has the field. */
 export function malformedIntent(intent: unknown) {
@@ -50,11 +54,7 @@ export function malformedIntent(intent: unknown) {
     issues.map((issue) =>
       issue.path[0] === "situation"
         ? "situation must be one line of at most 200 characters"
-        : issue.path[0] === "audience"
-          ? `audience must be one of ${AUDIENCES.join(", ")}`
-          : issue.path[0] === "purpose"
-            ? `purpose must be one of ${PURPOSES.join(", ")}`
-            : "intent takes only situation, audience and purpose",
+        : "intent takes situation, optional kind_id and bounded context dimensions",
     ),
   );
   return `get_report intent: ${[...broken].join("; ")}. Nothing was read.`;
@@ -85,8 +85,8 @@ export function coverSheet(documents: Documents & { version: string }) {
   };
 }
 /** Served samples without their bodies (those stay in text), in served order, so
- * an assistant can reuse a kind or name a sample to replace or remove. Labels
- * appear only when the sample has them. */
+ * an assistant can name a sample to replace or remove and read its approved
+ * context and match evidence. */
 const sampleIndex = (report: ReportDocument) =>
   report.samples.map((s) => ({
     id: s.id,
@@ -94,9 +94,8 @@ const sampleIndex = (report: ReportDocument) =>
     kind: s.kind,
     context: s.context,
     date: s.date,
-    ...(s.audience ? { audience: s.audience } : {}),
-    ...(s.purpose ? { purpose: s.purpose } : {}),
-    ...(s.register ? { register: s.register } : {}),
+    context_revision: s.context_revision,
+    ...(s.match ? { match: s.match } : {}),
   }));
 /** Optional setup, served only while a report has no rules or samples. */
 const setupField = (documents: Documents, id: (typeof REPORT_IDS)[number]) => {
@@ -113,7 +112,10 @@ export const reportEnvelope = (
     text: report.body,
     version: documents.version,
     is_empty: report.is_empty,
+    kinds: report.kinds,
     samples: sampleIndex(report),
+    selection:
+      "Up to eight: requested kind, purpose overlap, matching context dimensions, situation text, then newest. Sparse matches include broader examples; match lists exact signals. Unknown scope stays unknown; excerpts do not establish whole-work structure.",
     ...setupField(documents, id),
   };
 };

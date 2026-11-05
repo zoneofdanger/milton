@@ -59,7 +59,25 @@ export const triggerRefusals = new Map<
   ],
   [
     "sample_is_append_only",
-    { message: "Stored samples cannot be changed.", status: 409 },
+    {
+      message:
+        "Sample writing is immutable; only active context corrections or retirement are allowed.",
+      status: 409,
+    },
+  ],
+  [
+    "sample_context_revision",
+    {
+      message: "A new sample must start at context revision one.",
+      status: 409,
+    },
+  ],
+  [
+    "sample_replacement_kind",
+    {
+      message: "A replacement must name a sample of the same kind.",
+      status: 409,
+    },
   ],
   [
     "sample_kind_is_immutable",

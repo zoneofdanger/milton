@@ -15,29 +15,49 @@ report and sends its exact approved wording, and Milton stores those bytes. Comp
 instructions, including conditions and exceptions, are independently versioned cards. Each card belongs to one of five fixed
 reports (`email`, `chat`, `post`, `document`, `speech`) or to the cover sheet, the
 rules true of all writing. Approved samples are stored exactly as sent in their own
-append-only table; every approved sample stays, and a report read serves the eight that best
-fit the assistant's intent (0033).
+table with immutable writing; every approved sample stays, and a report read serves the eight that best
+fit the assistant's intent.
 Assembly is deterministic and runs on read: the cover sheet is its rules in
 write-once insertion order, after one fixed note on the `Baseline: ` prefix while any
 active rule carries it; each report prints its heading, its when line, selected samples,
 then its rules (0017). `get_report` requires an intent (a one-line situation, with an
-optional audience and purpose) and serves the eight samples ranked by label overlap with
-it, then Postgres full-text rank of the situation against context and body, then
-recency; without an intent (`list_reports`, the web page) a report serves its
+optional personal kind and context dimensions) and serves up to eight samples ranked by
+requested kind, purpose overlap count, exact dimension match count, Postgres full-text
+rank of the situation against context summary and body, recency, then ascending ID.
+Broader examples fill sparse matches, with exact match evidence and a fallback explanation;
+unknown scope stays unknown and excerpts do not establish whole-work structure.
+The `get_report.kinds` index lists every personal kind with an active sample in that
+report as `{kind_id, kind}`, ascending by ID, independently of intent or the eight-sample
+selection. It includes older unserved kinds without sample bodies; empty and retired-only
+kinds and other accounts/reports are excluded.
+Without an intent (`list_reports`, the web page) a report serves its
 newest eight (0033). The TPS.md download includes all active approved samples, newest
 first. Every rule prints as one bullet, with
 one stored leading `- ` dropped first so rules filed by the retired compiler and rules
 stored as sent read alike. Card text cannot contain Markdown
 headings. The version is a fingerprint of the assembled cover sheet and reports
-(with every active sample's ID and kind), the same for every intent, so the same cards and samples always give the same
+(with every active sample's ID, kind and context revision), the same for every intent, so the same cards and samples always give the same
 version and every save fences on what the assistant read. The memo group tables (0016) remain as history only.
 
 Filing is correctable (0020): a card's report (or `cover`) lives on each version, so
 an explicit `moves` entry appends a version that keeps the card's identity, text and
 history; no card moves to tidy up. Samples belong to stable, immutable
 kinds named once per report; assistants reuse a `kind_id` from `get_report` and use
-`new_kind` only when none fits, and label each sample with an audience, purpose and
-register from fixed lists (0033). `replaces` and `retire_samples` retire samples on
+`new_kind` only when none fits. Every sample requires approved context: representation
+`version: 1`, a useful summary, and optional known purposes, medium, audience
+relationship/role/familiarity/expertise/group, interaction, whole/excerpt scope with
+optional excerpt role, language and register. Keys are fixed; vocabulary values are
+bounded strings, so unfamiliar kinds and purposes require no migration. Unknowns stay absent.
+`sample_context` replaces one active sample's complete approved context and optionally
+reclassifies it to an existing kind in the same report; omitted optional fields clear.
+Body, ID, date and replacement lineage remain unchanged. A distinct correction increments
+the sample's context revision and account version, even outside the served eight;
+identical context/classification is unchanged, and retries replay the same receipt.
+Reclassification refuses `sample_conflict` when the target kind already has identical
+active text, preserving all samples, contexts and the version. Context correction and
+rule changes save together or not at all; this operation cannot combine with sample
+insertion or retirement.
+`replaces` and `retire_samples` retire samples on
 request, and nothing retires a sample automatically; every retirement is reported in
 `samples_retired` and recorded with its reason and request. Kind labels
 stay out of report text.
@@ -53,7 +73,7 @@ instruction adherence remain outside the server's guarantee.
 
 Every save is exact. `create_memo` needs at least one structured field: `rules`
 (1 to 100 entries of `{ report, text }`, `report` one of the five or `cover`),
-`exact_edits`, `moves`, `sample` or `retire_samples`. A save with none is refused
+`exact_edits`, `moves`, `sample`, `sample_context` or `retire_samples`. A save with none is refused
 with `invalid_input` ("Name the report and send the rule's text in rules."). Each
 `rules` entry becomes one new card stored byte for byte; its description is its first
 non-blank line, trimmed and cut to the description cap, with no model. An entry whose
@@ -67,8 +87,10 @@ reports carry optional help. Rules or samples make guidance usable; no quiz or
 rule count gates drafting. The assistant preserves existing guidance, shows exact
 placeholder-safe samples, obtains explicit retention approval for each, saves and
 reads back, then helps draft the next real task matching the report; the entry
-prompt favors email or DM. One yes to saving the exact displayed text suffices;
-ask again only if that text changes, including redaction. Skipping examples does not
+prompt favors email or DM. Every sample save displays exact text and proposed useful,
+non-private context together; one retention approval covers that proposal. Unchanged
+approved metadata needs no second approval; changed text or context, including redaction,
+requires renewed approval. Sending or praise is not retention approval. Skipping examples does not
 block drafting. Setup does not authorize mailbox access, import, account changes
 or saving unseen text. A standing instruction is offered separately with consent. Corrections go through `exact_edits`; an edit whose `before` is a whole rule
 and whose `after` is empty retires it. All fields resolve against one locked snapshot
@@ -100,8 +122,13 @@ records stay in the database unchanged.
 A read assembles the documents from cards and samples in one statement, takes no
 lock and writes nothing; nothing assembled is stored, so there is no refresh step.
 
-Fresh installations use one Drizzle baseline with the current tables, guards and runtime
-grants. An owner-only, atomic one-time transition supports the known 0033 schema; it
+Fresh installations apply the Drizzle baseline followed by `0001_sample_context`.
+The context migration preserves every exact body, summary and supplied legacy label
+in one JSONB context without inventing metadata. Its offline rollback refuses revised
+or unrepresentable context and incompatible replacement lineage. Old and new runtimes
+need different schemas: use the hosting runbook's closed-ingress, drained, snapshotted
+coordinated cutover; never select an old runtime against the new schema.
+An owner-only, atomic one-time transition supports the known 0033 schema; it
 drops the unused memo layer and preserves card identities, every card version and
 all other current data. Other old schema states are refused. Production applied this
 cleanup on 2026-11-04; the hosting runbook records its snapshot and verification.

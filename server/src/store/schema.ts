@@ -1,3 +1,4 @@
+import type { SampleContext } from "./sample-context";
 import { sql } from "drizzle-orm";
 import {
   pgTable,
@@ -315,8 +316,7 @@ export const sampleKinds = pgTable(
   ],
 );
 
-// Approved writing, stored exactly as submitted. Append-only: the only change a
-// row ever sees is retirement (retired_at and its reason set once); see 0020.
+// Approved writing is immutable. Context/classification corrections have their own revision; retirement is final.
 export const samples = pgTable(
   "samples",
   {
@@ -326,11 +326,11 @@ export const samples = pgTable(
     id: text("id").notNull(),
     report: text("report").notNull(),
     kindId: text("kind_id").notNull(),
-    // One line of context shown above the quoted sample.
-    context: text("context").notNull(),
+    context: jsonb("context").$type<SampleContext>().notNull(),
+    contextRevision: integer("context_revision").notNull().default(1),
     body: text("body").notNull(),
     clientJson: text("client_json").notNull(),
-    // The sample this one explicitly replaced, always of the same kind.
+    // Same kind when replaced; later approved classification preserves lineage.
     replacesId: text("replaces_id"),
     createdAt: createdAt(),
     retiredAt: timestamp("retired_at", { withTimezone: true }),
@@ -338,20 +338,12 @@ export const samples = pgTable(
     retireReason: text("retire_reason"),
     // The save that retired it; NULL only for retirements before 0020.
     retiredRequestId: text("retired_request_id"),
-    // Labels the saving assistant chose from fixed lists, each optional and
-    // never changed; NULL on samples before 0033. A report read compares
-    // audience and purpose for equality only.
-    audience: text("audience"),
-    purpose: text("purpose"),
-    register: text("register"),
-    // The words a report read ranks against, computed once on insert (0033).
     search: tsvector("search").generatedAlwaysAs(
-      sql`to_tsvector('english'::regconfig, context || ' ' || body)`,
+      sql`to_tsvector('english'::regconfig, (context->>'summary') || ' ' || body)`,
     ),
   },
   (t) => [
     primaryKey({ columns: [t.userId, t.id] }),
-    unique("samples_kind_key").on(t.userId, t.id, t.kindId),
     index("samples_by_report").on(t.userId, t.report),
     index("samples_by_kind").on(t.userId, t.kindId),
     // A sample's report is its kind's report, by construction.
@@ -362,8 +354,8 @@ export const samples = pgTable(
     }).onDelete("cascade"),
     foreignKey({
       name: "samples_replaces_fk",
-      columns: [t.userId, t.replacesId, t.kindId],
-      foreignColumns: [t.userId, t.id, t.kindId],
+      columns: [t.userId, t.replacesId],
+      foreignColumns: [t.userId, t.id],
     }).onDelete("cascade"),
     check(
       "samples_report",
@@ -371,8 +363,9 @@ export const samples = pgTable(
     ),
     check(
       "samples_context",
-      sql`char_length(${t.context}) BETWEEN 1 AND 200 AND position(chr(10) in ${t.context})=0 AND position(chr(13) in ${t.context})=0 AND btrim(${t.context})=${t.context}`,
+      sql`public.milton_sample_context_valid(${t.context})`,
     ),
+    check("samples_context_revision", sql`${t.contextRevision} > 0`),
     check(
       "samples_body",
       sql`btrim(${t.body}) <> '' AND octet_length(${t.body}) <= 131072`,
@@ -384,10 +377,6 @@ export const samples = pgTable(
     check(
       "samples_retirement",
       sql`(${t.retireReason} IS NULL) = (${t.retiredAt} IS NULL) AND (${t.retireReason} IS NULL OR ${t.retireReason} IN ('replaced','removed','evicted')) AND (${t.retiredRequestId} IS NULL OR ${t.retiredAt} IS NOT NULL)`,
-    ),
-    check(
-      "samples_labels",
-      sql`(${t.audience} IS NULL OR ${t.audience} IN ('client','boss','colleague','friend','public','other')) AND (${t.purpose} IS NULL OR ${t.purpose} IN ('decline','ask','thank','update','announce','apologize','introduce','follow up','other')) AND (${t.register} IS NULL OR ${t.register} IN ('formal','plain','casual'))`,
     ),
   ],
 );

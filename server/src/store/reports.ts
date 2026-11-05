@@ -1,3 +1,9 @@
+import {
+  contextDetails,
+  contextMatch,
+  type SampleContext,
+  type ContextDimensions,
+} from "./sample-context";
 import type { CardHead } from "./cards";
 
 /** The five fixed reports. IDs are singular words naming the kind of writing,
@@ -45,54 +51,25 @@ export const REPORTS: { id: ReportId; title: string; when: string }[] = [
 export const resolveReportId = (id: string): ReportId | undefined =>
   id === "doc" ? "document" : REPORT_IDS.find((known) => known === id);
 
-/** Labels an assistant may give a sample when saving it, and audience and
- * purpose when reading a report. Stored as sent and compared for equality only. */
-export const AUDIENCES = [
-  "client",
-  "boss",
-  "colleague",
-  "friend",
-  "public",
-  "other",
-] as const;
-export const PURPOSES = [
-  "decline",
-  "ask",
-  "thank",
-  "update",
-  "announce",
-  "apologize",
-  "introduce",
-  "follow up",
-  "other",
-] as const;
-export const REGISTERS = ["formal", "plain", "casual"] as const;
-
-/** What a report read is for: the report, one line on the situation, and the
- * audience and purpose when the assistant knows them. */
+/** Intent is required; supplied dimensions use the saved context vocabulary. */
 export type ReportIntent = {
   report: ReportId;
   situation: string;
-  audience?: (typeof AUDIENCES)[number];
-  purpose?: (typeof PURPOSES)[number];
+  kind_id?: string;
+  context?: ContextDimensions;
 };
-
 export type Sample = {
   id: string;
   report: ReportId;
   kind_id: string;
-  /** The kind's label; never printed in report text. */
   kind: string;
-  context: string;
+  context: SampleContext;
+  context_revision: number;
   body: string;
-  /** YYYY-MM-DD, UTC, shown above the sample. */
   date: string;
-  /** Full UTC timestamp, for ordering only. */
   created_at: string;
-  /** Labels the saving assistant chose; null when it sent none (0033). */
-  audience: (typeof AUDIENCES)[number] | null;
-  purpose: (typeof PURPOSES)[number] | null;
-  register: (typeof REGISTERS)[number] | null;
+  lexical_rank?: number;
+  match?: { kind?: boolean; purposes: string[]; dimensions: string[] };
 };
 export type ReportDocument = {
   id: ReportId;
@@ -102,6 +79,8 @@ export type ReportDocument = {
   is_empty: boolean;
   /** The same content as body, structured for the web page. */
   samples: Sample[];
+  /** Every kind with an active sample in this report, before selection. */
+  kinds: { kind_id: string; kind: string }[];
   rules: string[];
 };
 export type Documents = {
@@ -164,11 +143,15 @@ function reportDocument(
   report: (typeof REPORTS)[number],
   active: CardHead[],
   own: Sample[],
+  all: Sample[] = own,
 ): ReportDocument {
   const parts = [
     `# ${report.title}`,
     `Applies when ${report.when}.`,
-    ...own.map((s) => `Approved, ${s.context}, ${s.date}:\n${quote(s.body)}`),
+    ...own.map(
+      (s) =>
+        `Approved, ${s.context.summary}, ${s.date}:${contextDetails(s.context) ? `\nContext: ${contextDetails(s.context)}` : ""}\n${quote(s.body)}`,
+    ),
     ...rules(active, report.id).map(bullet),
   ];
   return {
@@ -178,6 +161,10 @@ function reportDocument(
     body: parts.join("\n\n"),
     is_empty: parts.length === 2,
     samples: own,
+    kinds: Array.from(
+      new Map(all.map((s) => [s.kind_id, s.kind])),
+      ([kind_id, kind]) => ({ kind_id, kind }),
+    ).sort((a, b) => a.kind_id.localeCompare(b.kind_id)),
     rules: rules(active, report.id),
   };
 }
@@ -199,12 +186,36 @@ export function assembleExport(active: CardHead[], samples: Sample[]): string {
     ),
   );
 }
+/** Unweighted, explicit tiers; broad examples fill all remaining slots. */
+function rankSamples(samples: Sample[], intent: ReportIntent) {
+  return samples
+    .map((s) => ({
+      ...s,
+      match: {
+        ...(intent.kind_id ? { kind: s.kind_id === intent.kind_id } : {}),
+        ...contextMatch(s.context, intent.context),
+      },
+    }))
+    .sort(
+      (a, b) =>
+        Number(b.match.kind ?? false) - Number(a.match.kind ?? false) ||
+        b.match.purposes.length - a.match.purposes.length ||
+        b.match.dimensions.length - a.match.dimensions.length ||
+        (b.lexical_rank ?? 0) - (a.lexical_rank ?? 0) ||
+        (a.created_at < b.created_at
+          ? 1
+          : a.created_at > b.created_at
+            ? -1
+            : a.id.localeCompare(b.id)),
+    )
+    .slice(0, SERVED_SAMPLES);
+}
 /** The cover sheet and the five reports. `ranked` replaces one report's newest
  * eight with the samples a read ranked for its intent. */
 export function assembleDocuments(
   active: CardHead[],
   samples: Sample[],
-  ranked?: { report: ReportId; ids: string[] },
+  ranked?: { report: ReportId; intent: ReportIntent },
 ): Documents {
   const cover = coverSheetText(active);
   const reports = REPORTS.map((r) => {
@@ -213,8 +224,9 @@ export function assembleDocuments(
       r,
       active,
       r.id === ranked?.report
-        ? ranked.ids.flatMap((id) => mine.filter((s) => s.id === id))
+        ? rankSamples(mine, ranked.intent)
         : newestFirst(mine).slice(0, SERVED_SAMPLES),
+      mine,
     );
   });
   return {

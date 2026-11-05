@@ -177,12 +177,12 @@ its next call; the set of announced assistants is per process, in memory, and cl
 
 Exactly four tools are exposed:
 
-| Tool                                                     | Contract                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `get_cover_sheet()`                                      | Returns `{text, version, is_empty, reports}`: the rules true of all writing, the save fence, whether the whole account is empty, and the index of five reports with their situations; only while the whole account has no rules or samples, `setup` offers sample-first onboarding. No model call, no write.                                                                                                                                                                                                                                                                          |
-| `get_report({report_id, intent})`                        | One of `email`, `chat`, `post`, `document` (`doc` accepted), `speech`, and a required `intent`: `{situation, audience?, purpose?}`. Returns `{report_id, text, version, is_empty, samples}`: heading, when line, the eight samples that best fit the intent, best first, then rules; see below for `samples`. Without a well-formed intent it refuses with `invalid_input`, saying what to send. Only while the report has no rules or samples, `setup` carries optional sample-first help. Existing samples are usable with zero rules; setup never blocks an explicit writing task. |
-| `list_reports()`                                         | All five reports as `{reports: [{report_id, text, is_empty, samples, setup?}], version}`, without the cover sheet, each with its newest eight samples; a report without rules or samples has a one-line optional `setup` pointer to `get_report`.                                                                                                                                                                                                                                                                                                                                     |
-| `create_memo({text, request_id, expected_version, ...})` | An exact save with at least one of `rules`, `exact_edits`, `moves`, `sample`, `retire_samples`; `text` states its purpose. UUID for the logical request and version from the cover sheet.                                                                                                                                                                                                                                                                                                                                                                                             |
+| Tool                                                     | Contract                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `get_cover_sheet()`                                      | Returns `{text, version, is_empty, reports}`: the rules true of all writing, the save fence, whether the whole account is empty, and the index of five reports with their situations; only while the whole account has no rules or samples, `setup` offers sample-first onboarding. No model call, no write.                                                                                                                                                                                                                                                                                           |
+| `get_report({report_id, intent})`                        | One of `email`, `chat`, `post`, `document` (`doc` accepted), `speech`, and a required `intent`: `{situation, kind_id?, context?}`. Returns `{report_id, text, version, is_empty, kinds, samples, selection}`: heading, when line, the eight samples that best fit the intent, best first, then rules; see below for `samples`. Without a well-formed intent it refuses with `invalid_input`, saying what to send. Only while the report has no rules or samples, `setup` carries optional sample-first help. Existing samples are usable with zero rules; setup never blocks an explicit writing task. |
+| `list_reports()`                                         | All five reports as `{reports: [{report_id, text, is_empty, samples, setup?}], version}`, without the cover sheet, each with its newest eight samples; a report without rules or samples has a one-line optional `setup` pointer to `get_report`.                                                                                                                                                                                                                                                                                                                                                      |
+| `create_memo({text, request_id, expected_version, ...})` | An exact save with at least one of `rules`, `exact_edits`, `moves`, `sample`, `sample_context`, `retire_samples`; `text` states its purpose. UUID for the logical request and version from the cover sheet.                                                                                                                                                                                                                                                                                                                                                                                            |
 
 `create_memo` returns `saved`, `unchanged`, `conflict`, or `failed`,
 with the request ID and relevant version/error.
@@ -250,17 +250,20 @@ history. An unchanged replacement leaves history and the version alone. This avo
 caller edits, and nothing detects a correction sent as a new rule that contradicts an
 old one. It does not change first-setup and capture approval rules.
 
-All structured fields can combine in one save: every operation resolves against one
-snapshot and commits together or not at all. `moves` is `[{before, report}]`
+Structured fields resolve against one snapshot and commit together or not at all;
+`sample_context` cannot combine with `sample` or `retire_samples`. `moves` is `[{before, report}]`
 (1-500): `before` is verbatim text identifying one rule, as for `exact_edits`, and
 `report` is a report or `cover`. A move to the rule's current place is a no-op; an
 unresolvable or repeated move, or a move of a rule the same save removes, fails with
-`move_conflict`. `sample` is `{report, kind_id | new_kind, context, audience?, purpose?,
-register?, text, replaces?}`. The labels come from fixed lists (audience: client, boss,
-colleague, friend, public, other; purpose: decline, ask, thank, update, announce,
-apologize, introduce, follow up, other; register: formal, plain, casual); any other value
-is refused as `invalid_input`. They are stored as sent and never interpreted beyond
-equality (0033).
+`move_conflict`. `sample` is `{report, kind_id | new_kind, context, text, replaces?}`.
+Context is one strict object with `version: 1` and a useful one-line `summary`
+(1–200 characters). Optional known dimensions are `purposes` (1–8 distinct values),
+`medium`, `audience` (relationship, role, familiarity, expertise, group), `interaction`,
+`scope` (`unit: "whole" | "excerpt"`, optional `role` only for excerpts), `language`
+and `register`. Vocabulary values are nonblank single lines of at most 60 characters;
+new purposes and media need no schema change. Unknown dimensions stay absent;
+unknown keys, empty audience objects, duplicate purposes and invalid scope are refused.
+Use generic situations and roles, never private identities or project facts.
 `kind_id` must name a kind in that report. A `new_kind` whose label already exists
 there, in any letter case, files under that kind (including a kind whose samples are
 all retired, which reads no longer list); otherwise it creates one. `replaces` names an active sample of the
@@ -272,9 +275,27 @@ retires it); a
 save that then changes nothing returns `unchanged` and charges nothing.
 Sample errors fail with `sample_conflict`. A `saved` result carries
 `samples_retired: [{id, reason}]` whenever a sample was retired, and replay returns
-it unchanged. A report read serves eight active samples (see "Sample labels and ranking"), and report reads list each served sample as `{id, kind_id, kind, context,
-date}`, plus each label it has, in served order;
-kind labels never appear in report text.
+it unchanged. A report read serves up to eight active samples (see "Sample context and ranking"), and report reads list each served sample as `{id, kind_id, kind, context,
+context_revision, date, match?}` in served order;
+kind labels never appear in report text. The separate `kinds` index contains
+`{kind_id, kind}` for every distinct personal kind with an active sample in this report,
+in ascending `kind_id` order. It is computed from the full tenant/report snapshot before
+the eight-sample cut, independently of intent. It has no sample bodies and excludes
+other accounts/reports, empty kinds and kinds with only retired samples. Use these IDs
+to request an older otherwise unserved kind or to reuse it on a sample save.
+
+`sample_context: {report, sample_id, context, kind_id?}` corrects an active sample
+after approval of the complete replacement context and any classification change.
+Omitting optional context dimensions deliberately clears them; omitting `kind_id`
+keeps its classification. A supplied kind must already belong to that person's report.
+Body, ID, exact creation timestamp and replacement lineage stay unchanged. A distinct
+correction increments `context_revision` and the account version, even outside the
+served eight. Identical context/classification is `unchanged`; retries use the original
+request ID and input. Foreign, retired or wrong-report samples fail with `sample_conflict`.
+Reclassification also refuses `sample_conflict` if another active sample in the target
+kind has byte-identical text. Refusal preserves every sample, context and the account
+version; neither sample is merged or retired. Retired duplicates do not block a move.
+Correction and rule changes are atomic together on success or refusal.
 
 The assistant offers sample-first setup once when the whole account is empty;
 other empty reports offer help only on request. The served script in
@@ -297,9 +318,11 @@ assistant's memory and does not guarantee assistants follow its instructions.
 
 Two offers follow from drafting. When the person approves a draft to send, post,
 or say, the assistant offers once to save it as a sample under the report that
-applies, quoted exactly with one line of context; a no is final for that draft and
-nothing is saved silently. One yes to saving the exact displayed text is sufficient;
-ask again only if that text changes, including redaction. When the person makes the same correction twice, the
+applies. On EVERY sample save it displays the exact text and proposed useful non-private
+context together; a no is final for that draft and nothing is saved silently. One yes
+to that proposal is sufficient; unchanged approved metadata needs no second approval.
+Ask again only if text or context changes, including redaction. Praise or permission to
+send is not retention approval. When the person makes the same correction twice, the
 assistant proposes one short rule and files it only on approval; a single
 correction is a one-off. Both run through `create_memo` with ordinary approval.
 
@@ -439,10 +462,12 @@ A report is the unit of the assembled output. Every instruction-card version has
 for a rule that applies to all writing. Card identities keep their insertion order;
 moving a card appends a version without changing its identity or position.
 
-Approved samples live in `samples`: report, a reference to an immutable sample kind, one `context`
-line, the `body` exactly as submitted, the filing client, and `retired_at`. A guard
-makes the table append-only: the only update sets `retired_at` once, and rows leave
-only with their account. Filing a sample through `create_memo` with the `sample` field
+Approved samples live in `samples`: report, a reference to an immutable sample kind,
+validated JSONB `context`, its `context_revision`, the exact `body`, filing client and
+retirement fields. A guard preserves writing, identity, date, attribution and lineage;
+only an active sample's context/classification can change with the next revision,
+or its retirement fields can be set once. Rows leave only with their account.
+Filing a sample through `create_memo` with the `sample` field
 makes no model call and reserves no budget. Every approved sample stays active until
 the person replaces or removes it; a report read serves eight.
 
@@ -458,7 +483,7 @@ the date, then the body quoted with `>`), then its rules. MCP reads select eight
 ranked for the read's intent or else newest first; the web page shows the newest eight.
 TPS.md includes all active samples, newest first. Both full texts are the cover sheet
 plus every non-empty report. The web page lists each
-sample by its context line, its labels when it has any, and its date (0033).
+sample by its exact context summary, readable approved dimensions and date.
 
 A read takes the card heads, the active samples and the account's status in one
 statement, without a transaction or lock, so a concurrent save shows whole or not at
@@ -467,7 +492,7 @@ database connection, where the read before 0031 opened a connection and a transa
 with the account lock and wrote a lagging snapshot. The version every
 read returns and every save fences on is a fingerprint of what any read can serve:
 SHA-256 of the user ID, the cover sheet, and each report's text (its newest eight) with
-every active sample's ID, kind ID and kind label (0033; before, only the served ones), so
+every active sample's ID, kind ID, kind label and context revision, so
 it is the same for every intent. The same cards and samples always give the same version, an empty
 account included, and a save that changes what is served changes it. Versions from
 before 0031 hashed a stored revision, so a client holding one conflicts once on its
@@ -494,11 +519,12 @@ keeps its position.
 `sample_kinds` holds immutable kinds: `(user_id, id, report, label)`, labels unique
 per report by `lower(label)`, rows removable only with their account. `samples`
 references its kind through `(user_id, kind_id, report)`, so a sample's report is its
-kind's report by construction, and `replaces_id` through `(user_id, replaces_id,
-kind_id)`, so a replacement is always the same kind. Retirement sets `retired_at`,
+kind's report by construction. `replaces_id` references `(user_id, id)` so an approved
+reclassification keeps the link; the insertion guard and save require the same kind
+at replacement time. Retirement sets `retired_at`,
 `retire_reason` (`replaced`, `removed`, `evicted`; current saves no longer evict, and
 `evicted` stays for rows and receipts written before) and the retiring `request_id`
-once, together; nothing else changes.
+once, together; retired samples cannot be corrected.
 
 ### Trial transition groundwork (0012, inactive)
 
@@ -566,41 +592,47 @@ Replay adds no duplicate. New saves record transformation pipeline `exact:v1`.
 Records live as long as internal history and are removed with account deletion.
 Generated payload byte fields remain, with no lifetime history cap.
 
-### Sample labels and ranking
+### Sample context and ranking
 
-A report read serves eight samples per report, chosen for the assistant's intent.
-`get_report` requires `intent: {situation, audience?, purpose?}`: `situation` is one line
-(at most 200 characters); `audience` and `purpose` come from the sample label lists. One
-statement, the same one that reads the cards and samples, ranks the report's active
-samples:
+`get_report` requires `intent: {situation, kind_id?, context?}`. `situation` is one line
+of at most 200 characters. `context` takes the optional dimensions described above,
+without version or summary. An invalid, foreign or wrong-report kind returns
+`invalid_kind`; reads never create a kind.
 
-```sql
-SELECT s.id, row_number() OVER (ORDER BY
-    COALESCE(s.audience = $audience, false)::int
-      + COALESCE(s.purpose = $purpose, false)::int DESC,
-    ts_rank(s.search, q.q) DESC, s.created_at DESC, s.id) AS n
-FROM samples s,
-  (SELECT replace(plainto_tsquery('english', $situation)::text, '&', '|')::tsquery AS q) q
-WHERE s.user_id = $user AND s.report = $report AND s.retired_at IS NULL
-ORDER BY n LIMIT 8
-```
+One snapshot reads the card heads and active tenant samples and computes `ts_rank`
+against the stored search vector of summary and body, matching any situation word.
+Selection within the requested report orders by requested-kind match, purpose overlap
+count, exact supplied scalar dimension match count, full-text rank, timestamp descending,
+then ID ascending. These are ordered tiers, without speculative weights. Up to eight
+slots fill from broader examples when exact matches are sparse. `match` lists kind
+match (when requested), overlapping purposes and matching dimension paths; `selection`
+explains the fallback. Unknown scope stays unknown; excerpts do not establish whole-work
+structure. Without intent (`list_reports`, the web page), selection stays newest eight.
+The complete TPS.md export includes all active samples and useful approved context.
 
-The tsquery matches any word of the situation, as the ranking test did. Unlabeled
-samples (all from before 0033) rank by full text and recency only. Without an intent
-(`list_reports`, the web page) a report serves its newest eight. The version
-covers every active sample, so it is the same for every intent. A `get_report` without
-a well-formed intent is refused with `invalid_input` before the store is read. With no
-intent, the message says what to send and to reconnect the assistant if it has no intent
-field; with a malformed one, it names each limit broken (situation must be one line of at
-most 200 characters, or the audience or purpose list) and gives no reconnect hint.
-Every active sample's ID now enters the version, and reports serve eight per report
-rather than two per kind, so a client holding a version from before this release
-conflicts once on its next save, rereads and saves.
+A missing/malformed intent returns `invalid_input` before the store is read; only the
+missing-intent refusal recommends reconnecting a client without that field. Context
+representation version describes the format; per-sample context revision tracks corrections
+and fences account saves, including edits outside the served eight.
 
-Samples carry three optional labels, `audience`, `purpose` and `register`, nullable text
-held to fixed lists by `samples_labels`, plus `search`, a stored generated `tsvector` of
-context and body. The append-only guard holds labels like every other stored field.
-Unlabeled samples remain unlabeled; no backfill invents labels.
+Migration `0001_sample_context` converts the old summary and audience/purpose/register
+labels exactly into this one JSONB object, with revision 1 and no invented metadata.
+The historical baseline remains unchanged. No dual-write legacy representation remains.
+This schema is incompatible with the old runtime. Follow the hosting runbook's coordinated
+cutover: stage matching app/MCP images with no traffic, close ingress, verify refusal and
+drain at least 180 seconds, snapshot and record table hashes, apply the owner migration,
+verify preservation and both matching runtimes, select them, then reopen ingress and
+verify canonical reads. No old runtime may serve the new schema.
+
+`server/scripts/sample-context-rollback.sql` is an owner-only offline transaction:
+with ingress closed and requests drained, snapshot first, then run it only before
+any revised or unrepresentable context or incompatible lineage exists. It refuses such
+data rather than discarding it; an error requires `ROLLBACK` on that connection. A
+successful rollback restores the baseline schema/guard and removes only this migration's
+journal row; select both old runtimes before reopening. After the refusal boundary,
+keep the compatible runtime and fix forward, or explicitly approve restoration of the
+pre-cutover snapshot and the loss of subsequent writes. Revision traffic alone cannot
+roll this release back. This plan is not a production action.
 
 ### Limits and save invariants
 
@@ -623,15 +655,15 @@ login role created with SQL whose only membership is `milton_runtime` (membershi
 inherits, so no `SET ROLE`). Each table gets only the statements the runtime, or a
 trigger it fires, runs on it:
 
-| Grant                          | Tables and why                                                                                                                                                                              |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| SELECT, INSERT, UPDATE, DELETE | `users`: sign-up, the account lock and account deletion (its cascades run as the table owner)                                                                                               |
-| SELECT, INSERT, DELETE         | `assistant_disconnects`: disconnect, the refusal check, reconnect on Allow                                                                                                                  |
-| SELECT, INSERT, UPDATE         | `save_requests` (receipts; the save guard refuses every update), `samples` (retirement), `trial_accounts` (notice stage), `usage_daily` (daily call upsert), `stripe_events` (event ledger) |
-| SELECT, INSERT                 | `identities`, `deleted_identities`, `instruction_cards`, `instruction_card_versions`, `sample_kinds`                                                                                        |
-| INSERT                         | `accepted_changes`: provenance, written once per save and never read by the runtime                                                                                                         |
-| SELECT                         | `store_config`: settings are read without a lock; no setting can be changed                                                                                                                 |
-| USAGE                          | the `instruction_card_position` sequence (new card positions) and schema `public`; CONNECT on the database                                                                                  |
+| Grant                          | Tables and why                                                                                                                                                                                                           |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| SELECT, INSERT, UPDATE, DELETE | `users`: sign-up, the account lock and account deletion (its cascades run as the table owner)                                                                                                                            |
+| SELECT, INSERT, DELETE         | `assistant_disconnects`: disconnect, the refusal check, reconnect on Allow                                                                                                                                               |
+| SELECT, INSERT, UPDATE         | `save_requests` (receipts; the save guard refuses every update), `samples` (active context correction or retirement), `trial_accounts` (notice stage), `usage_daily` (daily call upsert), `stripe_events` (event ledger) |
+| SELECT, INSERT                 | `identities`, `deleted_identities`, `instruction_cards`, `instruction_card_versions`, `sample_kinds`                                                                                                                     |
+| INSERT                         | `accepted_changes`: provenance, written once per save and never read by the runtime                                                                                                                                      |
+| SELECT                         | `store_config`: settings are read without a lock; no setting can be changed                                                                                                                                              |
+| USAGE                          | the `instruction_card_position` sequence (new card positions) and schema `public`; CONNECT on the database                                                                                                               |
 
 The role owns nothing, so it cannot alter, drop or truncate a table, disable a
 trigger, set `session_replication_role`, create objects in `public` or read the

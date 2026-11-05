@@ -71,12 +71,13 @@ test("sample-first setup is optional, preserves guidance and serves valid exact 
     "private details replaced by placeholders",
     "make excerpts explicit",
     "exact retention approval",
-    "A yes to saving that exact displayed text is sufficient",
-    "ask again only if the proposed text changes, including redaction",
+    "A yes to saving that displayed proposal is sufficient",
+    "unchanged approved metadata needs no second approval",
+    "ask again only if the proposed text or context changes, including redaction",
     "Do not silently sanitize after approval",
-    "minimal non-private context",
+    "proposed useful non-private context on EVERY save",
     "kind_id from the relevant report",
-    "supported labels",
+    "the approved context object",
     "same request_id and exact input",
     "Reread after saved, unchanged or conflict",
     "If examples are skipped, help with the real draft without claiming to know the voice",
@@ -99,13 +100,11 @@ test("sample-first setup is optional, preserves guidance and serves valid exact 
     report: "email" as const,
     kind_id: "k",
     kind: "follow-up",
-    context: "A fictional follow-up.",
+    context: { version: 1 as const, summary: "A fictional follow-up." },
     body: "Hi [name],\n\nFriday works. Thanks!",
     date: "2026-11-02",
     created_at: "2026-11-02T00:00:00.000000Z",
-    audience: null,
-    purpose: null,
-    register: null,
+    context_revision: 1,
   };
   const sampled = { ...assembleDocuments([], [sample]), version };
   expect(sampled.is_empty).toBe(false);
@@ -191,10 +190,14 @@ test("sample-first setup is optional, preserves guidance and serves valid exact 
       expect(shape.sample).toEqual({
         report: id,
         new_kind: `${task} example`,
-        context: `A fictional ${task}.`,
-        audience: "colleague",
-        purpose: "update",
-        register: "plain",
+        context: {
+          version: 1,
+          summary: `A fictional ${task}.`,
+          audience: { relationship: "colleague" },
+          purposes: ["update"],
+          register: "plain",
+          scope: { unit: "whole" },
+        },
         text,
       });
       parses(shape);
@@ -220,10 +223,19 @@ test("sample-first setup is optional, preserves guidance and serves valid exact 
 test("every create_memo shape the server instructions describe parses against saveMemoInput", () => {
   const says = (fragment: string) =>
     expect(storeInstructions).toContain(fragment);
-  says('show the exact text, then offer once: "Save this as a sample?"');
-  says("Yes authorizes saving that unchanged text");
-  says("ask again only if it changes, including redaction");
+  says(
+    'after draft approval, and on EVERY sample save, show exact text and proposed useful non-private context, then offer once: "Save this as a sample?"',
+  );
+  says("Yes approves that displayed proposal");
+  says(
+    "Yes approves that displayed proposal; ask again only if text or context changes",
+  );
+  expect(storeInstructions).not.toContain("Samples: on EVERY save");
+  says("ask again only if text or context changes, including redaction");
   says("Praise or send permission alone is not retention approval");
+  says("matching samples (opening, length, sign-off, forbidden phrases)");
+  says("Preserve guidance; never block writing");
+  says("Sample bodies cannot be edited");
   expect(storeInstructions).not.toContain("On yes, show");
   says("Pass the cover sheet version as expected_version and a new request_id");
   says("Send each new rule in rules: its report (or cover)");
@@ -235,7 +247,7 @@ test("every create_memo shape the server instructions describe parses against sa
     ],
   });
   says(
-    "call create_memo with sample (report; kind_id from get_report, or new_kind only if none fits; context; audience, purpose and register; text exactly as approved)",
+    "Call create_memo with sample (report; kind_id from get_report, or new_kind only if none fits; context; text exactly as approved)",
   );
   for (const kind of [{ kind_id: "fictional-kind" }, { new_kind: "follow-up" }])
     parses({
@@ -243,10 +255,13 @@ test("every create_memo shape the server instructions describe parses against sa
       sample: {
         report: "email",
         ...kind,
-        context: "A fictional situation.",
-        audience: "client",
-        purpose: "follow up",
-        register: "plain",
+        context: {
+          version: 1,
+          summary: "A fictional situation.",
+          audience: { relationship: "client" },
+          purposes: ["follow up"],
+          register: "plain",
+        },
         text: "A fictional email.",
       },
     });
@@ -257,7 +272,7 @@ test("every create_memo shape the server instructions describe parses against sa
       report: "email",
       kind_id: "fictional-kind",
       replaces: "fictional-sample",
-      context: "A fictional situation.",
+      context: { version: 1 as const, summary: "A fictional situation." },
       text: "A fictional email.",
     },
   });
@@ -274,7 +289,7 @@ test("every create_memo shape the server instructions describe parses against sa
   });
   // The read the instructions, the tool description and the refusal describe.
   says(
-    "get_report for each matching report with intent: one line on the situation, plus audience and purpose",
+    "get_report for each matching report with intent: one line on the situation, plus relevant kind_id and context",
   );
   for (const situation of [
     "declining a client's request for a discount",
@@ -283,7 +298,13 @@ test("every create_memo shape the server instructions describe parses against sa
     expect(
       reportInput.safeParse({
         report_id: "email",
-        intent: { situation, audience: "client", purpose: "decline" },
+        intent: {
+          situation,
+          context: {
+            audience: { relationship: "client" },
+            purposes: ["decline"],
+          },
+        },
       }).error?.issues ?? [],
     ).toEqual([]);
   says("pass moves: before verbatim from the rule and its new report");
@@ -316,4 +337,61 @@ test("the refusal, both reminders and the instructions give the one link, true f
   expect(account).not.toContain("no link");
   // No memo-update allowance remains to mention.
   expect(storeInstructions).not.toMatch(/memo.update/i);
+});
+
+test("sample contexts are bounded, extensible and complete replacements have explicit clearing semantics", () => {
+  const sample = {
+    report: "chat",
+    new_kind: "Unfamiliar cadence",
+    text: "Can you review the example?",
+    context: {
+      version: 1,
+      summary: "A fictional ticket comment.",
+      purposes: ["update", "request_review"],
+      medium: "ticket_comment",
+      scope: { unit: "excerpt", role: "closing" },
+    },
+  };
+  parses({ ...envelope(), sample });
+  parses({
+    ...envelope(),
+    sample_context: {
+      report: "chat",
+      sample_id: "fictional-sample",
+      context: {
+        version: 1,
+        summary: "Corrected context; optional fields cleared.",
+      },
+    },
+  });
+  for (const context of [
+    "legacy string",
+    { version: 1, summary: "" },
+    { version: 2, summary: "Future." },
+    { version: 1, summary: "A note.", arbitrary: "x" },
+    { version: 1, summary: "A note.", audience: { identity: "private" } },
+    { version: 1, summary: "A note.", purposes: Array(9).fill("ask") },
+    {
+      version: 1,
+      summary: "A note.",
+      scope: { unit: "whole", role: "closing" },
+    },
+    { version: 1, summary: "A note.", medium: "x".repeat(61) },
+    { version: 1, summary: "A note.\nSecond line." },
+  ])
+    expect(
+      saveMemoInput.safeParse({ ...envelope(), sample: { ...sample, context } })
+        .success,
+    ).toBe(false);
+  expect(
+    saveMemoInput.safeParse({
+      ...envelope(),
+      sample,
+      sample_context: {
+        report: "chat",
+        sample_id: "s",
+        context: sample.context,
+      },
+    }).success,
+  ).toBe(false);
 });

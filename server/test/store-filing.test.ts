@@ -616,7 +616,7 @@ test("reports print a heading, when line, the newest eight samples and rules; ca
         sample: {
           report,
           ...(known ? { kind_id: known.kind_id } : { new_kind: kind }),
-          context: `${kind} context`,
+          context: { version: 1 as const, summary: `${kind} context` },
           text,
         },
       });
@@ -803,7 +803,12 @@ test("a reused kind_id shares one kind; every sample stays and is served, and a 
   const f = await filingFixture("kinds-keep");
   try {
     const sample = (text: string, kind: object) => ({
-      sample: { report: "email", context: "after a call", text, ...kind },
+      sample: {
+        report: "email",
+        context: { version: 1 as const, summary: "after a call" },
+        text,
+        ...kind,
+      },
     });
     await f.save(sample("One", { new_kind: "Follow-up" }));
     const kind = (await f.report("email")).samples[0]!;
@@ -826,7 +831,7 @@ test("a reused kind_id shares one kind; every sample stays and is served, and a 
         sample: {
           report: "chat",
           kind_id: kind.kind_id,
-          context: "after a call",
+          context: { version: 1 as const, summary: "after a call" },
           text: "Wrong report",
         },
       }),
@@ -866,7 +871,7 @@ test("replaces retires the named sample as replaced and records lineage", async 
       sample: {
         report: "post",
         new_kind: "launch post",
-        context: "first launch",
+        context: { version: 1 as const, summary: "first launch" },
         text: "Old",
       },
     });
@@ -879,8 +884,9 @@ test("replaces retires the named sample as replaced and records lineage", async 
         id: old.id,
         kind_id: old.kind_id,
         kind: "launch post",
-        context: "first launch",
+        context: { version: 1 as const, summary: "first launch" },
         date: old.date,
+        context_revision: 1,
       },
     ]);
     const replace = {
@@ -888,14 +894,17 @@ test("replaces retires the named sample as replaced and records lineage", async 
         report: "post",
         kind_id: old.kind_id,
         replaces: old.id,
-        context: "second launch",
+        context: {
+          version: 1 as const,
+          summary: "second launch",
+          audience: { relationship: "public" },
+          purposes: ["announce"],
+          register: "plain",
+        },
         text: "New",
-        audience: "public",
-        purpose: "announce",
-        register: "plain",
       },
     };
-    // A label off its list is refused before anything is read or written.
+    // Obsolete top-level labels are refused before anything is read or written.
     await expect(
       f.save({ sample: { ...replace.sample, audience: "investor" } }),
     ).rejects.toMatchObject({ code: "invalid_input" });
@@ -903,14 +912,17 @@ test("replaces retires the named sample as replaced and records lineage", async 
       status: "saved",
       samples_retired: [{ id: old.id, reason: "replaced" }],
     });
-    // Labels are stored as sent and listed with the sample.
+    // Approved dimensions are listed with the sample.
     expect(
       reportEnvelope(await f.store.readDocuments(), "post").samples[0],
     ).toMatchObject({
-      context: "second launch",
-      audience: "public",
-      purpose: "announce",
-      register: "plain",
+      context: {
+        version: 1 as const,
+        summary: "second launch",
+        audience: { relationship: "public" },
+        purposes: ["announce"],
+        register: "plain",
+      },
     });
     expect(
       (
@@ -948,7 +960,7 @@ test("retire_samples removes a sample and reports it", async () => {
       sample: {
         report: "speech",
         new_kind: "toast",
-        context: "a fictional toast",
+        context: { version: 1 as const, summary: "a fictional toast" },
         text: "Cheers",
       },
     });
@@ -977,7 +989,7 @@ test("a new_kind naming a kind whose samples were all retired reuses that kind",
       sample: {
         report: "speech",
         new_kind,
-        context: "a fictional toast",
+        context: { version: 1 as const, summary: "a fictional toast" },
         text,
       },
     });
@@ -1004,7 +1016,7 @@ test("a sample and exact edits in one save apply together or not at all", async 
     };
     const sample = {
       report: "document",
-      context: "weekly update",
+      context: { version: 1 as const, summary: "weekly update" },
       text: "Fictional update.",
     };
     expect(
@@ -1073,7 +1085,12 @@ test("a sample identical to an active one of its kind is unchanged: no copy", as
   const f = await filingFixture("same-sample");
   try {
     const sample = (text: string, kind: object) => ({
-      sample: { report: "email", context: "after a call", text, ...kind },
+      sample: {
+        report: "email",
+        context: { version: 1 as const, summary: "after a call" },
+        text,
+        ...kind,
+      },
     });
     await f.save(sample("One", { new_kind: "Follow-up" }));
     const kind = (await f.report("email")).samples[0]!;
@@ -1105,7 +1122,7 @@ test("retiring a sample and re-adding its text in one save keeps one active copy
       sample: {
         report: "email",
         new_kind: "Follow-up",
-        context: "after a call",
+        context: { version: 1 as const, summary: "after a call" },
         text: "One",
       },
     });
@@ -1116,7 +1133,7 @@ test("retiring a sample and re-adding its text in one save keeps one active copy
         sample: {
           report: "email",
           kind_id: old!.kind_id,
-          context: "after a call",
+          context: { version: 1 as const, summary: "after a call" },
           text: "One",
         },
       }),
@@ -1132,43 +1149,55 @@ test("retiring a sample and re-adding its text in one save keeps one active copy
   }
 });
 
-test("sample labels stay immutable and ranking uses intent, full text and recency within the report", async () => {
+test("context guards preserve retirement and ranking uses purposes, dimensions, text and recency", async () => {
   const local = await localStore();
   const pg = local.pg;
   try {
-    await seedUsers(pg, "ranked");
+    await seedUsers(pg, "ranked", "ranked-other");
     await pg.exec(`INSERT INTO sample_kinds(user_id,id,report,label) VALUES ('ranked','k','email','note');
       INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,created_at)
-        VALUES ('ranked','old','email','k','A fictional budget decline.','Budget numbers attached.','{}','2026-02-01');`);
-    // Only listed labels are stored, and a stored label never changes.
-    await pg.exec(`INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,audience,purpose,register)
-      VALUES ('ranked','new','email','k','A fictional decline.','No, thank you.','{}','client','follow up','plain');`);
+        VALUES ('ranked','old','email','k','{"version":1,"summary":"A fictional budget decline."}','Budget numbers attached.','{}','2026-02-01');`);
+    // Unknown context keys and a correction combined with retirement are refused.
+    await pg.exec(`INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json)
+      VALUES ('ranked','new','email','k','{"version":1,"summary":"A fictional decline.","audience":{"relationship":"client"},"purposes":["follow up"],"register":"plain"}','No, thank you.','{}');`);
     await expect(
-      pg.exec(`INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,audience)
-        VALUES ('ranked','bad','email','k','A fictional note.','Hello.','{}','investor');`),
-    ).rejects.toThrow("samples_labels");
+      pg.exec(`INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json)
+        VALUES ('ranked','bad','email','k','{"version":1,"summary":"A fictional note.","arbitrary":"x"}','Hello.','{}');`),
+    ).rejects.toThrow("samples_context");
     await expect(
       pg.exec(
-        "UPDATE samples SET retired_at=now(),retire_reason='removed',audience='boss' WHERE id='new'",
+        `UPDATE samples SET retired_at=now(),retire_reason='removed',context=context || '{"audience":{"relationship":"boss"}}'::jsonb WHERE id='new'`,
       ),
     ).rejects.toThrow("sample_is_append_only");
-    // A report read serves eight: label overlap with the intent, then
-    // full-text rank of the situation, then newest. Retired samples and other
+    // A report read serves eight: purposes, dimensions, full-text rank of the
+    // situation, then newest. Retired samples and other
     // reports never compete.
     const at = (day: number) => `'2026-01-0${day}T00:00:00Z'`;
     await pg.exec(`INSERT INTO sample_kinds(user_id,id,report,label) VALUES ('ranked','c','chat','note');
-      INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,created_at,audience,purpose) VALUES
-      ('ranked','a','email','k','A fictional note.','See you soon.','{}',${at(1)},'client','thank'),
-      ('ranked','b','email','k','A fictional note.','Budget numbers attached.','{}',${at(2)},'client','thank'),
-      ('ranked','c','email','k','A fictional note.','Budget numbers attached.','{}',${at(3)},'boss','thank'),
-      ('ranked','d','email','k','A fictional note.','No budget this year.','{}',${at(4)},'client','decline'),
-      ('ranked','f','email','k','A fictional note.','Budget.','{}',${at(5)},NULL,NULL),
-      ('ranked','h','email','k','A fictional note.','Hello.','{}',${at(7)},NULL,NULL),
-      ('ranked','g','email','k','A fictional note.','Lunch?','{}',${at(8)},'other','other'),
-      ('ranked','e','email','k','A fictional note.','We moved house.','{}',${at(9)},'friend','announce'),
-      ('ranked','x','chat','c','A fictional note.','Budget numbers attached.','{}',${at(9)},'client','thank');
-      INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,created_at,audience,purpose,retired_at,retire_reason) VALUES
-      ('ranked','r','email','k','A fictional note.','Budget numbers attached.','{}',${at(6)},'client','thank',now(),'removed');`);
+      INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,created_at) VALUES
+      ('ranked','a','email','k','{"version":1,"summary":"A fictional note.","audience":{"relationship":"client"},"purposes":["thank"]}','See you soon.','{}',${at(1)}),
+      ('ranked','b','email','k','{"version":1,"summary":"A fictional note.","audience":{"relationship":"client"},"purposes":["thank"]}','Budget numbers attached.','{}',${at(2)}),
+      ('ranked','c','email','k','{"version":1,"summary":"A fictional note.","audience":{"relationship":"boss"},"purposes":["thank"]}','Budget numbers attached.','{}',${at(3)}),
+      ('ranked','d','email','k','{"version":1,"summary":"A fictional note.","audience":{"relationship":"client"},"purposes":["decline"]}','No budget this year.','{}',${at(4)}),
+      ('ranked','f','email','k','{"version":1,"summary":"A fictional note."}','Budget.','{}',${at(5)}),
+      ('ranked','h','email','k','{"version":1,"summary":"A fictional note."}','Hello.','{}',${at(7)}),
+      ('ranked','g','email','k','{"version":1,"summary":"A fictional note.","audience":{"relationship":"other"},"purposes":["other"]}','Lunch?','{}',${at(8)}),
+      ('ranked','e','email','k','{"version":1,"summary":"A fictional note.","audience":{"relationship":"friend"},"purposes":["announce"]}','We moved house.','{}',${at(9)}),
+      ('ranked','x','chat','c','{"version":1,"summary":"A fictional note.","audience":{"relationship":"client"},"purposes":["thank"]}','Budget numbers attached.','{}',${at(9)});
+      INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,created_at,retired_at,retire_reason) VALUES
+      ('ranked','r','email','k','{"version":1,"summary":"A fictional note.","audience":{"relationship":"client"},"purposes":["thank"]}','Budget numbers attached.','{}',${at(6)},now(),'removed');`);
+    // This older kind cannot enter any of the default eight above. Empty,
+    // retired-only, other-report and foreign kinds must stay out of its index.
+    await pg.exec(`INSERT INTO sample_kinds(user_id,id,report,label) VALUES
+      ('ranked','older','email','Quiet check-in'),
+      ('ranked','empty','email','Empty kind'),
+      ('ranked','retired-only','email','Retired kind'),
+      ('ranked-other','foreign','email','Foreign kind');
+      INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,created_at) VALUES
+      ('ranked','quiet','email','older','{"version":1,"summary":"A quiet check-in."}','Checking in.','{}','2025-01-01'),
+      ('ranked-other','foreign','email','foreign','{"version":1,"summary":"A fictional note."}','Foreign example.','{}','2025-01-01');
+      INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,retired_at,retire_reason) VALUES
+      ('ranked','retired-kind','email','retired-only','{"version":1,"summary":"A fictional note."}','Retired example.','{}',now(),'removed');`);
     const store = fixtureStore(local.db, "ranked", "assistant");
     const served = async (intent?: ReportIntent) => {
       const documents = await store.readDocuments(intent);
@@ -1176,14 +1205,14 @@ test("sample labels stay immutable and ranking uses intent, full text and recenc
       return {
         version: documents.version,
         ids: email.samples.map((s) => s.id),
+        kinds: reportEnvelope(documents, "email").kinds,
       };
     };
-    const intent = {
+    const intent: ReportIntent = {
       report: "email",
       situation: "budget numbers for the client",
-      audience: "client",
-      purpose: "thank",
-    } as const;
+      context: { audience: { relationship: "client" }, purposes: ["thank"] },
+    };
     const ranked = await served(intent);
     expect(ranked.ids).toEqual(["b", "a", "c", "d", "new", "old", "f", "e"]);
     // Without labels, full-text rank then recency decide: two matching words
@@ -1195,6 +1224,529 @@ test("sample labels stay immutable and ranking uses intent, full text and recenc
     const newest = await served();
     expect(newest.ids).toEqual(["new", "old", "e", "g", "h", "f", "d", "c"]);
     expect(newest.version).toBe(ranked.version);
+    expect(newest.kinds).toEqual([
+      { kind_id: "k", kind: "note" },
+      { kind_id: "older", kind: "Quiet check-in" },
+    ]);
+    expect(ranked.kinds).toEqual(newest.kinds);
+    const discovered = newest.kinds.find((k) => k.kind === "Quiet check-in")!;
+    const requested = await served({ ...intent, kind_id: discovered.kind_id });
+    expect(requested.ids).toHaveLength(8);
+    expect(requested.ids[0]).toBe("quiet");
+    expect(requested.kinds).toEqual(newest.kinds);
+    expect(requested.version).toBe(newest.version);
+    expect(
+      await store.saveMemo({
+        text: "Reuse the discovered fictional kind.",
+        request_id: crypto.randomUUID(),
+        expected_version: newest.version,
+        sample: {
+          report: "email",
+          kind_id: discovered.kind_id,
+          context: { version: 1, summary: "Another quiet check-in." },
+          text: "Checking in again.",
+        },
+      }),
+    ).toMatchObject({ status: "saved" });
+    expect(
+      (await served({ ...intent, kind_id: discovered.kind_id })).ids[1],
+    ).toBe("quiet");
+  } finally {
+    await local.dispose();
+  }
+});
+
+test("approved context replacement preserves writing, clears metadata, fences old samples and replays", async () => {
+  const local = await localStore();
+  try {
+    await seedUsers(local.pg, "context-owner", "context-other");
+    const store = fixtureStore(local.db, "context-owner");
+    const save = async (change: Partial<SaveMemoInput>) =>
+      store.saveMemo({
+        text: "Correct fictional sample context.",
+        request_id: crypto.randomUUID(),
+        expected_version: (await store.getTpsReport()).version,
+        ...change,
+      });
+    const context = {
+      version: 1 as const,
+      summary: "A Slack task request to a colleague.",
+      purposes: ["request", "coordinate"],
+      medium: "slack",
+      audience: {
+        relationship: "colleague",
+        role: "peer",
+        familiarity: "ongoing",
+        expertise: "specialist",
+        group: "one",
+      },
+      interaction: "standalone",
+      scope: { unit: "whole" as const },
+      language: "en",
+    };
+    const body = "  Could you check the example?\r\n\nThanks. 😀  ";
+    expect(
+      await save({
+        sample: { report: "chat", new_kind: "Relay note", context, text: body },
+      }),
+    ).toMatchObject({ status: "saved" });
+    const original = (await store.readDocuments()).reports.find(
+      (r) => r.id === "chat",
+    )!.samples[0]!;
+    for (let i = 0; i < 8; i++)
+      expect(
+        await save({
+          sample: {
+            report: "chat",
+            new_kind: "relay NOTE",
+            context: {
+              version: 1,
+              summary: "An async mini-standup.",
+              purposes: ["update"],
+            },
+            text: `Done: example ${i}. Next: review.`,
+          },
+        }),
+      ).toMatchObject({ status: "saved" });
+    expect(
+      (await store.readDocuments()).reports
+        .find((r) => r.id === "chat")!
+        .samples.map((s) => s.id),
+    ).not.toContain(original.id);
+    const before = (await store.getTpsReport()).version;
+    const corrected = {
+      version: 1 as const,
+      summary: "An excerpt asking an expert for help.",
+      purposes: ["ask_expert"],
+      scope: { unit: "excerpt" as const, role: "closing" },
+    };
+    const input: SaveMemoInput = {
+      text: "Approve corrected context.",
+      request_id: crypto.randomUUID(),
+      expected_version: before,
+      rules: [{ report: "cover", text: "Lead with the question." }],
+      sample_context: {
+        report: "chat",
+        sample_id: original.id,
+        context: corrected,
+      },
+    };
+    const outcome = await store.saveMemo(input);
+    expect(outcome.status).toBe("saved");
+    expect(outcome.version).not.toBe(before);
+    expect((await store.readDocuments()).cover_rules).toEqual([
+      "Lead with the question.",
+    ]);
+    expect(await store.saveMemo(input)).toEqual(outcome);
+    await expect(
+      store.saveMemo({ ...input, text: "Different request." }),
+    ).rejects.toMatchObject({ code: "request_id_reused" });
+    expect(await save({ sample_context: input.sample_context })).toMatchObject({
+      status: "unchanged",
+      version: outcome.version,
+    });
+    expect(
+      await save({
+        expected_version: before,
+        rules: [{ report: "cover", text: "Be brief." }],
+      }),
+    ).toMatchObject({ status: "conflict" });
+    const row = (
+      await local.pg.query(
+        "SELECT id,body,created_at,context,context_revision FROM samples WHERE id=$1",
+        [original.id],
+      )
+    ).rows[0] as Record<string, unknown>;
+    expect(row).toMatchObject({
+      id: original.id,
+      body,
+      context: corrected,
+      context_revision: 2,
+    });
+    expect(new Date(row.created_at as string).toISOString().slice(0, 10)).toBe(
+      original.date,
+    );
+    expect(new Date(row.created_at as string).toISOString()).toBe(
+      new Date(original.created_at).toISOString(),
+    );
+    const exportText = await store.exportTpsReport();
+    expect(exportText).toContain("ask_expert");
+    expect(exportText).toContain("excerpt");
+    expect(exportText).toContain("closing");
+    expect(exportText).toContain(
+      "  Could you check the example?\r\n>\n> Thanks. 😀  ",
+    );
+    const foreign = fixtureStore(local.db, "context-other");
+    expect(
+      await foreign.saveMemo({
+        ...input,
+        request_id: crypto.randomUUID(),
+        expected_version: (await foreign.getTpsReport()).version,
+      }),
+    ).toMatchObject({ status: "failed", error: "sample_conflict" });
+    const beforeRefusal = await store.readDocuments();
+    expect(
+      await save({
+        rules: [{ report: "cover", text: "Keep the closing brief." }],
+        sample_context: { ...input.sample_context!, report: "email" },
+      }),
+    ).toMatchObject({ status: "failed", error: "sample_conflict" });
+    const afterRefusal = await store.readDocuments();
+    expect(afterRefusal.version).toBe(beforeRefusal.version);
+    expect(afterRefusal.cover_rules).toEqual(beforeRefusal.cover_rules);
+    expect(afterRefusal.full).not.toContain("Keep the closing brief.");
+    expect(await save({ retire_samples: [original.id] })).toMatchObject({
+      status: "saved",
+    });
+    expect(await save({ sample_context: input.sample_context })).toMatchObject({
+      status: "failed",
+      error: "sample_conflict",
+    });
+    expect(
+      (
+        await local.pg.query(
+          "SELECT count(*)::int AS n FROM samples WHERE user_id='context-owner'",
+        )
+      ).rows,
+    ).toEqual([{ n: 9 }]);
+    // Reclassifying an active replacement keeps the old link and uses the new
+    // kind for a subsequent replacement; the retired ancestor never changes.
+    const parent = (await store.readDocuments()).reports.find(
+      (r) => r.id === "chat",
+    )!.samples[0]!;
+    expect(
+      await save({
+        sample: {
+          report: "chat",
+          kind_id: parent.kind_id,
+          context,
+          text: "A replacement request.",
+          replaces: parent.id,
+        },
+      }),
+    ).toMatchObject({ status: "saved" });
+    const child = (await store.readDocuments()).reports.find(
+      (r) => r.id === "chat",
+    )!.samples[0]!;
+    expect(
+      await save({
+        sample: {
+          report: "chat",
+          new_kind: "Expert request",
+          context,
+          text: "An expert request example.",
+        },
+      }),
+    ).toMatchObject({ status: "saved" });
+    const expert = (await store.readDocuments()).reports.find(
+      (r) => r.id === "chat",
+    )!.samples[0]!;
+    expect(
+      await save({
+        sample_context: {
+          report: "chat",
+          sample_id: child.id,
+          kind_id: expert.kind_id,
+          context,
+        },
+      }),
+    ).toMatchObject({ status: "saved" });
+    expect(
+      await save({
+        sample: {
+          report: "chat",
+          kind_id: parent.kind_id,
+          context,
+          text: "Wrong kind replacement.",
+          replaces: child.id,
+        },
+      }),
+    ).toMatchObject({ status: "failed", error: "sample_conflict" });
+    expect(
+      await save({
+        sample: {
+          report: "chat",
+          kind_id: expert.kind_id,
+          context,
+          text: "A subsequent replacement.",
+          replaces: child.id,
+        },
+      }),
+    ).toMatchObject({ status: "saved" });
+    const grandchild = (await store.readDocuments()).reports.find(
+      (r) => r.id === "chat",
+    )!.samples[0]!;
+    expect(
+      (
+        await local.pg.query(
+          "SELECT id,kind_id,replaces_id FROM samples WHERE id IN ($1,$2,$3) ORDER BY id",
+          [parent.id, child.id, grandchild.id],
+        )
+      ).rows,
+    ).toEqual(
+      [
+        { id: parent.id, kind_id: parent.kind_id, replaces_id: null },
+        { id: child.id, kind_id: expert.kind_id, replaces_id: parent.id },
+        { id: grandchild.id, kind_id: expert.kind_id, replaces_id: child.id },
+      ].sort((a, b) => a.id.localeCompare(b.id)),
+    );
+  } finally {
+    await local.dispose();
+  }
+});
+
+test("kind and contextual reads prefer concrete situations and fill sparse matches honestly", async () => {
+  const local = await localStore();
+  try {
+    await seedUsers(local.pg, "situations", "foreign-situation");
+    const store = fixtureStore(local.db, "situations");
+    const contexts = [
+      {
+        summary: "Slack task request to a colleague.",
+        purposes: ["request"],
+        medium: "slack",
+        audience: { relationship: "colleague" },
+        interaction: "standalone",
+      },
+      {
+        summary: "Async mini-standup.",
+        purposes: ["update"],
+        medium: "slack",
+        audience: { group: "team" },
+        interaction: "standalone",
+      },
+      {
+        summary: "Status reply to a manager who knows the background.",
+        purposes: ["update", "answer"],
+        medium: "chat",
+        audience: { role: "manager", familiarity: "ongoing" },
+        interaction: "reply",
+      },
+      {
+        summary: "Asking an expert for help.",
+        purposes: ["request"],
+        medium: "chat",
+        audience: { expertise: "specialist" },
+        interaction: "first_contact",
+      },
+      {
+        summary: "Ticket comment updates and asks for review.",
+        purposes: ["update", "request_review"],
+        medium: "ticket_comment",
+        interaction: "reply",
+      },
+    ];
+    for (const [i, context] of contexts.entries())
+      expect(
+        await store.saveMemo({
+          text: "Keep fictional approved example.",
+          request_id: crypto.randomUUID(),
+          expected_version: (await store.getTpsReport()).version,
+          sample: {
+            report: "chat",
+            new_kind: i === 1 ? "mini-standup" : "note",
+            context: { version: 1, ...context },
+            text: `Fictional example ${i}.`,
+          },
+        }),
+      ).toMatchObject({ status: "saved" });
+    const all = (await store.readDocuments()).reports.find(
+      (r) => r.id === "chat",
+    )!.samples;
+    const standup = all.find((s) => s.body === "Fictional example 1.")!;
+    for (const [i, context] of contexts.entries()) {
+      const read = await store.readDocuments({
+        report: "chat",
+        situation: "Writing a message.",
+        context: {
+          purposes: context.purposes,
+          medium: context.medium,
+          audience: context.audience,
+          interaction: context.interaction,
+        },
+      });
+      expect(read.reports.find((r) => r.id === "chat")!.samples[0]!.body).toBe(
+        `Fictional example ${i}.`,
+      );
+    }
+    const tools = (await import("../src/store/tools")).createStoreMemoTools;
+    const tenant: import("../src/store").TenantStore = {
+      ...store,
+      appOrigin: "http://localhost:3001",
+      readTpsReport: store.getTpsReport,
+      chargeToolCall: async () => ({
+        allowed: true,
+        limit: 10000,
+        retry_at_ms: 0,
+      }),
+    };
+    const result = JSON.parse(
+      (
+        await tools(tenant).get_report({
+          report_id: "chat",
+          intent: {
+            situation: "Writing an update.",
+            kind_id: standup.kind_id,
+            context: { purposes: ["update", "request_review"] },
+          },
+        })
+      ).content[0].text,
+    );
+    expect(result.samples).toHaveLength(5);
+    expect(result.samples[0].id).toBe(standup.id);
+    expect(result.samples[0].match.kind).toBe(true);
+    expect(
+      result.samples
+        .slice(1)
+        .every((s: { match: { kind: boolean } }) => s.match.kind === false),
+    ).toBe(true);
+    expect(result.selection).toContain("broader");
+    await expect(
+      store.readDocuments({
+        report: "email",
+        situation: "Read.",
+        kind_id: standup.kind_id,
+      }),
+    ).rejects.toMatchObject({ code: "invalid_kind" });
+    await expect(
+      store.readDocuments({
+        report: "chat",
+        situation: "Read.",
+        kind_id: "foreign-or-missing",
+      }),
+    ).rejects.toMatchObject({ code: "invalid_kind" });
+    const foreign = fixtureStore(local.db, "foreign-situation");
+    expect(
+      await foreign.saveMemo({
+        text: "Keep a fictional foreign sample.",
+        request_id: crypto.randomUUID(),
+        expected_version: (await foreign.getTpsReport()).version,
+        sample: {
+          report: "chat",
+          new_kind: "Foreign note",
+          context: { version: 1, summary: "A fictional note." },
+          text: "Foreign fictional writing.",
+        },
+      }),
+    ).toMatchObject({ status: "saved" });
+    const foreignKind = (await foreign.readDocuments()).reports.find(
+      (r) => r.id === "chat",
+    )!.samples[0]!.kind_id;
+    const before = (await store.getTpsReport()).version;
+    await expect(
+      store.readDocuments({
+        report: "chat",
+        situation: "Read.",
+        kind_id: foreignKind,
+      }),
+    ).rejects.toMatchObject({ code: "invalid_kind" });
+    expect(
+      await store.saveMemo({
+        text: "Refuse foreign classification.",
+        request_id: crypto.randomUUID(),
+        expected_version: before,
+        sample_context: {
+          report: "chat",
+          sample_id: standup.id,
+          kind_id: foreignKind,
+          context: standup.context,
+        },
+      }),
+    ).toMatchObject({ status: "failed", error: "sample_conflict" });
+    expect((await store.getTpsReport()).version).toBe(before);
+    await local.pg.exec(
+      "UPDATE users SET status='deleting' WHERE id='situations'",
+    );
+    await expect(
+      store.readDocuments({
+        report: "chat",
+        situation: "Read.",
+        kind_id: "missing",
+      }),
+    ).rejects.toMatchObject({ code: "account_unavailable" });
+  } finally {
+    await local.dispose();
+  }
+});
+
+test("reclassification refuses identical active writing in the target kind without changing any sample", async () => {
+  const local = await localStore();
+  try {
+    await seedUsers(local.pg, "collision", "collision-other");
+    await local.pg
+      .exec(`INSERT INTO sample_kinds(user_id,id,report,label) VALUES
+      ('collision','source','chat','Source note'),
+      ('collision','target','chat','Target note'),
+      ('collision','mail','email','Mail note'),
+      ('collision-other','target','chat','Foreign note');
+      INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json) VALUES
+      ('collision','source-sample','chat','source','{"version":1,"summary":"A source note."}','Please check the example.','{}'),
+      ('collision','target-sample','chat','target','{"version":1,"summary":"A target note."}','Please check the example.','{}'),
+      ('collision','mail-sample','email','mail','{"version":1,"summary":"A mail note."}','Please check the example.','{}'),
+      ('collision-other','foreign-sample','chat','target','{"version":1,"summary":"A foreign note."}','Please check the example.','{}');`);
+    const store = fixtureStore(local.db, "collision");
+    const save = async (change: Partial<SaveMemoInput>) =>
+      store.saveMemo({
+        text: "Correct a fictional classification.",
+        request_id: crypto.randomUUID(),
+        expected_version: (await store.getTpsReport()).version,
+        ...change,
+      });
+    const correction = {
+      report: "chat" as const,
+      sample_id: "source-sample",
+      kind_id: "target",
+      context: { version: 1 as const, summary: "An approved corrected note." },
+    };
+    const before = (await store.getTpsReport()).version;
+    const samplesBefore = (
+      await local.pg.query("SELECT * FROM samples ORDER BY user_id,id")
+    ).rows;
+    expect(await save({ sample_context: correction })).toMatchObject({
+      status: "failed",
+      error: "sample_conflict",
+    });
+    expect((await store.getTpsReport()).version).toBe(before);
+    expect(
+      (await local.pg.query("SELECT * FROM samples ORDER BY user_id,id")).rows,
+    ).toEqual(samplesBefore);
+    // Retired duplicates no longer block; the same bytes in another account
+    // (even with the same kind ID) or report must not block either.
+    expect(await save({ retire_samples: ["target-sample"] })).toMatchObject({
+      status: "saved",
+    });
+    expect(await save({ sample_context: correction })).toMatchObject({
+      status: "saved",
+    });
+    expect(
+      (
+        await local.pg.query(
+          "SELECT id,kind_id,context,context_revision,retire_reason FROM samples WHERE user_id='collision' ORDER BY id",
+        )
+      ).rows,
+    ).toEqual([
+      {
+        id: "mail-sample",
+        kind_id: "mail",
+        context: { version: 1, summary: "A mail note." },
+        context_revision: 1,
+        retire_reason: null,
+      },
+      {
+        id: "source-sample",
+        kind_id: "target",
+        context: correction.context,
+        context_revision: 2,
+        retire_reason: null,
+      },
+      {
+        id: "target-sample",
+        kind_id: "target",
+        context: { version: 1, summary: "A target note." },
+        context_revision: 1,
+        retire_reason: "removed",
+      },
+    ]);
   } finally {
     await local.dispose();
   }

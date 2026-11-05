@@ -2238,7 +2238,7 @@ test("pages stay capped and download includes every active sample, only for the 
       sample: {
         report: "email",
         new_kind: "follow-up",
-        context: "alpha context",
+        context: { version: 1 as const, summary: "alpha context" },
         text: "Alpha sample body.",
       },
     });
@@ -2282,7 +2282,7 @@ test("pages stay capped and download includes every active sample, only for the 
       for (const [n, body] of bodies.entries())
         await fixture.db
           .query(sql`INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,created_at)
-          VALUES (${beta.userId},${`${report}-${n}`},${report},${report},${`${report} context ${n}`},${body},'{}',
+          VALUES (${beta.userId},${`${report}-${n}`},${report},${report},${JSON.stringify({ version: 1, summary: `${report} context ${n}` })}::jsonb,${body},'{}',
             ${`2026-01-0${1 + Math.floor(n / 2)}T00:00:00Z`}::timestamptz)`);
       const replacement = `Fictional ${report} replacement: exact & approved.`;
       expect(
@@ -2295,7 +2295,10 @@ test("pages stay capped and download includes every active sample, only for the 
             report,
             kind_id: report,
             replaces: `${report}-2`,
-            context: `${report} replacement context`,
+            context: {
+              version: 1 as const,
+              summary: `${report} replacement context`,
+            },
             text: replacement,
           },
         }),
@@ -2509,12 +2512,15 @@ test("report bullets require exact revision and complete text parity; optional l
                   report: "email",
                   kind_id: "k",
                   kind: "follow-up",
-                  context: "after a call",
+                  context: {
+                    version: 1 as const,
+                    summary: "after a call",
+                    audience: { relationship: "client" },
+                    purposes: ["follow up"],
+                  },
+                  context_revision: 1,
                   body: "Hi <there>,\n\nThanks.",
                   date: "2026-11-02",
-                  audience: "client",
-                  purpose: "follow up",
-                  register: null,
                 },
               ],
               rules,
@@ -2539,7 +2545,7 @@ test("report bullets require exact revision and complete text parity; optional l
     '<details class="form-sample">',
     "<summary>",
     '<span class="typed">after a call</span>',
-    '<span class="labels">client, follow up</span>',
+    '<span class="labels">purposes: follow up; audience relationship: client</span>',
     '<span class="date">2026-11-02</span>',
     "</summary>",
     '<pre class="memo-text"><span>Hi &lt;there&gt;,\n\nThanks.</span></pre>',

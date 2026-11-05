@@ -205,8 +205,8 @@ export async function applySave(
     }
     if (duplicate !== undefined) return;
     // Every approved sample stays until the person retires or replaces it.
-    await tx.query(sql`INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,replaces_id,audience,purpose,register)
-        VALUES (${userId},${randomUUID()},${report},${kindId},${sample.context},${sample.text},${attribution},${sample.replaces ?? null},${sample.audience ?? null},${sample.purpose ?? null},${sample.register ?? null})`);
+    await tx.query(sql`INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,replaces_id)
+        VALUES (${userId},${randomUUID()},${report},${kindId},${JSON.stringify(sample.context)}::jsonb,${sample.text},${attribution},${sample.replaces ?? null})`);
   };
   const known = new Map(current.active.map((h) => [h.id, h]));
   // A rule cannot be moved and retired at once, including by an exact
@@ -243,7 +243,56 @@ export async function applySave(
       .filter((m) => known.get(m.id)!.report !== m.report)
       .map((m) => [m.id, m.report]),
   );
+  const correction = input.sample_context;
+  const corrected =
+    correction &&
+    current.samples.find(
+      (s) =>
+        s.id === correction.sample_id &&
+        s.report === resolveReportId(correction.report),
+    );
+  if (correction && !corrected)
+    throw sampleConflict(
+      "sample_context must name an active sample in this report.",
+    );
+  if (
+    correction?.kind_id !== undefined &&
+    !(
+      await tx.query(
+        sql`SELECT 1 FROM sample_kinds WHERE user_id=${userId} AND id=${correction.kind_id} AND report=${resolveReportId(correction.report)!}`,
+      )
+    ).length
+  )
+    throw sampleConflict("kind_id must name an existing kind in this report.");
+  if (
+    correction &&
+    corrected &&
+    correction.kind_id !== undefined &&
+    correction.kind_id !== corrected.kind_id &&
+    current.samples.some(
+      (s) =>
+        s.id !== corrected.id &&
+        s.report === corrected.report &&
+        s.kind_id === correction.kind_id &&
+        s.body === corrected.body,
+    )
+  )
+    throw sampleConflict(
+      "The target kind already has an active sample with identical text.",
+    );
+  const contextChanged = !!(
+    correction &&
+    corrected &&
+    ((correction.kind_id !== undefined &&
+      correction.kind_id !== corrected.kind_id) ||
+      (
+        await tx.query<{ changed: boolean }>(
+          sql`SELECT context IS DISTINCT FROM ${JSON.stringify(correction.context)}::jsonb AS changed FROM samples WHERE user_id=${userId} AND id=${correction.sample_id}`,
+        )
+      )[0]!.changed)
+  );
   const samplesChanged =
+    contextChanged ||
     (input.sample !== undefined && !sampleSkipped) ||
     input.retire_samples !== undefined;
   const unchanged =
@@ -302,5 +351,8 @@ export async function applySave(
   }
   for (const id of retire) await append(known.get(id)!, true, "archive");
   await applySamples();
+  if (contextChanged && correction)
+    await tx.query(sql`UPDATE samples SET context=${JSON.stringify(correction.context)}::jsonb,kind_id=${correction.kind_id ?? corrected!.kind_id},context_revision=context_revision+1
+    WHERE user_id=${userId} AND report=${resolveReportId(correction.report)!} AND id=${correction.sample_id} AND retired_at IS NULL`);
   return publishSave(ctx, tx, current, retired, attribution);
 }

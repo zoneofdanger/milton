@@ -109,6 +109,28 @@ test("an SDK client receives instructions, discovers the four tools, and reads t
     ).toContain(
       "every approved sample stays, and a report read serves the eight that best fit its intent",
     );
+    const save = tools.find((tool) => tool.name === "create_memo")!;
+    expect(save.inputSchema.properties).toHaveProperty("sample_context");
+    expect(save.description).toContain(
+      "For EVERY approved sample save, display the exact text and useful non-private context together before one retention approval",
+    );
+    expect(save.description).toContain(
+      "unchanged already-approved metadata needs no second approval",
+    );
+    expect(save.description).toContain("clearing omitted optional fields");
+    expect(save.description).toContain(
+      "Reclassification refuses sample_conflict if the target kind already has identical active text",
+    );
+    const read = tools.find((tool) => tool.name === "get_report")!;
+    expect(read.description).toContain(
+      "fill up to eight from broader examples",
+    );
+    expect(read.description).toContain(
+      "kinds lists every personal kind with an active sample in this report as {kind_id, kind}, ordered by kind_id, independently of intent and the eight-sample selection",
+    );
+    expect(JSON.stringify(read.inputSchema.properties?.intent)).toContain(
+      "get_report.kinds",
+    );
     const text = client.getInstructions();
     expect(text).toContain('"Did you get the memo?"');
     expect(text).toContain('"Did you get that memo?"');
@@ -198,7 +220,7 @@ test("get_report requires an intent: without a well-formed one it refuses, sayin
       ],
       [
         { situation: "a reply", audience: "investor" },
-        "audience must be one of client, boss, colleague, friend, public, other",
+        "intent takes situation, optional kind_id and bounded context dimensions",
       ],
     ] as const) {
       const message = await refused({ report_id: "email", intent });
@@ -215,8 +237,10 @@ test("get_report requires an intent: without a well-formed one it refuses, sayin
         report_id: "doc",
         intent: {
           situation: "declining a client's request for a discount",
-          audience: "client",
-          purpose: "decline",
+          context: {
+            audience: { relationship: "client" },
+            purposes: ["decline"],
+          },
         },
       },
     });
@@ -226,8 +250,10 @@ test("get_report requires an intent: without a well-formed one it refuses, sayin
       {
         report: "document",
         situation: "declining a client's request for a discount",
-        audience: "client",
-        purpose: "decline",
+        context: {
+          audience: { relationship: "client" },
+          purposes: ["decline"],
+        },
       },
     ]);
   } finally {

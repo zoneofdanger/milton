@@ -4,6 +4,7 @@ import type { Child } from "hono/jsx";
 import type { PersonStore } from "./store";
 import type { TrialStatus } from "./store/trials";
 import type { CompiledReport, Documents } from "./store/compiled";
+import { contextDetails } from "./store/sample-context";
 import { ruleText, type Sample } from "./store/reports";
 import { SETUP_PROMPT } from "./store/setup";
 
@@ -155,8 +156,7 @@ const ruled = (bodies: string[]) => (
 const counted = (n: number, label: string) =>
   `${n} ${label}${n === 1 ? "" : "s"}`;
 /** A sample's labels as one line, or "" when it has none. */
-const labelLine = (s: Sample) =>
-  [s.audience, s.purpose, s.register].filter(Boolean).join(", ");
+const labelLine = (s: Sample) => contextDetails(s.context);
 
 type SheetView = {
   report: CompiledReport;
@@ -268,7 +268,7 @@ function sheet({ report, documents, email, date, comment }: SheetView) {
                   {r.samples.map((s) => (
                     <details class="form-sample">
                       <summary>
-                        <span class="typed">{s.context}</span>
+                        <span class="typed">{s.context.summary}</span>
                         <span class="sample-meta">
                           {labelLine(s) && (
                             <span class="labels">{labelLine(s)}</span>

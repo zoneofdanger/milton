@@ -156,6 +156,12 @@ test("schema declarations generate the same surviving tables, constraints and in
       generateDrizzleJson(schema),
     );
     await generated.exec("CREATE SEQUENCE instruction_card_position AS bigint");
+    const contextMigration = await Bun.file(
+      new URL("../drizzle/0001_sample_context.sql", import.meta.url),
+    ).text();
+    await generated.exec(
+      contextMigration.split("--> statement-breakpoint")[0]!,
+    );
     await generated.exec(statements.join("\n"));
     const actual = await schemaCatalog(local.pg),
       expected = await schemaCatalog(generated);
@@ -306,11 +312,42 @@ test("the runtime has only current grants, its guards hold, and later tables inh
         sample: {
           report: "email",
           new_kind: "follow-up",
-          context: "runtime context",
+          context: { version: 1, summary: "runtime context" },
           text: "Runtime sample body.",
         },
       });
       expect(sample.status).toBe("saved");
+      const activeSample = (await store.readDocuments()).reports.find(
+        (r) => r.id === "email",
+      )!.samples[0]!;
+      const corrected = await store.saveMemo({
+        text: "Correct fictional runtime context.",
+        expected_version: sample.version!,
+        request_id: crypto.randomUUID(),
+        sample_context: {
+          report: "email",
+          sample_id: activeSample.id,
+          context: {
+            version: 1,
+            summary: "Corrected runtime context.",
+            purposes: ["request_review"],
+          },
+        },
+      });
+      expect(corrected.status).toBe("saved");
+      expect(
+        await store.saveMemo({
+          text: "Retire a fictional runtime sample.",
+          expected_version: corrected.version!,
+          request_id: crypto.randomUUID(),
+          retire_samples: [activeSample.id],
+        }),
+      ).toMatchObject({ status: "saved" });
+      await expect(
+        pg.query(
+          "UPDATE samples SET context=context || '{\"medium\":\"chat\"}'::jsonb,context_revision=context_revision+1 WHERE user_id='runtime'",
+        ),
+      ).rejects.toThrow("sample_is_append_only");
       expect((await store.getTpsReport()).text).toContain("Be concise.");
       // Owner-only statements are refused.
       for (const statement of [
@@ -364,5 +401,137 @@ test("the runtime has only current grants, its guards hold, and later tables inh
     }
   } finally {
     await local.dispose();
+  }
+});
+
+test("sample context upgrade preserves baseline writing and labels; guarded rollback restores it or refuses new metadata", async () => {
+  const folder = new URL("../drizzle/", import.meta.url).pathname;
+  const pg = new PGlite();
+  try {
+    await pg.exec(
+      "CREATE SCHEMA drizzle; CREATE TABLE drizzle.__drizzle_migrations(id serial PRIMARY KEY, hash text NOT NULL, created_at bigint)",
+    );
+    await pg.exec(await Bun.file(folder + "0000_baseline.sql").text());
+    await pg.exec(
+      "INSERT INTO drizzle.__drizzle_migrations(hash,created_at) VALUES ('fixture-baseline',1793815543500)",
+    );
+    await seedUsers(pg, "upgrade-fixture");
+    await pg.exec(`INSERT INTO sample_kinds(user_id,id,report,label) VALUES ('upgrade-fixture','k','chat','note');
+      INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,audience,purpose,register) VALUES ('upgrade-fixture','a','chat','k','Original summary.','  Original body.\r\n\n😀  ','{}','boss','follow up','casual');
+      INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,retired_at,retire_reason) VALUES ('upgrade-fixture','r','chat','k','Retired summary.','Retired body.','{}',now(),'removed');`);
+    const beforeSchema = await schemaCatalog(pg);
+    const before = (await pg.query("SELECT * FROM samples ORDER BY id")).rows;
+    const down = await Bun.file(
+      new URL("../scripts/sample-context-rollback.sql", import.meta.url),
+    ).text();
+    await migrate(drizzle(pg), { migrationsFolder: folder });
+    expect(
+      (
+        await pg.query(
+          "SELECT created_at FROM drizzle.__drizzle_migrations ORDER BY created_at",
+        )
+      ).rows,
+    ).toEqual([{ created_at: 1793815543500 }, { created_at: 1793901943500 }]);
+    expect(
+      (
+        await pg.query(
+          "SELECT id,body,context,context_revision FROM samples ORDER BY id",
+        )
+      ).rows,
+    ).toMatchObject([
+      {
+        id: "a",
+        body: "  Original body.\r\n\n😀  ",
+        context: {
+          version: 1,
+          summary: "Original summary.",
+          audience: { relationship: "boss" },
+          purposes: ["follow up"],
+          register: "casual",
+        },
+        context_revision: 1,
+      },
+      {
+        id: "r",
+        context: { version: 1, summary: "Retired summary." },
+        context_revision: 1,
+      },
+    ]);
+    await expect(
+      pg.query("UPDATE samples SET context_revision=2 WHERE id='r'"),
+    ).rejects.toThrow("sample_is_append_only");
+    await expect(
+      pg.query(
+        "UPDATE samples SET context=context || '{\"medium\":\"slack\"}'::jsonb WHERE id='a'",
+      ),
+    ).rejects.toThrow("sample_is_append_only");
+    // Identity-only lineage permits later reclassification, but insertion must
+    // still replace a sample of the same kind, including for direct SQL writers.
+    await pg.exec(
+      "INSERT INTO sample_kinds(user_id,id,report,label) VALUES ('upgrade-fixture','k2','chat','expert request')",
+    );
+    await expect(
+      pg.query(`INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,replaces_id)
+      VALUES ('upgrade-fixture','bad-link','chat','k2','{"version":1,"summary":"A fictional replacement."}','Replacement.','{}','a')`),
+    ).rejects.toThrow("sample_replacement_kind");
+    for (const context of [
+      { version: 1, summary: "A note.", unknown: "value" },
+      { version: 1, summary: "A note.", purposes: ["ask", "ask"] },
+      {
+        version: 1,
+        summary: "A note.",
+        scope: { unit: "whole", role: "closing" },
+      },
+      { version: 1, summary: "A note.", audience: { role: "expert\nreader" } },
+    ])
+      await expect(
+        pg.query(
+          "INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json) VALUES ('upgrade-fixture','bad-context','chat','k',$1::jsonb,'A note.','{}')",
+          [JSON.stringify(context)],
+        ),
+      ).rejects.toThrow("samples_context");
+    await pg.exec(down);
+    expect((await pg.query("SELECT * FROM samples ORDER BY id")).rows).toEqual(
+      before,
+    );
+    expect(await schemaCatalog(pg)).toEqual(beforeSchema);
+    expect(
+      (
+        await pg.query(
+          "SELECT hash,created_at FROM drizzle.__drizzle_migrations",
+        )
+      ).rows,
+    ).toEqual([{ hash: "fixture-baseline", created_at: 1793815543500 }]);
+    await migrate(drizzle(pg), { migrationsFolder: folder });
+    // Isolate refusal reasons so one unrepresentable row cannot mask another.
+    const rollbackReady = await pg.dumpDataDir("none");
+    for (const mutation of [
+      `INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json)
+        VALUES ('upgrade-fixture','new-value','chat','k','{"version":1,"summary":"New purpose.","purposes":["request_review"]}','A fictional review request.','{}')`,
+      `UPDATE samples SET context=context || '{"medium":"slack"}'::jsonb,context_revision=2 WHERE id='a'`,
+      `INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,replaces_id)
+        VALUES ('upgrade-fixture','child','chat','k','{"version":1,"summary":"Replacement summary."}','Replacement body.','{}','a');
+        UPDATE samples SET kind_id='k2',context_revision=2 WHERE id='child'`,
+    ]) {
+      const changed = await PGlite.create({ loadDataDir: rollbackReady });
+      try {
+        await changed.exec(mutation);
+        const upgraded = await schemaCatalog(changed);
+        const rows = (await changed.query("SELECT * FROM samples ORDER BY id"))
+          .rows;
+        await expect(changed.exec(down)).rejects.toThrow(
+          "sample_context_rollback_would_lose_metadata",
+        );
+        await changed.exec("ROLLBACK");
+        expect(await schemaCatalog(changed)).toEqual(upgraded);
+        expect(
+          (await changed.query("SELECT * FROM samples ORDER BY id")).rows,
+        ).toEqual(rows);
+      } finally {
+        await changed.close();
+      }
+    }
+  } finally {
+    await pg.close();
   }
 });

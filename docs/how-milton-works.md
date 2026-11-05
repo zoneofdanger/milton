@@ -81,13 +81,11 @@ Files: `server/src/store/tools.ts`, `server/src/mcp.ts`.
 - `get_cover_sheet` returns the cover rules, version, report index, and `is_empty`, plus
   the optional sample-first setup script while the whole account has no rules or samples.
 - `get_cover_sheet` takes no arguments and refuses any argument it is sent.
-- `get_report` returns one report's text, sample list, and version, plus setup while that
-  report has no rules or samples.
+- `get_report` returns one report's text, sample list, version and a personal `kinds` index (`{kind_id, kind}`, ascending ID) from every active sample in that report before the eight-sample selection, independent of intent, plus setup while the report has no rules or samples.
 - `doc` is accepted as an alias for `document`.
 - `list_reports` returns all five reports, with a one-line setup hint instead of the full
   script, only for reports with no rules or samples.
-- `create_memo` saves rules, edits, moves, samples, and sample removals together or not at
-  all.
+- `create_memo` saves rules, edits, moves and sample changes together or not at all; context correction cannot combine with sample insertion or retirement.
 - Replies add the daily update balance if it can be read within 250 ms.
 - Replies also add a trial notice if one is due, and neither extra can fail the call.
 - Failures return a code and message, and unknown failures say no save outcome is
@@ -112,11 +110,10 @@ Files: `server/src/store/reports.ts`, `server/src/store/compiled.ts`.
 - Reports are fixed in code: email, chat, post, document, and speech.
 - Cards print as bullets in insertion order, and an older stored `- ` is not doubled.
 - A report is its heading, "Applies when…", selected samples as quotes, and then rules.
-- `get_report` takes a required intent (situation, optional audience and purpose) and
-  serves the eight samples ranked in one SQL statement: label overlap with the intent,
-  then `ts_rank` of the situation (any of its words) over the stored `search` vector of
-  context and body, then newest, then id (0033). Without an intent (`list_reports`, the
-  web page) a report serves its newest eight.
+- `get_report` requires intent (situation, optional personal `kind_id` and context dimensions); invalid or foreign kinds are refused without creating one.
+- One snapshot computes full-text rank; deterministic selection prefers requested kind, purpose overlap count, exact dimension match count, situation rank over summary/body, newest, then ascending ID, filling up to eight with broader examples and reporting exact match signals.
+- Unknown scope stays unknown; excerpts do not establish whole-work structure, and report text, app and complete export show approved summary and dimensions.
+- Without intent (`list_reports`, the web page), a report serves its newest eight.
 - The cover sheet prints a note explaining `Baseline:` whenever any active rule has that
   prefix.
 - `TPS.md` is the cover sheet plus every non-empty report, with all its active approved
@@ -124,7 +121,7 @@ Files: `server/src/store/reports.ts`, `server/src/store/compiled.ts`.
   replaced samples stay excluded.
 - `is_empty` means no rules and no samples anywhere.
 - The version is a fingerprint of what any read can serve: a hash of the user, the cover
-  sheet, and each report's text (newest eight) with every active sample's ID and kind, so
+  sheet, and each report's text (newest eight) with every active sample's ID, kind and context revision, so
   it is the same for every intent. The same cards and samples
   always give the same version, and nothing assembled is stored.
 - A client holding a version from before fingerprints (a revision hash) conflicts once
@@ -183,12 +180,13 @@ not at all.
 - A new rule's description is its first non-blank line, cut to its byte cap, and
   descriptions are never printed.
 - Omitting a rule never removes it, and a no-op save returns `unchanged`.
-- Identical sample text for a kind files nothing.
+- Identical sample text for a kind files nothing; reclassification into a kind with identical active text refuses `sample_conflict` without changing rules, samples, context or version.
 - Kinds match by label, ignoring case.
 - A `kind_id` must name a kind in the same report.
-- A sample's optional `audience`, `purpose` and `register` must come from their fixed
-  lists, or the save is refused as `invalid_input`; they are stored as sent (0033).
-- Replacing a sample requires an active sample of the same kind.
+- Each sample requires context `version: 1` and a useful one-line summary; optional purposes, medium, audience, interaction, whole/excerpt scope, language and register use fixed keys and bounded open vocabulary, leaving unknowns absent.
+- `sample_context` completely replaces approved context and optionally reclassifies one active sample within its report; omitted optional fields clear, while body, ID, date and lineage stay unchanged.
+- A distinct context/classification correction increments its own revision and fences all saves even outside the served eight; an identical replacement is unchanged and request retries replay deterministically.
+- Replacing a sample requires an active sample of the same kind at save time; later reclassification preserves tenant/sample lineage.
 - Each sample removal must name an active sample, listed once.
 - Every approved sample stays until the person replaces or removes it; a report read
   serves the eight that best fit its intent. `samples_retired` reports what `replaces` and `retire_samples`
@@ -214,10 +212,10 @@ Files: `server/src/store/setup.ts`.
 - The shared setup prompt requests a few sent-message candidates through existing assistant access, with pasted examples as fallback; it allows only the person's own writing and excludes automated, forwarded and third-party text even on populated accounts.
 - Automated, forwarded and third-party text are excluded; a sent item is not assumed to represent the person's voice.
 - Proposed samples replace private details with placeholders before exact retention approval; excerpts are explicit and approved text is never silently changed.
-- Each approved sample uses an existing kind or concise new kind, minimal non-private context, supported labels, the version fence, idempotency and readback.
+- Every sample save shows exact text and proposed useful non-private context for one retention approval; unchanged approved metadata needs no second approval, and the save uses an existing or concise new personal kind, version fence, idempotency and readback.
 - Setup consent authorizes conversation, not inbox access, account changes, transcript import or saving unseen text.
 - Whole-account first setup asks for emails or DMs and the next email or DM; emails file under email, and DMs, texts or Slack messages under chat. Other report scripts keep examples and tasks matching their report; skipping examples never blocks writing or makes a voice claim.
-- Approval to send is not retention approval; one yes to saving the exact displayed text suffices, and changed text or redaction requires renewed approval.
+- Approval to send or praise is not retention approval; one yes covers the displayed text and context, and changed text or context, including redaction, requires renewed approval.
 - Rules remain available on request; a sample never implies a standing rule or turns its facts into preferences.
 - The historical `setupCatalog` remains canonical for Baseline validation; setup no longer generates Baseline rules, and a rejected Baseline points to the closest rule and report in the same error.
 - A standing instruction is offered separately and changed only with separate consent; a successful read verifies the connection, not future compliance.
@@ -377,7 +375,8 @@ Files: `server/drizzle/`, `server/src/store/schema.ts`, `server/src/store/databa
 
 - Card versions must be sequential, and they cannot be changed or deleted while the card
   exists.
-- Samples and kinds are append-only, and a sample can only be retired.
+- Kind identities and sample writing are immutable; active sample context/classification changes require a sequential context revision, and retirement is final.
+- Migration `0001_sample_context` preserves exact bodies, summaries and old labels in one JSONB object; its owner-only offline rollback refuses revised/unrepresentable context or incompatible lineage, and deployment requires the hosting runbook's closed-ingress coordinated cutover.
 - A receipt is written once with its outcome and cannot change.
 - Audit rows are immutable and must reference real card versions.
 - History has no size cap. History rows never shrink short of account deletion, so the

@@ -360,7 +360,7 @@ test("tenants with overlapping card, sample and request IDs never read, edit or 
       sample: {
         report: "email" as const,
         new_kind: "follow-up",
-        context: "alpha context",
+        context: { version: 1 as const, summary: "alpha context" },
         text: "Alpha sample body.",
       },
     };
@@ -386,7 +386,7 @@ test("tenants with overlapping card, sample and request IDs never read, edit or 
     );
     await local.db.query(
       sql`INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json)
-      VALUES (${beta.id},${sample!.id},'email',${sample!.kind_id},'beta context','Beta sample body.','{}')`,
+      VALUES (${beta.id},${sample!.id},'email',${sample!.kind_id},'{"version":1,"summary":"beta context"}','Beta sample body.','{}')`,
     );
     // (c) Cover sheet, report and list show only the caller's rules and samples.
     const alphaOwn = [
@@ -439,7 +439,7 @@ test("tenants with overlapping card, sample and request IDs never read, edit or 
       sample: {
         report: "email" as const,
         kind_id: sample!.kind_id,
-        context: "beta reuse",
+        context: { version: 1 as const, summary: "beta reuse" },
         text: "Beta reuse body.",
       },
     };
@@ -706,7 +706,7 @@ test("closing an account refuses its reads, saves and replays, fences a pending 
       sample: {
         report: "email" as const,
         new_kind: "follow-up",
-        context: "alpha context",
+        context: { version: 1 as const, summary: "alpha context" },
         text: "Alpha sample body.",
       },
     };
@@ -860,7 +860,7 @@ test("account deletion removes every tenant row, keeps refusals, waits for an in
                 ? { kind_id: prior[0]!.kind_id }
                 : { new_kind: "follow-up" }),
               ...(text === "Three" ? { replaces: prior[1]!.id } : {}),
-              context: "Fixture context",
+              context: { version: 1 as const, summary: "Fixture context" },
               text,
             },
           })

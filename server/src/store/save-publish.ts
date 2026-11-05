@@ -26,6 +26,7 @@ export async function publishSave(
       ...(input.exact_edits ? { exact_edits: input.exact_edits } : {}),
       ...(input.moves ? { moves: input.moves } : {}),
       ...(input.sample ? { sample: input.sample } : {}),
+      ...(input.sample_context ? { sample_context: input.sample_context } : {}),
       ...(input.retire_samples ? { retire_samples: input.retire_samples } : {}),
     },
     actor: JSON.parse(attribution),

@@ -19,8 +19,8 @@ decommission on 2026-11-01. Hosting rollback now uses Cloud Run revisions.
 
 Project `milton-510506`, Cloud Run/Artifact Registry region `us-east4`. Service manifests in this directory pin an immutable image and
 secret versions. They contain configuration and secret references, never values.
-The manifests pin what is serving now: app `milton-app-ui-99b7209`
-(`sha256:789939cf…`, env 3, key 1) and MCP `milton-mcp-ui-99b7209`
+The manifests pin what is serving now: app `milton-app-tps-c6a59b1`
+(`sha256:5ac952e1…`, env 3, key 1) and MCP `milton-mcp-ui-99b7209`
 (`sha256:789939cf…`, env 3, key 1), both connecting as `milton_app`; see the current
 release below. There is no worker service or scheduler job. There is no memo-update
 allowance; the daily call cap bounds saves. Existing positive account safeguards remain
@@ -183,13 +183,59 @@ references. Inspect revision readiness before selecting a recorded revision:
 gcloud run revisions list --service=milton-app --project=milton-510506 --region=us-east4
 ```
 
-Now serving: MCP `milton-mcp-ui-99b7209` (selected 2026-11-04 19:47:42Z)
+Now serving: app `milton-app-tps-c6a59b1` (selected 2026-11-04 23:58:58Z),
+from exact landed main commit `c6a59b11d8aaf4636e52e374a962d9be62d26241`, at 100%.
+MCP remains `milton-mcp-ui-99b7209` at 100%, from
+`99b720966443e3a3cde696be9f39360fc51e7b7e`; it was not redeployed.
+
+Current app release tps-c6a59b1: image index
+`sha256:5ac952e173f0e337211eecff605c470f63f8e2868742e96c792d455a10d5a35b`, Linux amd64
+`sha256:3485f0f3523808693dc7460f1b9c1a3158b3aa74012c244616c645ca507160d5`.
+A clean archive of that exact commit passed frozen Bun install, types,
+103 tests/2,170 assertions and formatting, all exit 0. The runtime is Node 26.13.0,
+uid 1000, with a self-contained bundle, no env/key/pem/dev.vars/private artifacts,
+and both roles refusing empty configuration. The accepted four-path TPS patch is
+byte-identical to the reviewed source. Fictional evidence covers full-width sample
+descriptions above metadata, native keyboard disclosures, the counted report index,
+semantic headings and Filed by. No schema, auth, MCP, download or save code changed;
+this release ran no migration, writer drain, snapshot or database administration.
+
+Only the app image and expected revision metadata changed. The new revision was
+staged without traffic, verified Ready with the expected imported amd64 digest,
+then selected by name. Ingress, IAM, service account, resources, startup settings
+and numeric references remain unchanged: app `milton-app-env:3` /
+`milton-app-key:1`, MCP `milton-mcp-env:3` / `milton-mcp-key:1`.
+Canonical trusted TLS 1.2/1.3 and 1.0/1.1 refusal, health, discovery,
+unauthenticated 401, CORS, HTTP 308, direct-host refusal, signed-out restrictions,
+invalid Stripe-signature refusal and the mandatory forms probe passed, exit 0.
+Existing authenticated MCP cover/email reads succeeded before and after selection,
+with unchanged versions, five report entries and two email samples; only version,
+shape and count metadata was retained. No credentials or sessions changed.
+Rollout checks completed at 2026-11-04 23:59:10Z. Observation continued through
+2026-11-05 00:04:20Z, more than five minutes later. Repeated canonical health probes stayed
+200; filtered logs showed no runtime ERROR, 5xx or unexpected auth/schema/permission/lock
+failures, and no administrative errors. Available request metrics through
+2026-11-05T00:03:00Z showed no 5xx. The app predecessor remains Ready and its
+image is retained; MCP spec, metadata generation, traffic and IAM are unchanged.
+Designer independently confirmed that the production stylesheet exactly matches the
+accepted frozen CSS. Live signed-in TPS layout and keyboard verification remain
+unverified because the existing browser window was unavailable; fictional browser
+evidence is not a claim of live account behavior.
+
+Immediate app rollback: preserve `milton-app-ui-99b7209`, image index
+`sha256:789939cfbca106b00fb9288a149ef1e12b4e49da87c77e4bb9d1ac8aa0d5f842`, amd64
+`sha256:078a2e85ce824d598352803c2f18007ab988ce82b6079128cf44341a4e17b559`, env 3/key 1.
+The predecessor is schema-compatible; recheck readiness before selecting it.
+MCP retains its clean-c27869a rollback described below. Preserve older revisions,
+images and numeric secret versions too. No production rollback ran.
+
+Previous joint release: MCP `milton-mcp-ui-99b7209` (selected 2026-11-04 19:47:42Z)
 and app `milton-app-ui-99b7209` (19:48:59Z), each pinned by revision at 100%.
 Both use the exact landed main commit `99b720966443e3a3cde696be9f39360fc51e7b7e`.
 Ingress is `internal-and-cloud-load-balancing`; IAM, limits, startup CPU boost and
 numeric secrets are unchanged (app/MCP env 3, keys 1). There is no worker service.
 
-Current release ui-99b7209: image index
+Previous joint release ui-99b7209 (still current for MCP): image index
 `sha256:789939cfbca106b00fb9288a149ef1e12b4e49da87c77e4bb9d1ac8aa0d5f842`, Linux amd64
 `sha256:078a2e85ce824d598352803c2f18007ab988ce82b6079128cf44341a4e17b559` (uid 1000,
 Node 26.13.0; no env/key/pem/dev.vars/private artifacts; both roles refuse empty
@@ -222,7 +268,7 @@ errors. Available request metrics through 19:53Z had no 5xx. The immediate prede
 and their image remain
 available. No real-account saves, sign-ins or provider/billing actions ran.
 
-Immediate rollback: preserve `milton-mcp-clean-c27869a` and
+Rollback for the previous joint release (still current for MCP): preserve `milton-mcp-clean-c27869a` and
 `milton-app-clean-c27869a` with image index
 `sha256:32df4631750a32c35f52c263a10c61d6bb45ea64d807ebbe98771b499471ad7d`, amd64
 `sha256:22acf1609b35b8c1aff20fbb0b705a1a96b03cce4a002c059a4e49d00919e712`, env 3/key 1.

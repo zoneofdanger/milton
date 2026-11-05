@@ -1,8 +1,5 @@
-/** First setup as data: the paste-first quiz, one block per report. The served
- * script text and the catalog of baseline rules are both rendered from these
- * blocks, so they cannot diverge. Snippets and rules are copied from the
- * approved proposal; "⏎" marks a line break and " • " a bullet on its own line,
- * as there. Every rule is filed as "Baseline: " + its text here. */
+/** The historical Baseline catalog remains valid for existing approved rules.
+ * The default served setup below starts with samples, not the retired quiz. */
 import {
   BASELINE,
   REPORTS,
@@ -591,7 +588,7 @@ const key = (report: Filing, text: string) => JSON.stringify([report, text]);
 const baselines = new Map(
   setupBlocks.flatMap(blockRules).map((b) => [key(b.report, b.text), b]),
 );
-/** Every baseline rule the setup text can file, each once per report. */
+/** Every canonical historical baseline, each once per report. */
 export const setupCatalog: readonly Baseline[] = [...baselines.values()];
 /** A rule passes unless its text starts with "Baseline: " (after one leading
  * "- ") without being a catalog entry byte for byte, for that report. */
@@ -612,142 +609,78 @@ export function closestBaseline(text: string) {
   return best;
 }
 
-const title = (report: ReportId) => REPORTS.find((r) => r.id === report)!.title;
-const quoted = (snippet: string, lineBreak: string) =>
-  snippet
-    .split(/ ?⏎ ?/)
-    .map((line) => line.replaceAll(" • ", "\n• "))
-    .join(lineBreak)
-    .split("\n")
-    .map((line) => (line ? "> " + line : ">"))
-    .join("\n");
-const letter = (i: number) => "(" + String.fromCharCode(97 + i) + ")";
-const filed = (report: Filing, rule: string) =>
-  `[${report}] ${BASELINE}${rule}`;
+/** Shared by the public setup widget and the app's empty state. The served
+ * script holds the detailed flow, so clients do not carry separate quizzes. */
+export const SETUP_PROMPT =
+  "Help me connect Milton using https://www.meetmilton.com/setup, then read what I have on file. Help me choose a few messages that sound like me. If you already have access to my sent messages, find a few candidates; otherwise I'll paste them. Use only my own writing; skip automated, forwarded and third-party text. Show me the exact examples with private details removed, and save only the ones I approve. Preserve what's already on file. Then help me write my next email or DM.";
 
-function question(q: Pick | Tells, lineBreak: string) {
-  if (isTells(q))
-    return [
-      `${q.id}. ${q.title}`,
-      `Ask: "${q.ask}"`,
-      "Show exactly:",
-      ...q.tells.map((t) => "- " + t.rule),
-      "Files on yes, one rule per line; the person can strike any:",
-      ...q.tells.map((t) => filed(t.report, t.rule)),
-    ].join("\n");
-  const confirmable = q.dims.filter((d) => d.confirm).map((d) => d.name);
-  return [
-    `${q.id}. ${q.title}`,
-    `Ask: "${q.ask}"`,
-    "Show exactly:",
-    ...q.options.map((o, i) => letter(i) + "\n" + quoted(o.snippet, lineBreak)),
-    `Files${confirmable.length ? ` (a paste can confirm: ${confirmable.join(", ")})` : ""}:`,
-    ...q.options.map(
-      (o, i) =>
-        letter(i) +
-        " " +
-        o.rules.map((r, at) => filed(q.dims[at]!.report, r)).join(" | "),
-    ),
-  ].join("\n");
-}
+const setupWriting = {
+  email: {
+    examples: "emails",
+    task: "email",
+    text: "Hi [name],\n\nFriday works. Thanks!",
+  },
+  chat: {
+    examples: "DMs or texts",
+    task: "DM",
+    text: "Friday works. Thanks!",
+  },
+  post: {
+    examples: "posts",
+    task: "post",
+    text: "A small update: the guide is ready. Thanks for your feedback.",
+  },
+  document: {
+    examples: "documents or excerpts",
+    task: "document",
+    text: "The guide is ready for review. Next, we will check the examples.",
+  },
+  speech: {
+    examples: "speeches or excerpts",
+    task: "speech",
+    text: "Thanks for joining us today. Let’s start with what changed and what comes next.",
+  },
+};
 
-/** The cover-sheet questions, kept in email's block: the picks that file
- * only to cover and the cover tells. */
-const coverQuestions = () =>
-  setupBlocks[0]!.questions
-    .map((q) =>
-      isTells(q)
-        ? { ...q, tells: q.tells.filter((t) => t.report === "cover") }
-        : q,
-    )
-    .filter((q) =>
-      isTells(q)
-        ? q.tells.length > 0
-        : q.dims.every((d) => d.report === "cover"),
-    );
-/** The last step of the first block: one line for the person's standing
- * instructions, so assistants read Milton without being asked. Saves nothing. */
-const STICK = [
-  "7. Before the next report or stopping, make it stick: offer to keep this line in your own standing instructions, so you read Milton without being asked:",
-  "Show exactly: Before writing anything for me, call Milton's get_cover_sheet, then get_report for the matching report.",
-  "Where you can edit a startup instructions file, add it there after the person approves: ~/.claude/CLAUDE.md for Claude Code, ~/.codex/AGENTS.md for Codex, User Rules in Cursor's settings. Where you have custom instructions, project instructions or memory, keep it there instead. If you have none of these, show the line and say where the person can paste it. Then, on a pick, run that report's setup; otherwise say setup is complete.",
-].join("\n");
-/** The setup script for one report's block. `first` (no rules anywhere yet)
- * adds the opening lines; `cover` (the cover sheet has no rules) attaches the
- * cover-sheet questions, inline in email's block and after any other's;
- * `next` names the reports still
- * without rules to offer afterwards. Only a `first` block ends with STICK. */
-function setupText(
-  report: ReportId,
-  { first, cover, next }: { first: boolean; cover: boolean; next: ReportId[] },
-) {
-  const block = setupBlocks.find((b) => b.report === report)!;
-  const name = title(report);
-  // Without the cover-sheet questions, a block keeps only its own rules.
-  const own = block.questions
-    .map((q) =>
-      isTells(q)
-        ? { ...q, tells: q.tells.filter((t) => t.report !== "cover") }
-        : q,
-    )
-    .filter((q) =>
-      isTells(q)
-        ? q.tells.length > 0
-        : q.dims.some((d) => d.report !== "cover"),
-    );
-  const questions: [Pick | Tells, string][] = !cover
-    ? own.map((q) => [q, block.lineBreak])
-    : report === "email"
-      ? block.questions.map((q) => [q, block.lineBreak])
-      : [
-          ...own.map((q): [Pick | Tells, string] => [q, block.lineBreak]),
-          ...coverQuestions().map((q): [Pick | Tells, string] => [q, "\n"]),
-        ];
-  const groups = cover ? `"All writing" (cover) and "${name}"` : `"${name}"`;
-  const start =
-    report === "email"
-      ? "First, paste one email you sent and were happy with, exactly as sent, or say skip. I'll show you what would be stored before anything is saved. Then a few short choices, two to four pieces of writing each: pick the one that sounds like you, or say neither. Each becomes one rule, marked as a baseline until your real writing replaces it. About four minutes."
-      : `Paste one ${block.piece} you sent and were happy with, exactly as sent, or say skip. I'll show you what would be stored before anything is saved.`;
-  const opening = first
-    ? `First setup: ${name}. Run it as written before any other writing. Before anything else, tell the person: "Milton keeps the writing you approve, word for word. It never rewrites a rule or a sample, and it never reads your inbox." Then say: "${start}"`
-    : `Setup for ${name}, on request only: run it when the person asks to set up ${report}, or picks ${name} at the end of another block. Do not offer it otherwise. Run it as written before any other writing, starting with: "${start}"`;
-  const how = [
-    "Run it in chat, one step at a time. Never reword, shorten or fill in a snippet, a rule or a skipped answer.",
-    `1. The paste. Show it back exactly as pasted, with a proposed kind of one or two words and a one-line context, and ask to keep it as a sample, unchanged. On yes, file it right away with its own create_memo: text "Setup sample", sample { report: "${report}", new_kind: a label of one or two words such as "${block.kind}", context: one line on the situation, text: the paste exactly as pasted }, expected_version from this read and a new request_id. Milton keeps every sample and serves the eight that best fit each task. Names stay unless the person asks for placeholders. Skipping the paste gives every pick.`,
-    `2. Confirmations. For each habit a Files line says a paste can confirm, if the paste plainly shows it and one listed option matches, ask one line instead of the pick${report === "email" ? `, such as "Your email opens with 'Hi [first name],'. Is that usual?"` : `: name the habit you saw in the ${block.piece} and ask whether it is usual.`} Yes files that option's rule for the habit; no, or "sometimes", asks the pick, which then files only the rules not already filed.`,
-    `3. The questions, in order, one at a time. Say the Ask line, then show the Show exactly block as written, every option with its letter. A letter files exactly the rules on its Files line, each to the report in brackets. Mixed answers ("a, but with b's sign-off") are fine: read back the exact rules chosen. "Neither" files nothing. An answer in the person's own words ("it depends", "Cheers,") is read back and filed in their words, without "${BASELINE}". The block stops at its end, on "stop", or after two consecutive skips.`,
-    `4. Approval. Show the complete list of rules grouped under ${groups}. Wait for approval; the person can strike or change any line.`,
-    `5. Save. Call create_memo once: text "Setup baseline", rules [{ report, text }] with one entry per approved rule, report from its brackets, text copied byte for byte from its Files line (or the person's own words exactly as approved), expected_version from the sample save's result (from this read when no sample was filed) and a new request_id. Milton refuses any rule starting "${BASELINE}" that is not a Files rule byte for byte.`,
-    `6. End. Say, with the counts actually filed, the sample from step 1 included: "Filed to ${name}: [n] sample and [n] baseline rules${cover ? ", plus [n] on your cover sheet" : ""}. Read them back any time, here or on your Milton page. To change one, tell me or any connected assistant ("change the sign-off rule to Best"); it is replaced word for word. Samples outrank baselines.${next.length ? ` Next: ${next.map(title).join(", ")}, or stop here?` : ""}"${next.length ? " On a pick, call get_report for that report and run its setup." : ""}`,
-    // Once per account: the first block ends by offering the standing line.
-    ...(first ? [STICK] : []),
-  ];
+/** Optional help only for a report with no rules or approved samples. */
+export function reportSetup(documents: Documents, report: ReportId) {
+  if (!documents.reports.find((r) => r.id === report)!.is_empty) return;
+  const title = REPORTS.find((r) => r.id === report)!.title;
+  const { examples, task, text } = setupWriting[report];
+  const firstEmail = documents.is_empty && report === "email";
+  const opening = documents.is_empty
+    ? "First setup: offer setup once; a request to set up Milton accepts the conversation. Do not repeat a declined offer and never block an explicit writing task."
+    : `Optional setup for ${title}, on request only. Existing guidance is usable, including samples with zero rules; never block an explicit writing task.`;
   return [
     opening,
-    how.join("\n"),
-    ...questions.map(([q, lineBreak]) => question(q, lineBreak)),
+    "Setup permission authorizes this conversation only, not mailbox access, account changes, transcript import or saving unseen text. Milton keeps approved writing word for word and does not read an inbox. Do not connect an inbox, request Gmail permissions, bulk import or save unseen text.",
+    "1. Read the current cover sheet and relevant reports; preserve all existing rules and samples. If relevant examples exist, use them and offer adding examples only when useful. Do not rerun setup because rules are absent. Rules remain supported when explicitly requested: show the complete proposed list and save only exact approved wording; do not infer standing rules from one example or turn sample facts into preferences.",
+    `2. Ask for a few ${firstEmail ? "emails or DMs" : examples} the person likes, or let them skip. If the person asks you to find candidates and you already have authorized access, use only that access; otherwise accept pasted examples. Never promise access. Exclude automated, forwarded and third-party text. Do not assume a sent item represents the person's voice; let the person choose what sounds like them.`,
+    `3. Show each proposed sample with private details replaced by placeholders; preserve the wording and style otherwise, make excerpts explicit, and ask for exact retention approval of the displayed text. A yes to saving that exact displayed text is sufficient. Do not silently sanitize after approval; ask again only if the proposed text changes, including redaction.${firstEmail ? " File emails under email, and DMs, texts or Slack messages under chat." : ""} Save each approved sample separately with create_memo: use a valid kind_id from the relevant report, or a concise new_kind only when none fits, minimal non-private context and supported labels. Use the cover sheet version as expected_version and a new request_id per save; retry an uncertain outcome with the same request_id and exact input. Reread after saved, unchanged or conflict and compare exact text before confirming retention. Resolve a changed version before saving without re-asking about unchanged text; never invent approval.`,
+    "Sample save example (fictional, replace with the approved sample):\n```json\n" +
+      JSON.stringify(
+        {
+          text: "Keep the approved setup sample.",
+          request_id: "00000000-0000-4000-8000-000000000001",
+          expected_version: "a".repeat(64),
+          sample: {
+            report,
+            new_kind: `${task} example`,
+            context: `A fictional ${task}.`,
+            audience: "colleague",
+            purpose: "update",
+            register: "plain",
+            text,
+          },
+        },
+        null,
+        2,
+      ) +
+      "\n```\nThis illustrates the save shape, not permission to save this fictional text. Reuse kind_id instead of new_kind when a kind fits; never send both.",
+    `4. Ask what the next real ${firstEmail ? "email or DM" : task} should accomplish. Read the relevant report with that intent, then draft using its examples and the cover sheet. If examples are skipped, help with the real draft without claiming to know the voice. No need to fill all five reports or accumulate rules before drafting. After a draft is approved, show the exact text before the single offer to keep it as a sample; use the same approval rule above. Praise or permission to send is not retention permission.`,
+    "5. Offer the standing instruction separately: Before writing anything for me, call Milton's get_cover_sheet, then get_report for the matching report. Offer to add it where this assistant supports standing instructions, only after separate consent; otherwise show where the person can paste it. Verify an actual successful read before confirming the connection works. Setup completion does not guarantee the assistant follows the instruction.",
   ].join("\n\n");
 }
-
-/** Setup keys on rules, not samples: a report's block is served while that
- * report has no rules, with the cover-sheet questions while the cover sheet
- * has none. The cover sheet serves email's while no rules exist anywhere. */
-const ruleless = (documents: Documents, report: ReportId) =>
-  documents.reports.find((r) => r.id === report)!.rules.length === 0;
-export const noRules = (documents: Documents) =>
-  documents.cover_rules.length === 0 &&
-  documents.reports.every((r) => r.rules.length === 0);
-export function reportSetup(documents: Documents, report: ReportId) {
-  if (!ruleless(documents, report)) return;
-  return setupText(report, {
-    first: noRules(documents),
-    cover: documents.cover_rules.length === 0,
-    next: documents.reports
-      .filter((r) => r.rules.length === 0 && r.id !== report)
-      .map((r) => r.id),
-  });
-}
-/** list_reports carries this one line, not the block, for each report
- * without rules. */
+/** Keep list_reports compact; a report with guidance needs no setup hint. */
 export const setupHint = (report: ReportId) =>
-  `Setup available on request while this report has no rules: when the person asks to set up ${report}, call get_report ${report} and run its setup as written.`;
+  `Optional sample-first setup on request: call get_report for ${report} with intent. Never block an explicit writing task; rules are not required.`;

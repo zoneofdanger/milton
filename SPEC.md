@@ -60,9 +60,17 @@ non-blank line, trimmed and cut to the description cap, with no model. An entry 
 text prints like an active card in the same report, or an earlier entry in the same
 request, is skipped; a save that then changes nothing returns `unchanged` and charges
 nothing. `text` is the stated purpose: recorded with the accepted change, never stored
-as a rule. A rule stored starting with `Baseline: ` must match the first-setup
-catalog byte for byte, in the report it is served for (`baseline_unknown` otherwise); the setup script served on the
-cover sheet and on each report without rules is rendered from the same data. Corrections go through `exact_edits`; an edit whose `before` is a whole rule
+as a rule. A rule stored starting with `Baseline: ` must match the historical
+setup catalog byte for byte, in its canonical report (`baseline_unknown` otherwise).
+The default setup is now sample-first: empty accounts offer it once, and empty
+reports carry optional help. Rules or samples make guidance usable; no quiz or
+rule count gates drafting. The assistant preserves existing guidance, shows exact
+placeholder-safe samples, obtains explicit retention approval for each, saves and
+reads back, then helps draft the next real task matching the report; the entry
+prompt favors email or DM. One yes to saving the exact displayed text suffices;
+ask again only if that text changes, including redaction. Skipping examples does not
+block drafting. Setup does not authorize mailbox access, import, account changes
+or saving unseen text. A standing instruction is offered separately with consent. Corrections go through `exact_edits`; an edit whose `before` is a whole rule
 and whose `after` is empty retires it. All fields resolve against one locked snapshot
 and apply atomically. Anchors resolve uniquely within active card bodies, never
 against generated text; overlapping edits fail. The source/report fences, receipt and

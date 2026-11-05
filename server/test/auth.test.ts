@@ -1024,14 +1024,18 @@ test("signed-in email shows only in authenticated chrome; switch account signs o
     expect(assistants).toContain(
       `<pre class="setup-copy"><code>${resource}</code></pre>`,
     );
+    expect(assistants).toContain("save only the ones I approve");
     expect(assistants).toContain(
-      "It is empty, so run the setup it returns exactly as written",
+      "Use only my own writing; skip automated, forwarded and third-party text.",
+    );
+    expect(assistants).toContain(
+      "If you already have access to my sent messages, find a few candidates",
     );
     expect(assistants).toContain(
       'href="https://www.meetmilton.com/setup">Setup instructions for your assistant</a>',
     );
     expect(assistants).toContain(
-      "Follow the guide to connect Milton and set the instruction for future chats.",
+      "Follow the guide to connect Milton and optionally add a standing instruction.",
     );
     expect(report).not.toContain("https://mcp.meetmilton.com/mcp");
     expect(report).toContain('name="next" value="login"');
@@ -2133,7 +2137,7 @@ test("web shows only current TPS and rejects all retired history and mutation ro
   const fixture = await memoPageFixture();
   try {
     const empty = await (await fixture.send("/")).text();
-    expect(empty).toContain("No instructions on file.");
+    expect(empty).toContain("No writing samples on file yet.");
     expect(empty).toContain('href="/assistants#connect"');
     expect(
       (
@@ -2433,7 +2437,7 @@ test("report bullets require exact revision and complete text parity; optional l
   ])
     expect(html).toContain(`<dt>${label}:</dt><dd class="fill">${value}</dd>`);
   expect(html).toContain(
-    "To change your cover sheet, tell a connected assistant what to change.</p>",
+    "Give a connected assistant the facts for your next email or DM and ask it to use what’s on file. You can also approve a writing sample.</p>",
   );
   expect(html).not.toContain("Memo updates");
   expect(html).toContain(
@@ -2482,45 +2486,46 @@ test("report bullets require exact revision and complete text parity; optional l
     new TextEncoder().encode(report.text),
   );
   expect(lookups).toBe(0);
-  const titled = await memoPages(
-    new Request(appOrigin + "/tps-report"),
-    {
-      ...base,
-      readTpsReport: async () => ({
-        ...report,
-        text: "# Email\n\nApplies when fictional.\n\n- One.\n\n- Two\nlines.",
-      }),
-      readDocuments: (async () => ({
-        ...exact,
-        cover: "",
-        cover_rules: [],
-        reports: [
-          {
-            ...emptyReport("email", "Email"),
-            is_empty: false,
-            samples: [
-              {
-                id: "s",
-                report: "email",
-                kind_id: "k",
-                kind: "follow-up",
-                context: "after a call",
-                body: "Hi <there>,\n\nThanks.",
-                date: "2026-11-02",
-                audience: "client",
-                purpose: "follow up",
-                register: null,
-              },
-            ],
-            rules: ["- One.", "- Two\nlines."],
-          },
-          emptyReport("chat", "Chat"),
-        ],
-      })) as never,
-    },
-    () => "",
-  );
-  const titledPage = await titled.text();
+  const renderTitled = (rules = ["- One.", "- Two\nlines."]) =>
+    memoPages(
+      new Request(appOrigin + "/tps-report"),
+      {
+        ...base,
+        readTpsReport: async () => ({
+          ...report,
+          text: "# Email\n\nApplies when fictional.\n\n- One.\n\n- Two\nlines.",
+        }),
+        readDocuments: (async () => ({
+          ...exact,
+          cover: "",
+          cover_rules: [],
+          reports: [
+            {
+              ...emptyReport("email", "Email"),
+              is_empty: false,
+              samples: [
+                {
+                  id: "s",
+                  report: "email",
+                  kind_id: "k",
+                  kind: "follow-up",
+                  context: "after a call",
+                  body: "Hi <there>,\n\nThanks.",
+                  date: "2026-11-02",
+                  audience: "client",
+                  purpose: "follow up",
+                  register: null,
+                },
+              ],
+              rules,
+            },
+            emptyReport("chat", "Chat"),
+          ],
+        })) as never,
+      },
+      () => "",
+    );
+  const titledPage = await (await renderTitled()).text();
   const emailSection =
     titledPage.match(
       /<section class="form-section"><h2 id="report-email">Email<\/h2>([\s\S]*?)<\/section>/,
@@ -2549,11 +2554,15 @@ test("report bullets require exact revision and complete text parity; optional l
     expect(remaining).toContain(fragment);
     offset += remaining.indexOf(fragment) + fragment.length;
   }
-  // A report without rules says how to ask for its setup.
+  expect(titledPage).not.toContain("Not set up yet");
   expect(titledPage).toContain(
-    '<h2>Not set up yet</h2><p class="applies">Tell any connected assistant: set up my chat report.</p></section>',
+    "Other reports are available whenever you need them.",
   );
-  expect(titledPage).not.toContain("set up my email report");
+  const sampleOnly = await (await renderTitled([])).text();
+  expect(sampleOnly).toContain("1 sample · 0 rules");
+  expect(sampleOnly).toContain("Hi &lt;there&gt;,\n\nThanks.");
+  expect(sampleOnly).not.toContain("Not set up yet");
+  expect(sampleOnly).not.toContain("set up my email report");
 });
 
 test("the MCP host redirects browser paths to the app host unchanged", async () => {

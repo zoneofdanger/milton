@@ -177,12 +177,12 @@ its next call; the set of announced assistants is per process, in memory, and cl
 
 Exactly four tools are exposed:
 
-| Tool                                                     | Contract                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `get_cover_sheet()`                                      | Returns `{text, version, is_empty, reports}`: the rules true of all writing, the save fence, whether the whole account is empty, and the index of five reports with their situations; while no rules exist yet (samples do not count), `setup` carries the first-setup script. No model call, no write.                                                                                                                                                                                                                                       |
-| `get_report({report_id, intent})`                        | One of `email`, `chat`, `post`, `document` (`doc` accepted), `speech`, and a required `intent`: `{situation, audience?, purpose?}`. Returns `{report_id, text, version, is_empty, samples}`: heading, when line, the eight samples that best fit the intent, best first, then rules; see below for `samples`. Without a well-formed intent it refuses with `invalid_input`, saying what to send. While the report has no rules, `setup` carries that report's setup block, with the cover-sheet questions while the cover sheet has no rules. |
-| `list_reports()`                                         | All five reports as `{reports: [{report_id, text, is_empty, samples, setup?}], version}`, without the cover sheet, each with its newest eight samples; a report without rules has a one-line `setup` pointer to `get_report`.                                                                                                                                                                                                                                                                                                                 |
-| `create_memo({text, request_id, expected_version, ...})` | An exact save with at least one of `rules`, `exact_edits`, `moves`, `sample`, `retire_samples`; `text` states its purpose. UUID for the logical request and version from the cover sheet.                                                                                                                                                                                                                                                                                                                                                     |
+| Tool                                                     | Contract                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `get_cover_sheet()`                                      | Returns `{text, version, is_empty, reports}`: the rules true of all writing, the save fence, whether the whole account is empty, and the index of five reports with their situations; only while the whole account has no rules or samples, `setup` offers sample-first onboarding. No model call, no write.                                                                                                                                                                                                                                                                          |
+| `get_report({report_id, intent})`                        | One of `email`, `chat`, `post`, `document` (`doc` accepted), `speech`, and a required `intent`: `{situation, audience?, purpose?}`. Returns `{report_id, text, version, is_empty, samples}`: heading, when line, the eight samples that best fit the intent, best first, then rules; see below for `samples`. Without a well-formed intent it refuses with `invalid_input`, saying what to send. Only while the report has no rules or samples, `setup` carries optional sample-first help. Existing samples are usable with zero rules; setup never blocks an explicit writing task. |
+| `list_reports()`                                         | All five reports as `{reports: [{report_id, text, is_empty, samples, setup?}], version}`, without the cover sheet, each with its newest eight samples; a report without rules or samples has a one-line optional `setup` pointer to `get_report`.                                                                                                                                                                                                                                                                                                                                     |
+| `create_memo({text, request_id, expected_version, ...})` | An exact save with at least one of `rules`, `exact_edits`, `moves`, `sample`, `retire_samples`; `text` states its purpose. UUID for the logical request and version from the cover sheet.                                                                                                                                                                                                                                                                                                                                                                                             |
 
 `create_memo` returns `saved`, `unchanged`, `conflict`, or `failed`,
 with the request ID and relevant version/error.
@@ -276,21 +276,30 @@ it unchanged. A report read serves eight active samples (see "Sample labels and 
 date}`, plus each label it has, in served order;
 kind labels never appear in report text.
 
-The assistant offers first setup once when empty, uses available explicit
-instructions or asks questions, and shows the full draft for approval before
-saving. The setup script is text rendered from one data file (`src/store/setup.ts`)
-that also yields the baseline catalog: paste one piece first, confirm what it shows,
-then pick among exact snippets, each pick filing listed `Baseline: ` rules. While any
-active rule starts with `Baseline: `, the cover sheet text opens with one fixed,
-unstored line saying what the prefix means. Only the first run (no rules anywhere) is offered;
-later blocks run on request, and the memo page tells the person what to ask for each
-report without rules. Milton cannot inspect other assistants' memories. It stores instructions,
-not factual/project memory. The assistant applies the rules and samples to its drafts itself.
+The assistant offers sample-first setup once when the whole account is empty;
+other empty reports offer help only on request. The served script in
+`src/store/setup.ts` preserves existing guidance, asks for examples matching the report,
+and permits finding candidates only on request using already authorized access.
+It excludes automated, forwarded and third-party text, shows exact proposed
+samples with private details replaced by placeholders, and requires explicit
+retention approval before each exact save and readback. Setup authorizes the
+conversation, not inbox access, account changes, import or unseen saves.
+The finish line is the next real task matching that report: read it, then draft.
+The shared entry prompt favors email or DM and requests a few sent-message
+candidates through the assistant's existing access, with pasted examples as fallback.
+Skipping examples never blocks writing, and samples are usable with zero rules.
+The standing instruction is offered separately with consent; an actual successful
+read, not setup completion, verifies the connection. Rules remain supported when
+explicitly requested; one example does not imply a standing rule. The historical
+Baseline catalog stays canonical for stored rules; an active Baseline still adds
+the fixed explanatory note to the cover sheet. Milton cannot inspect another
+assistant's memory and does not guarantee assistants follow its instructions.
 
 Two offers follow from drafting. When the person approves a draft to send, post,
 or say, the assistant offers once to save it as a sample under the report that
 applies, quoted exactly with one line of context; a no is final for that draft and
-nothing is saved silently. When the person makes the same correction twice, the
+nothing is saved silently. One yes to saving the exact displayed text is sufficient;
+ask again only if that text changes, including redaction. When the person makes the same correction twice, the
 assistant proposes one short rule and files it only on approval; a single
 correction is a one-off. Both run through `create_memo` with ordinary approval.
 

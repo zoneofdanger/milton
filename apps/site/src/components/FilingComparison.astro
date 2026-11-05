@@ -1,398 +1,72 @@
----
-// The junk drawer and the filing cabinet, side by side. Every note, tab and
-// peek line is real text; the rotations, tape and drawer are CSS only. Each
-// taped tab is its panel's heading.
----
-
-<div class="compare">
-  <section class="panel" aria-labelledby="junk-label">
-    <div class="drawer-tray">
-      <h3 class="panel-label" id="junk-label">
-        MEMORY TOOLS
-      </h3>
-      <ul class="notes">
-        <li class="note">User prefers concise answers.</li>
-        <li class="note tan">Has a dog?</li>
-        <li class="note ground">Enjoys em dashes.</li>
-        <li class="note">Works Saturdays.</li>
-        <li class="note tan">Writing style: professional, friendly.</li>
-      </ul>
-    </div>
-    <p class="facts">Facts, preferences and context about you.</p>
-  </section>
-  <section class="panel" aria-labelledby="milton-label">
-    <div class="cabinet">
-      <h3 class="panel-label cabinet-label" id="milton-label">
-        MILTON
-      </h3>
-      <div class="cabinet-front">
-        <span class="cabinet-pull" aria-hidden="true"></span>
-      </div>
-      <div class="lifted">
-        <p class="folder-tab">
-          <span class="tab-name">Email</span> <span>· 1 sample · 4 rules</span>
+<div class="examples" aria-label="Fictional writing samples">
+  <figure class="folder">
+    <figcaption class="folder-tab">Email · fictional example</figcaption>
+    <div class="sheet">
+      <div class="sheet-bar">A follow-up you might choose to keep</div>
+      <blockquote class="sheet-content">
+        <p>Hi [name],</p>
+        <p>
+          Friday works. I’ll bring the cover sheets. Thanks for sorting it out.
         </p>
-        <div class="folder">
-          <div class="folder-page">
-            <blockquote class="excerpt">
-              <p>
-                Bill, Saturday doesn’t work. TPS reports on your desk Monday,
-                cover sheets and all.
-              </p>
-              <p>Peter</p>
-            </blockquote>
-          </div>
-        </div>
-      </div>
-      <ul class="catalog">
-        <li class="catalog-row" style="--i: 1; --g: 0.33">
-          <div class="tab-row">
-            <p class="catalog-tab">
-              <span class="tab-name">Chat</span>{" "}
-              <span>· 2 samples · 2 rules</span>
-            </p>
-          </div>
-          <p class="catalog-card">
-            “Can’t make standup. Notes are in the doc.”
-          </p>
-        </li>
-        <li class="catalog-row" style="--i: 2; --g: 0.66">
-          <div class="tab-row">
-            <p class="catalog-tab">
-              <span class="tab-name">Post</span>{" "}
-              <span>· 1 sample · 1 rule</span>
-            </p>
-          </div>
-          <p class="catalog-card">
-            “We built a drawer. It holds your writing. That’s the whole
-            product.”
-          </p>
-        </li>
-        <li class="catalog-row" style="--i: 3; --g: 1">
-          <div class="tab-row">
-            <p class="catalog-tab">
-              <span class="tab-name">Document</span>{" "}
-              <span>· 1 sample · 2 rules</span>
-            </p>
-          </div>
-          <p class="catalog-card">
-            “I recommend we cancel the Saturday meeting.”
-          </p>
-        </li>
-        <li class="catalog-row" style="--i: 4; --g: 0.2">
-          <div class="tab-row">
-            <p class="catalog-tab">
-              <span class="tab-name">Speech</span>{" "}
-              <span>· 1 sample · 0 rules</span>
-            </p>
-          </div>
-          <p class="catalog-card">
-            “Raise a glass to the only coworker who got the memo.”
-          </p>
-        </li>
-      </ul>
+        <p>[my name]</p>
+      </blockquote>
     </div>
-    <p class="facts">
-      Writing samples and rules you approve, kept word for word.
-    </p>
-  </section>
+  </figure>
+  <figure class="folder">
+    <figcaption class="folder-tab">DM · fictional example</figcaption>
+    <div class="sheet">
+      <div class="sheet-bar">A quick reply in your own words</div>
+      <blockquote class="sheet-content">
+        <p>Can’t make the 2:15. Notes are in the doc. I’ll catch you after.</p>
+      </blockquote>
+    </div>
+  </figure>
 </div>
+<p class="small-note example-note">
+  Illustrations, not customer results. For your next message, your AI reads your
+  approved examples and uses the facts you give it.
+</p>
 
 <style>
-  :where(h3, p) {
+  .examples {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-8);
+    margin-top: var(--space-8);
+  }
+  .folder {
     margin: 0;
+    min-width: 0;
+    padding: 0 var(--space-4) var(--space-4);
+    background: var(--sheet-bar);
+    border: 1px solid var(--hairline);
+  }
+  .folder-tab {
+    padding: var(--space-3) 0;
+    font-family: var(--font-mono);
+    font-size: var(--text-small);
+    overflow-wrap: anywhere;
+  }
+  blockquote {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: var(--text-small);
   }
   p {
     text-wrap: pretty;
   }
-  /* Two panels; each spans two subgrid rows, so both captions start on one line. */
-  .compare {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    grid-template-rows: auto auto;
-    gap: 0 var(--space-16);
-  }
-  .panel {
-    display: grid;
-    grid-row: span 2;
-    grid-template-rows: subgrid;
-    min-width: 0;
-  }
-  /* A crooked strip of tan tape, the panel's heading. */
-  .panel-label {
-    position: absolute;
-    top: calc(-1 * var(--space-3));
-    left: var(--space-6);
-    padding: var(--space-2) var(--space-4);
-    background: var(--sheet-bar);
-    color: var(--sheet-bar-ink);
-    font: var(--text-caption) / var(--leading-label) var(--font-mono);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    transform: rotate(-2deg);
-    box-shadow: 0 calc(var(--space-2) / 4) 0 var(--shadow);
-  }
-
-  /* Left: the junk drawer. A loose tray, notes tossed in at angles. */
-  .drawer-tray {
-    position: relative;
-    flex: 1;
-    padding: var(--space-12) var(--space-8) var(--space-8);
-    border: 1px solid var(--hairline);
-    background: var(--ground);
-    box-shadow: inset 0 var(--space-2) var(--space-6) var(--shadow);
-  }
-  .notes {
-    display: grid;
-    grid-template-columns: repeat(6, minmax(0, 1fr));
-    align-content: space-evenly;
-    height: 100%;
+  blockquote p {
     margin: 0;
-    padding: 0;
-    list-style: none;
   }
-  .note {
-    position: relative;
-    padding: var(--space-5);
-    min-height: calc(var(--space-16) * 1.75);
-    border: 1px solid var(--hairline);
-    background: var(--surface);
-    color: var(--ink);
-    font-size: var(--text-body);
-    line-height: var(--leading-label);
-    box-shadow: calc(var(--space-2) / 4) calc(var(--space-2) / 2) 0
-      var(--shadow);
-  }
-  .note.tan {
-    background: var(--sheet-bar);
-    color: var(--sheet-bar-ink);
-    border-color: transparent;
-  }
-  .note.ground {
-    background: var(--ground);
-  }
-  .note:nth-child(1) {
-    grid-area: 1 / 1 / 2 / 4;
-    transform: rotate(-3deg) translateY(var(--space-2));
-    z-index: 1;
-  }
-  .note:nth-child(2) {
-    grid-area: 1 / 4 / 2 / 6;
-    transform: rotate(4deg) translate(calc(-1 * var(--space-4)), var(--space-6));
-    z-index: 3;
-  }
-  .note:nth-child(3) {
-    grid-area: 2 / 1 / 3 / 3;
-    transform: rotate(2deg) translate(var(--space-3), calc(-1 * var(--space-2)));
-    z-index: 2;
-  }
-  .note:nth-child(4) {
-    grid-area: 2 / 3 / 3 / 6;
-    transform: rotate(-1.5deg) translateY(var(--space-3));
-    z-index: 4;
-    margin-left: calc(-1 * var(--space-2));
-  }
-  .note:nth-child(5) {
-    grid-area: 3 / 2 / 4 / 7;
-    transform: rotate(-4deg)
-      translate(var(--space-2), calc(-1 * var(--space-2)));
-    z-index: 5;
-  }
-
-  /* Right: a card-catalog drawer. The source order is tab, front, folder,
-     cards; CSS order puts the folder on top and the front at the bottom. */
-  .cabinet {
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    padding-top: var(--space-8);
-    border: 1px solid var(--ink);
-    background: var(--ground);
-    box-shadow: inset 0 var(--space-6) var(--space-6) calc(-1 * var(--space-4))
-      var(--shadow);
-  }
-  .cabinet-label {
-    z-index: 10;
-  }
-  .lifted {
-    order: 1;
-  }
-  .catalog {
-    order: 2;
-  }
-  .cabinet-front {
-    order: 3;
-  }
-  /* The pulled Email folder, lifted a degree off the cards. */
-  .lifted {
-    position: relative;
-    z-index: 8;
-    margin: 0 var(--space-8) calc(-1 * var(--space-4));
-    transform: rotate(1deg);
-    filter: drop-shadow(var(--shadow-sheet));
-  }
-  .folder-tab,
-  .catalog-tab {
-    padding: calc(var(--space-2) / 4) var(--space-3) 0;
-    border: 1px solid var(--ink);
-    border-bottom: 0;
-    border-radius: var(--radius-control) var(--radius-control) 0 0;
-    background: var(--sheet-bar);
-    color: var(--sheet-bar-ink);
-    font: var(--text-caption) / var(--leading-label) var(--font-mono);
-  }
-  .folder-tab {
-    display: inline-block;
-    max-width: 100%;
-    margin-left: var(--space-4);
-    vertical-align: bottom;
-  }
-  .tab-name {
-    font-weight: 600;
-  }
-  .folder {
-    padding: var(--space-2) var(--space-3);
-    border: 1px solid var(--ink);
-    background: var(--sheet-bar);
-  }
-  .folder-page {
-    padding: var(--space-3);
-    border: 1px solid var(--hairline);
-    background: var(--surface);
-  }
-  .excerpt {
-    margin: 0;
-    padding: var(--space-2) var(--space-3);
-    border: 1px dashed var(--hairline);
-    background: var(--ground);
-    font: var(--text-small) / var(--leading-body) var(--font-mono);
-  }
-  .excerpt > p + p {
-    margin-top: var(--space-2);
-  }
-  /* The cards; rows further back sit narrower, their tabs staggered. */
-  .catalog {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    margin: 0;
-    padding: var(--space-8) var(--space-4) var(--space-4);
-    list-style: none;
-  }
-  .catalog-row {
-    position: relative;
-    z-index: var(--i);
-    min-width: 0;
-    margin-inline: calc((4 - var(--i)) * var(--space-2));
-  }
-  .tab-row {
-    display: flex;
-  }
-  .tab-row::before,
-  .tab-row::after {
-    content: "";
-    flex-basis: 0;
-  }
-  .tab-row::before {
-    flex-grow: var(--g);
-  }
-  .tab-row::after {
-    flex-grow: calc(1 - var(--g));
-  }
-  .catalog-tab {
-    flex: 0 1 auto;
-    min-width: 0;
-  }
-  /* One line of each filed card shows; the rest tucks behind the next. */
-  .catalog-card {
-    position: relative;
-    margin-bottom: calc(-1 * var(--space-3));
-    padding: calc(var(--space-2) / 2) var(--space-3) var(--space-3);
-    border: 1px solid var(--ink);
-    border-bottom: 0;
-    background: var(--surface);
-    color: var(--muted);
-    font: var(--text-caption) / var(--leading-label) var(--font-mono);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  /* A blank drawer front with a cup pull. */
-  .cabinet-front {
-    position: relative;
-    z-index: 9;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    margin: 0 -1px -1px;
-    padding: var(--space-5) var(--space-5) var(--space-6);
-    border: 1px solid var(--ink);
-    border-top-width: 2px;
-    background: var(--surface);
-    box-shadow: var(--shadow-sheet);
-  }
-  .cabinet-pull {
-    width: var(--space-12);
-    height: var(--space-4);
-    border: 1px solid var(--ink);
-    border-top-width: 2px;
-    border-radius: 0 0 var(--space-6) var(--space-6);
-  }
-
-  /* Under each panel, one flowing caption. */
-  .facts {
-    align-self: start;
+  blockquote p + p {
     margin-top: var(--space-4);
-    color: var(--ink);
-    font: var(--text-body) / var(--leading-label) var(--font-mono);
   }
-
-  @media (max-width: 960px) {
-    .compare {
-      gap: var(--space-8);
-    }
-    .drawer-tray {
-      padding-inline: var(--space-5);
-    }
+  .example-note {
+    margin-top: var(--space-4);
   }
   @media (max-width: 767px) {
-    .compare {
+    .examples {
       grid-template-columns: 1fr;
-      grid-template-rows: none;
-      gap: var(--space-16);
-    }
-    .panel {
-      display: flex;
-      flex-direction: column;
-      grid-row: auto;
-    }
-    .drawer-tray {
-      padding: var(--space-10) var(--space-4) var(--space-8);
-    }
-    .note {
-      padding: var(--space-4);
-      min-height: calc(var(--space-16) * 1.5);
-      font-size: var(--text-small);
-    }
-  }
-  @media (max-width: 600px) {
-    .note:nth-child(3) {
-      grid-area: 2 / 1 / 3 / 4;
-    }
-    .note:nth-child(4) {
-      grid-area: 2 / 4 / 3 / 7;
-    }
-    .catalog {
-      padding-inline: var(--space-2);
-    }
-    .catalog-row {
-      margin-inline: calc((4 - var(--i)) * var(--space-2) / 2);
-    }
-    .lifted {
-      margin-inline: var(--space-3);
-    }
-    .folder-tab {
-      margin-left: var(--space-3);
     }
   }
 </style>

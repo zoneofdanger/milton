@@ -77,6 +77,9 @@ async function tokenFixture(target = resource) {
 test("server instructions fit within Claude Code's 4,096-character limit", () => {
   // Claude Code truncates MCP server instructions at 4,096 characters.
   expect(storeInstructions.length).toBeLessThanOrEqual(4096);
+  expect(storeInstructions).toContain(
+    "Setup: when get_cover_sheet is_empty, offer sample-first setup once.",
+  );
 });
 
 test("an SDK client receives instructions, discovers the four tools, and reads the cover sheet", async () => {
@@ -344,40 +347,19 @@ test("two authenticated clients isolate tenants, save once and reject retired to
     expect(second.text).toBe("");
     // An empty account carries the first-setup script; it leaves after the first save.
     expect(first.is_empty).toBe(true);
-    expect(String(first.setup)).toContain("Show exactly:");
+    expect(String(first.setup)).toContain("exact retention approval");
     expect(String(first.setup)).toContain(
-      '"Milton keeps the writing you approve, word for word. It never rewrites a rule or a sample, and it never reads your inbox."',
+      "next real email or DM should accomplish",
     );
-    // The scripted sample names only fields that form a valid sample.
-    const scripted = /sample \{ ([^}]*) \}/.exec(String(first.setup))![1]!;
-    const fields = [...scripted.matchAll(/(\w+):/g)].map((m) => m[1]!);
-    expect(fields).toEqual(["report", "new_kind", "context", "text"]);
-    expect(
-      saveMemoInput.shape.sample.safeParse(
-        Object.fromEntries(
-          fields.map((f) => [f, f === "report" ? "email" : "Fictional value"]),
-        ),
-      ).success,
-    ).toBe(true);
-    // So does the scripted rules entry, under each report the script names.
-    const ruleShape = /rules \[\{ ([^}]*) \}\]/.exec(String(first.setup))![1]!;
-    expect(ruleShape.split(", ")).toEqual(["report", "text"]);
-    for (const report of ["cover", "email"])
-      expect(String(first.setup)).toContain(`[${report}] Baseline: `);
-    for (const report of [
-      "cover",
-      "email",
-      "chat",
-      "post",
-      "document",
-      "speech",
-    ]) {
-      expect(
-        saveMemoInput.shape.rules.safeParse([
-          { report, text: "Fictional value" },
-        ]).success,
-      ).toBe(true);
-    }
+    expect(String(first.setup)).toContain(
+      "preserve all existing rules and samples",
+    );
+    // The served JSON example parses against the real save schema.
+    const scripted = JSON.parse(
+      /```json\n([\s\S]*?)\n```/.exec(String(first.setup))![1]!,
+    );
+    expect(saveMemoInput.safeParse(scripted).success).toBe(true);
+    expect(String(first.setup)).not.toContain("Baseline:");
     const input = {
       text: "Lead with the answer.",
       rules: [{ report: "cover", text: "Lead with the answer." }],

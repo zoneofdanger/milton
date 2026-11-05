@@ -120,7 +120,7 @@ export async function applySave(
     const closest = closestBaseline(unknown.text);
     throw new StoreError(
       "baseline_unknown",
-      `"${describe(unknown.text, 120)}" in ${unknown.report} starts with "Baseline: " but is not a setup rule for that report. Copy the rule and its report exactly from the setup text, or send a rule in the person's own words without "Baseline: ". Closest setup rule: [${closest.report}] "${closest.text}". Nothing was changed.`,
+      `"${describe(unknown.text, 120)}" in ${unknown.report} starts with "Baseline: " but is not a setup rule for that report. Copy the closest rule and its report shown below exactly, or send a rule in the person's own words without "Baseline: ". Closest setup rule: [${closest.report}] "${closest.text}". Nothing was changed.`,
       422,
     );
   }

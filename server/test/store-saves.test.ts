@@ -1095,6 +1095,9 @@ test("a Baseline: rule must be a setup rule byte for byte in its report, filed n
       error: "baseline_unknown",
     });
     expect(refused.message).toContain(
+      "Copy the closest rule and its report shown below exactly",
+    );
+    expect(refused.message).toContain(
       'Closest setup rule: [email] "Baseline: Sign off with "Thanks," and my first name."',
     );
     expect((await store.getTpsReport()).text).toBe("");

@@ -5,10 +5,14 @@ import type { CardHead } from "../src/store/cards";
 import {
   assembleDocuments,
   BASELINE_NOTE,
-  FILINGS,
   type Filing,
 } from "../src/store/reports";
-import { setupCatalog, setupHint } from "../src/store/setup";
+import {
+  setupCatalog,
+  setupHint,
+  knownBaseline,
+  SETUP_PROMPT,
+} from "../src/store/setup";
 import {
   coverSheet,
   missingIntent,
@@ -46,144 +50,75 @@ const head = (report: Filing, body: string, id = body): CardHead => ({
   report,
 });
 
-test("setup renders from its catalog, per report while empty, within 32 KB", () => {
+test("sample-first setup is optional, preserves guidance and serves valid exact saves", () => {
   const version = "a".repeat(64);
   const empty = { ...assembleDocuments([], []), version };
-  const sheet = coverSheet(empty);
-  // The cover sheet serves the opening lines and email's block, cover questions included.
-  expect(sheet.setup).toBe(reportEnvelope(empty, "email").setup!);
-  expect(sheet.setup).toContain('Then say: "First, paste one email');
-  // The first block ends by offering the standing line, after the save.
-  const stick = [
-    "7. Before the next report or stopping, make it stick: offer to keep this line in your own standing instructions, so you read Milton without being asked:",
-    "Show exactly: Before writing anything for me, call Milton's get_cover_sheet, then get_report for the matching report.",
-    "Where you can edit a startup instructions file, add it there after the person approves: ~/.claude/CLAUDE.md for Claude Code, ~/.codex/AGENTS.md for Codex, User Rules in Cursor's settings. Where you have custom instructions, project instructions or memory, keep it there instead. If you have none of these, show the line and say where the person can paste it. Then, on a pick, run that report's setup; otherwise say setup is complete.",
-  ].join("\n");
-  expect(between(sheet.setup!, "\n6. End. ", "\n\n")).toEndWith("\n" + stick);
-  // Nothing to file explains the prefix: the cover sheet prints a fixed note
-  // while any baseline is active.
-  expect(sheet.setup).not.toContain("Rules marked Baseline:");
-  // Setup keys on rules: samples alone keep every block, and the cover
-  // questions ride with whichever block runs while the cover sheet has none.
-  const sampled = {
-    ...assembleDocuments(
-      [],
-      [
-        {
-          id: "s",
-          report: "email",
-          kind_id: "k",
-          kind: "follow-up email",
-          context: "A fictional follow-up.",
-          body: "A fictional email.",
-          date: "2026-11-02",
-          created_at: "2026-11-02T00:00:00.000000Z",
-          audience: null,
-          purpose: null,
-          register: null,
-        },
-      ],
-    ),
-    version,
+  const setup = coverSheet(empty).setup!;
+  expect(setup).toBe(reportEnvelope(empty, "email").setup!);
+  expect(empty.is_empty).toBe(true);
+  expect(SETUP_PROMPT).toBe(
+    "Help me connect Milton using https://www.meetmilton.com/setup, then read what I have on file. Help me choose a few messages that sound like me. If you already have access to my sent messages, find a few candidates; otherwise I'll paste them. Use only my own writing; skip automated, forwarded and third-party text. Show me the exact examples with private details removed, and save only the ones I approve. Preserve what's already on file. Then help me write my next email or DM.",
+  );
+  for (const fragment of [
+    "offer setup once",
+    "never block an explicit writing task",
+    "Read the current cover sheet and relevant reports; preserve all existing rules and samples",
+    "Do not rerun setup because rules are absent",
+    "If the person asks you to find candidates and you already have authorized access",
+    "otherwise accept pasted examples",
+    "Exclude automated, forwarded and third-party text",
+    "Do not assume a sent item represents the person's voice",
+    "private details replaced by placeholders",
+    "make excerpts explicit",
+    "exact retention approval",
+    "A yes to saving that exact displayed text is sufficient",
+    "ask again only if the proposed text changes, including redaction",
+    "Do not silently sanitize after approval",
+    "minimal non-private context",
+    "kind_id from the relevant report",
+    "supported labels",
+    "same request_id and exact input",
+    "Reread after saved, unchanged or conflict",
+    "If examples are skipped, help with the real draft without claiming to know the voice",
+    "Praise or permission to send is not retention permission",
+    "do not infer standing rules from one example or turn sample facts into preferences",
+    "Do not connect an inbox, request Gmail permissions, bulk import or save unseen text",
+    "Setup permission authorizes this conversation only",
+    "Offer the standing instruction separately",
+    "only after separate consent",
+    "Verify an actual successful read",
+    "No need to fill all five reports or accumulate rules before drafting",
+  ])
+    expect(setup).toContain(fragment);
+  expect(setup).not.toMatch(
+    /quiz|E3\. Register|Files on yes|before any other writing/,
+  );
+
+  const sample = {
+    id: "s",
+    report: "email" as const,
+    kind_id: "k",
+    kind: "follow-up",
+    context: "A fictional follow-up.",
+    body: "Hi [name],\n\nFriday works. Thanks!",
+    date: "2026-11-02",
+    created_at: "2026-11-02T00:00:00.000000Z",
+    audience: null,
+    purpose: null,
+    register: null,
   };
+  const sampled = { ...assembleDocuments([], [sample]), version };
   expect(sampled.is_empty).toBe(false);
-  expect(coverSheet(sampled).setup).toBe(
-    reportEnvelope(sampled, "email").setup!,
+  expect(coverSheet(sampled).setup).toBeUndefined();
+  expect(reportEnvelope(sampled, "email").setup).toBeUndefined();
+  expect(reportList(sampled).reports[0]!.setup).toBeUndefined();
+  expect(sampled.reports[0]!.samples).toEqual([sample]);
+  expect(sampled.cover_rules).toEqual([]);
+  expect(sampled.reports[0]!.rules).toEqual([]);
+  // Other empty reports offer optional help, never a forced restart.
+  expect(reportEnvelope(sampled, "chat").setup).toStartWith(
+    "Optional setup for Chat",
   );
-  expect(coverSheet(sampled).setup).toContain("E3. Register");
-  const chat = reportEnvelope(empty, "chat").setup!;
-  expect(chat).toContain('grouped under "All writing" (cover) and "Chat"');
-  for (const id of ["E3", "E5", "E8"]) expect(chat).toContain(`\n\n${id}. `);
-  expect(chat).toContain("[cover] Baseline: Use contractions.");
-  expect(chat).not.toContain("[email]");
-  // After a first save, each empty report serves its full block.
-  const started = {
-    ...assembleDocuments([head("cover", "Lead with the answer.")], []),
-    version,
-  };
-  const served = [
-    sheet.setup!,
-    ...(["email", "chat", "post", "document", "speech"] as const).map(
-      (id) => reportEnvelope(started, id).setup!,
-    ),
-  ];
-  // Later blocks, on request only, never repeat it.
-  expect(served.filter((setup) => setup.includes("make it stick"))).toEqual([
-    sheet.setup!,
-  ]);
-  const offered = new Set<string>();
-  for (const setup of served) {
-    // Each served script is well-formed text of at most 32 KB.
-    expect(setup.isWellFormed() && !setup.includes("\0")).toBe(true);
-    expect(Buffer.byteLength(setup)).toBeLessThanOrEqual(32768);
-    const questions = setup
-      .split("\n\n")
-      .filter((block) => /^[A-Z]\d\. /.test(block));
-    expect(questions.length).toBeGreaterThan(1);
-    for (const block of questions) {
-      const lines = block.split("\n");
-      // One quoted line: any quote inside it is single.
-      expect(lines[1]).toMatch(/^Ask: "[^"]+"$/);
-      expect(lines[2]).toBe("Show exactly:");
-      const at = lines.findIndex((line) => line.startsWith("Files"));
-      const shown = lines.slice(3, at);
-      const files = lines.slice(at + 1);
-      // Every option shown has one Files line; a tells list files one rule per item.
-      const letters = shown.filter((line) => /^\([a-z]\)$/.test(line));
-      if (letters.length)
-        expect(files.map((line) => line.slice(0, 3))).toEqual(letters);
-      else expect(files.length).toBe(shown.length);
-      for (const line of files)
-        for (const rule of line.replace(/^\([a-z]\) /, "").split(" | ")) {
-          const [, report, text] = /^\[(\w+)\] (.+)$/.exec(rule)!;
-          expect(FILINGS).toContain(report as Filing);
-          expect(text).toStartWith("Baseline: ");
-          // Served with the report the catalog files it to.
-          expect(setupCatalog).toContainEqual({
-            report: report as Filing,
-            text: text!,
-          });
-          offered.add(JSON.stringify([report, text]));
-        }
-    }
-  }
-  // Every catalog baseline is offered, and only those.
-  expect([...offered].sort()).toEqual(
-    setupCatalog.map((b) => JSON.stringify([b.report, b.text])).sort(),
-  );
-  // The scripted saves parse against saveMemoInput.
-  expect(between(sheet.setup!, "rules [{ ", " }]").split(", ")).toEqual([
-    "report",
-    "text",
-  ]);
-  parses({
-    ...envelope(),
-    text: between(sheet.setup!, 'create_memo once: text "', '"'),
-    rules: [...setupCatalog.slice(0, 20)],
-  });
-  // The approved paste is filed first, so an abandoned block keeps it.
-  expect(sheet.setup!.indexOf("sample { ")).toBeLessThan(
-    sheet.setup!.indexOf("rules [{ "),
-  );
-  const sample = between(sheet.setup!, "sample { ", " }");
-  expect([...sample.matchAll(/(\w+):/g)].map((m) => m[1]!)).toEqual([
-    "report",
-    "new_kind",
-    "context",
-    "text",
-  ]);
-  parses({
-    ...envelope(),
-    text: between(sheet.setup!, 'its own create_memo: text "', '"'),
-    sample: {
-      report: /report: "(\w+)"/.exec(sample)![1],
-      new_kind: /such as "([^"]+)"/.exec(sample)![1],
-      context: "A fictional situation.",
-      text: "A fictional email.",
-    },
-  });
-  // Once rules exist, a report with rules serves no setup; with cover rules on
-  // file, email's block loses the cover questions.
   const filed = {
     ...assembleDocuments(
       [
@@ -195,19 +130,8 @@ test("setup renders from its catalog, per report while empty, within 32 KB", () 
     version,
   };
   expect(coverSheet(filed).setup).toBeUndefined();
-  expect(filed.cover).toBe(BASELINE_NOTE + "\n\n- Lead with the answer.");
-  expect(started.cover).toBe("- Lead with the answer.");
   expect(reportEnvelope(filed, "chat").setup).toBeUndefined();
-  const email = reportEnvelope(filed, "email").setup!;
-  expect(email).toStartWith("Setup for Email, on request only: ");
-  expect(email).not.toContain("[cover]");
-  // Only email's confirmation example names an email.
-  expect(reportEnvelope(filed, "post").setup).toContain(
-    "name the habit you saw in the post and ask whether it is usual.",
-  );
-  expect(reportEnvelope(filed, "post").setup).not.toContain("Your email");
-  expect(email).toContain("Next: Post, Document, Speech, or stop here?");
-  // list_reports carries one line per empty report, never a block.
+  expect(filed.cover).toBe(BASELINE_NOTE + "\n\n- Lead with the answer.");
   expect(reportList(filed).reports.map((r) => r.setup)).toEqual([
     setupHint("email"),
     undefined,
@@ -215,11 +139,92 @@ test("setup renders from its catalog, per report while empty, within 32 KB", () 
     setupHint("document"),
     setupHint("speech"),
   ]);
+  const before = JSON.stringify([empty, sampled, filed]);
+  const writing = {
+    email: ["emails", "email", "Hi [name],\n\nFriday works. Thanks!"],
+    chat: ["DMs or texts", "DM", "Friday works. Thanks!"],
+    post: [
+      "posts",
+      "post",
+      "A small update: the guide is ready. Thanks for your feedback.",
+    ],
+    document: [
+      "documents or excerpts",
+      "document",
+      "The guide is ready for review. Next, we will check the examples.",
+    ],
+    speech: [
+      "speeches or excerpts",
+      "speech",
+      "Thanks for joining us today. Let’s start with what changed and what comes next.",
+    ],
+  };
+  for (const documents of [empty, sampled, filed]) {
+    for (const id of ["email", "chat", "post", "document", "speech"] as const) {
+      const script = reportEnvelope(documents, id).setup;
+      if (script === undefined) continue;
+      expect(script.isWellFormed() && !script.includes("\0")).toBe(true);
+      expect(Buffer.byteLength(script)).toBeLessThanOrEqual(32768);
+      const shape = JSON.parse(
+        between(
+          script,
+          "Sample save example (fictional, replace with the approved sample):\n```json\n",
+          "\n```",
+        ),
+      );
+      expect(shape.sample.report).toBe(id);
+      const [examples, task, text] = writing[id];
+      const firstEmail = documents.is_empty && id === "email";
+      expect(script).toContain(
+        `Ask for a few ${firstEmail ? "emails or DMs" : examples} the person likes`,
+      );
+      expect(script).toContain(
+        `Ask what the next real ${firstEmail ? "email or DM" : task} should accomplish`,
+      );
+      const filing =
+        "File emails under email, and DMs, texts or Slack messages under chat.";
+      expect(script.includes(filing)).toBe(firstEmail);
+      if (id !== "email" && id !== "chat") {
+        expect(script).not.toContain("emails or DMs");
+        expect(script).not.toContain("next real email");
+      }
+      expect(shape.sample).toEqual({
+        report: id,
+        new_kind: `${task} example`,
+        context: `A fictional ${task}.`,
+        audience: "colleague",
+        purpose: "update",
+        register: "plain",
+        text,
+      });
+      parses(shape);
+      expect(script.indexOf("exact retention approval")).toBeLessThan(
+        script.indexOf("Sample save example"),
+      );
+      expect(
+        reportList(documents).reports.find((r) => r.report_id === id)!.setup,
+      ).toBe(setupHint(id));
+    }
+  }
+  // Reads and setup text do not save, import or reset anything.
+  expect(JSON.stringify([empty, sampled, filed])).toBe(before);
+  // Historical approved Baseline rules remain canonical, even though setup no longer generates them.
+  expect(setupCatalog.length).toBeGreaterThan(0);
+  for (const rule of setupCatalog) {
+    expect(knownBaseline(rule.text, rule.report)).toBe(true);
+    expect(knownBaseline(rule.text + " altered", rule.report)).toBe(false);
+    parses({ ...envelope(), rules: [rule] });
+  }
 });
 
 test("every create_memo shape the server instructions describe parses against saveMemoInput", () => {
   const says = (fragment: string) =>
     expect(storeInstructions).toContain(fragment);
+  says('show the exact text, then offer once: "Save this as a sample?"');
+  says("Yes authorizes saving that unchanged text");
+  says("ask again only if it changes, including redaction");
+  says("Praise or send permission alone is not retention approval");
+  expect(storeInstructions).not.toContain("On yes, show");
   says("Pass the cover sheet version as expected_version and a new request_id");
   says("Send each new rule in rules: its report (or cover)");
   parses({

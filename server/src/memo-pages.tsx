@@ -5,6 +5,7 @@ import type { PersonStore } from "./store";
 import type { TrialStatus } from "./store/trials";
 import type { CompiledReport, Documents } from "./store/compiled";
 import { ruleText, type Sample } from "./store/reports";
+import { SETUP_PROMPT } from "./store/setup";
 
 export const isMemoRoute = (path: string) =>
   path === "/" || path === "/download" || path === "/tps-report";
@@ -105,8 +106,8 @@ export function connectSteps(empty: boolean, mcpUrl: string) {
             <a href="https://www.meetmilton.com/setup">
               Setup instructions for your assistant
             </a>
-            . Follow the guide to connect Milton and set the instruction for
-            future chats.
+            . Follow the guide to connect Milton and optionally add a standing
+            instruction.
           </p>
           <pre class="setup-copy">
             <code>{mcpUrl}</code>
@@ -116,16 +117,19 @@ export function connectSteps(empty: boolean, mcpUrl: string) {
           <h3>Start the conversation.</h3>
           <p>Once connected, copy this prompt into your assistant:</p>
           <blockquote class="setup-copy">
-            {empty
-              ? "Read my Milton cover sheet. It is empty, so run the setup it returns exactly as written, one question at a time, starting with an email I paste. Show me the complete list of rules and wait for my approval before saving any rules."
-              : "Read my Milton cover sheet, then the report that fits what we’re writing, and write like me."}
+            <p>
+              {empty
+                ? SETUP_PROMPT
+                : "Read my Milton cover sheet and the report for my next email or DM. Preserve what is on file and use any relevant examples. Ask what the message should accomplish. Offer to add another example only if useful; save nothing without my exact retention approval."}
+            </p>
           </blockquote>
         </li>
       </ol>
       {empty && (
         <p>
-          Your account starts empty. Approve the complete draft before saving
-          instructions, or leave it empty.
+          Your account starts empty. Choose a few messages that sound like you,
+          approve exactly what to keep, or skip examples and draft your next
+          message.
         </p>
       )}
     </section>
@@ -200,11 +204,15 @@ function sheet({ report, documents, email, date, comment }: SheetView) {
       </div>
       {report.is_empty ? (
         <div class="form-empty">
-          <p class="empty-placeholder">No instructions on file.</p>
+          <p class="empty-placeholder">No writing samples on file yet.</p>
           <p>
             <a href="/assistants#connect">Follow the setup steps</a> to connect
-            an assistant and start your cover sheet.
+            an assistant and choose a few emails or DMs that sound like you.
           </p>
+          <p>Once connected, copy this prompt into your assistant:</p>
+          <blockquote class="setup-copy">
+            <p>{SETUP_PROMPT}</p>
+          </blockquote>
         </div>
       ) : docs ? (
         <>
@@ -281,17 +289,13 @@ function sheet({ report, documents, email, date, comment }: SheetView) {
               )}
             </section>
           ))}
-          {/* Later setup blocks run on request only, so say how to ask. */}
-          {docs.reports.some((r) => r.rules.length === 0) && (
+          {docs.reports.some((r) => r.is_empty) && (
             <section class="form-section">
-              <h2>Not set up yet</h2>
-              {docs.reports
-                .filter((r) => r.rules.length === 0)
-                .map((r) => (
-                  <p class="applies">
-                    {`Tell any connected assistant: set up my ${r.id} report.`}
-                  </p>
-                ))}
+              <h2>When you need them</h2>
+              <p class="applies">
+                Other reports are available whenever you need them. You can
+                start with email and DMs; there is no need to fill every report.
+              </p>
             </section>
           )}
         </>
@@ -323,7 +327,8 @@ function current(
       {notice}
       {!view.report.is_empty && !assistantPaused && (
         <p class="small-note sheet-meta">
-          To change your cover sheet, tell a connected assistant what to change.
+          Give a connected assistant the facts for your next email or DM and ask
+          it to use what’s on file. You can also approve a writing sample.
         </p>
       )}
       {sheet(view)}

@@ -6,20 +6,19 @@ import FilingComparison from "../components/FilingComparison.astro";
 ---
 
 <SiteLayout
-  title="How you write, in every AI you already use — Milton"
-  description="Your AI has a case of the Mondays in every new chat. Milton keeps what you wrote, from emails to speeches, so the next draft sounds like you."
+  title="Make your agents write like you. | Milton"
+  description="You bring what you want to say. Milton helps your AI write emails and messages in your voice, using examples you approve."
 >
   <section class="hero" aria-labelledby="headline">
     <div>
-      <h1 id="headline">How you write, in every AI you already use.</h1>
+      <h1 id="headline">Make your agents write like you.</h1>
       <p class="intro">
-        Your AI has a case of the Mondays in every new chat. Milton keeps what
-        you wrote, from emails to speeches, so the next draft sounds like you.
-        Yeah, that’d be great.
+        You bring what you want to say. Milton helps your AI write emails and
+        messages in your voice, using examples you approve.
       </p>
       <p class="hero-aside">
-        Everyone else is building superintelligence. We’re asking it to stop
-        using em dashes.
+        Start with messages you've already written. Keep the drafts you want
+        your AI to learn from.
       </p>
       <div class="actions action-row">
         <a class="button" href="https://app.meetmilton.com/login">
@@ -28,7 +27,10 @@ import FilingComparison from "../components/FilingComparison.astro";
         <AssistantSetup />
       </div>
     </div>
-    <MemoDemo />
+    <div>
+      <MemoDemo />
+      <p class="demo-caption small-note">Fictional example conversation.</p>
+    </div>
   </section>
   <div class="assistant-strip">
     <span class="assistant-label">Works with:</span>
@@ -56,16 +58,21 @@ import FilingComparison from "../components/FilingComparison.astro";
     </nav>
   </div>
   <section class="section" id="why-milton" aria-labelledby="why-heading">
-    <p class="eyebrow">## Why not a memory app</p>
-    <h2 id="why-heading">A file for how you write.</h2>
+    <p class="eyebrow">## Your writing, on file</p>
+    <h2 id="why-heading">Start with your own words.</h2>
+    <p class="section-lead">
+      Your assistant can find a few messages where it already has access, if you
+      ask, or you can paste them. You choose what sounds like you. It shows the
+      proposed examples with private details replaced by placeholders, then
+      Milton keeps only what you approve.
+    </p>
     <FilingComparison />
   </section>
   <section class="section" id="how-it-works" aria-labelledby="how-heading">
     <p class="eyebrow">## How it works</p>
-    <h2 id="how-heading">Tell it once. Keep it on file.</h2>
+    <h2 id="how-heading">From your examples to your next message.</h2>
     <p class="section-lead">
-      We distribute the memo. Your AI reads your cover sheet before it writes
-      for you; following it is still up to the AI.
+      Give your AI the facts. Let your approved writing show it how to say them.
     </p>
     <div class="slip-wrap">
       <figure class="sheet slip" aria-labelledby="slip-title">
@@ -105,8 +112,8 @@ import FilingComparison from "../components/FilingComparison.astro";
               ✓
             </span>
             <p class="slip-text">
-              <strong>File.</strong> When a draft is right, your AI asks “Save
-              this as a sample?” You say yes.
+              <strong>Choose.</strong> Pick a few emails or DMs that sound like
+              you. Review the exact examples and approve what Milton may keep.
             </p>
             <p class="slip-initials">
               <span class="slip-initials-label">Initials</span>
@@ -118,12 +125,26 @@ import FilingComparison from "../components/FilingComparison.astro";
               ✓
             </span>
             <p class="slip-text">
-              <strong>Distribute.</strong> Every new chat starts by reading your
-              cover sheet and the report that fits. You don’t have to ask.
+              <strong>Draft.</strong> Give your AI the facts for the next email
+              or message. Ask it to read your examples, then draft.
             </p>
             <p class="slip-initials">
               <span class="slip-initials-label">Initials</span>
               <span class="slip-initials-value">AI</span>
+            </p>
+          </li>
+          <li class="slip-row">
+            <span class="slip-box" aria-hidden="true">
+              ✓
+            </span>
+            <p class="slip-text">
+              <strong>Keep, if you like.</strong> Edit the draft until it is
+              yours. Your AI can offer to keep that final version as a future
+              sample; it needs your separate yes to save it.
+            </p>
+            <p class="slip-initials">
+              <span class="slip-initials-label">Initials</span>
+              <span class="slip-initials-value">You</span>
             </p>
           </li>
         </ol>
@@ -133,20 +154,26 @@ import FilingComparison from "../components/FilingComparison.astro";
       </span>
     </div>
   </section>
-  <section class="section" aria-label="Employee testimonial">
+  <p class="section-lead">
+    You can add a standing instruction asking your AI to read Milton before
+    writing. To check it actually read, ask “Did you get that memo?” It should
+    confirm only after a successful read.{" "}
+    <a href="/setup">See the setup guide and requirements.</a>
+  </p>
+  <section class="section" aria-label="Fictional employee testimonial">
     <figure class="employee-testimonial" id="employee-testimonial">
       <blockquote>
         “Milton lets me say ‘Did you get that memo?’ to software. I have never
         felt more qualified for management.”
       </blockquote>
       <figcaption>
-        <strong>Michael Bolton</strong>
+        <strong>Michael Bolton (fictional)</strong>
         <span>Senior Founding AI Forward Deployed Product Engineer</span>
       </figcaption>
     </figure>
     <ul class="social-proof">
       <li>Would recommend: 1 of 1 founders.</li>
-      <li>Reduced rewrites by an amount we did not measure.</li>
+      <li>Goal: fewer edits before you send. Results not measured.</li>
     </ul>
   </section>
   <section class="section faq" aria-labelledby="faq-heading">
@@ -156,9 +183,10 @@ import FilingComparison from "../components/FilingComparison.astro";
       <summary>What does Milton keep, and what does it never touch?</summary>
       <p>
         Only what you approve: samples of your writing, kept word for word, and
-        the rules you ask for, stored as your AI sends them. Milton never
-        rewrites a rule or a sample. It never reads your inbox, your files, or
-        your conversations.
+        the writing rules you ask for. Milton never rewrites a rule or sample.
+        It does not read your inbox, files, or conversations. If you ask, your
+        assistant may find candidates using access you already granted it;
+        Milton receives only the examples you approve for retention.
       </p>
     </details>
     <details>
@@ -172,9 +200,11 @@ import FilingComparison from "../components/FilingComparison.astro";
       <summary>Can I take my writing and leave?</summary>
       <p>
         We won’t take your stapler. The source is public, and you can run Milton
-        yourself. Download your rules and samples as TPS.md. Disconnect an AI
-        and Milton refuses it at once. We’d prefer you keep paying us, but
-        apparently that’s not a retention strategy.
+        yourself. Download all your current rules and every active approved
+        sample as TPS.md. Disconnect an AI and Milton refuses its future reads
+        and saves immediately; it cannot erase copies the AI already read. We’d
+        prefer you keep paying us, but apparently that’s not a retention
+        strategy.
       </p>
       <p>
         <a href="https://github.com/zoneofdanger/milton">Read the source ↗</a>
@@ -210,8 +240,10 @@ import FilingComparison from "../components/FilingComparison.astro";
     <details>
       <summary>Will my AI always write like me?</summary>
       <p>
-        Not always. Milton keeps the samples and rules available. Your AI reads
-        them before it writes; it still decides how closely to follow them.
+        Not always. Milton keeps approved examples and rules available. A
+        standing instruction asks your AI to read them before writing, but the
+        AI still decides when to read and how to follow them. Ask it to verify
+        the read before relying on the result.
       </p>
     </details>
     <details>
@@ -291,6 +323,9 @@ import FilingComparison from "../components/FilingComparison.astro";
     font-size: var(--text-lead);
     line-height: var(--leading-body);
     margin-top: var(--space-6);
+  }
+  .demo-caption {
+    margin-top: var(--space-3);
   }
   .hero-aside {
     margin-top: var(--space-5);

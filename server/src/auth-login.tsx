@@ -144,11 +144,11 @@ export const signInRoutes = async (ctx: PageContext): Promise<Response> => {
       const user = await session();
       if (!user)
         return page(
-          "How you write, in every assistant.",
+          "Make your agents write like you.",
           <>
             <p>
-              Keep your cover sheet and reports in one place, ready for the
-              assistants you connect.
+              Keep writing examples you approve, ready for connected assistants
+              to use in your next email or message.
             </p>
             <p>
               <a class="button" href="/login">

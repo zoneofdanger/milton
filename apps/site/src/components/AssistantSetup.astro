@@ -1,6 +1,5 @@
 ---
-const prompt =
-  "Help me set up Milton using https://www.meetmilton.com/setup. Guide me through connecting it to this AI. Then read my Milton cover sheet. If it is empty, run the setup it returns exactly as written, one question at a time, starting with an email I paste. Show me the complete list of rules and wait for my approval before saving any rules. If Milton already has rules or samples, preserve them and ask what I want to change. Do not import conversation history or assume access to another service’s memory.";
+import { SETUP_PROMPT as prompt } from "../../../../server/src/store/setup";
 const encodedPrompt = encodeURIComponent(prompt);
 ---
 

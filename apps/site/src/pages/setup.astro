@@ -4,8 +4,8 @@ import AssistantSetup from "../components/AssistantSetup.astro";
 ---
 
 <SiteLayout
-  title="Connect your AI — Milton"
-  description="Connect Milton to your AI with MCP. Setup guidance for Claude, ChatGPT, Claude Code, Codex, and Cursor, plus unverified guides for Grok Bot, Muse, and Claude Duet."
+  title="Connect your AI | Milton"
+  description="Connect your AI, choose writing examples you approve, and draft your next email or message. Setup guidance and connection requirements for Milton."
   legal
 >
   <p class="eyebrow">## A little paperwork. Once.</p>
@@ -14,8 +14,11 @@ import AssistantSetup from "../components/AssistantSetup.astro";
     <strong>Connect Milton. Say “set up Milton.”</strong>
   </p>
   <p>
-    Your AI gets the writing you approved, word for word. Milton never rewrites
-    a rule or a sample, and it never reads your inbox.
+    Start with a few emails or DMs that sound like you. Your AI shows the
+    proposed examples with private details replaced by placeholders and asks
+    exactly what Milton may keep. Milton does not read your inbox; your
+    assistant can find candidates only with access you already granted it and
+    when you ask.
   </p>
   <p>
     Milton connects through MCP, a standard that lets AIs use tools. You need a
@@ -38,16 +41,17 @@ import AssistantSetup from "../components/AssistantSetup.astro";
   </div>
   <div id="standing-line" class="standing">
     <p>
-      Setup ends with one line for your AI’s standing instructions, so it reads
-      Milton without being asked:
+      Setup separately offers a line for your AI’s standing instructions, asking
+      it to read Milton before writing:
     </p>
     <blockquote>
       Before writing anything for me, call Milton's get_cover_sheet, then
       get_report for the matching report.
     </blockquote>
     <p>
-      Your AI offers to add it for you. If you set up before this or skipped
-      setup, add it yourself; each AI below says where it goes.
+      Your AI may add it only with your separate consent, or you can paste it
+      yourself; each AI below says where it goes. This is a reminder, not a
+      guarantee. Ask “Did you get that memo?” and verify a successful read.
     </p>
   </div>
   <nav class="clients" aria-label="Choose your AI">
@@ -275,20 +279,28 @@ codex mcp login milton`}</code></pre>
     </p>
   </section>
   <section id="first-preference" aria-labelledby="first-heading">
-    <h2 id="first-heading">Put your first rules on file.</h2>
+    <h2 id="first-heading">Start with your own words.</h2>
     <p>
-      Your account starts empty. The setup prompt above runs a short quiz: paste
-      one email you sent, then pick between short examples, one question at a
-      time. Or try an instruction you actually want to keep. For example:
+      New accounts start empty. Use the setup prompt above to choose a few
+      emails or DMs you like. Paste examples, or ask your AI to find candidates
+      using access it already has. Milton needs no inbox connection or Gmail
+      permissions. Your AI should exclude automated, forwarded and other
+      people’s text, show you the exact proposed samples with private details
+      replaced, and save each only after your retention approval.
     </p>
-    <blockquote>
-      “Milton, go ahead and file this: lead with the answer. Keep replies
-      concise unless I ask for detail.”
-    </blockquote>
     <p>
-      Setup does this for you: your AI runs the setup questions, shows you the
-      complete list of rules, and files them only after you approve.{" "}
-      <a href="https://app.meetmilton.com/">Open Milton</a> to check the report.
+      Already have rules or examples? Keep them. Approved samples work with zero
+      rules. Add more only when useful; there is no quiz or requirement to fill
+      five reports. Rules are still supported when you ask for them.
+    </p>
+    <p>
+      Then tell your AI what the next real email or DM should accomplish. It
+      reads the relevant report and drafts with what is on file. You can skip
+      examples and get help with the draft. If you approve the final version,
+      your AI may offer once to keep it as a sample. Approval to send is
+      separate from approval to keep it.{" "}
+      <a href="https://app.meetmilton.com/">Open Milton</a> to check what was
+      saved.
     </p>
     <p>In your next conversation, ask:</p>
     <blockquote>“Did you get that memo?”</blockquote>
@@ -299,9 +311,10 @@ codex mcp login milton`}</code></pre>
       requests a read, not a save.
     </p>
     <p>
-      Your AI reads your cover sheet at the start of each chat once setup
-      finishes. Connecting alone doesn’t do this. All connected AIs can read the
-      whole report, so keep private project context in its own tools.
+      The standing instruction asks your AI to read your cover sheet and the
+      relevant report before writing. Check that it actually does. All connected
+      AIs can read the whole report, so keep private project context in its own
+      tools.
     </p>
   </section>
   <section aria-labelledby="help-heading">

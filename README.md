@@ -1,10 +1,10 @@
 # Milton
 
-**Did you get that memo?**
+**Make your agents write like you.**
 
-Tell your assistant how you write. Milton files your rules and approved samples,
-keeps the internal memos in order, and prepares a cover sheet and five reports for
-your connected assistant to read. Useful with one assistant or several.
+You bring what you want to say. Milton helps your AI write emails and messages in
+your voice, using examples you approve. Start with messages you have already written;
+keep the drafts you want your AI to learn from. Rules and all five reports remain supported.
 
 I built Milton because I was tired of telling Claude to stop using em dashes for the 100th time.
 
@@ -24,8 +24,8 @@ hands over the right one.
   `list_reports` returns all five. No model call. Assistants decide when to read and
   apply them; Milton does not guarantee their adherence.
 - **See what's on file.** The app shows your current cover sheet and reports and
-  downloads them as `TPS.md`. New accounts start empty. For first setup, review and
-  approve the complete draft before your assistant saves it.
+  downloads them as `TPS.md`. New accounts start empty. For first setup, choose emails or DMs that sound like you and approve
+  each exact sample before your assistant saves it. Samples work without rules.
 - **Keep the filing internal.** Each rule is an instruction card that keeps its
   version history internally. The cover sheet and reports are a current snapshot
   with a version, not a second history or restore interface. A save updates the
@@ -39,9 +39,14 @@ The hosted service is at [meetmilton.com](https://meetmilton.com), in early acce
 2. Add `https://mcp.meetmilton.com/mcp` in your assistant's MCP or connector settings,
    then complete sign-in and approve the connection. Availability depends on the
    assistant and your plan.
-3. Ask your assistant to read your Milton cover sheet. An empty account returns
-   setup questions; your assistant asks them one at a time and shows the complete
-   draft of rules. Review it before approving the first save.
+3. Ask your assistant to read your Milton cover sheet and relevant reports, preserving
+   existing guidance. An empty account offers sample-first setup once. Paste a few
+   emails or DMs you like, or ask it to find candidates only using access it already
+   has. Review the proposed text with private details replaced by placeholders and
+   approve exactly what it may keep. Milton needs no inbox connection.
+4. Give your assistant the facts for your next real email or DM. It reads the relevant
+   report and drafts. You can skip examples and still get help. Approving a draft to
+   send does not approve saving it; retention needs a separate yes.
 
 Use **Connect an assistant** above the cover sheet for the connection address and a
 prompt to copy. It starts expanded for empty accounts and stays available after

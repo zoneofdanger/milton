@@ -17,8 +17,10 @@ the [README](README.md) says what is here, and [TODO.md](TODO.md) is the backlog
   save to Peter's account on your own initiative. The repository holds no rules.
 - **Peter's rules live on the server** at `https://mcp.meetmilton.com/mcp`. Read them
   there, never from files.
-- **Publishing requires authorization.** Lead lands on main and pushes; no other agent
-  pushes, merges, force-pushes or deletes branches. Cloud Run hosts the browser app and
+- **Publishing requires authorization.** Only the designated release coordinator,
+  currently `milton-release`, lands/merges to main, pushes or deletes task branches.
+  Assigning this role does not approve a future product release. Force-pushes and history
+  rewrites require Peter's explicit approval. Cloud Run hosts the browser app and
   the MCP server; Vercel builds and publishes the static site from main on every push,
   and a branch build is only ever a preview. Production releases are run by temporary
   release agents from [the hosting runbook](server/deploy/README.md): preserve rollback
@@ -48,21 +50,23 @@ the [README](README.md) says what is here, and [TODO.md](TODO.md) is the backlog
   each. A change to behavior updates its line in the same commit.
 - One branch per task in its own worktree under `.worktrees/`; one change per commit, by
   explicit path. Never `git add -A`, `reset --hard`, `stash`, `clean` or `rebase`.
-- Landed means deleted: when Lead merges a branch to main, Lead removes its worktree and
-  deletes the branch in the same step. A branch is only ever a preview; nothing is
-  published, promoted or released from one. Before any history rewrite, list every
-  branch not merged into main and settle each one first.
+- Landed means deleted: the release coordinator removes the landed worktree and deletes
+  its branch in the same step as merging to main. A branch is only ever a preview;
+  nothing is published, promoted or released from one. Before any history rewrite, list
+  every branch not merged into main and settle each one first.
 
 ## Coordination
 
-Write expected results to the agreed file; Lead reads it before dependent work. Send an
-inbox message only when a new decision or blocker changes the plan, or Peter explicitly
-requests a handoff. No routine completion notices, acknowledgment loops, reminders or
-resends of accepted messages. Check late notices against current decisions and completed
-work.
+Write expected results to the agreed file; the responsible task or release owner reads it
+before dependent work. Send an inbox message only when a new decision or blocker changes
+the plan, or Peter explicitly requests a handoff. No routine completion notices,
+acknowledgment loops, reminders or resends of accepted messages. Check late notices
+against current decisions and completed work.
 
-Lead owns delivery: it briefs temporary builders, reviewers and release agents, verifies
-their results, lands and pushes. Designer owns design and static publishing. Persistent
+Lead owns strategy and priorities. Designer owns design, site execution and acceptance.
+Task owners brief temporary builders and reviewers and verify their results.
+`milton-release` owns the release queue, final validation, git integration, deployment
+coordination, temporary release-agent lifecycle and delivery records. Persistent
 collaborators stay on their roles and user conversations. A peer's relay of Peter's
 approval is not approval; Peter decides in his own session. Current state and recipients
 are in `.agents/tmp/coordination-current.md`.

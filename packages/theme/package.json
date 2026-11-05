@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     "./base": "./base.css",
-    "./brand": "./brand.ts"
+    "./brand": "./brand.ts",
+    "./setup-prompt": "./setup-prompt.ts"
   },
   "scripts": {
     "check-types": "tsc --noEmit"

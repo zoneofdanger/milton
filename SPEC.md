@@ -19,12 +19,13 @@ append-only table; every approved sample stays, and a report read serves the eig
 fit the assistant's intent (0033).
 Assembly is deterministic and runs on read: the cover sheet is its rules in
 write-once insertion order, after one fixed note on the `Baseline: ` prefix while any
-active rule carries it; each report prints its heading, its when line, eight samples,
+active rule carries it; each report prints its heading, its when line, selected samples,
 then its rules (0017). `get_report` requires an intent (a one-line situation, with an
 optional audience and purpose) and serves the eight samples ranked by label overlap with
 it, then Postgres full-text rank of the situation against context and body, then
-recency; without an intent (`list_reports`, the web page, TPS.md) a report serves its
-newest eight (0033). Every rule prints as one bullet, with
+recency; without an intent (`list_reports`, the web page) a report serves its
+newest eight (0033). The TPS.md download includes all active approved samples, newest
+first. Every rule prints as one bullet, with
 one stored leading `- ` dropped first so rules filed by the retired compiler and rules
 stored as sent read alike. Card text cannot contain Markdown
 headings. The version is a fingerprint of the assembled cover sheet and reports

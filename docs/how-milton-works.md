@@ -111,15 +111,17 @@ Files: `server/src/store/reports.ts`, `server/src/store/compiled.ts`.
 
 - Reports are fixed in code: email, chat, post, document, and speech.
 - Cards print as bullets in insertion order, and an older stored `- ` is not doubled.
-- A report is its heading, "Applies when…", eight samples as quotes, and then rules.
+- A report is its heading, "Applies when…", selected samples as quotes, and then rules.
 - `get_report` takes a required intent (situation, optional audience and purpose) and
   serves the eight samples ranked in one SQL statement: label overlap with the intent,
   then `ts_rank` of the situation (any of its words) over the stored `search` vector of
   context and body, then newest, then id (0033). Without an intent (`list_reports`, the
-  web page, `TPS.md`) a report serves its newest eight.
+  web page) a report serves its newest eight.
 - The cover sheet prints a note explaining `Baseline:` whenever any active rule has that
   prefix.
-- `TPS.md` is the cover sheet plus every non-empty report.
+- `TPS.md` is the cover sheet plus every non-empty report, with all its active approved
+  samples in newest-first order (then descending id on a timestamp tie); removed and
+  replaced samples stay excluded.
 - `is_empty` means no rules and no samples anywhere.
 - The version is a fingerprint of what any read can serve: a hash of the user, the cover
   sheet, and each report's text (newest eight) with every active sample's ID and kind, so
@@ -296,7 +298,8 @@ Files: `server/src/pages.tsx`, `server/src/memo-pages.tsx`, `server/src/auth.tsx
   native sample disclosures, rules, and a random joke comment.
 - It shows setup prompts for reports without rules.
 - If the structured read fails, it falls back to plain report text.
-- `/download` returns the report as `TPS.md`.
+- `/download` returns the complete writing export as `TPS.md`; the web report keeps its
+  newest eight samples per report.
 - `/assistants` lists live consents and looks up at most 20 names per view.
 - The setup prompt changes depending on whether the account is empty.
 - Account opens a native popover; Escape closes it and returns focus to Account, and

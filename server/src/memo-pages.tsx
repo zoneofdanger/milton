@@ -9,7 +9,7 @@ import { ruleText, type Sample } from "./store/reports";
 export const isMemoRoute = (path: string) =>
   path === "/" || path === "/download" || path === "/tps-report";
 
-type PageStore = Pick<PersonStore, "readTpsReport"> &
+type PageStore = Pick<PersonStore, "readTpsReport" | "exportTpsReport"> &
   Partial<Pick<PersonStore, "trialStatus" | "readDocuments">>;
 
 // The note above the report, only when paying is pressing: a trial's last 7 days
@@ -161,8 +161,8 @@ type SheetView = {
   date: string;
   comment: string;
 };
-/** The signed-in cover sheet as a T.P.S. report form. Page only: the download
- * and MCP serve the report text unchanged. */
+/** The signed-in cover sheet as a T.P.S. report form. Web and MCP reads select
+ * eight samples per report; the download includes all active samples. */
 function sheet({ report, documents, email, date, comment }: SheetView) {
   const docs = documents?.version === report.version ? documents : null;
   const filed = docs?.reports.filter((r) => !r.is_empty) ?? [];
@@ -382,9 +382,8 @@ export async function memoPages(
     return page("Method not allowed", "", 405);
   if (request.method !== "GET")
     return page("Not found", <p>This page does not exist.</p>, 404);
-  const report = await store.readTpsReport();
   if (path === "/download")
-    return new Response(report.text, {
+    return new Response(await store.exportTpsReport(), {
       headers: {
         "Content-Type": "text/markdown; charset=utf-8",
         "Content-Disposition": 'attachment; filename="TPS.md"',
@@ -392,6 +391,7 @@ export async function memoPages(
         "X-Content-Type-Options": "nosniff",
       },
     });
+  const report = await store.readTpsReport();
   // Billing information is page chrome, never part of the report/download.
   const trial = await store.trialStatus?.().catch(() => undefined);
   return showCurrent(

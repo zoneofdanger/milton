@@ -1,6 +1,7 @@
 import { cardHeadsJson, cardFingerprint, type CardHead } from "./cards";
 import {
   assembleDocuments,
+  assembleExport,
   AUDIENCES,
   FILINGS,
   PURPOSES,
@@ -331,6 +332,10 @@ export function compiledMemos(
         version: current.version,
         is_empty: current.documents.is_empty,
       };
+    },
+    async exportTpsReport(): Promise<string> {
+      const current = await read();
+      return assembleExport(current.active, current.samples);
     },
     async saveMemo(raw: SaveMemoInput): Promise<SaveOutcome> {
       const parsed = saveMemoInput.safeParse(raw);

@@ -2208,7 +2208,7 @@ test("web shows only current TPS and rejects all retired history and mutation ro
   }
 }, 30000);
 
-test("pages and download show only the session account, whatever the query names", async () => {
+test("pages stay capped and download includes every active sample, only for the session account", async () => {
   // The browser session belongs to page-fixes; a second account shares the store.
   const fixture = await memoPageFixture();
   try {
@@ -2239,17 +2239,78 @@ test("pages and download show only the session account, whatever the query names
       },
     });
     expect(alphaSample.status).toBe("saved");
+    const rules = [
+      {
+        report: "cover",
+        text: "Beta keeps it brief.\n  Keep this exception & <tag>.  ",
+      },
+      {
+        report: "email",
+        text: "Preserve email wording.\nIncluding this line.",
+      },
+      { report: "chat", text: "Preserve chat wording." },
+      { report: "post", text: "Keep this report with rules alone." },
+    ] as const;
     expect(
       (
         await fixture.author.saveMemo({
           text: "Beta keeps it brief.",
-          rules: [{ report: "cover", text: "Beta keeps it brief." }],
+          rules: [...rules],
           expected_version: (await fixture.store.readTpsReport()).version,
           request_id: crypto.randomUUID(),
         })
       ).status,
     ).toBe("saved");
+    const beta = await lookupIdentityAccount(bindings, {
+      provider: "neon",
+      subject: "page-fixes",
+    });
+    const expected = new Map<string, string[]>();
+    for (const report of ["email", "chat"] as const) {
+      await fixture.db
+        .query(sql`INSERT INTO sample_kinds(user_id,id,report,label)
+        VALUES (${beta.userId},${report},${report},'fictional note')`);
+      const bodies = Array.from(
+        { length: 10 },
+        (_, n) =>
+          `Fictional ${report} sample ${n}: <tag> & *verbatim*.${n === 0 ? "\n\n  Keep the oldest sample's spacing.  " : ""}`,
+      );
+      for (const [n, body] of bodies.entries())
+        await fixture.db
+          .query(sql`INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,created_at)
+          VALUES (${beta.userId},${`${report}-${n}`},${report},${report},${`${report} context ${n}`},${body},'{}',
+            ${`2026-01-0${1 + Math.floor(n / 2)}T00:00:00Z`}::timestamptz)`);
+      const replacement = `Fictional ${report} replacement: exact & approved.`;
+      expect(
+        await fixture.author.saveMemo({
+          text: "Fictional audit detail, outside the export.",
+          expected_version: (await fixture.store.readTpsReport()).version,
+          request_id: crypto.randomUUID(),
+          retire_samples: [`${report}-1`],
+          sample: {
+            report,
+            kind_id: report,
+            replaces: `${report}-2`,
+            context: `${report} replacement context`,
+            text: replacement,
+          },
+        }),
+      ).toMatchObject({ status: "saved" });
+      expected.set(report, [
+        replacement,
+        ...[9, 8, 7, 6, 5, 4, 3, 0].map((n) => bodies[n]!),
+      ]);
+    }
     const own = await fixture.store.readTpsReport();
+    const documents = await fixture.store.readDocuments();
+    for (const [report, bodies] of expected) {
+      expect(
+        documents.reports
+          .find((r) => r.id === report)!
+          .samples.map((s) => s.body),
+      ).toEqual(bodies.slice(0, 8));
+      expect(own.text).not.toContain("Keep the oldest sample's spacing.");
+    }
     const [card] = await fixture.db.query<{ id: string }>(
       sql`SELECT card_id AS id FROM instruction_card_versions WHERE user_id=${alpha.userId} AND report='email'`,
     );
@@ -2265,8 +2326,41 @@ test("pages and download show only the session account, whatever the query names
         const response = await fixture.send(path + query);
         expect(response.status).toBe(200);
         const text = await response.text();
-        if (path === "/download") expect(text).toBe(own.text);
-        else expect(text).toContain("Beta keeps it brief.");
+        if (path === "/download") {
+          expect(response.headers.get("Content-Type")).toBe(
+            "text/markdown; charset=utf-8",
+          );
+          expect(response.headers.get("Content-Disposition")).toBe(
+            'attachment; filename="TPS.md"',
+          );
+          expect(response.headers.get("Cache-Control")).toBe("no-store");
+          expect(response.headers.get("X-Content-Type-Options")).toBe(
+            "nosniff",
+          );
+          expect(text.match(/^Approved,/gm)).toHaveLength(18);
+          for (const rule of rules) expect(text).toContain("- " + rule.text);
+          expect(text).not.toContain("# Document");
+          expect(text).not.toContain("# Speech");
+          for (const [report, bodies] of expected) {
+            let previous = -1;
+            for (const body of bodies) {
+              const position = text.indexOf("> " + body.split("\n")[0]!);
+              expect(position).toBeGreaterThan(previous);
+              previous = position;
+            }
+            expect(text).toContain(
+              `Approved, ${report} context 0, 2026-01-01:\n> Fictional ${report} sample 0: <tag> & *verbatim*.\n>\n>   Keep the oldest sample's spacing.  `,
+            );
+            for (const n of [1, 2])
+              expect(text).not.toContain(`Fictional ${report} sample ${n}:`);
+          }
+          expect(text).not.toContain("Fictional audit detail");
+          expect(text).not.toContain(beta.userId);
+        } else {
+          expect(text).toContain("Beta keeps it brief.");
+          expect(text).not.toContain("Keep the oldest sample&#39;s spacing.");
+          expect(text).not.toContain("Keep the oldest sample's spacing.");
+        }
         for (const foreign of [
           "Alpha signs as Ada",
           "Alpha sample body",
@@ -2275,6 +2369,7 @@ test("pages and download show only the session account, whatever the query names
         ])
           expect(text).not.toContain(foreign);
       }
+    expect(await fixture.store.readTpsReport()).toEqual(own);
   } finally {
     await fixture.dispose();
   }
@@ -2292,6 +2387,7 @@ test("report bullets require exact revision and complete text parity; optional l
   };
   const base = {
     readTpsReport: async () => report,
+    exportTpsReport: async () => report.text,
   };
   const emptyReport = (id: string, title: string) => ({
     id,

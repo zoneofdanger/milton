@@ -419,7 +419,8 @@ canonical report; it does not compare the text.
 Unavailable or mismatched layout data keeps the original plain-text view. Report
 pages preload the shared Geist and JetBrains Mono fonts; the theme uses
 `font-display: optional` to avoid a late font swap.
-`/download` returns the unchanged exact report text as `TPS.md`. Old memo/history/recovery
+`/download` returns the cover rules and every non-empty report, including all active
+approved samples, as `TPS.md`. Old memo/history/recovery
 routes return 404.
 
 ## Reports, samples and the cover sheet
@@ -443,10 +444,11 @@ rule whose own text starts with `- ` (stored as sent) prints as a plain bullet, 
 reader cannot tell that dash is content. Stored cards are not
 edited. The cover sheet is the cover-sheet rules joined by blank lines; the fixed
 report index (one "when" line per report) travels beside it as data. Each report
-prints `# Title`, its when line, eight active samples, ranked for the read's intent or
-else newest first (a context line with
-the date, then the body quoted with `>`), then its rules. The full text (TPS.md and
-the web page) is the cover sheet plus every non-empty report. The web page lists each
+prints `# Title`, its when line, selected active samples (a context line with
+the date, then the body quoted with `>`), then its rules. MCP reads select eight samples,
+ranked for the read's intent or else newest first; the web page shows the newest eight.
+TPS.md includes all active samples, newest first. Both full texts are the cover sheet
+plus every non-empty report. The web page lists each
 sample by its context line, its labels when it has any, and its date (0033).
 
 A read takes the card heads, the active samples and the account's status in one
@@ -576,7 +578,7 @@ ORDER BY n LIMIT 8
 
 The tsquery matches any word of the situation, as the ranking test did. Unlabeled
 samples (all from before 0033) rank by full text and recency only. Without an intent
-(`list_reports`, the web page, `TPS.md`) a report serves its newest eight. The version
+(`list_reports`, the web page) a report serves its newest eight. The version
 covers every active sample, so it is the same for every intent. A `get_report` without
 a well-formed intent is refused with `invalid_input` before the store is read. With no
 intent, the message says what to send and to reconnect the assistant if it has no intent

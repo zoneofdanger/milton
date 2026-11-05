@@ -404,7 +404,11 @@ export async function personStoreForCurrentRequest(
 ) {
   const store = await storeForCurrentRequest(bindings, auth);
   const db = database(bindings);
-  return { ...store, trialStatus: () => trialStatus(db, auth.userId) };
+  return {
+    ...store,
+    exportTpsReport: compiledMemos(db, auth.userId).exportTpsReport,
+    trialStatus: () => trialStatus(db, auth.userId),
+  };
 }
 /** The account's billing status, for the menu on pages with no person store. */
 export const accountTrialStatus = (bindings: StoreBindings, userId: string) =>

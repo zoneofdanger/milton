@@ -111,7 +111,7 @@ export type Documents = {
   /** One "when" line per report, in fixed order. */
   index: { id: ReportId; when: string }[];
   reports: ReportDocument[];
-  /** Cover sheet and every non-empty report, for the web page and TPS.md. */
+  /** Cover sheet and every non-empty report, with the selected samples. */
   full: string;
   /** No rules anywhere and no samples: first setup applies. */
   is_empty: boolean;
@@ -148,29 +148,23 @@ const coverSheetText = (active: CardHead[]) =>
 const reportIndex = () => REPORTS.map((r) => ({ id: r.id, when: r.when }));
 /** Samples a report serves; every active sample stays stored. */
 export const SERVED_SAMPLES = 8;
-/** Heading, the when line, the served samples (context line, quoted body),
- * then rules as bullets. The served samples are `ranked`, in that order, when a
- * read ranked them for an intent; otherwise the newest eight, newest first.
+const newestFirst = (samples: Sample[]) =>
+  samples.toSorted((a, b) =>
+    a.created_at === b.created_at
+      ? b.id.localeCompare(a.id)
+      : a.created_at < b.created_at
+        ? 1
+        : -1,
+  );
+/** Heading, the when line, the selected samples (context line, quoted body),
+ * then rules as bullets. The caller selects and orders the samples.
  * Every stored byte of a rule or sample is preserved, apart from one leading
  * "- " a bullet replaces. */
 function reportDocument(
   report: (typeof REPORTS)[number],
   active: CardHead[],
-  samples: Sample[],
-  ranked?: string[],
+  own: Sample[],
 ): ReportDocument {
-  const mine = samples.filter((s) => s.report === report.id);
-  const own = ranked
-    ? ranked.flatMap((id) => mine.filter((s) => s.id === id))
-    : mine
-        .sort((a, b) =>
-          a.created_at === b.created_at
-            ? b.id.localeCompare(a.id)
-            : a.created_at < b.created_at
-              ? 1
-              : -1,
-        )
-        .slice(0, SERVED_SAMPLES);
   const parts = [
     `# ${report.title}`,
     `Applies when ${report.when}.`,
@@ -187,6 +181,24 @@ function reportDocument(
     rules: rules(active, report.id),
   };
 }
+const fullText = (cover: string, reports: ReportDocument[]) =>
+  [cover, ...reports.filter((r) => !r.is_empty).map((r) => r.body)]
+    .filter(Boolean)
+    .join("\n\n");
+
+/** The download includes every active sample, newest first within each report. */
+export function assembleExport(active: CardHead[], samples: Sample[]): string {
+  return fullText(
+    coverSheetText(active),
+    REPORTS.map((r) =>
+      reportDocument(
+        r,
+        active,
+        newestFirst(samples.filter((s) => s.report === r.id)),
+      ),
+    ),
+  );
+}
 /** The cover sheet and the five reports. `ranked` replaces one report's newest
  * eight with the samples a read ranked for its intent. */
 export function assembleDocuments(
@@ -195,22 +207,22 @@ export function assembleDocuments(
   ranked?: { report: ReportId; ids: string[] },
 ): Documents {
   const cover = coverSheetText(active);
-  const reports = REPORTS.map((r) =>
-    reportDocument(
+  const reports = REPORTS.map((r) => {
+    const mine = samples.filter((s) => s.report === r.id);
+    return reportDocument(
       r,
       active,
-      samples,
-      r.id === ranked?.report ? ranked.ids : undefined,
-    ),
-  );
+      r.id === ranked?.report
+        ? ranked.ids.flatMap((id) => mine.filter((s) => s.id === id))
+        : newestFirst(mine).slice(0, SERVED_SAMPLES),
+    );
+  });
   return {
     cover,
     cover_rules: rules(active, "cover"),
     index: reportIndex(),
     reports,
-    full: [cover, ...reports.filter((r) => !r.is_empty).map((r) => r.body)]
-      .filter(Boolean)
-      .join("\n\n"),
+    full: fullText(cover, reports),
     is_empty: active.length === 0 && samples.length === 0,
   };
 }

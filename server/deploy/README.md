@@ -19,10 +19,10 @@ decommission on 2026-11-01. Hosting rollback now uses Cloud Run revisions.
 
 Project `milton-510506`, Cloud Run/Artifact Registry region `us-east4`. Service manifests in this directory pin an immutable image and
 secret versions. They contain configuration and secret references, never values.
-The manifests pin what is serving now: app `milton-app-tps-c6a59b1`
-(`sha256:5ac952e1…`, env 3, key 1) and MCP `milton-mcp-ui-99b7209`
-(`sha256:789939cf…`, env 3, key 1), both connecting as `milton_app`; see the current
-release below. There is no worker service or scheduler job. There is no memo-update
+The manifests pin what is serving now: app `milton-app-context-fec8802` and MCP
+`milton-mcp-context-fec8802` (image index `sha256:fe7e2263…`, env 3, key 1), both
+connecting as `milton_app`; see the current release below. Production has the
+`0000_baseline` and `0001_sample_context` migrations. There is no worker service or scheduler job. There is no memo-update
 allowance; the daily call cap bounds saves. Existing positive account safeguards remain
 in effect. Trials and billing are live (since 2026-11-04).
 Each image includes both roles and browser assets. Validate manifests before applying:
@@ -173,9 +173,11 @@ revision and its imported image, then verify startup again when assigning traffi
    `PASS` (exit 0) means the form reached the sign-in check; `FAIL` means
    `csrf_refused`, so roll back the app.
 
-To roll back a release, first verify the selected runtime supports the current
-database schema and accounting policy, then send traffic to its recorded healthy Cloud
-Run revision. Do not restore a database snapshot to roll back application code. An
+For the current sample-context schema, old revisions are not a traffic-only
+rollback: follow the closed-ingress, snapshot and guarded schema rollback boundary
+recorded below. For a schema-compatible code release, first verify the selected
+runtime supports the current database schema and accounting policy, then send traffic
+to its recorded healthy Cloud Run revision. Do not restore a database snapshot to roll back application code. An
 existing revision retains its image, runtime configuration and numeric secret
 references. Inspect revision readiness before selecting a recorded revision:
 
@@ -183,12 +185,102 @@ references. Inspect revision readiness before selecting a recorded revision:
 gcloud run revisions list --service=milton-app --project=milton-510506 --region=us-east4
 ```
 
-Now serving: app `milton-app-tps-c6a59b1` (selected 2026-11-04 23:58:58Z),
+Now serving: app `milton-app-context-fec8802` and MCP
+`milton-mcp-context-fec8802`, both selected by name at 100% while ingress was closed
+on 2026-11-05 (MCP 16:51:08Z, app 16:51:19Z). Exact landed main source:
+`fec88029f86cf6c71710fa78978c35269becb718`. Both ingress settings were restored
+to `internal-and-cloud-load-balancing` by 2026-11-05 16:51:32Z.
+
+Current release context-fec8802: image index
+`sha256:fe7e226368b42d2ec047c26ac7cbb6d6181acb5157bda8d881b75af55ee8802b`, Linux amd64
+`sha256:f49a219aa7001219ec3ff75fa9ff770762bc0043fc4e226024fd181ba06e877b`. The clean git archive passed
+frozen Bun install, types, 108 tests/2,517 assertions, formatting and the focused
+five migration tests/83 assertions, all exit 0. Node 26.13.0, uid 1000, the
+self-contained bundle, absence of private/env/key artifacts and both roles'
+empty-configuration refusal were verified in the Linux amd64 image. Disposable
+PGlite tests exercised fresh/repeated install, baseline-seeded upgrade, exact
+preservation, guarded rollback/refusal, re-upgrade and narrow runtime privileges.
+Accepted fictional component/browser evidence remains the layout evidence; it is
+not a live-account or Node-runtime save/correction claim. This integrated source
+also includes the approved onboarding and complete-export changes.
+
+Both matching revisions were staged Ready without traffic. Only image/name and
+generated operation metadata changed in runtime specs; IAM, ingress after reopening,
+resources, service accounts, startup settings and numeric secret references match
+the predecessors. App retains `milton-app-env:3` / `milton-app-key:1`; MCP retains
+`milton-mcp-env:3` / `milton-mcp-key:1`, startup CPU boost and its unmounted env-2
+volume. The minimal tracked manifests omit that dormant volume.
+
+Both ingresses closed to `internal`; canonical health endpoints refused 404 at
+2026-11-05 16:46:27Z. After more than 180 seconds, the owner capture showed no other
+active transactions/writers. Native Neon snapshot `before-sample-context-fec8802`,
+`snap-divine-rain-b864qz0l`, was created and independently retrieved at
+2026-11-05 16:50:01Z immediately before the normal owner-only
+migrator applied only `0001_sample_context` (2026-11-05 16:50:29Z to
+2026-11-05 16:50:37Z). The journal is exactly baseline
+`1793815543500` / `4167000e0d8550aa7f2852d648a176a841a5a6d7a01a763d7e73822fc7c48735`
+and sample context `1793901943500` /
+`2efc9cea1347716ce23abf560e943869409af23fb742966de1bb6556599c9c10`.
+All 11 samples retained their exact immutable fields, approved summaries and legacy
+label mappings; all 13 unrelated public tables matched their pre-migration counts
+and hashes. Sample columns/constraints/indexes and guard functions match the migrated
+fictional catalog; unrelated catalog, narrow grants, roles and sequence state match
+the captured baseline. A repeated normal migration left data, catalog and journal
+identical. Only hashes/counts/catalog metadata were retained. Representation changes
+can change account version tokens; unchanged versions were not required.
+
+Canonical trusted TLS 1.2/1.3 and TLS 1.0/1.1 refusal, health, discovery, unauthenticated
+401/CORS, HTTP 308, direct run.app refusal, signed-out restrictions, invalid Stripe
+signature refusal and the mandatory forms probe passed, exit 0. Through the existing
+authorized MCP connection, cover/email reads succeeded at one matching new version:
+five reports, eight selected email samples, four kinds, context objects at version 1
+and context revisions, with no legacy top-level labels. No account sample/rule save,
+new sign-in, credential rotation or client configuration change ran. The parsed served-contract and
+SDK tests cover four tools, current schemas and 4,095 instruction characters in the
+exact deployed source. Lead independently read the account and used a fresh native
+connection to discover all four live tool schemas at 2026-11-05 16:55:49Z, including object sample context,
+contextual intent and sample-context corrections with legacy label inputs absent.
+The already-open Lead and release sessions still advertise cached metadata; refresh
+in other clients remains unverified. Signed-in account download remains unverified.
+
+The static site published separately from main
+`50e6fc4682d091a6d2619eae7f3148d6ee23ac52`, which fixes the Vercel upload boundary by
+moving the unchanged setup prompt to the existing shared theme package. Vercel
+deployment `dpl_2wZG11uNAJLE7nD9giueneJXTqwy` was Ready in production with the canonical
+domain aliases. Lead checked `/`, `/setup`, `/pricing`, `/notes`, `/privacy` and
+`/terms` at HTTP 200 with footers, the approved homepage headline, and both setup
+widgets plus their four assistant links against the exact canonical prompt.
+
+Rollout gates completed at 2026-11-05 16:52:22Z.
+Observation continued through 2026-11-05 16:57:51Z, more than five minutes after
+rollout checks. Repeated canonical health probes stayed 200; filtered logs showed no
+runtime ERROR, 5xx or unexpected auth/schema/permission/lock failures. Available
+request metrics showed no 5xx. Final service/IAM/resource/startup/numeric-secret
+parity passed; both predecessor revisions remain Ready and their images and enabled
+secret versions are retained.
+Live signed-in browser layout, complete account download, schema refresh in
+already-open assistant sessions and Node 26 save/correction behavior remain unverified.
+
+Conditional rollback: preserve Ready predecessors `milton-app-tps-c6a59b1` (image index
+`sha256:5ac952e173f0e337211eecff605c470f63f8e2868742e96c792d455a10d5a35b`, amd64
+`sha256:3485f0f3523808693dc7460f1b9c1a3158b3aa74012c244616c645ca507160d5`)
+and `milton-mcp-ui-99b7209` (image index
+`sha256:789939cfbca106b00fb9288a149ef1e12b4e49da87c77e4bb9d1ac8aa0d5f842`, amd64
+`sha256:078a2e85ce824d598352803c2f18007ab988ce82b6079128cf44341a4e17b559`),
+both env 3/key 1. These old runtimes cannot read the new schema. Rollback requires
+closed/drained ingress, another immediate snapshot, the tested owner-only
+`server/scripts/sample-context-rollback.sql`, successful schema/data verification and
+both matching old runtimes selected before reopening. The script refuses revised or
+unrepresentable context and reclassified lineage; never bypass that refusal. If it
+would discard later writes, keep compatible code and seek a recovery decision. No
+automatic snapshot restore, traffic-only rollback, resource deletion or tuning ran.
+
+Previous app release: `milton-app-tps-c6a59b1` (selected 2026-11-04 23:58:58Z),
 from exact landed main commit `c6a59b11d8aaf4636e52e374a962d9be62d26241`, at 100%.
-MCP remains `milton-mcp-ui-99b7209` at 100%, from
+MCP then remained `milton-mcp-ui-99b7209` at 100%, from
 `99b720966443e3a3cde696be9f39360fc51e7b7e`; it was not redeployed.
 
-Current app release tps-c6a59b1: image index
+Previous app release tps-c6a59b1: image index
 `sha256:5ac952e173f0e337211eecff605c470f63f8e2868742e96c792d455a10d5a35b`, Linux amd64
 `sha256:3485f0f3523808693dc7460f1b9c1a3158b3aa74012c244616c645ca507160d5`.
 A clean archive of that exact commit passed frozen Bun install, types,
@@ -222,7 +314,7 @@ accepted frozen CSS. Live signed-in TPS layout and keyboard verification remain
 unverified because the existing browser window was unavailable; fictional browser
 evidence is not a claim of live account behavior.
 
-Immediate app rollback: preserve `milton-app-ui-99b7209`, image index
+Historical TPS rollback: preserve `milton-app-ui-99b7209`, image index
 `sha256:789939cfbca106b00fb9288a149ef1e12b4e49da87c77e4bb9d1ac8aa0d5f842`, amd64
 `sha256:078a2e85ce824d598352803c2f18007ab988ce82b6079128cf44341a4e17b559`, env 3/key 1.
 The predecessor is schema-compatible; recheck readiness before selecting it.
@@ -268,7 +360,7 @@ errors. Available request metrics through 19:53Z had no 5xx. The immediate prede
 and their image remain
 available. No real-account saves, sign-ins or provider/billing actions ran.
 
-Rollback for the previous joint release (still current for MCP): preserve `milton-mcp-clean-c27869a` and
+Historical rollback for the previous joint release: preserve `milton-mcp-clean-c27869a` and
 `milton-app-clean-c27869a` with image index
 `sha256:32df4631750a32c35f52c263a10c61d6bb45ea64d807ebbe98771b499471ad7d`, amd64
 `sha256:22acf1609b35b8c1aff20fbb0b705a1a96b03cce4a002c059a4e49d00919e712`, env 3/key 1.
@@ -613,8 +705,8 @@ trial-ending reminder.
 ## Legacy schema cleanup
 
 **Applied to production on 2026-11-04 at 18:54:45Z.** The current release above records
-the snapshot, exact transition and verified preservation. Production now has one baseline
-journal entry at `1793815543500`. `server/drizzle/0000_baseline.sql` is for empty
+the snapshot, exact transition and verified preservation. That cleanup left one baseline
+journal entry at `1793815543500`; the sample-context release above adds `0001`. `server/drizzle/0000_baseline.sql` is for empty
 installations; `server/scripts/transition-baseline.sql` supports the one known old 34-entry
 0033 state (latest timestamp `1793779058436`). No earlier schema state or historical schema
 rollback chain is supported.

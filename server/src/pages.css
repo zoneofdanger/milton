@@ -127,6 +127,11 @@ section {
 .setup-copy code {
   font-size: inherit;
 }
+.form-empty > p,
+.connect-steps p,
+blockquote.setup-copy > p {
+  text-wrap: pretty;
+}
 .assistant-list {
   list-style: none;
   padding: 0;

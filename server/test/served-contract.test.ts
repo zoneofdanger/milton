@@ -233,20 +233,24 @@ test("default edit scope preserves the person's text while retrieval and request
     /Preserve other words, length, tone, greeting and sign-off/,
     /no stock phrases or new punctuation habits/,
     /Briefly list changes/,
-    /Explicit shortening, translation, tone changes or other transformations permit that change only/,
-    /When writing from scratch, use the samples and rules/,
+    /Requested transformations \(shortening, translation, tone\) permit only that scope/,
+    /Edit scope overrides samples and standing tone; never restyle outside the request/,
   ])
     expect(editing).toMatch(constraint);
   // Retrieval applies before edits and new drafts; editing adds a scope boundary.
-  expect(
-    storeInstructions.indexOf("Before writing for or as the person"),
-  ).toBeLessThan(storeInstructions.indexOf("Edit mode:"));
-  expect(storeInstructions).toContain(
-    "get_report for each matching report with intent: one line on the situation, plus relevant kind_id and context",
+  expect(storeInstructions.indexOf("Before writing or editing")).toBeLessThan(
+    storeInstructions.indexOf("Edit mode:"),
   );
   expect(storeInstructions).toContain(
-    "matching samples (opening, length, sign-off, forbidden phrases)",
+    "get_report for each matching report with intent: one-line situation, relevant kind_id/context",
   );
+  const retrieval = storeInstructions.split("\n\n")[1]!;
+  // Only new drafts get the conformity rewrite; supplied text keeps edit scope.
+  expect(retrieval).toContain("New drafts: imitate samples; rules fill gaps;");
+  expect(retrieval).toMatch(
+    /New drafts:[^.]+check cover rules and matching samples \(opening, length, sign-off, forbidden phrases\), fixing failures before showing the draft\./,
+  );
+  expect(retrieval).not.toContain("fix failures before showing text");
 });
 
 test("every create_memo shape the server instructions describe parses against saveMemoInput", () => {
@@ -318,7 +322,7 @@ test("every create_memo shape the server instructions describe parses against sa
   });
   // The read the instructions, the tool description and the refusal describe.
   says(
-    "get_report for each matching report with intent: one line on the situation, plus relevant kind_id and context",
+    "get_report for each matching report with intent: one-line situation, relevant kind_id/context",
   );
   for (const situation of [
     "declining a client's request for a discount",

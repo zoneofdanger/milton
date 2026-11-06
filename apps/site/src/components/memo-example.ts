@@ -1,68 +1,18 @@
-// Every line of the hero conversation, once. MemoDemo renders it in order.
-
-/** An email excerpt, with its signature on a separate line when supplied. */
-interface MemoExcerpt {
-  body: string;
-  signature?: string;
-}
-
-interface MemoTurn {
-  speaker: "You" | "Claude" | "ChatGPT";
-  text?: string;
-  excerpt?: MemoExcerpt;
-}
-
-interface MemoScene {
-  label: string;
-  turns: MemoTurn[];
-}
-
-const signature = "Peter";
-
-const sample: MemoExcerpt = {
-  body: "Bill, Saturday doesn’t work. TPS reports on your desk Monday, cover sheets and all.",
-  signature,
-};
-
-const draft: MemoExcerpt = {
-  body: "Bob, Bob. Can’t do 2:15. I’ll come find you after.",
-  signature,
-};
-
-export const memoExample: { scenes: MemoScene[] } = {
-  scenes: [
+// The fictional illustration's exact display strings, scored at build time.
+export const memoExample = {
+  request: "Clean this up.",
+  original:
+    "hey team, tps reports are late again bc the new cover sheets didnt come in. ill have them on everyones desk monday, sorry about that. The cover sheets are the problem, not the reports.",
+  outputs: [
     {
-      label: "Monday · Claude",
-      turns: [
-        {
-          speaker: "You",
-          text: "Reply to Lumbergh. I’m not coming in on Saturday.",
-        },
-        {
-          speaker: "Claude",
-          excerpt: {
-            body: "Hi Bill! Thanks so much for reaching out. Unfortunately I won’t be able to...",
-          },
-        },
-        {
-          speaker: "You",
-          text: "Not me. Here’s what I sent. Keep it as my email sample.",
-          excerpt: sample,
-        },
-        {
-          speaker: "Claude",
-          text: "Milton got the memo. Filed under email, word for word.",
-        },
-      ],
+      id: "plain",
+      label: "Illustrative plain AI",
+      text: "Hi team, I hope this message finds you well. I wanted to provide a quick update regarding the TPS reports, which are running behind schedule due to a delay in receiving the new cover sheets. Rest assured, they will be on everyone's desk by Monday. We're working through a minor paperwork issue. Thank you for your patience!",
     },
     {
-      label: "Next week · ChatGPT",
-      turns: [
-        { speaker: "You", text: "Did you get that memo?" },
-        { speaker: "ChatGPT", text: "Got it. One email sample on file." },
-        { speaker: "You", text: "Tell the Bobs I’ll miss the 2:15." },
-        { speaker: "ChatGPT", excerpt: draft },
-      ],
+      id: "milton",
+      label: "Illustrative Milton",
+      text: "Hey team, TPS reports are late again because the new cover sheets didn't come in. I'll have them on everyone's desk Monday, sorry about that. The cover sheets are the problem, not the reports.",
     },
   ],
-};
+} as const;

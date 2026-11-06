@@ -25,10 +25,7 @@ import FilingComparison from "../components/FilingComparison.astro";
         $5.01 a month after a 30-day free trial. No card required.
       </p>
     </div>
-    <div>
-      <MemoDemo />
-      <p class="demo-caption small-note">Fictional example conversation.</p>
-    </div>
+    <MemoDemo />
   </section>
   <div class="assistant-strip">
     <span class="assistant-label">Works with:</span>
@@ -305,7 +302,7 @@ import FilingComparison from "../components/FilingComparison.astro";
     position: relative;
     z-index: 11;
     display: grid;
-    grid-template-columns: 1.15fr 1fr;
+    grid-template-columns: 1fr;
     gap: var(--space-16);
     align-items: center;
     padding-block: var(--space-20);
@@ -321,9 +318,6 @@ import FilingComparison from "../components/FilingComparison.astro";
     font-size: var(--text-lead);
     line-height: var(--leading-body);
     margin-top: var(--space-6);
-  }
-  .demo-caption {
-    margin-top: var(--space-3);
   }
   .actions {
     margin-top: var(--space-6);

@@ -404,13 +404,16 @@ Files: `apps/site/`.
 
 - Astro builds static pages and copies shared fonts from the theme.
 - Every static page, including 404, shows the same shared footer navigation.
-- The hero demo loops its eight-turn conversation on one clock, holding the final draft
-  for 2,150 ms before repeating every 10,500 ms; requests and the approved email appear
-  whole, and AI replies type, with no playback controls or status announcements.
+- The hero demo shows one fictional cleanup request with illustrative plain-AI and
+  Milton outputs; build-time ordered word matching computes words kept from the
+  displayed strings, ignoring case and punctuation except normalized internal
+  apostrophes, and unmatched output words stay underlined. One 10,500 ms clock sweeps
+  a paper tint over edits with two 2,150 ms reading holds; all text and scores remain
+  readable throughout, with no playback controls or status announcements.
 - Playback waits for 35% card visibility, or 80% of the maximum visible card area when a
   short viewport cannot show 35%; resizing updates that threshold, and playback pauses
   off-screen or in a hidden tab, preserving its position.
-- Reduced motion or disabled JavaScript shows the complete story without animation.
+- Reduced motion or disabled JavaScript shows the complete illustration without animation.
 - The setup widget copies a prompt, falls back to manual selection, and closes on Escape
   or an outside click.
 - The fake crowdfunding campaign on `/pricing` is static data.

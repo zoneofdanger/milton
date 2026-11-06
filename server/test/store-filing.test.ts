@@ -879,7 +879,11 @@ test("sample revisions keep identity and immutable complete snapshots, replay an
       context,
       text: "  Old\r\n😀  ",
     };
-    expect(await f.save({ sample: first })).toMatchObject({ status: "saved" });
+    // Valid uppercase request UUIDs retain their exact bytes through save and replay.
+    const creationRequest = "A1C13E43-10F9-47CE-98D9-C8B23A102DC5";
+    expect(
+      await f.save({ sample: first, request_id: creationRequest }),
+    ).toMatchObject({ status: "saved", request_id: creationRequest });
     const original = (await f.report("post")).samples[0]!;
     const next = {
       report: "post" as const,
@@ -894,7 +898,7 @@ test("sample revisions keep identity and immutable complete snapshots, replay an
     };
     const input = {
       text: "Revise the approved example.",
-      request_id: crypto.randomUUID(),
+      request_id: "9AA52382-1122-4F71-A44A-B4E848EA8347",
       expected_version: (await f.store.getTpsReport()).version,
       sample: next,
     };
@@ -910,7 +914,10 @@ test("sample revisions keep identity and immutable complete snapshots, replay an
       SELECT user_id,sample_id,4,report,kind_id,context,body,actor_json,request_id FROM sample_versions WHERE user_id='sample-revisions' AND version=2`),
     ).rejects.toThrow("sample_version_conflict");
 
-    expect(saved).toMatchObject({ status: "saved" });
+    expect(saved).toMatchObject({
+      status: "saved",
+      request_id: input.request_id,
+    });
     expect(saved.samples_retired).toBeUndefined();
     expect(await f.store.saveMemo(input)).toEqual(saved);
     expect(await f.save({ sample: next })).toMatchObject({
@@ -971,7 +978,13 @@ test("sample revisions keep identity and immutable complete snapshots, replay an
       )
     ).rows;
     expect(versions).toMatchObject([
-      { version: 1, body: first.text, context, retired: false },
+      {
+        version: 1,
+        body: first.text,
+        context,
+        retired: false,
+        request_id: creationRequest,
+      },
       {
         version: 2,
         body: next.text,

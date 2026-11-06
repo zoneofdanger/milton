@@ -147,7 +147,7 @@ BEGIN
    OR (head.version IS NULL AND NEW.retired) THEN RAISE EXCEPTION USING ERRCODE='P0001',MESSAGE='sample_version_conflict'; END IF;
  IF NEW.retired AND (NEW.body,NEW.context,NEW.kind_id,NEW.report) IS DISTINCT FROM (head.body,head.context,head.kind_id,head.report)
    THEN RAISE EXCEPTION USING ERRCODE='P0001',MESSAGE='sample_version_conflict'; END IF;
- IF NEW.request_id IS NULL OR NEW.request_id !~ '^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$'
+ IF NEW.request_id IS NULL OR NEW.request_id !~* '^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$'
    OR NEW.provenance<>'{}'::jsonb THEN RAISE EXCEPTION USING ERRCODE='P0001',MESSAGE='sample_version_conflict'; END IF;
  RETURN NEW;
 END $$;

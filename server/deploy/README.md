@@ -15,6 +15,27 @@ The retired combined Vercel `milton-mcp` project, deployments, aliases, project
 secrets and firewall configuration were removed during the authorized hosting
 decommission on 2026-11-01. Hosting rollback now uses Cloud Run revisions.
 
+## Pending sample revision schema/API cutover
+
+`0002_sample_versions` is a breaking forward migration, not a deployed change.
+A separately authorized coordinated cutover must close app/MCP ingress for both
+reads and writes, drain old instances, take a database snapshot, apply the migration
+as owner, then start compatible app/MCP images before reopening. Do not run old code
+against this schema. Preserve existing resources under the normal release policy;
+this task supplies no compatibility period or new rollback artifact.
+
+The migration maps linear legacy replacement chains to root stable IDs, preserves
+known exact snapshots and legacy provenance, and leaves accepted-change evidence
+unchanged. It aborts transactionally on ambiguous lineage; investigate a refusal
+without bypassing it. Earlier overwritten contexts/correction times are unknown and
+are explicitly not reconstructed. Retired leaves with no successor stay retired,
+including dedup-consolidated samples. Local fictional PGlite rehearsal is not a live
+history inventory or authorization to migrate. Before release, review preservation
+against the selected snapshot. Reconnect assistants after cutover: `sample.sample_id`
+replaces `sample.replaces`, report metadata uses `revision`, and clients must reread
+current IDs and the account version. Check exact active reads/exports and revision,
+retirement, replay, stale-write and account-delete behavior before reopening.
+
 ## Cloud resources
 
 Project `milton-510506`, Cloud Run/Artifact Registry region `us-east4`. Service manifests in this directory pin an immutable image and

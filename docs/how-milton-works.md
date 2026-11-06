@@ -120,11 +120,11 @@ Files: `server/src/store/reports.ts`, `server/src/store/compiled.ts`.
 - The cover sheet prints a note explaining `Baseline:` whenever any active rule has that
   prefix.
 - `TPS.md` is the cover sheet plus every non-empty report, with all its active approved
-  samples in newest-first order (then descending id on a timestamp tie); removed and
-  replaced samples stay excluded.
+  samples in newest-first order (then descending id on a timestamp tie);
+  retired samples and superseded revisions stay excluded.
 - `is_empty` means no rules and no samples anywhere.
 - The version is a fingerprint of what any read can serve: a hash of the user, the cover
-  sheet, and each report's text (newest eight) with every active sample's ID, kind and context revision, so
+  sheet, and each report's text (newest eight) with every active sample's ID, kind and sample revision, so
   it is the same for every intent. The same cards and samples
   always give the same version, and nothing assembled is stored.
 - A client holding a version from before fingerprints (a revision hash) conflicts once
@@ -183,17 +183,16 @@ not at all.
 - A new rule's description is its first non-blank line, cut to its byte cap, and
   descriptions are never printed.
 - Omitting a rule never removes it, and a no-op save returns `unchanged`.
-- Identical sample text for a kind files nothing; reclassification into a kind with identical active text refuses `sample_conflict` without changing rules, samples, context or version.
+- A new example identical in body, report/kind and complete context files nothing; different context can justify a separate identity, and revisions never merge identities.
 - Kinds match by label, ignoring case.
 - A `kind_id` must name a kind in the same report.
 - Each sample requires context `version: 1` and a useful one-line summary; optional purposes, medium, audience, interaction, whole/excerpt scope, language and register use fixed keys and bounded open vocabulary, leaving unknowns absent.
-- `sample_context` completely replaces approved context and optionally reclassifies one active sample within its report; omitted optional fields clear, while body, ID, date and lineage stay unchanged.
-- A distinct context/classification correction increments its own revision and fences all saves even outside the served eight; an identical replacement is unchanged and request retries replay deterministically.
-- Replacing a sample requires an active sample of the same kind at save time; later reclassification preserves tenant/sample lineage.
+- `sample_context` appends a complete approved revision, preserving body and stable ID and optionally reclassifying within the report; omitted optional context fields clear.
+- Every changed sample snapshot advances its revision and fences all saves even outside the served eight; identical revisions append nothing, and request retries replay deterministically.
+- `sample.sample_id` revises an active identity with complete approved body, context and report/kind; omission creates an identity plus revision one, and `replaces` is no longer accepted.
+- Approval date and all sample recency ordering use latest revision time, including metadata changes; original creation time and actor remain on the stable identity.
 - Each sample removal must name an active sample, listed once.
-- Every approved sample stays until the person replaces or removes it; a report read
-  serves the eight that best fit its intent. `samples_retired` reports what `replaces` and `retire_samples`
-  retired.
+- Every approved sample stays until explicit `retire_samples` appends an inactive complete snapshot; `samples_retired` reports retired stable IDs, while reads/app/exports show only latest active revisions with stable ID and revision metadata.
 
 ### Publish
 
@@ -380,8 +379,9 @@ Files: `server/drizzle/`, `server/src/store/schema.ts`, `server/src/store/databa
 
 - Card versions must be sequential, and they cannot be changed or deleted while the card
   exists.
-- Kind identities and sample writing are immutable; active sample context/classification changes require a sequential context revision, and retirement is final.
-- Migration `0001_sample_context` preserves exact bodies, summaries and old labels in one JSONB object; its owner-only offline rollback refuses revised/unrepresentable context or incompatible lineage, and deployment requires the hosting runbook's closed-ingress coordinated cutover.
+- Kind identities, sample identities and complete revisions are immutable; database guards serialize sequential appends on the account lock, refuse changes to inactive samples, enforce tenant/classification references and cascade account hard deletion.
+- Forward migration `0002_sample_versions` maps linear replacement chains to root IDs, retains known snapshots and legacy provenance, keeps retired/consolidated leaves inactive, and leaves accepted-change evidence intact; unavailable context history is not invented.
+- Migration refuses cycles, branches and invalid tenant/report/lifecycle parents before destructive changes; this breaking schema/API upgrade requires an authorized closed-ingress cutover with compatible app/MCP code.
 - A receipt is written once with its outcome and cannot change.
 - Audit rows are immutable and must reference real card versions.
 - History has no size cap. History rows never shrink short of account deletion, so the

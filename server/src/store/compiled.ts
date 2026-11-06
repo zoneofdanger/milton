@@ -22,6 +22,7 @@ import type {
   SaveOutcome,
   Snapshot,
 } from "./save-context";
+import { sampleHeads } from "./samples";
 import { runSave } from "./save";
 import { oneLine, sampleContextInput } from "./sample-context";
 export { oneLine } from "./sample-context";
@@ -109,13 +110,13 @@ export const saveMemoInput = z
           .describe(
             "Only when no listed kind fits: a label of one or two words, such as follow-up email. A label already used in this report, in any letter case, files under that kind. Send kind_id or new_kind, not both.",
           ),
-        replaces: z
+        sample_id: z
           .string()
           .min(1)
           .max(256)
           .optional()
           .describe(
-            "The id of an active sample of the same kind that the person asked to replace.",
+            "Stable id of an active sample the person approved revising. Omit for a new example; include complete approved text, context and classification.",
           ),
         context: sampleContextInput,
         text: text
@@ -129,7 +130,7 @@ export const saveMemoInput = z
       })
       .optional()
       .describe(
-        "Optional approved sample to file under a report, offered once when the person approves a draft and sent only after they say yes. Every approved sample stays; a report read serves the eight that best fit its intent. Remove one with retire_samples or replace it with replaces; either is reported in samples_retired. Text identical to an active sample of the kind files nothing.",
+        "Optional approved sample to file under a report, offered once when the person approves a draft and sent only after they say yes. Every approved sample stays; a report read serves the eight that best fit its intent. Use sample_id to append a complete revision, or retire_samples to remove an example. Only retirement is reported in samples_retired. A new example identical in body, report/kind and complete context files nothing; revisions never merge identities.",
       ),
     sample_context: z
       .strictObject({
@@ -147,7 +148,7 @@ export const saveMemoInput = z
       })
       .optional()
       .describe(
-        "Correct an active sample after approval of the complete replacement context and classification. Omitted optional context fields are deliberately cleared. Body, id and date stay unchanged. Reclassification refuses sample_conflict if the target kind already has identical active text. Cannot combine with sample or retire_samples. An identical replacement is unchanged.",
+        "Correct an active sample after approval of the complete replacement context and classification. Omitted optional context fields are deliberately cleared. Appends a complete revision with unchanged body and stable id; the approval date and recency advance. Reclassification preserves separate identities even when their text matches. Cannot combine with sample or retire_samples. An identical replacement is unchanged.",
       ),
     retire_samples: z
       .array(z.string().min(1).max(256))
@@ -207,7 +208,7 @@ export function compiledMemos(
     )
       throw unavailable();
   }
-  // Every active context revision fences writes, including samples outside eight.
+  // Every active sample revision fences writes, including samples outside eight.
   const version = (documents: Documents, samples: Sample[]) =>
     hash([
       "documents",
@@ -218,7 +219,7 @@ export function compiledMemos(
         r.body,
         samples
           .filter((s) => s.report === r.id)
-          .map((s) => [s.id, s.kind_id, s.kind, s.context_revision]),
+          .map((s) => [s.id, s.kind_id, s.kind, s.revision]),
       ]),
     ]);
   async function snapshot(
@@ -237,12 +238,13 @@ export function compiledMemos(
       }>(
         sql`SELECT EXISTS(SELECT 1 FROM users WHERE id=${userId} AND status='active') AS open,
       (${cardHeadsJson(userId)}) AS heads,
-      (SELECT coalesce(json_agg(json_build_object('id',s.id,'report',s.report,'kind_id',s.kind_id,'kind',k.label,'context',s.context,'context_revision',s.context_revision,'body',s.body,
+      (SELECT coalesce(json_agg(json_build_object('id',s.id,'report',s.report,'kind_id',s.kind_id,'kind',k.label,'context',s.context,'revision',s.version,'body',s.body,
         'date',to_char(s.created_at AT TIME ZONE 'UTC','YYYY-MM-DD'),
         'lexical_rank',${intent ? sql`ts_rank(s.search,replace(plainto_tsquery('english',${intent.situation})::text,'&','|')::tsquery)` : sql`0`},
-        'created_at',to_char(s.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"')) ORDER BY s.created_at,s.id),'[]'::json)
-        FROM samples s JOIN sample_kinds k ON k.user_id=s.user_id AND k.id=s.kind_id
-        WHERE s.user_id=${userId} AND s.retired_at IS NULL) AS samples,
+        'revised_at',to_char(s.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
+        'created_at',to_char(s.original_created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"')) ORDER BY s.created_at,s.id),'[]'::json)
+        FROM (${sampleHeads(userId)}) s JOIN sample_kinds k ON k.user_id=s.user_id AND k.id=s.kind_id
+        WHERE s.user_id=${userId} AND NOT s.retired) AS samples,
       ${intent?.kind_id ? sql`EXISTS(SELECT 1 FROM sample_kinds WHERE user_id=${userId} AND id=${intent.kind_id} AND report=${intent.report})` : sql`true`} AS kind_valid`,
       )
     )[0]!;
@@ -258,7 +260,7 @@ export function compiledMemos(
     const fingerprint = samples.length
       ? hash([
           cardFingerprint(heads),
-          samples.map((s) => [s.id, s.kind_id, s.context_revision]),
+          samples.map((s) => [s.id, s.kind_id, s.revision]),
         ])
       : cardFingerprint(heads);
     const active = heads.filter((h) => !h.archived && h.body.trim());

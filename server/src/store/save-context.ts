@@ -26,7 +26,7 @@ export type Snapshot = {
   open: boolean;
   heads: CardHead[];
   samples: Sample[];
-  /** The source fingerprint: card heads and active sample IDs, kinds and context revisions. */
+  /** The source fingerprint: card heads and active sample IDs, kinds and revisions. */
   fingerprint: string;
   active: CardHead[];
   documents: Documents;

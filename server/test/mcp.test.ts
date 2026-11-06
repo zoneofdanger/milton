@@ -119,7 +119,13 @@ test("an SDK client receives instructions, discovers the four tools, and reads t
     );
     expect(save.description).toContain("clearing omitted optional fields");
     expect(save.description).toContain(
-      "Reclassification refuses sample_conflict if the target kind already has identical active text",
+      "Revisions preserve separate identities even if text matches another example",
+    );
+    expect(JSON.stringify(save.inputSchema.properties?.sample)).toContain(
+      '"sample_id"',
+    );
+    expect(JSON.stringify(save.inputSchema.properties?.sample)).not.toContain(
+      '"replaces"',
     );
     const read = tools.find((tool) => tool.name === "get_report")!;
     expect(read.description).toContain(

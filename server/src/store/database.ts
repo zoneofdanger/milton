@@ -58,24 +58,17 @@ export const triggerRefusals = new Map<
     { message: "The Milton user id cannot be changed.", status: 409 },
   ],
   [
-    "sample_is_append_only",
-    {
-      message:
-        "Sample writing is immutable; only active context corrections or retirement are allowed.",
-      status: 409,
-    },
+    "sample_identity_is_immutable",
+    { message: "Sample identities cannot be changed.", status: 409 },
   ],
   [
-    "sample_context_revision",
-    {
-      message: "A new sample must start at context revision one.",
-      status: 409,
-    },
+    "sample_version_is_immutable",
+    { message: "Sample revisions cannot be changed.", status: 409 },
   ],
   [
-    "sample_replacement_kind",
+    "sample_version_conflict",
     {
-      message: "A replacement must name a sample of the same kind.",
+      message: "Append the next complete revision of an active sample.",
       status: 409,
     },
   ],

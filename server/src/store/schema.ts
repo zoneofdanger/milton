@@ -316,7 +316,7 @@ export const sampleKinds = pgTable(
   ],
 );
 
-// Approved writing is immutable. Context/classification corrections have their own revision; retirement is final.
+// One stable sample identity; every approved change is a complete immutable version.
 export const samples = pgTable(
   "samples",
   {
@@ -324,59 +324,77 @@ export const samples = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     id: text("id").notNull(),
+    createdAt: createdAt(),
+    clientJson: text("client_json").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.id] }),
+    check("samples_id", sql`${t.id} <> ''`),
+    check(
+      "samples_client_object",
+      sql`jsonb_typeof(${t.clientJson}::jsonb)='object'`,
+    ),
+  ],
+);
+export const sampleVersions = pgTable(
+  "sample_versions",
+  {
+    userId: text("user_id").notNull(),
+    sampleId: text("sample_id").notNull(),
+    version: integer("version").notNull(),
     report: text("report").notNull(),
     kindId: text("kind_id").notNull(),
     context: jsonb("context").$type<SampleContext>().notNull(),
-    contextRevision: integer("context_revision").notNull().default(1),
     body: text("body").notNull(),
-    clientJson: text("client_json").notNull(),
-    // Same kind when replaced; later approved classification preserves lineage.
-    replacesId: text("replaces_id"),
-    createdAt: createdAt(),
-    retiredAt: timestamp("retired_at", { withTimezone: true }),
-    // replaced, removed or evicted; set together with retired_at.
+    retired: boolean("retired").notNull().default(false),
     retireReason: text("retire_reason"),
-    // The save that retired it; NULL only for retirements before 0020.
-    retiredRequestId: text("retired_request_id"),
+    actorJson: text("actor_json").notNull(),
+    requestId: text("request_id"),
+    // Exact known legacy provenance only; no reconstructed missing contexts.
+    provenance: jsonb("provenance")
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: createdAt(),
     search: tsvector("search").generatedAlwaysAs(
       sql`to_tsvector('english'::regconfig, (context->>'summary') || ' ' || body)`,
     ),
   },
   (t) => [
-    primaryKey({ columns: [t.userId, t.id] }),
-    index("samples_by_report").on(t.userId, t.report),
-    index("samples_by_kind").on(t.userId, t.kindId),
-    // A sample's report is its kind's report, by construction.
+    primaryKey({ columns: [t.userId, t.sampleId, t.version] }),
     foreignKey({
-      name: "samples_kind_fk",
+      name: "sample_versions_sample_fk",
+      columns: [t.userId, t.sampleId],
+      foreignColumns: [samples.userId, samples.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "sample_versions_kind_fk",
       columns: [t.userId, t.kindId, t.report],
       foreignColumns: [sampleKinds.userId, sampleKinds.id, sampleKinds.report],
     }).onDelete("cascade"),
-    foreignKey({
-      name: "samples_replaces_fk",
-      columns: [t.userId, t.replacesId],
-      foreignColumns: [t.userId, t.id],
-    }).onDelete("cascade"),
+    check("sample_versions_version", sql`${t.version} > 0`),
     check(
-      "samples_report",
+      "sample_versions_report",
       sql`${t.report} IN ('email','chat','post','document','speech')`,
     ),
     check(
-      "samples_context",
+      "sample_versions_context",
       sql`public.milton_sample_context_valid(${t.context})`,
     ),
-    check("samples_context_revision", sql`${t.contextRevision} > 0`),
     check(
-      "samples_body",
+      "sample_versions_body",
       sql`btrim(${t.body}) <> '' AND octet_length(${t.body}) <= 131072`,
     ),
     check(
-      "samples_client_object",
-      sql`jsonb_typeof(${t.clientJson}::jsonb)='object'`,
+      "sample_versions_actor",
+      sql`jsonb_typeof(${t.actorJson}::jsonb)='object'`,
     ),
     check(
-      "samples_retirement",
-      sql`(${t.retireReason} IS NULL) = (${t.retiredAt} IS NULL) AND (${t.retireReason} IS NULL OR ${t.retireReason} IN ('replaced','removed','evicted')) AND (${t.retiredRequestId} IS NULL OR ${t.retiredAt} IS NOT NULL)`,
+      "sample_versions_provenance",
+      sql`jsonb_typeof(${t.provenance})='object'`,
+    ),
+    check(
+      "sample_versions_retirement",
+      sql`(${t.retireReason} IS NOT NULL) = ${t.retired} AND (${t.retireReason} IS NULL OR ${t.retireReason} IN ('replaced','removed','evicted'))`,
     ),
   ],
 );

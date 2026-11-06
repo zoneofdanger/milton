@@ -15,6 +15,7 @@ import {
   StoreError,
 } from "../src/store";
 import { localAsset } from "../src/assets";
+import { seedSample } from "./store-fixtures";
 import { localStore } from "./local-store";
 import { SETUP_PROMPT } from "../src/store/setup";
 
@@ -1276,6 +1277,7 @@ async function memoPageFixture(
     store,
     author,
     db: local.db,
+    pg: local.pg,
     send: browser(app),
     async dispose() {
       upstream.mockRestore();
@@ -2297,10 +2299,16 @@ test("pages stay capped and download includes every active sample, only for the 
           `Fictional ${report} sample ${n}: <tag> & *verbatim*.${n === 0 ? "\n\n  Keep the oldest sample's spacing.  " : ""}`,
       );
       for (const [n, body] of bodies.entries())
-        await fixture.db
-          .query(sql`INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,created_at)
-          VALUES (${beta.userId},${`${report}-${n}`},${report},${report},${JSON.stringify({ version: 1, summary: `${report} context ${n}` })}::jsonb,${body},'{}',
-            ${`2026-01-0${1 + Math.floor(n / 2)}T00:00:00Z`}::timestamptz)`);
+        await seedSample(
+          fixture.pg,
+          beta.userId,
+          `${report}-${n}`,
+          report,
+          report,
+          { version: 1, summary: `${report} context ${n}` },
+          body,
+          { createdAt: `2026-01-0${1 + Math.floor(n / 2)}T00:00:00Z` },
+        );
       const replacement = `Fictional ${report} replacement: exact & approved.`;
       expect(
         await fixture.author.saveMemo({
@@ -2311,7 +2319,7 @@ test("pages stay capped and download includes every active sample, only for the 
           sample: {
             report,
             kind_id: report,
-            replaces: `${report}-2`,
+            sample_id: `${report}-2`,
             context: {
               version: 1 as const,
               summary: `${report} replacement context`,
@@ -2535,7 +2543,7 @@ test("report bullets require exact revision and complete text parity; optional l
                     audience: { relationship: "client" },
                     purposes: ["follow up"],
                   },
-                  context_revision: 1,
+                  revision: 1,
                   body: "Hi <there>,\n\nThanks.",
                   date: "2026-11-02",
                 },
@@ -2710,7 +2718,7 @@ test("an unrecognized database failure logs its class and code once, never its m
     // Already typed: no second line.
     databaseFailure(failure);
     // A mapped trigger refusal is an answer, not a failure.
-    databaseFailure({ code: "P0001", message: "sample_is_append_only" });
+    databaseFailure({ code: "P0001", message: "sample_version_is_immutable" });
     expect(logged).toHaveBeenCalledTimes(1);
     const line = String(logged.mock.calls[0]![0]);
     expect(JSON.parse(line)).toEqual({

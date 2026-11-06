@@ -85,7 +85,7 @@ export function coverSheet(documents: Documents & { version: string }) {
   };
 }
 /** Served samples without their bodies (those stay in text), in served order, so
- * an assistant can name a sample to replace or remove and read its approved
+ * an assistant can name a sample to revise or remove and read its approved
  * context and match evidence. */
 const sampleIndex = (report: ReportDocument) =>
   report.samples.map((s) => ({
@@ -94,7 +94,7 @@ const sampleIndex = (report: ReportDocument) =>
     kind: s.kind,
     context: s.context,
     date: s.date,
-    context_revision: s.context_revision,
+    revision: s.revision,
     ...(s.match ? { match: s.match } : {}),
   }));
 /** Optional setup, served only while a report has no rules or samples. */

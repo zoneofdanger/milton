@@ -61,11 +61,16 @@ draft or edit, it asks once whether to save it as a sample, quoted
 exactly as approved. When you make the same correction twice, it proposes a short
 rule. Nothing is saved until you say yes, and a no is final for that draft.
 
-For every correction or removal, your assistant submits exact before/after
+For every rule correction or removal, your assistant submits exact before/after
 replacements copied from the current report. Milton applies that wording without a
 model rewrite and leaves the surrounding text unchanged. The assistant still needs
 to preserve your intended scope and conditions; literal editing does not decide
 what you meant. Missing, repeated or overlapping matches leave the report unchanged.
+
+Approved samples keep a stable ID. Revising their text, context or classification adds
+a complete immutable revision; removing one retires it explicitly. Reports and the
+TPS.md download show current active revisions. There is no history or restore screen.
+Assistants revise through `sample.sample_id`; `replaces` is no longer accepted.
 
 Milton supplies usage instructions when your assistant connects, plus descriptions
 for all four tools and their arguments. These explain when to read the cover sheet

@@ -61,4 +61,9 @@ so every push builds; a build takes about a minute). A branch can only produce a
 repository root, where `.vercelignore` keeps only `apps/site`, `packages/theme` and the
 workspace manifests. Never promote a branch build; land it and let the push publish.
 
+The site build must stay inside that upload set: importing from `server/` or another
+excluded path builds locally but fails on Vercel. `bun run build:site-upload` (also
+run by the checks workflow) builds the site from exactly the files `.vercelignore`
+keeps.
+
 Do not reuse the web app's project link or copy its environment variables.

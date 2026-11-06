@@ -108,6 +108,13 @@ async function finish(
   result: { text: string | null } | { reason: string; terminal?: boolean },
 ) {
   await db.transaction(async (tx) => {
+    // Serialize with enrollment's report update before reading its epoch. At
+    // READ COMMITTED the following statement gets a fresh snapshot after any
+    // enrollment transaction we waited for; a fence inside the blocked UPDATE
+    // alone can still use its pre-disable subquery snapshot.
+    await tx.query(
+      sql`SELECT 1 FROM report_guides WHERE user_id=${c.user_id} AND report=${c.report} FOR UPDATE`,
+    );
     if ("text" in result) {
       await tx.query(sql`UPDATE report_guides SET guide_text=${result.text},completed_version=${c.source_version},
         status=${result.text === null ? "insufficient" : "ready"},reason=${result.text === null ? "insufficient_evidence" : "completed"}

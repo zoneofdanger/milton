@@ -66,7 +66,9 @@ enroll anyone. Existing nonempty reports are scheduled on enablement.
 Work is recorded in the sample transaction even while disabled; rules do not invalidate
 it. One report lease lasts 150 seconds, with a 90-second provider deadline and two attempts
 per source/epoch. Failures retry no sooner than five minutes; expiry recovers durably.
-Source/epoch/lease checks prevent obsolete activation. Zero active samples clear immediately;
+Completion first locks the report row enrollment also updates, then evaluates its
+source/epoch/lease fence in a fresh READ COMMITTED statement; this prevents a blocked
+completion from reusing a pre-disable epoch snapshot. Zero active samples clear immediately;
 valid insufficient evidence is a completed no-guide result. Nonempty changes/failures retain
 last successful stale text with explicit versions/reason. Off hides future presentation;
 completed text may remain stored until deletion, and exact-source completed results may be

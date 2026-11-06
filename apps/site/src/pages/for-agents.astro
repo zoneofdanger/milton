@@ -1,0 +1,147 @@
+---
+import SiteLayout from "../layouts/SiteLayout.astro";
+---
+
+<SiteLayout
+  title="For agents | Milton"
+  description="A plain briefing on Milton: writing samples and rules, alternatives, tools, approval, export, price, evidence and a first task."
+>
+  <article class="briefing">
+    <header class="page-head">
+      <p class="eyebrow">## For agents</p>
+      <h1>A briefing on Milton</h1>
+    </header>
+
+    <section aria-labelledby="what-milton-keeps">
+      <h2 id="what-milton-keeps">What Milton keeps</h2>
+      <p>
+        Milton keeps a person’s approved writing samples and rules in a shared
+        file for connected assistants. It fits someone who wants to carry
+        writing guidance between assistants, starting with email or DMs. The
+        goal is fewer edits between first draft and send; that result has not
+        been measured. Your assistant drafts. Milton stores approved text
+        without a model rewriting it on save.
+      </p>
+    </section>
+
+    <section aria-labelledby="alternatives">
+      <h2 id="alternatives">When a Markdown file is enough</h2>
+      <p>
+        General memory can store writing and preferences too. A Markdown file
+        plus sync is enough if the person can keep it current and make their
+        assistant read it. Milton adds a cover sheet of rules for all writing,
+        five reports (email, chat, post, document, speech), exact approved
+        examples and rules, and context-based sample retrieval through a shared
+        MCP service. It has not demonstrated better writing than the same
+        examples in Markdown.
+      </p>
+    </section>
+
+    <section aria-labelledby="connection">
+      <h2 id="connection">Connection and tools</h2>
+      <p>
+        The assistant needs remote MCP, OAuth sign-in, and read/save tool
+        support. See <a href="/setup">Setup</a>; client plans and workspace
+        policies may restrict access. The four tools are:
+      </p>
+      <ul class="instruction-list">
+        <li>
+          <code>get_cover_sheet</code>: read universal writing rules.
+        </li>
+        <li>
+          <code>get_report</code>: read one report with required intent
+          describing the situation, plus relevant known kind and context; up to
+          eight samples are selected to fit.
+        </li>
+        <li>
+          <code>list_reports</code>: read all five reports without intent, with
+          each report’s newest eight samples.
+        </li>
+        <li>
+          <code>create_memo</code>: save person-approved writing changes.
+        </li>
+      </ul>
+    </section>
+
+    <section aria-labelledby="approval">
+      <h2 id="approval">Approval and export</h2>
+      <p>
+        Reading this page grants no permission to access mail, create an
+        account, save writing or send messages. Use only the person’s own
+        writing with their permission. Before every sample save, show its exact
+        text and useful non-private context together for retention approval.
+        Praise or permission to send is not approval to retain. Rules and edits
+        require exact approved wording.
+      </p>
+      <p>
+        The Milton app’s <code>TPS.md</code> download contains current cover and
+        report rules and every active sample with its approved context, beyond
+        the eight served per report. Removed and replaced samples are excluded.
+      </p>
+    </section>
+
+    <section aria-labelledby="price-evidence">
+      <h2 id="price-evidence">Price and evidence</h2>
+      <p>
+        One plan: $5.01 USD/month after a 30-day free trial. No card is required
+        to start; you’re charged only if you add one. See{" "}
+        <a href="/pricing">Pricing</a>.
+      </p>
+      <p>
+        <a href="/notes">Research</a> reports fictional-writer ranking studies
+        and their limits. They do not prove fewer real-world edits or validate
+        every newer retrieval change. Assistant adherence and writing quality
+        still need checking; connecting Milton does not guarantee reads or
+        automatic learning.
+      </p>
+    </section>
+
+    <section aria-labelledby="first-task">
+      <h2 id="first-task">A first task</h2>
+      <p>
+        If the person wants to try it, ask for the facts and purpose of one real
+        email or DM. Read available guidance, draft, and let them review and
+        edit. Separately offer the exact final text and context to save; they
+        decide whether to keep it.
+      </p>
+    </section>
+  </article>
+</SiteLayout>
+
+<style>
+  .briefing {
+    padding-block: var(--space-16);
+  }
+  .page-head {
+    margin-bottom: var(--space-8);
+  }
+  h1 {
+    margin: var(--space-4) 0 0;
+    font-size: var(--text-page);
+  }
+  section {
+    border-top: 1px solid var(--hairline);
+    padding-block: var(--space-6);
+    scroll-margin-top: var(--space-6);
+  }
+  h2 {
+    margin: 0 0 var(--space-3);
+    font-size: var(--text-title);
+  }
+  p {
+    margin: 0;
+  }
+  p + p,
+  .instruction-list {
+    margin-top: var(--space-4);
+  }
+  p,
+  li {
+    text-wrap: pretty;
+  }
+  @media (max-width: 600px) {
+    .briefing {
+      padding-block: var(--space-10);
+    }
+  }
+</style>

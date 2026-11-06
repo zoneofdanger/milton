@@ -27,3 +27,5 @@ jobs:
       - run: bun run check-types
       - run: bun test
       - run: bun run format:check
+      # Vercel builds the site from only what .vercelignore keeps; build that same set.
+      - run: bun run build:site-upload

@@ -18,6 +18,7 @@
   "scripts": {
     "dev": "bun run --cwd apps/site dev",
     "build": "bun run --cwd apps/site build",
+    "build:site-upload": "bash scripts/check-site-upload.sh",
     "check-types": "bun run --workspaces --if-present check-types",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

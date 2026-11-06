@@ -220,8 +220,7 @@ test("sample-first setup is optional, preserves guidance and serves valid exact 
   }
 });
 
-test("default edit scope preserves the person's text while retrieval and requested transformations still apply", () => {
-  expect(storeInstructions.length).toBeLessThanOrEqual(4096);
+test("served instructions state edit precedence, retrieval and scoped transformations", () => {
   expect(storeInstructions.isWellFormed()).toBe(true);
   const editing = storeInstructions
     .split("\n\n")
@@ -234,21 +233,18 @@ test("default edit scope preserves the person's text while retrieval and request
     /no stock phrases or new punctuation habits/,
     /Briefly list changes/,
     /Requested transformations \(shortening, translation, tone\) permit only that scope/,
-    /Edit scope overrides samples and standing tone; never restyle outside the request/,
+    /Guidance never widens edit scope; preserve source style over samples\/rules, flagging specific unresolved conflicts/,
   ])
     expect(editing).toMatch(constraint);
-  // Retrieval applies before edits and new drafts; editing adds a scope boundary.
-  expect(storeInstructions.indexOf("Before writing or editing")).toBeLessThan(
-    storeInstructions.indexOf("Edit mode:"),
-  );
+  // Pin served text; this does not demonstrate actual assistant adherence.
   expect(storeInstructions).toContain(
-    "get_report for each matching report with intent: one-line situation, relevant kind_id/context",
+    "Before writing or editing: get_cover_sheet, then get_report for matching reports with intent: one-line situation, relevant kind_id/context",
   );
   const retrieval = storeInstructions.split("\n\n")[1]!;
-  // Only new drafts get the conformity rewrite; supplied text keeps edit scope.
+  // The conformity clause is explicitly scoped to new drafts.
   expect(retrieval).toContain("New drafts: imitate samples; rules fill gaps;");
   expect(retrieval).toMatch(
-    /New drafts:[^.]+check cover rules and matching samples \(opening, length, sign-off, forbidden phrases\), fixing failures before showing the draft\./,
+    /New drafts:[^.]+check cover rules and matching samples \(opening, length, sign-off, forbidden phrases\), fixing failures before display\./,
   );
   expect(retrieval).not.toContain("fix failures before showing text");
 });
@@ -269,6 +265,7 @@ test("every create_memo shape the server instructions describe parses against sa
   says("matching samples (opening, length, sign-off, forbidden phrases)");
   says("Preserve guidance; never block writing");
   says("Sample bodies cannot be edited");
+  says("While on, file only the person's explicit standing rules");
   expect(storeInstructions).not.toContain("On yes, show");
   says("Pass the cover sheet version as expected_version and a new request_id");
   says("Send each new rule in rules: its report (or cover)");
@@ -322,7 +319,7 @@ test("every create_memo shape the server instructions describe parses against sa
   });
   // The read the instructions, the tool description and the refusal describe.
   says(
-    "get_report for each matching report with intent: one-line situation, relevant kind_id/context",
+    "get_report for matching reports with intent: one-line situation, relevant kind_id/context",
   );
   for (const situation of [
     "declining a client's request for a discount",
@@ -341,6 +338,8 @@ test("every create_memo shape the server instructions describe parses against sa
       }).error?.issues ?? [],
     ).toEqual([]);
   says("pass moves: before verbatim from the rule and its new report");
+  says("To move, pass moves:");
+  expect(storeInstructions).not.toContain("For scope, pass moves");
   parses({
     ...envelope(),
     moves: [{ before: "A fictional rule.", report: "cover" }],

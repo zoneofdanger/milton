@@ -50,14 +50,32 @@ const head = (report: Filing, body: string, id = body): CardHead => ({
   report,
 });
 
-test("sample-first setup is optional, preserves guidance and serves valid exact saves", () => {
+test("setup helps with pasted writing first, preserves optional guidance and serves valid exact saves", () => {
   const version = "a".repeat(64);
   const empty = { ...assembleDocuments([], []), version };
   const setup = coverSheet(empty).setup!;
   expect(setup).toBe(reportEnvelope(empty, "email").setup!);
   expect(empty.is_empty).toBe(true);
-  expect(SETUP_PROMPT).toBe(
-    "Help me connect Milton using https://www.meetmilton.com/setup, then read what I have on file. Help me choose a few messages that sound like me. If you already have access to my sent messages, find a few candidates; otherwise I'll paste them. Use only my own writing; skip automated, forwarded and third-party text. Show me the exact examples with private details removed, and save only the ones I approve. Preserve what's already on file. Then help me write my next email or DM.",
+  expect(SETUP_PROMPT).toStartWith(
+    "Help me connect Milton using https://www.meetmilton.com/setup, then read what I have on file.",
+  );
+  for (const fragment of [
+    "I'll paste something I wrote; help me clean it up",
+    "Keep the rest in my words",
+    "Show changes separately",
+    "show the exact body and useful non-private context before asking to save it as a sample",
+    "Old examples are optional",
+    "only if I ask and you already have authorized access",
+    "skip automated, forwarded and third-party text",
+    "Preserve what's already on file",
+    "Don't wait for samples or rules before helping",
+  ])
+    expect(SETUP_PROMPT).toContain(fragment);
+  expect(SETUP_PROMPT.indexOf("then read what I have on file")).toBeLessThan(
+    SETUP_PROMPT.indexOf("help me clean it up"),
+  );
+  expect(SETUP_PROMPT.indexOf("help me clean it up")).toBeLessThan(
+    SETUP_PROMPT.indexOf("Old examples are optional"),
   );
   for (const fragment of [
     "offer setup once",
@@ -91,6 +109,10 @@ test("sample-first setup is optional, preserves guidance and serves valid exact 
     "only after separate consent",
     "Verify an actual successful read",
     "No need to fill all five reports or accumulate rules before drafting",
+    "Invite the person to paste something they wrote and ask you to clean it up",
+    "Help with this task first; do not require samples or rules",
+    "briefly list changes separately",
+    "Optional, after helping with the real task",
   ])
     expect(setup).toContain(fragment);
   expect(setup).not.toMatch(
@@ -166,6 +188,13 @@ test("sample-first setup is optional, preserves guidance and serves valid exact 
       if (script === undefined) continue;
       expect(script.isWellFormed() && !script.includes("\0")).toBe(true);
       expect(Buffer.byteLength(script)).toBeLessThanOrEqual(32768);
+      // Connection read and real writing precede any optional old-example request.
+      expect(script.indexOf("1. Read the current cover sheet")).toBeLessThan(
+        script.indexOf("2. Invite the person"),
+      );
+      expect(script.indexOf("2. Invite the person")).toBeLessThan(
+        script.indexOf("3. Optional, after helping with the real task"),
+      );
       const shape = JSON.parse(
         between(
           script,

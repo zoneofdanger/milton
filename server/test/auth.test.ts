@@ -1029,7 +1029,7 @@ test("signed-in email shows only in authenticated chrome; switch account signs o
       "Use only my own writing; skip automated, forwarded and third-party text.",
     );
     expect(assistants).toContain(
-      "If you already have access to my sent messages, find a few candidates",
+      "Find sent-message candidates only if I ask and you already have authorized access",
     );
     expect(assistants).toContain(
       'href="https://www.meetmilton.com/setup">Setup instructions for your assistant</a>',

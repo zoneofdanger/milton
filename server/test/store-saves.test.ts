@@ -1487,8 +1487,8 @@ test("guide leases, source moves, revoked eligibility and account deletion fence
 
 test("guide reservations and recovery bound concurrent spend and retries", async () => {
   const { setGuideEnrollment } = await import("../src/guides/store");
-  const { runGuideWorker, GUIDE_RESERVATION_MICROS } =
-    await import("../src/guides/worker");
+  const { runGuideWorker } = await import("../src/guides/worker");
+  const countedReservation = 102_900; // 100 input tokens + 4096 maximum output tokens.
   const local = await localStore();
   try {
     for (const id of ["budget-a", "budget-b"]) {
@@ -1548,7 +1548,7 @@ test("guide reservations and recovery bound concurrent spend and retries", async
     // Reserve against a nearly-full global day. Unknown outcomes keep their reservation.
     await local.pg.query(
       "INSERT INTO guide_spend(id,account_key,amount_micros) VALUES ('prior','fictional',$1)",
-      [5_000_000 - GUIDE_RESERVATION_MICROS - 6000],
+      [5_000_000 - countedReservation - 6000],
     );
     await local.pg.exec(
       "UPDATE report_guides SET next_attempt_at=now() WHERE user_id='budget-b'",
@@ -1572,11 +1572,18 @@ test("guide reservations and recovery bound concurrent spend and retries", async
     ).rows;
     expect(spent!.n).toBeLessThanOrEqual(5_000_000);
     expect(spent!.unknown).toBe(2); // prior + unknown request
+    expect(
+      (
+        await local.pg.query(
+          "SELECT amount_micros FROM guide_spend WHERE NOT settled AND id<>'prior'",
+        )
+      ).rows,
+    ).toEqual([{ amount_micros: countedReservation }]);
     await local.pg.exec(
       "UPDATE report_guides SET next_attempt_at=now() WHERE user_id='budget-b'",
     );
     await runGuideWorker(local.db, unknown, { maxReports: 1 });
-    expect(calls).toBe(3); // account/day caps prevent a second worst-case reservation
+    expect(calls).toBe(3); // global day cap prevents another counted-input reservation
     await local.pg.exec("DELETE FROM users WHERE id='budget-b'");
     expect(
       (await local.pg.query("SELECT * FROM guide_spend")).rows,
@@ -1588,8 +1595,8 @@ test("guide reservations and recovery bound concurrent spend and retries", async
 
 test("guide bounds reject whole oversize input before processing and reserve monthly/account caps", async () => {
   const { setGuideEnrollment } = await import("../src/guides/store");
-  const { runGuideWorker, GUIDE_RESERVATION_MICROS } =
-    await import("../src/guides/worker");
+  const { runGuideWorker } = await import("../src/guides/worker");
+  const countedReservation = 102_900; // 100 input tokens + 4096 maximum output tokens.
   const local = await localStore();
   try {
     await seedUsers(local.pg, "bounded");
@@ -1611,11 +1618,12 @@ test("guide bounds reject whole oversize input before processing and reserve mon
       optInReference: "fictional-consent",
     });
     let counts = 0,
-      calls = 0;
+      calls = 0,
+      inputTokens = 100;
     const provider = {
       count: async () => {
         counts++;
-        return 100;
+        return inputTokens;
       },
       generate: async () => {
         calls++;
@@ -1654,7 +1662,7 @@ test("guide bounds reject whole oversize input before processing and reserve mon
     // Prior global-month spending may sit on a different UTC day.
     await local.pg.query(
       "INSERT INTO guide_spend(id,account_key,amount_micros,created_at) VALUES ('month','fictional',$1,date_trunc('month',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')",
-      [20_000_000 - GUIDE_RESERVATION_MICROS + 1],
+      [20_000_000 - countedReservation + 1],
     );
     await runGuideWorker(local.db, provider, { maxReports: 1 });
     expect(calls).toBe(0);
@@ -1664,6 +1672,7 @@ test("guide bounds reject whole oversize input before processing and reserve mon
     });
     // An isolated local scenario resets only fictional ledger rows, never production.
     await local.pg.exec("DELETE FROM guide_spend WHERE id='month'");
+    inputTokens = 200_000; // A full-sized report still reserves the complete input ceiling.
     await setGuideEnrollment(local.db, "bounded", { enabled: false });
     await setGuideEnrollment(local.db, "bounded", {
       enabled: true,
@@ -1682,7 +1691,7 @@ test("guide bounds reject whole oversize input before processing and reserve mon
           "SELECT amount_micros FROM guide_spend",
         )
       ).rows,
-    ).toEqual([{ amount_micros: GUIDE_RESERVATION_MICROS }]);
+    ).toEqual([{ amount_micros: 1_102_400 }]);
   } finally {
     await local.dispose();
   }

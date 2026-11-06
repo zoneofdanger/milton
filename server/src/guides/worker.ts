@@ -15,8 +15,6 @@ import {
 } from "./provider";
 
 // USD microdollars: $5/M input, $25/M output, no caching/tools/batch.
-export const GUIDE_RESERVATION_MICROS =
-  MAX_INPUT_TOKENS * 5 + MAX_OUTPUT_TOKENS * 25;
 const cost = (usage: { input_tokens: number; output_tokens: number }) =>
   usage.input_tokens * 5 + usage.output_tokens * 25;
 type Claim = {
@@ -65,7 +63,11 @@ async function claim(db: StoreDatabase): Promise<Claim | undefined> {
     return { ...row, epoch, token, samples };
   });
 }
-async function reserve(db: StoreDatabase, c: Claim) {
+async function reserve(db: StoreDatabase, c: Claim, inputTokens: number) {
+  const amountMicros = cost({
+    input_tokens: inputTokens,
+    output_tokens: MAX_OUTPUT_TOKENS,
+  });
   return db.transaction(async (tx) => {
     await tx.query(
       sql`SELECT singleton FROM guide_budget_lock WHERE singleton=1 FOR UPDATE`,
@@ -82,13 +84,13 @@ async function reserve(db: StoreDatabase, c: Claim) {
       FROM guide_spend WHERE created_at>=date_trunc('month',clock_timestamp() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`);
     if (
       !spent ||
-      spent.month + GUIDE_RESERVATION_MICROS > 20_000_000 ||
-      spent.day + GUIDE_RESERVATION_MICROS > 5_000_000 ||
-      spent.account + GUIDE_RESERVATION_MICROS > 2_000_000
+      spent.month + amountMicros > 20_000_000 ||
+      spent.day + amountMicros > 5_000_000 ||
+      spent.account + amountMicros > 2_000_000
     )
       return false;
     await tx.query(
-      sql`INSERT INTO guide_spend(id,account_key,amount_micros) VALUES (${c.token},${key(c.user_id)},${GUIDE_RESERVATION_MICROS})`,
+      sql`INSERT INTO guide_spend(id,account_key,amount_micros) VALUES (${c.token},${key(c.user_id)},${amountMicros})`,
     );
     return true;
   });
@@ -97,7 +99,7 @@ async function settle(db: StoreDatabase, c: Claim, raw: unknown) {
   const usage = knownUsage(raw);
   if (!usage) return; // Unknown transport/completion retains the full reservation.
   await db.query(
-    sql`UPDATE guide_spend SET amount_micros=${cost(usage)},settled=true WHERE id=${c.token} AND NOT settled`,
+    sql`UPDATE guide_spend SET amount_micros=${cost(usage)},settled=true WHERE id=${c.token} AND NOT settled AND amount_micros>=${cost(usage)}`,
   );
 }
 async function finish(
@@ -165,7 +167,7 @@ export async function runGuideWorker(
         await finish(db, c, { reason: "superseded" });
         continue;
       }
-      if (!(await reserve(db, c))) {
+      if (!(await reserve(db, c, tokens))) {
         await finish(db, c, { reason: "budget_limit", terminal: true });
         continue;
       }

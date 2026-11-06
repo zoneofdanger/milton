@@ -447,7 +447,7 @@ Files: `packages/theme/`, `server/scripts/`, `.github/workflows/checks.yml`.
 
 Files: `server/src/guides/`, `server/src/guide-worker.ts`, `server/scripts/guide-enrollment.ts`, `server/drizzle/0003_report_guides.sql`.
 
-- Enrollment defaults off and records explicit processing consent plus an epoch that advances on every off/on transition.
+- Operator-only enrollment defaults off and records explicit processing consent plus an epoch that advances on every off/on transition; app/MCP have no enrollment or consent write privilege.
 - Guide eligibility requires enrollment, an active account and an active subscription or an unexpired trial; missing/unknown billing is ineligible.
 - A sample-revision trigger advances report source versions and marks durable work in the sample transaction, including while disabled; classification moves invalidate both reports; rules and unchanged saves do not.
 - Zero active samples immediately clears the guide and fences old work; nonempty changes retain the last successful stale guide with source/current versions and a reason.
@@ -455,7 +455,7 @@ Files: `server/src/guides/`, `server/src/guide-worker.ts`, `server/scripts/guide
 - All active originals and complete approved classification/context go in one generation; rules, prior guides and retired revisions are excluded; input is never sampled, truncated or batched.
 - Versioned prompting treats samples as untrusted evidence; the fixed Anthropic Opus 4.6 adapter has thinking disabled, no tools and a 90-second combined provider deadline.
 - Fully serialized input has a conservative 180,000-byte preflight limit and must fit 200,000 provider-counted input tokens; output is limited to 4,096 tokens, eight evidence-linked tendencies and 6,000 rendered characters.
-- A serialized database reservation bounds worst-case spend to $20/global UTC month, $5/global UTC day and $2/account UTC day at $5/M input and $25/M output; unknown outcomes retain reservations.
+- A serialized database reservation uses provider-counted complete-input tokens at $5/M plus maximum output at $25/M, bounded by $20/global UTC month, $5/global UTC day and $2/account UTC day; unknown outcomes retain reservations.
 - Content-free spend entries outlive account deletion; known bounded usage settles reservations downward, without allowing deletion or churn to reset caps.
 - Activation requires the same source version, epoch and live lease; valid insufficient evidence clears old text, while invalid/unfinished/refused output fails without a paid repair loop.
 - Expired claims recover within the attempt bound; oversize, budget-limited and exhausted work has terminal status rather than indefinite preparation.

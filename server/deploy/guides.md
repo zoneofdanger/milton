@@ -10,7 +10,8 @@ No down migration or compatibility layer is included in this pre-launch build.
 ## Services and credentials
 
 App/MCP keep their approved-source responsibilities. Their `milton_runtime` role gets
-SELECT only on `guide_accounts`/`report_guides`, no spend or enrollment write privileges.
+SELECT only on `guide_accounts`/`report_guides`, no spend or enrollment/consent write privileges.
+Only the owner-operated enrollment script can enable guides or update consent.
 A scoped SECURITY DEFINER trigger updates report source/work state in sample transactions;
 it has a fixed search path and no public executable grant.
 
@@ -85,11 +86,12 @@ all stable-ID/revision references and a 6,000-character rendered cap. Insufficie
 must have no tendencies. There is no paid repair/second judge. Mechanical validation and
 fake-provider tests cannot establish semantic truth or immunity to prompt injection.
 
-Each generation reserves $1.102400 (maximum 200k input + 4096 output tokens) atomically,
-at $5/M input and $25/M output. A singleton lock serializes reservations against $20/global
+Each generation atomically reserves the provider-counted complete-input tokens at $5/M
+plus the maximum 4,096 output tokens at $25/M. For example, 100 input tokens reserve
+$0.102900; 200,000 input tokens reserve $1.102400. A singleton lock serializes reservations against $20/global
 UTC month, $5/global UTC day and $2/account UTC day. Count requests are not generation and
 are not charged by Anthropic. Known bounded usage settles downward; unknown outcomes keep
-full reservations, including across crashes/deletion. Content-free amount/time/account-hash
+their counted-input plus maximum-output reservations, including across crashes/deletion. Content-free amount/time/account-hash
 records outlive accounts. Do not delete/reset these to permit retries. Caps are guide-pilot
 caps, not a cap on unrelated provider usage. No caching, tools, batch or regional premium
 is selected. Model/rate changes require a matching reservation review before use.

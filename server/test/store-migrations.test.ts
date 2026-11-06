@@ -820,6 +820,18 @@ test("guide migration preserves populated approved sources, defaults off and iso
       "guide_spend:UPDATE",
       "report_guides:UPDATE",
     ]);
+    await pg.exec("SET ROLE milton_runtime");
+    await expect(
+      pg.query(
+        "INSERT INTO guide_accounts(user_id,enabled,epoch,opted_in_at,opt_in_reference) VALUES ('upgrade',true,1,now(),'fictional-consent')",
+      ),
+    ).rejects.toThrow("permission denied");
+    await expect(
+      pg.query(
+        "UPDATE guide_accounts SET enabled=true,epoch=epoch+1,opted_in_at=now(),opt_in_reference='fictional-consent'",
+      ),
+    ).rejects.toThrow("permission denied");
+    await pg.exec("RESET ROLE");
     await pg.exec("SET ROLE milton_guide_worker");
     await expect(
       pg.query("UPDATE sample_versions SET body='changed'"),

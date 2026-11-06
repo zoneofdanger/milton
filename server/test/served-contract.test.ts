@@ -240,7 +240,7 @@ test("served instructions state edit precedence, retrieval and scoped transforma
     expect(editing).toMatch(constraint);
   // Pin served text; this does not demonstrate actual assistant adherence.
   expect(storeInstructions).toContain(
-    "Before writing or editing: get_cover_sheet, then get_report for matching reports with intent: one-line situation, relevant kind_id/context",
+    "Before writing or editing for or as the person: get_cover_sheet, then get_report for matching reports with intent: one-line situation, relevant kind_id/context",
   );
   const retrieval = storeInstructions.split("\n\n")[1]!;
   // The conformity clause is explicitly scoped to new drafts.

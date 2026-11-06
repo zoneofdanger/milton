@@ -404,6 +404,7 @@ Files: `apps/site/`.
 
 - Astro builds static pages and copies shared fonts from the theme.
 - Every static page, including 404, shows the same shared footer navigation.
+- `/for-agents` serves a static product briefing, alternatives, tools, approval rules, export, price, evidence limits and an optional first writing task in the initial HTML.
 - The hero demo shows one fictional cleanup request with illustrative plain-AI and
   Milton outputs; build-time ordered word matching computes words kept from the
   displayed strings, ignoring case and punctuation except normalized internal

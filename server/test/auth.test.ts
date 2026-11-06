@@ -16,6 +16,7 @@ import {
 } from "../src/store";
 import { localAsset } from "../src/assets";
 import { localStore } from "./local-store";
+import { SETUP_PROMPT } from "../src/store/setup";
 
 const appOrigin = "http://localhost:3001";
 const issuer = "https://auth.example/milton/auth";
@@ -1021,6 +1022,22 @@ test("signed-in email shows only in authenticated chrome; switch account signs o
     );
     // Setup steps moved to Connected assistants, still keyed to the empty account.
     const assistants = await (await send("/assistants")).text();
+    // Compare the actual empty-page output to the full shared export, including whitespace.
+    const escapedPrompt = SETUP_PROMPT.replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#39;");
+    for (const html of [report, assistants])
+      expect(html).toContain(
+        `<blockquote class="setup-copy"><p>${escapedPrompt}</p></blockquote>`,
+      );
+    expect(assistants).toContain(
+      "Your account starts empty; paste something you wrote and ask your AI to clean it up, with older examples optional.",
+    );
+    expect(report).toContain(
+      "an assistant, then paste something you wrote and ask it to clean it up; older examples are optional.",
+    );
     expect(assistants).toContain(
       `<pre class="setup-copy"><code>${resource}</code></pre>`,
     );

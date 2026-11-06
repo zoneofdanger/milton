@@ -128,9 +128,8 @@ export function connectSteps(empty: boolean, mcpUrl: string) {
       </ol>
       {empty && (
         <p>
-          Your account starts empty. Choose a few messages that sound like you,
-          approve exactly what to keep, or skip examples and draft your next
-          message.
+          Your account starts empty; paste something you wrote and ask your AI
+          to clean it up, with older examples optional.
         </p>
       )}
     </section>
@@ -213,7 +212,8 @@ function sheet({ report, documents, email, date, comment }: SheetView) {
           <p class="empty-placeholder">No writing samples on file yet.</p>
           <p>
             <a href="/assistants#connect">Follow the setup steps</a> to connect
-            an assistant and choose a few emails or DMs that sound like you.
+            an assistant, then paste something you wrote and ask it to clean it
+            up; older examples are optional.
           </p>
           <p>Once connected, copy this prompt into your assistant:</p>
           <blockquote class="setup-copy">

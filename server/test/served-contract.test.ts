@@ -63,7 +63,8 @@ test("setup helps with pasted writing first, preserves optional guidance and ser
     "I'll paste something I wrote; help me clean it up",
     "Keep the rest in my words",
     "Show changes separately",
-    "show the exact body and useful non-private context before asking to save it as a sample",
+    "For both edited text and older examples, show the exact proposed sample body and useful non-private context before asking to save it",
+    "Replace private details with placeholders before retention approval; save only the ones I approve",
     "Old examples are optional",
     "only if I ask and you already have authorized access",
     "skip automated, forwarded and third-party text",
@@ -110,9 +111,11 @@ test("setup helps with pasted writing first, preserves optional guidance and ser
     "Verify an actual successful read",
     "No need to fill all five reports or accumulate rules before drafting",
     "Invite the person to paste something they wrote and ask you to clean it up",
-    "Help with this task first; do not require samples or rules",
+    "For a writing task, help now; do not require samples or rules",
+    "If the person explicitly asks to add or import examples, go directly to that conversation instead",
     "briefly list changes separately",
-    "Optional, after helping with the real task",
+    "Optional, after the task or whenever the person asks",
+    "If the person wants another writing task",
   ])
     expect(setup).toContain(fragment);
   expect(setup).not.toMatch(
@@ -188,13 +191,24 @@ test("setup helps with pasted writing first, preserves optional guidance and ser
       if (script === undefined) continue;
       expect(script.isWellFormed() && !script.includes("\0")).toBe(true);
       expect(Buffer.byteLength(script)).toBeLessThanOrEqual(32768);
-      // Connection read and real writing precede any optional old-example request.
+      // Pin the default presentation order; explicit example requests bypass cleanup.
       expect(script.indexOf("1. Read the current cover sheet")).toBeLessThan(
         script.indexOf("2. Invite the person"),
       );
       expect(script.indexOf("2. Invite the person")).toBeLessThan(
-        script.indexOf("3. Optional, after helping with the real task"),
+        script.indexOf(
+          "3. Optional, after the task or whenever the person asks",
+        ),
       );
+      const approvalStep = between(script, "4. ", "Sample save example");
+      expect(approvalStep).toContain("After a draft or edit is approved");
+      expect(approvalStep).toContain(
+        "before the single offer to keep it as a sample",
+      );
+      expect(approvalStep).toContain(
+        "never include the change list in the sample",
+      );
+      expect(setupHint(id)).not.toContain("sample-first");
       const shape = JSON.parse(
         between(
           script,

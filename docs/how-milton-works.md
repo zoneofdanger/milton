@@ -422,7 +422,8 @@ Files: `apps/site/`.
 - The setup widget copies a prompt, falls back to manual selection, and closes on Escape
   or an outside click.
 - The fake crowdfunding campaign on `/pricing` is static data.
-- `/notes` presents the approved testing notes, linked from About and the site footer.
+- `/research` presents the approved testing notes, linked from About and the site footer.
+  `/notes` is retired with no redirect or alias, so old URLs reach the normal 404.
 - Every page loads Vercel Analytics.
 
 ## Theme, scripts, and CI

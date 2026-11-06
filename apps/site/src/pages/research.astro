@@ -19,14 +19,137 @@ import SiteLayout from "../layouts/SiteLayout.astro";
             Applies when someone asks how we know any of this works.
           </p>
 
+          <section class="report-section" aria-labelledby="style-guide-pilot">
+            <h3 id="style-guide-pilot">
+              Do good samples need a written style guide?
+            </h3>
+            <p>
+              <strong>What this shows:</strong> no clear overall benefit from
+              adding this particular guide in this small pilot. The guide was
+              preferred more often on voice alone, but not overall. Samples stay
+              the practical default, and a guide stays optional. Milton stores
+              your approved samples and corrections, and the assistant you
+              already use does the writing.
+            </p>
+            <p>
+              <strong>Working conclusion:</strong> capable models may be able to
+              follow a person's style from good examples, without an elaborate
+              written guide. That is our hypothesis. We have not measured it.
+            </p>
+            <p>
+              <strong>What we measured:</strong> whether adding one particular
+              guide to the same samples made first drafts better.
+            </p>
+            <ul class="instruction-list">
+              <li>
+                <strong>Samples:</strong> three Paul Graham essays.
+              </li>
+              <li>
+                <strong>Tasks:</strong> 10 fictional briefs, made up of 3
+                essays, 3 posts, 2 emails, and 2 DMs.
+              </li>
+              <li>
+                <strong>Drafts:</strong> 20 first drafts from GPT-6.1-Sol at
+                medium reasoning, two for each brief.
+              </li>
+              <li>
+                <strong>Judging:</strong> Claude Opus 5.5 at high effort,
+                working independently of the writer, compared each pair twice,
+                once in each candidate order. It was not told which draft had
+                the guide.
+              </li>
+              <li>
+                <strong>Controls:</strong> within each pair, the samples, model,
+                and brief were the same. Only the guide differed.
+              </li>
+              <li>
+                <strong>Guide:</strong> the latest one supplied from Spiral,
+                another writing tool. It was fixed before the drafts were
+                written and not revised after we saw them.
+              </li>
+            </ul>
+
+            <table class="report-table">
+              <thead>
+                <tr>
+                  <th scope="col">Outcome, out of 10 tasks</th>
+                  <th scope="col">Overall</th>
+                  <th scope="col">Voice only</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">Samples alone preferred</th>
+                  <td>5</td>
+                  <td>3</td>
+                </tr>
+                <tr>
+                  <th scope="row">Samples plus guide preferred</th>
+                  <td>4</td>
+                  <td>5</td>
+                </tr>
+                <tr>
+                  <th scope="row">Inconclusive across orders</th>
+                  <td>1</td>
+                  <td>2</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <p>
+              A task counts for one side only when both orders chose that side.
+              Mixed results count as inconclusive. All 20 drafts met their
+              requested word ranges.
+            </p>
+            <p>
+              <strong>What this doesn't show:</strong>
+            </p>
+            <ul class="instruction-list">
+              <li>
+                What people prefer. The judge was an AI, not a person, and we
+                measured neither human preference nor editing time.
+              </li>
+              <li>
+                Anything broader than this setup: one familiar author, one
+                writer model, one guide, and one judge.
+              </li>
+              <li>
+                How much samples help. Every draft had samples, so nothing was
+                compared with drafts written without them.
+              </li>
+              <li>
+                That all GPT or Claude models work equally well, or that Milton
+                achieves any percentage of Spiral's quality.
+              </li>
+              <li>
+                How a real person writes email or DMs. Those drafts carry a
+                style over from essays, not from real correspondence.
+              </li>
+            </ul>
+            <p>
+              Full notes:{" "}
+              <a href="https://github.com/zoneofdanger/milton/blob/main/docs/research/pg-style-guide-ablation-2026-11-05.md">
+                Method and results
+              </a>{" "}
+              and{" "}
+              <a href="https://github.com/zoneofdanger/milton/blob/main/docs/research/pg-style-guide-ablation-drafts-2026-11-05.md">
+                All briefs and drafts
+              </a>
+              .
+            </p>
+          </section>
+
           <section class="report-section" aria-labelledby="no-model">
-            <h3 id="no-model">Why no model touches your writing</h3>
+            <h3 id="no-model">Why Milton doesn't rewrite your writing</h3>
             <p>
               Milton stores your rules exactly as sent and your samples exactly
               as approved. Reading them back is a database query, with no model
-              call. Your assistant does the writing. Milton keeps the file.
+              call. Milton itself never rewrites what you saved. Your assistant
+              does the writing, with its own model. Milton keeps the file.
             </p>
-            <p>We tested adding one. See below.</p>
+            <p>
+              We tested adding a model to how Milton picks samples. See below.
+            </p>
           </section>
 
           <section class="report-section" aria-labelledby="sample-ranking">
@@ -107,8 +230,9 @@ import SiteLayout from "../layouts/SiteLayout.astro";
               email first, and why your samples outrank the setup choices.
             </p>
             <p>
-              In our own tests, cutting from eight samples to four made drafts
-              clearly worse, 3.21 against 3.65 out of 5. Milton serves eight.
+              In our earlier ranking tests, cutting from eight samples to four
+              made drafts clearly worse, 3.21 against 3.65 out of 5. Milton
+              serves eight.
             </p>
           </section>
 
@@ -117,20 +241,23 @@ import SiteLayout from "../layouts/SiteLayout.astro";
             <ul class="instruction-list">
               <li>Drafts for real people, judged by those people.</li>
               <li>
-                Assistants other than Claude Code. ChatGPT, Codex, and the rest
-                are untested.
+                How well ChatGPT, Codex, and other clients beyond Claude Code
+                retrieve samples from Milton and write from them. The
+                style-guide pilot was an offline prompt test: the samples were
+                placed in the prompt, and no client fetched them from Milton.
               </li>
               <li>Whether one short email is enough.</li>
               <li>
-                Whether the setup choices, or any written rules, add anything
-                beyond a pasted sample.
+                Whether the setup choices, or rules a person has approved or
+                corrected, add anything beyond a pasted sample. The style-guide
+                pilot tested one fixed guide, not those.
               </li>
               <li>Whether you can pick out your own writing, blind.</li>
             </ul>
           </section>
 
           <section class="report-section" aria-labelledby="test-method">
-            <h3 id="test-method">How these tests were run</h3>
+            <h3 id="test-method">How the earlier ranking tests were run</h3>
             <ul class="instruction-list">
               <li>
                 The fictional writers and their samples were written by a model.

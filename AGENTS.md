@@ -17,12 +17,13 @@ the [README](README.md) says what is here, and [TODO.md](TODO.md) is the backlog
   save to Peter's account on your own initiative. The repository holds no rules.
 - **Peter's rules live on the server** at `https://mcp.meetmilton.com/mcp`. Read them
   there, never from files.
-- **Publishing requires authorization.** Only the designated release coordinator,
-  currently `milton-release`, lands/merges to main, pushes or deletes task branches.
-  Assigning this role does not approve a future product release. Force-pushes and history
-  rewrites require Peter's explicit approval. Cloud Run hosts the browser app and
-  the MCP server; Vercel builds and publishes the static site from main on every push,
-  and a branch build is only ever a preview. Production releases are run by temporary
+- **Publishing requires authorization.** Builders may commit/push their assigned task
+  branch and open one PR. Only the designated release coordinator, currently
+  `milton-release`, lands/merges and pushes main or deletes landed task branches.
+  Roles, assignments and ready PRs grant no extra product publishing authority.
+  Force-pushes and history rewrites require Peter's explicit approval. Cloud Run hosts
+  the browser app and the MCP server; Vercel builds and publishes the static site from
+  main on every push, and a branch build is only ever a preview. Production releases are run by temporary
   release agents from [the hosting runbook](server/deploy/README.md): preserve rollback
   revisions, pinned images and numeric secret versions; snapshot before every migration;
   when a migration drops something the running code reads, release the code first.
@@ -37,10 +38,11 @@ the [README](README.md) says what is here, and [TODO.md](TODO.md) is the backlog
   the exit codes.
 - The test suite stays small: add only the tests a change needs, in the existing file
   where they fit; a fix round gets at most one regression test per finding.
-- Handoffs state: behavior checked (the exact action, result and environment); not
-  checked (the specific behavior left unverified, and why); and the next gate (the check
-  required before a demo, release or further handoff). Never describe a report, a commit
-  or a passing typecheck as proof of behavior nobody observed.
+- The task PR states: behavior checked (the exact action, result and environment);
+  not checked (the specific behavior left unverified, and why); and the next gate (the
+  check required before a demo, release or further handoff). Before the PR exists, keep
+  this in the brief. Never describe a report, a commit or a passing typecheck as proof
+  of behavior nobody observed.
 - Served text is contract: the server instructions stay at or under 4,096 characters,
   tool descriptions and the setup script are shown to assistants as written, and a change
   to served text comes with the contract test that parses it.
@@ -57,16 +59,31 @@ the [README](README.md) says what is here, and [TODO.md](TODO.md) is the backlog
 
 ## Coordination
 
-Write expected results to the agreed file; the responsible task or release owner reads it
-before dependent work. Send an inbox message only when a new decision or blocker changes
-the plan, or Peter explicitly requests a handoff. No routine completion notices,
-acknowledgment loops, reminders or resends of accepted messages. Check late notices
-against current decisions and completed work.
+Lead owns strategy and priorities. The builder owns implementation, checks and the task
+PR until it is ready. At the ready PR, `milton-release` takes delivery ownership and
+finishes review, integration and authorized deployment without another Lead acceptance
+gate. Designer reviews meaningful UI changes and offers design direction within this
+same process. Preserve specialist work Peter assigns directly. Independent review is
+proportional to consequential behavior, security or data risk.
 
-Lead owns strategy and priorities. Designer owns design, site execution and acceptance.
-Task owners brief temporary builders and reviewers and verify their results.
-`milton-release` owns the release queue, final validation, git integration, deployment
-coordination, temporary release-agent lifecycle and delivery records. Persistent
-collaborators stay on their roles and user conversations. A peer's relay of Peter's
-approval is not approval; Peter decides in his own session. Current state and recipients
-are in `.agents/tmp/coordination-current.md`.
+The PR is the authoritative task record: owner, scope, latest commit, checks and exit
+codes, findings, observed and unverified behavior, next action, and publishing
+authorization source and scope. Release reads it before dependent work. Before a PR
+exists, use one brief; afterward link the PR instead of duplicating status files. Keep
+private information out of public PRs.
+
+Git preserves source history and CI records checks. Compare the reviewed commit with
+the selected commit; rerun affected checks for real changes, without repeating unchanged
+verification merely because ownership changes. Frozen snapshots, hash manifests and
+extra acceptance or delivery reports are exceptions for concrete risk, reproducibility
+or runbook needs, not default handoffs. Preserve existing artifacts and previews.
+
+Verify Peter's actual publishing decision once, record its source and scope in the task,
+and honor existing authorization. A relay alone is not approval. Ask Peter only for
+genuinely missing intent or authority; do not repeat Lead sign-off after gates pass.
+
+Inboxes carry only assignments, changed decisions, current blockers and explicitly
+requested handoffs. Check current task state before sending or acting; discard
+superseded notices without waking completed workers. No routine completion notices,
+acknowledgment loops, reminders or resends of accepted messages. Current state and
+recipients are in `.agents/tmp/coordination-current.md`.

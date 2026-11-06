@@ -19,9 +19,10 @@ decommission on 2026-11-01. Hosting rollback now uses Cloud Run revisions.
 
 Project `milton-510506`, Cloud Run/Artifact Registry region `us-east4`. Service manifests in this directory pin an immutable image and
 secret versions. They contain configuration and secret references, never values.
-The manifests pin what is serving now: app `milton-app-context-fec8802` and MCP
-`milton-mcp-context-fec8802` (image index `sha256:fe7e2263…`, env 3, key 1), both
-connecting as `milton_app`; see the current release below. Production has the
+The manifests pin what is serving now: app `milton-app-mvp-8364a81`
+(image index `sha256:81d10f9e…`) and unchanged MCP `milton-mcp-context-fec8802`
+(image index `sha256:fe7e2263…`), both env 3, key 1, connecting as `milton_app`;
+see the current release below. Production has the
 `0000_baseline` and `0001_sample_context` migrations. There is no worker service or scheduler job. There is no memo-update
 allowance; the daily call cap bounds saves. Existing positive account safeguards remain
 in effect. Trials and billing are live (since 2026-11-04).
@@ -185,13 +186,76 @@ references. Inspect revision readiness before selecting a recorded revision:
 gcloud run revisions list --service=milton-app --project=milton-510506 --region=us-east4
 ```
 
-Now serving: app `milton-app-context-fec8802` and MCP
+Now serving: app `milton-app-mvp-8364a81`, selected by name at 100% on
+2026-11-06 06:01:11Z, from exact landed main source
+`8364a81e8544dd07a7618baa8c555c309d9a1b60`. MCP remains unchanged at
+`milton-mcp-context-fec8802`, 100%, from `fec88029f86cf6c71710fa78978c35269becb718`.
+
+Current app release mvp-8364a81: image index
+`sha256:81d10f9e581a69be5ea27798687c1c2e9e7fb8525318f0d1d03a88abb2da8e99`, Linux amd64
+`sha256:dbc53d970f57e49b19d7741dcf22645eec401fb128355f926972c0f61520ab9c`.
+Built and pushed from a clean git archive of that exact commit with frozen Bun
+install, exit 0. The accepted R4 source checks remain applicable: 86 of 87 frozen
+inputs are identical; package.json only adds the static upload-check command.
+Types, 108 tests/2,517 assertions, formatting and app/site builds passed, all exit 0;
+the unchanged suite was reused. Node 26.13.0, uid 1000, bundled assets, absence of
+private/env/key artifacts and both roles' empty-configuration refusal were checked
+in this Linux amd64 image.
+
+Under Node 26 in the exact image, isolated fictional PGlite store reads and actual
+memoPages responses show nine samples (eight newest emails and one chat), while
+the complete download retains all eleven active samples: 4,436 bytes, SHA-256
+`2d3187a9fcae2eb5ff3e625c220ff208f037c7e86ae2c236b98d2f492a10692a`.
+All eleven response bytes/headers match accepted fixtures, including original CSP,
+paused/empty/fallback states and downloads. The image's CSS matches the accepted
+asset. Headless Chromium rendered populated, paused and empty responses at
+1440/390/320 pixels with no overflow or page errors, computed pretty wrapping,
+and a keyboard download matching the complete file. These are isolated source
+fixture checks under Node 26, not authenticated production browser evidence.
+
+The app was validated and staged at zero traffic, inspected Ready with its expected
+imported amd64 digest, then selected; it became Active and ContainerHealthy.
+Only app image/revision and expected operation metadata changed. Ingress, IAM,
+service account, resources, startup settings and numeric secret references match
+the predecessor. App retains `milton-app-env:3` / `milton-app-key:1`; MCP retains
+`milton-mcp-env:3` / `milton-mcp-key:1`, with its entire service record and IAM
+unchanged. No migration, database operation, MCP deployment, secret change or
+static deployment ran in this app rollout.
+
+Canonical trusted TLS 1.2/1.3, TLS 1.0/1.1 refusal, health, discovery, unauthenticated
+401/CORS, HTTP 308, direct run.app refusal, signed-out restrictions, production CSS
+and invalid Stripe-signature refusal passed, exit 0. The mandatory exact-source
+`bun --no-env-file scripts/probe-forms.ts https://app.meetmilton.com` passed with
+sign-in refusal 403, exit 0. Existing authenticated MCP cover-sheet reads succeeded
+before and after selection; no writing text was logged. Production signed-out login
+rendered without overflow or browser errors at 1440/390/320 pixels; no provider was
+activated or new login created.
+
+Observation through 2026-11-06 06:06:28Z covered 317 seconds after selection.
+Repeated app/MCP health stayed 200. Filtered request/runtime logs showed zero 5xx,
+ERROR or unexpected auth/schema/permission/lock failures. Available request metrics
+through 06:05:00Z contained traffic and zero 5xx; their publication lag is explicit.
+Queue age has no instrument and remains unverified. Full configuration/IAM parity
+and enabled numeric secret versions were verified. Live signed-in report layout,
+account download and Node 26 real-account save/correction remain unverified; no
+memo saves ran.
+
+Compatible app rollback: preserve Ready `milton-app-context-fec8802`, image index
+`sha256:fe7e226368b42d2ec047c26ac7cbb6d6181acb5157bda8d881b75af55ee8802b`, Linux amd64
+`sha256:f49a219aa7001219ec3ff75fa9ff770762bc0043fc4e226024fd181ba06e877b`, app env 3/key 1.
+Recheck readiness before selecting it; no database restore is part of this code
+rollback. Older pre-context runtimes require the historical schema recovery gate
+below and must not be selected as a simple app rollback. All old revisions, images
+and numeric secrets remain preserved. Existing previews were untouched; the MVP
+previews were already absent before landing. No rollback ran.
+
+Previous joint release (still current for MCP): app `milton-app-context-fec8802` and MCP
 `milton-mcp-context-fec8802`, both selected by name at 100% while ingress was closed
 on 2026-11-05 (MCP 16:51:08Z, app 16:51:19Z). Exact landed main source:
 `fec88029f86cf6c71710fa78978c35269becb718`. Both ingress settings were restored
 to `internal-and-cloud-load-balancing` by 2026-11-05 16:51:32Z.
 
-Current release context-fec8802: image index
+Previous joint release context-fec8802 (current MCP image): image index
 `sha256:fe7e226368b42d2ec047c26ac7cbb6d6181acb5157bda8d881b75af55ee8802b`, Linux amd64
 `sha256:f49a219aa7001219ec3ff75fa9ff770762bc0043fc4e226024fd181ba06e877b`. The clean git archive passed
 frozen Bun install, types, 108 tests/2,517 assertions, formatting and the focused
@@ -327,7 +391,7 @@ Both use the exact landed main commit `99b720966443e3a3cde696be9f39360fc51e7b7e`
 Ingress is `internal-and-cloud-load-balancing`; IAM, limits, startup CPU boost and
 numeric secrets are unchanged (app/MCP env 3, keys 1). There is no worker service.
 
-Previous joint release ui-99b7209 (still current for MCP): image index
+Previous joint release ui-99b7209: image index
 `sha256:789939cfbca106b00fb9288a149ef1e12b4e49da87c77e4bb9d1ac8aa0d5f842`, Linux amd64
 `sha256:078a2e85ce824d598352803c2f18007ab988ce82b6079128cf44341a4e17b559` (uid 1000,
 Node 26.13.0; no env/key/pem/dev.vars/private artifacts; both roles refuse empty

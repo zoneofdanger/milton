@@ -1,0 +1,212 @@
+{
+  "repository": "plastic-labs/honcho",
+  "commit": "b57a3730d00a95efbcd1b203c130c47a6028c289",
+  "visited": "2026-11-05",
+  "files": {
+    "integrations/cursor/src/session-start.ts": {
+      "blob": "5519f663270a9b08954cf336d65c22b0b498f1cb",
+      "lines": 55
+    },
+    "integrations/cursor/src/before-submit-prompt.ts": {
+      "blob": "39393cbb8dfef28cbe7390be261317e6bdeab4e9",
+      "lines": 29
+    },
+    "integrations/cursor/src/after-agent-response.ts": {
+      "blob": "563c603c2229b0fd6c7aedead5fc788bd421c82c",
+      "lines": 25
+    },
+    "integrations/cursor/src/common.ts": {
+      "blob": "711e1d762079c07e1183a710567c924350e1eff8",
+      "lines": 171
+    },
+    "integrations/cursor/src/redact.ts": {
+      "blob": "9648a1642e2c64085f77f281eb71078ce5d5577b",
+      "lines": 49
+    },
+    "integrations/cursor/hooks/hooks.json": {
+      "blob": "8fdd807696f0f5af33f4f66a467214a73cfcb612",
+      "lines": 15
+    },
+    "integrations/cursor/skills/honcho-memory/SKILL.md": {
+      "blob": "92f825276b4ed381724c5ec08dd39a4c089df4b5",
+      "lines": 114
+    },
+    "integrations/cursor/rules/honcho-memory.mdc": {
+      "blob": "54ae567ef887cf033d61f4b6097d2926dc5b1c5e",
+      "lines": 25
+    },
+    "integrations/cursor/tests/hooks.test.ts": {
+      "blob": "32949f6b5f4759fcb828121765f5e028330f8501",
+      "lines": 115
+    },
+    "hermes-plugin-honcho/__init__.py": {
+      "blob": "cd74e603e31379e1f005adf8b4882e343e6ef145",
+      "lines": 1377
+    },
+    "hermes-plugin-honcho/session_context.py": {
+      "blob": "bd4cb2c3fae4bf1b26c5d5e9d0b623e98b00cee7",
+      "lines": 421
+    },
+    "hermes-plugin-honcho/recall_sync.py": {
+      "blob": "7a6e6e9831d992c21befefed5b78cc577d307fac",
+      "lines": 120
+    },
+    "src/dialectic/core.py": {
+      "blob": "ee6fe57aae8a09539dcf2e4bf16530ef0407974a",
+      "lines": 841
+    },
+    "src/dialectic/chat.py": {
+      "blob": "6e2f5e4f37c3635caad7e7bad28f189ce003391d",
+      "lines": 283
+    },
+    "src/utils/evidence.py": {
+      "blob": "2a4e32305d39a0ac5ec5b442b02d27b0a84399f4",
+      "lines": 212
+    },
+    "src/utils/representation.py": {
+      "blob": "ba0d80f0ac4af57955d6f14617a5018f53d04313",
+      "lines": 797
+    },
+    "src/utils/memory_brief.py": {
+      "blob": "87221535e46ff50018f3004dd4a310b1d1c4c967",
+      "lines": 92
+    },
+    "src/utils/agent_tools.py": {
+      "blob": "2b204d1ba39214eadd9d753935acfdd191ff68c9",
+      "lines": 2978
+    },
+    "src/crud/representation.py": {
+      "blob": "b63f82cac3fc5c3af63fa8dd3c78eda4ef0e3e2a",
+      "lines": 695
+    },
+    "src/crud/document.py": {
+      "blob": "22ce82d79cf537488b8c422ebfa29bdde99ddb3e",
+      "lines": 2172
+    },
+    "src/crud/peer_card.py": {
+      "blob": "c1930eab2dd8a2e5402c06051bd5b26ffe0bf6b6",
+      "lines": 148
+    },
+    "src/dreamer/specialists.py": {
+      "blob": "7deba85904a8236e759ac8f243016d2a506a5401",
+      "lines": 1234
+    },
+    "hermes-plugin-honcho/tests/test_honcho_startup_fail_open.py": {
+      "blob": "30cc162eee3f9a65852ebedb1c94331af161fd34",
+      "lines": 706
+    },
+    "hermes-plugin-honcho/tests/test_honcho_session_cache_bounds.py": {
+      "blob": "61dcaadb68607891c8c25fde48e3b940b9118af4",
+      "lines": 434
+    },
+    "hermes-plugin-honcho/tests/test_recall_sync.py": {
+      "blob": "e3c35a9984da001199eac54de98d23c0c1f60d24",
+      "lines": 155
+    },
+    "hermes-plugin-honcho/tests/test_async_memory.py": {
+      "blob": "ba5dfdaa9d8a186f88a4dbf9d7b04cffeece1eb5",
+      "lines": 835
+    },
+    "tests/dialectic/test_evidence.py": {
+      "blob": "af11743aec50f791877b3830a9dfe2e78e71a945",
+      "lines": 424
+    },
+    "tests/dialectic/test_working_memory.py": {
+      "blob": "652b6720ae3f2046d0f4d5f25e1228a35ba2e3df",
+      "lines": 190
+    },
+    "tests/dreamer/test_dreamer_integration.py": {
+      "blob": "16e6b427e077ae07b0272fa5b33447aa3cec4312",
+      "lines": 653
+    },
+    "tests/dreamer/test_dream_history_wiring.py": {
+      "blob": "c6f7f1bea6ee7e071acdcef179465b16324b1ba1",
+      "lines": 232
+    },
+    "tests/unified/README.md": {
+      "blob": "fe96aa4128e426cd40a344fdf69a0d0439abb65a",
+      "lines": 138
+    },
+    "tests/unified/runner.py": {
+      "blob": "651888bedbe14078bd5668cb0af067c0507d7303",
+      "lines": 1214
+    },
+    "tests/unified/schema.py": {
+      "blob": "ca4766b57ddad06c65b29d4d5124a170bcdbf8ad",
+      "lines": 289
+    },
+    "tests/unified/test_cases/dream_knowledge_updates_and_patterns.json": {
+      "blob": "28e262b79b5f6e7010cf281ab77d97e6cfd65a17",
+      "lines": 232
+    },
+    "tests/live_llm/README.md": {
+      "blob": "18e6a4c88ae4f05f0df5729e9ac14ab9bbcc0e62",
+      "lines": 74
+    },
+    "src/routers/conclusions.py": {
+      "blob": "4b5d5b8070bcf9cb52514aabd71b72448733b838",
+      "lines": 196
+    },
+    "src/crud/lifecycle.py": {
+      "blob": "be00c18e38c325ba013c6757813a30ae2fd87fa1",
+      "lines": 276
+    },
+    "src/schemas/api.py": {
+      "blob": "2db9aa32fd34361f38cfacc3d6db28162db2e7a8",
+      "lines": 1476
+    },
+    "tests/llm/test_tool_loop_budget.py": {
+      "blob": "f915e0254513b00d4f390d2b7330be7d10601e5f",
+      "lines": 231
+    },
+    "src/crud/dream_history.py": {
+      "blob": "a962dbd54d5c48fb4a2163d585f448b5823c239c",
+      "lines": 587
+    },
+    "tests/crud/test_dream_history.py": {
+      "blob": "8028651436333dc30c2cf6c971fab2e6311bdcd4",
+      "lines": 635
+    },
+    "src/llm/tool_loop.py": {
+      "blob": "7a05eb00aeda5e5a42f50f154958e54e259735dc",
+      "lines": 959
+    },
+    "tests/utils/test_agent_tools.py": {
+      "blob": "04147cc567c9f05963efd65aca53b76fa767a9c9",
+      "lines": 2931
+    },
+    ".github/workflows/unified-tests.yml": {
+      "blob": "1f1f9d874bbb838b6a3b5ecc8363ba3540f4f4ab",
+      "lines": 234
+    },
+    ".github/workflows/unittest.yml": {
+      "blob": "830396a30d945a8d6aaf2e5e477a81b67e60c984",
+      "lines": 280
+    },
+    "src/deriver/deriver.py": {
+      "blob": "7ada60f3f1c788e59e842dd5381a39974a138b83",
+      "lines": 413
+    },
+    "src/deriver/prompts.py": {
+      "blob": "dadb58c3072f6045842ba1d689973358270773d7",
+      "lines": 129
+    },
+    "hermes-plugin-honcho/dialectic.py": {
+      "blob": "054652340bd94ea6ecf3195a00c13658b4561ff7",
+      "lines": 205
+    },
+    "src/schemas/internal.py": {
+      "blob": "168a0b6f74afa20ab6912b3231d670fcda2453f5",
+      "lines": 202
+    },
+    "src/schemas/__init__.py": {
+      "blob": "696e4527ef138496279574a3c42ac9e3ec6266ac",
+      "lines": 221
+    },
+    "src/llm/conversation.py": {
+      "blob": "5a672cda5524b30abf94566d43214c0b2115bb90",
+      "lines": 365
+    }
+  },
+  "note": "Public source identities reviewed for the dated research note; source code is not vendored. Collection does not imply every line was audited or tests were run."
+}

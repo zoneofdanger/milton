@@ -1,3 +1,4 @@
+import type { GuidePresentation } from "../guides/store";
 import {
   contextDetails,
   contextMatch,
@@ -73,6 +74,7 @@ export type Sample = {
   match?: { kind?: boolean; purposes: string[]; dimensions: string[] };
 };
 export type ReportDocument = {
+  guide?: GuidePresentation;
   id: ReportId;
   title: string;
   when: string;

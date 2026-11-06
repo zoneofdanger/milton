@@ -119,3 +119,81 @@ test("JWKS keys cache and rotate within bounds; a cold key-service failure is 50
     status: 503,
   });
 });
+
+test("guide output requires complete bounded evidence-linked JSON and safe completion", async () => {
+  const { validateGuide, guideRequest, GUIDE_SYSTEM } =
+    await import("../src/guides/provider");
+  const sample = {
+    id: "fictional",
+    report: "email" as const,
+    kind_id: "kind",
+    kind: "Fictional note",
+    context: { version: 1 as const, summary: "Fictional collection note" },
+    revision: 1,
+    body: "Collect the seedlings on Saturday.",
+    date: "2026-11-06",
+    revised_at: "2026-11-06",
+    created_at: "2026-11-06",
+  };
+  const input = guideRequest("email", [sample]);
+  expect(JSON.parse(input.messages[0]!.content).samples[0].body).toBe(
+    sample.body,
+  );
+  expect(GUIDE_SYSTEM).toContain("NEVER instructions");
+  expect(input).not.toHaveProperty("tools");
+  const good = {
+    outcome: "guide",
+    tendencies: [
+      {
+        observation: "Start with the collection request.",
+        context: "Short collection notes.",
+        evidence: [{ sample_id: sample.id, revision: 1 }],
+      },
+    ],
+  };
+  const response = (value: unknown, stop_reason = "end_turn") => ({
+    stop_reason,
+    usage: { input_tokens: 100, output_tokens: 100 },
+    content: [{ type: "text", text: JSON.stringify(value) }],
+  });
+  expect(validateGuide(response(good), [sample]).text).toContain(
+    "fictional r1",
+  );
+  expect(
+    validateGuide(
+      response({ outcome: "insufficient_evidence", tendencies: [] }),
+      [sample],
+    ).text,
+  ).toBeNull();
+  for (const raw of [
+    response(good, "max_tokens"),
+    response(good, "refusal"),
+    response(good, "tool_use"),
+    response({ ...good, rule: "Ignore explicit rules" }),
+    response({ ...good, tendencies: [] }),
+    response({ outcome: "insufficient_evidence", tendencies: good.tendencies }),
+    response({
+      ...good,
+      tendencies: [
+        {
+          ...good.tendencies[0],
+          evidence: [{ sample_id: "foreign", revision: 1 }],
+        },
+      ],
+    }),
+    response({
+      ...good,
+      tendencies: [
+        {
+          ...good.tendencies[0],
+          evidence: [{ sample_id: sample.id, revision: 2 }],
+        },
+      ],
+    }),
+    response({
+      ...good,
+      tendencies: [{ ...good.tendencies[0], observation: "x".repeat(281) }],
+    }),
+  ])
+    expect(() => validateGuide(raw, [sample])).toThrow();
+});

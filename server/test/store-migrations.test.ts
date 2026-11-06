@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { localStore, storeDatabase } from "./local-store";
-import { fixtureStore, seedUsers } from "./store-fixtures";
+import { fixtureStore, seedSample, seedUsers } from "./store-fixtures";
 import { checkRuntimeRole } from "../scripts/check-runtime-role";
 import { migrationUrl } from "../scripts/migrate";
 import { PGlite } from "@electric-sql/pglite";
@@ -228,9 +228,13 @@ test("the runtime has only current grants, its guards hold, and later tables inh
       accepted_changes: "INSERT",
       assistant_disconnects: "DELETE,INSERT,SELECT",
       deleted_identities: "INSERT,SELECT",
+      guide_accounts: "SELECT",
+      guide_budget_lock: "",
+      guide_spend: "",
       identities: "INSERT,SELECT",
       instruction_card_versions: "INSERT,SELECT",
       instruction_cards: "INSERT,SELECT",
+      report_guides: "SELECT",
       sample_kinds: "INSERT,SELECT",
       sample_versions: "INSERT,SELECT",
       samples: "INSERT,SELECT",
@@ -242,6 +246,15 @@ test("the runtime has only current grants, its guards hold, and later tables inh
       users: "DELETE,INSERT,SELECT,UPDATE",
     };
     expect(await roles(pg)).toEqual([
+      {
+        rolname: "milton_guide_worker",
+        rolcanlogin: false,
+        rolsuper: false,
+        rolcreatedb: false,
+        rolcreaterole: false,
+        rolreplication: false,
+        rolbypassrls: false,
+      },
       {
         rolname: "milton_runtime",
         rolcanlogin: false,
@@ -258,11 +271,13 @@ test("the runtime has only current grants, its guards hold, and later tables inh
     expect(Object.keys(used)).toEqual(await publicTables(pg));
     expect(granted.objects).toEqual(
       [
-        ...Object.entries(used).map(([relname, privileges]) => ({
-          relname,
-          relkind: "r",
-          privileges,
-        })),
+        ...Object.entries(used)
+          .filter(([, privileges]) => privileges)
+          .map(([relname, privileges]) => ({
+            relname,
+            relkind: "r",
+            privileges,
+          })),
         {
           relname: "instruction_card_position",
           relkind: "S",
@@ -741,3 +756,83 @@ test("stable revision upgrade preserves known snapshots and provenance, refuses 
     await pg.close();
   }
 }, 30000);
+
+test("guide migration preserves populated approved sources, defaults off and isolates worker capabilities", async () => {
+  const folder = new URL("../drizzle/", import.meta.url).pathname;
+  const scratch = await mkdtemp(join(tmpdir(), "milton-guides-"));
+  const pg = new PGlite();
+  try {
+    await cp(folder, scratch, { recursive: true });
+    const journal = await Bun.file(join(scratch, "meta/_journal.json")).json();
+    journal.entries = journal.entries.filter((e: { idx: number }) => e.idx < 3);
+    await writeFile(
+      join(scratch, "meta/_journal.json"),
+      JSON.stringify(journal),
+    );
+    await migrate(drizzle(pg), { migrationsFolder: scratch });
+    await seedUsers(pg, "upgrade");
+    await pg.exec(
+      "INSERT INTO sample_kinds(user_id,id,report,label) VALUES ('upgrade','kind','email','Fictional note')",
+    );
+    await seedSample(
+      pg,
+      "upgrade",
+      "example",
+      "email",
+      "kind",
+      { version: 1, summary: "Fictional note" },
+      "Collect the seedlings on Saturday.",
+    );
+    const before = (await pg.query("SELECT * FROM sample_versions")).rows;
+    await migrate(drizzle(pg), { migrationsFolder: folder });
+    await migrate(drizzle(pg), { migrationsFolder: folder });
+    expect((await pg.query("SELECT * FROM sample_versions")).rows).toEqual(
+      before,
+    );
+    expect((await pg.query("SELECT * FROM guide_accounts")).rows).toHaveLength(
+      0,
+    );
+    expect(
+      (await pg.query("SELECT source_version,status FROM report_guides")).rows,
+    ).toEqual([{ source_version: 1, status: "queued" }]);
+    const allowed = (
+      await pg.query<{ table_name: string; privilege_type: string }>(
+        "SELECT table_name,privilege_type FROM information_schema.role_table_grants WHERE grantee='milton_guide_worker' ORDER BY 1,2",
+      )
+    ).rows;
+    expect(
+      allowed.filter((r) =>
+        [
+          "identities",
+          "instruction_cards",
+          "instruction_card_versions",
+          "assistant_disconnects",
+        ].includes(r.table_name),
+      ),
+    ).toEqual([]);
+    expect(
+      allowed
+        .filter((r) => r.privilege_type !== "SELECT")
+        .map((r) => `${r.table_name}:${r.privilege_type}`),
+    ).toEqual([
+      "guide_budget_lock:UPDATE",
+      "guide_spend:INSERT",
+      "guide_spend:UPDATE",
+      "report_guides:UPDATE",
+    ]);
+    await pg.exec("SET ROLE milton_guide_worker");
+    await expect(
+      pg.query("UPDATE sample_versions SET body='changed'"),
+    ).rejects.toThrow("permission denied");
+    await expect(pg.query("SELECT * FROM identities")).rejects.toThrow(
+      "permission denied",
+    );
+    await expect(
+      pg.query("UPDATE guide_accounts SET enabled=true"),
+    ).rejects.toThrow("permission denied");
+    await pg.exec("RESET ROLE");
+  } finally {
+    await pg.close();
+    await rm(scratch, { recursive: true, force: true });
+  }
+});

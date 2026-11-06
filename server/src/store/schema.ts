@@ -455,3 +455,85 @@ export const stripeEvents = pgTable(
     ),
   ],
 );
+
+// Derived guides are separate from approved-source versions and size limits.
+export const guideAccounts = pgTable(
+  "guide_accounts",
+  {
+    userId: text("user_id")
+      .primaryKey()
+      .references(() => users.id, { onDelete: "cascade" }),
+    enabled: boolean("enabled").notNull().default(false),
+    epoch: integer("epoch").notNull().default(0),
+    optedInAt: timestamp("opted_in_at", { withTimezone: true }),
+    optInReference: text("opt_in_reference"),
+  },
+  (t) => [
+    check(
+      "guide_consent",
+      sql`NOT ${t.enabled} OR (${t.optedInAt} IS NOT NULL AND ${t.optInReference} IS NOT NULL)`,
+    ),
+  ],
+);
+export const reportGuides = pgTable(
+  "report_guides",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    report: text("report").notNull(),
+    sourceVersion: integer("source_version").notNull().default(0),
+    completedVersion: integer("completed_version"),
+    guideText: text("guide_text"),
+    status: text("status").notNull().default("empty"),
+    reason: text("reason").notNull().default("no_samples"),
+    attempts: integer("attempts").notNull().default(0),
+    leaseToken: text("lease_token"),
+    leaseUntil: timestamp("lease_until", { withTimezone: true }),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.report] }),
+    check(
+      "guide_report",
+      sql`${t.report} IN ('email','chat','post','document','speech')`,
+    ),
+    check(
+      "guide_versions",
+      sql`${t.sourceVersion} >= 0 AND (${t.completedVersion} IS NULL OR ${t.completedVersion} <= ${t.sourceVersion})`,
+    ),
+    check("guide_attempts", sql`${t.attempts} BETWEEN 0 AND 2`),
+    check(
+      "guide_text_limit",
+      sql`${t.guideText} IS NULL OR char_length(${t.guideText}) <= 6000`,
+    ),
+    check(
+      "guide_status",
+      sql`${t.status} IN ('empty','queued','running','ready','insufficient','failed','unavailable')`,
+    ),
+  ],
+);
+// Content-free reservations intentionally outlive accounts; deletion cannot reset caps.
+export const guideSpend = pgTable(
+  "guide_spend",
+  {
+    id: text("id").primaryKey(),
+    accountKey: text("account_key").notNull(),
+    amountMicros: integer("amount_micros").notNull(),
+    settled: boolean("settled").notNull().default(false),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    check("guide_spend_amount", sql`${t.amountMicros} >= 0`),
+    index("guide_spend_date").on(t.createdAt),
+  ],
+);
+export const guideBudgetLock = pgTable(
+  "guide_budget_lock",
+  {
+    singleton: integer("singleton").primaryKey(),
+  },
+  (t) => [check("guide_budget_singleton", sql`${t.singleton} = 1`)],
+);

@@ -209,3 +209,15 @@ The retired Vercel app/MCP project and migration validation services are decommi
 there is no Vercel backend failover. Preserve the current Cloud Run revisions, pinned
 images and secret versions. Future runtime rollback uses Cloud Run revision traffic,
 never older instruction or TPS data.
+
+## Default-off derived-guide pilot
+
+Approved saves remain model-free. Explicitly opted-in eligible paid/trial accounts may
+also receive a separate, derived per-report guide from all active approved samples and
+complete context. Background Anthropic processing never changes approved sources or
+save fences. Reads include an optional self-contained guide/status block; explicit rules,
+Baseline precedence and requested edit scope still govern. Stale successful guides remain
+labeled until replaced; zero samples and valid insufficient evidence clear them. Operator
+controls, spend/retry limits, eligibility and service capabilities are specified in
+[guide operations](server/deploy/guides.md). No public tier, new MCP tool, history UI,
+refresh/disable control or rollout authorization is introduced.

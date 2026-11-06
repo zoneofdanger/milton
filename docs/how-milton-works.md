@@ -123,10 +123,10 @@ Files: `server/src/store/reports.ts`, `server/src/store/compiled.ts`.
   samples in newest-first order (then descending id on a timestamp tie);
   retired samples and superseded revisions stay excluded.
 - `is_empty` means no rules and no samples anywhere.
-- The version is a fingerprint of what any read can serve: a hash of the user, the cover
+- The approved-source version is a fingerprint of the rules and samples: a hash of the user, the cover
   sheet, and each report's text (newest eight) with every active sample's ID, kind and sample revision, so
   it is the same for every intent. The same cards and samples
-  always give the same version, and nothing assembled is stored.
+  always give the same version; derived guide text, status and enrollment do not affect it.
 - A client holding a version from before fingerprints (a revision hash) conflicts once
   on its next save, rereads, and saves on the new version.
 
@@ -197,7 +197,7 @@ not at all.
 ### Publish
 
 - Publishing checks the assembled documents against their size limits and answers with
-  their new fingerprint; it stores nothing beyond the cards and samples.
+  their new approved-source fingerprint; sample changes durably invalidate guides in the same transaction.
 - An audit row records the request, assistant, before and after versions, and affected
   cards.
 - The receipt is written last, once, with the outcome.
@@ -442,3 +442,25 @@ Files: `packages/theme/`, `server/scripts/`, `.github/workflows/checks.yml`.
 - `build.ts` builds the CSS with Vite and bundles the Cloud Run entry with Bun.
 - `dev.ts` serves the app on loopback and rebuilds the CSS on change.
 - CI runs types, tests, and formatting, holds no secrets, and does not deploy.
+
+## Optional report guides
+
+Files: `server/src/guides/`, `server/src/guide-worker.ts`, `server/scripts/guide-enrollment.ts`, `server/drizzle/0003_report_guides.sql`.
+
+- Enrollment defaults off and records explicit processing consent plus an epoch that advances on every off/on transition.
+- Guide eligibility requires enrollment, an active account and an active subscription or an unexpired trial; missing/unknown billing is ineligible.
+- A sample-revision trigger advances report source versions and marks durable work in the sample transaction, including while disabled; classification moves invalidate both reports; rules and unchanged saves do not.
+- Zero active samples immediately clears the guide and fences old work; nonempty changes retain the last successful stale guide with source/current versions and a reason.
+- A finite sequential worker claims at most five reports per run with a 150-second lease, checks eligibility before provider processing/spend/activation and permits two attempts per source/epoch.
+- All active originals and complete approved classification/context go in one generation; rules, prior guides and retired revisions are excluded; input is never sampled, truncated or batched.
+- Versioned prompting treats samples as untrusted evidence; the fixed Anthropic Opus 4.6 adapter has thinking disabled, no tools and a 90-second combined provider deadline.
+- Fully serialized input has a conservative 180,000-byte preflight limit and must fit 200,000 provider-counted input tokens; output is limited to 4,096 tokens, eight evidence-linked tendencies and 6,000 rendered characters.
+- A serialized database reservation bounds worst-case spend to $20/global UTC month, $5/global UTC day and $2/account UTC day at $5/M input and $25/M output; unknown outcomes retain reservations.
+- Content-free spend entries outlive account deletion; known bounded usage settles reservations downward, without allowing deletion or churn to reset caps.
+- Activation requires the same source version, epoch and live lease; valid insufficient evidence clears old text, while invalid/unfinished/refused output fails without a paid repair loop.
+- Expired claims recover within the attempt bound; oversize, budget-limited and exhausted work has terminal status rather than indefinite preparation.
+- Both MCP report envelopes carry the same optional self-contained derived guide block with status, freshness and precedence; off/ineligible responses keep their prior shape and the four tool inputs stay unchanged.
+- The report page shows read-only derived guidance and stale/terminal status only while eligible; requested edit scope and explicit rules override inferred tendencies, preserving Baseline semantics.
+- Approved-source limits, expected_version and exports exclude derived guides and status; saves and reads never call a model.
+- Account deletion cascades guides/enrollment/work; late completion never creates an account or guide row; disabled completed results are reusable only for the exact current source.
+- The guide worker has a distinct database role, provider-only secret payload and no credential/signing-key access; auth receives no guide writing capability.

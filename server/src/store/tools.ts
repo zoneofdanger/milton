@@ -110,6 +110,7 @@ export const reportEnvelope = (
   return {
     report_id: id,
     text: report.body,
+    ...(report.guide ? { guide: report.guide } : {}),
     version: documents.version,
     is_empty: report.is_empty,
     kinds: report.kinds,
@@ -123,6 +124,7 @@ export const reportList = (documents: Documents & { version: string }) => ({
   reports: documents.reports.map((r) => ({
     report_id: r.id,
     text: r.body,
+    ...(r.guide ? { guide: r.guide } : {}),
     is_empty: r.is_empty,
     samples: sampleIndex(r),
     // A one-line pointer, so the list stays small; get_report serves the block.

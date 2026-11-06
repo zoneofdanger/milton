@@ -1,3 +1,4 @@
+import { guidePresentation, type GuidePresentation } from "../guides/store";
 import { cardHeadsJson, cardFingerprint, type CardHead } from "./cards";
 import {
   assembleDocuments,
@@ -6,6 +7,7 @@ import {
   REPORT_IDS,
   type Documents,
   type ReportIntent,
+  type ReportId,
   type Sample,
 } from "./reports";
 import { createHash } from "node:crypto";
@@ -225,7 +227,13 @@ export function compiledMemos(
   async function snapshot(
     session: StoreSession,
     intent?: ReportIntent,
-  ): Promise<Snapshot & { served?: Documents }> {
+    includeGuides = false,
+  ): Promise<
+    Snapshot & {
+      served?: Documents;
+      guides: Partial<Record<ReportId, GuidePresentation>>;
+    }
+  > {
     // One statement reads every head (including archive state) and the active
     // samples, so a read without a transaction still sees a save whole or not
     // at all. Never page this input.
@@ -235,6 +243,7 @@ export function compiledMemos(
         heads: CardHead[];
         samples: Sample[];
         kind_valid: boolean;
+        guides: Partial<Record<ReportId, GuidePresentation>>;
       }>(
         sql`SELECT EXISTS(SELECT 1 FROM users WHERE id=${userId} AND status='active') AS open,
       (${cardHeadsJson(userId)}) AS heads,
@@ -245,7 +254,8 @@ export function compiledMemos(
         'created_at',to_char(s.original_created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"')) ORDER BY s.created_at,s.id),'[]'::json)
         FROM (${sampleHeads(userId)}) s JOIN sample_kinds k ON k.user_id=s.user_id AND k.id=s.kind_id
         WHERE s.user_id=${userId} AND NOT s.retired) AS samples,
-      ${intent?.kind_id ? sql`EXISTS(SELECT 1 FROM sample_kinds WHERE user_id=${userId} AND id=${intent.kind_id} AND report=${intent.report})` : sql`true`} AS kind_valid`,
+      ${intent?.kind_id ? sql`EXISTS(SELECT 1 FROM sample_kinds WHERE user_id=${userId} AND id=${intent.kind_id} AND report=${intent.report})` : sql`true`} AS kind_valid,
+      (${includeGuides ? guidePresentation(userId) : sql`SELECT '{}'::json`}) AS guides`,
       )
     )[0]!;
     if (!row.open) throw unavailable();
@@ -267,6 +277,7 @@ export function compiledMemos(
     const documents = assembleDocuments(active, samples);
     return {
       open: row.open,
+      guides: row.guides,
       heads,
       samples,
       fingerprint,
@@ -286,9 +297,9 @@ export function compiledMemos(
   /** A read assembles the documents from cards and samples. It takes no lock
    * and writes nothing: one statement for the snapshot, then the trial gate
    * for an assistant. The size cap bounds saves; a read serves what is on file. */
-  async function read(intent?: ReportIntent) {
+  async function read(intent?: ReportIntent, includeGuides = false) {
     try {
-      const current = await snapshot(db, intent);
+      const current = await snapshot(db, intent, includeGuides);
       if (actor) await assertTrialAccess(db, userId);
       return current;
     } catch (error) {
@@ -325,9 +336,13 @@ export function compiledMemos(
     async readDocuments(
       intent?: ReportIntent,
     ): Promise<Documents & { version: string }> {
-      const current = await read(intent);
+      const current = await read(intent, true);
       return {
         ...(current.served ?? current.documents),
+        reports: (current.served ?? current.documents).reports.map((r) => ({
+          ...r,
+          ...(current.guides[r.id] ? { guide: current.guides[r.id] } : {}),
+        })),
         version: current.version,
       };
     },

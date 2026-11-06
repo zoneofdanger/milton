@@ -493,3 +493,34 @@ test("sample contexts are bounded, extensible and complete replacements have exp
     }).success,
   ).toBe(false);
 });
+
+test("optional guide envelopes are self-contained and leave approved text and source fences intact", () => {
+  const documents = { ...assembleDocuments([], []), version: "a".repeat(64) };
+  const off = reportEnvelope(documents, "email");
+  expect(off).not.toHaveProperty("guide");
+  const guide = {
+    derived: true as const,
+    text: "Open with the practical update.",
+    source_version: 1,
+    current_version: 2,
+    stale: true,
+    status: "failed",
+    reason: "attempts_exhausted",
+    precedence:
+      "Explicit rules and requested edit scope win; preserve Baseline precedence. Stale guides may reflect removed samples.",
+  };
+  documents.reports[0]!.guide = guide;
+  const report = JSON.parse(JSON.stringify(reportEnvelope(documents, "email")));
+  const list = JSON.parse(JSON.stringify(reportList(documents)));
+  expect(report.guide).toEqual(list.reports[0].guide);
+  expect(report.guide).toMatchObject({
+    derived: true,
+    source_version: 1,
+    current_version: 2,
+    stale: true,
+  });
+  expect(report.guide.precedence).toContain("requested edit scope");
+  expect(report.text).toBe(off.text);
+  expect(report.version).toBe(off.version);
+  expect(storeInstructions.length).toBeLessThanOrEqual(4096);
+});

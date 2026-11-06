@@ -36,6 +36,10 @@ replaces `sample.replaces`, report metadata uses `revision`, and clients must re
 current IDs and the account version. Check exact active reads/exports and revision,
 retirement, replay, stale-write and account-delete behavior before reopening.
 
+## Optional guide worker
+
+The default-off private guide pilot has separate [operations and capability instructions](guides.md). No guide job, schedule, provider key or account enrollment is provisioned by its build.
+
 ## Cloud resources
 
 Project `milton-510506`, Cloud Run/Artifact Registry region `us-east4`. Service manifests in this directory pin an immutable image and

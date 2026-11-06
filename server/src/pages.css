@@ -541,3 +541,11 @@ main > nav + .tps-form {
     break-after: avoid;
   }
 }
+
+.report-guide p {
+  text-wrap: pretty;
+  overflow-wrap: anywhere;
+}
+.report-guide .guide-tendency {
+  font: var(--text-small) / var(--leading-body) var(--font-mono);
+}

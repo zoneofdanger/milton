@@ -11,6 +11,14 @@ I built Milton because I was tired of telling Claude to stop using em dashes for
 Milton is named after Milton Waddams in Office Space, the collator: he keeps things in order and
 hands over the right one.
 
+A default-off private pilot can add a read-only guide inferred from every active
+approved sample in each report. It requires explicit processing opt-in and an eligible
+paid subscription or unexpired trial. A separate background worker sends those samples
+and their approved context to Anthropic; saves still preserve exact approved source.
+Guides are labeled interpretations, with freshness and failure status. Rules and requested
+edit scope take precedence. Downloads contain approved rules and samples only.
+See [guide operations](server/deploy/guides.md) for bounds, consent and service isolation.
+
 ## How it works
 
 - **Tell Milton how you write.** Your connected assistant sends rules, corrections,
@@ -21,7 +29,7 @@ hands over the right one.
 - **Read the cover sheet, then the report that fits.** `get_cover_sheet` returns the
   rules true of all your writing and an index of five reports: email, chat, post,
   document, and speech. `get_report` returns one report, samples first, then rules;
-  `list_reports` returns all five. No model call. Assistants decide when to read and
+  `list_reports` returns all five. Reads make no model call. Assistants decide when to read and
   apply them; Milton does not guarantee their adherence.
 - **See what's on file.** The app shows your current cover sheet and reports and
   downloads them as `TPS.md`. New accounts start empty. Connect your assistant,

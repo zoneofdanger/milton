@@ -6,6 +6,7 @@ import type { TrialStatus } from "./store/trials";
 import type { CompiledReport, Documents } from "./store/compiled";
 import { contextDetails } from "./store/sample-context";
 import { ruleText, type Sample } from "./store/reports";
+import type { GuidePresentation } from "./guides/store";
 import { SETUP_PROMPT } from "./store/setup";
 
 export const isMemoRoute = (path: string) =>
@@ -157,6 +158,51 @@ const counted = (n: number, label: string) =>
 /** A sample's labels as one line, or "" when it has none. */
 const labelLine = (s: Sample) => contextDetails(s.context);
 
+const guideReasons: Record<string, string> = {
+  no_samples: "No active samples to learn from.",
+  samples_changed: "Samples changed; an update is queued.",
+  enrollment_changed: "A guide is queued.",
+  preparing: "Preparing from all active approved samples.",
+  completed: "Based on the current approved samples.",
+  insufficient_evidence: "There is not enough evidence for a guide yet.",
+  input_too_large:
+    "All samples together exceed the processing limit. No subset was used.",
+  budget_limit:
+    "The pilot spending limit was reached. A guide update is unavailable.",
+  provider_or_output_failed: "The guide update failed. Attempts are limited.",
+  attempts_exhausted: "The guide update failed after the allowed attempts.",
+  lease_expired: "The interrupted update is queued for recovery.",
+  superseded: "The interrupted update needs another attempt.",
+};
+function reportGuide(guide: GuidePresentation) {
+  return (
+    <div class="report-guide">
+      <h3 class="sub-label">
+        Guide <span class="report-counts">Derived from samples</span>
+      </h3>
+      <p class="small-note">
+        Inferred tendencies, not rules. Your explicit rules take precedence; a
+        guide never widens a requested edit.
+      </p>
+      <p class="report-counts">
+        {guide.stale ? "Stale guide. " : ""}
+        {guideReasons[guide.reason] ?? "A guide is unavailable."}{" "}
+        {guide.source_version !== null
+          ? `Guide source version ${guide.source_version}; current sample version ${guide.current_version}.`
+          : `Current sample version ${guide.current_version}.`}
+      </p>
+      {guide.stale && (
+        <p class="small-note">
+          This guide may still reflect samples that were removed or corrected.
+        </p>
+      )}
+      {guide.text?.split("\n\n").map((paragraph) => (
+        <p class="guide-tendency">{paragraph}</p>
+      ))}
+    </div>
+  );
+}
+
 type SheetView = {
   report: CompiledReport;
   documents?: (Documents & { version: string }) | null;
@@ -266,6 +312,7 @@ function sheet({ report, documents, email, date, comment }: SheetView) {
                 {`${counted(r.samples.length, "sample")} · ${counted(r.rules.length, "rule")}`}
               </p>
               <p class="applies">Applies when {r.when}.</p>
+              {r.guide && reportGuide(r.guide)}
               {r.samples.length > 0 && (
                 <>
                   <h3 class="sub-label">

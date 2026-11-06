@@ -220,6 +220,35 @@ test("sample-first setup is optional, preserves guidance and serves valid exact 
   }
 });
 
+test("default edit scope preserves the person's text while retrieval and requested transformations still apply", () => {
+  expect(storeInstructions.length).toBeLessThanOrEqual(4096);
+  expect(storeInstructions.isWellFormed()).toBe(true);
+  const editing = storeInstructions
+    .split("\n\n")
+    .find((paragraph) => paragraph.startsWith("Edit mode:"))!;
+  expect(editing).toBeDefined();
+  for (const constraint of [
+    /fix, clean up, proofread or tighten the person's own text/,
+    /change only what was requested/,
+    /Preserve other words, length, tone, greeting and sign-off/,
+    /no stock phrases or new punctuation habits/,
+    /Briefly list changes/,
+    /Explicit shortening, translation, tone changes or other transformations permit that change only/,
+    /When writing from scratch, use the samples and rules/,
+  ])
+    expect(editing).toMatch(constraint);
+  // Retrieval applies before edits and new drafts; editing adds a scope boundary.
+  expect(
+    storeInstructions.indexOf("Before writing for or as the person"),
+  ).toBeLessThan(storeInstructions.indexOf("Edit mode:"));
+  expect(storeInstructions).toContain(
+    "get_report for each matching report with intent: one line on the situation, plus relevant kind_id and context",
+  );
+  expect(storeInstructions).toContain(
+    "matching samples (opening, length, sign-off, forbidden phrases)",
+  );
+});
+
 test("every create_memo shape the server instructions describe parses against saveMemoInput", () => {
   const says = (fragment: string) =>
     expect(storeInstructions).toContain(fragment);

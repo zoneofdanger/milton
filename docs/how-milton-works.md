@@ -64,6 +64,7 @@ Files: `server/src/handler.ts`, `server/src/token.ts`, `server/src/mcp.ts`,
 - Each request also checks that the account is active and the assistant is not
   disconnected.
 - Each request builds a fresh stateless MCP server, with no sessions or subscriptions.
+- Global instructions ask assistants to edit only the requested scope of the person's own text, preserve other wording and style, and briefly list changes; explicit transformations permit their requested scope, while new writing still uses retrieved samples and rules. These are behavioral instructions, not server enforcement.
 - Each assistant's (account and OAuth client) first tool call after a server process starts
   carries `notifications/tools/list_changed` ahead of its result, as does every
   `get_report` refused for a missing intent, so clients holding tool schemas from before

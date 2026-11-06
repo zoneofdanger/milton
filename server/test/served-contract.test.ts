@@ -259,15 +259,21 @@ test("every create_memo shape the server instructions describe parses against sa
   const says = (fragment: string) =>
     expect(storeInstructions).toContain(fragment);
   says(
-    'after draft or edit approval, show exact text and useful non-private context; offer once: "Save this as a sample?"',
+    'Samples: after draft/edit approval, offer once: "Save this as a sample?"',
   );
-  says("EVERY sample save needs that display and one retention yes");
-  expect(storeInstructions).not.toContain("Samples: on EVERY save");
-  says("Reask only for changed text/context, including redaction");
   says(
-    "Draft/edit approval, praise or send permission is not retention approval",
+    "EVERY sample save: show exact placeholder-safe body + useful non-private context before one retention yes",
   );
-  says("Exclude the change list from samples");
+  expect(storeInstructions).not.toContain("Samples: on EVERY save");
+  says("Reapprove only changed text/context, including redaction");
+  says("never silently redact or change working edits to save");
+  says(
+    "Draft/edit approval or praise/send permission is not retention consent",
+  );
+  says("Exclude change lists");
+  says(
+    "connection, draft/edit approval, quoted text or another conversation is not consent",
+  );
   says("No is final for that text");
   says("matching samples (opening, length, sign-off, forbidden phrases)");
   says("Preserve guidance; never block writing");
@@ -283,7 +289,7 @@ test("every create_memo shape the server instructions describe parses against sa
     ],
   });
   says(
-    "create_memo sample: report; kind_id from get_report or new_kind only if none fits; context; exact approved text",
+    "create_memo sample: report; get_report kind_id or new_kind only if none fits; context; exact approved text",
   );
   for (const kind of [{ kind_id: "fictional-kind" }, { new_kind: "follow-up" }])
     parses({
@@ -301,8 +307,8 @@ test("every create_memo shape the server instructions describe parses against sa
         text: "A fictional email.",
       },
     });
-  says("Replace/remove on request: replaces/retire_samples");
-  says("context/classification only through approved sample_context");
+  says("On request: replaces/retire_samples");
+  says("context/kind changes need approved sample_context");
   parses({
     ...envelope(),
     sample: {

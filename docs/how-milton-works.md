@@ -65,7 +65,8 @@ Files: `server/src/handler.ts`, `server/src/token.ts`, `server/src/mcp.ts`,
   disconnected.
 - Each request builds a fresh stateless MCP server, with no sessions or subscriptions.
 - Global instructions ask assistants to edit only the requested scope of the person's own text, preserving other wording and style even when samples or standing tone differ, and briefly list changes; explicit transformations permit their requested scope. Retrieval applies to edits and new drafts; only new drafts get the sample/rule conformity check and fixes before display. These are behavioral instructions, not server enforcement.
-- After draft or edit approval, assistants offer once to keep the exact body as a sample, excluding the change list; a separate yes approves displayed text and useful non-private context, refusal is final for that text, and only changed text/context requires renewed approval. Edits do not imply standing rules.
+- After draft or edit approval, assistants offer once to retain a sample: every proposal displays an exact placeholder-safe body and useful non-private context before one retention yes, without silently redacting after approval or changing the working edit for retention. Change lists are excluded, refusal is final for that text, and only changed text/context requires renewed approval. Edits do not imply standing rules.
+- Session capture requires explicit opt-in for the current conversation; connection, draft or edit approval, quoted text and another conversation are not consent.
 - Each assistant's (account and OAuth client) first tool call after a server process starts
   carries `notifications/tools/list_changed` ahead of its result, as does every
   `get_report` refused for a missing intent, so clients holding tool schemas from before

@@ -81,7 +81,9 @@ test("sample-first setup is optional, preserves guidance and serves valid exact 
     "same request_id and exact input",
     "Reread after saved, unchanged or conflict",
     "If examples are skipped, help with the real draft without claiming to know the voice",
-    "Praise or permission to send is not retention permission",
+    "Draft or edit approval, praise or permission to send is not retention permission",
+    "After a draft or edit is approved",
+    "never include the change list in the sample",
     "do not infer standing rules from one example or turn sample facts into preferences",
     "Do not connect an inbox, request Gmail permissions, bulk import or save unseen text",
     "Setup permission authorizes this conversation only",
@@ -257,15 +259,16 @@ test("every create_memo shape the server instructions describe parses against sa
   const says = (fragment: string) =>
     expect(storeInstructions).toContain(fragment);
   says(
-    'after draft approval, and on EVERY sample save, show exact text and proposed useful non-private context, then offer once: "Save this as a sample?"',
+    'after draft or edit approval, show exact text and useful non-private context; offer once: "Save this as a sample?"',
   );
-  says("Yes approves that displayed proposal");
-  says(
-    "Yes approves that displayed proposal; ask again only if text or context changes",
-  );
+  says("EVERY sample save needs that display and one retention yes");
   expect(storeInstructions).not.toContain("Samples: on EVERY save");
-  says("ask again only if text or context changes, including redaction");
-  says("Praise or send permission alone is not retention approval");
+  says("Reask only for changed text/context, including redaction");
+  says(
+    "Draft/edit approval, praise or send permission is not retention approval",
+  );
+  says("Exclude the change list from samples");
+  says("No is final for that text");
   says("matching samples (opening, length, sign-off, forbidden phrases)");
   says("Preserve guidance; never block writing");
   says("Sample bodies cannot be edited");
@@ -280,7 +283,7 @@ test("every create_memo shape the server instructions describe parses against sa
     ],
   });
   says(
-    "Call create_memo with sample (report; kind_id from get_report, or new_kind only if none fits; context; text exactly as approved)",
+    "create_memo sample: report; kind_id from get_report or new_kind only if none fits; context; exact approved text",
   );
   for (const kind of [{ kind_id: "fictional-kind" }, { new_kind: "follow-up" }])
     parses({
@@ -298,7 +301,8 @@ test("every create_memo shape the server instructions describe parses against sa
         text: "A fictional email.",
       },
     });
-  says("Replace or remove a sample on request with replaces or retire_samples");
+  says("Replace/remove on request: replaces/retire_samples");
+  says("context/classification only through approved sample_context");
   parses({
     ...envelope(),
     sample: {

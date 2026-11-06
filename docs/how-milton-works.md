@@ -65,6 +65,7 @@ Files: `server/src/handler.ts`, `server/src/token.ts`, `server/src/mcp.ts`,
   disconnected.
 - Each request builds a fresh stateless MCP server, with no sessions or subscriptions.
 - Global instructions ask assistants to edit only the requested scope of the person's own text, preserving other wording and style even when samples or standing tone differ, and briefly list changes; explicit transformations permit their requested scope. Retrieval applies to edits and new drafts; only new drafts get the sample/rule conformity check and fixes before display. These are behavioral instructions, not server enforcement.
+- After draft or edit approval, assistants offer once to keep the exact body as a sample, excluding the change list; a separate yes approves displayed text and useful non-private context, refusal is final for that text, and only changed text/context requires renewed approval. Edits do not imply standing rules.
 - Each assistant's (account and OAuth client) first tool call after a server process starts
   carries `notifications/tools/list_changed` ahead of its result, as does every
   `get_report` refused for a missing intent, so clients holding tool schemas from before
@@ -216,7 +217,7 @@ Files: `server/src/store/setup.ts`.
 - Every sample save shows exact text and proposed useful non-private context for one retention approval; unchanged approved metadata needs no second approval, and the save uses an existing or concise new personal kind, version fence, idempotency and readback.
 - Setup consent authorizes conversation, not inbox access, account changes, transcript import or saving unseen text.
 - Whole-account first setup asks for emails or DMs and the next email or DM; emails file under email, and DMs, texts or Slack messages under chat. Other report scripts keep examples and tasks matching their report; skipping examples never blocks writing or makes a voice claim.
-- Approval to send or praise is not retention approval; one yes covers the displayed text and context, and changed text or context, including redaction, requires renewed approval.
+- Draft or edit approval, approval to send or praise is not retention approval; one yes covers the displayed text and context, and changed text or context, including redaction, requires renewed approval.
 - Rules remain available on request; a sample never implies a standing rule or turns its facts into preferences.
 - The historical `setupCatalog` remains canonical for Baseline validation; setup no longer generates Baseline rules, and a rejected Baseline points to the closest rule and report in the same error.
 - A standing instruction is offered separately and changed only with separate consent; a successful read verifies the connection, not future compliance.

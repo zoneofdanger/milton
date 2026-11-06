@@ -19,9 +19,9 @@ decommission on 2026-11-01. Hosting rollback now uses Cloud Run revisions.
 
 Project `milton-510506`, Cloud Run/Artifact Registry region `us-east4`. Service manifests in this directory pin an immutable image and
 secret versions. They contain configuration and secret references, never values.
-The manifests pin what is serving now: app `milton-app-mvp-8364a81`
-(image index `sha256:81d10f9e…`) and unchanged MCP `milton-mcp-context-fec8802`
-(image index `sha256:fe7e2263…`), both env 3, key 1, connecting as `milton_app`;
+The manifests pin what is serving now: app `milton-app-edit-00223ec` and MCP
+`milton-mcp-edit-00223ec`, both using image index `sha256:2682542b…`,
+env 3, key 1, connecting as `milton_app`;
 see the current release below. Production has the
 `0000_baseline` and `0001_sample_context` migrations. There is no worker service or scheduler job. There is no memo-update
 allowance; the daily call cap bounds saves. Existing positive account safeguards remain
@@ -186,12 +186,101 @@ references. Inspect revision readiness before selecting a recorded revision:
 gcloud run revisions list --service=milton-app --project=milton-510506 --region=us-east4
 ```
 
-Now serving: app `milton-app-mvp-8364a81`, selected by name at 100% on
+Now serving: MCP `milton-mcp-edit-00223ec` and app `milton-app-edit-00223ec`,
+selected by exact revision name at 100% on 2026-11-06 (MCP 11:50:02Z,
+app 11:50:15Z). Both use exact landed main
+`00223ec298e07717d713cfe51b9f523b4e0de567`. Peter selected this app/MCP rollout
+with “Land and deploy those now” in Lead on 2026-11-06; the temporary release
+worker executed that pinned selection. The existing static deployment was preserved.
+
+Current edit-mode release: image index
+`sha256:2682542b3328c26de20846788798f68bc9efdc14cea2fc8233a920edcbc64e28`, Linux amd64
+`sha256:03d78555b80e4c79001a99d4fa11020cd33d4ff5b2dcc12f7ec56b24fcf67069`.
+Built once and pushed from a clean git archive of that exact landed commit with a
+frozen Bun install, exit 0. Runtime inputs exactly match accepted `9e260abd`:
+types, 109 tests/2,656 assertions, formatting and the server build passed, exit 0;
+those unchanged checks were reused. A fresh server build also passed, exit 0.
+The exact Linux amd64 image runs Node 26.13.0 as uid 1000, contains the bundled
+runtime and browser assets, excludes private/env/key/research artifacts and refuses
+empty configuration for both roles. The exact image bundle contains the accepted
+4,047-character instructions, SHA-256
+`352fd8a1fc71fea5dab93a609bd3cba1878dffc0f81898b3c263d37456f5f575`.
+
+In that image under Node 26 with network disabled, isolated fictional PGlite and
+SDK fixtures exercised scoped-edit instructions, display-before-offer retention
+consent, the 880-character setup prompt, all five setup responses and the actual
+empty, populated, paused and fallback pages. Ten of eleven R4 response bodies and
+all headers match; the intentionally changed empty report and empty assistants
+responses match their accepted browser-reviewed bytes. All 21 app/theme presentation
+inputs and compiled CSS match accepted presentation evidence, so that browser
+review carries by measured equality. The R4 complete-download check still shows
+9 samples while exporting all 11 active samples: 4,436 bytes, SHA-256
+`2d3187a9fcae2eb5ff3e625c220ff208f037c7e86ae2c236b98d2f492a10692a`.
+These fictional checks do not establish assistant adherence or real-account saves.
+
+Both full manifests were derived from the live resources, validated normally and
+staged with zero traffic. Ready/Retired was treated only as staging evidence; after
+selection both revisions became Ready, Active and ContainerHealthy. Only image,
+revision/traffic and generated operation metadata changed. Full configuration and
+IAM parity passed, preserving ingress, resources, startup settings, service accounts,
+app `milton-app-env:3` / `milton-app-key:1`, and MCP
+`milton-mcp-env:3` / `milton-mcp-key:1`, including its unmounted env-2 volume.
+No migration, snapshot, database restore, secret, policy or static change ran.
+
+Canonical trusted TLS 1.2/1.3, TLS 1.0/1.1 refusal, health, discovery,
+unauthenticated 401/challenge, CORS, HTTP 308, direct run.app refusal, signed-out
+restrictions, production CSS and invalid Stripe-signature refusal passed, exit 0.
+The mandatory exact-source
+`bun --no-env-file scripts/probe-forms.ts https://app.meetmilton.com` passed with
+sign-in refusal 403, exit 0. Existing authenticated MCP cover-sheet reads succeeded
+before and after selection with an unchanged version and five reports. A live empty
+speech-report read returned the new 5,014-character setup guidance, including pasted
+writing, edit approval distinct from retention, and display before the single offer.
+No personal writing was retained in evidence. An existing signed-in Chrome page
+reloaded at 1512 by 828 with no overflow or console errors; no visible browser was
+opened, login created, provider activated, download triggered or memo saved.
+
+Observation through 2026-11-06 11:56:02Z covered 347 seconds after the
+last traffic selection. Repeated app/MCP health stayed 200. Filtered request/runtime
+logs contained 30 app and 25 MCP entries, zero 5xx or ERROR and no
+unexpected auth/schema/permission/lock failures; no entries were truncated.
+Available request metrics through 2026-11-06T11:55:00Z (app) and
+2026-11-06T11:55:00Z (MCP) showed zero 5xx. Available per-series/minute
+p95 latency was at most 178.0 ms (app) and 357.0 ms (MCP); instance metrics
+showed at most one per revision/state series. Metrics publish with lag: raw latency
+and instance sample timestamps and measured lag are recorded in private release
+evidence; aligned percentile endpoints are not freshness evidence. Queue age has
+no instrument and remains unverified. Final full service/configuration/IAM and edge parity
+checks passed.
+
+Compatible rollback: retain Ready app `milton-app-mvp-8364a81`, index
+`sha256:81d10f9e581a69be5ea27798687c1c2e9e7fb8525318f0d1d03a88abb2da8e99`, amd64
+`sha256:dbc53d970f57e49b19d7741dcf22645eec401fb128355f926972c0f61520ab9c`,
+app env 3/key 1; and MCP `milton-mcp-context-fec8802`, index
+`sha256:fe7e226368b42d2ec047c26ac7cbb6d6181acb5157bda8d881b75af55ee8802b`, amd64
+`sha256:f49a219aa7001219ec3ff75fa9ff770762bc0043fc4e226024fd181ba06e877b`,
+MCP env 3/key 1. Their exact specs/imported digests remain, and images and enabled
+numeric secrets are retained. Recheck readiness before selecting only an affected
+service. Do not select a pre-context revision or restore the database for this
+compatible code rollback. No rollback or cloud resource deletion ran.
+
+Fresh authenticated production initialize instructions and fresh four-tool discovery
+were not exposed by the existing connector, which offers only the four tool calls;
+its instruction metadata is cached from before selection. Exact-image SDK initialize
+verified all four tools and the new instruction hash, while the production reads above
+verify authenticated service access and changed setup output. A fresh authorized client
+initialization remains a separate verification gap. Actual adherence in Claude,
+ChatGPT, Claude Code, Cursor and Codex remains untested. Live account download,
+save/correction/retention, provider/clipboard flows, other viewport sizes, browsers and
+assistive technology remain unverified in this rollout. Before claiming those behaviors
+in a demo, observe them through separately authorized existing sessions.
+
+Previous app release: app `milton-app-mvp-8364a81`, selected by name at 100% on
 2026-11-06 06:01:11Z, from exact landed main source
 `8364a81e8544dd07a7618baa8c555c309d9a1b60`. MCP remains unchanged at
 `milton-mcp-context-fec8802`, 100%, from `fec88029f86cf6c71710fa78978c35269becb718`.
 
-Current app release mvp-8364a81: image index
+Previous app release mvp-8364a81: image index
 `sha256:81d10f9e581a69be5ea27798687c1c2e9e7fb8525318f0d1d03a88abb2da8e99`, Linux amd64
 `sha256:dbc53d970f57e49b19d7741dcf22645eec401fb128355f926972c0f61520ab9c`.
 Built and pushed from a clean git archive of that exact commit with frozen Bun
@@ -249,13 +338,13 @@ below and must not be selected as a simple app rollback. All old revisions, imag
 and numeric secrets remain preserved. Existing previews were untouched; the MVP
 previews were already absent before landing. No rollback ran.
 
-Previous joint release (still current for MCP): app `milton-app-context-fec8802` and MCP
+Previous joint release: app `milton-app-context-fec8802` and MCP
 `milton-mcp-context-fec8802`, both selected by name at 100% while ingress was closed
 on 2026-11-05 (MCP 16:51:08Z, app 16:51:19Z). Exact landed main source:
 `fec88029f86cf6c71710fa78978c35269becb718`. Both ingress settings were restored
 to `internal-and-cloud-load-balancing` by 2026-11-05 16:51:32Z.
 
-Previous joint release context-fec8802 (current MCP image): image index
+Previous joint release context-fec8802: image index
 `sha256:fe7e226368b42d2ec047c26ac7cbb6d6181acb5157bda8d881b75af55ee8802b`, Linux amd64
 `sha256:f49a219aa7001219ec3ff75fa9ff770762bc0043fc4e226024fd181ba06e877b`. The clean git archive passed
 frozen Bun install, types, 108 tests/2,517 assertions, formatting and the focused

@@ -15,12 +15,12 @@ import SiteLayout from "../layouts/SiteLayout.astro";
     <section aria-labelledby="what-milton-keeps">
       <h2 id="what-milton-keeps">What Milton keeps</h2>
       <p>
-        Milton keeps a person’s approved writing samples and rules in a shared
-        file for connected assistants. It fits someone who wants to carry
-        writing guidance between assistants, starting with email or DMs. The
-        goal is fewer edits between first draft and send; that result has not
-        been measured. Your assistant drafts. Milton stores approved text
-        without a model rewriting it on save.
+        Milton supplies your approved writing examples and rules when your
+        assistant drafts something new or edits something you’ve written. It
+        keeps that guidance available across connected assistants, starting with
+        email or DMs. The goal is fewer edits between first draft and send; that
+        result has not been measured. Milton stores approved text without a
+        model rewriting it on save.
       </p>
     </section>
 
@@ -40,9 +40,15 @@ import SiteLayout from "../layouts/SiteLayout.astro";
     <section aria-labelledby="connection">
       <h2 id="connection">Connection and tools</h2>
       <p>
-        The assistant needs remote MCP, OAuth sign-in, and read/save tool
-        support. See <a href="/setup">Setup</a>; client plans and workspace
-        policies may restrict access. The four tools are:
+        MCP server: <code class="mcp-url">https://mcp.meetmilton.com/mcp</code>.
+        Connect with remote MCP and OAuth sign-in; read/save tools are required.
+        Client plans and workspace policies may restrict access. See{" "}
+        <a href="/setup">Setup</a>.
+      </p>
+      <p>
+        Check for existing Milton tools before setup. Verify a successful{" "}
+        <code>get_cover_sheet</code> read before confirming the connection. The
+        four tools are:
       </p>
       <ul class="instruction-list">
         <li>
@@ -97,12 +103,25 @@ import SiteLayout from "../layouts/SiteLayout.astro";
     </section>
 
     <section aria-labelledby="first-task">
-      <h2 id="first-task">A first task</h2>
+      <h2 id="first-task">Draft or edit an email or DM</h2>
+      <p>If the person wants to try Milton, choose either path:</p>
+      <ul class="instruction-list">
+        <li>
+          <strong>Draft something new:</strong> ask for the purpose, audience
+          and facts, then draft using available approved guidance.
+        </li>
+        <li>
+          <strong>Edit existing text:</strong> ask what should change, revise
+          within that scope, and preserve the rest.
+        </li>
+      </ul>
       <p>
-        If the person wants to try it, ask for the facts and purpose of one real
-        email or DM. Read available guidance, draft, and let them review and
-        edit. Separately offer the exact final text and context to save; they
-        decide whether to keep it.
+        For either task, first read <code>get_cover_sheet</code> and{" "}
+        <code>get_report</code> for <code>email</code> or <code>chat</code> with{" "}
+        the task in <code>intent.situation</code>. Show the result for review.
+        Saving needs separate exact-text and context approval; call{" "}
+        <code>create_memo</code> only after that approval, then reread to verify
+        the save.
       </p>
     </section>
   </article>
@@ -132,8 +151,12 @@ import SiteLayout from "../layouts/SiteLayout.astro";
     margin: 0;
   }
   p + p,
-  .instruction-list {
+  .instruction-list,
+  .instruction-list + p {
     margin-top: var(--space-4);
+  }
+  .mcp-url {
+    overflow-wrap: anywhere;
   }
   p,
   li {

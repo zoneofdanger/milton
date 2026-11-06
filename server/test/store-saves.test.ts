@@ -1301,6 +1301,18 @@ test("opt-in report guides fence lifecycle work without changing approved source
       status: "insufficient",
       stale: false,
     });
+    // Exact-source no-guide reuse keeps its successful terminal reason.
+    await setGuideEnrollment(local.db, "guide-a", { enabled: false });
+    await setGuideEnrollment(local.db, "guide-a", {
+      enabled: true,
+      optInReference: "fictional-reconsent",
+    });
+    expect((await store.readDocuments()).reports[0]!.guide).toMatchObject({
+      text: null,
+      status: "insufficient",
+      reason: "insufficient_evidence",
+      stale: false,
+    });
     // Billing loss hides guides and prevents even token counting.
     await local.pg.exec(
       "UPDATE trial_accounts SET subscription_status='unknown' WHERE user_id='guide-a'",

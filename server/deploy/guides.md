@@ -69,7 +69,7 @@ per source/epoch. Failures retry no sooner than five minutes; expiry recovers du
 Completion first locks the report row enrollment also updates, then evaluates its
 source/epoch/lease fence in a fresh READ COMMITTED statement; this prevents a blocked
 completion from reusing a pre-disable epoch snapshot. Zero active samples clear immediately;
-valid insufficient evidence is a completed no-guide result. Nonempty changes/failures retain
+valid insufficient evidence is a completed no-guide result whose reason survives exact-source reuse. Nonempty changes/failures retain
 last successful stale text with explicit versions/reason. Off hides future presentation;
 completed text may remain stored until deletion, and exact-source completed results may be
 reused on re-enable. Content already read by another assistant cannot be retracted.

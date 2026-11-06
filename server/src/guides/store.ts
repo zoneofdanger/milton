@@ -80,7 +80,7 @@ export async function setGuideEnrollment(
       status=CASE WHEN source_version=0 OR status='empty' THEN 'empty'
         WHEN completed_version=source_version THEN CASE WHEN guide_text IS NULL THEN 'insufficient' ELSE 'ready' END ELSE 'queued' END,
       reason=CASE WHEN source_version=0 OR status='empty' THEN 'no_samples'
-        WHEN completed_version=source_version THEN 'completed' ELSE 'enrollment_changed' END
+        WHEN completed_version=source_version THEN CASE WHEN guide_text IS NULL THEN 'insufficient_evidence' ELSE 'completed' END ELSE 'enrollment_changed' END
       WHERE user_id=${userId}`);
   });
 }

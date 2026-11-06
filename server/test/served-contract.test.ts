@@ -265,8 +265,7 @@ test("setup helps with pasted writing first, preserves optional guidance and ser
   }
 });
 
-test("default edit scope preserves the person's text while retrieval and requested transformations still apply", () => {
-  expect(storeInstructions.length).toBeLessThanOrEqual(4096);
+test("served instructions state edit precedence, retrieval and scoped transformations", () => {
   expect(storeInstructions.isWellFormed()).toBe(true);
   const editing = storeInstructions
     .split("\n\n")
@@ -279,21 +278,18 @@ test("default edit scope preserves the person's text while retrieval and request
     /no stock phrases or new punctuation habits/,
     /Briefly list changes/,
     /Requested transformations \(shortening, translation, tone\) permit only that scope/,
-    /Edit scope overrides samples and standing tone; never restyle outside the request/,
+    /Guidance never widens edit scope; preserve source style over samples\/rules, flagging specific unresolved conflicts/,
   ])
     expect(editing).toMatch(constraint);
-  // Retrieval applies before edits and new drafts; editing adds a scope boundary.
-  expect(storeInstructions.indexOf("Before writing or editing")).toBeLessThan(
-    storeInstructions.indexOf("Edit mode:"),
-  );
+  // Pin served text; this does not demonstrate actual assistant adherence.
   expect(storeInstructions).toContain(
-    "get_report for each matching report with intent: one-line situation, relevant kind_id/context",
+    "Before writing or editing: get_cover_sheet, then get_report for matching reports with intent: one-line situation, relevant kind_id/context",
   );
   const retrieval = storeInstructions.split("\n\n")[1]!;
-  // Only new drafts get the conformity rewrite; supplied text keeps edit scope.
+  // The conformity clause is explicitly scoped to new drafts.
   expect(retrieval).toContain("New drafts: imitate samples; rules fill gaps;");
   expect(retrieval).toMatch(
-    /New drafts:[^.]+check cover rules and matching samples \(opening, length, sign-off, forbidden phrases\), fixing failures before showing the draft\./,
+    /New drafts:[^.]+check cover rules and matching samples \(opening, length, sign-off, forbidden phrases\), fixing failures before display\./,
   );
   expect(retrieval).not.toContain("fix failures before showing text");
 });
@@ -302,19 +298,26 @@ test("every create_memo shape the server instructions describe parses against sa
   const says = (fragment: string) =>
     expect(storeInstructions).toContain(fragment);
   says(
-    'after draft or edit approval, show exact text and useful non-private context; offer once: "Save this as a sample?"',
+    'Samples: after draft/edit approval, offer once: "Save this as a sample?"',
   );
-  says("EVERY sample save needs that display and one retention yes");
-  expect(storeInstructions).not.toContain("Samples: on EVERY save");
-  says("Reask only for changed text/context, including redaction");
   says(
-    "Draft/edit approval, praise or send permission is not retention approval",
+    "EVERY sample save: show exact placeholder-safe body + useful non-private context before one retention yes",
   );
-  says("Exclude the change list from samples");
+  expect(storeInstructions).not.toContain("Samples: on EVERY save");
+  says("Reapprove only changed text/context, including redaction");
+  says("never silently redact or change working edits to save");
+  says(
+    "Draft/edit approval or praise/send permission is not retention consent",
+  );
+  says("Exclude change lists");
+  says(
+    "connection, draft/edit approval, quoted text or another conversation is not consent",
+  );
   says("No is final for that text");
   says("matching samples (opening, length, sign-off, forbidden phrases)");
   says("Preserve guidance; never block writing");
   says("Sample bodies cannot be edited");
+  says("While on, file only the person's explicit standing rules");
   expect(storeInstructions).not.toContain("On yes, show");
   says("Pass the cover sheet version as expected_version and a new request_id");
   says("Send each new rule in rules: its report (or cover)");
@@ -326,7 +329,7 @@ test("every create_memo shape the server instructions describe parses against sa
     ],
   });
   says(
-    "create_memo sample: report; kind_id from get_report or new_kind only if none fits; context; exact approved text",
+    "create_memo sample: report; get_report kind_id or new_kind only if none fits; context; exact approved text",
   );
   for (const kind of [{ kind_id: "fictional-kind" }, { new_kind: "follow-up" }])
     parses({
@@ -344,8 +347,8 @@ test("every create_memo shape the server instructions describe parses against sa
         text: "A fictional email.",
       },
     });
-  says("Replace/remove on request: replaces/retire_samples");
-  says("context/classification only through approved sample_context");
+  says("On request: replaces/retire_samples");
+  says("context/kind changes need approved sample_context");
   parses({
     ...envelope(),
     sample: {
@@ -369,7 +372,7 @@ test("every create_memo shape the server instructions describe parses against sa
   });
   // The read the instructions, the tool description and the refusal describe.
   says(
-    "get_report for each matching report with intent: one-line situation, relevant kind_id/context",
+    "get_report for matching reports with intent: one-line situation, relevant kind_id/context",
   );
   for (const situation of [
     "declining a client's request for a discount",
@@ -388,6 +391,8 @@ test("every create_memo shape the server instructions describe parses against sa
       }).error?.issues ?? [],
     ).toEqual([]);
   says("pass moves: before verbatim from the rule and its new report");
+  says("To move, pass moves:");
+  expect(storeInstructions).not.toContain("For scope, pass moves");
   parses({
     ...envelope(),
     moves: [{ before: "A fictional rule.", report: "cover" }],

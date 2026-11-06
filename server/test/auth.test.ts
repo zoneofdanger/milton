@@ -2436,7 +2436,7 @@ test("report bullets require exact revision and complete text parity; optional l
     ["Date", "2026-11-02 UTC"],
     ["Reports", "None"],
     ["Rules", "2"],
-    ["Samples", "0"],
+    ["Samples shown", "0"],
   ])
     expect(html).toContain(`<dt>${label}:</dt><dd class="fill">${value}</dd>`);
   expect(html).toContain(

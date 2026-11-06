@@ -298,8 +298,9 @@ Files: `server/src/pages.tsx`, `server/src/memo-pages.tsx`, `server/src/auth.tsx
 - Empty accounts explain there are no writing samples and show the shared sample-first prompt; populated accounts point to the next email or DM.
 - Empty reports remain optional later uses; sample-only reports never show an unfinished setup state.
 - If the structured read fails, it falls back to plain report text.
-- `/download` returns the complete writing export as `TPS.md`; the web report keeps its
-  newest eight samples per report.
+- `/download` returns the complete writing export as `TPS.md`; the web report labels
+  its sample count as shown, explains its newest-eight-per-report limit and links to
+  the complete download, including when assistant access is paused.
 - `/assistants` lists live consents and looks up at most 20 names per view.
 - The setup prompt changes depending on whether the account is empty.
 - Account opens a native popover; Escape closes it and returns focus to Account, and

@@ -197,11 +197,17 @@ function sheet({ report, documents, email, date, comment }: SheetView) {
           <dl class="row">
             {field("Reports", counts.reports, true)}
             {field("Rules", counts.rules)}
-            {field("Samples", counts.samples)}
+            {field("Samples shown", counts.samples)}
           </dl>
         )}
         <dl class="row">{field("Filed by", "Milton", true)}</dl>
       </div>
+      {!report.is_empty && (
+        <p class="small-note view-scope">
+          This view shows up to eight samples per report, newest first.{" "}
+          <a href="/download">Download all current rules and samples</a>.
+        </p>
+      )}
       {report.is_empty ? (
         <div class="form-empty">
           <p class="empty-placeholder">No writing samples on file yet.</p>

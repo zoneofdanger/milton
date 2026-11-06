@@ -64,7 +64,7 @@ Files: `server/src/handler.ts`, `server/src/token.ts`, `server/src/mcp.ts`,
 - Each request also checks that the account is active and the assistant is not
   disconnected.
 - Each request builds a fresh stateless MCP server, with no sessions or subscriptions.
-- Global instructions require retrieval before edits and new drafts; only new drafts get the sample/rule conformity check before display. Edits preserve source wording and style outside the request over conflicting samples/rules; guidance never widens scope, and only specific unresolved conflicts are flagged. Requested transformations retain their scope, and changes are briefly listed. These are behavioral instructions, not server enforcement.
+- Global instructions require retrieval before writing or editing for or as the person; only new drafts get the sample/rule conformity check before display. Edits preserve source wording and style outside the request over conflicting samples/rules; guidance never widens scope, and only specific unresolved conflicts are flagged. Requested transformations retain their scope, and changes are briefly listed. These are behavioral instructions, not server enforcement.
 - Each assistant's (account and OAuth client) first tool call after a server process starts
   carries `notifications/tools/list_changed` ahead of its result, as does every
   `get_report` refused for a missing intent, so clients holding tool schemas from before

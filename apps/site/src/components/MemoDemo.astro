@@ -1,165 +1,135 @@
 ---
 import { memoExample } from "./memo-example";
+import { compareWords } from "./edit-score";
+
+const outputs = memoExample.outputs.map((output) => ({
+  ...output,
+  score: compareWords(memoExample.original, output.text),
+}));
 ---
 
 <figure
   class="memo-demo sheet"
   id="memo-demo"
   data-memo-demo
-  aria-label="Example conversation."
+  aria-labelledby="memo-demo-title"
+  aria-describedby="memo-demo-scope memo-demo-method"
 >
-  {/* Animated, the header shows a visual copy of the active scene's label. Each
-      scene keeps its own label as its accessible name, so this copy stays
-      aria-hidden. Static, the bar is hidden and each scene shows its label. */}
-  <div class="sheet-bar">
-    <span class="scene-names" aria-hidden="true">
-      <span class="scene-name-stack">
-        {memoExample.scenes.map((scene) => (
-          <span class="scene-name" data-scene-name>
-            {scene.label}
-          </span>
-        ))}
-      </span>
-    </span>
-    <span data-scene-progress aria-hidden="true"></span>
-  </div>
-  <div class="scene-stage sheet-content">
-    {memoExample.scenes.map((scene, index) => (
-      <section
-        class="scene"
-        id={`memo-scene-${index}`}
-        data-scene
-        aria-labelledby={`memo-scene-${index}-label`}
-      >
-        <p class="scene-label eyebrow" id={`memo-scene-${index}-label`}>
-          {scene.label}
-        </p>
-        <ol class="chat">
-          {scene.turns.map((turn) => (
-            <li>
-              <span class="speaker">{turn.speaker}</span>
-              {turn.text && <p data-stream>{turn.text}</p>}
-              {turn.excerpt && (
-                <blockquote class="excerpt">
-                  <p data-stream>{turn.excerpt.body}</p>
-                  {turn.excerpt.signature && (
-                    <p data-stream>{turn.excerpt.signature}</p>
-                  )}
-                </blockquote>
-              )}
-            </li>
-          ))}
-        </ol>
-      </section>
-    ))}
+  <figcaption class="sheet-bar" id="memo-demo-title">
+    TPS memo · One cleanup request
+  </figcaption>
+  <div class="demo-content sheet-content">
+    <p class="demo-scope small-note" id="memo-demo-scope">
+      An illustration, not a model run or a product guarantee.
+    </p>
+    <section
+      class="original-note"
+      data-demo-original-panel
+      aria-labelledby="rough-label"
+    >
+      <h2 class="eyebrow" id="rough-label">
+        Your rough draft
+      </h2>
+      <p class="memo-copy" data-demo-original>
+        {memoExample.original}
+      </p>
+      <p class="cleanup-request">
+        <span class="eyebrow">You ask</span>
+        <strong>{memoExample.request}</strong>
+      </p>
+    </section>
+    <div class="outputs">
+      {outputs.map(({ id, label, score }) => (
+        <section class="output" aria-labelledby={id + "-label"}>
+          <h3 class="output-title" id={id + "-label"}>
+            {label}
+          </h3>
+          <p class="memo-copy" data-demo-output={id}>
+            {score.segments.map((segment) =>
+              segment.changed ? (
+                <span class="changed-word" data-changed>
+                  {segment.text}
+                </span>
+              ) : (
+                segment.text
+              ),
+            )}
+          </p>
+          <p
+            class="kept-score"
+            data-demo-score={id}
+            data-kept={score.kept}
+            data-total={score.originalWords}
+            data-percent={score.percent}
+          >
+            <strong>{score.percent}%</strong> words kept
+            <span class="small-note">
+              ({score.kept}/{score.originalWords} original words)
+            </span>
+          </p>
+        </section>
+      ))}
+    </div>
+    <p class="demo-method small-note" id="memo-demo-method">
+      Words are letters or numbers, including internal apostrophes. We match the
+      longest sequence in the original order, ignoring capitalization and other
+      punctuation. Straight and curly apostrophes count alike. Underlines mark
+      changed words. Scores describe this illustration only.
+    </p>
   </div>
 </figure>
 
 <script>
   const demo = document.querySelector<HTMLElement>("[data-memo-demo]");
   if (demo) {
-    const story = demo.querySelector<HTMLElement>(".scene-stage")!;
-    const progress = demo.querySelector<HTMLElement>("[data-scene-progress]")!;
-    const names = Array.from(
-      demo.querySelectorAll<HTMLElement>("[data-scene-name]"),
-    );
-    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
-
-    // The complete semantic story stays intact. Only this hidden-from-AT copy
-    // types or switches scenes, so no typed characters are announced.
-    const visual = story.cloneNode(true) as HTMLElement;
-    visual.className = "motion-story sheet-content";
-    visual.setAttribute("aria-hidden", "true");
-    visual
-      .querySelectorAll("[id]")
-      .forEach((node) => node.removeAttribute("id"));
-    visual
-      .querySelectorAll("[aria-labelledby]")
-      .forEach((node) => node.removeAttribute("aria-labelledby"));
-    demo.append(visual);
-    const panels = Array.from(visual.querySelectorAll<HTMLElement>(".scene"));
-    const messages = panels.map((panel) =>
-      Array.from(panel.querySelectorAll<HTMLElement>(".chat > li")).map(
-        (unit) => {
-          const lines = Array.from(
-            unit.querySelectorAll<HTMLElement>("[data-stream]"),
-          ).map((paragraph) => {
-            const text = paragraph.textContent ?? "";
-            // The full copy reserves each line's final height while typing.
-            const source = document.createElement("span");
-            source.className = "stream-source";
-            source.textContent = text;
-            const copy = document.createElement("span");
-            copy.className = "stream-visual";
-            paragraph.classList.add("stream-line");
-            paragraph.replaceChildren(source, copy);
-            return { text, copy };
-          });
-          return { unit, lines };
-        },
+    const original = demo.querySelector<HTMLElement>(
+      "[data-demo-original-panel]",
+    )!;
+    const edits = ["plain", "milton"].map((id) =>
+      Array.from(
+        demo.querySelectorAll<HTMLElement>(
+          '[data-demo-output="' + id + '"] [data-changed]',
+        ),
       ),
     );
-
-    const scene2Start = 5800;
-    const cues = [
-      [
-        { at: 0, type: 0 },
-        { at: 450, type: 650 },
-        { at: 1500, type: 0 },
-        { at: 3200, type: 450 },
-      ],
-      [
-        { at: scene2Start, type: 0 },
-        { at: scene2Start + 250, type: 320 },
-        { at: scene2Start + 900, type: 0 },
-        { at: scene2Start + 1950, type: 600 },
-      ],
-    ];
-    const finalCue = cues[1][3];
-    const completedAt = finalCue.at + finalCue.type;
-    const cycleDuration = completedAt + 2150;
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const cycleDuration = 10500;
     let elapsed = 0;
     let visible = false;
     let frame = 0;
     let last: number | null = null;
 
+    // Only the paper tint moves. Every word, score and underline stays visible.
     const render = () => {
-      const scene = elapsed < scene2Start ? 0 : 1;
-      names.forEach((name, index) =>
-        name.classList.toggle("active", index === scene),
+      original.style.setProperty(
+        "--edit-tint",
+        reduced.matches
+          ? "0%"
+          : Math.round(Math.max(0, 1 - elapsed / 1250) * 25) + "%",
       );
-      progress.textContent = `${scene + 1} / ${panels.length}`;
-      panels.forEach((panel, index) =>
-        panel.classList.toggle("active", index === scene),
-      );
-      messages.forEach((items, index) =>
-        items.forEach(({ unit, lines }, turn) => {
-          const cue = cues[index][turn];
-          unit.classList.toggle("pending", elapsed < cue.at);
-          const fraction = cue.type
-            ? Math.max(0, Math.min(1, (elapsed - cue.at) / cue.type))
-            : 1;
-          let remaining = Math.ceil(
-            lines.reduce((length, line) => length + line.text.length, 0) *
-              fraction,
+      edits.forEach((words, scene) => {
+        const start = scene === 0 ? 1250 : 5800;
+        const duration = scene === 0 ? 2400 : 2550;
+        const progress = (elapsed - start) / duration;
+        const band = Math.max(0.1, 2 / words.length);
+        words.forEach((word, index) => {
+          const center = (index + 0.5) / words.length;
+          const strength =
+            reduced.matches || progress < 0 || progress > 1
+              ? 0
+              : Math.max(0, 1 - Math.abs(progress - center) / band);
+          word.style.setProperty(
+            "--edit-tint",
+            Math.round(strength * 100) + "%",
           );
-          lines.forEach(({ text, copy }) => {
-            copy.textContent = text.slice(0, Math.max(0, remaining));
-            remaining -= text.length;
-          });
-        }),
-      );
+        });
+      });
     };
-    const advance = (now: number) => {
-      // A frame's timestamp can precede schedule's performance.now(). Keep the
-      // frame delta nonnegative, including the first frame after resume.
+    const tick = (now: number) => {
       const current = Math.max(now, last ?? now);
       if (last !== null) elapsed = (elapsed + current - last) % cycleDuration;
       last = current;
       render();
-    };
-    const tick = (now: number) => {
-      advance(now);
       frame = requestAnimationFrame(tick);
     };
     const schedule = () => {
@@ -179,8 +149,8 @@ import { memoExample } from "./memo-example";
         document.documentElement.clientHeight /
           demo.getBoundingClientRect().height,
       );
-      // Keep 35% unless the viewport cannot show that much of the card. In that
-      // case require 80% of the available viewport, still observed before play.
+      // Adapt only when 35% is physically unreachable; require 80% of the
+      // available viewport before animating the taller comparison.
       const threshold = maximum < 0.35 ? 0.8 * maximum : 0.35;
       if (observer && threshold === requiredVisibility) return;
       observer?.disconnect();
@@ -202,7 +172,7 @@ import { memoExample } from "./memo-example";
     resize.observe(demo, { box: "border-box" });
     window.addEventListener("resize", observeVisibility);
     const preference = () => {
-      demo.classList.toggle("enhanced", !reduced.matches);
+      render();
       observeVisibility();
       schedule();
     };
@@ -217,103 +187,87 @@ import { memoExample } from "./memo-example";
     margin: 0;
     min-width: 0;
   }
-  .stream-line {
-    position: relative;
-  }
-  .stream-line :global(.stream-source) {
-    visibility: hidden;
-  }
-  .stream-line :global(.stream-visual) {
-    display: block;
-    position: absolute;
-    inset: 0;
-  }
-  .enhanced :global(.pending) {
-    visibility: hidden;
-  }
-  .scene-stage {
+  .demo-content {
     display: grid;
+    gap: var(--space-6);
+  }
+  .demo-content > p {
+    margin: 0;
+  }
+  .original-note {
+    padding: var(--space-5);
+    border: 1px dashed var(--hairline);
+    background: color-mix(
+      in srgb,
+      var(--sheet-bar) var(--edit-tint, 0%),
+      var(--ground)
+    );
+  }
+  .original-note h2 {
+    margin: 0 0 var(--space-3);
+  }
+  .cleanup-request {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--space-3);
+    margin-top: var(--space-5);
+  }
+  .outputs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: var(--space-8);
   }
-  .scene {
+  .output {
     min-width: 0;
+    display: flex;
+    flex-direction: column;
+    border-top: 1px solid var(--hairline);
+    padding-top: var(--space-5);
   }
-  .motion-story {
-    display: none;
+  .output-title {
+    margin: 0 0 var(--space-4);
+    font: var(--text-lead) / var(--leading-heading) var(--font-mono);
   }
-  .enhanced .motion-story {
-    display: grid;
+  .memo-copy {
+    line-height: var(--leading-document);
   }
-  /* Animated, the header names the active scene and each scene's own label is
-     kept for assistive technology only. Static, each scene shows its label. */
-  .memo-demo:not(.enhanced) .sheet-bar {
-    display: none;
+  .changed-word {
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 0.17em;
+    background: color-mix(
+      in srgb,
+      var(--sheet-bar) var(--edit-tint, 0%),
+      transparent
+    );
   }
-  .scene-name-stack {
-    display: inline-grid;
+  .kept-score {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--space-2);
+    margin-top: auto;
+    padding-top: var(--space-5);
   }
-  .scene-name {
-    grid-area: 1 / 1;
-    visibility: hidden;
+  .kept-score strong {
+    font: var(--text-section) / var(--leading-heading) var(--font-mono);
   }
-  .scene-name.active {
-    visibility: visible;
-  }
-  .enhanced > .scene-stage,
-  .motion-story .scene-label {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-  }
-  .motion-story .scene {
-    grid-area: 1 / 1;
-    visibility: hidden;
-  }
-  .motion-story .scene.active {
-    visibility: visible;
-  }
-  .chat {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: grid;
-    gap: var(--space-5);
-  }
-  .chat > li {
-    border-left: 2px solid var(--hairline);
-    padding: 0 var(--space-4);
-  }
-  .scene-label {
-    margin-bottom: var(--space-3);
-  }
-  /* A saved-report excerpt, set like a sample on a report: typed text in a
-     dashed box on the ground, apart from the chat turns around it. */
-  .excerpt {
-    margin: 0;
-    padding: var(--space-2) var(--space-3);
-    border: 1px dashed var(--hairline);
-    background: var(--ground);
-    font: var(--text-small) / var(--leading-body) var(--font-mono);
-  }
-  p + .excerpt {
-    margin-top: var(--space-3);
-  }
-  .excerpt > p + p {
-    margin-top: var(--space-2);
-  }
-  .speaker {
-    display: block;
-    color: var(--muted);
-    font: var(--text-caption) / var(--leading-label) var(--font-mono);
-    margin-bottom: var(--space-2);
+  .demo-method {
+    border-top: 1px solid var(--hairline);
+    padding-top: var(--space-5);
   }
   p {
     margin: 0;
     text-wrap: pretty;
+  }
+  @media (max-width: 767px) {
+    .outputs {
+      grid-template-columns: 1fr;
+      gap: var(--space-6);
+    }
+    .original-note {
+      padding: var(--space-4);
+    }
   }
 </style>

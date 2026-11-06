@@ -78,7 +78,7 @@ test("server instructions fit within Claude Code's 4,096-character limit", () =>
   // Claude Code truncates MCP server instructions at 4,096 characters.
   expect(storeInstructions.length).toBeLessThanOrEqual(4096);
   expect(storeInstructions).toContain(
-    "Setup: when get_cover_sheet is_empty, offer sample-first setup once.",
+    "Setup: when get_cover_sheet is_empty, offer setup once.",
   );
 });
 

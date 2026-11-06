@@ -64,6 +64,9 @@ Files: `server/src/handler.ts`, `server/src/token.ts`, `server/src/mcp.ts`,
 - Each request also checks that the account is active and the assistant is not
   disconnected.
 - Each request builds a fresh stateless MCP server, with no sessions or subscriptions.
+- Global instructions require retrieval before edits and new drafts; only new drafts get the sample/rule conformity check before display. Edits preserve source wording and style outside the request over conflicting samples/rules; guidance never widens scope, and only specific unresolved conflicts are flagged. Requested transformations retain their scope, and changes are briefly listed. These are behavioral instructions, not server enforcement.
+- After draft or edit approval, assistants offer once to retain a sample: every proposal displays an exact placeholder-safe body and useful non-private context before one retention yes, without silently redacting after approval or changing the working edit for retention. Change lists are excluded, refusal is final for that text, and only changed text/context requires renewed approval. Edits do not imply standing rules.
+- Session capture requires explicit opt-in for the current conversation; connection, draft or edit approval, quoted text and another conversation are not consent.
 - Each assistant's (account and OAuth client) first tool call after a server process starts
   carries `notifications/tools/list_changed` ahead of its result, as does every
   `get_report` refused for a missing intent, so clients holding tool schemas from before
@@ -79,7 +82,7 @@ Files: `server/src/handler.ts`, `server/src/token.ts`, `server/src/mcp.ts`,
 Files: `server/src/store/tools.ts`, `server/src/mcp.ts`.
 
 - `get_cover_sheet` returns the cover rules, version, report index, and `is_empty`, plus
-  the optional sample-first setup script while the whole account has no rules or samples.
+  the optional setup script while the whole account has no rules or samples.
 - `get_cover_sheet` takes no arguments and refuses any argument it is sent.
 - `get_report` returns one report's text, sample list, version and a personal `kinds` index (`{kind_id, kind}`, ascending ID) from every active sample in that report before the eight-sample selection, independent of intent, plus setup while the report has no rules or samples.
 - `doc` is accepted as an alias for `document`.
@@ -204,18 +207,19 @@ not at all.
 
 Files: `server/src/store/setup.ts`.
 
-- Setup is a served sample-first script, not a style quiz; reads assemble text without saving.
+- Setup invites pasted-writing cleanup by default; explicit requests to add or import examples go directly to that conversation, with examples optional. Reads assemble text without saving.
 - Setup is offered once when `get_cover_sheet.is_empty` says the whole account is empty; a declined offer is not repeated.
 - A report carries optional help only while it has no rules or samples; other empty reports run setup only on request.
 - Existing rules and samples are preserved; sample-only and rules-only guidance are usable.
 - Candidate lookup requires the person's request and already authorized access; pasted examples also work.
-- The shared setup prompt requests a few sent-message candidates through existing assistant access, with pasted examples as fallback; it allows only the person's own writing and excludes automated, forwarded and third-party text even on populated accounts.
+- The shared setup prompt connects and reads existing guidance, then invites a scoped edit with a separate change list; both edited text and older examples are displayed as placeholder-safe proposals before exact retention approval. Candidate lookup needs the person's request and existing authorized access; automated, forwarded and third-party text is excluded even on populated accounts.
 - Automated, forwarded and third-party text are excluded; a sent item is not assumed to represent the person's voice.
 - Proposed samples replace private details with placeholders before exact retention approval; excerpts are explicit and approved text is never silently changed.
 - Every sample save shows exact text and proposed useful non-private context for one retention approval; unchanged approved metadata needs no second approval, and the save uses an existing or concise new personal kind, version fence, idempotency and readback.
 - Setup consent authorizes conversation, not inbox access, account changes, transcript import or saving unseen text.
-- Whole-account first setup asks for emails or DMs and the next email or DM; emails file under email, and DMs, texts or Slack messages under chat. Other report scripts keep examples and tasks matching their report; skipping examples never blocks writing or makes a voice claim.
-- Approval to send or praise is not retention approval; one yes covers the displayed text and context, and changed text or context, including redaction, requires renewed approval.
+- Setup verifies a successful read before the cleanup task and helps without requiring samples or rules; optional whole-account examples and the next task use emails or DMs, filed under email or chat. Other report scripts keep optional examples and tasks matching their report; skipping examples never blocks writing or makes a voice claim.
+- Draft or edit approval, approval to send or praise is not retention approval; one yes covers the displayed text and context, and changed text or context, including redaction, requires renewed approval.
+- The sample approval step includes the approved-edit one-time offer and excludes the change list; another writing task is requested only if the person wants one.
 - Rules remain available on request; a sample never implies a standing rule or turns its facts into preferences.
 - The historical `setupCatalog` remains canonical for Baseline validation; setup no longer generates Baseline rules, and a rejected Baseline points to the closest rule and report in the same error.
 - A standing instruction is offered separately and changed only with separate consent; a successful read verifies the connection, not future compliance.
@@ -295,7 +299,7 @@ Files: `server/src/pages.tsx`, `server/src/memo-pages.tsx`, `server/src/auth.tsx
 - The cover sheet renders as a TPS form filed by Milton, with counted section links,
   report counts and subheadings, exact sample descriptions above wrapping metadata,
   native sample disclosures, rules, and a random joke comment.
-- Empty accounts explain there are no writing samples and show the shared sample-first prompt; populated accounts point to the next email or DM.
+- Both empty-app setup paragraphs lead with pasted-writing cleanup and optional older examples beside the shared prompt; populated accounts point to the next email or DM.
 - Empty reports remain optional later uses; sample-only reports never show an unfinished setup state.
 - If the structured read fails, it falls back to plain report text.
 - `/download` returns the complete writing export as `TPS.md`; the web report labels

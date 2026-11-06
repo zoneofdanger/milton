@@ -128,9 +128,8 @@ export function connectSteps(empty: boolean, mcpUrl: string) {
       </ol>
       {empty && (
         <p>
-          Your account starts empty. Choose a few messages that sound like you,
-          approve exactly what to keep, or skip examples and draft your next
-          message.
+          Your account starts empty; paste something you wrote and ask your AI
+          to clean it up, with older examples optional.
         </p>
       )}
     </section>
@@ -197,17 +196,24 @@ function sheet({ report, documents, email, date, comment }: SheetView) {
           <dl class="row">
             {field("Reports", counts.reports, true)}
             {field("Rules", counts.rules)}
-            {field("Samples", counts.samples)}
+            {field("Samples shown", counts.samples)}
           </dl>
         )}
         <dl class="row">{field("Filed by", "Milton", true)}</dl>
       </div>
+      {!report.is_empty && (
+        <p class="small-note view-scope">
+          This view shows up to eight samples per report, newest first.{" "}
+          <a href="/download">Download all current rules and samples</a>.
+        </p>
+      )}
       {report.is_empty ? (
         <div class="form-empty">
           <p class="empty-placeholder">No writing samples on file yet.</p>
           <p>
             <a href="/assistants#connect">Follow the setup steps</a> to connect
-            an assistant and choose a few emails or DMs that sound like you.
+            an assistant, then paste something you wrote and ask it to clean it
+            up; older examples are optional.
           </p>
           <p>Once connected, copy this prompt into your assistant:</p>
           <blockquote class="setup-copy">

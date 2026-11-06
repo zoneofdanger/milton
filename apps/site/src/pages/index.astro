@@ -6,31 +6,26 @@ import FilingComparison from "../components/FilingComparison.astro";
 ---
 
 <SiteLayout
-  title="Make your agents write like you. | Milton"
-  description="You bring what you want to say. Milton helps your AI write emails and messages in your voice, using examples you approve."
+  title="Yeah, if your AI could just stop rewriting your memos, that'd be great. | Milton"
+  description="Your AI fixes what you asked. The rest stays you."
 >
   <section class="hero" aria-labelledby="headline">
     <div>
-      <h1 id="headline">Make your agents write like you.</h1>
-      <p class="intro">
-        You bring what you want to say. Milton helps your AI write emails and
-        messages in your voice, using examples you approve.
-      </p>
-      <p class="hero-aside">
-        Start with messages you've already written. Keep the drafts you want
-        your AI to learn from.
-      </p>
+      <h1 id="headline">
+        Yeah, if your AI could just stop rewriting your memos, that'd be great.
+      </h1>
+      <p class="intro">Your AI fixes what you asked. The rest stays you.</p>
       <div class="actions action-row">
         <a class="button" href="https://app.meetmilton.com/login">
           Try Milton free <span aria-hidden="true">↗</span>
         </a>
         <AssistantSetup />
       </div>
+      <p class="hero-price small-note">
+        $5.01 a month after a 30-day free trial. No card required.
+      </p>
     </div>
-    <div>
-      <MemoDemo />
-      <p class="demo-caption small-note">Fictional example conversation.</p>
-    </div>
+    <MemoDemo />
   </section>
   <div class="assistant-strip">
     <span class="assistant-label">Works with:</span>
@@ -72,7 +67,7 @@ import FilingComparison from "../components/FilingComparison.astro";
     <p class="eyebrow">## How it works</p>
     <h2 id="how-heading">From your examples to your next message.</h2>
     <p class="section-lead">
-      Give your AI the facts. Let your approved writing show it how to say them.
+      Tell your AI what you want to say. Milton helps it write in your voice.
     </p>
     <div class="slip-wrap">
       <figure class="sheet slip" aria-labelledby="slip-title">
@@ -140,7 +135,7 @@ import FilingComparison from "../components/FilingComparison.astro";
             <p class="slip-text">
               <strong>Keep, if you like.</strong> Edit the draft until it is
               yours. Your AI can offer to keep that final version as a future
-              sample; it needs your separate yes to save it.
+              sample.
             </p>
             <p class="slip-initials">
               <span class="slip-initials-label">Initials</span>
@@ -154,27 +149,17 @@ import FilingComparison from "../components/FilingComparison.astro";
       </span>
     </div>
   </section>
-  <p class="section-lead">
-    You can add a standing instruction asking your AI to read Milton before
-    writing. To check it actually read, ask “Did you get that memo?” It should
-    confirm only after a successful read.{" "}
-    <a href="/setup">See the setup guide and requirements.</a>
-  </p>
   <section class="section" aria-label="Fictional employee testimonial">
     <figure class="employee-testimonial" id="employee-testimonial">
       <blockquote>
-        “Milton lets me say ‘Did you get that memo?’ to software. I have never
-        felt more qualified for management.”
+        “I already share a name with a singer. I’d rather not share a voice with
+        a chatbot.”
       </blockquote>
       <figcaption>
-        <strong>Michael Bolton (fictional)</strong>
+        <strong>Michael Bolton</strong>
         <span>Senior Founding AI Forward Deployed Product Engineer</span>
       </figcaption>
     </figure>
-    <ul class="social-proof">
-      <li>Would recommend: 1 of 1 founders.</li>
-      <li>Goal: fewer edits before you send. Results not measured.</li>
-    </ul>
   </section>
   <section class="section faq" aria-labelledby="faq-heading">
     <p class="eyebrow">## A few things to know</p>
@@ -307,7 +292,7 @@ import FilingComparison from "../components/FilingComparison.astro";
     position: relative;
     z-index: 11;
     display: grid;
-    grid-template-columns: 1.15fr 1fr;
+    grid-template-columns: 1fr;
     gap: var(--space-16);
     align-items: center;
     padding-block: var(--space-20);
@@ -317,23 +302,18 @@ import FilingComparison from "../components/FilingComparison.astro";
     line-height: 1.18;
     letter-spacing: -0.05em;
     margin-top: var(--space-6);
-    text-wrap: balance;
+    text-wrap: pretty;
   }
   .intro {
     font-size: var(--text-lead);
     line-height: var(--leading-body);
     margin-top: var(--space-6);
   }
-  .demo-caption {
-    margin-top: var(--space-3);
-  }
-  .hero-aside {
-    margin-top: var(--space-5);
-    font-size: var(--text-lead);
-    color: var(--muted);
-  }
   .actions {
     margin-top: var(--space-6);
+  }
+  .hero-price {
+    margin-top: var(--space-3);
   }
   .assistant-strip {
     display: flex;
@@ -566,22 +546,6 @@ import FilingComparison from "../components/FilingComparison.astro";
   .employee-testimonial figcaption span {
     color: var(--muted);
   }
-  /* Fine print where a case study would show its metrics: plain lines under
-     the caption, set off by a hairline, one column each across the container. */
-  .social-proof {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--space-2) var(--space-8);
-    margin: var(--space-6) 0 0;
-    padding: var(--space-4) 0 0;
-    border-top: 1px solid var(--hairline);
-    list-style: none;
-    color: var(--muted);
-    font-size: var(--text-small);
-  }
-  .social-proof li {
-    text-wrap: pretty;
-  }
   .faq details {
     border-top: 1px solid var(--hairline);
     padding-block: var(--space-3);
@@ -653,9 +617,6 @@ import FilingComparison from "../components/FilingComparison.astro";
     }
     .section-lead {
       font-size: var(--text-body);
-    }
-    .social-proof {
-      grid-template-columns: minmax(0, 1fr);
     }
   }
 </style>

@@ -5,7 +5,7 @@ import AssistantSetup from "../components/AssistantSetup.astro";
 
 <SiteLayout
   title="Connect your AI | Milton"
-  description="Connect your AI, choose writing examples you approve, and draft your next email or message. Setup guidance and connection requirements for Milton."
+  description="Connect your AI, paste something you wrote, and ask it to clean it up. Setup guidance and connection requirements for Milton."
   legal
 >
   <p class="eyebrow">## A little paperwork. Once.</p>
@@ -14,11 +14,16 @@ import AssistantSetup from "../components/AssistantSetup.astro";
     <strong>Connect Milton. Say “set up Milton.”</strong>
   </p>
   <p>
-    Start with a few emails or DMs that sound like you. Your AI shows the
-    proposed examples with private details replaced by placeholders and asks
-    exactly what Milton may keep. Milton does not read your inbox; your
-    assistant can find candidates only with access you already granted it and
-    when you ask.
+    Paste something you wrote and ask your AI to “clean this up.” It should fix
+    what you asked, keep the rest in your words, and briefly list the changes.
+    You can get help before saving any examples or rules.
+  </p>
+  <p>
+    If you approve the edit, your AI can offer to keep it as a sample. It shows
+    the exact text and useful context with private details replaced by
+    placeholders, then asks what Milton may keep. Older emails or DMs are
+    optional. Milton does not read your inbox; your assistant can find
+    candidates only with access you already granted it and when you ask.
   </p>
   <p>
     Milton connects through MCP, a standard that lets AIs use tools. You need a
@@ -281,12 +286,19 @@ codex mcp login milton`}</code></pre>
   <section id="first-preference" aria-labelledby="first-heading">
     <h2 id="first-heading">Start with your own words.</h2>
     <p>
-      New accounts start empty. Use the setup prompt above to choose a few
-      emails or DMs you like. Paste examples, or ask your AI to find candidates
-      using access it already has. Milton needs no inbox connection or Gmail
-      permissions. Your AI should exclude automated, forwarded and other
-      people’s text, show you the exact proposed samples with private details
-      replaced, and save each only after your retention approval.
+      New accounts start empty. Once connected, paste a real email or DM you
+      wrote and ask your AI to clean it up. It reads what you have on file and
+      should change only what you asked. You choose the final text. If you
+      approve the edit, your AI may offer once to keep the edited body as a
+      sample, with its change list left out.
+    </p>
+    <p>
+      Older examples are optional. Paste a few emails or DMs you like, or ask
+      your AI to find candidates using access it already has. Milton needs no
+      inbox connection or Gmail permissions. Your AI should exclude automated,
+      forwarded and other people’s text, show you the exact proposed samples and
+      useful non-private context with private details replaced, and save each
+      only after your retention approval.
     </p>
     <p>
       Already have rules or examples? Keep them. Approved samples work with zero
@@ -294,13 +306,13 @@ codex mcp login milton`}</code></pre>
       five reports. Rules are still supported when you ask for them.
     </p>
     <p>
-      Then tell your AI what the next real email or DM should accomplish. It
-      reads the relevant report and drafts with what is on file. You can skip
-      examples and get help with the draft. If you approve the final version,
-      your AI may offer once to keep it as a sample. Approval to send is
-      separate from approval to keep it.{" "}
-      <a href="https://app.meetmilton.com/">Open Milton</a> to check what was
-      saved.
+      Need a new draft? Tell your AI what the next email or DM should
+      accomplish. It reads the relevant report and drafts with what is on file.
+      You can skip examples and get help with the draft. If you approve the
+      final version, your AI may offer once to keep it as a sample. Approval of
+      a draft or edit, praise, or permission to send is separate from approval
+      to keep it. <a href="https://app.meetmilton.com/">Open Milton</a> to check
+      what was saved.
     </p>
     <p>In your next conversation, ask:</p>
     <blockquote>“Did you get that memo?”</blockquote>

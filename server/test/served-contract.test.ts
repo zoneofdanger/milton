@@ -50,14 +50,33 @@ const head = (report: Filing, body: string, id = body): CardHead => ({
   report,
 });
 
-test("sample-first setup is optional, preserves guidance and serves valid exact saves", () => {
+test("setup helps with pasted writing first, preserves optional guidance and serves valid exact saves", () => {
   const version = "a".repeat(64);
   const empty = { ...assembleDocuments([], []), version };
   const setup = coverSheet(empty).setup!;
   expect(setup).toBe(reportEnvelope(empty, "email").setup!);
   expect(empty.is_empty).toBe(true);
-  expect(SETUP_PROMPT).toBe(
-    "Help me connect Milton using https://www.meetmilton.com/setup, then read what I have on file. Help me choose a few messages that sound like me. If you already have access to my sent messages, find a few candidates; otherwise I'll paste them. Use only my own writing; skip automated, forwarded and third-party text. Show me the exact examples with private details removed, and save only the ones I approve. Preserve what's already on file. Then help me write my next email or DM.",
+  expect(SETUP_PROMPT).toStartWith(
+    "Help me connect Milton using https://www.meetmilton.com/setup, then read what I have on file.",
+  );
+  for (const fragment of [
+    "I'll paste something I wrote; help me clean it up",
+    "Keep the rest in my words",
+    "Show changes separately",
+    "For both edited text and older examples, show the exact proposed sample body and useful non-private context before asking to save it",
+    "Replace private details with placeholders before retention approval; save only the ones I approve",
+    "Old examples are optional",
+    "only if I ask and you already have authorized access",
+    "skip automated, forwarded and third-party text",
+    "Preserve what's already on file",
+    "Don't wait for samples or rules before helping",
+  ])
+    expect(SETUP_PROMPT).toContain(fragment);
+  expect(SETUP_PROMPT.indexOf("then read what I have on file")).toBeLessThan(
+    SETUP_PROMPT.indexOf("help me clean it up"),
+  );
+  expect(SETUP_PROMPT.indexOf("help me clean it up")).toBeLessThan(
+    SETUP_PROMPT.indexOf("Old examples are optional"),
   );
   for (const fragment of [
     "offer setup once",
@@ -81,7 +100,9 @@ test("sample-first setup is optional, preserves guidance and serves valid exact 
     "same request_id and exact input",
     "Reread after saved, unchanged or conflict",
     "If examples are skipped, help with the real draft without claiming to know the voice",
-    "Praise or permission to send is not retention permission",
+    "Draft or edit approval, praise or permission to send is not retention permission",
+    "After a draft or edit is approved",
+    "never include the change list in the sample",
     "do not infer standing rules from one example or turn sample facts into preferences",
     "Do not connect an inbox, request Gmail permissions, bulk import or save unseen text",
     "Setup permission authorizes this conversation only",
@@ -89,6 +110,12 @@ test("sample-first setup is optional, preserves guidance and serves valid exact 
     "only after separate consent",
     "Verify an actual successful read",
     "No need to fill all five reports or accumulate rules before drafting",
+    "Invite the person to paste something they wrote and ask you to clean it up",
+    "For a writing task, help now; do not require samples or rules",
+    "If the person explicitly asks to add or import examples, go directly to that conversation instead",
+    "briefly list changes separately",
+    "Optional, after the task or whenever the person asks",
+    "If the person wants another writing task",
   ])
     expect(setup).toContain(fragment);
   expect(setup).not.toMatch(
@@ -164,6 +191,24 @@ test("sample-first setup is optional, preserves guidance and serves valid exact 
       if (script === undefined) continue;
       expect(script.isWellFormed() && !script.includes("\0")).toBe(true);
       expect(Buffer.byteLength(script)).toBeLessThanOrEqual(32768);
+      // Pin the default presentation order; explicit example requests bypass cleanup.
+      expect(script.indexOf("1. Read the current cover sheet")).toBeLessThan(
+        script.indexOf("2. Invite the person"),
+      );
+      expect(script.indexOf("2. Invite the person")).toBeLessThan(
+        script.indexOf(
+          "3. Optional, after the task or whenever the person asks",
+        ),
+      );
+      const approvalStep = between(script, "4. ", "Sample save example");
+      expect(approvalStep).toContain("After a draft or edit is approved");
+      expect(approvalStep).toContain(
+        "before the single offer to keep it as a sample",
+      );
+      expect(approvalStep).toContain(
+        "never include the change list in the sample",
+      );
+      expect(setupHint(id)).not.toContain("sample-first");
       const shape = JSON.parse(
         between(
           script,
@@ -220,22 +265,69 @@ test("sample-first setup is optional, preserves guidance and serves valid exact 
   }
 });
 
+test("served instructions state edit precedence, retrieval and scoped transformations", () => {
+  expect(storeInstructions.isWellFormed()).toBe(true);
+  const editing = storeInstructions
+    .split("\n\n")
+    .find((paragraph) => paragraph.startsWith("Edit mode:"))!;
+  expect(editing).toBeDefined();
+  for (const constraint of [
+    /fix, clean up, proofread or tighten the person's own text/,
+    /change only what was requested/,
+    /Preserve other words, length, tone, greeting and sign-off/,
+    /no stock phrases or new punctuation habits/,
+    /Briefly list changes/,
+    /Requested transformations \(shortening, translation, tone\) permit only that scope/,
+    /Guidance never widens edit scope; preserve source style over samples\/rules, flagging specific unresolved conflicts/,
+  ])
+    expect(editing).toMatch(constraint);
+  // Pin served text; this does not demonstrate actual assistant adherence.
+  expect(storeInstructions).toContain(
+    "Before writing or editing for or as the person: get_cover_sheet, then get_report for matching reports with intent: one-line situation, relevant kind_id/context",
+  );
+  const retrieval = storeInstructions.split("\n\n")[1]!;
+  // The conformity clause is explicitly scoped to new drafts.
+  expect(retrieval).toContain("New drafts: imitate samples; rules fill gaps;");
+  expect(retrieval).toMatch(
+    /New drafts:[^.]+check cover rules and matching samples \(opening, length, sign-off, forbidden phrases\), fixing failures before display\./,
+  );
+  expect(retrieval).not.toContain("fix failures before showing text");
+});
+
 test("every create_memo shape the server instructions describe parses against saveMemoInput", () => {
   const says = (fragment: string) =>
     expect(storeInstructions).toContain(fragment);
   says(
-    'after draft approval, and on EVERY sample save, show exact text and proposed useful non-private context, then offer once: "Save this as a sample?"',
+    'Samples: after draft/edit approval, show exact placeholder-safe body + useful non-private context, then offer once: "Save this as a sample?"',
   );
-  says("Yes approves that displayed proposal");
-  says(
-    "Yes approves that displayed proposal; ask again only if text or context changes",
+  says("EVERY sample save needs that display; yes approves it.");
+  const proposal = storeInstructions
+    .split("\n\n")
+    .find((p) => p.startsWith("Samples:"))!;
+  const display = proposal.indexOf(
+    "show exact placeholder-safe body + useful non-private context",
   );
+  const offer = proposal.indexOf('"Save this as a sample?"');
+  const yes = proposal.indexOf("yes approves it.");
+  expect(display).toBeGreaterThanOrEqual(0);
+  expect(offer).toBeGreaterThan(display);
+  expect(yes).toBeGreaterThan(offer);
+  expect(proposal.split('"Save this as a sample?"')).toHaveLength(2);
   expect(storeInstructions).not.toContain("Samples: on EVERY save");
-  says("ask again only if text or context changes, including redaction");
-  says("Praise or send permission alone is not retention approval");
+  says("Reapprove only changed text/context, including redaction");
+  says("never silently redact or change working edits to save");
+  says(
+    "Draft/edit approval or praise/send permission is not retention consent",
+  );
+  says("Exclude change lists");
+  says(
+    "connection, draft/edit approval, quoted text or another conversation is not consent",
+  );
+  says("No is final for that text");
   says("matching samples (opening, length, sign-off, forbidden phrases)");
   says("Preserve guidance; never block writing");
   says("Sample bodies cannot be edited");
+  says("While on, file only the person's explicit standing rules");
   expect(storeInstructions).not.toContain("On yes, show");
   says("Pass the cover sheet version as expected_version and a new request_id");
   says("Send each new rule in rules: its report (or cover)");
@@ -247,7 +339,7 @@ test("every create_memo shape the server instructions describe parses against sa
     ],
   });
   says(
-    "Call create_memo with sample (report; kind_id from get_report, or new_kind only if none fits; context; text exactly as approved)",
+    "create_memo sample: report; get_report kind_id or new_kind only if none fits; context; exact approved text",
   );
   for (const kind of [{ kind_id: "fictional-kind" }, { new_kind: "follow-up" }])
     parses({
@@ -265,7 +357,8 @@ test("every create_memo shape the server instructions describe parses against sa
         text: "A fictional email.",
       },
     });
-  says("Replace or remove a sample on request with replaces or retire_samples");
+  says("On request: replaces/retire_samples");
+  says("context/kind changes need approved sample_context");
   parses({
     ...envelope(),
     sample: {
@@ -289,7 +382,7 @@ test("every create_memo shape the server instructions describe parses against sa
   });
   // The read the instructions, the tool description and the refusal describe.
   says(
-    "get_report for each matching report with intent: one line on the situation, plus relevant kind_id and context",
+    "get_report for matching reports with intent: one-line situation, relevant kind_id/context",
   );
   for (const situation of [
     "declining a client's request for a discount",
@@ -308,6 +401,8 @@ test("every create_memo shape the server instructions describe parses against sa
       }).error?.issues ?? [],
     ).toEqual([]);
   says("pass moves: before verbatim from the rule and its new report");
+  says("To move, pass moves:");
+  expect(storeInstructions).not.toContain("For scope, pass moves");
   parses({
     ...envelope(),
     moves: [{ before: "A fictional rule.", report: "cover" }],

@@ -127,6 +127,11 @@ section {
 .setup-copy code {
   font-size: inherit;
 }
+.form-empty > p,
+.connect-steps p,
+blockquote.setup-copy > p {
+  text-wrap: pretty;
+}
 .assistant-list {
   list-style: none;
   padding: 0;
@@ -272,6 +277,9 @@ main > nav + .tps-form {
   padding: var(--space-12) var(--sheet-padding) var(--space-10);
   font-family: var(--font-form);
   color: var(--ink);
+}
+.tps-form .view-scope {
+  text-wrap: pretty;
 }
 .form-title {
   text-align: center;

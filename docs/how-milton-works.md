@@ -460,7 +460,7 @@ Files: `server/src/guides/`, `server/src/guide-worker.ts`, `server/scripts/guide
 - Activation requires the same source version, epoch and live lease; valid insufficient evidence clears old text, while invalid/unfinished/refused output fails without a paid repair loop.
 - Expired claims recover within the attempt bound; oversize, budget-limited and exhausted work has terminal status rather than indefinite preparation.
 - Both MCP report envelopes carry the same optional self-contained derived guide block with status, freshness and precedence; off/ineligible responses keep their prior shape and the four tool inputs stay unchanged.
-- The report page shows read-only derived guidance and stale/terminal status only while eligible; requested edit scope and explicit rules override inferred tendencies, preserving Baseline semantics.
+- The report page shows read-only tendencies/applicability and plain queued/updating/unavailable reasons only while eligible, retaining the stale explanation; source versions remain in MCP metadata, evidence references validate without entering displayed text, and requested edit scope/explicit rules retain precedence.
 - Approved-source limits, expected_version and exports exclude derived guides and status; saves and reads never call a model.
 - Account deletion cascades guides/enrollment/work; late completion never creates an account or guide row; disabled completed results are reusable only for the exact current source.
 - The guide worker has a distinct database role, provider-only secret payload and no credential/signing-key access; auth receives no guide writing capability.

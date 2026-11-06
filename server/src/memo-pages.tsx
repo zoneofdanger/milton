@@ -166,13 +166,15 @@ const guideReasons: Record<string, string> = {
   completed: "Based on the current approved samples.",
   insufficient_evidence: "There is not enough evidence for a guide yet.",
   input_too_large:
-    "All samples together exceed the processing limit. No subset was used.",
+    "A guide is unavailable because these samples are too long to process together.",
   budget_limit:
-    "The pilot spending limit was reached. A guide update is unavailable.",
-  provider_or_output_failed: "The guide update failed. Attempts are limited.",
-  attempts_exhausted: "The guide update failed after the allowed attempts.",
-  lease_expired: "The interrupted update is queued for recovery.",
-  superseded: "The interrupted update needs another attempt.",
+    "A guide update is unavailable because the pilot spending limit was reached.",
+  provider_or_output_failed:
+    "A guide update is unavailable because it could not finish.",
+  attempts_exhausted:
+    "A guide update is unavailable because it could not finish.",
+  lease_expired: "A guide update is queued.",
+  superseded: "A guide update is queued.",
 };
 function reportGuide(guide: GuidePresentation) {
   return (
@@ -185,11 +187,12 @@ function reportGuide(guide: GuidePresentation) {
         guide never widens a requested edit.
       </p>
       <p class="report-counts">
-        {guide.stale ? "Stale guide. " : ""}
-        {guideReasons[guide.reason] ?? "A guide is unavailable."}{" "}
-        {guide.source_version !== null
-          ? `Guide source version ${guide.source_version}; current sample version ${guide.current_version}.`
-          : `Current sample version ${guide.current_version}.`}
+        {guide.stale ? "Based on earlier samples. " : ""}
+        {guide.status === "queued"
+          ? "A guide update is queued."
+          : guide.status === "running"
+            ? "Updating your guide from approved samples."
+            : (guideReasons[guide.reason] ?? "A guide is unavailable.")}
       </p>
       {guide.stale && (
         <p class="small-note">

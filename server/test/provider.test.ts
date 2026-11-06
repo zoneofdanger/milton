@@ -156,8 +156,8 @@ test("guide output requires complete bounded evidence-linked JSON and safe compl
     usage: { input_tokens: 100, output_tokens: 100 },
     content: [{ type: "text", text: JSON.stringify(value) }],
   });
-  expect(validateGuide(response(good), [sample]).text).toContain(
-    "fictional r1",
+  expect(validateGuide(response(good), [sample]).text).toBe(
+    "Start with the collection request.\nApplies: Short collection notes.",
   );
   expect(
     validateGuide(

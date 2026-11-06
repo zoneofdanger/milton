@@ -82,7 +82,10 @@ unavailable. Token counting is provider processing and therefore requires eligib
 
 Opus 4.6 has no tools, disabled thinking and a versioned system prompt with strict JSON
 output. Local validation checks completion/refusal, shape, at most eight bounded tendencies,
-all stable-ID/revision references and a 6,000-character rendered cap. Insufficient evidence
+all stable-ID/revision references and a 6,000-character rendered cap. References validate
+before activation but are omitted from human-readable guide text; source/current versions
+remain in MCP metadata. The app shows tendencies/applicability, plain update/unavailable
+reasons and a stale explanation, without source numbers or worker diagnostics. Insufficient evidence
 must have no tendencies. There is no paid repair/second judge. Mechanical validation and
 fake-provider tests cannot establish semantic truth or immunity to prompt injection.
 

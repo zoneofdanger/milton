@@ -2732,3 +2732,74 @@ test("an unrecognized database failure logs its class and code once, never its m
     logged.mockRestore();
   }
 });
+
+test("report guides show readable tendencies and status without internal diagnostics", async () => {
+  const { assembleDocuments } = await import("../src/store/reports");
+  const documents = {
+    ...assembleDocuments(
+      [
+        {
+          id: "fictional-rule",
+          version: 1,
+          description: "Fictional rule",
+          body: "Use plain words.",
+          archived: false,
+          report: "email",
+        },
+      ],
+      [],
+    ),
+    version: "a".repeat(64),
+  };
+  const report = {
+    text: documents.full,
+    version: documents.version,
+    is_empty: false,
+  };
+  for (const [status, reason, expected] of [
+    ["queued", "lease_expired", "queued"],
+    ["running", "preparing", "Updating"],
+    ["failed", "attempts_exhausted", "unavailable"],
+    ["failed", "provider_or_output_failed", "unavailable"],
+    ["unavailable", "input_too_large", "too long"],
+    ["unavailable", "budget_limit", "spending limit"],
+  ]) {
+    documents.reports[0]!.guide = {
+      derived: true,
+      text: "Open with the collection update.\nApplies: Short pickup notes.",
+      source_version: 123,
+      current_version: 456,
+      stale: true,
+      status: status!,
+      reason: reason!,
+      precedence: "Explicit rules and requested edit scope win.",
+    };
+    const response = await memoPages(
+      new Request(appOrigin + "/tps-report"),
+      {
+        readTpsReport: async () => report,
+        readDocuments: async () => documents,
+        exportTpsReport: async () => report.text,
+      },
+      () => null,
+      "writer@example.invalid",
+      {
+        now: () => new Date("2026-11-06T00:00:00Z"),
+        comment: () => "Fictional UI check.",
+      },
+    );
+    const html = await response.text(),
+      start = html.indexOf('<div class="report-guide">');
+    expect(start).toBeGreaterThanOrEqual(0);
+    const guide = html.slice(start, html.indexOf("</div>", start));
+    expect(guide).toContain(expected!);
+    expect(guide).toContain("Open with the collection update.");
+    expect(guide).toContain("Short pickup notes.");
+    expect(guide).toContain(
+      "may still reflect samples that were removed or corrected",
+    );
+    expect(guide).not.toMatch(
+      /123|456|version|Evidence:|lease|attempt|recovery|<button|<input|<textarea|<select/i,
+    );
+  }
+});

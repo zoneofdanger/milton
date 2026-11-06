@@ -1500,7 +1500,7 @@ test("guide leases, source moves, revoked eligibility and account deletion fence
 test("guide reservations and recovery bound concurrent spend and retries", async () => {
   const { setGuideEnrollment } = await import("../src/guides/store");
   const { runGuideWorker } = await import("../src/guides/worker");
-  const countedReservation = 102_900; // 100 input tokens + 4096 maximum output tokens.
+  const conservativeReservation = 1_102_400; // Full 200k input + 4096 output, even for tiny reports.
   const local = await localStore();
   try {
     for (const id of ["budget-a", "budget-b"]) {
@@ -1560,7 +1560,7 @@ test("guide reservations and recovery bound concurrent spend and retries", async
     // Reserve against a nearly-full global day. Unknown outcomes keep their reservation.
     await local.pg.query(
       "INSERT INTO guide_spend(id,account_key,amount_micros) VALUES ('prior','fictional',$1)",
-      [5_000_000 - countedReservation - 6000],
+      [5_000_000 - conservativeReservation - 6000],
     );
     await local.pg.exec(
       "UPDATE report_guides SET next_attempt_at=now() WHERE user_id='budget-b'",
@@ -1590,12 +1590,12 @@ test("guide reservations and recovery bound concurrent spend and retries", async
           "SELECT amount_micros FROM guide_spend WHERE NOT settled AND id<>'prior'",
         )
       ).rows,
-    ).toEqual([{ amount_micros: countedReservation }]);
+    ).toEqual([{ amount_micros: conservativeReservation }]);
     await local.pg.exec(
       "UPDATE report_guides SET next_attempt_at=now() WHERE user_id='budget-b'",
     );
     await runGuideWorker(local.db, unknown, { maxReports: 1 });
-    expect(calls).toBe(3); // global day cap prevents another counted-input reservation
+    expect(calls).toBe(3); // global day cap prevents another conservative reservation
     await local.pg.exec("DELETE FROM users WHERE id='budget-b'");
     expect(
       (await local.pg.query("SELECT * FROM guide_spend")).rows,
@@ -1608,7 +1608,7 @@ test("guide reservations and recovery bound concurrent spend and retries", async
 test("guide bounds reject whole oversize input before processing and reserve monthly/account caps", async () => {
   const { setGuideEnrollment } = await import("../src/guides/store");
   const { runGuideWorker } = await import("../src/guides/worker");
-  const countedReservation = 102_900; // 100 input tokens + 4096 maximum output tokens.
+  const conservativeReservation = 1_102_400; // Full 200k input + 4096 output, even for tiny reports.
   const local = await localStore();
   try {
     await seedUsers(local.pg, "bounded");
@@ -1674,7 +1674,7 @@ test("guide bounds reject whole oversize input before processing and reserve mon
     // Prior global-month spending may sit on a different UTC day.
     await local.pg.query(
       "INSERT INTO guide_spend(id,account_key,amount_micros,created_at) VALUES ('month','fictional',$1,date_trunc('month',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')",
-      [20_000_000 - countedReservation + 1],
+      [20_000_000 - conservativeReservation + 1],
     );
     await runGuideWorker(local.db, provider, { maxReports: 1 });
     expect(calls).toBe(0);
@@ -1704,6 +1704,46 @@ test("guide bounds reject whole oversize input before processing and reserve mon
         )
       ).rows,
     ).toEqual([{ amount_micros: 1_102_400 }]);
+  } finally {
+    await local.dispose();
+  }
+});
+
+test("guide billing records recognized usage up or down once and retains unknown reservations", async () => {
+  const { settleGuideSpend } = await import("../src/guides/worker");
+  const local = await localStore();
+  try {
+    await local.pg.exec(
+      "INSERT INTO guide_spend(id,account_key,amount_micros) VALUES ('up','fictional',1102400),('down','fictional',1102400),('unknown','fictional',1102400)",
+    );
+    // Usage beyond the activation bound still costs money even when no guide can activate.
+    await settleGuideSpend(local.db, "up", {
+      usage: { input_tokens: 200001, output_tokens: 4096 },
+    });
+    await Promise.all([
+      settleGuideSpend(local.db, "up", {
+        usage: { input_tokens: 1, output_tokens: 1 },
+      }),
+      settleGuideSpend(local.db, "up", {
+        usage: { input_tokens: 1, output_tokens: 1 },
+      }),
+    ]);
+    await settleGuideSpend(local.db, "down", {
+      stop_reason: "max_tokens",
+      usage: { input_tokens: 100, output_tokens: 100 },
+    });
+    await settleGuideSpend(local.db, "unknown", {});
+    expect(
+      (
+        await local.pg.query(
+          "SELECT id,amount_micros,settled FROM guide_spend ORDER BY id",
+        )
+      ).rows,
+    ).toEqual([
+      { id: "down", amount_micros: 3000, settled: true },
+      { id: "unknown", amount_micros: 1102400, settled: false },
+      { id: "up", amount_micros: 1102405, settled: true },
+    ]);
   } finally {
     await local.dispose();
   }

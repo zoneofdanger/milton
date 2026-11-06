@@ -93,14 +93,18 @@ export interface GuideProvider {
   count(request: GuideRequest, signal: AbortSignal): Promise<number>;
   generate(request: GuideRequest, signal: AbortSignal): Promise<unknown>;
 }
-const usageSchema = z.object({
-  input_tokens: z.number().int().nonnegative().max(MAX_INPUT_TOKENS),
-  output_tokens: z.number().int().nonnegative().max(MAX_OUTPUT_TOKENS),
+const billingUsageSchema = z.object({
+  input_tokens: z.number().int().nonnegative(),
+  output_tokens: z.number().int().nonnegative(),
   cache_creation_input_tokens: z.number().int().max(0).optional(),
   cache_read_input_tokens: z.number().int().max(0).optional(),
 });
+const usageSchema = billingUsageSchema.extend({
+  input_tokens: z.number().int().nonnegative().max(MAX_INPUT_TOKENS),
+  output_tokens: z.number().int().nonnegative().max(MAX_OUTPUT_TOKENS),
+});
 export function knownUsage(raw: unknown) {
-  return z.object({ usage: usageSchema }).safeParse(raw).data?.usage;
+  return z.object({ usage: billingUsageSchema }).safeParse(raw).data?.usage;
 }
 export function validateGuide(raw: unknown, samples: Sample[]) {
   const message = z
@@ -195,6 +199,14 @@ export function anthropicGuideProvider(
         .parse(await post("/count_tokens", request, signal)).input_tokens;
     },
     generate: (request, signal) =>
-      post("", { ...request, max_tokens: MAX_OUTPUT_TOKENS }, signal),
+      post(
+        "",
+        {
+          ...request,
+          max_tokens: MAX_OUTPUT_TOKENS,
+          service_tier: "standard_only",
+        },
+        signal,
+      ),
   };
 }

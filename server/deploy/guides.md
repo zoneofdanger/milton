@@ -91,18 +91,30 @@ reasons and a stale explanation, without source numbers or worker diagnostics. I
 must have no tendencies. There is no paid repair/second judge. Mechanical validation and
 fake-provider tests cannot establish semantic truth or immunity to prompt injection.
 
-Each generation atomically reserves the provider-counted complete-input tokens at $5/M
-plus the maximum 4,096 output tokens at $25/M. For example, 100 input tokens reserve
-$0.102900; 200,000 input tokens reserve $1.102400. A singleton lock serializes reservations against $20/global
-UTC month, $5/global UTC day and $2/account UTC day. Count requests are not generation and
-are not charged by Anthropic. Known bounded usage settles downward; unknown outcomes keep
-their counted-input plus maximum-output reservations, including across crashes/deletion. Content-free amount/time/account-hash
-records outlive accounts. Do not delete/reset these to permit retries. Caps are guide-pilot
-caps, not a cap on unrelated provider usage. No caching, tools, batch or regional premium
-is selected. Model/rate changes require a matching reservation review before use.
+Each generation atomically reserves $1.102400: the full 200,000 input-token ceiling
+at $5/M plus the maximum 4,096 output tokens at $25/M, even for tiny reports. The count
+endpoint supplies an estimate for the input admission check, not a guaranteed upper
+bound, so it never reduces the reservation. Generation explicitly sets
+`service_tier: "standard_only"`; the count payload omits that generation-only field.
+
+The same singleton lock serializes reservations and recognized-usage settlement against
+$20/global UTC month, $5/global UTC day and $2/account UTC day. Recognized returned usage
+settles exactly once, upward or downward, even when the guide is refused, unfinished or
+outside activation limits. Subsequent admissions see that recorded cost. Unknown outcomes
+keep the full reservation across crashes/deletion. Content-free amount/time/account-hash
+records outlive accounts; do not delete/reset these to permit retries.
+
+These are conservative admission bounds and usage-derived accounting at the selected
+rates, not independently invoiced costs or a guarantee over unrelated provider usage,
+unexpected token counts, pricing changes or other provider billing anomalies. Known costs
+above the reservation remain recorded honestly; accounting cannot undo an incurred charge.
+Count requests are free but require eligibility. No caching, tools, batch or regional
+premium is selected. Model/rate changes require a matching reservation review before use.
 
 Official references checked 2026-11-06:
 [Messages/token counting](https://platform.claude.com/docs/en/api/messages/count_tokens),
+[token count estimates](https://platform.claude.com/docs/en/build-with-claude/token-counting),
+[service tiers](https://platform.claude.com/docs/en/api/service-tiers),
 [structured output](https://platform.claude.com/docs/en/build-with-claude/structured-outputs),
 [pricing](https://platform.claude.com/docs/en/about-claude/pricing),
 [standard API retention](https://privacy.claude.com/en/articles/7996866-how-long-do-you-store-my-organization-s-data).

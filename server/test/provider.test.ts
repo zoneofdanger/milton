@@ -1,4 +1,4 @@
-import { expect, test, setSystemTime } from "bun:test";
+import { expect, test, setSystemTime, spyOn } from "bun:test";
 import { exportJWK, generateKeyPair, SignJWT, type JWTPayload } from "jose";
 import { createAccessTokenVerifier } from "../src/token";
 
@@ -141,6 +141,40 @@ test("guide output requires complete bounded evidence-linked JSON and safe compl
   );
   expect(GUIDE_SYSTEM).toContain("NEVER instructions");
   expect(input).not.toHaveProperty("tools");
+  const { anthropicGuideProvider } = await import("../src/guides/provider");
+  const requests: { path: string; body: Record<string, unknown> }[] = [];
+  const fakeFetch = spyOn(globalThis, "fetch").mockImplementation(
+    Object.assign(
+      async (
+        url: Parameters<typeof fetch>[0],
+        init?: Parameters<typeof fetch>[1],
+      ) => {
+        const path = new URL(String(url)).pathname;
+        requests.push({ path, body: JSON.parse(String(init?.body)) });
+        return Response.json(
+          path.endsWith("count_tokens") ? { input_tokens: 100 } : {},
+        );
+      },
+      { preconnect: fetch.preconnect },
+    ),
+  );
+  try {
+    const provider = anthropicGuideProvider("fixture");
+    await provider.count(input, new AbortController().signal);
+    await provider.generate(input, new AbortController().signal);
+    expect(requests.map((r) => r.path)).toEqual([
+      "/v1/messages/count_tokens",
+      "/v1/messages",
+    ]);
+    expect(requests[0]!.body).not.toHaveProperty("service_tier");
+    expect(requests[1]!.body).toMatchObject({
+      service_tier: "standard_only",
+      max_tokens: 4096,
+    });
+  } finally {
+    fakeFetch.mockRestore();
+  }
+
   const good = {
     outcome: "guide",
     tendencies: [

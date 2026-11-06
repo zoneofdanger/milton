@@ -63,9 +63,9 @@ async function claim(db: StoreDatabase): Promise<Claim | undefined> {
     return { ...row, epoch, token, samples };
   });
 }
-async function reserve(db: StoreDatabase, c: Claim, inputTokens: number) {
+async function reserve(db: StoreDatabase, c: Claim) {
   const amountMicros = cost({
-    input_tokens: inputTokens,
+    input_tokens: MAX_INPUT_TOKENS,
     output_tokens: MAX_OUTPUT_TOKENS,
   });
   return db.transaction(async (tx) => {
@@ -95,12 +95,21 @@ async function reserve(db: StoreDatabase, c: Claim, inputTokens: number) {
     return true;
   });
 }
-async function settle(db: StoreDatabase, c: Claim, raw: unknown) {
+export async function settleGuideSpend(
+  db: StoreDatabase,
+  id: string,
+  raw: unknown,
+) {
   const usage = knownUsage(raw);
   if (!usage) return; // Unknown transport/completion retains the full reservation.
-  await db.query(
-    sql`UPDATE guide_spend SET amount_micros=${cost(usage)},settled=true WHERE id=${c.token} AND NOT settled AND amount_micros>=${cost(usage)}`,
-  );
+  await db.transaction(async (tx) => {
+    await tx.query(
+      sql`SELECT singleton FROM guide_budget_lock WHERE singleton=1 FOR UPDATE`,
+    );
+    await tx.query(
+      sql`UPDATE guide_spend SET amount_micros=${cost(usage)},settled=true WHERE id=${id} AND NOT settled`,
+    );
+  });
 }
 async function finish(
   db: StoreDatabase,
@@ -152,7 +161,11 @@ export async function runGuideWorker(
       const request = guideRequest(c.report, c.samples);
       if (
         new TextEncoder().encode(
-          JSON.stringify({ ...request, max_tokens: MAX_OUTPUT_TOKENS }),
+          JSON.stringify({
+            ...request,
+            max_tokens: MAX_OUTPUT_TOKENS,
+            service_tier: "standard_only",
+          }),
         ).length > MAX_INPUT_BYTES
       ) {
         await finish(db, c, { reason: "input_too_large", terminal: true });
@@ -174,18 +187,20 @@ export async function runGuideWorker(
         await finish(db, c, { reason: "superseded" });
         continue;
       }
-      if (!(await reserve(db, c, tokens))) {
+      if (!(await reserve(db, c))) {
         await finish(db, c, { reason: "budget_limit", terminal: true });
         continue;
       }
       // Recheck after reservation: loss of eligibility never permits a new provider request.
       if (!(await valid(db, c))) {
-        await settle(db, c, { usage: { input_tokens: 0, output_tokens: 0 } });
+        await settleGuideSpend(db, c.token, {
+          usage: { input_tokens: 0, output_tokens: 0 },
+        });
         await finish(db, c, { reason: "superseded" });
         continue;
       }
       const raw = await provider.generate(request, signal);
-      await settle(db, c, raw);
+      await settleGuideSpend(db, c.token, raw);
       const result = validateGuide(raw, c.samples);
       await finish(db, c, result);
     } catch {

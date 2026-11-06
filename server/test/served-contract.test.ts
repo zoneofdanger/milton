@@ -283,7 +283,7 @@ test("served instructions state edit precedence, retrieval and scoped transforma
     expect(editing).toMatch(constraint);
   // Pin served text; this does not demonstrate actual assistant adherence.
   expect(storeInstructions).toContain(
-    "Before writing or editing: get_cover_sheet, then get_report for matching reports with intent: one-line situation, relevant kind_id/context",
+    "Before writing or editing for or as the person: get_cover_sheet, then get_report for matching reports with intent: one-line situation, relevant kind_id/context",
   );
   const retrieval = storeInstructions.split("\n\n")[1]!;
   // The conformity clause is explicitly scoped to new drafts.
@@ -298,11 +298,21 @@ test("every create_memo shape the server instructions describe parses against sa
   const says = (fragment: string) =>
     expect(storeInstructions).toContain(fragment);
   says(
-    'Samples: after draft/edit approval, offer once: "Save this as a sample?"',
+    'Samples: after draft/edit approval, show exact placeholder-safe body + useful non-private context, then offer once: "Save this as a sample?"',
   );
-  says(
-    "EVERY sample save: show exact placeholder-safe body + useful non-private context before one retention yes",
+  says("EVERY sample save needs that display; yes approves it.");
+  const proposal = storeInstructions
+    .split("\n\n")
+    .find((p) => p.startsWith("Samples:"))!;
+  const display = proposal.indexOf(
+    "show exact placeholder-safe body + useful non-private context",
   );
+  const offer = proposal.indexOf('"Save this as a sample?"');
+  const yes = proposal.indexOf("yes approves it.");
+  expect(display).toBeGreaterThanOrEqual(0);
+  expect(offer).toBeGreaterThan(display);
+  expect(yes).toBeGreaterThan(offer);
+  expect(proposal.split('"Save this as a sample?"')).toHaveLength(2);
   expect(storeInstructions).not.toContain("Samples: on EVERY save");
   says("Reapprove only changed text/context, including redaction");
   says("never silently redact or change working edits to save");

@@ -250,6 +250,37 @@ try {
     cookie = [...cookies].map(([k, v]) => k + "=" + v).join("; ");
     return response;
   }
+  // Discovery advertises only the client authentication Milton accepts.
+  for (const path of [
+    "/.well-known/openid-configuration",
+    "/.well-known/oauth-authorization-server",
+  ]) {
+    const response = await service.handler(new Request(ISSUER + path));
+    assert.equal(response.status, 200);
+    const metadata = (await response.json()) as Record<string, unknown>;
+    assert.deepEqual(metadata.token_endpoint_auth_methods_supported, [
+      "none",
+      "client_secret_basic",
+      "client_secret_post",
+    ]);
+    assert.deepEqual(metadata.introspection_endpoint_auth_methods_supported, [
+      "client_secret_post",
+    ]);
+    assert.deepEqual(metadata.revocation_endpoint_auth_methods_supported, [
+      "client_secret_basic",
+      "client_secret_post",
+    ]);
+    for (const key of [
+      "dpop_signing_alg_values_supported",
+      "token_endpoint_auth_signing_alg_values_supported",
+      "introspection_endpoint_auth_signing_alg_values_supported",
+      "revocation_endpoint_auth_signing_alg_values_supported",
+    ])
+      assert(!(key in metadata), key);
+    assert.equal(metadata.backchannel_logout_supported, false);
+    assert.equal(metadata.backchannel_logout_session_supported, false);
+  }
+  group("discovery metadata advertises only supported client authentication");
   let password = " Ｆｉｃｔｉｏｎａｌ 🌲 password with spaces ";
   const email = "person@example.invalid";
   assert.equal(

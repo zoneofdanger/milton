@@ -1,4 +1,5 @@
 import { expect, test, spyOn } from "bun:test";
+import { brotliDecompressSync, gunzipSync } from "node:zlib";
 import { sql } from "drizzle-orm";
 import { createMiltonApp } from "../src/index";
 import { navigation, page } from "../src/pages";
@@ -252,8 +253,8 @@ test("page fonts and favicons are local while other browser restrictions stay cl
     "default-src 'none'; script-src 'none'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'",
   );
   const html = await response.text();
-  expect(html).toContain('href="/favicon.svg?v=printer"');
-  expect(html).toContain('href="/favicon.ico?v=printer"');
+  expect(html).toMatch(/href="\/favicon\.svg\?v=[\w-]{16}"/);
+  expect(html).toMatch(/href="\/favicon\.ico\?v=[\w-]{16}"/);
   const { localAsset } = await import("../src/assets");
   for (const [path, type] of [
     ["/fonts/jetbrains-mono-regular.woff2", "font/woff2"],
@@ -281,6 +282,70 @@ test("page fonts and favicons are local while other browser restrictions stay cl
     "/src/pages.ts",
   ])
     expect(localAsset(new Request(appOrigin + path))).toBeNull();
+});
+
+test("pages link content-versioned assets that cache for a year; legacy URLs revalidate", async () => {
+  const response = page("Example", "<p>Example</p>");
+  expect(response.headers.get("Cache-Control")).toBe("no-store");
+  const html = await response.text();
+  const linked = (pattern: RegExp) => html.match(pattern)?.[1] ?? "missing";
+  const css = linked(
+    /<link rel="stylesheet" href="(\/milton\.css\?v=[\w-]{16})"/,
+  );
+  const svg = linked(/href="(\/favicon\.svg\?v=[\w-]{16})"/);
+  const fonts = ["geist-latin-variable", "jetbrains-mono-regular"].map((font) =>
+    linked(
+      new RegExp(
+        `<link rel="preload" href="(/fonts/${font}\\.woff2\\?v=[\\w-]{16})" as="font" type="font/woff2" crossorigin="anonymous"`,
+      ),
+    ),
+  );
+  const get = (path: string, headers: Record<string, string> = {}) =>
+    localAsset(new Request(appOrigin + path, { headers }))!;
+  const immutable = "public, max-age=31536000, immutable";
+  const stylesheet = await get(css).text();
+  for (const font of fonts) expect(stylesheet).toContain(`url(${font})`);
+  for (const [path, type] of [
+    [css, "text/css; charset=utf-8"],
+    [svg, "image/svg+xml"],
+  ] as const) {
+    const plain = get(path);
+    expect(plain.headers.get("Content-Encoding")).toBeNull();
+    const bytes = Buffer.from(await plain.arrayBuffer());
+    for (const [accept, coding, decode] of [
+      ["br, gzip", "br", brotliDecompressSync],
+      ["gzip", "gzip", gunzipSync],
+    ] as const) {
+      const r = get(path, { "Accept-Encoding": accept });
+      expect(r.headers.get("Content-Type")).toBe(type);
+      expect(r.headers.get("Cache-Control")).toBe(immutable);
+      expect(r.headers.get("Content-Encoding")).toBe(coding);
+      expect(r.headers.get("Vary")).toBe("Accept-Encoding");
+      const encoded = Buffer.from(await r.arrayBuffer());
+      expect(encoded.byteLength).toBeLessThan(bytes.byteLength);
+      expect(decode(encoded).equals(bytes)).toBe(true);
+    }
+  }
+  for (const font of fonts) {
+    const r = get(font, { "Accept-Encoding": "br, gzip" });
+    expect(r.headers.get("Content-Type")).toBe("font/woff2");
+    expect(r.headers.get("Cache-Control")).toBe(immutable);
+    expect(r.headers.get("Content-Encoding")).toBeNull();
+  }
+  for (const path of [
+    "/milton.css",
+    "/favicon.ico",
+    "/fonts/geist-latin-variable.woff2",
+    css.replace(/v=.*/, "v=stale"),
+  ]) {
+    const r = get(path);
+    expect(r.status).toBe(200);
+    expect(r.headers.get("Cache-Control")).toBe("no-cache");
+    const again = get(path, { "If-None-Match": r.headers.get("ETag")! });
+    expect(again.status).toBe(304);
+    expect(again.headers.get("Cache-Control")).toBe("no-cache");
+    expect(await again.text()).toBe("");
+  }
 });
 
 test("navigation accepts native Allow/Deny callbacks while rejecting unsafe destinations", async () => {
@@ -1214,9 +1279,9 @@ test("web shows only current TPS and rejects all retired history and mutation ro
     expect(html).toContain("&lt;script&gt;");
     expect(html).not.toContain("<script>");
     for (const font of ["geist-latin-variable", "jetbrains-mono-regular"])
-      expect(html).toContain(
-        `<link rel="preload" href="/fonts/${font}.woff2" as="font" type="font/woff2" crossorigin="anonymous"`,
-      );
+      expect(
+        html.split(`<link rel="preload" href="/fonts/${font}.woff2?v=`),
+      ).toHaveLength(2);
     expect(html).toContain('<ol class="ruled">');
     expect(html).toContain(
       '<li class="line"><span class="typed">Lead with the answer.\n\nUnless clarification is needed, keep the reply brief. &lt;script&gt;',

@@ -417,7 +417,8 @@ must also be checked independently.
 
 The optional interactive `test:local` uses the configured issuer and can reach a live
 provider; running it is a separate authorized action. Root global checks are types,
-`bun test` and `bun run format:check`. The release coordinator owns actual cutover.
+`bun test` and `bun run format:check`; CI also runs this rehearsal and the apps/auth
+integration suite on every pull request. The release coordinator owns actual cutover.
 
 ## Store, history, and limits
 
@@ -464,8 +465,8 @@ Retained history has no cap.
 The website shows the current cover sheet and reports, escapes their text and serves no browser JavaScript.
 It displays one bullet per complete active instruction card, preserving internal
 line breaks and conditions and dropping one stored leading `- ` as assembly does,
-from one read per page view. Report
-pages preload the shared Geist and JetBrains Mono fonts; the theme uses
+from one read per page view. Every
+page preloads the shared Geist and JetBrains Mono fonts; the theme uses
 `font-display: optional` to avoid a late font swap.
 `/download` returns the cover rules and every non-empty report, including all active
 approved samples, as `TPS.md`. Old memo/history/recovery
@@ -690,6 +691,16 @@ app may read every column except `secret_hash`, insert, and set `revoked_at`; MC
 read and set `last_used_at` only. No runtime can change a key's binding columns. Native
 `007-connection-key-status` grants `connection_key_status` EXECUTE to MCP and app only.
 Rerunning 006 converges.
+
+Server timeouts live on the runtime logins, because Neon's proxy and pooler drop the
+`statement_timeout`/`lock_timeout` a client passes at connect (the pools still pass them,
+which plain PostgreSQL applies). As the privileged owner, `migrations/007-role-timeouts.up.sql`
+sets, in database `milton` only, 20 s statement and 10 s lock limits for
+`milton_app_runtime` and `milton_mcp_runtime` (the values in `src/store/database.ts`) and
+a 5 s statement limit for `milton_auth_runtime` (`apps/auth`'s value; it sets no lock
+limit). Owner, delegate, legacy and guide roles get none. `check-runtime-role.ts`
+requires the app/MCP settings; `007-role-timeouts.down.sql` resets exactly these. A
+setting reaches only sessions that start after it.
 
 App and MCP read `sample_versions` and the guide state in `guide_accounts` and
 `report_guides`; MCP appends to `samples` and `sample_versions` but cannot update

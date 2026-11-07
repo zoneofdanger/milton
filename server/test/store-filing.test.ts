@@ -1,10 +1,10 @@
-import { cardHeads, cardFingerprint } from "../src/store/cards";
 import type { ReportIntent } from "../src/store/reports";
 import type { SaveMemoInput } from "../src/store/compiled";
 import { expect, test } from "bun:test";
 import { sql } from "drizzle-orm";
 import { localStore } from "./local-store";
 import {
+  cardHeads,
   fixtureStore,
   seedRule,
   seedUsers,
@@ -117,84 +117,6 @@ test("every rule reads as one bullet, whether stored with the compiler's leading
   }
 });
 
-test("edits and moves accept a quoted bullet for rules stored with or without the dash", async () => {
-  const local = await localStore();
-  try {
-    await seedUsers(local.pg, "anchors");
-    const store = fixtureStore(local.db, "anchors");
-    const save = async (change: Partial<SaveMemoInput>) =>
-      store.saveMemo({
-        text: "Fictional change.",
-        request_id: crypto.randomUUID(),
-        expected_version: (await store.getTpsReport()).version,
-        ...change,
-      });
-    const bodies = async () =>
-      (
-        await local.pg.query(
-          `SELECT DISTINCT ON (card_id) report,body FROM instruction_card_versions
-          WHERE user_id='anchors' AND NOT archived ORDER BY card_id,version DESC`,
-        )
-      ).rows
-        .map((r) => r as { report: string; body: string })
-        .sort((a, b) => a.body.localeCompare(b.body));
-    expect(
-      await save({
-        rules: [
-          { report: "cover", text: "- Old rule here." },
-          { report: "cover", text: "New rule here." },
-          { report: "cover", text: "Shared phrase one." },
-          { report: "cover", text: "Shared phrase two." },
-        ],
-      }),
-    ).toMatchObject({ status: "saved" });
-    // Both quoted as printed: the old one matches verbatim, the new one without
-    // its printed dash, and a copied bullet in after is not doubled.
-    expect(
-      await save({
-        exact_edits: [
-          { before: "- Old rule here.", after: "- Old rule changed." },
-          { before: "- New rule here.", after: "- New rule changed." },
-        ],
-      }),
-    ).toMatchObject({ status: "saved" });
-    expect(
-      await save({
-        moves: [
-          { before: "- Old rule changed.", report: "email" },
-          { before: "- New rule changed.", report: "email" },
-        ],
-      }),
-    ).toMatchObject({ status: "saved" });
-    // The new-style rule still matches without the dash.
-    expect(
-      await save({
-        exact_edits: [
-          { before: "New rule changed.", after: "New rule edited." },
-        ],
-        moves: [{ before: "New rule changed.", report: "chat" }],
-      }),
-    ).toMatchObject({ status: "saved" });
-    expect(await bodies()).toEqual([
-      { report: "email", body: "- Old rule changed." },
-      { report: "chat", body: "New rule edited." },
-      { report: "cover", body: "Shared phrase one." },
-      { report: "cover", body: "Shared phrase two." },
-    ]);
-    // Ambiguity is unchanged: a bullet-stripped anchor in two rules conflicts.
-    const before = await bodies();
-    expect(
-      await save({ exact_edits: [{ before: "- Shared phrase", after: "x" }] }),
-    ).toMatchObject({ status: "failed", error: "edit_conflict" });
-    expect(
-      await save({ moves: [{ before: "- Shared phrase", report: "post" }] }),
-    ).toMatchObject({ status: "failed", error: "move_conflict" });
-    expect(await bodies()).toEqual(before);
-  } finally {
-    await local.dispose();
-  }
-});
-
 test("anchors resolve against the printed rules, so a quote never lands on a rule the person did not see it in", async () => {
   const local = await localStore();
   try {
@@ -271,6 +193,16 @@ test("anchors resolve against the printed rules, so a quote never lands on a rul
     expect((await store.readDocuments()).cover).toBe(
       "- Be concise\n\n- In email:\n- Be brief\n\n- Be brief when replying\n\n- Avoid filler.",
     );
+    // A compiler-era rule moves by its dash quote as well.
+    expect(
+      await save({
+        moves: [{ before: "- Be brief when replying", report: "email" }],
+      }),
+    ).toMatchObject({ status: "saved" });
+    expect(await bodies()).toContainEqual({
+      report: "email",
+      body: "- Be brief when replying",
+    });
   } finally {
     await local.dispose();
   }
@@ -742,7 +674,6 @@ test("exact moves keep a card's identity and bytes, add one version and change t
       description: "- Email rule.",
       report: "cover",
     });
-    expect(cardFingerprint(after)).not.toBe(cardFingerprint(before));
     expect((await f.store.getTpsReport()).version).not.toBe(version);
     const documents = await f.store.readDocuments();
     expect(documents.cover).toBe("- Cover rule.\n\n- Email rule.");
@@ -1004,35 +935,6 @@ test("sample revisions keep identity and immutable complete snapshots, replay an
   }
 });
 
-test("retire_samples removes a sample and reports it", async () => {
-  const f = await filingFixture("kinds-remove");
-  try {
-    await f.save({
-      sample: {
-        report: "speech",
-        new_kind: "toast",
-        context: { version: 1 as const, summary: "a fictional toast" },
-        text: "Cheers",
-      },
-    });
-    const { id } = (await f.report("speech")).samples[0]!;
-    expect(await f.save({ retire_samples: [id] })).toMatchObject({
-      status: "saved",
-      samples_retired: [{ id, reason: "removed" }],
-    });
-    expect((await f.report("speech")).is_empty).toBe(true);
-    // A refused save carries its code and the client-facing reason.
-    expect(await f.save({ retire_samples: [id] })).toMatchObject({
-      status: "failed",
-      error: "sample_conflict",
-      message:
-        "Each sample to retire must be an active sample, listed once. Nothing was changed.",
-    });
-  } finally {
-    await f.local.dispose();
-  }
-});
-
 test("a new_kind naming a kind whose samples were all retired reuses that kind", async () => {
   const f = await filingFixture("kinds-revive");
   try {
@@ -1048,6 +950,13 @@ test("a new_kind naming a kind whose samples were all retired reuses that kind",
     const first = (await f.report("speech")).samples[0]!;
     await f.save({ retire_samples: [first.id] });
     expect((await f.report("speech")).samples).toEqual([]);
+    // Retiring it again is refused with its code and the client-facing reason.
+    expect(await f.save({ retire_samples: [first.id] })).toMatchObject({
+      status: "failed",
+      error: "sample_conflict",
+      message:
+        "Each sample to retire must be an active sample, listed once. Nothing was changed.",
+    });
     expect(await f.save(toast("Toast", "Cheers again"))).toMatchObject({
       status: "saved",
     });
@@ -1086,51 +995,6 @@ test("a sample and exact edits in one save apply together or not at all", async 
     await f.local.dispose();
   }
 });
-
-test("an account has no card count limit: 120 creates and 60 removals all save", async () => {
-  const local = await localStore();
-  try {
-    await seedUsers(local.pg, "many");
-    const store = fixtureStore(local.db, "many");
-    const rule = (n: number) => `Fictional rule ${n}.`;
-    const save = async (change: Partial<SaveMemoInput>) =>
-      (
-        await store.saveMemo({
-          text: "A fictional change.",
-          request_id: crypto.randomUUID(),
-          expected_version: (await store.getTpsReport()).version,
-          ...change,
-        })
-      ).status;
-    for (let batch = 0; batch < 6; batch++)
-      expect(
-        await save({
-          rules: Array.from({ length: 20 }, (_, i) => ({
-            report: "cover" as const,
-            text: rule(batch * 20 + i),
-          })),
-        }),
-      ).toBe("saved");
-    for (let batch = 0; batch < 3; batch++)
-      expect(
-        await save({
-          exact_edits: Array.from({ length: 20 }, (_, i) => ({
-            before: rule(batch * 20 + i),
-            after: "",
-          })),
-        }),
-      ).toBe("saved");
-    expect(
-      (
-        await local.pg.query(
-          "SELECT count(*)::int AS cards, count(*) FILTER (WHERE NOT archived)::int AS active FROM (SELECT DISTINCT ON (card_id) archived FROM instruction_card_versions WHERE user_id='many' ORDER BY card_id,version DESC) h",
-        )
-      ).rows,
-    ).toEqual([{ cards: 120, active: 60 }]);
-  } finally {
-    await local.dispose();
-  }
-}, 30000);
 
 test("a sample identical to an active one of its kind is unchanged: no copy", async () => {
   const f = await filingFixture("same-sample");

@@ -6,7 +6,6 @@ import {
   connectionKeysForAccount,
   EXPIRED_KEY_HISTORY,
   keyExpiries,
-  lookupIdentityAccount,
   MAX_ACTIVE_KEYS,
   StoreError,
   type ConnectionKey,
@@ -38,19 +37,12 @@ const expiry = (key: ConnectionKey) =>
 /** The signed-in person's keys, by their Milton account, bound to the
  * session's validated native identity, incarnation and generation. */
 export const accountKeys = async (ctx: PageContext, user: SessionUser) =>
-  connectionKeysForAccount(
-    ctx.config,
-    await lookupIdentityAccount(ctx.config, {
-      provider: ctx.config.issuer,
-      subject: user.id,
-    }),
-    {
-      issuer: ctx.config.issuer,
-      subject: user.id,
-      incarnation: user.incarnation,
-      generation: user.generation,
-    },
-  );
+  connectionKeysForAccount(ctx.config, await ctx.account(user), {
+    issuer: ctx.config.issuer,
+    subject: user.id,
+    incarnation: user.incarnation,
+    generation: user.generation,
+  });
 
 const keyItems = (keys: ConnectionKey[]) => (
   <ul class="assistant-list">
@@ -263,10 +255,14 @@ export const connectionKeyRoutes = async (
   }
   if (request.method === "GET") {
     const user = await signedIn();
-    // By id and owning account, never through the bounded list.
-    const target = await (
-      await accountKeys(ctx, user)
-    ).find(url.searchParams.get("key") ?? "");
+    // By id and owning account, never through the bounded list; the account
+    // menu reads at the same time, on its own pooled connection.
+    const [target, menu] = await Promise.all([
+      accountKeys(ctx, user).then((keys) =>
+        keys.find(url.searchParams.get("key") ?? ""),
+      ),
+      chrome(user),
+    ]);
     if (!target)
       return page(
         "Key not found",
@@ -276,7 +272,7 @@ export const connectionKeyRoutes = async (
         </>,
         404,
         null,
-        await chrome(user),
+        menu,
       );
     return page(
       "Revoke this key?",
@@ -302,7 +298,7 @@ export const connectionKeyRoutes = async (
       </>,
       200,
       null,
-      await chrome(user),
+      menu,
     );
   }
   if (request.method !== "POST") return methodNotAllowed();

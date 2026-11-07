@@ -64,19 +64,6 @@ reports, memos) and plain text on security screens and anything an assistant rea
       safeError prints, without secrets. Also make provision.ts's "output outside the
       repository" check resolve the real repository root rather than only its own checkout.
 
-- [ ] #29 (server, med) **Set query timeouts on the runtime database roles.** Reported
-      2026-11-07 by milton-ux, not yet confirmed: through Neon's pooler (PgBouncer, transaction
-      mode) the connect-time `statement_timeout` (20 s) and `lock_timeout` (10 s) that
-      `postgresDatabase` passes in server/src/store/database.ts (and the auth service's 5 s in
-      apps/auth/src/provider.ts) never reach the server; `SHOW` returns 0 for both and no role
-      sets them. Only the client-side 20 s `query_timeout` and the in-transaction `SET LOCAL`s
-      (store/index.ts) apply. ⚠ billing.tsx relies on the 10 s lock_timeout to answer 503. First
-      confirm with `SHOW` as each runtime role through the pooler host. Then add a migration that
-      runs `ALTER ROLE … SET` for each login role the app, MCP, guide job and auth service use
-      (server/scripts/check-runtime-role.ts names them), with values matching the code. Rehearse
-      on a throwaway branch per server/deploy/README.md. A role setting reaches only new
-      sessions, so check it after the release.
-
 ## From the audit of 2026-11-02 (`.agents/tmp/audit/report.md`)
 
 - [ ] #19 (server, low) **Document two known limits.** Exact-edit anchors are not Unicode-normalized,

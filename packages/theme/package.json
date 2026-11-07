@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./assets": "./assets.ts",
     "./base": "./base.css",
     "./brand": "./brand.ts",
     "./setup-prompt": "./setup-prompt.ts"

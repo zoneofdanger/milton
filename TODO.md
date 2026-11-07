@@ -47,11 +47,6 @@ reports, memos) and plain text on security screens and anything an assistant rea
       reads the current UTC day twice and fails when a run crosses midnight (seen 2026-11-03
       00:00Z on a parallel run; passes on rerun). Inject the clock or compute the day once.
 
-- [ ] #12 (server, low) **Break the store import cycle.** store/index.ts and compiled.ts import
-      each other, now also through save.ts and save-apply.ts. Nothing reads those imports
-      at load time, so it works today; a top-level use of utf8Bytes in a save module would crash
-      startup. Move readLimits and utf8Bytes into a module with no store imports.
-
 - [ ] #13 (server, med, founder) **Optional learn-from-sent-mail step in first setup.** Decided
       2026-11-03, then parked the same day because people will not trust a new product reading their mail, even through the assistant's own connector: the assistant, with permission, reads about twenty
       recent sent emails through its own mail connector, proposes up to five of different kinds

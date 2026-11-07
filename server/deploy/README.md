@@ -117,6 +117,34 @@ Rollback: `psql -X -v ON_ERROR_STOP=1 -f server/migrations/007-role-timeouts.dow
 the same owner resets exactly these settings; code whose role audit requires them then
 fails that audit, so roll such code back first.
 
+## Drop the unread trial tables (pending: Drizzle 0005, owner file 008)
+
+Since PR #26 nothing reads or writes `public.deleted_identities` or
+`milton_app.legacy_mapping`: keyed trial-eligibility fingerprints are the only second-trial
+block. App/MCP code before #26 reads both, so apply only while code from #26 or later
+(source `cb5199b` onward, such as `*-drt-c1af8c3`) serves. The recorded app/MCP rollback
+targets `*-lca-9de3099` and `*-tmo-58a4a59` predate #26: after the drop, roll app/MCP back
+no further than `*-dup-cb5199b` unless both downs below run first. Rehearse on a disposable
+branch or database first, then:
+
+1. Snapshot. It is the only copy of the dropped rows.
+2. As `neondb_owner`: `bun run --cwd server db:migrate` applies
+   `0005_drop_deleted_identities` (journal 6 entries).
+3. As the `milton_app` owner, `milton_app_owner` (the role the cutover ran
+   `migrate.ts --app-auth` as):
+   `psql -X -v ON_ERROR_STOP=1 -f server/migrations/008-drop-legacy-mapping.up.sql`.
+4. Check as the owner. Both columns must be null:
+   `SELECT to_regclass('public.deleted_identities') AS d, to_regclass('milton_app.legacy_mapping') AS l;`
+   Then `check-runtime-role.ts` must print `ok` for app and MCP.
+
+Rollback, needed only before traffic returns to app/MCP code older than #26: run
+`server/migrations/008-drop-legacy-mapping.down.sql` as `milton_app_owner` (it refuses any
+other role) and `server/drizzle/rollback/0005_drop_deleted_identities.sql` as `neondb_owner`.
+Each recreates its table empty, with its original definition and grants; rows come back
+only from the snapshot. The 0005 journal row stays, so re-forwarding means
+`psql -1 -X -v ON_ERROR_STOP=1 -f server/drizzle/0005_drop_deleted_identities.sql`, then
+008 up again.
+
 ## Optional guide worker
 
 The default-off private guide pilot has separate [operations and capability instructions](guides.md). No guide job, schedule, provider key or account enrollment is provisioned by its build.

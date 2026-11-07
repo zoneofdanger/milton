@@ -9,6 +9,6 @@ GRANT USAGE ON SCHEMA public TO milton_app_owner;
 GRANT REFERENCES,SELECT ON public.users TO milton_app_owner;
 GRANT UPDATE(id) ON public.users TO milton_app_owner;
 GRANT SELECT,INSERT,UPDATE ON public.identities TO milton_app_owner;
-GRANT SELECT ON public.deleted_identities,public.trial_accounts TO milton_app_owner;
+GRANT SELECT ON public.trial_accounts TO milton_app_owner;
 -- The app owner creates/owns milton_app. It receives no writing content,
 -- native credential/schema or runtime role membership by this preparation.

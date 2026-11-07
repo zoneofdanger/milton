@@ -1,6 +1,6 @@
 import { sql, type SQL } from "drizzle-orm";
 import type { StoreDatabase, StoreSession } from "../store/database";
-import { StoreError } from "../store/errors";
+import { requireActiveAccount } from "../store/accounts";
 import { REPORT_IDS } from "../store/reports";
 
 // This deliberately does not use the permissive base-access billing gate.
@@ -50,18 +50,7 @@ export async function setGuideEnrollment(
       "Record explicit guide processing opt-in before enablement.",
     );
   await db.transaction(async (tx) => {
-    if (
-      !(
-        await tx.query(
-          sql`SELECT id FROM users WHERE id=${userId} AND status='active' FOR UPDATE`,
-        )
-      ).length
-    )
-      throw new StoreError(
-        "account_unavailable",
-        "This Milton account is unavailable.",
-        403,
-      );
+    await requireActiveAccount(tx, userId, { lock: true });
     const [prior] = await tx.query<{ enabled: boolean }>(
       sql`SELECT enabled FROM guide_accounts WHERE user_id=${userId} FOR UPDATE`,
     );

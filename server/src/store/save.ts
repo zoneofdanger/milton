@@ -16,7 +16,8 @@ import { recordAcceptedChange } from "./provenance";
 import { bullet, FILINGS, type Documents } from "./reports";
 import { applySampleChanges } from "./samples";
 import { closestBaseline, knownBaseline } from "./setup";
-import { hash, lockAccount, readSnapshot, type Snapshot } from "./snapshot";
+import { requireActiveAccount } from "./accounts";
+import { hash, readSnapshot, type Snapshot } from "./snapshot";
 import { assertTrialAccess } from "./trials";
 
 const retiredSample = z.object({
@@ -124,7 +125,7 @@ export async function runSave(
     return await db.transaction(async (tx) => {
       // Saves take only the account lock; store_config is read unlocked. A
       // concurrent save of the same request waits here, then replays.
-      await lockAccount(tx, userId);
+      await requireActiveAccount(tx, userId, { lock: true });
       const existing = await receipt(tx, userId, input.request_id);
       if (existing) return replay(existing);
       // After replay, so a receipt from before exact-only saves still recovers.
@@ -178,7 +179,7 @@ export async function runSave(
     let existing: Receipt | undefined;
     try {
       existing = await db.transaction(async (tx) => {
-        await lockAccount(tx, userId);
+        await requireActiveAccount(tx, userId, { lock: true });
         return receipt(tx, userId, input.request_id);
       });
     } catch {

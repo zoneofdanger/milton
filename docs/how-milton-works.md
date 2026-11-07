@@ -134,8 +134,8 @@ Files: `server/src/store/reports.ts`, `server/src/store/compiled.ts`.
 ## Saves
 
 Files: `server/src/store/compiled.ts`, `server/src/store/save.ts`,
-`server/src/store/snapshot.ts`, `server/src/store/provenance.ts`,
-`server/src/exact-edits.ts`.
+`server/src/store/snapshot.ts`, `server/src/store/accounts.ts`,
+`server/src/store/provenance.ts`, `server/src/exact-edits.ts`.
 
 A save runs in one transaction under the account lock: replay or gates, then
 validation, the writes, publishing and the receipt, which commits with its result or

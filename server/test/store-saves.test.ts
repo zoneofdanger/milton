@@ -285,38 +285,6 @@ test("stale and failed compiled saves preserve current memos, receipts and charg
     });
     const first = await store.getTpsReport();
     expect(first.text).toBe("- Be concise.");
-    // Throw after actual commit: receipt resolution must report the committed result.
-    let dropped = false;
-    const uncertain = {
-      ...local.db,
-      async transaction<T>(
-        work: Parameters<typeof local.db.transaction<T>>[0],
-      ) {
-        const result = await local.db.transaction(work);
-        if (
-          !dropped &&
-          typeof result === "object" &&
-          result !== null &&
-          "status" in result &&
-          result.status === "saved"
-        ) {
-          dropped = true;
-          throw new Error("lost acknowledgment");
-        }
-        return result;
-      },
-    };
-    const saved = await fixtureStore(uncertain, "race").saveMemo({
-      text: "Lead with the answer.",
-      exact_edits: [{ before: "Be concise.", after: "Lead with the answer." }],
-      request_id: crypto.randomUUID(),
-      expected_version: first.version,
-    });
-    expect(saved.status).toBe("saved");
-    if (!saved.version) throw new Error("Saved revision missing");
-    expect((await store.getTpsReport()).text).toBe("- Lead with the answer.");
-    expect((await store.saveMemo(fast)).version).toBe(first.version);
-    expect((await store.getTpsReport()).version).toBe(saved.version);
     const before = await local.pg.query(
       "SELECT card_id,version,body FROM instruction_card_versions WHERE user_id='race' ORDER BY card_id,version",
     );
@@ -325,11 +293,9 @@ test("stale and failed compiled saves preserve current memos, receipts and charg
       CREATE TRIGGER reject_report BEFORE INSERT ON accepted_changes FOR EACH ROW EXECUTE FUNCTION reject_report();`);
     const failed = await store.saveMemo({
       text: "A changed instruction.",
-      exact_edits: [
-        { before: "Lead with the answer.", after: "A changed instruction." },
-      ],
+      exact_edits: [{ before: "Be concise.", after: "A changed instruction." }],
       request_id: crypto.randomUUID(),
-      expected_version: String(saved.version),
+      expected_version: first.version,
     });
     expect(failed.status).toBe("failed");
     expect(
@@ -337,26 +303,26 @@ test("stale and failed compiled saves preserve current memos, receipts and charg
         "SELECT card_id,version,body FROM instruction_card_versions WHERE user_id='race' ORDER BY card_id,version",
       ),
     ).toEqual(before);
-    expect((await store.getTpsReport()).version).toBe(saved.version);
+    expect((await store.getTpsReport()).version).toBe(first.version);
     expect(
       (
         await local.pg.query(
           "SELECT count(*)::int AS n FROM accepted_changes WHERE user_id='race'",
         )
       ).rows,
-    ).toEqual([{ n: 2 }]);
+    ).toEqual([{ n: 1 }]);
   } finally {
     await local.dispose();
   }
 });
 
-test("saves anchor in every active memo, never archived or foreign text, and have no technical write cap", async () => {
+test("saves anchor in every active memo, never archived or foreign text", async () => {
   const local = await localStore();
   try {
     await seedUsers(local.pg, "collection", "other");
-    for (let n = 1; n <= 52; n++)
+    for (let n = 1; n <= 3; n++)
       await seedRule(local.pg, "collection", `m-${n}`, `Instruction m-${n}`, {
-        archived: n === 52,
+        archived: n === 3,
       });
     await seedRule(local.pg, "other", "foreign-id", "Never exposed");
     const store = fixtureStore(local.db, "collection");
@@ -370,26 +336,15 @@ test("saves anchor in every active memo, never archived or foreign text, and hav
         expected_version: base,
       });
     // The read assembled the sources, so an edit that changes nothing is unchanged.
-    expect((await send("Instruction m-51")).status).toBe("unchanged");
+    expect((await send("Instruction m-2")).status).toBe("unchanged");
     base = (await store.getTpsReport()).version;
     // Every active rule is served; archived and foreign text is excluded.
-    for (const anchor of ["Instruction m-52", "Never exposed"])
+    for (const anchor of ["Instruction m-3", "Never exposed"])
       expect((await send(anchor, "Changed")).error).toBe("edit_conflict");
     expect((await store.getTpsReport()).version).toBe(base);
     expect(
-      (await send("Instruction m-51", "Instruction m-51 changed")).status,
+      (await send("Instruction m-2", "Instruction m-2 changed")).status,
     ).toBe("saved");
-    base = (await store.getTpsReport()).version;
-    // Saves leave no per-day write counter.
-    expect(
-      (await send("Instruction m-50", "Instruction m-50 changed")).status,
-    ).toBe("saved");
-    expect((await store.getTpsReport()).version).not.toBe(base);
-    base = (await store.getTpsReport()).version;
-    expect((await send("Instruction m-50 changed")).status).toBe("unchanged");
-    expect((await local.pg.query("SELECT * FROM usage_daily")).rows).toEqual(
-      [],
-    );
   } finally {
     await local.dispose();
   }

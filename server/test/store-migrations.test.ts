@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { localStore, storeDatabase } from "./local-store";
-import { fixtureStore, seedUsers } from "./store-fixtures";
+import { fixtureStore, seedSample, seedUsers } from "./store-fixtures";
 import { checkRuntimeRole } from "../scripts/check-runtime-role";
 import { migrationUrl } from "../scripts/migrate";
 import { PGlite } from "@electric-sql/pglite";
@@ -8,7 +8,7 @@ import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
 import { generateDrizzleJson, generateMigration } from "drizzle-kit/api";
 import * as schema from "../src/store/schema";
-import { cp, mkdtemp, rm, appendFile } from "node:fs/promises";
+import { cp, mkdtemp, rm, appendFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -231,11 +231,16 @@ test("the runtime has only current grants, its guards hold, and later tables inh
       accepted_changes: "INSERT",
       assistant_disconnects: "DELETE,INSERT,SELECT",
       deleted_identities: "INSERT,SELECT",
+      guide_accounts: "SELECT",
+      guide_budget_lock: "",
+      guide_spend: "",
       identities: "INSERT,SELECT",
       instruction_card_versions: "INSERT,SELECT",
       instruction_cards: "INSERT,SELECT",
+      report_guides: "SELECT",
       sample_kinds: "INSERT,SELECT",
-      samples: "INSERT,SELECT,UPDATE",
+      sample_versions: "INSERT,SELECT",
+      samples: "INSERT,SELECT",
       save_requests: "INSERT,SELECT,UPDATE",
       store_config: "SELECT",
       stripe_events: "INSERT,SELECT,UPDATE",
@@ -244,6 +249,15 @@ test("the runtime has only current grants, its guards hold, and later tables inh
       users: "DELETE,INSERT,SELECT,UPDATE",
     };
     expect(await roles(pg)).toEqual([
+      {
+        rolname: "milton_guide_worker",
+        rolcanlogin: false,
+        rolsuper: false,
+        rolcreatedb: false,
+        rolcreaterole: false,
+        rolreplication: false,
+        rolbypassrls: false,
+      },
       {
         rolname: "milton_runtime",
         rolcanlogin: false,
@@ -260,11 +274,13 @@ test("the runtime has only current grants, its guards hold, and later tables inh
     expect(Object.keys(used)).toEqual(await publicTables(pg));
     expect(granted.objects).toEqual(
       [
-        ...Object.entries(used).map(([relname, privileges]) => ({
-          relname,
-          relkind: "r",
-          privileges,
-        })),
+        ...Object.entries(used)
+          .filter(([, privileges]) => privileges)
+          .map(([relname, privileges]) => ({
+            relname,
+            relkind: "r",
+            privileges,
+          })),
         {
           relname: "instruction_card_position",
           relkind: "S",
@@ -348,9 +364,9 @@ test("the runtime has only current grants, its guards hold, and later tables inh
       ).toMatchObject({ status: "saved" });
       await expect(
         pg.query(
-          "UPDATE samples SET context=context || '{\"medium\":\"chat\"}'::jsonb,context_revision=context_revision+1 WHERE user_id='runtime'",
+          "UPDATE sample_versions SET context=context || '{\"medium\":\"chat\"}'::jsonb,version=version+1 WHERE user_id='runtime'",
         ),
-      ).rejects.toThrow("sample_is_append_only");
+      ).rejects.toThrow("permission denied");
       expect((await store.getTpsReport()).text).toContain("Be concise.");
       // Owner-only statements are refused.
       for (const statement of [
@@ -377,19 +393,27 @@ test("the runtime has only current grants, its guards hold, and later tables inh
         await expect(pg.query(statement)).rejects.toThrow(
           /must be owner|permission denied/,
         );
-      // A write a trigger forbids is refused by that trigger, as for the owner.
-      const edit = "UPDATE samples SET body='Edited' WHERE user_id='runtime'";
-      await expect(pg.query(edit)).rejects.toThrow("sample_is_append_only");
+      // Runtime grants refuse mutation; the owner is still bound by immutability.
+      const edit =
+        "UPDATE sample_versions SET body='Edited' WHERE user_id='runtime'";
+      await expect(pg.query(edit)).rejects.toThrow("permission denied");
       await pg.exec("RESET ROLE");
-      await expect(pg.query(edit)).rejects.toThrow("sample_is_append_only");
+      await expect(pg.query(edit)).rejects.toThrow(
+        "sample_version_is_immutable",
+      );
       // The owner session is a superuser here, not a runtime member.
       expect(
         await checkRuntimeRole(storeDatabase(pg), "milton_app_fixture"),
       ).toBe(false);
       expect(
-        (await pg.query("SELECT body FROM samples WHERE user_id='runtime'"))
-          .rows,
-      ).toEqual([{ body: "Runtime sample body." }]);
+        (
+          await pg.query(
+            "SELECT body FROM sample_versions WHERE user_id='runtime'",
+          )
+        ).rows,
+      ).toEqual(
+        Array.from({ length: 3 }, () => ({ body: "Runtime sample body." })),
+      );
       // A table a later migration creates gets SELECT, INSERT and UPDATE by
       // default; DELETE only if that migration grants it.
       await pg.exec(
@@ -410,6 +434,15 @@ test("the runtime has only current grants, its guards hold, and later tables inh
 test("sample context upgrade preserves baseline writing and labels; guarded rollback restores it or refuses new metadata", async () => {
   const folder = new URL("../drizzle/", import.meta.url).pathname;
   const pg = new PGlite();
+  // This historical migration's rollback contract is tested at its own schema.
+  const contextFolder = await mkdtemp(join(tmpdir(), "milton-context-"));
+  await cp(folder, contextFolder, { recursive: true });
+  const journal = await Bun.file(folder + "meta/_journal.json").json();
+  journal.entries = journal.entries.slice(0, 2);
+  await writeFile(
+    join(contextFolder, "meta/_journal.json"),
+    JSON.stringify(journal),
+  );
   try {
     await pg.exec(
       "CREATE SCHEMA drizzle; CREATE TABLE drizzle.__drizzle_migrations(id serial PRIMARY KEY, hash text NOT NULL, created_at bigint)",
@@ -427,7 +460,7 @@ test("sample context upgrade preserves baseline writing and labels; guarded roll
     const down = await Bun.file(
       new URL("../scripts/sample-context-rollback.sql", import.meta.url),
     ).text();
-    await migrate(drizzle(pg), { migrationsFolder: folder });
+    await migrate(drizzle(pg), { migrationsFolder: contextFolder });
     expect(
       (
         await pg.query(
@@ -505,7 +538,7 @@ test("sample context upgrade preserves baseline writing and labels; guarded roll
         )
       ).rows,
     ).toEqual([{ hash: "fixture-baseline", created_at: 1793815543500 }]);
-    await migrate(drizzle(pg), { migrationsFolder: folder });
+    await migrate(drizzle(pg), { migrationsFolder: contextFolder });
     // Isolate refusal reasons so one unrepresentable row cannot mask another.
     const rollbackReady = await pg.dumpDataDir("none");
     for (const mutation of [
@@ -536,5 +569,285 @@ test("sample context upgrade preserves baseline writing and labels; guarded roll
     }
   } finally {
     await pg.close();
+    await rm(contextFolder, { recursive: true, force: true });
+  }
+});
+
+test("stable revision upgrade preserves known snapshots and provenance, refuses ambiguous lineage atomically", async () => {
+  const folder = new URL("../drizzle/", import.meta.url).pathname;
+  const pg = new PGlite();
+  try {
+    await pg.exec(
+      "CREATE SCHEMA drizzle; CREATE TABLE drizzle.__drizzle_migrations(id serial PRIMARY KEY,hash text NOT NULL,created_at bigint)",
+    );
+    await pg.exec(await Bun.file(folder + "0000_baseline.sql").text());
+    await pg.exec(await Bun.file(folder + "0001_sample_context.sql").text());
+    await pg.exec(`INSERT INTO drizzle.__drizzle_migrations(hash,created_at) VALUES ('fixture-context',1793901943500);
+      INSERT INTO users(id) VALUES ('upgrade'),('other');
+      INSERT INTO sample_kinds(user_id,id,report,label) VALUES ('upgrade','k','chat','note'),('upgrade','k2','chat','expert note'),('upgrade','mail','email','note'),('other','k','chat','note');
+      INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,created_at) VALUES
+      ('upgrade','root','chat','k','{"version":1,"summary":"Original summary."}',E'  Original body.\\r\\n\\n😀  ',' { "issuer": "fictional" } ','2026-01-01'),
+      ('upgrade','removed','chat','k','{"version":1,"summary":"Removed summary."}','Removed body.','{}','2026-01-01'),
+      ('upgrade','consolidated','chat','k','{"version":1,"summary":"Consolidated summary."}','Consolidated body.','{}','2026-01-01'),
+      ('upgrade','duplicate-target','chat','k','{"version":1,"summary":"Independent target."}','Same approved text.','{}','2026-01-01');
+      UPDATE samples SET retired_at='2026-01-02',retire_reason='replaced',retired_request_id='11111111-1111-4111-8111-111111111111' WHERE id='root';
+      INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,replaces_id,created_at)
+      VALUES ('upgrade','child','chat','k','{"version":1,"summary":"Child summary."}','Same approved text.','{"client":"second"}','root','2026-01-02');
+      UPDATE samples SET context='{"version":1,"summary":"Corrected context.","scope":{"unit":"excerpt","role":"closing"}}',kind_id='k2',context_revision=2 WHERE id='child';
+      UPDATE samples SET retired_at='2026-01-03',retire_reason='removed' WHERE id='removed';
+      UPDATE samples SET retired_at='2026-01-03',retire_reason='replaced' WHERE id='consolidated';`);
+    const before = (
+      await pg.query<
+        Record<string, unknown> & { id: string; created_at: Date }
+      >("SELECT * FROM samples ORDER BY user_id,id")
+    ).rows;
+    // Accepted-change evidence stays untouched, even when it uses old IDs/API.
+    await pg.query(
+      `INSERT INTO accepted_changes(user_id,request_id,operation,request_json,actor_json,transformation_json,affected_json,before_tps,after_tps,before_source,after_source)
+      VALUES ('upgrade',$1,'save_memo','{"sample_context":{"sample_id":"child"}}','{}','{}','[]',repeat('a',64),repeat('b',64),repeat('c',64),repeat('d',64))`,
+      [crypto.randomUUID()],
+    );
+    const evidence = (await pg.query("SELECT * FROM accepted_changes")).rows;
+    const baseline = await pg.dumpDataDir("none");
+    await migrate(drizzle(pg), { migrationsFolder: folder });
+    const identities = (
+      await pg.query<{ id: string; created_at: Date; client_json: string }>(
+        "SELECT id,created_at,client_json FROM samples WHERE user_id='upgrade' ORDER BY id",
+      )
+    ).rows;
+    expect(identities).toHaveLength(4);
+    expect(identities.find((s) => s.id === "root")).toEqual({
+      id: "root",
+      created_at: before.find((s) => s.id === "root")!.created_at,
+      client_json: ' { "issuer": "fictional" } ',
+    });
+    const versions = (
+      await pg.query<Record<string, unknown>>(
+        "SELECT * FROM sample_versions ORDER BY sample_id,version",
+      )
+    ).rows;
+    expect(versions).toHaveLength(before.length);
+    for (const old of before) {
+      const v = versions.find(
+        (v) => (v.provenance as Record<string, unknown>).legacy_id === old.id,
+      )!;
+      expect(v).toMatchObject({
+        body: old.body,
+        context: old.context,
+        kind_id: old.kind_id,
+        report: old.report,
+        actor_json: old.client_json,
+        provenance: {
+          legacy_context_revision: old.context_revision,
+          legacy_retire_reason: old.retire_reason,
+          legacy_retired_request_id: old.retired_request_id,
+        },
+      });
+      const provenance = v.provenance as Record<string, unknown>;
+      expect(new Date(provenance.legacy_created_at as string)).toEqual(
+        old.created_at,
+      );
+      expect(provenance.context_history).toContain("not reconstructed");
+    }
+    expect(versions.filter((v) => v.sample_id === "root")).toMatchObject([
+      { version: 1, retired: false },
+      { version: 2, retired: false, kind_id: "k2" },
+    ]);
+    expect(versions.find((v) => v.sample_id === "consolidated")).toMatchObject({
+      retired: true,
+      retire_reason: "replaced",
+    });
+    expect((await pg.query("SELECT * FROM accepted_changes")).rows).toEqual(
+      evidence,
+    );
+    const store = fixtureStore(storeDatabase(pg), "upgrade");
+    const current = (await store.readDocuments()).reports.find(
+      (r) => r.id === "chat",
+    )!;
+    expect(current.samples.map((s) => s.id).sort()).toEqual([
+      "duplicate-target",
+      "root",
+    ]);
+    expect(current.samples.find((s) => s.id === "root")).toMatchObject({
+      revision: 2,
+      body: "Same approved text.",
+      context: { summary: "Corrected context." },
+    });
+    expect(await store.exportTpsReport()).not.toContain("Original body.");
+    expect(await store.exportTpsReport()).not.toContain("Removed body.");
+    await pg.query("DELETE FROM users WHERE id='upgrade'");
+    expect((await pg.query("SELECT * FROM samples")).rows).toEqual([]);
+    expect((await pg.query("SELECT * FROM sample_versions")).rows).toEqual([]);
+    const retiredChain = await PGlite.create({ loadDataDir: baseline });
+    try {
+      await retiredChain.query(
+        "UPDATE samples SET retired_at='2026-01-04',retire_reason='removed' WHERE id='child'",
+      );
+      await migrate(drizzle(retiredChain), { migrationsFolder: folder });
+      const retiredStore = fixtureStore(storeDatabase(retiredChain), "upgrade");
+      expect(
+        (await retiredStore.readDocuments()).reports
+          .find((r) => r.id === "chat")!
+          .samples.map((s) => s.id),
+      ).toEqual(["duplicate-target"]);
+      expect(
+        (
+          await retiredChain.query(
+            "SELECT version,retired,retire_reason FROM sample_versions WHERE sample_id='root' ORDER BY version",
+          )
+        ).rows,
+      ).toEqual([
+        { version: 1, retired: false, retire_reason: null },
+        { version: 2, retired: true, retire_reason: "removed" },
+      ]);
+    } finally {
+      await retiredChain.close();
+    }
+    for (const [mutation, reason] of [
+      [
+        "UPDATE samples SET replaces_id='absent' WHERE id='child'",
+        "sample_lineage_invalid_parent",
+      ],
+      [
+        "UPDATE samples SET user_id='other' WHERE id='child'",
+        "sample_lineage_invalid_parent",
+      ],
+      [
+        "UPDATE samples SET report='email',kind_id='mail' WHERE id='child'",
+        "sample_lineage_invalid_parent",
+      ],
+      [
+        "UPDATE samples SET retired_at=NULL,retire_reason=NULL,retired_request_id=NULL WHERE id='root'",
+        "sample_lineage_invalid_parent",
+      ],
+      [
+        "INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,replaces_id) VALUES ('upgrade','branch','chat','k','{\"version\":1,\"summary\":\"Branch.\"}','Branch.','{}','root')",
+        "sample_lineage_branch",
+      ],
+      [
+        "UPDATE samples SET replaces_id='child' WHERE id='root'; UPDATE samples SET retired_at=now(),retire_reason='replaced' WHERE id='child'",
+        "sample_lineage_cycle",
+      ],
+    ]) {
+      const invalid = await PGlite.create({ loadDataDir: baseline });
+      try {
+        await invalid.exec(
+          "ALTER TABLE samples DISABLE TRIGGER ALL;" +
+            mutation +
+            ";ALTER TABLE samples ENABLE TRIGGER ALL",
+        );
+        const rows = (
+          await invalid.query("SELECT * FROM samples ORDER BY user_id,id")
+        ).rows;
+        await expect(
+          migrate(drizzle(invalid), { migrationsFolder: folder }),
+        ).rejects.toMatchObject({ cause: { message: reason } });
+        expect(
+          (await invalid.query("SELECT * FROM samples ORDER BY user_id,id"))
+            .rows,
+        ).toEqual(rows);
+        expect(await publicTables(invalid)).not.toContain("sample_versions");
+        expect(
+          (await invalid.query("SELECT * FROM drizzle.__drizzle_migrations"))
+            .rows,
+        ).toHaveLength(1);
+      } finally {
+        await invalid.close();
+      }
+    }
+  } finally {
+    await pg.close();
+  }
+}, 30000);
+
+test("guide migration preserves populated approved sources, defaults off and isolates worker capabilities", async () => {
+  const folder = new URL("../drizzle/", import.meta.url).pathname;
+  const scratch = await mkdtemp(join(tmpdir(), "milton-guides-"));
+  const pg = new PGlite();
+  try {
+    await cp(folder, scratch, { recursive: true });
+    const journal = await Bun.file(join(scratch, "meta/_journal.json")).json();
+    journal.entries = journal.entries.filter((e: { idx: number }) => e.idx < 3);
+    await writeFile(
+      join(scratch, "meta/_journal.json"),
+      JSON.stringify(journal),
+    );
+    await migrate(drizzle(pg), { migrationsFolder: scratch });
+    await seedUsers(pg, "upgrade");
+    await pg.exec(
+      "INSERT INTO sample_kinds(user_id,id,report,label) VALUES ('upgrade','kind','email','Fictional note')",
+    );
+    await seedSample(
+      pg,
+      "upgrade",
+      "example",
+      "email",
+      "kind",
+      { version: 1, summary: "Fictional note" },
+      "Collect the seedlings on Saturday.",
+    );
+    const before = (await pg.query("SELECT * FROM sample_versions")).rows;
+    await migrate(drizzle(pg), { migrationsFolder: folder });
+    await migrate(drizzle(pg), { migrationsFolder: folder });
+    expect((await pg.query("SELECT * FROM sample_versions")).rows).toEqual(
+      before,
+    );
+    expect((await pg.query("SELECT * FROM guide_accounts")).rows).toHaveLength(
+      0,
+    );
+    expect(
+      (await pg.query("SELECT source_version,status FROM report_guides")).rows,
+    ).toEqual([{ source_version: 1, status: "queued" }]);
+    const allowed = (
+      await pg.query<{ table_name: string; privilege_type: string }>(
+        "SELECT table_name,privilege_type FROM information_schema.role_table_grants WHERE grantee='milton_guide_worker' ORDER BY 1,2",
+      )
+    ).rows;
+    expect(
+      allowed.filter((r) =>
+        [
+          "identities",
+          "instruction_cards",
+          "instruction_card_versions",
+          "assistant_disconnects",
+        ].includes(r.table_name),
+      ),
+    ).toEqual([]);
+    expect(
+      allowed
+        .filter((r) => r.privilege_type !== "SELECT")
+        .map((r) => `${r.table_name}:${r.privilege_type}`),
+    ).toEqual([
+      "guide_budget_lock:UPDATE",
+      "guide_spend:INSERT",
+      "guide_spend:UPDATE",
+      "report_guides:UPDATE",
+    ]);
+    await pg.exec("SET ROLE milton_runtime");
+    await expect(
+      pg.query(
+        "INSERT INTO guide_accounts(user_id,enabled,epoch,opted_in_at,opt_in_reference) VALUES ('upgrade',true,1,now(),'fictional-consent')",
+      ),
+    ).rejects.toThrow("permission denied");
+    await expect(
+      pg.query(
+        "UPDATE guide_accounts SET enabled=true,epoch=epoch+1,opted_in_at=now(),opt_in_reference='fictional-consent'",
+      ),
+    ).rejects.toThrow("permission denied");
+    await pg.exec("RESET ROLE");
+    await pg.exec("SET ROLE milton_guide_worker");
+    await expect(
+      pg.query("UPDATE sample_versions SET body='changed'"),
+    ).rejects.toThrow("permission denied");
+    await expect(pg.query("SELECT * FROM identities")).rejects.toThrow(
+      "permission denied",
+    );
+    await expect(
+      pg.query("UPDATE guide_accounts SET enabled=true"),
+    ).rejects.toThrow("permission denied");
+    await pg.exec("RESET ROLE");
+  } finally {
+    await pg.close();
+    await rm(scratch, { recursive: true, force: true });
   }
 });

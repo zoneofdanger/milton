@@ -4,7 +4,12 @@ import type { SaveMemoInput } from "../src/store/compiled";
 import { expect, test } from "bun:test";
 import { sql } from "drizzle-orm";
 import { localStore } from "./local-store";
-import { fixtureStore, seedRule, seedUsers } from "./store-fixtures";
+import {
+  fixtureStore,
+  seedRule,
+  seedUsers,
+  seedSample,
+} from "./store-fixtures";
 import { coverSheet, reportEnvelope } from "../src/store/tools";
 
 test("rules are stored byte for byte, one card each", async () => {
@@ -657,7 +662,7 @@ test("reports print a heading, when line, the newest eight samples and rules; ca
     expect(
       (
         await local.pg.query(
-          "SELECT body,retired_at IS NULL AS live FROM samples WHERE user_id='reports' AND kind_id IN (SELECT id FROM sample_kinds WHERE label='follow-up') ORDER BY created_at,id",
+          "SELECT body,NOT retired AS live FROM sample_versions WHERE user_id='reports' AND kind_id IN (SELECT id FROM sample_kinds WHERE label='follow-up') ORDER BY created_at,sample_id",
         )
       ).rows,
     ).toEqual([
@@ -667,12 +672,12 @@ test("reports print a heading, when line, the newest eight samples and rules; ca
     ]);
     await expect(
       local.pg.query(
-        "UPDATE samples SET body='Edited' WHERE user_id='reports' AND body='Third follow-up'",
+        "UPDATE sample_versions SET body='Edited' WHERE user_id='reports' AND body='Third follow-up'",
       ),
-    ).rejects.toThrow("sample_is_append_only");
+    ).rejects.toThrow("sample_version_is_immutable");
     await expect(
-      local.pg.query("DELETE FROM samples WHERE user_id='reports'"),
-    ).rejects.toThrow("sample_is_append_only");
+      local.pg.query("DELETE FROM sample_versions WHERE user_id='reports'"),
+    ).rejects.toThrow("sample_version_is_immutable");
     // Every sample save is a fenced, receipted write with no model reservation.
     expect(
       (
@@ -855,7 +860,7 @@ test("a reused kind_id shares one kind; every sample stays and is served, and a 
     expect(
       (
         await f.local.pg.query(
-          "SELECT body FROM samples WHERE user_id='kinds-keep' AND retired_at IS NULL ORDER BY created_at",
+          "SELECT body FROM sample_versions WHERE user_id='kinds-keep' AND NOT retired ORDER BY created_at",
         )
       ).rows,
     ).toEqual([{ body: "One" }, { body: "Two" }, { body: "Three" }]);
@@ -864,90 +869,136 @@ test("a reused kind_id shares one kind; every sample stays and is served, and a 
   }
 });
 
-test("replaces retires the named sample as replaced and records lineage", async () => {
-  const f = await filingFixture("kinds-replace");
+test("sample revisions keep identity and immutable complete snapshots, replay and retire explicitly", async () => {
+  const f = await filingFixture("sample-revisions");
   try {
-    await f.save({
-      sample: {
-        report: "post",
-        new_kind: "launch post",
-        context: { version: 1 as const, summary: "first launch" },
-        text: "Old",
-      },
-    });
-    const old = (await f.report("post")).samples[0]!;
-    // Reads carry each sample's id and kind, without its body.
-    expect(
-      reportEnvelope(await f.store.readDocuments(), "post").samples,
-    ).toEqual([
-      {
-        id: old.id,
-        kind_id: old.kind_id,
-        kind: "launch post",
-        context: { version: 1 as const, summary: "first launch" },
-        date: old.date,
-        context_revision: 1,
-      },
-    ]);
-    const replace = {
-      sample: {
-        report: "post",
-        kind_id: old.kind_id,
-        replaces: old.id,
-        context: {
-          version: 1 as const,
-          summary: "second launch",
-          audience: { relationship: "public" },
-          purposes: ["announce"],
-          register: "plain",
-        },
-        text: "New",
-      },
+    const context = { version: 1 as const, summary: "First fictional launch." };
+    const first = {
+      report: "post" as const,
+      new_kind: "launch post",
+      context,
+      text: "  Old\r\n😀  ",
     };
-    // Obsolete top-level labels are refused before anything is read or written.
-    await expect(
-      f.save({ sample: { ...replace.sample, audience: "investor" } }),
-    ).rejects.toMatchObject({ code: "invalid_input" });
-    expect(await f.save(replace)).toMatchObject({
-      status: "saved",
-      samples_retired: [{ id: old.id, reason: "replaced" }],
-    });
-    // Approved dimensions are listed with the sample.
+    // Valid uppercase request UUIDs retain their exact bytes through save and replay.
+    const creationRequest = "A1C13E43-10F9-47CE-98D9-C8B23A102DC5";
     expect(
-      reportEnvelope(await f.store.readDocuments(), "post").samples[0],
-    ).toMatchObject({
+      await f.save({ sample: first, request_id: creationRequest }),
+    ).toMatchObject({ status: "saved", request_id: creationRequest });
+    const original = (await f.report("post")).samples[0]!;
+    const next = {
+      report: "post" as const,
+      kind_id: original.kind_id,
+      sample_id: original.id,
       context: {
         version: 1 as const,
-        summary: "second launch",
-        audience: { relationship: "public" },
+        summary: "Second fictional launch.",
         purposes: ["announce"],
-        register: "plain",
       },
+      text: "  New\r\n😀  ",
+    };
+    const input = {
+      text: "Revise the approved example.",
+      request_id: "9AA52382-1122-4F71-A44A-B4E848EA8347",
+      expected_version: (await f.store.getTpsReport()).version,
+      sample: next,
+    };
+    const saved = await f.store.saveMemo(input);
+    await expect(
+      f.local.pg.query(
+        "UPDATE samples SET created_at=now() WHERE user_id='sample-revisions'",
+      ),
+    ).rejects.toThrow("sample_identity_is_immutable");
+    await expect(
+      f.local.pg
+        .query(`INSERT INTO sample_versions(user_id,sample_id,version,report,kind_id,context,body,actor_json,request_id)
+      SELECT user_id,sample_id,4,report,kind_id,context,body,actor_json,request_id FROM sample_versions WHERE user_id='sample-revisions' AND version=2`),
+    ).rejects.toThrow("sample_version_conflict");
+
+    expect(saved).toMatchObject({
+      status: "saved",
+      request_id: input.request_id,
+    });
+    expect(saved.samples_retired).toBeUndefined();
+    expect(await f.store.saveMemo(input)).toEqual(saved);
+    expect(await f.save({ sample: next })).toMatchObject({
+      status: "unchanged",
+      version: saved.version,
     });
     expect(
-      (
-        await f.local.pg.query(
-          "SELECT body,replaces_id,retire_reason,retired_request_id IS NOT NULL AS receipted FROM samples WHERE user_id='kinds-replace' ORDER BY created_at",
-        )
-      ).rows,
-    ).toEqual([
-      {
-        body: "Old",
-        replaces_id: null,
-        retire_reason: "replaced",
-        receipted: true,
-      },
-      {
-        body: "New",
-        replaces_id: old.id,
-        retire_reason: null,
-        receipted: false,
-      },
-    ]);
-    expect(await f.save(replace)).toMatchObject({
+      await f.save({ ...input, request_id: crypto.randomUUID() }),
+    ).toMatchObject({ status: "conflict" });
+    const current = (await f.report("post")).samples[0]!;
+    expect(current).toMatchObject({
+      id: original.id,
+      revision: 2,
+      body: next.text,
+      context: next.context,
+      created_at: original.created_at,
+    });
+    expect(current.revised_at > original.revised_at).toBe(true);
+    expect(
+      reportEnvelope(await f.store.readDocuments(), "post").samples[0],
+    ).toMatchObject({ id: original.id, revision: 2 });
+    expect(await f.store.exportTpsReport()).toContain("  New\r\n> 😀  ");
+    expect(await f.store.exportTpsReport()).not.toContain("Old");
+    await expect(
+      f.save({ sample: { ...next, replaces: original.id } }),
+    ).rejects.toMatchObject({ code: "invalid_input" });
+    expect(
+      await f.save({
+        rules: [{ report: "cover", text: "Must not land." }],
+        sample: { ...next, sample_id: "missing" },
+      }),
+    ).toMatchObject({ status: "failed", error: "sample_conflict" });
+    expect((await f.store.readDocuments()).cover).not.toContain(
+      "Must not land.",
+    );
+    const foreign = fixtureStore(f.local.db, "foreign-revision");
+    await seedUsers(f.local.pg, "foreign-revision");
+    expect(
+      await foreign.saveMemo({
+        ...input,
+        expected_version: (await foreign.getTpsReport()).version,
+        sample: { ...next, new_kind: "launch", kind_id: undefined },
+      }),
+    ).toMatchObject({ status: "failed", error: "sample_conflict" });
+    expect(await f.save({ retire_samples: [original.id] })).toMatchObject({
+      status: "saved",
+      samples_retired: [{ id: original.id, reason: "removed" }],
+    });
+    expect(await f.save({ sample: next })).toMatchObject({
       status: "failed",
       error: "sample_conflict",
     });
+    expect((await f.report("post")).samples).toEqual([]);
+    expect(await f.store.exportTpsReport()).not.toContain("New");
+    const versions = (
+      await f.local.pg.query(
+        "SELECT version,body,context,retired,request_id FROM sample_versions WHERE user_id='sample-revisions' ORDER BY version",
+      )
+    ).rows;
+    expect(versions).toMatchObject([
+      {
+        version: 1,
+        body: first.text,
+        context,
+        retired: false,
+        request_id: creationRequest,
+      },
+      {
+        version: 2,
+        body: next.text,
+        context: next.context,
+        retired: false,
+        request_id: input.request_id,
+      },
+      { version: 3, body: next.text, context: next.context, retired: true },
+    ]);
+    await expect(
+      f.local.pg.query(
+        "UPDATE sample_versions SET body='Edited' WHERE user_id='sample-revisions'",
+      ),
+    ).rejects.toThrow("sample_version_is_immutable");
   } finally {
     await f.local.dispose();
   }
@@ -1154,50 +1205,107 @@ test("context guards preserve retirement and ranking uses purposes, dimensions, 
   const pg = local.pg;
   try {
     await seedUsers(pg, "ranked", "ranked-other");
-    await pg.exec(`INSERT INTO sample_kinds(user_id,id,report,label) VALUES ('ranked','k','email','note');
-      INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,created_at)
-        VALUES ('ranked','old','email','k','{"version":1,"summary":"A fictional budget decline."}','Budget numbers attached.','{}','2026-02-01');`);
-    // Unknown context keys and a correction combined with retirement are refused.
-    await pg.exec(`INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json)
-      VALUES ('ranked','new','email','k','{"version":1,"summary":"A fictional decline.","audience":{"relationship":"client"},"purposes":["follow up"],"register":"plain"}','No, thank you.','{}');`);
-    await expect(
-      pg.exec(`INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json)
-        VALUES ('ranked','bad','email','k','{"version":1,"summary":"A fictional note.","arbitrary":"x"}','Hello.','{}');`),
-    ).rejects.toThrow("samples_context");
-    await expect(
-      pg.exec(
-        `UPDATE samples SET retired_at=now(),retire_reason='removed',context=context || '{"audience":{"relationship":"boss"}}'::jsonb WHERE id='new'`,
-      ),
-    ).rejects.toThrow("sample_is_append_only");
-    // A report read serves eight: purposes, dimensions, full-text rank of the
-    // situation, then newest. Retired samples and other
-    // reports never compete.
-    const at = (day: number) => `'2026-01-0${day}T00:00:00Z'`;
-    await pg.exec(`INSERT INTO sample_kinds(user_id,id,report,label) VALUES ('ranked','c','chat','note');
-      INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,created_at) VALUES
-      ('ranked','a','email','k','{"version":1,"summary":"A fictional note.","audience":{"relationship":"client"},"purposes":["thank"]}','See you soon.','{}',${at(1)}),
-      ('ranked','b','email','k','{"version":1,"summary":"A fictional note.","audience":{"relationship":"client"},"purposes":["thank"]}','Budget numbers attached.','{}',${at(2)}),
-      ('ranked','c','email','k','{"version":1,"summary":"A fictional note.","audience":{"relationship":"boss"},"purposes":["thank"]}','Budget numbers attached.','{}',${at(3)}),
-      ('ranked','d','email','k','{"version":1,"summary":"A fictional note.","audience":{"relationship":"client"},"purposes":["decline"]}','No budget this year.','{}',${at(4)}),
-      ('ranked','f','email','k','{"version":1,"summary":"A fictional note."}','Budget.','{}',${at(5)}),
-      ('ranked','h','email','k','{"version":1,"summary":"A fictional note."}','Hello.','{}',${at(7)}),
-      ('ranked','g','email','k','{"version":1,"summary":"A fictional note.","audience":{"relationship":"other"},"purposes":["other"]}','Lunch?','{}',${at(8)}),
-      ('ranked','e','email','k','{"version":1,"summary":"A fictional note.","audience":{"relationship":"friend"},"purposes":["announce"]}','We moved house.','{}',${at(9)}),
-      ('ranked','x','chat','c','{"version":1,"summary":"A fictional note.","audience":{"relationship":"client"},"purposes":["thank"]}','Budget numbers attached.','{}',${at(9)});
-      INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,created_at,retired_at,retire_reason) VALUES
-      ('ranked','r','email','k','{"version":1,"summary":"A fictional note.","audience":{"relationship":"client"},"purposes":["thank"]}','Budget numbers attached.','{}',${at(6)},now(),'removed');`);
-    // This older kind cannot enter any of the default eight above. Empty,
-    // retired-only, other-report and foreign kinds must stay out of its index.
     await pg.exec(`INSERT INTO sample_kinds(user_id,id,report,label) VALUES
-      ('ranked','older','email','Quiet check-in'),
-      ('ranked','empty','email','Empty kind'),
-      ('ranked','retired-only','email','Retired kind'),
-      ('ranked-other','foreign','email','Foreign kind');
-      INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,created_at) VALUES
-      ('ranked','quiet','email','older','{"version":1,"summary":"A quiet check-in."}','Checking in.','{}','2025-01-01'),
-      ('ranked-other','foreign','email','foreign','{"version":1,"summary":"A fictional note."}','Foreign example.','{}','2025-01-01');
-      INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,retired_at,retire_reason) VALUES
-      ('ranked','retired-kind','email','retired-only','{"version":1,"summary":"A fictional note."}','Retired example.','{}',now(),'removed');`);
+      ('ranked','k','email','note'), ('ranked','c','chat','note'),
+      ('ranked','older','email','Quiet check-in'), ('ranked','empty','email','Empty kind'),
+      ('ranked','retired-only','email','Retired kind'), ('ranked-other','foreign','email','Foreign kind');`);
+    const context = { version: 1 as const, summary: "A fictional note." };
+    await seedSample(
+      pg,
+      "ranked",
+      "old",
+      "email",
+      "k",
+      { ...context, summary: "A fictional budget decline." },
+      "Budget numbers attached.",
+      { createdAt: "2026-02-01" },
+    );
+    await seedSample(
+      pg,
+      "ranked",
+      "new",
+      "email",
+      "k",
+      {
+        ...context,
+        summary: "A fictional decline.",
+        audience: { relationship: "client" },
+        purposes: ["follow up"],
+        register: "plain",
+      },
+      "No, thank you.",
+    );
+    await expect(
+      pg.query(
+        `INSERT INTO sample_versions(user_id,sample_id,version,report,kind_id,context,body,actor_json,request_id)
+      VALUES ('ranked','new',2,'email','k','{"version":1,"summary":"A fictional note.","arbitrary":"x"}','Hello.','{}',$1)`,
+        [crypto.randomUUID()],
+      ),
+    ).rejects.toThrow("sample_versions_context");
+    await expect(
+      pg.query(
+        `INSERT INTO sample_versions(user_id,sample_id,version,report,kind_id,context,body,actor_json,request_id,retired,retire_reason)
+      VALUES ('ranked','new',2,'email','k','{"version":1,"summary":"Changed while retiring."}','No, thank you.','{}',$1,true,'removed')`,
+        [crypto.randomUUID()],
+      ),
+    ).rejects.toThrow("sample_version_conflict");
+    // Explicit ranking tiers, followed by latest approval time; inactive versions never compete.
+    for (const [id, day, relationship, purposes, body] of [
+      ["a", 1, "client", ["thank"], "See you soon."],
+      ["b", 2, "client", ["thank"], "Budget numbers attached."],
+      ["c", 3, "boss", ["thank"], "Budget numbers attached."],
+      ["d", 4, "client", ["decline"], "No budget this year."],
+      ["f", 5, undefined, undefined, "Budget."],
+      ["h", 7, undefined, undefined, "Hello."],
+      ["g", 8, "other", ["other"], "Lunch?"],
+      ["e", 9, "friend", ["announce"], "We moved house."],
+      ["x", 9, "client", ["thank"], "Budget numbers attached."],
+      ["r", 6, "client", ["thank"], "Budget numbers attached."],
+    ] as const)
+      await seedSample(
+        pg,
+        "ranked",
+        id,
+        id === "x" ? "chat" : "email",
+        id === "x" ? "c" : "k",
+        {
+          ...context,
+          ...(relationship ? { audience: { relationship } } : {}),
+          ...(purposes ? { purposes: [...purposes] } : {}),
+        },
+        body,
+        { createdAt: `2026-01-0${day}`, retired: id === "r" },
+      );
+    await seedSample(
+      pg,
+      "ranked",
+      "quiet",
+      "email",
+      "older",
+      { ...context, summary: "A quiet check-in." },
+      "Checking in.",
+      { createdAt: "2025-01-01" },
+    );
+    await seedSample(
+      pg,
+      "ranked-other",
+      "foreign",
+      "email",
+      "foreign",
+      context,
+      "Foreign example.",
+      { createdAt: "2025-01-01" },
+    );
+    await seedSample(
+      pg,
+      "ranked",
+      "retired-kind",
+      "email",
+      "retired-only",
+      context,
+      "Retired example.",
+      { retired: true },
+    );
     const store = fixtureStore(local.db, "ranked", "assistant");
     const served = async (intent?: ReportIntent) => {
       const documents = await store.readDocuments(intent);
@@ -1334,6 +1442,16 @@ test("approved context replacement preserves writing, clears metadata, fences ol
     const outcome = await store.saveMemo(input);
     expect(outcome.status).toBe("saved");
     expect(outcome.version).not.toBe(before);
+    const latest = (await store.readDocuments()).reports.find(
+      (r) => r.id === "chat",
+    )!.samples[0]!;
+    expect(latest).toMatchObject({
+      id: original.id,
+      revision: 2,
+      created_at: original.created_at,
+      body,
+    });
+    expect(latest.revised_at > original.revised_at).toBe(true);
     expect((await store.readDocuments()).cover_rules).toEqual([
       "Lead with the question.",
     ]);
@@ -1353,7 +1471,7 @@ test("approved context replacement preserves writing, clears metadata, fences ol
     ).toMatchObject({ status: "conflict" });
     const row = (
       await local.pg.query(
-        "SELECT id,body,created_at,context,context_revision FROM samples WHERE id=$1",
+        "SELECT s.id,v.body,s.created_at,v.context,v.version AS revision FROM samples s JOIN sample_versions v ON v.user_id=s.user_id AND v.sample_id=s.id WHERE s.id=$1 ORDER BY v.version DESC LIMIT 1",
         [original.id],
       )
     ).rows[0] as Record<string, unknown>;
@@ -1361,7 +1479,7 @@ test("approved context replacement preserves writing, clears metadata, fences ol
       id: original.id,
       body,
       context: corrected,
-      context_revision: 2,
+      revision: 2,
     });
     expect(new Date(row.created_at as string).toISOString().slice(0, 10)).toBe(
       original.date,
@@ -1409,8 +1527,7 @@ test("approved context replacement preserves writing, clears metadata, fences ol
         )
       ).rows,
     ).toEqual([{ n: 9 }]);
-    // Reclassifying an active replacement keeps the old link and uses the new
-    // kind for a subsequent replacement; the retired ancestor never changes.
+    // Reclassification and later text revisions keep the identity and history.
     const parent = (await store.readDocuments()).reports.find(
       (r) => r.id === "chat",
     )!.samples[0]!;
@@ -1418,21 +1535,8 @@ test("approved context replacement preserves writing, clears metadata, fences ol
       await save({
         sample: {
           report: "chat",
-          kind_id: parent.kind_id,
-          context,
-          text: "A replacement request.",
-          replaces: parent.id,
-        },
-      }),
-    ).toMatchObject({ status: "saved" });
-    const child = (await store.readDocuments()).reports.find(
-      (r) => r.id === "chat",
-    )!.samples[0]!;
-    expect(
-      await save({
-        sample: {
-          report: "chat",
           new_kind: "Expert request",
+          sample_id: parent.id,
           context,
           text: "An expert request example.",
         },
@@ -1441,55 +1545,42 @@ test("approved context replacement preserves writing, clears metadata, fences ol
     const expert = (await store.readDocuments()).reports.find(
       (r) => r.id === "chat",
     )!.samples[0]!;
+    expect(expert).toMatchObject({
+      id: parent.id,
+      revision: 2,
+      created_at: parent.created_at,
+    });
     expect(
       await save({
-        sample_context: {
-          report: "chat",
-          sample_id: child.id,
-          kind_id: expert.kind_id,
+        sample: {
+          report: "document",
+          new_kind: "Expert memo",
+          sample_id: parent.id,
           context,
+          text: "A subsequent revision.",
         },
       }),
     ).toMatchObject({ status: "saved" });
     expect(
-      await save({
-        sample: {
-          report: "chat",
-          kind_id: parent.kind_id,
-          context,
-          text: "Wrong kind replacement.",
-          replaces: child.id,
-        },
-      }),
-    ).toMatchObject({ status: "failed", error: "sample_conflict" });
-    expect(
-      await save({
-        sample: {
-          report: "chat",
-          kind_id: expert.kind_id,
-          context,
-          text: "A subsequent replacement.",
-          replaces: child.id,
-        },
-      }),
-    ).toMatchObject({ status: "saved" });
-    const grandchild = (await store.readDocuments()).reports.find(
-      (r) => r.id === "chat",
-    )!.samples[0]!;
+      (await store.readDocuments()).reports.find((r) => r.id === "document")!
+        .samples[0],
+    ).toMatchObject({
+      id: parent.id,
+      revision: 3,
+      body: "A subsequent revision.",
+    });
     expect(
       (
         await local.pg.query(
-          "SELECT id,kind_id,replaces_id FROM samples WHERE id IN ($1,$2,$3) ORDER BY id",
-          [parent.id, child.id, grandchild.id],
+          "SELECT version,report FROM sample_versions WHERE sample_id=$1 ORDER BY version",
+          [parent.id],
         )
       ).rows,
-    ).toEqual(
-      [
-        { id: parent.id, kind_id: parent.kind_id, replaces_id: null },
-        { id: child.id, kind_id: expert.kind_id, replaces_id: parent.id },
-        { id: grandchild.id, kind_id: expert.kind_id, replaces_id: child.id },
-      ].sort((a, b) => a.id.localeCompare(b.id)),
-    );
+    ).toEqual([
+      { version: 1, report: "chat" },
+      { version: 2, report: "chat" },
+      { version: 3, report: "document" },
+    ]);
   } finally {
     await local.dispose();
   }
@@ -1669,85 +1760,77 @@ test("kind and contextual reads prefer concrete situations and fill sparse match
   }
 });
 
-test("reclassification refuses identical active writing in the target kind without changing any sample", async () => {
-  const local = await localStore();
+test("reclassification and matching text never merge stable identities; new examples dedup only complete matches", async () => {
+  const f = await filingFixture("sample-dedup");
   try {
-    await seedUsers(local.pg, "collision", "collision-other");
-    await local.pg
-      .exec(`INSERT INTO sample_kinds(user_id,id,report,label) VALUES
-      ('collision','source','chat','Source note'),
-      ('collision','target','chat','Target note'),
-      ('collision','mail','email','Mail note'),
-      ('collision-other','target','chat','Foreign note');
-      INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json) VALUES
-      ('collision','source-sample','chat','source','{"version":1,"summary":"A source note."}','Please check the example.','{}'),
-      ('collision','target-sample','chat','target','{"version":1,"summary":"A target note."}','Please check the example.','{}'),
-      ('collision','mail-sample','email','mail','{"version":1,"summary":"A mail note."}','Please check the example.','{}'),
-      ('collision-other','foreign-sample','chat','target','{"version":1,"summary":"A foreign note."}','Please check the example.','{}');`);
-    const store = fixtureStore(local.db, "collision");
-    const save = async (change: Partial<SaveMemoInput>) =>
-      store.saveMemo({
-        text: "Correct a fictional classification.",
-        request_id: crypto.randomUUID(),
-        expected_version: (await store.getTpsReport()).version,
-        ...change,
-      });
-    const correction = {
+    const context = { version: 1 as const, summary: "A fictional note." };
+    const example = {
       report: "chat" as const,
-      sample_id: "source-sample",
-      kind_id: "target",
-      context: { version: 1 as const, summary: "An approved corrected note." },
+      new_kind: "Source note",
+      context,
+      text: "Please check the example.",
     };
-    const before = (await store.getTpsReport()).version;
-    const samplesBefore = (
-      await local.pg.query("SELECT * FROM samples ORDER BY user_id,id")
-    ).rows;
-    expect(await save({ sample_context: correction })).toMatchObject({
-      status: "failed",
-      error: "sample_conflict",
-    });
-    expect((await store.getTpsReport()).version).toBe(before);
-    expect(
-      (await local.pg.query("SELECT * FROM samples ORDER BY user_id,id")).rows,
-    ).toEqual(samplesBefore);
-    // Retired duplicates no longer block; the same bytes in another account
-    // (even with the same kind ID) or report must not block either.
-    expect(await save({ retire_samples: ["target-sample"] })).toMatchObject({
+    expect(await f.save({ sample: example })).toMatchObject({
       status: "saved",
     });
-    expect(await save({ sample_context: correction })).toMatchObject({
-      status: "saved",
-    });
+    const original = (await f.report("chat")).samples[0]!;
     expect(
-      (
-        await local.pg.query(
-          "SELECT id,kind_id,context,context_revision,retire_reason FROM samples WHERE user_id='collision' ORDER BY id",
-        )
-      ).rows,
-    ).toEqual([
-      {
-        id: "mail-sample",
-        kind_id: "mail",
-        context: { version: 1, summary: "A mail note." },
-        context_revision: 1,
-        retire_reason: null,
-      },
-      {
-        id: "source-sample",
-        kind_id: "target",
-        context: correction.context,
-        context_revision: 2,
-        retire_reason: null,
-      },
-      {
-        id: "target-sample",
-        kind_id: "target",
-        context: { version: 1, summary: "A target note." },
-        context_revision: 1,
-        retire_reason: "removed",
-      },
-    ]);
+      await f.save({
+        sample: {
+          ...example,
+          context: { summary: context.summary, version: 1 },
+        },
+      }),
+    ).toMatchObject({ status: "unchanged" });
+    expect(
+      await f.save({
+        sample: { ...example, context: { ...context, medium: "slack" } },
+      }),
+    ).toMatchObject({ status: "saved" });
+    expect((await f.report("chat")).samples).toHaveLength(2);
+    expect(
+      await f.save({ sample: { ...example, new_kind: "Target note" } }),
+    ).toMatchObject({ status: "saved" });
+    const target = (await f.report("chat")).samples[0]!;
+    expect(
+      await f.save({
+        sample_context: {
+          report: "chat",
+          sample_id: original.id,
+          kind_id: target.kind_id,
+          context,
+        },
+      }),
+    ).toMatchObject({ status: "saved" });
+    expect((await f.report("chat")).samples).toHaveLength(3);
+    expect(
+      await f.save({
+        sample: {
+          ...example,
+          new_kind: undefined,
+          kind_id: target.kind_id,
+          sample_id: original.id,
+          text: "Different bytes.",
+        },
+      }),
+    ).toMatchObject({ status: "saved" });
+    expect(
+      await f.save({
+        sample: {
+          ...example,
+          new_kind: undefined,
+          kind_id: target.kind_id,
+          sample_id: original.id,
+        },
+      }),
+    ).toMatchObject({ status: "saved" });
+    expect((await f.report("chat")).samples.map((s) => s.id)).toContain(
+      target.id,
+    );
+    expect(
+      (await f.report("chat")).samples.find((s) => s.id === original.id),
+    ).toMatchObject({ revision: 4, body: example.text });
   } finally {
-    await local.dispose();
+    await f.local.dispose();
   }
 });

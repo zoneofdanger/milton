@@ -120,13 +120,13 @@ Files: `server/src/store/reports.ts`, `server/src/store/compiled.ts`.
 - The cover sheet prints a note explaining `Baseline:` whenever any active rule has that
   prefix.
 - `TPS.md` is the cover sheet plus every non-empty report, with all its active approved
-  samples in newest-first order (then descending id on a timestamp tie); removed and
-  replaced samples stay excluded.
+  samples in newest-first order (then descending id on a timestamp tie);
+  retired samples and superseded revisions stay excluded.
 - `is_empty` means no rules and no samples anywhere.
-- The version is a fingerprint of what any read can serve: a hash of the user, the cover
-  sheet, and each report's text (newest eight) with every active sample's ID, kind and context revision, so
+- The approved-source version is a fingerprint of the rules and samples: a hash of the user, the cover
+  sheet, and each report's text (newest eight) with every active sample's ID, kind and sample revision, so
   it is the same for every intent. The same cards and samples
-  always give the same version, and nothing assembled is stored.
+  always give the same version; derived guide text, status and enrollment do not affect it.
 - A client holding a version from before fingerprints (a revision hash) conflicts once
   on its next save, rereads, and saves on the new version.
 
@@ -183,22 +183,21 @@ not at all.
 - A new rule's description is its first non-blank line, cut to its byte cap, and
   descriptions are never printed.
 - Omitting a rule never removes it, and a no-op save returns `unchanged`.
-- Identical sample text for a kind files nothing; reclassification into a kind with identical active text refuses `sample_conflict` without changing rules, samples, context or version.
+- A new example identical in body, report/kind and complete context files nothing; different context can justify a separate identity, and revisions never merge identities.
 - Kinds match by label, ignoring case.
 - A `kind_id` must name a kind in the same report.
 - Each sample requires context `version: 1` and a useful one-line summary; optional purposes, medium, audience, interaction, whole/excerpt scope, language and register use fixed keys and bounded open vocabulary, leaving unknowns absent.
-- `sample_context` completely replaces approved context and optionally reclassifies one active sample within its report; omitted optional fields clear, while body, ID, date and lineage stay unchanged.
-- A distinct context/classification correction increments its own revision and fences all saves even outside the served eight; an identical replacement is unchanged and request retries replay deterministically.
-- Replacing a sample requires an active sample of the same kind at save time; later reclassification preserves tenant/sample lineage.
+- `sample_context` appends a complete approved revision, preserving body and stable ID and optionally reclassifying within the report; omitted optional context fields clear.
+- Every changed sample snapshot advances its revision and fences all saves even outside the served eight; identical revisions append nothing, and request retries replay deterministically.
+- `sample.sample_id` revises an active identity with complete approved body, context and report/kind; omission creates an identity plus revision one, and `replaces` is no longer accepted.
+- Approval date and all sample recency ordering use latest revision time, including metadata changes; original creation time and actor remain on the stable identity.
 - Each sample removal must name an active sample, listed once.
-- Every approved sample stays until the person replaces or removes it; a report read
-  serves the eight that best fit its intent. `samples_retired` reports what `replaces` and `retire_samples`
-  retired.
+- Every approved sample stays until explicit `retire_samples` appends an inactive complete snapshot; `samples_retired` reports retired stable IDs, while reads/app/exports show only latest active revisions with stable ID and revision metadata.
 
 ### Publish
 
 - Publishing checks the assembled documents against their size limits and answers with
-  their new fingerprint; it stores nothing beyond the cards and samples.
+  their new approved-source fingerprint; sample changes durably invalidate guides in the same transaction.
 - An audit row records the request, assistant, before and after versions, and affected
   cards.
 - The receipt is written last, once, with the outcome.
@@ -357,8 +356,9 @@ Files: `server/drizzle/`, `server/src/store/schema.ts`, `server/src/store/databa
 
 - Card versions must be sequential, and they cannot be changed or deleted while the card
   exists.
-- Kind identities and sample writing are immutable; active sample context/classification changes require a sequential context revision, and retirement is final.
-- Migration `0001_sample_context` preserves exact bodies, summaries and old labels in one JSONB object; its owner-only offline rollback refuses revised/unrepresentable context or incompatible lineage, and deployment requires the hosting runbook's closed-ingress coordinated cutover.
+- Kind identities, sample identities and complete revisions are immutable; database guards serialize sequential appends on the account lock, refuse changes to inactive samples, enforce tenant/classification references and cascade account hard deletion.
+- Forward migration `0002_sample_versions` maps linear replacement chains to root IDs, retains known snapshots and legacy provenance, keeps retired/consolidated leaves inactive, and leaves accepted-change evidence intact; unavailable context history is not invented.
+- Migration refuses cycles, branches and invalid tenant/report/lifecycle parents before destructive changes; this breaking schema/API upgrade requires an authorized closed-ingress cutover with compatible app/MCP code.
 - A receipt is written once with its outcome and cannot change.
 - Audit rows are immutable and must reference real card versions.
 - History has no size cap. History rows never shrink short of account deletion, so the
@@ -416,3 +416,25 @@ Files: `packages/theme/`, `server/scripts/`, `.github/workflows/checks.yml`.
 - `build.ts` builds the CSS with Vite and bundles the Cloud Run entry with Bun.
 - `dev.ts` serves the app on loopback and rebuilds the CSS on change.
 - CI runs types, tests, and formatting, holds no secrets, and does not deploy.
+
+## Optional report guides
+
+Files: `server/src/guides/`, `server/src/guide-worker.ts`, `server/scripts/guide-enrollment.ts`, `server/drizzle/0003_report_guides.sql`.
+
+- Operator-only enrollment defaults off and records explicit processing consent plus an epoch that advances on every off/on transition; app/MCP have no enrollment or consent write privilege.
+- Guide eligibility requires enrollment, an active account and an active subscription or an unexpired trial; missing/unknown billing is ineligible.
+- A sample-revision trigger advances report source versions and marks durable work in the sample transaction, including while disabled; classification moves invalidate both reports; rules and unchanged saves do not.
+- Zero active samples immediately clears the guide and fences old work; nonempty changes retain the last successful stale guide with source/current versions and a reason.
+- A finite sequential worker claims at most five reports per run with a 150-second lease, checks eligibility before provider processing/spend/activation and permits two attempts per source/epoch.
+- All active originals and complete approved classification/context go in one generation; rules, prior guides and retired revisions are excluded; input is never sampled, truncated or batched.
+- Versioned prompting treats samples as untrusted evidence; the fixed Anthropic Opus 5.5 adapter runs at low effort (thinking cannot be disabled; thinking blocks are ignored, never shown or stored), no tools, standard_only generation (omitted from token counting) and a 90-second combined provider deadline.
+- Fully serialized input has a conservative 180,000-byte preflight limit and must fit 200,000 provider-counted input tokens; output is limited to 16,000 tokens including thinking, eight evidence-linked tendencies and 6,000 rendered characters.
+- Each generation reserves the full 200,000 input + 16,000 output tokens at $4/M input and $20/M output; the singleton lock applies conservative $20/month, $5/day global and $2/day account UTC admission bounds, while unknown outcomes retain reservations.
+- Content-free spend entries outlive account deletion; recognized usage settles exactly once upward or downward under the same budget lock, even after output failure, without allowing deletion/churn to reset admission bounds; usage-derived costs are not invoiced costs or guarantees over unrelated usage/provider billing anomalies.
+- Completion locks the report row enrollment also updates before evaluating its source/epoch/lease fence in a fresh statement; valid insufficient evidence clears old text and retains its reason on exact-source reuse, while invalid/unfinished/refused output fails without a paid repair loop.
+- Expired claims recover within the attempt bound; oversize, budget-limited and exhausted work has terminal status rather than indefinite preparation.
+- Both MCP report envelopes carry the same optional self-contained derived guide block with status, freshness and precedence; off/ineligible responses keep their prior shape and the four tool inputs stay unchanged.
+- The report page shows read-only tendencies/applicability and plain queued/updating/unavailable reasons only while eligible, retaining the stale explanation; source versions remain in MCP metadata, evidence references validate without entering displayed text, and requested edit scope/explicit rules retain precedence.
+- Approved-source limits, expected_version and exports exclude derived guides and status; saves and reads never call a model.
+- Account deletion cascades guides/enrollment/work; late completion never creates an account or guide row; disabled completed results are reusable only for the exact current source.
+- The guide worker has a distinct database role, provider-only secret payload and no credential/signing-key access; auth receives no guide writing capability.

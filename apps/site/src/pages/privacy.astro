@@ -60,9 +60,10 @@ import SiteLayout from "../layouts/SiteLayout.astro";
     reports, samples included. Once an assistant has read them, its handling of
     that content is governed by that assistant’s own terms and privacy policy,
     not ours. Rules and samples are stored exactly as your assistant sends them;
-    Milton does not send them to an AI model. Milton does not collect your
-    assistant conversations. The service providers below process data to operate
-    Milton.
+    Ordinary saves and reads do not send them to an AI model. If you explicitly
+    opt into the private guide pilot, the background processing described below
+    sends approved samples to Anthropic. Milton does not collect your assistant
+    conversations. The service providers below process data to operate Milton.
   </p>
   <p>
     You can disconnect an assistant at any time from Connected assistants in the
@@ -81,6 +82,31 @@ import SiteLayout from "../layouts/SiteLayout.astro";
     leave future reports and current downloads, but remain in your internal
     history until account deletion. This does not erase copies an assistant
     already received.
+  </p>
+
+  <h2>Optional derived guides</h2>
+  <p>
+    Guides are off by default. For eligible accounts that explicitly opt in,
+    Milton sends every active approved sample in a report, with its approved
+    classification and context, to Anthropic to infer writing tendencies. Rules,
+    retired sample revisions and earlier guides are excluded. The resulting
+    guide is an interpretation, shown to you and the assistants you connect;
+    your approved writing stays unchanged. A stale guide can still reflect a
+    sample that was corrected or removed until its update succeeds. Removing all
+    active samples clears the guide immediately. Guides are excluded from your
+    download.
+  </p>
+  <p>
+    Anthropic’s standard API policy deletes inputs and outputs within 30 days,
+    with exceptions for policy enforcement, legal requirements and contractual
+    terms. This pilot does not promise zero data retention. See
+    <a href="https://privacy.claude.com/en/articles/7996866-how-long-do-you-store-my-organization-s-data">
+      Anthropic’s retention policy
+    </a>
+    . Disabling participation hides guides on future reads; it cannot retract
+    copies already received by an assistant. Completed guides may remain stored
+    while disabled, until account deletion. Milton keeps one current guide per
+    report, without a guide history archive.
   </p>
 
   <h2>Where it is kept</h2>
@@ -141,18 +167,18 @@ import SiteLayout from "../layouts/SiteLayout.astro";
     Choose Delete account in the Milton app. Deletion blocks account and
     assistant access. If you have a Stripe customer, deletion deletes it at
     Stripe first, which ends any subscription immediately, with no refund.
-    Milton then removes your rules, samples, internal memos and their history,
-    your cover sheet and reports, request receipts, accepted-change records,
-    usage counts and billing record, and the app’s sign-in sessions and
-    credentials. Cleanup then removes your sign-in profile, password hashes,
-    linked sign-in methods, browser sessions and assistant grants and tokens
-    from Milton’s sign-in service. If account cleanup is incomplete, the app
-    offers a retry; deletion is confirmed only when that cleanup finishes.
-    Unused password reset links stop working when account security changes or
-    deletion starts, as well as when they expire. Verification links expire
-    after one hour; remaining verification records become eligible for cleanup
-    one day after expiry and can remain until cleanup reaches them. The limited
-    records below remain.
+    Milton then removes your rules, samples, derived guides and pending guide
+    work, internal memos and their history, your cover sheet and reports,
+    request receipts, accepted-change records, usage counts and billing record,
+    and the app’s sign-in sessions and credentials. Cleanup then removes your
+    sign-in profile, password hashes, linked sign-in methods, browser sessions
+    and assistant grants and tokens from Milton’s sign-in service. If account
+    cleanup is incomplete, the app offers a retry; deletion is confirmed only
+    when that cleanup finishes. Unused password reset links stop working when
+    account security changes or deletion starts, as well as when they expire.
+    Verification links expire after one hour; remaining verification records
+    become eligible for cleanup one day after expiry and can remain until
+    cleanup reaches them. The limited records below remain.
   </p>
   <p>These records remain after deletion:</p>
   <ul>
@@ -173,6 +199,10 @@ import SiteLayout from "../layouts/SiteLayout.astro";
       Limited verified records linking earlier sign-in identities to Milton
       account IDs, to preserve account and deletion history, and a check that
       trial fingerprints remain consistent.
+    </li>
+    <li>
+      Content-free guide spending records (amount, time and a one-way account
+      fingerprint), so deletion cannot reset pilot spending limits.
     </li>
     <li>Stripe keeps past invoices and payment records.</li>
   </ul>

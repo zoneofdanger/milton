@@ -1,3 +1,4 @@
+import type { GuidePresentation } from "../guides/store";
 import {
   contextDetails,
   contextMatch,
@@ -64,14 +65,16 @@ export type Sample = {
   kind_id: string;
   kind: string;
   context: SampleContext;
-  context_revision: number;
+  revision: number;
   body: string;
   date: string;
   created_at: string;
+  revised_at: string;
   lexical_rank?: number;
   match?: { kind?: boolean; purposes: string[]; dimensions: string[] };
 };
 export type ReportDocument = {
+  guide?: GuidePresentation;
   id: ReportId;
   title: string;
   when: string;
@@ -129,9 +132,9 @@ const reportIndex = () => REPORTS.map((r) => ({ id: r.id, when: r.when }));
 export const SERVED_SAMPLES = 8;
 const newestFirst = (samples: Sample[]) =>
   samples.toSorted((a, b) =>
-    a.created_at === b.created_at
+    a.revised_at === b.revised_at
       ? b.id.localeCompare(a.id)
-      : a.created_at < b.created_at
+      : a.revised_at < b.revised_at
         ? 1
         : -1,
   );
@@ -202,9 +205,9 @@ function rankSamples(samples: Sample[], intent: ReportIntent) {
         b.match.purposes.length - a.match.purposes.length ||
         b.match.dimensions.length - a.match.dimensions.length ||
         (b.lexical_rank ?? 0) - (a.lexical_rank ?? 0) ||
-        (a.created_at < b.created_at
+        (a.revised_at < b.revised_at
           ? 1
-          : a.created_at > b.created_at
+          : a.revised_at > b.revised_at
             ? -1
             : a.id.localeCompare(b.id)),
     )

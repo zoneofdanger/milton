@@ -98,6 +98,8 @@ test("setup helps with pasted writing first, preserves optional guidance and ser
     "kind_id from the relevant report",
     "the approved context object",
     "same request_id and exact input",
+    "Omit sample_id for a new example",
+    "Revisions require the complete approved text, context and classification",
     "Reread after saved, unchanged or conflict",
     "If examples are skipped, help with the real draft without claiming to know the voice",
     "Draft or edit approval, praise or permission to send is not retention permission",
@@ -130,8 +132,9 @@ test("setup helps with pasted writing first, preserves optional guidance and ser
     context: { version: 1 as const, summary: "A fictional follow-up." },
     body: "Hi [name],\n\nFriday works. Thanks!",
     date: "2026-11-02",
+    revised_at: "2026-11-02T00:00:00.000000Z",
     created_at: "2026-11-02T00:00:00.000000Z",
-    context_revision: 1,
+    revision: 1,
   };
   const sampled = { ...assembleDocuments([], [sample]), version };
   expect(sampled.is_empty).toBe(false);
@@ -326,7 +329,7 @@ test("every create_memo shape the server instructions describe parses against sa
   says("No is final for that text");
   says("matching samples (opening, length, sign-off, forbidden phrases)");
   says("Preserve guidance; never block writing");
-  says("Sample bodies cannot be edited");
+  says("Revise samples with sample.sample_id");
   says("While on, file only the person's explicit standing rules");
   expect(storeInstructions).not.toContain("On yes, show");
   says("Pass the cover sheet version as expected_version and a new request_id");
@@ -357,14 +360,14 @@ test("every create_memo shape the server instructions describe parses against sa
         text: "A fictional email.",
       },
     });
-  says("On request: replaces/retire_samples");
-  says("context/kind changes need approved sample_context");
+  says("On request: revise via sample_id; retire_samples removes");
+  says("sample_context appends approved context/kind revisions");
   parses({
     ...envelope(),
     sample: {
       report: "email",
       kind_id: "fictional-kind",
-      replaces: "fictional-sample",
+      sample_id: "fictional-sample",
       context: { version: 1 as const, summary: "A fictional situation." },
       text: "A fictional email.",
     },
@@ -489,4 +492,35 @@ test("sample contexts are bounded, extensible and complete replacements have exp
       },
     }).success,
   ).toBe(false);
+});
+
+test("optional guide envelopes are self-contained and leave approved text and source fences intact", () => {
+  const documents = { ...assembleDocuments([], []), version: "a".repeat(64) };
+  const off = reportEnvelope(documents, "email");
+  expect(off).not.toHaveProperty("guide");
+  const guide = {
+    derived: true as const,
+    text: "Open with the practical update.",
+    source_version: 1,
+    current_version: 2,
+    stale: true,
+    status: "failed",
+    reason: "attempts_exhausted",
+    precedence:
+      "Explicit rules and requested edit scope win; preserve Baseline precedence. Stale guides may reflect removed samples.",
+  };
+  documents.reports[0]!.guide = guide;
+  const report = JSON.parse(JSON.stringify(reportEnvelope(documents, "email")));
+  const list = JSON.parse(JSON.stringify(reportList(documents)));
+  expect(report.guide).toEqual(list.reports[0].guide);
+  expect(report.guide).toMatchObject({
+    derived: true,
+    source_version: 1,
+    current_version: 2,
+    stale: true,
+  });
+  expect(report.guide.precedence).toContain("requested edit scope");
+  expect(report.text).toBe(off.text);
+  expect(report.version).toBe(off.version);
+  expect(storeInstructions.length).toBeLessThanOrEqual(4096);
 });

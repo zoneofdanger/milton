@@ -111,10 +111,12 @@ bun run db:migrate
 
 This command explicitly reads `.dev.vars`, unless a release sets `MILTON_OWNER_DATABASE_URL` to the owner connection, which it then uses instead. It does not use `.env.local` or an inherited `DATABASE_URL`. It checks the database name and owner role, then applies pending migrations and records them in the Drizzle journal. Rerunning it applies only migrations that have not completed. Run one migration process at a time.
 
-`drizzle/0000_baseline.sql` creates the 14 current tables defined in `src/store/schema.ts`,
+`drizzle/0000_baseline.sql` creates the original 14 tables,
 the instruction-position sequence, seven guard functions and triggers, the `milton_runtime`
 role and its grants/default privileges, and the singleton `store_config` seed. Authenticated native admission creates or finds the exact identity's account; a new account reads empty documents.
 Reads assemble cards and samples, take no lock, write nothing and invoke no model.
+Fresh installs also apply `0001_sample_context` and `0002_sample_versions`; the latter
+adds `sample_versions`, leaving 15 tables defined in `src/store/schema.ts`.
 
 The baseline requires an empty database. For the one known existing schema through 0033
 (34 journal entries, latest timestamp `1793779058436`), use the owner-only
@@ -257,7 +259,7 @@ Structured fields resolve against one snapshot and commit together or not at all
 (1-500): `before` is verbatim text identifying one rule, as for `exact_edits`, and
 `report` is a report or `cover`. A move to the rule's current place is a no-op; an
 unresolvable or repeated move, or a move of a rule the same save removes, fails with
-`move_conflict`. `sample` is `{report, kind_id | new_kind, context, text, replaces?}`.
+`move_conflict`. `sample` is `{report, kind_id | new_kind, context, text, sample_id?}`.
 Context is one strict object with `version: 1` and a useful one-line `summary`
 (1–200 characters). Optional known dimensions are `purposes` (1–8 distinct values),
 `medium`, `audience` (relationship, role, familiarity, expertise, group), `interaction`,
@@ -268,17 +270,21 @@ unknown keys, empty audience objects, duplicate purposes and invalid scope are r
 Use generic situations and roles, never private identities or project facts.
 `kind_id` must name a kind in that report. A `new_kind` whose label already exists
 there, in any letter case, files under that kind (including a kind whose samples are
-all retired, which reads no longer list); otherwise it creates one. `replaces` names an active sample of the
-same kind, retired as `replaced`. `retire_samples` lists 1-500 active sample IDs, retired as
-`removed`. Every approved sample stays active until one of those retires it; nothing
-retires a sample automatically. A `sample` whose text is byte-identical to an active
-sample of the same kind inserts nothing (a `replaces` naming another sample still
-retires it); a
-save that then changes nothing returns `unchanged` and charges nothing.
+all retired, which reads no longer list); otherwise it creates one. Omit `sample_id`
+for a new example; supply the stable ID of an active sample to append a complete
+approved revision of its text, context and report/kind. `replaces` is no longer accepted.
+`retire_samples` lists 1-500 active stable sample IDs, each retired by appending an
+inactive snapshot with reason `removed`. Revision is distinct from retirement;
+nothing retires a sample automatically. A new example inserts nothing only when an
+active example has identical body bytes, report/kind and complete JSON context.
+Different context can justify a separate example. Revisions compare only to their
+own identity and never merge identities, even when another example matches.
+An identical revision appends nothing; a save that changes nothing returns
+`unchanged` and charges nothing.
 Sample errors fail with `sample_conflict`. A `saved` result carries
 `samples_retired: [{id, reason}]` whenever a sample was retired, and replay returns
 it unchanged. A report read serves up to eight active samples (see "Sample context and ranking"), and report reads list each served sample as `{id, kind_id, kind, context,
-context_revision, date, match?}` in served order;
+revision, date, match?}` in served order;
 kind labels never appear in report text. The separate `kinds` index contains
 `{kind_id, kind}` for every distinct personal kind with an active sample in this report,
 in ascending `kind_id` order. It is computed from the full tenant/report snapshot before
@@ -290,13 +296,12 @@ to request an older otherwise unserved kind or to reuse it on a sample save.
 after approval of the complete replacement context and any classification change.
 Omitting optional context dimensions deliberately clears them; omitting `kind_id`
 keeps its classification. A supplied kind must already belong to that person's report.
-Body, ID, exact creation timestamp and replacement lineage stay unchanged. A distinct
-correction increments `context_revision` and the account version, even outside the
-served eight. Identical context/classification is `unchanged`; retries use the original
-request ID and input. Foreign, retired or wrong-report samples fail with `sample_conflict`.
-Reclassification also refuses `sample_conflict` if another active sample in the target
-kind has byte-identical text. Refusal preserves every sample, context and the account
-version; neither sample is merged or retired. Retired duplicates do not block a move.
+Body, stable ID and original creation timestamp stay unchanged. A distinct correction
+appends a complete immutable sample revision and advances its approval time, recency
+and account version, even outside the served eight. Identical context/classification
+is `unchanged`; retries use the exact original request ID and input. Foreign, retired
+or wrong-report samples fail with `sample_conflict`. Reclassification can leave
+identical active examples in one kind without merging or retiring either identity.
 Correction and rule changes are atomic together on success or refusal.
 
 The assistant offers setup once when the whole account is empty;
@@ -470,14 +475,16 @@ A report is the unit of the assembled output. Every instruction-card version has
 for a rule that applies to all writing. Card identities keep their insertion order;
 moving a card appends a version without changing its identity or position.
 
-Approved samples live in `samples`: report, a reference to an immutable sample kind,
-validated JSONB `context`, its `context_revision`, the exact `body`, filing client and
-retirement fields. A guard preserves writing, identity, date, attribution and lineage;
-only an active sample's context/classification can change with the next revision,
-or its retirement fields can be set once. Rows leave only with their account.
-Filing a sample through `create_memo` with the `sample` field
-makes no model call and reserves no budget. Every approved sample stays active until
-the person replaces or removes it; a report read serves eight.
+`samples` holds each stable tenant-scoped identity, original `created_at` and filing
+`client_json`. `sample_versions` holds complete numbered snapshots: report/kind,
+validated JSONB `context`, exact `body`, retirement state/reason, revision timestamp,
+actor, request ID and backfill provenance. The latest revision alone is current;
+reads select it before filtering out retirement. Guards keep identities and versions
+immutable and permit sequential appends only while the account and sample are active.
+Account hard deletion cascades both identities and revisions. Filing through
+`create_memo` makes no model call and reserves no budget. Every example stays active
+until explicit retirement; a report read serves eight. Body or metadata revisions
+advance approval date and all sample recency ordering; original creation stays separate.
 
 Assembly is deterministic and runs on read. Every rule prints as one bullet: `- `
 followed by its stored body, with one stored leading `- ` (as the retired compiler
@@ -500,7 +507,7 @@ database connection, where the read before 0031 opened a connection and a transa
 with the account lock and wrote a lagging snapshot. The version every
 read returns and every save fences on is a fingerprint of what any read can serve:
 SHA-256 of the user ID, the cover sheet, and each report's text (its newest eight) with
-every active sample's ID, kind ID, kind label and context revision, so
+every active sample's stable ID, kind ID, kind label and revision, so
 it is the same for every intent. The same cards and samples always give the same version, an empty
 account included, and a save that changes what is served changes it. Versions from
 before 0031 hashed a stored revision, so a client holding one conflicts once on its
@@ -525,14 +532,16 @@ A move changes the report a rule prints in, so it changes the version. A moved c
 keeps its position.
 
 `sample_kinds` holds immutable kinds: `(user_id, id, report, label)`, labels unique
-per report by `lower(label)`, rows removable only with their account. `samples`
-references its kind through `(user_id, kind_id, report)`, so a sample's report is its
-kind's report by construction. `replaces_id` references `(user_id, id)` so an approved
-reclassification keeps the link; the insertion guard and save require the same kind
-at replacement time. Retirement sets `retired_at`,
-`retire_reason` (`replaced`, `removed`, `evicted`; current saves no longer evict, and
-`evicted` stays for rows and receipts written before) and the retiring `request_id`
-once, together; retired samples cannot be corrected.
+per report by `lower(label)`, rows removable only with their account. Each
+`sample_versions` snapshot references its identity through `(user_id, sample_id)`
+and its kind through `(user_id, kind_id, report)`, so classification stays within the
+tenant and the kind's report. Full `sample` revisions can correct report/kind together;
+`sample_context` reclassifies within the current report. Retirement appends an
+inactive copy of the exact current body/context/classification, with the retiring
+`request_id` and revision timestamp. Retired identities cannot be revised or revived.
+Current retirement uses `removed`; backfilled retired snapshots and old receipts
+can retain `replaced` or `evicted`. Old replacement IDs and retirement dates/reasons
+remain in backfill provenance rather than a current replacement-link column.
 
 ### Trial transition groundwork (0012, inactive)
 
@@ -609,7 +618,7 @@ without version or summary. An invalid, foreign or wrong-report kind returns
 One snapshot reads the card heads and active tenant samples and computes `ts_rank`
 against the stored search vector of summary and body, matching any situation word.
 Selection within the requested report orders by requested-kind match, purpose overlap
-count, exact supplied scalar dimension match count, full-text rank, timestamp descending,
+count, exact supplied scalar dimension match count, full-text rank, latest revision timestamp descending,
 then ID ascending. These are ordered tiers, without speculative weights. Up to eight
 slots fill from broader examples when exact matches are sparse. `match` lists kind
 match (when requested), overlapping purposes and matching dimension paths; `selection`
@@ -619,33 +628,37 @@ The complete TPS.md export includes all active samples and useful approved conte
 
 A missing/malformed intent returns `invalid_input` before the store is read; only the
 missing-intent refusal recommends reconnecting a client without that field. Context
-representation version describes the format; per-sample context revision tracks corrections
-and fences account saves, including edits outside the served eight.
+representation version describes the context format; each sample revision is a complete
+body/context/classification/lifecycle snapshot and fences account saves, including
+edits outside the served eight.
 
 Migration `0001_sample_context` converts the old summary and audience/purpose/register
-labels exactly into this one JSONB object, with revision 1 and no invented metadata.
-The historical baseline remains unchanged. No dual-write legacy representation remains.
-This schema is incompatible with the old runtime. Follow the hosting runbook's coordinated
-cutover: stage matching app/MCP images with no traffic, close ingress, verify refusal and
-drain at least 180 seconds, snapshot and record table hashes, apply the owner migration,
-verify preservation and both matching runtimes, select them, then reopen ingress and
-verify canonical reads. No old runtime may serve the new schema.
+labels exactly into one JSONB context without inventing metadata. Forward migration
+`0002_sample_versions` then maps linear replacement chains to root stable IDs and
+preserves each known snapshot's body, context, classification and actor bytes. Legacy
+IDs, creation/retirement dates, reasons, requests and context counters remain in revision
+provenance; accepted-change evidence stays unchanged. Retired leaves remain inactive,
+including consolidation without a successor. Earlier overwritten contexts and correction
+times cannot be reconstructed and are explicitly marked unknown; backfilled revisions
+count known snapshots, dated by known creation or leaf retirement times. Cycles,
+branches and invalid tenant/report/lifecycle parents abort transactionally before
+destructive changes. Applied baseline/context migrations remain unchanged.
 
-`server/scripts/sample-context-rollback.sql` is an owner-only offline transaction:
-with ingress closed and requests drained, snapshot first, then run it only before
-any revised or unrepresentable context or incompatible lineage exists. It refuses such
-data rather than discarding it; an error requires `ROLLBACK` on that connection. A
-successful rollback restores the baseline schema/guard and removes only this migration's
-journal row; select both old runtimes before reopening. After the refusal boundary,
-keep the compatible runtime and fix forward, or explicitly approve restoration of the
-pre-cutover snapshot and the loss of subsequent writes. Revision traffic alone cannot
-roll this release back. This plan is not a production action.
+The revision schema and API are incompatible with old runtimes. A separately authorized
+cutover must close reads/writes, drain old instances, snapshot, apply the owner migration,
+verify preservation and matching app/MCP code, then reopen ingress and verify canonical
+reads. Follow [the hosting runbook](deploy/README.md#pending-sample-revision-schemaapi-cutover).
+No old runtime may serve the new schema. Reconnect assistants and reread current IDs
+and the account version before saving. No compatibility layer or new rollback artifact
+is supplied; `scripts/sample-context-rollback.sql` applies only to the historical
+context schema before `0002`, and cannot roll back the revision schema. Implementation
+and local fictional rehearsal do not authorize a production migration or deployment.
 
 ### Limits and save invariants
 
 The byte and attempted-call caps above apply alongside 1-100 rules and up to 500
 exact edits, moves and sample removals per save, with a 256 KiB request bound.
-`samples_body` allows 131072 bytes, `accepted_change_shape` allows 1,100 affected cards,
+`sample_versions_body` allows 131072 bytes, `accepted_change_shape` allows 1,100 affected cards,
 and `save_request_result` allows 65,536 bytes. The five stored limits are `body_bytes`,
 `description_bytes`, `reason_bytes`, `report_body_bytes` and `daily_calls`.
 There is no card count, daily save allowance or lifetime history cap.
@@ -669,5 +682,11 @@ Run `MILTON_SERVICE=app` or `mcp` with the corresponding private `DATABASE_URL` 
 `bun --no-env-file server/scripts/check-runtime-role.ts`. This audits actual role
 membership/ownership, DDL/TEMP, native table and lifecycle privileges. Inspect PUBLIC
 views/functions/default privileges against the real retained schema before cutover too.
+
+App and MCP read `sample_versions` and the guide state in `guide_accounts` and
+`report_guides`; MCP appends to `samples` and `sample_versions` but cannot update
+either, because migration `0002` makes every sample change an insert. Neither runtime
+writes guide tables or reads `guide_spend`; the separate `milton_guide_worker`
+capability is described in [the guide pilot runbook](deploy/guides.md).
 
 Native auth mail now uses committed encrypted jobs/no-op receipts before generic public acceptance. No provider call occurs during an auth request; the separately selected auth-only `node deliver.js --apply` command drains bounded leased work using the original native target and exact message. App/MCP receive no mail payload/table/function privileges. [Auth operations](../apps/auth/README.md#bounded-mail-delivery-and-retention) describe uncertain503 recovery, retry/retention bounds, key recovery and disabled job preparation. Native migrations run through006. Old inline-send writers remain unsafe for public fallback; select a compatible fixed self-hosted revision/forward fix. Retained disabled managed sign-in schema/data/backups require separately selected cleanup and are disclosed in the candidate privacy/intake wording.

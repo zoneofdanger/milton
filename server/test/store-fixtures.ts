@@ -1,4 +1,5 @@
 import type { PGlite } from "@electric-sql/pglite";
+import type { SampleContext } from "../src/store/sample-context";
 import type { ReportId } from "../src/store/reports";
 import { compiledMemos } from "../src/store/compiled";
 import type { StoreDatabase, StoreSession } from "../src/store/database";
@@ -64,3 +65,40 @@ export const seedRule = async (
     ],
   );
 };
+
+// An approved sample's identity plus immutable snapshots, with fictional provenance.
+export async function seedSample(
+  pg: PGlite,
+  userId: string,
+  id: string,
+  report: ReportId,
+  kindId: string,
+  context: SampleContext,
+  body: string,
+  options: { createdAt?: string; retired?: boolean } = {},
+) {
+  await pg.query(
+    "INSERT INTO samples(user_id,id,client_json,created_at) VALUES ($1,$2,'{}',coalesce($3::timestamptz,clock_timestamp()))",
+    [userId, id, options.createdAt ?? null],
+  );
+  await pg.query(
+    `INSERT INTO sample_versions(user_id,sample_id,version,report,kind_id,context,body,actor_json,request_id,created_at)
+    VALUES ($1,$2,1,$3,$4,$5::jsonb,$6,'{}',$7,coalesce($8::timestamptz,clock_timestamp()))`,
+    [
+      userId,
+      id,
+      report,
+      kindId,
+      JSON.stringify(context),
+      body,
+      crypto.randomUUID(),
+      options.createdAt ?? null,
+    ],
+  );
+  if (options.retired)
+    await pg.query(
+      `INSERT INTO sample_versions(user_id,sample_id,version,report,kind_id,context,body,retired,retire_reason,actor_json,request_id)
+      SELECT user_id,sample_id,2,report,kind_id,context,body,true,'removed','{}',$3 FROM sample_versions WHERE user_id=$1 AND sample_id=$2`,
+      [userId, id, crypto.randomUUID()],
+    );
+}

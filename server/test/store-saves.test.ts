@@ -10,6 +10,7 @@ import {
   fixtureStore,
   insideTransactions,
   seedRule,
+  seedSample,
   seedUsers,
 } from "./store-fixtures";
 
@@ -686,10 +687,17 @@ test("Postgres enforces separate UTF-8 field caps and no card count", async () =
     const hex = (c: string) => `repeat('${c}',64)`;
     await local.pg
       .exec(`INSERT INTO sample_kinds(user_id,id,report,label) VALUES ('sample','k','email','long');
-      INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json)
-      VALUES ('sample','s','email','k','{"version":1,"summary":"A long sample."}',repeat('x',131072),'{}');
       INSERT INTO save_requests(user_id,request_id,input_hash,source_hash,result_json)
       VALUES ('receipt','${crypto.randomUUID()}',${hex("a")},${hex("c")},jsonb_build_object('status','saved','pad',repeat('x',60000)));`);
+    await seedSample(
+      local.pg,
+      "sample",
+      "s",
+      "email",
+      "k",
+      { version: 1, summary: "A long sample." },
+      "x".repeat(131072),
+    );
     // A save that changes 101 cards: 100 rules, then 100 edits and one more.
     const change = fixtureStore(local.db, "change", "assistant");
     const changeSave = async (
@@ -1142,6 +1150,600 @@ test("a Baseline: rule must be a setup rule byte for byte in its report, filed n
     const own = 'Sign off with "Cheers," and my first name.';
     expect((await edit(own)).status).toBe("saved");
     expect((await cardHeads(local.db, "baseline")).at(-1)!.body).toBe(own);
+  } finally {
+    await local.dispose();
+  }
+});
+
+test("opt-in report guides fence lifecycle work without changing approved sources", async () => {
+  const { setGuideEnrollment } = await import("../src/guides/store");
+  const { runGuideWorker } = await import("../src/guides/worker");
+  const { reportEnvelope, reportList } = await import("../src/store/tools");
+  const local = await localStore();
+  try {
+    await seedUsers(local.pg, "guide-a", "guide-b");
+    await local.pg
+      .exec(`INSERT INTO sample_kinds(user_id,id,report,label) VALUES ('guide-a','kind','email','Fictional note');
+      INSERT INTO trial_accounts(user_id,started_at,subscription_status,trial_end) VALUES
+      ('guide-a',now(),'trialing',now()+interval '1 day')`);
+    for (let i = 0; i < 10; i++)
+      await seedSample(
+        local.pg,
+        "guide-a",
+        `sample-${i}`,
+        "email",
+        "kind",
+        {
+          version: 1,
+          summary: `Fictional garden note ${i}`,
+          scope: { unit: "whole" },
+        },
+        `The seedlings are ready ${i}. Collect them on Saturday.`,
+      );
+    const store = fixtureStore(local.db, "guide-a");
+    const original = await store.readDocuments();
+    const exported = await store.exportTpsReport();
+    expect(original.reports[0]!.guide).toBeUndefined();
+    let seen = 0;
+    let during: (() => Promise<void>) | undefined;
+    let insufficient = false;
+    const provider = {
+      async count(request: { messages: { content: string }[] }) {
+        const input = JSON.parse(request.messages[0]!.content);
+        expect(input.samples).toHaveLength(10);
+        expect(
+          input.samples.every(
+            (s: { revision: number; context: unknown; kind: string }) =>
+              s.revision === 1 && s.context && s.kind,
+          ),
+        ).toBe(true);
+        expect(Object.keys(input).sort()).toEqual(["report", "samples"]);
+        seen++;
+        return 1000;
+      },
+      async generate() {
+        await during?.();
+        return {
+          stop_reason: "end_turn",
+          usage: { input_tokens: 1000, output_tokens: 100 },
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                outcome: insufficient ? "insufficient_evidence" : "guide",
+                tendencies: insufficient
+                  ? []
+                  : [
+                      {
+                        observation: "Open with the practical update.",
+                        context: "Short collection notes.",
+                        evidence: [{ sample_id: "sample-0", revision: 1 }],
+                      },
+                    ],
+              }),
+            },
+          ],
+        };
+      },
+    };
+    expect(await runGuideWorker(local.db, provider, { maxReports: 1 })).toBe(0);
+    await setGuideEnrollment(local.db, "guide-a", {
+      enabled: true,
+      optInReference: "fictional-consent",
+    });
+    expect(await runGuideWorker(local.db, provider, { maxReports: 1 })).toBe(1);
+    let docs = await store.readDocuments();
+    const guide = docs.reports[0]!.guide!;
+    expect(guide.text).toContain("Open with the practical update.");
+    expect(guide.stale).toBe(false);
+    expect(docs.version).toBe(original.version);
+    expect(await store.exportTpsReport()).toBe(exported);
+    expect(reportEnvelope(docs, "email").guide).toEqual(
+      reportList(docs).reports[0]!.guide,
+    );
+    expect(
+      (await fixtureStore(local.db, "guide-b").readDocuments()).reports[0]!
+        .guide,
+    ).toBeUndefined();
+    const rule = await store.saveMemo({
+      text: "Fictional rule",
+      rules: [{ report: "email", text: "Use plain words." }],
+      expected_version: docs.version,
+      request_id: crypto.randomUUID(),
+    });
+    expect(rule.status).toBe("saved");
+    expect(await runGuideWorker(local.db, provider, { maxReports: 1 })).toBe(0);
+    docs = await store.readDocuments();
+    const context = {
+      version: 1 as const,
+      summary: "Fictional revised context",
+    };
+    expect(
+      (
+        await store.saveMemo({
+          text: "Correct context",
+          sample_context: { report: "email", sample_id: "sample-0", context },
+          expected_version: docs.version,
+          request_id: crypto.randomUUID(),
+        })
+      ).status,
+    ).toBe("saved");
+    docs = await store.readDocuments();
+    expect(docs.reports[0]!.guide).toMatchObject({
+      stale: true,
+      status: "queued",
+      text: guide.text,
+    });
+    const version = docs.version;
+    // A stale completion after off/on is fenced, even if source is unchanged.
+    provider.count = async () => 1000;
+    during = async () => {
+      await setGuideEnrollment(local.db, "guide-a", { enabled: false });
+      expect((await store.readDocuments()).reports[0]!.guide).toBeUndefined();
+      await setGuideEnrollment(local.db, "guide-a", {
+        enabled: true,
+        optInReference: "fictional-reconsent",
+      });
+    };
+    await runGuideWorker(local.db, provider, { maxReports: 1 });
+    docs = await store.readDocuments();
+    expect(docs.reports[0]!.guide).toMatchObject({
+      stale: true,
+      text: guide.text,
+      status: "queued",
+    });
+    expect(docs.version).toBe(version);
+    during = undefined;
+    insufficient = true;
+    await runGuideWorker(local.db, provider, { maxReports: 1 });
+    expect((await store.readDocuments()).reports[0]!.guide).toMatchObject({
+      text: null,
+      status: "insufficient",
+      stale: false,
+    });
+    // Exact-source no-guide reuse keeps its successful terminal reason.
+    await setGuideEnrollment(local.db, "guide-a", { enabled: false });
+    await setGuideEnrollment(local.db, "guide-a", {
+      enabled: true,
+      optInReference: "fictional-reconsent",
+    });
+    expect((await store.readDocuments()).reports[0]!.guide).toMatchObject({
+      text: null,
+      status: "insufficient",
+      reason: "insufficient_evidence",
+      stale: false,
+    });
+    // Billing loss hides guides and prevents even token counting.
+    await local.pg.exec(
+      "UPDATE trial_accounts SET subscription_status='unknown' WHERE user_id='guide-a'",
+    );
+    expect((await store.readDocuments()).reports[0]!.guide).toBeUndefined();
+    expect(await runGuideWorker(local.db, provider, { maxReports: 1 })).toBe(0);
+    expect(seen).toBe(1);
+    await local.pg.exec(
+      "UPDATE trial_accounts SET subscription_status='active' WHERE user_id='guide-a'",
+    );
+    docs = await store.readDocuments();
+    expect(
+      (
+        await store.saveMemo({
+          text: "Remove fictional samples",
+          retire_samples: docs.reports[0]!.samples.map((s) => s.id),
+          expected_version: docs.version,
+          request_id: crypto.randomUUID(),
+        })
+      ).status,
+    ).toBe("saved");
+    docs = await store.readDocuments();
+    // Remaining samples beyond the served eight must also be removed.
+    expect(
+      (
+        await store.saveMemo({
+          text: "Remove remaining fictional samples",
+          retire_samples: docs.reports[0]!.samples.map((s) => s.id),
+          expected_version: docs.version,
+          request_id: crypto.randomUUID(),
+        })
+      ).status,
+    ).toBe("saved");
+    expect((await store.readDocuments()).reports[0]!.guide).toMatchObject({
+      text: null,
+      status: "empty",
+    });
+    expect(await runGuideWorker(local.db, provider, { maxReports: 1 })).toBe(0);
+  } finally {
+    await local.dispose();
+  }
+});
+
+test("guide leases, source moves, revoked eligibility and account deletion fence late work", async () => {
+  const { setGuideEnrollment } = await import("../src/guides/store");
+  const { runGuideWorker } = await import("../src/guides/worker");
+  const local = await localStore();
+  try {
+    for (const mode of ["move", "revoke", "delete"] as const) {
+      const id = `guide-${mode}`;
+      await seedUsers(local.pg, id);
+      await local.pg.query(
+        "INSERT INTO sample_kinds(user_id,id,report,label) VALUES ($1,'email-kind','email','Fictional note'),($1,'chat-kind','chat','Fictional message')",
+        [id],
+      );
+      await local.pg.query(
+        "INSERT INTO trial_accounts(user_id,started_at,subscription_status) VALUES ($1,now(),'active')",
+        [id],
+      );
+      await seedSample(
+        local.pg,
+        id,
+        "example",
+        "email",
+        "email-kind",
+        { version: 1, summary: "Fictional collection note" },
+        "The seedlings are ready. Collect them on Saturday.",
+      );
+      await setGuideEnrollment(local.db, id, {
+        enabled: true,
+        optInReference: "fictional-consent",
+      });
+      let release!: () => void;
+      let entered!: () => void;
+      const waiting = new Promise<void>((r) => {
+        release = r;
+      });
+      const started = new Promise<void>((r) => {
+        entered = r;
+      });
+      const task = runGuideWorker(
+        local.db,
+        {
+          count: async () => 100,
+          async generate() {
+            entered();
+            await waiting;
+            return {
+              stop_reason: "end_turn",
+              usage: { input_tokens: 100, output_tokens: 100 },
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify({
+                    outcome: "guide",
+                    tendencies: [
+                      {
+                        observation: "Start with the update.",
+                        context: "Collection notes.",
+                        evidence: [{ sample_id: "example", revision: 1 }],
+                      },
+                    ],
+                  }),
+                },
+              ],
+            };
+          },
+        },
+        { maxReports: 1 },
+      );
+      await started;
+      expect(
+        await runGuideWorker(
+          local.db,
+          {
+            count: async () => {
+              throw new Error("duplicate claim");
+            },
+            generate: async () => {
+              throw new Error("duplicate call");
+            },
+          },
+          { maxReports: 1 },
+        ),
+      ).toBe(0);
+      if (mode === "move") {
+        const store = fixtureStore(local.db, id);
+        const docs = await store.readDocuments();
+        expect(
+          (
+            await store.saveMemo({
+              text: "Move fictional sample",
+              sample: {
+                sample_id: "example",
+                report: "chat",
+                kind_id: "chat-kind",
+                context: { version: 1, summary: "Fictional chat note" },
+                text: "The seedlings are ready. Collect them on Saturday.",
+              },
+              expected_version: docs.version,
+              request_id: crypto.randomUUID(),
+            })
+          ).status,
+        ).toBe("saved");
+      } else if (mode === "revoke")
+        await local.pg.query(
+          "UPDATE trial_accounts SET subscription_status='canceled' WHERE user_id=$1",
+          [id],
+        );
+      else await local.pg.query("DELETE FROM users WHERE id=$1", [id]);
+      release();
+      await task;
+      const rows = await local.pg.query<{
+        report: string;
+        guide_text: string | null;
+        status: string;
+      }>(
+        "SELECT report,guide_text,status FROM report_guides WHERE user_id=$1 ORDER BY report",
+        [id],
+      );
+      expect(rows.rows.every((r) => r.guide_text === null)).toBe(true);
+      if (mode === "delete") expect(rows.rows).toHaveLength(0);
+      if (mode === "move") {
+        expect(rows.rows.find((r) => r.report === "email")!.status).toBe(
+          "empty",
+        );
+        expect(rows.rows.find((r) => r.report === "chat")!.status).toBe(
+          "queued",
+        );
+      }
+      await setGuideEnrollment(local.db, id, { enabled: false }).catch(
+        (error) => {
+          if (mode !== "delete") throw error;
+        },
+      );
+    }
+    expect(
+      (await local.pg.query("SELECT * FROM guide_spend")).rows,
+    ).toHaveLength(3);
+  } finally {
+    await local.dispose();
+  }
+});
+
+test("guide reservations and recovery bound concurrent spend and retries", async () => {
+  const { setGuideEnrollment } = await import("../src/guides/store");
+  const { runGuideWorker } = await import("../src/guides/worker");
+  const conservativeReservation = 1_120_000; // Full 200k input + 16,000 output, even for tiny reports.
+  const local = await localStore();
+  try {
+    for (const id of ["budget-a", "budget-b"]) {
+      await seedUsers(local.pg, id);
+      await local.pg.query(
+        "INSERT INTO sample_kinds(user_id,id,report,label) VALUES ($1,'kind','email','Fictional note')",
+        [id],
+      );
+      await local.pg.query(
+        "INSERT INTO trial_accounts(user_id,started_at,subscription_status) VALUES ($1,now(),'active')",
+        [id],
+      );
+      await seedSample(
+        local.pg,
+        id,
+        "example",
+        "email",
+        "kind",
+        { version: 1, summary: "Fictional note" },
+        "Collect the seedlings on Saturday.",
+      );
+      await setGuideEnrollment(local.db, id, {
+        enabled: true,
+        optInReference: "fictional-consent",
+      });
+    }
+    await local.pg.exec(
+      "UPDATE report_guides SET next_attempt_at=now()+interval '1 hour' WHERE user_id='budget-b'",
+    );
+    let calls = 0;
+    const bad = {
+      count: async () => 100,
+      generate: async () => {
+        calls++;
+        return {
+          stop_reason: "max_tokens",
+          usage: { input_tokens: 100, output_tokens: 100 },
+          content: [],
+        };
+      },
+    };
+    await runGuideWorker(local.db, bad, { maxReports: 1 });
+    // A restart recovers an expired claim, counts the next attempt durably, then stops.
+    await local.pg.exec(
+      "UPDATE report_guides SET status='running',lease_token='abandoned',lease_until=now()-interval '1 second',next_attempt_at=now() WHERE user_id='budget-a' AND report='email'",
+    );
+    await runGuideWorker(local.db, bad, { maxReports: 1 });
+    expect(calls).toBe(2);
+    expect(
+      (
+        await local.pg.query(
+          "SELECT status,attempts FROM report_guides WHERE user_id='budget-a' AND report='email'",
+        )
+      ).rows,
+    ).toEqual([{ status: "failed", attempts: 2 }]);
+    await setGuideEnrollment(local.db, "budget-a", { enabled: false });
+    // Reserve against a nearly-full global day. Unknown outcomes keep their reservation.
+    await local.pg.query(
+      "INSERT INTO guide_spend(id,account_key,amount_micros) VALUES ('prior','fictional',$1)",
+      [5_000_000 - conservativeReservation - 6000],
+    );
+    await local.pg.exec(
+      "UPDATE report_guides SET next_attempt_at=now() WHERE user_id='budget-b'",
+    );
+    const unknown = {
+      count: async () => 100,
+      generate: async () => {
+        calls++;
+        throw new Error("unknown outcome");
+      },
+    };
+    await Promise.all([
+      runGuideWorker(local.db, unknown, { maxReports: 1 }),
+      runGuideWorker(local.db, unknown, { maxReports: 1 }),
+    ]);
+    expect(calls).toBe(3);
+    const [spent] = (
+      await local.pg.query<{ n: number; unknown: number }>(
+        "SELECT sum(amount_micros)::int AS n,count(*) FILTER(WHERE NOT settled)::int AS unknown FROM guide_spend",
+      )
+    ).rows;
+    expect(spent!.n).toBeLessThanOrEqual(5_000_000);
+    expect(spent!.unknown).toBe(2); // prior + unknown request
+    expect(
+      (
+        await local.pg.query(
+          "SELECT amount_micros FROM guide_spend WHERE NOT settled AND id<>'prior'",
+        )
+      ).rows,
+    ).toEqual([{ amount_micros: conservativeReservation }]);
+    await local.pg.exec(
+      "UPDATE report_guides SET next_attempt_at=now() WHERE user_id='budget-b'",
+    );
+    await runGuideWorker(local.db, unknown, { maxReports: 1 });
+    expect(calls).toBe(3); // global day cap prevents another conservative reservation
+    await local.pg.exec("DELETE FROM users WHERE id='budget-b'");
+    expect(
+      (await local.pg.query("SELECT * FROM guide_spend")).rows,
+    ).toHaveLength(4);
+  } finally {
+    await local.dispose();
+  }
+});
+
+test("guide bounds reject whole oversize input before processing and reserve monthly/account caps", async () => {
+  const { setGuideEnrollment } = await import("../src/guides/store");
+  const { runGuideWorker } = await import("../src/guides/worker");
+  const conservativeReservation = 1_120_000; // Full 200k input + 16,000 output, even for tiny reports.
+  const local = await localStore();
+  try {
+    await seedUsers(local.pg, "bounded");
+    await local.pg.exec(
+      "INSERT INTO sample_kinds(user_id,id,report,label) VALUES ('bounded','kind','email','Fictional note'); INSERT INTO trial_accounts(user_id,started_at,subscription_status) VALUES ('bounded',now(),'active')",
+    );
+    for (let i = 0; i < 2; i++)
+      await seedSample(
+        local.pg,
+        "bounded",
+        `large-${i}`,
+        "email",
+        "kind",
+        { version: 1, summary: `Fictional long note ${i}` },
+        "Seedlings. ".repeat(9000),
+      );
+    await setGuideEnrollment(local.db, "bounded", {
+      enabled: true,
+      optInReference: "fictional-consent",
+    });
+    let counts = 0,
+      calls = 0,
+      inputTokens = 100;
+    const provider = {
+      count: async () => {
+        counts++;
+        return inputTokens;
+      },
+      generate: async () => {
+        calls++;
+        throw new Error("unknown outcome");
+      },
+    };
+    await runGuideWorker(local.db, provider, { maxReports: 1 });
+    expect([counts, calls]).toEqual([0, 0]);
+    expect(
+      (await fixtureStore(local.db, "bounded").readDocuments()).reports[0]!
+        .guide,
+    ).toMatchObject({
+      status: "unavailable",
+      reason: "input_too_large",
+      text: null,
+    });
+    // Shrink all originals through approved complete revisions; rules do not enter input.
+    const store = fixtureStore(local.db, "bounded");
+    for (let i = 0; i < 2; i++)
+      expect(
+        (
+          await store.saveMemo({
+            text: "Fictional revision",
+            sample: {
+              sample_id: `large-${i}`,
+              report: "email",
+              kind_id: "kind",
+              context: { version: 1, summary: `Fictional short note ${i}` },
+              text: `Collect ${i + 1} trays on Saturday.`,
+            },
+            expected_version: (await store.readDocuments()).version,
+            request_id: crypto.randomUUID(),
+          })
+        ).status,
+      ).toBe("saved");
+    // Prior global-month spending may sit on a different UTC day.
+    await local.pg.query(
+      "INSERT INTO guide_spend(id,account_key,amount_micros,created_at) VALUES ('month','fictional',$1,date_trunc('month',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')",
+      [20_000_000 - conservativeReservation + 1],
+    );
+    await runGuideWorker(local.db, provider, { maxReports: 1 });
+    expect(calls).toBe(0);
+    expect((await store.readDocuments()).reports[0]!.guide).toMatchObject({
+      status: "unavailable",
+      reason: "budget_limit",
+    });
+    // An isolated local scenario resets only fictional ledger rows, never production.
+    await local.pg.exec("DELETE FROM guide_spend WHERE id='month'");
+    inputTokens = 200_000; // A full-sized report still reserves the complete input ceiling.
+    await setGuideEnrollment(local.db, "bounded", { enabled: false });
+    await setGuideEnrollment(local.db, "bounded", {
+      enabled: true,
+      optInReference: "fictional-reconsent",
+    });
+    await runGuideWorker(local.db, provider, { maxReports: 1 });
+    expect(calls).toBe(1);
+    await local.pg.exec(
+      "UPDATE report_guides SET next_attempt_at=now() WHERE user_id='bounded'",
+    );
+    await runGuideWorker(local.db, provider, { maxReports: 1 });
+    expect(calls).toBe(1); // $2 account/day blocks another unknown $1.12 request
+    expect(
+      (
+        await local.pg.query<{ amount_micros: number }>(
+          "SELECT amount_micros FROM guide_spend",
+        )
+      ).rows,
+    ).toEqual([{ amount_micros: 1_120_000 }]);
+  } finally {
+    await local.dispose();
+  }
+});
+
+test("guide billing records recognized usage up or down once and retains unknown reservations", async () => {
+  const { settleGuideSpend } = await import("../src/guides/worker");
+  const local = await localStore();
+  try {
+    await local.pg.exec(
+      "INSERT INTO guide_spend(id,account_key,amount_micros) VALUES ('up','fictional',1120000),('down','fictional',1120000),('unknown','fictional',1120000)",
+    );
+    // Usage beyond the activation bound still costs money even when no guide can activate.
+    await settleGuideSpend(local.db, "up", {
+      usage: { input_tokens: 200001, output_tokens: 16000 },
+    });
+    await Promise.all([
+      settleGuideSpend(local.db, "up", {
+        usage: { input_tokens: 1, output_tokens: 1 },
+      }),
+      settleGuideSpend(local.db, "up", {
+        usage: { input_tokens: 1, output_tokens: 1 },
+      }),
+    ]);
+    await settleGuideSpend(local.db, "down", {
+      stop_reason: "max_tokens",
+      usage: { input_tokens: 100, output_tokens: 100 },
+    });
+    await settleGuideSpend(local.db, "unknown", {});
+    expect(
+      (
+        await local.pg.query(
+          "SELECT id,amount_micros,settled FROM guide_spend ORDER BY id",
+        )
+      ).rows,
+    ).toEqual([
+      { id: "down", amount_micros: 2400, settled: true },
+      { id: "unknown", amount_micros: 1120000, settled: false },
+      { id: "up", amount_micros: 1120004, settled: true },
+    ]);
   } finally {
     await local.dispose();
   }

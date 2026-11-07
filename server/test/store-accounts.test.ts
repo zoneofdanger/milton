@@ -6,6 +6,7 @@ import {
   insideTransactions,
   read,
   seedRule,
+  seedSample,
   seedUsers,
 } from "./store-fixtures";
 import { createStoreMemoTools } from "../src/store/tools";
@@ -371,7 +372,7 @@ test("tenants with overlapping card, sample and request IDs never read, edit or 
       sql`SELECT card_id AS id FROM instruction_card_versions WHERE user_id=${alpha.id} AND report='email'`,
     );
     const [sample] = await local.db.query<{ id: string; kind_id: string }>(
-      sql`SELECT id,kind_id FROM samples WHERE user_id=${alpha.id}`,
+      sql`SELECT sample_id AS id,kind_id FROM sample_versions WHERE user_id=${alpha.id}`,
     );
     await local.db.query(
       sql`INSERT INTO instruction_cards(user_id,id) VALUES (${beta.id},${card!.id})`,
@@ -384,9 +385,14 @@ test("tenants with overlapping card, sample and request IDs never read, edit or 
     await local.db.query(
       sql`INSERT INTO sample_kinds(user_id,id,report,label) VALUES (${beta.id},${sample!.kind_id},'email','follow-up')`,
     );
-    await local.db.query(
-      sql`INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json)
-      VALUES (${beta.id},${sample!.id},'email',${sample!.kind_id},'{"version":1,"summary":"beta context"}','Beta sample body.','{}')`,
+    await seedSample(
+      local.pg,
+      beta.id,
+      sample!.id,
+      "email",
+      sample!.kind_id,
+      { version: 1, summary: "beta context" },
+      "Beta sample body.",
     );
     // (c) Cover sheet, report and list show only the caller's rules and samples.
     const alphaOwn = [
@@ -729,7 +735,7 @@ test("closing an account refuses its reads, saves and replays, fences a pending 
         sql`SELECT card_id,version,body FROM instruction_card_versions WHERE user_id=${userId} ORDER BY card_id,version`,
       ),
       await local.db.query(
-        sql`SELECT id,body,retired_at FROM samples WHERE user_id=${userId} ORDER BY id`,
+        sql`SELECT sample_id,version,body,retired FROM sample_versions WHERE user_id=${userId} ORDER BY sample_id,version`,
       ),
       await local.db.query(
         sql`SELECT count(*)::int AS n FROM accepted_changes WHERE user_id=${userId}`,
@@ -844,10 +850,10 @@ test("account deletion removes every tenant row, keeps refusals, waits for an in
       .query(sql`INSERT INTO instruction_card_versions(user_id,card_id,version,description,body,reason,report,actor_json)
       VALUES (${gone.auth.userId},'history',2,'Fictional','A fictional rule, revised.','Fixture','cover','{}')`);
     expect((await gone.save()).status).toBe("saved");
-    // A kind, a sample replaced by another (lineage) and an active pair.
+    // A kind, a revised sample, a retired example and an active pair.
     const goneSamples = () =>
       local.db.query<{ id: string; kind_id: string }>(
-        sql`SELECT id,kind_id FROM samples WHERE user_id=${gone.auth.userId} ORDER BY created_at,id`,
+        sql`SELECT sample_id AS id,kind_id FROM sample_versions WHERE user_id=${gone.auth.userId} ORDER BY created_at,sample_id`,
       );
     for (const text of ["One", "Two", "Three"]) {
       const prior = await goneSamples();
@@ -859,7 +865,7 @@ test("account deletion removes every tenant row, keeps refusals, waits for an in
               ...(prior.length
                 ? { kind_id: prior[0]!.kind_id }
                 : { new_kind: "follow-up" }),
-              ...(text === "Three" ? { replaces: prior[1]!.id } : {}),
+              ...(text === "Three" ? { sample_id: prior[1]!.id } : {}),
               context: { version: 1 as const, summary: "Fixture context" },
               text,
             },
@@ -867,6 +873,7 @@ test("account deletion removes every tenant row, keeps refusals, waits for an in
         ).status,
       ).toBe("saved");
     }
+    await gone.save({ retire_samples: [(await goneSamples())[0]!.id] });
     await gone.store.chargeToolCall();
     expect((await kept.save()).status).toBe("saved");
     const tenantTables = (
@@ -897,6 +904,7 @@ test("account deletion removes every tenant row, keeps refusals, waits for an in
       "instruction_cards",
       "instruction_card_versions",
       "samples",
+      "sample_versions",
       "sample_kinds",
       "accepted_changes",
       "save_requests",
@@ -906,7 +914,7 @@ test("account deletion removes every tenant row, keeps refusals, waits for an in
     expect(
       (
         await local.db.query(
-          sql`SELECT 1 FROM samples WHERE user_id=${gone.auth.userId} AND retired_at IS NOT NULL`,
+          sql`SELECT 1 FROM sample_versions WHERE user_id=${gone.auth.userId} AND retired`,
         )
       ).length,
     ).toBe(1);

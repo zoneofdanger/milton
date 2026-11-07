@@ -316,7 +316,7 @@ export const sampleKinds = pgTable(
   ],
 );
 
-// Approved writing is immutable. Context/classification corrections have their own revision; retirement is final.
+// One stable sample identity; every approved change is a complete immutable version.
 export const samples = pgTable(
   "samples",
   {
@@ -324,59 +324,77 @@ export const samples = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     id: text("id").notNull(),
+    createdAt: createdAt(),
+    clientJson: text("client_json").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.id] }),
+    check("samples_id", sql`${t.id} <> ''`),
+    check(
+      "samples_client_object",
+      sql`jsonb_typeof(${t.clientJson}::jsonb)='object'`,
+    ),
+  ],
+);
+export const sampleVersions = pgTable(
+  "sample_versions",
+  {
+    userId: text("user_id").notNull(),
+    sampleId: text("sample_id").notNull(),
+    version: integer("version").notNull(),
     report: text("report").notNull(),
     kindId: text("kind_id").notNull(),
     context: jsonb("context").$type<SampleContext>().notNull(),
-    contextRevision: integer("context_revision").notNull().default(1),
     body: text("body").notNull(),
-    clientJson: text("client_json").notNull(),
-    // Same kind when replaced; later approved classification preserves lineage.
-    replacesId: text("replaces_id"),
-    createdAt: createdAt(),
-    retiredAt: timestamp("retired_at", { withTimezone: true }),
-    // replaced, removed or evicted; set together with retired_at.
+    retired: boolean("retired").notNull().default(false),
     retireReason: text("retire_reason"),
-    // The save that retired it; NULL only for retirements before 0020.
-    retiredRequestId: text("retired_request_id"),
+    actorJson: text("actor_json").notNull(),
+    requestId: text("request_id"),
+    // Exact known legacy provenance only; no reconstructed missing contexts.
+    provenance: jsonb("provenance")
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: createdAt(),
     search: tsvector("search").generatedAlwaysAs(
       sql`to_tsvector('english'::regconfig, (context->>'summary') || ' ' || body)`,
     ),
   },
   (t) => [
-    primaryKey({ columns: [t.userId, t.id] }),
-    index("samples_by_report").on(t.userId, t.report),
-    index("samples_by_kind").on(t.userId, t.kindId),
-    // A sample's report is its kind's report, by construction.
+    primaryKey({ columns: [t.userId, t.sampleId, t.version] }),
     foreignKey({
-      name: "samples_kind_fk",
+      name: "sample_versions_sample_fk",
+      columns: [t.userId, t.sampleId],
+      foreignColumns: [samples.userId, samples.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "sample_versions_kind_fk",
       columns: [t.userId, t.kindId, t.report],
       foreignColumns: [sampleKinds.userId, sampleKinds.id, sampleKinds.report],
     }).onDelete("cascade"),
-    foreignKey({
-      name: "samples_replaces_fk",
-      columns: [t.userId, t.replacesId],
-      foreignColumns: [t.userId, t.id],
-    }).onDelete("cascade"),
+    check("sample_versions_version", sql`${t.version} > 0`),
     check(
-      "samples_report",
+      "sample_versions_report",
       sql`${t.report} IN ('email','chat','post','document','speech')`,
     ),
     check(
-      "samples_context",
+      "sample_versions_context",
       sql`public.milton_sample_context_valid(${t.context})`,
     ),
-    check("samples_context_revision", sql`${t.contextRevision} > 0`),
     check(
-      "samples_body",
+      "sample_versions_body",
       sql`btrim(${t.body}) <> '' AND octet_length(${t.body}) <= 131072`,
     ),
     check(
-      "samples_client_object",
-      sql`jsonb_typeof(${t.clientJson}::jsonb)='object'`,
+      "sample_versions_actor",
+      sql`jsonb_typeof(${t.actorJson}::jsonb)='object'`,
     ),
     check(
-      "samples_retirement",
-      sql`(${t.retireReason} IS NULL) = (${t.retiredAt} IS NULL) AND (${t.retireReason} IS NULL OR ${t.retireReason} IN ('replaced','removed','evicted')) AND (${t.retiredRequestId} IS NULL OR ${t.retiredAt} IS NOT NULL)`,
+      "sample_versions_provenance",
+      sql`jsonb_typeof(${t.provenance})='object'`,
+    ),
+    check(
+      "sample_versions_retirement",
+      sql`(${t.retireReason} IS NOT NULL) = ${t.retired} AND (${t.retireReason} IS NULL OR ${t.retireReason} IN ('replaced','removed','evicted'))`,
     ),
   ],
 );
@@ -436,4 +454,86 @@ export const stripeEvents = pgTable(
       sql`${t.id} ~ '^evt_[A-Za-z0-9]{1,251}$' AND char_length(${t.type}) BETWEEN 1 AND 128 AND ${t.payloadSha256} ~ '^[a-f0-9]{64}$'`,
     ),
   ],
+);
+
+// Derived guides are separate from approved-source versions and size limits.
+export const guideAccounts = pgTable(
+  "guide_accounts",
+  {
+    userId: text("user_id")
+      .primaryKey()
+      .references(() => users.id, { onDelete: "cascade" }),
+    enabled: boolean("enabled").notNull().default(false),
+    epoch: integer("epoch").notNull().default(0),
+    optedInAt: timestamp("opted_in_at", { withTimezone: true }),
+    optInReference: text("opt_in_reference"),
+  },
+  (t) => [
+    check(
+      "guide_consent",
+      sql`NOT ${t.enabled} OR (${t.optedInAt} IS NOT NULL AND ${t.optInReference} IS NOT NULL)`,
+    ),
+  ],
+);
+export const reportGuides = pgTable(
+  "report_guides",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    report: text("report").notNull(),
+    sourceVersion: integer("source_version").notNull().default(0),
+    completedVersion: integer("completed_version"),
+    guideText: text("guide_text"),
+    status: text("status").notNull().default("empty"),
+    reason: text("reason").notNull().default("no_samples"),
+    attempts: integer("attempts").notNull().default(0),
+    leaseToken: text("lease_token"),
+    leaseUntil: timestamp("lease_until", { withTimezone: true }),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.report] }),
+    check(
+      "guide_report",
+      sql`${t.report} IN ('email','chat','post','document','speech')`,
+    ),
+    check(
+      "guide_versions",
+      sql`${t.sourceVersion} >= 0 AND (${t.completedVersion} IS NULL OR ${t.completedVersion} <= ${t.sourceVersion})`,
+    ),
+    check("guide_attempts", sql`${t.attempts} BETWEEN 0 AND 2`),
+    check(
+      "guide_text_limit",
+      sql`${t.guideText} IS NULL OR char_length(${t.guideText}) <= 6000`,
+    ),
+    check(
+      "guide_status",
+      sql`${t.status} IN ('empty','queued','running','ready','insufficient','failed','unavailable')`,
+    ),
+  ],
+);
+// Content-free reservations intentionally outlive accounts; deletion cannot reset caps.
+export const guideSpend = pgTable(
+  "guide_spend",
+  {
+    id: text("id").primaryKey(),
+    accountKey: text("account_key").notNull(),
+    amountMicros: integer("amount_micros").notNull(),
+    settled: boolean("settled").notNull().default(false),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    check("guide_spend_amount", sql`${t.amountMicros} >= 0`),
+    index("guide_spend_date").on(t.createdAt),
+  ],
+);
+export const guideBudgetLock = pgTable(
+  "guide_budget_lock",
+  {
+    singleton: integer("singleton").primaryKey(),
+  },
+  (t) => [check("guide_budget_singleton", sql`${t.singleton} = 1`)],
 );

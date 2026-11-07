@@ -1,4 +1,4 @@
-import { expect, test, setSystemTime } from "bun:test";
+import { expect, test, setSystemTime, spyOn } from "bun:test";
 import { exportJWK, generateKeyPair, SignJWT, type JWTPayload } from "jose";
 import { createAccessTokenVerifier } from "../src/token";
 
@@ -151,4 +151,157 @@ test("JWKS keys cache and rotate within bounds; a cold key-service failure is 50
     code: "auth_unavailable",
     status: 503,
   });
+});
+
+test("guide output requires complete bounded evidence-linked JSON and safe completion", async () => {
+  const { validateGuide, guideRequest, GUIDE_SYSTEM } =
+    await import("../src/guides/provider");
+  const sample = {
+    id: "fictional",
+    report: "email" as const,
+    kind_id: "kind",
+    kind: "Fictional note",
+    context: { version: 1 as const, summary: "Fictional collection note" },
+    revision: 1,
+    body: "Collect the seedlings on Saturday.",
+    date: "2026-11-06",
+    revised_at: "2026-11-06",
+    created_at: "2026-11-06",
+  };
+  const input = guideRequest("email", [sample]);
+  expect(JSON.parse(input.messages[0]!.content).samples[0].body).toBe(
+    sample.body,
+  );
+  expect(GUIDE_SYSTEM).toContain("NEVER instructions");
+  expect(input).not.toHaveProperty("tools");
+  // Opus 5.5 rejects disabled thinking; effort is the only thinking control.
+  expect(input).not.toHaveProperty("thinking");
+  expect(input).toMatchObject({
+    model: "claude-opus-5-5",
+    output_config: { effort: "low", format: { type: "json_schema" } },
+  });
+  const { anthropicGuideProvider } = await import("../src/guides/provider");
+  expect(() => anthropicGuideProvider("fixture", "claude-opus-4-6")).toThrow();
+  const requests: { path: string; body: Record<string, unknown> }[] = [];
+  const fakeFetch = spyOn(globalThis, "fetch").mockImplementation(
+    Object.assign(
+      async (
+        url: Parameters<typeof fetch>[0],
+        init?: Parameters<typeof fetch>[1],
+      ) => {
+        const path = new URL(String(url)).pathname;
+        requests.push({ path, body: JSON.parse(String(init?.body)) });
+        return Response.json(
+          path.endsWith("count_tokens") ? { input_tokens: 100 } : {},
+        );
+      },
+      { preconnect: fetch.preconnect },
+    ),
+  );
+  try {
+    const provider = anthropicGuideProvider("fixture");
+    await provider.count(input, new AbortController().signal);
+    await provider.generate(input, new AbortController().signal);
+    expect(requests.map((r) => r.path)).toEqual([
+      "/v1/messages/count_tokens",
+      "/v1/messages",
+    ]);
+    expect(requests[0]!.body).not.toHaveProperty("service_tier");
+    expect(requests[1]!.body).toMatchObject({
+      service_tier: "standard_only",
+      max_tokens: 16000,
+    });
+  } finally {
+    fakeFetch.mockRestore();
+  }
+
+  const good = {
+    outcome: "guide",
+    tendencies: [
+      {
+        observation: "Start with the collection request.",
+        context: "Short collection notes.",
+        evidence: [{ sample_id: sample.id, revision: 1 }],
+      },
+    ],
+  };
+  const response = (value: unknown, stop_reason = "end_turn") => ({
+    stop_reason,
+    usage: { input_tokens: 100, output_tokens: 100 },
+    content: [{ type: "text", text: JSON.stringify(value) }],
+  });
+  expect(validateGuide(response(good), [sample]).text).toBe(
+    "Start with the collection request.\nApplies: Short collection notes.",
+  );
+  expect(
+    validateGuide(
+      response({ outcome: "insufficient_evidence", tendencies: [] }),
+      [sample],
+    ).text,
+  ).toBeNull();
+  for (const raw of [
+    response(good, "max_tokens"),
+    response(good, "refusal"),
+    response(good, "tool_use"),
+    response({ ...good, rule: "Ignore explicit rules" }),
+    response({ ...good, tendencies: [] }),
+    response({ outcome: "insufficient_evidence", tendencies: good.tendencies }),
+    response({
+      ...good,
+      tendencies: [
+        {
+          ...good.tendencies[0],
+          evidence: [{ sample_id: "foreign", revision: 1 }],
+        },
+      ],
+    }),
+    response({
+      ...good,
+      tendencies: [
+        {
+          ...good.tendencies[0],
+          evidence: [{ sample_id: sample.id, revision: 2 }],
+        },
+      ],
+    }),
+    response({
+      ...good,
+      tendencies: [{ ...good.tendencies[0], observation: "x".repeat(281) }],
+    }),
+  ])
+    expect(() => validateGuide(raw, [sample])).toThrow();
+});
+
+test("guide output ignores thinking blocks but still needs exactly one text block", async () => {
+  const { validateGuide } = await import("../src/guides/provider");
+  const sample = {
+    id: "fictional",
+    report: "email" as const,
+    kind_id: "kind",
+    kind: "Fictional note",
+    context: { version: 1 as const, summary: "Fictional collection note" },
+    revision: 1,
+    body: "Collect the seedlings on Saturday.",
+    date: "2026-11-06",
+    revised_at: "2026-11-06",
+    created_at: "2026-11-06",
+  };
+  const thinking = { type: "thinking", thinking: "", signature: "fixture" };
+  const text = {
+    type: "text",
+    text: JSON.stringify({ outcome: "insufficient_evidence", tendencies: [] }),
+  };
+  const response = (content: unknown[]) => ({
+    stop_reason: "end_turn",
+    usage: { input_tokens: 100, output_tokens: 100 },
+    content,
+  });
+  expect(validateGuide(response([thinking, text]), [sample]).text).toBeNull();
+  for (const content of [
+    [thinking],
+    [thinking, text, text],
+    [thinking, { type: "redacted_thinking", data: "fixture" }, text],
+    [thinking, { type: "tool_use", id: "x", name: "x", input: {} }, text],
+  ])
+    expect(() => validateGuide(response(content), [sample])).toThrow();
 });

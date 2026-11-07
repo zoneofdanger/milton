@@ -1,16 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
-import { z } from "zod";
 import { headingLine, type CardHead } from "./cards";
 import type { StoreSession } from "./database";
-import { bullet, resolveReportId, FILINGS } from "./reports";
+import { bullet, FILINGS } from "./reports";
 import { StoreError } from "./errors";
 import { utf8Bytes, type readLimits } from "./index";
 import { exactEditsProposal, exactMoves } from "../exact-edits";
+import { applySampleChanges } from "./samples";
 import { publishSave } from "./save-publish";
 import { closestBaseline, knownBaseline } from "./setup";
 import {
-  retiredSample,
   type SaveContext,
   type SaveOutcome,
   type Snapshot,
@@ -129,85 +128,6 @@ export async function applySave(
     issuer: actor.issuer,
     client_id: actor.clientId,
   });
-  const sampleConflict = (message: string) =>
-    new StoreError("sample_conflict", message + " Nothing was changed.", 409);
-  // Structured saves change samples and cards together, or not at all.
-  const retired: z.infer<typeof retiredSample>[] = [];
-  const retireSample = async (
-    id: string,
-    reason: "replaced" | "removed",
-    kindId?: string,
-  ) =>
-    (
-      await tx.query(sql`UPDATE samples SET retired_at=clock_timestamp(),retire_reason=${reason},retired_request_id=${input.request_id}
-          WHERE user_id=${userId} AND id=${id} AND retired_at IS NULL ${kindId === undefined ? sql`` : sql`AND kind_id=${kindId}`} RETURNING id`)
-    ).length > 0;
-  // A sample whose bytes equal an active sample of its kind files nothing:
-  // no copy. A replacement of some other sample still applies.
-  // Samples this save retires are not on file for this check.
-  const sampleReport = input.sample && resolveReportId(input.sample.report)!;
-  const duplicate =
-    input.sample &&
-    (
-      await tx.query<{ id: string }>(sql`SELECT s.id FROM samples s
-          JOIN sample_kinds k ON k.user_id=s.user_id AND k.id=s.kind_id
-          WHERE s.user_id=${userId} AND s.report=${sampleReport} AND s.retired_at IS NULL AND s.body=${input.sample.text}
-          AND s.id NOT IN (SELECT jsonb_array_elements_text(${JSON.stringify(input.retire_samples ?? [])}::jsonb))
-          AND ${input.sample.kind_id === undefined ? sql`lower(k.label)=lower(${input.sample.new_kind!})` : sql`k.id=${input.sample.kind_id}`}
-          LIMIT 1`)
-    )[0]?.id;
-  const sampleSkipped =
-    duplicate !== undefined &&
-    (input.sample!.replaces === undefined ||
-      input.sample!.replaces === duplicate);
-  const applySamples = async () => {
-    for (const id of input.retire_samples ?? []) {
-      if (!(await retireSample(id, "removed")))
-        throw sampleConflict(
-          "Each sample to retire must be an active sample, listed once.",
-        );
-      retired.push({ id, reason: "removed" });
-    }
-    const sample = input.sample;
-    if (!sample || sampleSkipped) return;
-    const report = sampleReport!;
-    let kindId = sample.kind_id;
-    if (kindId === undefined) {
-      // A label already used in this report, in any letter case, is
-      // that kind, even when none of its samples is still listed.
-      kindId = (
-        await tx.query<{ id: string }>(
-          sql`SELECT id FROM sample_kinds WHERE user_id=${userId} AND report=${report} AND lower(label)=lower(${sample.new_kind!})`,
-        )
-      )[0]?.id;
-      if (kindId === undefined) {
-        kindId = randomUUID();
-        await tx.query(
-          sql`INSERT INTO sample_kinds(user_id,id,report,label) VALUES (${userId},${kindId},${report},${sample.new_kind!})`,
-        );
-      }
-    } else if (
-      !(
-        await tx.query(
-          sql`SELECT 1 FROM sample_kinds WHERE user_id=${userId} AND id=${kindId} AND report=${report}`,
-        )
-      ).length
-    )
-      throw sampleConflict(
-        "kind_id must name an existing kind in this report.",
-      );
-    if (sample.replaces !== undefined) {
-      if (!(await retireSample(sample.replaces, "replaced", kindId)))
-        throw sampleConflict(
-          "replaces must name an active sample of the same kind.",
-        );
-      retired.push({ id: sample.replaces, reason: "replaced" });
-    }
-    if (duplicate !== undefined) return;
-    // Every approved sample stays until the person retires or replaces it.
-    await tx.query(sql`INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,replaces_id)
-        VALUES (${userId},${randomUUID()},${report},${kindId},${JSON.stringify(sample.context)}::jsonb,${sample.text},${attribution},${sample.replaces ?? null})`);
-  };
   const known = new Map(current.active.map((h) => [h.id, h]));
   // A rule cannot be moved and retired at once, including by an exact
   // edit that empties it.
@@ -243,60 +163,9 @@ export async function applySave(
       .filter((m) => known.get(m.id)!.report !== m.report)
       .map((m) => [m.id, m.report]),
   );
-  const correction = input.sample_context;
-  const corrected =
-    correction &&
-    current.samples.find(
-      (s) =>
-        s.id === correction.sample_id &&
-        s.report === resolveReportId(correction.report),
-    );
-  if (correction && !corrected)
-    throw sampleConflict(
-      "sample_context must name an active sample in this report.",
-    );
-  if (
-    correction?.kind_id !== undefined &&
-    !(
-      await tx.query(
-        sql`SELECT 1 FROM sample_kinds WHERE user_id=${userId} AND id=${correction.kind_id} AND report=${resolveReportId(correction.report)!}`,
-      )
-    ).length
-  )
-    throw sampleConflict("kind_id must name an existing kind in this report.");
-  if (
-    correction &&
-    corrected &&
-    correction.kind_id !== undefined &&
-    correction.kind_id !== corrected.kind_id &&
-    current.samples.some(
-      (s) =>
-        s.id !== corrected.id &&
-        s.report === corrected.report &&
-        s.kind_id === correction.kind_id &&
-        s.body === corrected.body,
-    )
-  )
-    throw sampleConflict(
-      "The target kind already has an active sample with identical text.",
-    );
-  const contextChanged = !!(
-    correction &&
-    corrected &&
-    ((correction.kind_id !== undefined &&
-      correction.kind_id !== corrected.kind_id) ||
-      (
-        await tx.query<{ changed: boolean }>(
-          sql`SELECT context IS DISTINCT FROM ${JSON.stringify(correction.context)}::jsonb AS changed FROM samples WHERE user_id=${userId} AND id=${correction.sample_id}`,
-        )
-      )[0]!.changed)
-  );
-  const samplesChanged =
-    contextChanged ||
-    (input.sample !== undefined && !sampleSkipped) ||
-    input.retire_samples !== undefined;
+  const samples = await applySampleChanges(ctx, tx, current, attribution);
   const unchanged =
-    !samplesChanged &&
+    !samples.changed &&
     moveTo.size === 0 &&
     creates.length === 0 &&
     retire.length === 0 &&
@@ -350,9 +219,5 @@ export async function applySave(
     );
   }
   for (const id of retire) await append(known.get(id)!, true, "archive");
-  await applySamples();
-  if (contextChanged && correction)
-    await tx.query(sql`UPDATE samples SET context=${JSON.stringify(correction.context)}::jsonb,kind_id=${correction.kind_id ?? corrected!.kind_id},context_revision=context_revision+1
-    WHERE user_id=${userId} AND report=${resolveReportId(correction.report)!} AND id=${correction.sample_id} AND retired_at IS NULL`);
-  return publishSave(ctx, tx, current, retired, attribution);
+  return publishSave(ctx, tx, current, samples.retired, attribution);
 }

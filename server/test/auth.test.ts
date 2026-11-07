@@ -11,6 +11,7 @@ import {
   StoreError,
 } from "../src/store";
 import { localAsset } from "../src/assets";
+import { seedSample } from "./store-fixtures";
 import { localStore } from "./local-store";
 
 import {
@@ -107,6 +108,7 @@ async function memoPageFixture() {
     store,
     author,
     db: local.db,
+    pg: local.pg,
     send: browser(app, new Map([["milton-session", local.token]])),
     dispose: local.dispose,
   };
@@ -936,10 +938,16 @@ test("pages stay capped and download includes every active sample, only for the 
           `Fictional ${report} sample ${n}: <tag> & *verbatim*.${n === 0 ? "\n\n  Keep the oldest sample's spacing.  " : ""}`,
       );
       for (const [n, body] of bodies.entries())
-        await fixture.db
-          .query(sql`INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,created_at)
-          VALUES (${beta.userId},${`${report}-${n}`},${report},${report},${JSON.stringify({ version: 1, summary: `${report} context ${n}` })}::jsonb,${body},'{}',
-            ${`2026-01-0${1 + Math.floor(n / 2)}T00:00:00Z`}::timestamptz)`);
+        await seedSample(
+          fixture.pg,
+          beta.userId,
+          `${report}-${n}`,
+          report,
+          report,
+          { version: 1, summary: `${report} context ${n}` },
+          body,
+          { createdAt: `2026-01-0${1 + Math.floor(n / 2)}T00:00:00Z` },
+        );
       const replacement = `Fictional ${report} replacement: exact & approved.`;
       expect(
         await fixture.author.saveMemo({
@@ -950,7 +958,7 @@ test("pages stay capped and download includes every active sample, only for the 
           sample: {
             report,
             kind_id: report,
-            replaces: `${report}-2`,
+            sample_id: `${report}-2`,
             context: {
               version: 1 as const,
               summary: `${report} replacement context`,
@@ -1174,7 +1182,7 @@ test("report bullets require exact revision and complete text parity; optional l
                     audience: { relationship: "client" },
                     purposes: ["follow up"],
                   },
-                  context_revision: 1,
+                  revision: 1,
                   body: "Hi <there>,\n\nThanks.",
                   date: "2026-11-02",
                 },
@@ -1324,7 +1332,7 @@ test("an unrecognized database failure logs its class and code once, never its m
     // Already typed: no second line.
     databaseFailure(failure);
     // A mapped trigger refusal is an answer, not a failure.
-    databaseFailure({ code: "P0001", message: "sample_is_append_only" });
+    databaseFailure({ code: "P0001", message: "sample_version_is_immutable" });
     expect(logged).toHaveBeenCalledTimes(1);
     const line = String(logged.mock.calls[0]![0]);
     expect(JSON.parse(line)).toEqual({
@@ -1528,3 +1536,74 @@ test("authenticated admission requires verified provider IDs, converges and pres
     await local.dispose();
   }
 }, 30000);
+
+test("report guides show readable tendencies and status without internal diagnostics", async () => {
+  const { assembleDocuments } = await import("../src/store/reports");
+  const documents = {
+    ...assembleDocuments(
+      [
+        {
+          id: "fictional-rule",
+          version: 1,
+          description: "Fictional rule",
+          body: "Use plain words.",
+          archived: false,
+          report: "email",
+        },
+      ],
+      [],
+    ),
+    version: "a".repeat(64),
+  };
+  const report = {
+    text: documents.full,
+    version: documents.version,
+    is_empty: false,
+  };
+  for (const [status, reason, expected] of [
+    ["queued", "lease_expired", "queued"],
+    ["running", "preparing", "Updating"],
+    ["failed", "attempts_exhausted", "unavailable"],
+    ["failed", "provider_or_output_failed", "unavailable"],
+    ["unavailable", "input_too_large", "too long"],
+    ["unavailable", "budget_limit", "spending limit"],
+  ]) {
+    documents.reports[0]!.guide = {
+      derived: true,
+      text: "Open with the collection update.\nApplies: Short pickup notes.",
+      source_version: 123,
+      current_version: 456,
+      stale: true,
+      status: status!,
+      reason: reason!,
+      precedence: "Explicit rules and requested edit scope win.",
+    };
+    const response = await memoPages(
+      new Request(appOrigin + "/tps-report"),
+      {
+        readTpsReport: async () => report,
+        readDocuments: async () => documents,
+        exportTpsReport: async () => report.text,
+      },
+      () => null,
+      "writer@example.invalid",
+      {
+        now: () => new Date("2026-11-06T00:00:00Z"),
+        comment: () => "Fictional UI check.",
+      },
+    );
+    const html = await response.text(),
+      start = html.indexOf('<div class="report-guide">');
+    expect(start).toBeGreaterThanOrEqual(0);
+    const guide = html.slice(start, html.indexOf("</div>", start));
+    expect(guide).toContain(expected!);
+    expect(guide).toContain("Open with the collection update.");
+    expect(guide).toContain("Short pickup notes.");
+    expect(guide).toContain(
+      "may still reflect samples that were removed or corrected",
+    );
+    expect(guide).not.toMatch(
+      /123|456|version|Evidence:|lease|attempt|recovery|<button|<input|<textarea|<select/i,
+    );
+  }
+});

@@ -36,7 +36,7 @@ first. Every rule prints as one bullet, with
 one stored leading `- ` dropped first so rules filed by the retired compiler and rules
 stored as sent read alike. Card text cannot contain Markdown
 headings. The version is a fingerprint of the assembled cover sheet and reports
-(with every active sample's ID, kind and context revision), the same for every intent, so the same cards and samples always give the same
+(with every active sample's ID, kind and sample revision), the same for every intent, so the same cards and samples always give the same
 version and every save fences on what the assistant read. The memo group tables (0016) remain as history only.
 
 Filing is correctable (0020): a card's report (or `cover`) lives on each version, so
@@ -48,19 +48,29 @@ kinds named once per report; assistants reuse a `kind_id` from `get_report` and 
 relationship/role/familiarity/expertise/group, interaction, whole/excerpt scope with
 optional excerpt role, language and register. Keys are fixed; vocabulary values are
 bounded strings, so unfamiliar kinds and purposes require no migration. Unknowns stay absent.
-`sample_context` replaces one active sample's complete approved context and optionally
-reclassifies it to an existing kind in the same report; omitted optional fields clear.
-Body, ID, date and replacement lineage remain unchanged. A distinct correction increments
-the sample's context revision and account version, even outside the served eight;
-identical context/classification is unchanged, and retries replay the same receipt.
-Reclassification refuses `sample_conflict` when the target kind already has identical
-active text, preserving all samples, contexts and the version. Context correction and
-rule changes save together or not at all; this operation cannot combine with sample
-insertion or retirement.
-`replaces` and `retire_samples` retire samples on
-request, and nothing retires a sample automatically; every retirement is reported in
-`samples_retired` and recorded with its reason and request. Kind labels
-stay out of report text.
+Each sample has one stable tenant-scoped identity in `samples`, with original creation
+time and actor, and complete immutable snapshots in `sample_versions`. The latest
+revision alone is current. `sample.sample_id` revises an active identity with complete
+approved text, context and report/kind; omit it for a new example. The old `replaces`
+input is removed. Classification corrections use the same revision, resolving kind
+and report together. `sample_context` appends a complete snapshot preserving body and
+identity, optionally reclassifying within the same report; omitted context fields
+clear. It cannot combine with `sample` or `retire_samples`.
+
+An identical revision appends nothing. New examples deduplicate only against a complete
+identical active example: body, report/kind and JSON context. Different context can
+justify separate examples. Revisions never merge identities, even when two examples
+end up identical. Every changed revision fences account saves, including examples
+outside the served eight. Request retries replay the same receipt; mixed rule/sample
+changes apply together or not at all.
+
+`retire_samples` explicitly appends an inactive snapshot of each named active stable
+ID, reported in `samples_retired`; revisions are not retirements. Reads, the app and
+exports use current active snapshots only, with no history/restore UI. Report metadata
+exposes stable `id` and `revision`. Approval date and sample recency use the latest
+revision time, including context/classification corrections; original creation stays
+separate. Other ranking tiers and report/category vocabulary are unchanged. Kind
+labels stay out of report text.
 
 Embeddings, advisory card graphs, task-aware retrieval and observation-only gardening
 were built, measured and removed; their schema is absent from the baseline. What they showed
@@ -122,12 +132,24 @@ records stay in the database unchanged.
 A read assembles the documents from cards and samples in one statement, takes no
 lock and writes nothing; nothing assembled is stored, so there is no refresh step.
 
-Fresh installations apply the Drizzle baseline followed by `0001_sample_context`.
-The context migration preserves every exact body, summary and supplied legacy label
-in one JSONB context without inventing metadata. Its offline rollback refuses revised
-or unrepresentable context and incompatible replacement lineage. Old and new runtimes
-need different schemas: use the hosting runbook's closed-ingress, drained, snapshotted
-coordinated cutover; never select an old runtime against the new schema.
+Fresh installations apply the baseline, `0001_sample_context` and
+`0002_sample_versions`. The forward sample revision migration maps ordinary replacement
+chains to root IDs and keeps every known body, context, classification, actor and date;
+legacy IDs, context counters and retirement evidence live in revision provenance.
+Retired leaves stay inactive; dedup-consolidated roots without successors remain
+separate retired identities. Accepted-change evidence remains unchanged. Earlier
+context values/correction times were not stored and are not invented: each legacy row
+contributes only its last known snapshot, dated by its known creation (or leaf
+retirement), with this limitation recorded in provenance. Backfilled revision numbers
+count known snapshots, not missing context edits. Ambiguous lineage (cycles, branching,
+invalid/cross-account or cross-report parents, incompatible parent lifecycle) aborts
+transactionally before dropping old columns.
+
+This breaks schema and sample API compatibility. An authorized release must close
+reads/writes, drain old instances, snapshot, migrate and start compatible app/MCP code
+as one cutover; old runtimes must never use the new schema. Reconnect assistants and
+reread guidance/IDs/version before saving. No compatibility shim or rollback artifact
+is part of this change; no migration or release is authorized by implementation alone.
 An owner-only, atomic one-time transition supports the known 0033 schema; it
 drops the unused memo layer and preserves card identities, every card version and
 all other current data. Other old schema states are refused. Production applied this
@@ -183,3 +205,15 @@ The retired Vercel app/MCP project and migration validation services are decommi
 there is no Vercel backend failover. Preserve the current Cloud Run revisions, pinned
 images and secret versions. Future runtime rollback uses Cloud Run revision traffic,
 never older instruction or TPS data.
+
+## Default-off derived-guide pilot
+
+Approved saves remain model-free. Explicitly opted-in eligible paid/trial accounts may
+also receive a separate, derived per-report guide from all active approved samples and
+complete context. Background Anthropic processing never changes approved sources or
+save fences. Reads include an optional self-contained guide/status block; explicit rules,
+Baseline precedence and requested edit scope still govern. Stale successful guides remain
+labeled until replaced; zero samples and valid insufficient evidence clear them. Operator
+controls, spend/retry limits, eligibility and service capabilities are specified in
+[guide operations](server/deploy/guides.md). No public tier, new MCP tool, history UI,
+refresh/disable control or rollout authorization is introduced.

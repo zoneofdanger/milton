@@ -85,7 +85,7 @@ export function coverSheet(documents: Documents & { version: string }) {
   };
 }
 /** Served samples without their bodies (those stay in text), in served order, so
- * an assistant can name a sample to replace or remove and read its approved
+ * an assistant can name a sample to revise or remove and read its approved
  * context and match evidence. */
 const sampleIndex = (report: ReportDocument) =>
   report.samples.map((s) => ({
@@ -94,7 +94,7 @@ const sampleIndex = (report: ReportDocument) =>
     kind: s.kind,
     context: s.context,
     date: s.date,
-    context_revision: s.context_revision,
+    revision: s.revision,
     ...(s.match ? { match: s.match } : {}),
   }));
 /** Optional setup, served only while a report has no rules or samples. */
@@ -110,6 +110,7 @@ export const reportEnvelope = (
   return {
     report_id: id,
     text: report.body,
+    ...(report.guide ? { guide: report.guide } : {}),
     version: documents.version,
     is_empty: report.is_empty,
     kinds: report.kinds,
@@ -123,6 +124,7 @@ export const reportList = (documents: Documents & { version: string }) => ({
   reports: documents.reports.map((r) => ({
     report_id: r.id,
     text: r.body,
+    ...(r.guide ? { guide: r.guide } : {}),
     is_empty: r.is_empty,
     samples: sampleIndex(r),
     // A one-line pointer, so the list stays small; get_report serves the block.

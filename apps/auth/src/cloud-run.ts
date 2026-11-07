@@ -7,7 +7,9 @@ import { loadEnvironment } from "./environment.ts";
 import { checkRuntimeRole, retryStartupCheck } from "./roles.ts";
 const config = readConfig(loadEnvironment());
 const auth = createProvider(config);
-await retryStartupCheck(() => checkRuntimeRole(auth.pool));
+await retryStartupCheck(() =>
+  checkRuntimeRole(auth.pool, "milton_auth_runtime"),
+);
 const fetch = createCloudApp(
   auth,
   new URL("./public/", import.meta.url).pathname,

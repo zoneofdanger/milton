@@ -19,6 +19,7 @@ import {
 } from "./token";
 import { isLoopback } from "./config";
 import { boundRequest, MAX_REQUEST_BYTES } from "./http";
+import { isIP } from "node:net";
 import { z } from "zod";
 import {
   finalToolCall,
@@ -93,22 +94,111 @@ const invalidKey = () =>
   new AuthError("invalid_token", "Reconnect your assistant to Milton.", 401);
 const keyLookupBusy = () =>
   new AuthError("server_busy", "Milton is busy. Try again shortly.", 503);
+class KeyAttemptsLimited extends AuthError {
+  readonly retryAfter: number;
+  constructor(retryAfter: number) {
+    super("rate_limited", "Too many connection-key attempts. Try later.", 429);
+    this.retryAfter = retryAfter;
+  }
+}
+
+/**
+ * The client address Google's external Application Load Balancer saw, used
+ * only to limit connection-key attempts. The load balancer appends
+ * "<client-ip>,<load-balancer-ip>" to X-Forwarded-For and "does not verify any
+ * IP addresses that precede" them
+ * (https://docs.cloud.google.com/load-balancing/docs/https#x-forwarded-for_header),
+ * so only the second-to-last entry is trusted; the first is whatever the
+ * client sent. MCP ingress is internal-and-cloud-load-balancing, so direct
+ * internet requests to run.app are refused and every public request carries
+ * that appended pair (https://docs.cloud.google.com/run/docs/securing/ingress).
+ * Requests with no well-formed pair (local runs, internal callers) share one
+ * "unknown" source. The socket peer is not used: behind Cloud Run it is
+ * Google's front end, not the client. IPv6 clients are grouped by /64.
+ */
+export function keyAttemptSource(request: Request): string {
+  const hops = (request.headers.get("X-Forwarded-For") ?? "")
+    .split(",")
+    .map((hop) => hop.trim());
+  const client = hops.at(-2) ?? "";
+  if (hops.length < 2 || !isIP(hops.at(-1)!)) return "unknown";
+  if (isIP(client) === 4) return client;
+  if (isIP(client) !== 6) return "unknown";
+  const groups = (part = "") =>
+    part
+      .split(":")
+      .filter(Boolean)
+      .flatMap((g) => (g.includes(".") ? ["0", "0"] : [g]));
+  const [head, tail] = client.split("%")[0]!.split("::");
+  const left = groups(head),
+    right = groups(tail);
+  const full =
+    tail === undefined
+      ? left
+      : [...left, ...Array(8 - left.length - right.length).fill("0"), ...right];
+  return `${full
+    .slice(0, 4)
+    .map((g) => parseInt(g, 16).toString(16))
+    .join(":")}::/64`;
+}
 
 /**
  * Bounds unauthenticated database work on the connection-key path, per
  * process, before any database access. Anyone can send well-formed keys with
- * invented ids, so at most 8 key lookups run at once (beyond that the request
- * gets a quick 503 with Retry-After, without touching the database), and an id
- * no key has is remembered for 60 seconds in a 10,000-entry LRU, so a repeated
- * invented id never reaches the database. Only ids with no key at all are
- * remembered: a wrong secret for a real id is not, so knowing a key's public
- * id cannot lock its owner out.
+ * invented ids, so:
+ * - an id no key has is remembered for 60 seconds in a 10,000-entry LRU, so a
+ *   repeated invented id never reaches the database. Only ids with no key at
+ *   all are remembered: a wrong secret for a real id is not, so knowing a
+ *   key's public id cannot lock its owner out;
+ * - each source (see keyAttemptSource) has a token bucket of 5, refilled at 10
+ *   a minute, in a 10,000-source LRU. A lookup reserves one token before it
+ *   takes a slot; an empty bucket gets 429 with Retry-After, without touching
+ *   the database or a slot. A failed lookup keeps its token; a successful one
+ *   is refunded to 0.1, so an agent can make about 100 key calls a minute
+ *   while one source's invented keys reach the database about 10 times a
+ *   minute and hold at most 5 slots at once. Requests that never reach the
+ *   database (malformed keys, remembered ids, busy refusals) cost nothing;
+ * - at most 8 lookups run at once across all sources (beyond that a quick 503
+ *   with Retry-After, without touching the database).
+ * All of this is per instance; MCP runs at most 3, so the effective limits are
+ * up to three times these.
  */
-function keyLookupGate(concurrent = 8, entries = 10_000, ttlMs = 60_000) {
+function keyLookupGate(
+  concurrent = 8,
+  entries = 10_000,
+  ttlMs = 60_000,
+  burst = 5,
+  perMinute = 10,
+  successCost = 0.1,
+) {
   let running = 0;
   const unknown = new Map<string, number>(); // id → expiry; oldest first
+  const buckets = new Map<string, { tokens: number; at: number }>(); // LRU
+  const bucket = (source: string) => {
+    const now = Date.now();
+    const found = buckets.get(source);
+    buckets.delete(source);
+    if (!found && buckets.size >= entries)
+      buckets.delete(buckets.keys().next().value!);
+    const current = {
+      tokens: found
+        ? Math.min(
+            burst,
+            found.tokens + ((now - found.at) * perMinute) / 60_000,
+          )
+        : burst,
+      at: now,
+    };
+    buckets.set(source, current);
+    return current;
+  };
+  const refund = (source: string, tokens: number) => {
+    const current = bucket(source);
+    current.tokens = Math.min(burst, current.tokens + tokens);
+  };
   return async <T>(
     id: string,
+    source: string,
     lookup: () => Promise<
       { ok: true; value: T } | { ok: false; known: boolean }
     >,
@@ -121,11 +211,20 @@ function keyLookupGate(concurrent = 8, entries = 10_000, ttlMs = 60_000) {
         return undefined;
       }
     }
+    const reserved = bucket(source);
+    if (reserved.tokens < 1)
+      throw new KeyAttemptsLimited(
+        Math.ceil(((1 - reserved.tokens) * 60) / perMinute),
+      );
     if (running >= concurrent) throw keyLookupBusy();
+    reserved.tokens -= 1;
     running++;
     try {
       const result = await lookup();
-      if (result.ok) return result.value;
+      if (result.ok) {
+        refund(source, 1 - successCost);
+        return result.value;
+      }
       if (!result.known) {
         if (unknown.size >= entries)
           unknown.delete(unknown.keys().next().value!);
@@ -197,10 +296,14 @@ export function createMiltonHandler(
         // an invalid token. Only the key's public id is ever logged.
         const parsed = parseConnectionKey(authorization.slice(7));
         if (!parsed) throw invalidKey();
-        const key = await keyLookup(parsed.id, async () => {
-          const found = await connectionKeyAccount(config, parsed);
-          return found.ok ? { ok: true as const, value: found } : found;
-        });
+        const key = await keyLookup(
+          parsed.id,
+          keyAttemptSource(request),
+          async () => {
+            const found = await connectionKeyAccount(config, parsed);
+            return found.ok ? { ok: true as const, value: found } : found;
+          },
+        );
         if (!key) throw invalidKey();
         write = key.scope === "read_write";
         if (call.success && call.data.params.name === "create_memo" && !write)
@@ -279,6 +382,8 @@ export function createMiltonHandler(
           );
         }
         if (error.code === "server_busy") headers.set("Retry-After", "1");
+        if (error instanceof KeyAttemptsLimited)
+          headers.set("Retry-After", String(error.retryAfter));
         if (error.code === "insufficient_scope")
           headers.set(
             "WWW-Authenticate",

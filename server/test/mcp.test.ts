@@ -727,6 +727,9 @@ test("connection keys get exactly their scope's tools; revoked, expired, malform
         },
       },
     };
+    // Each request from its own source, so the per-source limit stays out of
+    // the way of these validity checks.
+    let sources = 0;
     const post = (authorization: string | null, body: unknown) =>
       handler(
         new Request(resource, {
@@ -736,6 +739,7 @@ test("connection keys get exactly their scope's tools; revoked, expired, malform
             ...(authorization ? { Authorization: authorization } : {}),
             Accept: "application/json, text/event-stream",
             "Content-Type": "application/json",
+            "X-Forwarded-For": `198.51.100.${++sources}, 203.0.113.1`,
           },
           body: JSON.stringify(body),
         }),
@@ -861,6 +865,8 @@ test("key lookups are bounded before database access: 8 at once, then a quick 50
       fixture.verify,
       () => {},
     );
+    // Each request from its own source, so only the aggregate cap applies.
+    let sources = 0;
     const post = (key: string) =>
       handler(
         new Request(resource, {
@@ -870,6 +876,7 @@ test("key lookups are bounded before database access: 8 at once, then a quick 50
             Authorization: "Bearer " + key,
             Accept: "application/json, text/event-stream",
             "Content-Type": "application/json",
+            "X-Forwarded-For": `198.51.100.${++sources}, 203.0.113.1`,
           },
           body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
         }),
@@ -904,6 +911,85 @@ test("key lookups are bounded before database access: 8 at once, then a quick 50
     expect((await post(wrong)).status).toBe(401);
     expect(queries).toBe(after + 2);
     expect((await post(real.key)).status).toBe(200);
+  } finally {
+    await local.dispose();
+  }
+}, 30000);
+
+test("key attempts are limited per load-balancer client before database access: one source's invented keys get 429, another source's real key still works, and a forged first X-Forwarded-For entry changes nothing", async () => {
+  const local = await localStore();
+  let queries = 0;
+  try {
+    await local.pg.exec(`CREATE SCHEMA IF NOT EXISTS milton_guard;
+      CREATE FUNCTION milton_guard.connection_key_status(text,text,text) RETURNS boolean
+        LANGUAGE sql AS $$ SELECT ($1,$2,$3)=('sourced','s:1','s:2') $$`);
+    await resolveIdentityAccount(local.env, {
+      provider: issuer,
+      subject: "sourced",
+    });
+    const real = await connectionKeysForAccount(
+      local.env,
+      await lookupIdentityAccount(local.env, {
+        provider: issuer,
+        subject: "sourced",
+      }),
+      { issuer, subject: "sourced", incarnation: "s:1", generation: "s:2" },
+    ).create({ name: "Real", scope: "read", expiry: 30 });
+    const db = new Proxy(local.db, {
+      get(target, key) {
+        if (key === "query")
+          return (statement: SQL) => {
+            queries++;
+            return target.query(statement);
+          };
+        return Reflect.get(target, key);
+      },
+    });
+    const fixture = await tokenFixture(local.pg);
+    const handler = createMiltonHandler(
+      { storeDatabase: db, issuer, resource, appOrigin: origin },
+      fixture.verify,
+      () => {},
+    );
+    // Google's load balancer appends "<client>, <load balancer>"; anything
+    // earlier came from the client.
+    const post = (key: string, forwardedFor: string) =>
+      handler(
+        new Request(resource, {
+          method: "POST",
+          headers: {
+            Host: "localhost:3001",
+            Authorization: "Bearer " + key,
+            Accept: "application/json, text/event-stream",
+            "Content-Type": "application/json",
+            "X-Forwarded-For": forwardedFor,
+          },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+        }),
+      );
+    const invented = () =>
+      `mk_${randomBytes(16).toString("base64url")}_${"A".repeat(43)}`;
+    const a = "198.51.100.7, 203.0.113.1";
+    const b = "198.51.100.8, 203.0.113.1";
+    let refused = 0;
+    for (let n = 0; n < 12; n++) {
+      const reply = await post(invented(), a);
+      if (reply.status === 429) {
+        refused++;
+        expect(Number(reply.headers.get("Retry-After"))).toBeGreaterThan(0);
+        expect((await reply.json()).error).toBe("rate_limited");
+      } else expect(reply.status).toBe(401);
+    }
+    expect(refused).toBeGreaterThan(0);
+    // Refusals touch neither the database nor a lookup slot, and a forged
+    // leading entry does not make source A someone else.
+    const before = queries;
+    for (const forged of ["192.0.2.1", "192.0.2.2, 192.0.2.3", "unknown"])
+      expect((await post(invented(), `${forged}, ${a}`)).status).toBe(429);
+    expect(queries).toBe(before);
+    // Source B's real key keeps working, past the burst and the per-minute rate.
+    for (let n = 0; n < 15; n++)
+      expect((await post(real.key, b)).status).toBe(200);
   } finally {
     await local.dispose();
   }

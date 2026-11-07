@@ -7,17 +7,68 @@ Milton uses Bun for installs, builds and tests, and Node 26 LTS in production.
 | `meetmilton.com`, `www.meetmilton.com` | Static Astro, Vercel `milton-site`                                    |
 | `app.meetmilton.com`                   | Hono JSX, Vite theme assets, Cloud Run `milton-app`                   |
 | `mcp.meetmilton.com`                   | Hono MCP, Cloud Run `milton-mcp`, Google external HTTPS load balancer |
+| `auth.meetmilton.com`                  | Self-hosted Better Auth, Cloud Run `milton-auth`, same load balancer  |
 
-Neon PostgreSQL and Neon Auth remain the source of truth.
+Neon PostgreSQL is the source of truth. Sign-in is the self-hosted auth service at
+`https://auth.meetmilton.com/api/auth` (since 2026-11-07). Managed Neon Auth is disabled,
+with its `neon_auth` schema and data retained.
 
 The app and MCP are live on GCP. Vercel hosts only the static Astro site.
 The retired combined Vercel `milton-mcp` project, deployments, aliases, project
 secrets and firewall configuration were removed during the authorized hosting
 decommission on 2026-11-01. Hosting rollback now uses Cloud Run revisions.
 
-## Pending sample revision schema/API cutover
+## Release record: schema + self-hosted auth cutover (2026-11-07)
 
-`0002_sample_versions` is a breaking forward migration, not a deployed change.
+Release agent milton-duo; Peter authorized each gate. Runbook and evidence (local,
+untracked): `.agents/tmp/auth-cutover/` (`runbook.md`, `phase1-report.md`,
+`linking-rehearsal.md`, `rehearsal-2.md`, `prod/README.md`).
+
+- Closed app/MCP ingress at 06:58:52Z (`internal`), 180 s drain, Neon snapshot
+  `snap-fancy-hat-b8j5ls14` (07:02:36Z), plus private `pg_dump` checkpoints before every
+  migration. Reopened 07:25:27Z (UTC), about 26 minutes closed.
+- Applied in order: writing `0002_sample_versions`, `0003_report_guides`; auth000; native
+  001–006; app000, app005, `005-app-roles.sql`. Writing journal 4 entries, native ledger 6.
+  Preservation equal to the pre-0002 baseline (2 accounts, 16 samples, 3 active, 13 retired,
+  identical active reads and exports).
+- Runtime logins: `milton_auth_runtime`, `milton_app_runtime`, `milton_mcp_runtime`;
+  owner delegate `milton_auth_delegate` (kept for maintenance); `milton_guide_runtime` and
+  `milton_app_delegate` set NOLOGIN after use. Legacy `milton_app` login retained, unused.
+- Identity import: 2 legacy accounts mapped to native users by verified Google/GitHub
+  subject (never email); eligibility key policy recorded (the trial fingerprint key is
+  permanent; back it up with recovery material).
+- Serving: `milton-app-cut-eaf898e`, `milton-mcp-cut-eaf898e` (server image
+  `sha256:2c49e2a0772ab2ff407eaf75507b2eb933671189baa8814180ba99a9db955e95`, source
+  `eaf898e`) with `milton-app-env` 4 / `milton-app-key` 2 and `milton-mcp-env` 4 /
+  `milton-mcp-key` 2. `milton-auth-00002-jj7` (auth image
+  `sha256:69910d8dd570fb5027cb10b60e61a7231062465c7f2b32f90b43d77e2fb1e1ef`, source
+  `f2f4301`) with `milton-auth-env` 2 / `milton-auth-key` 1, SA `milton-auth@`.
+- Jobs: `milton-auth-mail` (every minute) and `milton-auth-maint` (every 15 minutes, SA
+  `milton-auth-maint@`, secret `milton-auth-owner-url` 1), triggered by
+  `milton-auth-cron@`. Both on the auth image above.
+- Edge: URL-map host rule `auth.meetmilton.com` → backend/serverless NEG `milton-auth`;
+  certificate `milton-auth` (DNS authorization `milton-auth`) in cert map `milton-mcp`; DNS
+  `auth` A and `_acme-challenge.auth` CNAME in Cloudflare. Log exclusion
+  `milton-auth-credential-urls` on `_Default` (canaries excluded, positive control logged).
+- Fix during the window: `f2f4301` accepts any https client-metadata URL (Claude Code
+  was refused by the Muse-only allowlist). Claude Code connected and read the cover sheet
+  afterwards.
+- Checks: provider redirects; log canaries; controlled mail send (1 sent); maintenance
+  pass (exit 0); forms probe PASS; health 200 on all three; 0 server errors in the first
+  ~8 minutes; Peter verified both accounts in the app.
+- Deferred (record): password sign-up and reset on a real address; Safari/mobile;
+  disconnect and reconnect; refresh replay; sample revision, retirement and stale-write
+  through create_memo; interrupted-deletion retry; one-hour session expiry; real Muse
+  portal; sustained mail cadence and quota; full restore rehearsal; Codex, ChatGPT and
+  Cursor connections. A mail-test native user (Resend sink address, random discarded
+  password, no Milton account) remains; the guard trigger refuses a direct delete, so
+  remove it through the lifecycle path.
+- Rollback: the old `*-edit-00223ec` revisions are not compatible with this schema. Fix
+  forward, or restore `snap-fancy-hat-b8j5ls14` per the runbook's rollback section.
+
+## Sample revision schema/API cutover (applied 2026-11-07, see above)
+
+`0002_sample_versions` is a breaking forward migration.
 A separately authorized coordinated cutover must close app/MCP ingress for both
 reads and writes, drain old instances, take a database snapshot, apply the migration
 as owner, then start compatible app/MCP images before reopening. Do not run old code

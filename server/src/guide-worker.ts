@@ -1,6 +1,6 @@
-import { sql } from "drizzle-orm";
 import { loadEnvironment } from "./environment";
-import { neonDatabase } from "./store/database";
+import { postgresDatabase } from "./store/database";
+import { guideWorkerRoleAllowed } from "./guides/store";
 import { anthropicGuideProvider } from "./guides/provider";
 import { runGuideWorker } from "./guides/worker";
 
@@ -10,13 +10,9 @@ try {
   const env = loadEnvironment();
   if (!env.GUIDE_DATABASE_URL || !env.ANTHROPIC_API_KEY)
     throw new Error("configuration");
-  const db = neonDatabase(env.GUIDE_DATABASE_URL);
-  const [role] = await db.query<{ allowed: boolean }>(sql`SELECT
-    pg_has_role(current_user,'milton_guide_worker','USAGE')
-    AND NOT pg_has_role(current_user,'milton_runtime','USAGE')
-    AND NOT (rolsuper OR rolcreaterole OR rolcreatedb OR rolbypassrls OR rolreplication) AS allowed
-    FROM pg_roles WHERE rolname=current_user`);
-  if (!role?.allowed) throw new Error("configuration");
+  // Same direct verified-TLS adapter and error mapping as the app/MCP runtimes.
+  const db = postgresDatabase(env.GUIDE_DATABASE_URL);
+  if (!(await guideWorkerRoleAllowed(db))) throw new Error("configuration");
   const processed = await runGuideWorker(
     db,
     anthropicGuideProvider(env.ANTHROPIC_API_KEY, env.GUIDE_MODEL),

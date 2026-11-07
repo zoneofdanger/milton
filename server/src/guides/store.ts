@@ -90,3 +90,25 @@ export const guideEpoch = async (tx: StoreSession, userId: string) =>
       sql`SELECT epoch FROM guide_accounts WHERE user_id=${userId} AND ${guideEligible(userId)}`,
     )
   )[0]?.epoch;
+
+/** The worker's login may hold only the guide capability: no runtime, auth or
+ * owner membership, ownership or DDL/TEMP path, identity table or auth/app
+ * credential, signing-key or session schema. Checked before any provider call. */
+export const guideWorkerRoleAllowed = async (db: StoreSession) =>
+  (
+    await db.query<{ allowed: boolean }>(sql`SELECT
+    pg_has_role(current_user,'milton_guide_worker','USAGE')
+    AND NOT pg_has_role(current_user,'milton_runtime','USAGE')
+    AND NOT EXISTS(SELECT 1 FROM pg_auth_members m JOIN pg_roles g ON g.oid=m.roleid
+      WHERE m.member=r.oid AND g.rolname<>'milton_guide_worker')
+    AND NOT EXISTS(SELECT 1 FROM pg_class c WHERE c.relowner=r.oid)
+    AND NOT EXISTS(SELECT 1 FROM pg_namespace n WHERE n.nspowner=r.oid
+      OR (n.nspname IN ('milton_auth','milton_credential','milton_guard','milton_app','milton_app_auth','neon_auth')
+        AND has_schema_privilege(n.oid,'USAGE')))
+    AND NOT has_table_privilege('public.identities','SELECT')
+    AND NOT has_database_privilege(current_database(),'CREATE')
+    AND NOT has_database_privilege(current_database(),'TEMP')
+    AND NOT has_schema_privilege('public','CREATE')
+    AND NOT (rolsuper OR rolcreaterole OR rolcreatedb OR rolbypassrls OR rolreplication) AS allowed
+    FROM pg_roles r WHERE rolname=current_user`)
+  )[0]?.allowed === true;

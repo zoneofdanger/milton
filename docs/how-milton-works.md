@@ -437,4 +437,4 @@ Files: `server/src/guides/`, `server/src/guide-worker.ts`, `server/scripts/guide
 - The report page shows read-only tendencies/applicability and plain queued/updating/unavailable reasons only while eligible, retaining the stale explanation; source versions remain in MCP metadata, evidence references validate without entering displayed text, and requested edit scope/explicit rules retain precedence.
 - Approved-source limits, expected_version and exports exclude derived guides and status; saves and reads never call a model.
 - Account deletion cascades guides/enrollment/work; late completion never creates an account or guide row; disabled completed results are reusable only for the exact current source.
-- The guide worker has a distinct database role, provider-only secret payload and no credential/signing-key access; auth receives no guide writing capability.
+- The guide worker uses the runtimes' direct TLS adapter, a distinct login holding only the guide capability, a provider-only secret payload and no identity, credential, signing-key or session access; app/MCP only read guide state and auth receives no guide capability.

@@ -21,6 +21,9 @@ import { importIdentities } from "./auth-identity-import";
 import { hash } from "../src/auth-oidc";
 import { appActive, bindingActive } from "../src/auth-authority";
 import { checkProductRuntimeRole } from "./check-runtime-role";
+import { guideWorkerRoleAllowed } from "../src/guides/store";
+import { runGuideWorker } from "../src/guides/worker";
+import type { GuideProvider } from "../src/guides/provider";
 import {
   startOperation,
   advanceOperation,
@@ -117,7 +120,7 @@ try {
   for (const owner of ["milton_auth_owner", "milton_app_owner"])
     await admin.query(`CREATE ROLE ${owner} NOLOGIN NOINHERIT`);
   const credentials: Record<string, string> = {};
-  for (const service of ["auth", "app", "mcp"]) {
+  for (const service of ["auth", "app", "mcp", "guide"]) {
     const password = secret();
     credentials[service] = password;
     await admin.query(
@@ -133,9 +136,14 @@ try {
   });
   pools.push(owner);
   await owner.query(
-    "REVOKE ALL ON DATABASE milton FROM PUBLIC; GRANT CONNECT ON DATABASE milton TO milton_auth_runtime,milton_app_runtime,milton_mcp_runtime; REVOKE CREATE ON SCHEMA public FROM PUBLIC; CREATE SCHEMA drizzle; CREATE TABLE drizzle.__drizzle_migrations(id serial,hash text,created_at bigint)",
+    "REVOKE ALL ON DATABASE milton FROM PUBLIC; GRANT CONNECT ON DATABASE milton TO milton_auth_runtime,milton_app_runtime,milton_mcp_runtime,milton_guide_runtime; REVOKE CREATE ON SCHEMA public FROM PUBLIC; CREATE SCHEMA drizzle; CREATE TABLE drizzle.__drizzle_migrations(id serial,hash text,created_at bigint)",
   );
-  for (const migration of ["0000_baseline", "0001_sample_context"])
+  for (const migration of [
+    "0000_baseline",
+    "0001_sample_context",
+    "0002_sample_versions",
+    "0003_report_guides",
+  ])
     await owner.query(
       readFileSync(new URL(`./drizzle/${migration}.sql`, sourceRoot), "utf8"),
     );
@@ -183,6 +191,10 @@ try {
   );
   await owner.query(
     readFileSync(new URL("./migrations/005-app-roles.sql", sourceRoot), "utf8"),
+  );
+  // The guide job's plain login holds only main's NOLOGIN guide capability.
+  await owner.query(
+    "GRANT milton_guide_worker TO milton_guide_runtime WITH INHERIT TRUE",
   );
   const poolConfig = (service: string): pg.PoolConfig => ({
     host: "127.0.0.1",
@@ -597,6 +609,53 @@ try {
   }
   assert(await checkProductRuntimeRole(postgresDatabase(url("app")), "app"));
   assert(await checkProductRuntimeRole(postgresDatabase(url("mcp")), "mcp"));
+  // Sample revisions and guides: app/MCP read, MCP appends, nothing else widens.
+  const privileges = async (role: string) =>
+    (
+      await owner.query<{ p: string }>(
+        `SELECT t||':'||p p FROM unnest(ARRAY['samples','sample_versions','guide_accounts','report_guides','guide_spend','guide_budget_lock']) t,
+          unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE','TRUNCATE']) p
+          WHERE has_table_privilege($1,'public.'||t,p) ORDER BY 1`,
+        [role],
+      )
+    ).rows.map((r) => r.p);
+  const reads = [
+    "guide_accounts:SELECT",
+    "report_guides:SELECT",
+    "sample_versions:SELECT",
+    "samples:SELECT",
+  ];
+  assert.deepEqual(await privileges("milton_app_runtime"), reads);
+  assert.deepEqual(
+    await privileges("milton_mcp_runtime"),
+    [...reads, "sample_versions:INSERT", "samples:INSERT"].sort(),
+  );
+  assert.deepEqual(await privileges("milton_auth_runtime"), []);
+  const guideDb = postgresDatabase(url("guide"));
+  assert.equal(await guideWorkerRoleAllowed(guideDb), true);
+  assert.equal(
+    await guideWorkerRoleAllowed(postgresDatabase(url("mcp"))),
+    false,
+  );
+  for (const statement of [
+    "SELECT * FROM public.identities",
+    "SELECT * FROM milton_auth.session",
+    "SELECT * FROM milton_auth.jwks",
+    "SELECT * FROM milton_app.session",
+    "SELECT * FROM neon_auth.retained",
+  ])
+    await assert.rejects(
+      guideDb.query(sql.raw(statement)),
+      (e) => e instanceof StoreError,
+    );
+  const idle: GuideProvider = {
+    count: () => assert.fail("no enrolled guide work"),
+    generate: () => assert.fail("no enrolled guide work"),
+  };
+  assert.equal(await runGuideWorker(guideDb, idle), 0);
+  await owner.query("GRANT milton_mcp_runtime TO milton_guide_runtime");
+  assert.equal(await guideWorkerRoleAllowed(guideDb), false);
+  await owner.query("REVOKE milton_mcp_runtime FROM milton_guide_runtime");
   pass(
     "real TLS login roles separate native secrets, app credentials and writing with no DDL/TEMP path; production DB errors map safely and preserve callbacks/rollback",
   );
@@ -1142,6 +1201,12 @@ try {
         rules: [
           { report: "cover", text: "Keep fictional measurements explicit." },
         ],
+        sample: {
+          report: "email",
+          new_kind: "fictional note",
+          context: { version: 1, summary: "Fictional pickup note" },
+          text: "Collect the fictional trays on Saturday.",
+        },
         expected_version: cover.version,
         request_id: crypto.randomUUID(),
       },

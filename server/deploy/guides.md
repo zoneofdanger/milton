@@ -16,7 +16,11 @@ A scoped SECURITY DEFINER trigger updates report source/work state in sample tra
 it has a fixed search path and no public executable grant.
 
 `milton_guide_worker` is a NOLOGIN capability role, separate from `milton_runtime`.
-A future release may provision a plain login with membership only in that capability:
+A future release may provision a plain NOINHERIT login whose only membership is that
+capability, granted `WITH INHERIT TRUE`. Before contacting the provider, the worker
+refuses any other membership (including the auth, app and MCP runtime roles), ownership,
+DDL/TEMP path, `identities` read or usage of the native auth, app credential or retained
+sign-in schemas:
 
 | Tables                                                                        | Guide worker capabilities |
 | ----------------------------------------------------------------------------- | ------------------------- |

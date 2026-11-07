@@ -1,10 +1,11 @@
 import { hostHeaderValidationResponse } from "@modelcontextprotocol/server";
 import type { RuntimeConfig } from "./config";
 import { createMiltonApp } from "./index";
-import { localAsset } from "./assets";
+import { loadAssets, localAsset } from "./assets";
 
 export function createCloudApp(config: RuntimeConfig) {
   const app = createMiltonApp(config, true);
+  loadAssets();
   return async (request: Request): Promise<Response> => {
     const refusal = hostHeaderValidationResponse(request, [
       new URL(config.appOrigin).hostname,

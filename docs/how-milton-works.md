@@ -43,7 +43,7 @@ Files: `server/src/index.ts`, `server/src/cloud-app.ts`, `server/src/http.ts`,
 - `GET /health` returns ok.
 - `/.well-known/oauth-protected-resource` publishes the resource and its auth issuer.
 - Any other path on the MCP host redirects to the app host with a 308.
-- Static files are served from a fixed list of five, never arbitrary paths.
+- Static files are served from a fixed list of five, never arbitrary paths. A URL whose `?v=` matches the bytes' build hash caches for a year as immutable; any other URL revalidates by ETag; CSS and SVG go out brotli or gzip per Accept-Encoding.
 - Errors that escape the routes show browsers a "PC LOAD LETTER" page, and everything else
   gets a JSON 503.
 - Error logs hold only the location, class name, and code, never messages or tokens.
@@ -277,7 +277,7 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
 Files: `server/src/pages.tsx`, `server/src/memo-pages.tsx`, `server/src/auth.tsx`,
 `server/src/auth-session.tsx`, `server/src/auth-assistants.tsx`.
 
-- Pages run no scripts, under a strict CSP, and are not cached.
+- Pages run no scripts, under a strict CSP, and are not cached; they link content-versioned assets and preload both theme fonts.
 - A page route that fails shows "Unable to continue" at the error's status, with a link back
   where one applies.
 - An unknown error there reads as a 503 and is logged.
@@ -431,7 +431,7 @@ Files: `packages/theme/`, `server/scripts/`, `.github/workflows/checks.yml`.
 - `check-local` is an explicitly invoked interactive configured-issuer check; the isolated check-auth-integration builds actual product modules under Node26/PG18 and mocks only external boundaries.
 - `check-runtime-role` audits selected NOINHERIT app/MCP roles, ownership, DDL/TEMP and native/app credential/function boundaries.
 - `probe-forms` confirms a signed-out form post passes CSRF.
-- `build.ts` builds the CSS with Vite and bundles the Cloud Run entry with Bun.
+- `build.ts` builds the CSS with Vite, versions the public assets by content hash, and bundles the Cloud Run entry with Bun.
 - `dev.ts` serves the app on loopback and rebuilds the CSS on change.
 - CI runs types, tests, and formatting, holds no secrets, and does not deploy.
 

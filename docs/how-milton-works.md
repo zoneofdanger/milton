@@ -117,6 +117,8 @@ Files: `server/src/store/compiled.ts`, `server/src/store/snapshot.ts`,
   view is not.
 - An assistant read is two queries (that statement and the trial gate) and opens no
   database connection; the web view's is one.
+- The web view reads no store limits and makes no account check of its own: its
+  account lookup and that statement each require an active account.
 
 ## Assembling documents
 
@@ -244,7 +246,7 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
 - Native auth hosts verified password/email, Google/GitHub, consent and account security; own form destinations and direct native URL-encoded browser form POST redirects (including logout confirmation) share an escaped fresh-document Continue navigation under strict same-origin form policy; direct GET, JSON/fetch and machine calls retain native redirects, and finalized native/static/refusal responses use strict-origin referrers (origin only, no paths/queries/proofs, suppressed on HTTPS downgrade) so same-origin form POSTs retain Origin while missing/null/foreign Origins stay refused; responses retain their security headers and native cookies; app never handles passwords or native cookies.
 - App uses maintained code/S256 OIDC with shared SQL one-use state/nonce/verifier, exact callback, signature/issuer/audience/subject and matching UserInfo/opaque-token proof.
 - Identity-only app sessions last at most one absolute hour and never outlive their native opaque token; renewal starts a new SSO flow with no refresh/offline scope.
-- App cookies are host-only Secure/HttpOnly/SameSite=Lax over HTTPS; every use checks the original nonempty sid, immutable binding, incarnation and generation against native SQL.
+- App cookies are host-only Secure/HttpOnly/SameSite=Lax over HTTPS; every use checks the original nonempty sid, immutable binding, incarnation and generation against native SQL, in the statement that reads the session.
 - Invalid proof refuses; actual native5xx/network/timeout is 503; an uncertain spent callback recovers through a new login.
 - New logins reclaim at most16 expired flows/sessions each; admission correlations expire after24 hours with bounded reclaim, while eligibility/key policy/legacy mapping and original operation associations remain indefinitely for their stated purposes.
 - Forms require same origin, an ASCII CSRF token and unique fields; sign-in rotates CSRF.
@@ -394,6 +396,7 @@ Files: `server/drizzle/`, `server/src/store/schema.ts`, `server/src/store/databa
 - PostgreSQL connection, query, transaction-control and close failures become store errors: known triggers and constraints get clean coded responses, unknown failures log only class/code, and callback errors survive rollback/close unchanged.
 - The store opens only a database named `milton`, over TLS.
 - Runtime queries borrow bounded direct PostgreSQL TLS connections from one process pool per URL (at most 40, waiting at most 5 s for one); a connection idle over 30 s by the wall clock, whose last command, BEGIN, COMMIT or ROLLBACK failed, or with a query or transaction unfinished when its operation ends, is closed instead of reused, and that operation's later calls refuse; transactions keep one connection with lock and statement timeouts; app/MCP close the pools on SIGTERM after in-flight requests, and the guide job when it ends.
+- A signed-in page runs its independent reads at once, each borrowing its own connection (at most 4 per request, on `/assistants`); no operation borrows while holding one, so a full pool makes reads wait, never deadlock.
 
 ## Static site
 

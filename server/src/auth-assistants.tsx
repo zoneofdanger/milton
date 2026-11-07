@@ -20,6 +20,18 @@ export const clientHost = (clientId: string) => {
   } catch {}
   return "";
 };
+/** Awaits reads started together, each borrowing its own pooled connection
+ * (none borrows while holding one), and fails as awaiting them one after
+ * another would: with the first listed failure. */
+const inOrder = async <T extends readonly unknown[]>(
+  ...reads: { [K in keyof T]: Promise<T[K]> }
+): Promise<T> => {
+  const settled = await Promise.allSettled(reads);
+  for (const read of settled) if (read.status === "rejected") throw read.reason;
+  return settled.map(
+    (read) => (read as PromiseFulfilledResult<unknown>).value,
+  ) as unknown as T;
+};
 export const assistants = async (ctx: PageContext): Promise<Response> => {
   const { config, request, url, csrfField, readForm, signedIn } = ctx;
   if (
@@ -54,12 +66,15 @@ export const assistants = async (ctx: PageContext): Promise<Response> => {
     return Response.redirect(config.appOrigin + "/assistants", 303);
   }
   const user = await signedIn();
-  const { items: listed, full } = await connections(config, user);
-  const pending = await pendingOperations(
-    config,
-    cookieValue(request, cookieName(config, "session")),
+  const [{ items: listed, full }, pending, keys, billing] = await inOrder(
+    connections(config, user),
+    pendingOperations(
+      config,
+      cookieValue(request, cookieName(config, "session")),
+    ),
+    accountKeys(ctx, user).then((account) => account.list()),
+    ctx.accountBilling(user),
   );
-  const keys = await (await accountKeys(ctx, user)).list();
   return page(
     "Connected assistants",
     <>
@@ -129,7 +144,7 @@ export const assistants = async (ctx: PageContext): Promise<Response> => {
         csrf: csrfField,
         email: user.email,
         here: "assistants",
-        billing: await ctx.accountBilling(user),
+        billing,
       },
     },
   );

@@ -4,6 +4,7 @@ WORKDIR /src
 COPY package.json bun.lock tsconfig.base.json ./
 COPY apps/site/package.json apps/site/package.json
 COPY packages/theme packages/theme
+COPY packages/forwarded-client packages/forwarded-client
 COPY server/package.json server/package.json
 COPY apps/auth apps/auth
 RUN bun --no-env-file install --frozen-lockfile && bun --no-env-file run --cwd apps/auth build

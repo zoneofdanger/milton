@@ -19,7 +19,7 @@ import {
 } from "./token";
 import { isLoopback } from "./config";
 import { boundRequest, MAX_REQUEST_BYTES } from "./http";
-import { isIP } from "node:net";
+import { forwardedClient } from "@milton/forwarded-client";
 import { z } from "zod";
 import {
   finalToolCall,
@@ -104,52 +104,19 @@ class KeyAttemptsLimited extends AuthError {
 
 /**
  * The client address Google's external Application Load Balancer saw, used
- * only to limit connection-key attempts. The load balancer appends
- * "<client-ip>,<load-balancer-ip>" to X-Forwarded-For and "does not verify any
- * IP addresses that precede" them
- * (https://docs.cloud.google.com/load-balancing/docs/https#x-forwarded-for_header),
- * so only the second-to-last entry is trusted; the first is whatever the
- * client sent. MCP ingress is internal-and-cloud-load-balancing, so direct
- * internet requests to run.app are refused and every public request carries
- * that appended pair (https://docs.cloud.google.com/run/docs/securing/ingress).
+ * only to limit connection-key attempts: forwardedClient's rules (the
+ * second-to-last X-Forwarded-For entry; never the first, which the client
+ * sent). MCP ingress is internal-and-cloud-load-balancing, so direct internet
+ * requests to run.app are refused and every public request carries that
+ * appended pair (https://docs.cloud.google.com/run/docs/securing/ingress).
  * Requests with no well-formed pair (local runs, internal callers) share one
  * "unknown" source. The socket peer is not used: behind Cloud Run it is
- * Google's front end, not the client. IPv4-mapped IPv6 clients are their IPv4
- * address; other IPv6 clients are grouped by /64.
+ * Google's front end, not the client. IPv6 clients are keyed as "a:b:c:d::/64".
  */
 export function keyAttemptSource(request: Request): string {
-  const hops = (request.headers.get("X-Forwarded-For") ?? "")
-    .split(",")
-    .map((hop) => hop.trim());
-  const client = hops.at(-2) ?? "";
-  if (hops.length < 2 || !isIP(hops.at(-1)!)) return "unknown";
-  if (isIP(client) === 4) return client;
-  if (isIP(client) !== 6) return "unknown";
-  const groups = (part = "") =>
-    part
-      .split(":")
-      .filter(Boolean)
-      .flatMap((g) => {
-        if (!g.includes(".")) return [parseInt(g, 16)];
-        const [a, b, c, d] = g.split(".").map(Number);
-        return [a! * 256 + b!, c! * 256 + d!];
-      });
-  const [head, tail] = client.split("%")[0]!.split("::");
-  const left = groups(head),
-    right = groups(tail);
-  const full =
-    tail === undefined
-      ? left
-      : [...left, ...Array(8 - left.length - right.length).fill(0), ...right];
-  // An IPv4-mapped address (::ffff:a.b.c.d, dotted or hex) is that IPv4 client.
-  if (full.slice(0, 5).every((g) => g === 0) && full[5] === 0xffff)
-    return [full[6]! >> 8, full[6]! & 255, full[7]! >> 8, full[7]! & 255].join(
-      ".",
-    );
-  return `${full
-    .slice(0, 4)
-    .map((g) => g.toString(16))
-    .join(":")}::/64`;
+  const client = forwardedClient(request.headers.get("X-Forwarded-For"));
+  if (!client) return "unknown";
+  return "ipv4" in client ? client.ipv4 : `${client.ipv6Prefix}::/64`;
 }
 
 /**

@@ -1,4 +1,4 @@
-import { isIP } from "node:net";
+import { forwardedClient } from "@milton/forwarded-client";
 import { AUTH_ORIGIN } from "./config.ts";
 const browserPosts = new Set([
   "/sign-up/email",
@@ -158,46 +158,14 @@ export const SECURITY_HEADERS = {
 };
 /**
  * The client address Google's external Application Load Balancer saw, used
- * for the network rate limits. The load balancer appends
- * "<client-ip>,<load-balancer-ip>" to X-Forwarded-For and does not verify
- * anything before them
- * (https://docs.cloud.google.com/load-balancing/docs/https#x-forwarded-for_header),
- * so only the second-to-last entry is trusted; the first is whatever the client
- * sent. Same rules as the MCP server's keyAttemptSource. This holds only while
- * auth ingress is internal-and-cloud-load-balancing. IPv4-mapped IPv6 clients
- * are their IPv4 address; other IPv6 clients are grouped by /64, returned as a valid address ("a:b:c:d::") for Better Auth's IP
- * header. Without a well-formed pair, undefined: the caller keeps the socket
- * peer (local runs and tests).
+ * for the network rate limits: forwardedClient's rules, shared with the MCP
+ * server's keyAttemptSource. This holds only while auth ingress is
+ * internal-and-cloud-load-balancing. An IPv6 client's /64 is returned as a
+ * valid address ("a:b:c:d::") for Better Auth's IP header. Without a
+ * well-formed pair, undefined: the caller keeps the socket peer (local runs
+ * and tests).
  */
 export function loadBalancerClient(forwarded: string | null) {
-  const hops = (forwarded ?? "").split(",").map((hop) => hop.trim());
-  const client = hops.at(-2) ?? "";
-  if (hops.length < 2 || !isIP(hops.at(-1)!)) return undefined;
-  if (isIP(client) === 4) return client;
-  if (isIP(client) !== 6) return undefined;
-  const groups = (part = "") =>
-    part
-      .split(":")
-      .filter(Boolean)
-      .flatMap((g) => {
-        if (!g.includes(".")) return [parseInt(g, 16)];
-        const [a, b, c, d] = g.split(".").map(Number);
-        return [a! * 256 + b!, c! * 256 + d!];
-      });
-  const [head, tail] = client.split("%")[0]!.split("::");
-  const left = groups(head),
-    right = groups(tail);
-  const full =
-    tail === undefined
-      ? left
-      : [...left, ...Array(8 - left.length - right.length).fill(0), ...right];
-  // An IPv4-mapped address (::ffff:a.b.c.d, dotted or hex) is that IPv4 client.
-  if (full.slice(0, 5).every((g) => g === 0) && full[5] === 0xffff)
-    return [full[6]! >> 8, full[6]! & 255, full[7]! >> 8, full[7]! & 255].join(
-      ".",
-    );
-  return `${full
-    .slice(0, 4)
-    .map((g) => g.toString(16))
-    .join(":")}::`;
+  const client = forwardedClient(forwarded);
+  return client && ("ipv4" in client ? client.ipv4 : `${client.ipv6Prefix}::`);
 }

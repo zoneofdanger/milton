@@ -52,7 +52,7 @@ Files: `server/src/index.ts`, `server/src/cloud-app.ts`, `server/src/http.ts`,
 
 Files: `server/src/handler.ts`, `server/src/token.ts`, `server/src/mcp.ts`,
 `server/src/mcp-outcomes.ts`, `server/src/store/index.ts`,
-`server/src/store/connection-keys.ts`.
+`server/src/store/connection-keys.ts`, `packages/forwarded-client/`.
 
 - Only POST and OPTIONS pass.
 - Origin is deliberately not checked, so web clients reach auth from any origin. The Host
@@ -241,7 +241,7 @@ Files: `server/src/store/setup.ts`.
 Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-login.tsx`,
 `server/src/auth-assistants.tsx`, `server/src/auth-account.tsx`, `server/src/pages.tsx`,
 `server/src/billing.tsx`, `server/src/store/index.ts`, `server/src/store/billing.ts`,
-`server/scripts/backfill-subscriptions.ts`.
+`server/scripts/backfill-subscriptions.ts`, `packages/forwarded-client/`.
 
 - Native auth hosts verified password/email, Google/GitHub, consent and account security; own form destinations and direct native URL-encoded browser form POST redirects (including logout confirmation) share an escaped fresh-document Continue navigation under strict same-origin form policy; direct GET, JSON/fetch and machine calls retain native redirects, and finalized native/static/refusal responses use strict-origin referrers (origin only, no paths/queries/proofs, suppressed on HTTPS downgrade) so same-origin form POSTs retain Origin while missing/null/foreign Origins stay refused; responses retain their security headers and native cookies; app never handles passwords or native cookies.
 - App uses maintained code/S256 OIDC with shared SQL one-use state/nonce/verifier, exact callback, signature/issuer/audience/subject and matching UserInfo/opaque-token proof.

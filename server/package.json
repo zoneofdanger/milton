@@ -18,6 +18,7 @@
   "dependencies": {
     "@dotenvx/dotenvx": "2.38.2",
     "@hono/node-server": "2.1.5",
+    "@milton/forwarded-client": "workspace:*",
     "@milton/theme": "workspace:*",
     "@modelcontextprotocol/server": "2.4.0",
     "@neondatabase/serverless": "1.2.0",

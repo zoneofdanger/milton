@@ -149,119 +149,56 @@ test("startup role check retries connection failures only, within its budget", a
   expect(sleeps).toEqual([500, 1000, 2000, 4000, 4000]);
 });
 
-test("the encrypted payload decrypts as dotenvx does, refusing what dotenvx would rewrite", async () => {
+// Fictional payloads minted as the release procedure does: the dotenvx CLI
+// with an explicit keys file, outside the working directory.
+async function payloads() {
   const { spawnSync } = await import("node:child_process");
   const { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } =
     await import("node:fs");
+  const { createRequire } = await import("node:module");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
-  const { config } = await import("@dotenvx/dotenvx");
   const root = mkdtempSync(join(tmpdir(), "milton-auth-env-"));
-  // Mint fictional payloads as the release procedure does: the dotenvx CLI
-  // with an explicit keys file, outside the working directory.
-  const mint = (name: string, lines: string[]) => {
-    const dir = join(root, name);
-    mkdirSync(dir);
-    writeFileSync(join(dir, ".env"), lines.join("\n") + "\n", { mode: 0o600 });
-    const cli = new URL("../node_modules/.bin/dotenvx", import.meta.url);
-    const r = spawnSync(
-      cli.pathname,
-      ["encrypt", "-f", `${name}/.env`, "--env-keys-file", `${name}/keys`],
-      { cwd: root, env: { PATH: process.env.PATH } },
-    );
-    expect(r.status).toBe(0);
-    const keys = readFileSync(join(dir, "keys"), "utf8");
-    return {
-      file: join(dir, ".env"),
-      text: readFileSync(join(dir, ".env"), "utf8"),
-      key: keys.match(/^DOTENV_PRIVATE_KEY="?([0-9a-f]{64})"?$/m)![1]!,
-    };
-  };
-  const dotenvx = (text: string, env: Record<string, string>) => {
-    const out = { ...env };
-    config({
-      envs: [
-        { type: "env", value: text, privateKeyName: "DOTENV_PRIVATE_KEY" },
-      ],
-      processEnv: out,
-      strict: true,
-      quiet: true,
-      noArmor: true,
-      noNative: true,
-      no1Password: true,
-      noBitwarden: true,
-    });
-    return out;
-  };
-  try {
-    const good = mint("good", [
+  const mkdir = join(root, "good");
+  mkdirSync(mkdir);
+  writeFileSync(
+    join(mkdir, ".env"),
+    [
       `AUTH_DATABASE_URL="postgresql://fictional:pw@db.example.invalid/milton?sslmode=verify-full&a=1"`,
       `AUTH_SECRET="${"f".repeat(64)}"`,
       `AUTH_MAIL_FROM="auth@notifications.meetmilton.com"`,
       `FICTIONAL_TEXT="ünï # = 'q' spaced"`,
       `FICTIONAL_LINES="one\\ntwo"`,
       `FICTIONAL_BOM="﻿bom"`,
-      `FICTIONAL_LITERAL='a$X\\b$(echo kept)'`,
       `FICTIONAL_SLASH="back\\slash"`,
-      "FICTIONAL_TICK=`tick`",
-      `FICTIONAL_BARE=bare-value # a comment`,
-      `export FICTIONAL_SPACED = 'spaced'`,
-      `1FICTIONAL.NAME-X="n"`,
-      `FICTIONAL_DUP="first"`,
-      `FICTIONAL_DUP="second"`,
       `PORT="9999"`,
-    ]);
-    expect(good.text).toMatch(/^DOTENV_PUBLIC_KEY="[0-9a-f]{66}" # -fk /m);
-    expect(good.text).toMatch(/^export FICTIONAL_SPACED='encrypted:/m);
-    expect(good.text).toMatch(/^FICTIONAL_TICK=`encrypted:/m);
-    const env = {
-      AUTH_ENCRYPTED_ENV_FILE: good.file,
-      DOTENV_PRIVATE_KEY: good.key,
-      PORT: "8080",
-    };
-    // The same payload with bare-CR line ends and an uppercase public key.
-    const accepted = [
-      good.text,
-      good.text.replace(/\n/g, "\r"),
-      good.text.replace(
-        /^(DOTENV_PUBLIC_KEY=")([0-9a-f]+)/m,
-        (_, a, b) => a + b.toUpperCase(),
-      ),
-    ];
-    // dotenvx would expand or run these, or they are not dotenvx output.
-    const rewritten = mint("rewritten", [
-      `A="$(echo substituted)"`,
-      `B="x\${PORT}y"`,
-      `C="pass$word"`,
-      "D=`x$PORT`",
-      `G=x$PORT`,
-    ]);
-    const assignment = /^(?:[A-DG])=/;
-    const header = rewritten.text
-      .split("\n")
-      .filter((l) => !assignment.test(l));
-    const variants = [
-      ...rewritten.text.split("\n").filter((l) => assignment.test(l)),
-      `E="plaintext"`,
-      good.text.split("\n").find((l) => l.startsWith("AUTH_SECRET="))!,
-      `F="${rewritten.text.match(/^A="(encrypted:[^"]+)"$/m)![1]!.slice(0, -4)}AAAA"`,
-    ];
-    expect(variants).toHaveLength(8);
-    const cases: Record<string, string>[] = [];
-    for (const [n, text] of accepted.entries()) {
-      const file = join(root, `accepted-${n}.env`);
-      writeFileSync(file, text, { mode: 0o600 });
-      cases.push({ ...env, AUTH_ENCRYPTED_ENV_FILE: file });
-    }
-    for (const [n, line] of variants.entries()) {
-      const file = join(root, `variant-${n}.env`);
-      writeFileSync(file, [...header, line].join("\n"), { mode: 0o600 });
-      cases.push({
-        AUTH_ENCRYPTED_ENV_FILE: file,
-        DOTENV_PRIVATE_KEY: rewritten.key,
-      });
-    }
-    // Production runs Node; Bun's crypto has no secp256k1.
+    ].join("\n") + "\n",
+    { mode: 0o600 },
+  );
+  const cli = new URL("../node_modules/.bin/dotenvx", import.meta.url);
+  const minted = spawnSync(
+    cli.pathname,
+    ["encrypt", "-f", "good/.env", "--env-keys-file", "good/keys"],
+    { cwd: root, env: { PATH: process.env.PATH } },
+  );
+  expect(minted.status).toBe(0);
+  const text = readFileSync(join(mkdir, ".env"), "utf8");
+  const key = readFileSync(join(mkdir, "keys"), "utf8").match(
+    /^DOTENV_PRIVATE_KEY="?([0-9a-f]{64})"?$/m,
+  )![1]!;
+  const publicKey = text.match(/^DOTENV_PUBLIC_KEY="([0-9a-f]{66})"/m)![1]!;
+  // dotenvx's own ECIES, for plaintexts the CLI would not encrypt as given.
+  const primitives = createRequire(import.meta.resolve("@dotenvx/dotenvx"))(
+    "@dotenvx/primitives",
+  ) as { encrypt: (publicKey: string, value: string) => string };
+  let n = 0;
+  const write = (body: string) => {
+    const file = join(root, `case-${n++}.env`);
+    writeFileSync(file, body, { mode: 0o600 });
+    return file;
+  };
+  // Production runs Node; Bun's crypto has no secp256k1.
+  const load = (cases: Record<string, string>[]) => {
     const run = spawnSync(
       "node",
       [
@@ -278,26 +215,121 @@ test("the encrypted payload decrypts as dotenvx does, refusing what dotenvx woul
       { env: { PATH: process.env.PATH }, encoding: "utf8" },
     );
     expect(run.status).toBe(0);
-    const out = JSON.parse(run.stdout) as unknown[];
-    for (const [n, text] of accepted.entries())
-      expect(out[n]).toEqual(dotenvx(text, cases[n]!));
-    expect(out[0]).toMatchObject({
+    return JSON.parse(run.stdout) as unknown[];
+  };
+  return {
+    file: join(mkdir, ".env"),
+    text,
+    key,
+    seal: (value: string) => primitives.encrypt(publicKey, value),
+    write,
+    load,
+    cleanup: () => rmSync(root, { recursive: true }),
+  };
+}
+
+test("the CLI-minted payload decrypts exactly as dotenvx config() reads it", async () => {
+  const { config } = await import("@dotenvx/dotenvx");
+  const p = await payloads();
+  try {
+    expect(p.text).toMatch(/^DOTENV_PUBLIC_KEY="[0-9a-f]{66}" # -fk keys$/m);
+    const env = {
+      AUTH_ENCRYPTED_ENV_FILE: p.file,
+      DOTENV_PRIVATE_KEY: p.key,
+      PORT: "8080",
+    };
+    const reference: Record<string, string> = { ...env };
+    config({
+      envs: [
+        { type: "env", value: p.text, privateKeyName: "DOTENV_PRIVATE_KEY" },
+      ],
+      processEnv: reference,
+      strict: true,
+      quiet: true,
+      noArmor: true,
+      noNative: true,
+      no1Password: true,
+      noBitwarden: true,
+    });
+    const [loaded] = p.load([env]);
+    expect(loaded).toEqual(reference);
+    expect(loaded).toMatchObject({
       PORT: "8080",
       FICTIONAL_TEXT: "ünï # = 'q' spaced",
       FICTIONAL_LINES: "one\ntwo",
       FICTIONAL_BOM: "﻿bom",
-      FICTIONAL_LITERAL: "a$X\\b$(echo kept)",
       FICTIONAL_SLASH: "back\\slash",
-      FICTIONAL_DUP: "second",
-      "1FICTIONAL.NAME-X": "n",
     });
-    expect(out.slice(accepted.length)).toEqual(
-      variants.map(() => [
-        "auth_runtime_secrets_unavailable",
-        "AUTH_RUNTIME_SECRETS_UNAVAILABLE",
-      ]),
+  } finally {
+    p.cleanup();
+  }
+});
+
+test("any other payload form is refused with the logged code", async () => {
+  const p = await payloads();
+  try {
+    const lines = p.text.split("\n");
+    const header = lines
+      .filter((l) => !l.startsWith("AUTH_SECRET="))
+      .join("\n");
+    const sealed = p.seal("fictional");
+    const refused: [string, string, string?][] = [
+      ["prototype name", `${header}\nconstructor="${sealed}"\n`],
+      ["lowercase name", `${header}\nfictional_value="${sealed}"\n`],
+      ["__proto__ name", `${header}\n__proto__="${sealed}"\n`],
+      ["single quotes", `${header}\nFICTIONAL='${sealed}'\n`],
+      ["backtick quotes", `${header}\nFICTIONAL=\`${sealed}\`\n`],
+      ["no quotes", `${header}\nFICTIONAL=${sealed}\n`],
+      ["export prefix", `${header}\nexport FICTIONAL="${sealed}"\n`],
+      ["value comment", `${header}\nFICTIONAL="${sealed}" # note\n`],
+      ["plaintext value", `${header}\nFICTIONAL="plaintext"\n`],
+      ["encrypted: header", `${header}\nDOTENV_PUBLIC_KEY_X="${sealed}"\n`],
+      [
+        "encrypted: main header",
+        p.text.replace(
+          /^DOTENV_PUBLIC_KEY=.*$/m,
+          `DOTENV_PUBLIC_KEY="${sealed}"`,
+        ),
+      ],
+      [
+        "uppercase header",
+        p.text.replace(
+          /^(DOTENV_PUBLIC_KEY=")([0-9a-f]+)/m,
+          (_, a, b) => a + b.toUpperCase(),
+        ),
+      ],
+      [
+        "encrypted: plaintext",
+        `${header}\nFICTIONAL="${p.seal("encrypted:fictional")}"\n`,
+      ],
+      ["$ plaintext", `${header}\nFICTIONAL="${p.seal("x$PORT")}"\n`],
+      ["duplicate", `${p.text}FICTIONAL="${sealed}"\nFICTIONAL="${sealed}"\n`],
+      ["CR line ends", p.text.replace(/\n/g, "\r")],
+      ["CRLF line ends", p.text.replace(/\n/g, "\r\n")],
+      ["tampered value", `${header}\nFICTIONAL="${sealed.slice(0, -4)}AAAA"\n`],
+      ["comma key list", p.text, `${p.key},${p.key}`],
+      ["wrong key", p.text, "1".repeat(64)],
+    ];
+    const cases = refused.map(([, body, key]) => ({
+      AUTH_ENCRYPTED_ENV_FILE: p.write(body),
+      DOTENV_PRIVATE_KEY: key ?? p.key,
+    }));
+    const out = p.load(cases);
+    expect(
+      Object.fromEntries(refused.map(([name], i) => [name, out[i]])),
+    ).toEqual(
+      Object.fromEntries(
+        refused.map(([name]) => [
+          name,
+          [
+            "auth_runtime_secrets_unavailable",
+            "AUTH_RUNTIME_SECRETS_UNAVAILABLE",
+          ],
+        ]),
+      ),
     );
     // The mail job logs the refusal's code, and no key material.
+    const { spawnSync } = await import("node:child_process");
     const mail = spawnSync(
       "node",
       [
@@ -305,15 +337,15 @@ test("the encrypted payload decrypts as dotenvx does, refusing what dotenvx woul
         new URL("../scripts/deliver.ts", import.meta.url).pathname,
         "--apply",
       ],
-      { env: { PATH: process.env.PATH, ...cases.at(-1)! }, encoding: "utf8" },
+      { env: { PATH: process.env.PATH, ...cases[0]! }, encoding: "utf8" },
     );
     expect(mail.status).toBe(1);
     expect(mail.stderr).toContain(
       "auth_mail_pass { class: 'Error', code: 'AUTH_RUNTIME_SECRETS_UNAVAILABLE' }",
     );
-    expect(mail.stdout + mail.stderr).not.toContain(rewritten.key);
+    expect(mail.stdout + mail.stderr).not.toContain(p.key);
   } finally {
-    rmSync(root, { recursive: true });
+    p.cleanup();
   }
 });
 

@@ -20,7 +20,7 @@ Files: `server/src/cloud-run.ts`, `server/src/environment.ts`, `server/src/confi
 - The prepared auth service has its own canonical host, issuer and database role; app/MCP routing stays separate. Live routing changes require the release runbook.
 - HTTP upgrades to HTTPS with a redirect that keeps the method.
 - Vercel builds the static site from main on every push.
-- Startup decrypts a dotenvx file using a separate platform-held key. Auth decrypts it with Node's OpenSSL instead of dotenvx, reading it as dotenvx does, and refuses plaintext values and any `$` outside single quotes, which dotenvx would expand, run or unescape.
+- Startup decrypts a dotenvx file using a separate platform-held key. Auth decrypts it with Node's OpenSSL instead of dotenvx and accepts only the exact `NAME="encrypted:..."` form the CLI writes, with one private key; any other form, or a plaintext that starts with `encrypted:` or contains `$`, refuses startup.
 - Startup fails on bad URLs, a missing/short app client, admission or eligibility secret, a bad support email, a bad port, or an
   unknown service name.
 - Auth startup checks its runtime role before listening; connection failures retry with backoff for about 15 seconds, while a role refusal fails at once. App/MCP startup does no database work.

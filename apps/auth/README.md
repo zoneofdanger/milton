@@ -127,7 +127,9 @@ The NOLOGIN owner is reached through a **separate delegated NOINHERIT login**, g
 
 Migration/provision/maintenance commands refuse without their explicit `--apply` selection and separate owner environment. `migrate.ts` expects `up --apply` or `down --apply`; provision expects `--apply /private/owner/output.json`; maintenance expects `--apply`. No startup migration occurs. Read the selected SQL as the preparation/dry run; omitted apply is a refusal, not a schema change.
 
-`migrate.ts` applies or reverses each file and its `migration_ledger` row in one transaction under an advisory lock, so a crash or lost connection leaves both or neither; rerun the same command.
+`migrate.ts` applies or reverses each file and its `migration_ledger` row in one transaction under an advisory lock, so a crash or lost connection leaves both or neither; rerun the same command. Prepared (two-phase) transactions are not used.
+
+A file must not begin, commit or roll back a transaction itself. The runner notices only after the file ran and stops with `MIGRATION_MUST_NOT_MANAGE_TRANSACTION`, naming the file and writing no ledger row. Do not simply rerun: the file's work may already be committed. Inspect the schema against the file, then either record its ledger row by hand (the work is complete) or reverse the work, and fix the file before the next run.
 
 ## Bounded mail delivery and retention
 

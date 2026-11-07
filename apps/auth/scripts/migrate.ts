@@ -1,4 +1,5 @@
 import { databaseOptions } from "../src/database.ts";
+import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import pg from "pg";
 import { safeError } from "../src/config.ts";
@@ -66,16 +67,25 @@ try {
             code: "MIGRATION_MUST_NOT_MANAGE_TRANSACTION",
           },
         );
-      // Habit check before any work: a line that is only BEGIN;, COMMIT; or ROLLBACK;.
+      // Deliberately conservative check before any work: a line that is only
+      // BEGIN;, COMMIT; or ROLLBACK;. Its one false positive is a comment or
+      // string holding exactly such a line, a loud and safe refusal.
       if (/^\s*(begin|commit|rollback)\s*;\s*$/im.test(sql))
         throw ownTransaction();
-      // Any COMMIT or ROLLBACK in the file (with or without AND CHAIN) ends the
-      // transaction and this savepoint, so the release fails. It is caught after
-      // the file ran: its work may be committed, but it gets no ledger row.
-      await client.query("SAVEPOINT migration_file");
+      // After the fact (only a SQL parser could tell before): any COMMIT, END
+      // or ROLLBACK in the file ends this transaction (a different xact id) or
+      // this savepoint, whose unguessable name the file cannot rewind to or
+      // recreate (a failed release). Either way there is no ledger row.
+      const savepoint = `migration_${randomBytes(16).toString("hex")}`;
+      const xact = async () =>
+        (await client!.query("select pg_current_xact_id()::text as id")).rows[0]
+          .id as string;
+      const before = await xact();
+      await client.query(`SAVEPOINT ${savepoint}`);
       await client.query(sql);
+      if ((await xact()) !== before) throw ownTransaction();
       await client
-        .query("RELEASE SAVEPOINT migration_file")
+        .query(`RELEASE SAVEPOINT ${savepoint}`)
         .catch((error: { code?: string }) => {
           throw ["25P01", "3B001"].includes(error.code ?? "")
             ? ownTransaction()

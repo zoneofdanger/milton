@@ -32,7 +32,10 @@ export function compiledMemos(
   async function read(intent?: ReportIntent, includeGuides = false) {
     try {
       const current = await readSnapshot(db, userId, intent, includeGuides);
-      if (actor) gated?.(await assertTrialAccess(db, userId));
+      if (actor) {
+        const status = await assertTrialAccess(db, userId);
+        gated?.(status);
+      }
       return current;
     } catch (error) {
       throw databaseFailure(error);

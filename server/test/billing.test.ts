@@ -10,6 +10,7 @@ import {
 } from "../scripts/backfill-subscriptions";
 import { linkStripeCustomer } from "../src/store/billing";
 import { localStore } from "./local-store";
+import { fixtureStore } from "./store-fixtures";
 
 const appOrigin = "http://localhost:3001";
 // Obviously fake values in the shapes Stripe uses.
@@ -212,6 +213,10 @@ test("the gate follows the subscription status: unknown or missing is allowed, p
     expect(await status()).toBe("paid");
     await set("past_due", "3 days 1 minute");
     expect(await status()).toBe("expired");
+    // An assistant read refuses it, with or without a caller watching the gate.
+    await expect(
+      fixtureStore(local.db, userId).readDocuments(),
+    ).rejects.toMatchObject({ code: "subscription_required" });
     // A trial_end in the past never expires a trial: Stripe's status decides.
     await set("trialing");
     await local.db.query(

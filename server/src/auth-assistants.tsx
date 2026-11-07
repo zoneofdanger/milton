@@ -3,14 +3,7 @@ import { page } from "./pages";
 import { connectSteps } from "./memo-pages";
 import { cookieValue, type PageContext } from "./auth-session";
 import { cookieName } from "./auth-oidc";
-import {
-  advanceOperation,
-  connections,
-  findOperation,
-  startOperation,
-  pendingOperations,
-} from "./auth-lifecycle";
-import { invalid } from "./auth-authority";
+import { connections, lifecycle } from "./auth-lifecycle";
 import { accountKeys, keysSection } from "./auth-keys";
 
 export const clientHost = (clientId: string) => {
@@ -31,34 +24,20 @@ export const assistants = async (ctx: PageContext): Promise<Response> => {
       <p>Use the page's controls to continue.</p>,
       405,
     );
+  const token = cookieValue(request, cookieName(config, "session"));
+  const disconnects = lifecycle({ ...ctx, token });
   if (request.method === "POST") {
     const form = await readForm();
-    const token = cookieValue(request, cookieName(config, "session"));
-    const id = form.get("operation") ?? "";
-    let op = await findOperation(config, token, id, "disconnect");
-    if (!op) {
-      const user = await signedIn();
-      const { items: listed } = await connections(config, user);
-      const target = listed.find((c) => c.reference === form.get("connection"));
-      if (!target || !token) throw invalid();
-      op = await startOperation(
-        config,
-        user,
-        token,
-        id,
-        "disconnect",
-        target.client_id,
-      );
-    }
-    await advanceOperation(config, op);
+    await disconnects.run(
+      "disconnect",
+      form.get("operation") ?? "",
+      form.get("connection"),
+    );
     return Response.redirect(config.appOrigin + "/assistants", 303);
   }
   const user = await signedIn();
   const { items: listed, full } = await connections(config, user);
-  const pending = await pendingOperations(
-    config,
-    cookieValue(request, cookieName(config, "session")),
-  );
+  const pending = await disconnects.pending("disconnect");
   const keys = await (await accountKeys(ctx, user)).list();
   return page(
     "Connected assistants",

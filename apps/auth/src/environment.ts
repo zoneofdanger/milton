@@ -1,19 +1,20 @@
 import { createDecipheriv, createECDH, hkdfSync } from "node:crypto";
 import { readFileSync } from "node:fs";
 
-// Reads the payload `dotenvx encrypt` writes: a DOTENV_PUBLIC_KEY line and
-// `KEY="encrypted:..."` lines, with dotenv's comments, quotes and spacing.
-// Each value is ECIES over secp256k1 (eciesjs defaults, as dotenvx uses them):
-// a 65-byte uncompressed ephemeral key, a 16-byte nonce, a 16-byte tag and
-// AES-256-GCM ciphertext under HKDF-SHA256 of the ephemeral key and the
-// uncompressed shared point. OpenSSL does the private key work; dotenvx's
-// pure-JS curve took most of auth's startup.
-// Anything dotenvx would rewrite after decrypting ($ expansion, $(...)
-// commands, backslash escapes) and any plaintext value is refused, so every
-// accepted payload means exactly what dotenvx would make of it.
+// Reads the payload `dotenvx encrypt` writes: DOTENV_PUBLIC_KEY lines and
+// `KEY="encrypted:..."` lines, in dotenv's line form (quotes, `export`,
+// comments, CRLF or CR). Each value is ECIES over secp256k1 (eciesjs
+// defaults, as dotenvx uses them): a 65-byte uncompressed ephemeral key, a
+// 16-byte nonce, a 16-byte tag and AES-256-GCM ciphertext under HKDF-SHA256 of
+// the ephemeral key and the uncompressed shared point. OpenSSL does the private
+// key work; dotenvx's pure-JS curve took most of auth's startup.
+// After decrypting, dotenvx expands `$NAME`/`${...}`, runs `$(...)` and turns
+// `\$` into `$`, except in single-quoted values; nothing else changes a value.
+// So a `$` outside single quotes and any plaintext value except a public key
+// are refused, and every accepted payload means exactly what dotenvx makes of it.
 const P = 2n ** 256n - 2n ** 32n - 977n;
 const LINE =
-  /^\s*(?:export\s+)?([A-Za-z_][\w.-]*)\s*=\s*(?:"([^"\\$]*)"|'([^'\\$]*)'|([^\s"'`\\$#]*))\s*(?:#.*)?$/;
+  /^\s*(?:export\s+)?([\w.-]+)\s*=\s*(?:"([^"\\$]*)"|'([^'\\$]*)'|`([^`\\$]*)`|([^\s"'`\\$#]*))\s*(?:#.*)?$/;
 const ENCRYPTED = /^encrypted:([A-Za-z0-9+/]+={0,2})$/;
 function power(base: bigint, exponent: bigint) {
   let result = 1n;
@@ -53,7 +54,10 @@ function decrypt(value: string, keys: ReturnType<typeof createECDH>[]) {
           decipher.update(data.subarray(97)),
           decipher.final(),
         ]);
-        return new TextDecoder("utf-8", { fatal: true }).decode(plain);
+        return new TextDecoder("utf-8", {
+          fatal: true,
+          ignoreBOM: true,
+        }).decode(plain);
       } catch {
         // Wrong root or wrong key: try the next.
       }
@@ -74,29 +78,28 @@ export function loadEnvironment(env: NodeJS.ProcessEnv = process.env) {
     const resolved: Record<string, string> = {};
     for (const [k, v] of Object.entries(env))
       if (v !== undefined) resolved[k] = v;
-    const seen = new Set<string>();
-    for (const line of readFileSync(path, "utf8").split(/\r?\n/)) {
+    // A later assignment wins, as with dotenvx; every one must decrypt.
+    const parsed = new Map<string, string>();
+    for (const line of readFileSync(path, "utf8").split(/\r\n?|\n/)) {
       if (/^\s*(#.*)?$/.test(line)) continue;
       const match = LINE.exec(line);
-      if (!match || seen.has(match[1]!) || match[1] === "__proto__")
-        throw new Error();
+      if (!match || match[1] === "__proto__") throw new Error();
       const name = match[1]!;
-      const raw = match[2] ?? match[3] ?? match[4]!;
-      seen.add(name);
-      let value: string;
-      if (name.startsWith("DOTENV_PUBLIC_KEY")) {
-        if (!/^[0-9a-f]{66}$/.test(raw)) throw new Error();
-        value = raw;
-      } else {
-        if (!ENCRYPTED.test(raw)) throw new Error();
-        value = decrypt(raw, keys);
-        if (/[$\\]/.test(value)) throw new Error();
-      }
-      // Platform variables take precedence, as with dotenvx.
-      if (!Object.hasOwn(resolved, name)) resolved[name] = value;
+      const raw = match[2] ?? match[3] ?? match[4] ?? match[5]!;
+      let value = raw;
+      if (ENCRYPTED.test(raw)) value = decrypt(raw, keys);
+      else if (!name.startsWith("DOTENV_PUBLIC_KEY")) throw new Error();
+      if (match[3] === undefined && value.includes("$")) throw new Error();
+      parsed.set(name, value);
     }
+    // Platform variables take precedence, as with dotenvx.
+    for (const [name, value] of parsed)
+      if (!Object.hasOwn(resolved, name)) resolved[name] = value;
     return resolved;
   } catch {
-    throw new Error("auth_runtime_secrets_unavailable");
+    // A stable code for safeError's logs; no cause, value or key material.
+    throw Object.assign(new Error("auth_runtime_secrets_unavailable"), {
+      code: "AUTH_RUNTIME_SECRETS_UNAVAILABLE",
+    });
   }
 }

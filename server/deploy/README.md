@@ -200,13 +200,25 @@ Auth runs as Cloud Run `milton-auth` with service account `milton-auth@` and ing
 account `milton-auth-maint@`, secret `milton-auth-owner-url` 1). Cloud Scheduler triggers
 both as `milton-auth-cron@`. An auth release moves both jobs to the new image too. Check a
 trigger's URL ends in `:run`: a shell expansion once turned it into `un`, and the jobs
-silently got 404s. Auth decrypts its dotenvx payload without dotenvx and refuses any
-plaintext value or decrypted `$` or `\` (see the
-[auth README](../../apps/auth/README.md)). The first release with that loader deploys
-the revision without traffic and moves traffic only after it becomes ready, and runs one
-mail job execution on the new image before moving the schedule. A refusal logs
-`auth_runtime_secrets_unavailable`; mint a conforming payload version with the dotenvx
-CLI rather than changing the loader. For mail throttling, use the
+silently got 404s. Auth decrypts its dotenvx payload without dotenvx and refuses any plaintext value
+or decrypted `$` outside single quotes (see the [auth README](../../apps/auth/README.md)).
+The first release with that loader deploys the service revision without traffic and moves
+traffic only after it becomes ready. `gcloud run jobs execute` cannot override the image,
+so check the mail job with its trigger paused:
+
+```sh
+gcloud scheduler jobs pause milton-auth-mail-minutely --location=us-east4 --project=milton-510506
+gcloud run jobs update milton-auth-mail --image=<new digest> --region=us-east4 --project=milton-510506
+gcloud run jobs execute milton-auth-mail --wait --region=us-east4 --project=milton-510506
+gcloud scheduler jobs resume milton-auth-mail-minutely --location=us-east4 --project=milton-510506
+```
+
+Resume only after the execution succeeds and its log shows an `auth_mail_pass` count;
+otherwise put the previous image back with `jobs update` first. Mail waits in the outbox
+meanwhile. A refusal logs `auth_mail_pass { class: 'Error', code:
+'AUTH_RUNTIME_SECRETS_UNAVAILABLE' }` (the service's startup error carries the same
+code); mint a conforming payload version with the dotenvx CLI rather than changing the
+loader. For mail throttling, use the
 [owner-only throttle procedure](../../apps/auth/README.md#throttle-inspection-and-recovery-prepared-not-enabled).
 The production Neon endpoint `ep-curly-cherry-b8l7hc8f` has autosuspend off
 (`suspend_timeout_seconds: -1`, since 2026-11-07).

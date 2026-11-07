@@ -66,6 +66,32 @@ untracked): `.agents/tmp/auth-cutover/` (`runbook.md`, `phase1-report.md`,
 - Rollback: the old `*-edit-00223ec` revisions are not compatible with this schema. Fix
   forward, or restore `snap-fancy-hat-b8j5ls14` per the runbook's rollback section.
 
+## Release record: connection keys (2026-11-07, TODO #25)
+
+Headless and background agents can now authenticate to MCP with a connection key
+(`Authorization: Bearer mk_<id>_<secret>`) created on the Connected assistants page. Source
+`5b59d19`; app/MCP `milton-app-keys-5b59d19` / `milton-mcp-keys-5b59d19` at 10:53:40Z (server
+image `sha256:fa262cc0824c72a4d66ced3d8ba711f5f65ecc9d170b5367567841039fdb78a9`, env 4 /
+key 2). Neon snapshot `snap-sparkling-forest-b8kb9y9d` (10:50:27Z) plus private dumps before
+each step. Applied with traffic open (additive): native `007-connection-key-status` (ledger 7;
+EXECUTE only for the app and MCP runtimes), writing `0004_connection_keys` (journal 5;
+samples unchanged), `006-connection-keys-roles.sql`; app/MCP role checks passed.
+
+Security review (GPT-6 Astra): BLOCK → REVISE → REVISE → PASS. Fixed before release: keys
+bound to the native security generation (recovery, security change or deletion kills them);
+every active key always listed and revocable by id; pre-database limits on the key path (8
+concurrent lookups per instance, 3 per source, 5-attempt burst refilling 10 per minute per
+source, 60-second negative cache of unknown ids). Source is the second-to-last
+`X-Forwarded-For` entry (Google load balancer `client, lb`), verified live: with the laptop
+limited (429), a request from another Google IP still got a normal 401, and forged prefixes
+did not escape the limit.
+
+Checks: health 200 on all three; unauthenticated, fake and malformed keys 401; OAuth read via
+Claude Code unchanged; forms probe PASS; served text byte-identical; 0 errors in a 5-minute
+watch. Not verified live: creating and using a real key (needs a person's own fresh
+sign-in). Rollback: app/MCP traffic to `*-store2-b64ec6a`; the function, table and grants can
+stay unused.
+
 ## Release record: auth startup retry (2026-11-07)
 
 `milton-auth-00003-ggx` at 09:15Z (auth image
@@ -123,7 +149,7 @@ replaces `sample.replaces`, report metadata uses `revision`, and clients must re
 current IDs and the account version. Check exact active reads/exports and revision,
 retirement, replay, stale-write and account-delete behavior before reopening.
 
-## Connection keys release (prepared, not applied)
+## Connection keys release (applied 2026-11-07, see the release record below)
 
 Connection keys add one native status function, one additive writing table and one owner
 grant file. Old app/MCP code never calls the function or reads the table, so traffic may

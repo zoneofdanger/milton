@@ -391,7 +391,7 @@ Files: `server/drizzle/`, `server/src/store/schema.ts`, `server/src/store/databa
 - Disconnects and identity hashes have no foreign key to users, so they outlive the account.
 - `connection_keys` (0004) cascades from users and from its (issuer, subject) identity, requires the native binding (issuer, subject, incarnation, generation), checks id, hash, name, scope, binding lengths and dates, and grants nothing to the legacy writing group; owner file `006-connection-keys-roles.sql` lets app read every column but the hash (binding included), insert and set `revoked_at`, and MCP read and set `last_used_at` only.
 - Native 007 adds only `milton_guard.connection_key_status(subject, incarnation, generation)`: SECURITY DEFINER, fixed `pg_catalog, pg_temp` path, false on NULL or any mismatch, no PUBLIC/auth/guide EXECUTE and no table grants; MCP and app may execute it. Its down file drops it, so every key is refused.
-- The native auth migrator applies or reverses each migration file and its ledger row in one transaction under an advisory lock, so a crash leaves both or neither; it refuses a file that ends the transaction itself.
+- The native auth migrator applies or reverses each migration file and its ledger row in one transaction under an advisory lock, so a crash leaves both or neither; a file that commits or rolls back the transaction itself fails after running and gets no ledger row.
 - `stripe_events` keeps each event's ID, type, and body hash, never the payload.
 - The database holds cards and their immutable versions; the obsolete memo tables and
   the unused card-version `legacy` flag are removed by the cleanup.

@@ -27,6 +27,7 @@ const pool = new pg.Pool({
   statement_timeout: 10000,
 });
 let client: pg.PoolClient | undefined;
+let file = "";
 try {
   client = await pool.connect();
   const r = await client.query<{ current_user: string }>("select current_user");
@@ -38,18 +39,7 @@ try {
   for (const name of direction === "up"
     ? names
     : [...names].reverse().filter((n) => n !== "001-native")) {
-    const sql = readFileSync(
-      new URL(`../migrations/${name}.${direction}.sql`, import.meta.url),
-      "utf8",
-    );
-    // The runner owns the transaction; a file that ends it early would commit
-    // its work apart from the ledger row.
-    if (
-      /^\s*(begin|commit|rollback|end|abort|start\s+transaction)\s*(work|transaction)?\s*;/im.test(
-        sql,
-      )
-    )
-      throw new Error("migration_transaction_control_refused");
+    file = `${name}.${direction}.sql`;
     // The file's work and its ledger row commit together or not at all.
     await client.query("BEGIN");
     try {
@@ -65,7 +55,32 @@ try {
         await client.query("ROLLBACK");
         continue;
       }
+      const sql = readFileSync(
+        new URL(`../migrations/${file}`, import.meta.url),
+        "utf8",
+      );
+      const ownTransaction = () =>
+        Object.assign(
+          new Error(`${file} must not manage its own transaction`),
+          {
+            code: "MIGRATION_MUST_NOT_MANAGE_TRANSACTION",
+          },
+        );
+      // Habit check before any work: a line that is only BEGIN;, COMMIT; or ROLLBACK;.
+      if (/^\s*(begin|commit|rollback)\s*;\s*$/im.test(sql))
+        throw ownTransaction();
+      // Any COMMIT or ROLLBACK in the file (with or without AND CHAIN) ends the
+      // transaction and this savepoint, so the release fails. It is caught after
+      // the file ran: its work may be committed, but it gets no ledger row.
+      await client.query("SAVEPOINT migration_file");
       await client.query(sql);
+      await client
+        .query("RELEASE SAVEPOINT migration_file")
+        .catch((error: { code?: string }) => {
+          throw ["25P01", "3B001"].includes(error.code ?? "")
+            ? ownTransaction()
+            : error;
+        });
       if (direction === "up")
         await client.query(
           "insert into milton_credential.migration_ledger values($1)",
@@ -84,7 +99,7 @@ try {
     console.log(`${name} ${direction} complete`);
   }
 } catch (error) {
-  console.error("auth_migration", safeError(error));
+  console.error("auth_migration", file, safeError(error));
   process.exitCode = 1;
 } finally {
   client?.release();

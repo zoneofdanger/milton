@@ -323,16 +323,20 @@ export async function storeForCurrentRequest(
   };
 }
 
-// The web app reads with the person's own session: no assistant, so no saves.
-export async function personStoreForCurrentRequest(
-  bindings: StoreBindings & { appOrigin: string },
+// The web app reads with the person's own session: no assistant, so no saves and
+// no charged calls. It reads no limits (they bound only saves and charges) and
+// makes no separate account check: the lookup behind `auth` required an active
+// account, and every read's snapshot statement refuses one that is not.
+export function personStoreForCurrentRequest(
+  bindings: StoreBindings,
   auth: VerifiedStoreAuth,
 ) {
-  const store = await storeForCurrentRequest(bindings, auth);
   const db = database(bindings);
+  const compiled = compiledMemos(db, auth.userId);
   return {
-    ...store,
-    exportTpsReport: compiledMemos(db, auth.userId).exportTpsReport,
+    readTpsReport: compiled.getTpsReport,
+    readDocuments: compiled.readDocuments,
+    exportTpsReport: compiled.exportTpsReport,
     trialStatus: () => trialStatus(db, auth.userId),
   };
 }

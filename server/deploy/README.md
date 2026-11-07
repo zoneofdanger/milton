@@ -66,6 +66,17 @@ untracked): `.agents/tmp/auth-cutover/` (`runbook.md`, `phase1-report.md`,
 - Rollback: the old `*-edit-00223ec` revisions are not compatible with this schema. Fix
   forward, or restore `snap-fancy-hat-b8j5ls14` per the runbook's rollback section.
 
+## Release record: store refactor, part 2 (2026-11-07)
+
+App and MCP moved to `milton-app-store2-b64ec6a` / `milton-mcp-store2-b64ec6a` at 08:58:21Z
+(server image `sha256:75f1cd73bccef7afa116bca4646446eca83e3ffc3f762c188ebd3db67dd60da1`,
+source `b64ec6a`, same env 4 / key 2). Structure only: one active-account check and one
+identity parser (`store/accounts.ts`), and the served tool contract moved beside `mcp.ts`
+(`mcp-tools.ts`). Served output byte-identical before and after (instructions, tool lists,
+envelopes, refusals). Checks: health 200, unauthenticated MCP 401, forms probe PASS,
+production read version unchanged, 5-minute watch clean. Rollback: traffic back to
+`*-store-95587e5`.
+
 ## Release record: store refactor (2026-11-07)
 
 App and MCP moved to `milton-app-store-95587e5` / `milton-mcp-store-95587e5` at 08:30:41Z

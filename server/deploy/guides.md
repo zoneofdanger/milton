@@ -1,5 +1,7 @@
 # Private report guide pilot
 
+**Parked 2026-11-07 (Peter): no further work; guides stay default-off.** Nothing is scheduled, keyed or enrolled. Resume only on his decision.
+
 This source build does not authorize deployment, provider calls or enrollment. Guides
 default off. Apply the additive `0003_report_guides` migration only through the normal
 hosting runbook, from the selected landed commit, with a database snapshot first.

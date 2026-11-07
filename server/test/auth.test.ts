@@ -1156,18 +1156,22 @@ test("disconnect ends only a listed connection: another one is refused and start
     const unchanged = await listing();
     expect(unchanged).toContain('name="connection" value="listed-ref"');
     expect(unchanged).not.toContain("Disconnect cleanup is incomplete");
-    // When native begin_operation fails, the request stays listed for retry.
+    // When native begin_operation fails, the answer is a retry page for the
+    // same operation, and the request stays listed for retry.
     await local.db.query(
       sql`UPDATE milton_guard.fixture_authority SET fail='begin_operation'`,
     );
-    expect(
-      (
-        await send("/assistants/disconnect", {
-          connection: "listed-ref",
-          operation,
-        })
-      ).status,
-    ).toBe(503);
+    const failed = await send("/assistants/disconnect", {
+      connection: "listed-ref",
+      operation,
+    });
+    expect(failed.status).toBe(503);
+    const failedPage = await failed.text();
+    expect(failedPage).toContain("Finish disconnecting");
+    expect(failedPage).toContain(
+      "Retry to finish disconnecting assistant.example.",
+    );
+    expect(operationIn(failedPage)).toBe(operation);
     await local.db.query(
       sql`UPDATE milton_guard.fixture_authority SET fail=NULL`,
     );
@@ -1176,7 +1180,9 @@ test("disconnect ends only a listed connection: another one is refused and start
       "Retry to finish disconnecting assistant.example.",
     );
     // The retry form carries only the operation.
-    const retry = await send("/assistants/disconnect", { operation });
+    const retry = await send("/assistants/disconnect", {
+      operation: operationIn(failedPage),
+    });
     expect(retry.status).toBe(303);
     expect(retry.headers.get("Location")).toBe(appOrigin + "/assistants");
     const after = await listing();

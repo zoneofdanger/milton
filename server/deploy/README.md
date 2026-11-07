@@ -18,6 +18,34 @@ The retired combined Vercel `milton-mcp` project, deployments, aliases, project
 secrets and firewall configuration were removed during the authorized hosting
 decommission on 2026-11-01. Hosting rollback now uses Cloud Run revisions.
 
+## Release record: connection pooling (2026-11-07, PR #16, TODO #15)
+
+Source `e4a7dc7` (builder milton-perf; Astra REVISE: a connection could return to the pool
+with a transaction still open, fixed in `0356e8d`). App and MCP now keep one `pg.Pool` per
+URL (max 40, 30 s wall-clock idle bound), and they destroy any connection whose last command
+failed or that still has work running. App/MCP `milton-*-pool-e4a7dc7` at 19:34Z (image
+`sha256:c196c309d8d27032c9855ff10a2011073ec218b807eb1ed3fa1761257c2ec579`); auth unchanged.
+Checks: types, 127 tests, format, build, rehearsal 12/12 all 0; health 200 ×3; MCP
+unauthenticated and fake-key 401; signed-out report 403. Not verified: SIGTERM pool close
+on a real instance, Neon pooler idle behaviour, production latency (milton-perf is
+measuring `get_cover_sheet`); 0 errors and 0 store errors in a 5-minute watch. Rollback:
+app/MCP `milton-*-fwd-c0276d4`.
+
+## Release record: shared forwarded-client parser (2026-11-07, PR #17)
+
+Source `c0276d4` (builder milton-qa). Auth and MCP share `packages/forwarded-client`, so
+the two key derivations cannot drift; the PR also adds auth OAuth refusal tests. The
+released and the new derivation gave identical results on 209 adversarial
+X-Forwarded-For inputs, for both services. The pinned production Dockerfiles were
+regenerated to copy the package. Auth `milton-auth-00005-jj6` at 19:28Z (image
+`sha256:d46e3d5ab4197acefeaf9453e0f10242b3a7a231e71e764b991d74114bb3a4f6`; mail and
+maintenance jobs too); app/MCP `milton-*-fwd-c0276d4` (image
+`sha256:565267839fcf7385c8ffb6cba2286146443a9012f3e5a534c3c8fd78cd638dee`). Checks:
+types, 127 tests, format, both builds, auth integration 17/17, rehearsal 12/12 all 0;
+health 200 ×3, Claude Code authorize 302, MCP 401s, Better Auth bucket keyed by a real
+client; 0 errors in a 5-minute watch. Rollback: auth `milton-auth-00004-69s`, app/MCP
+`milton-*-sweep-e4fff90`.
+
 ## Release record: overengineering sweep cleanup (2026-11-07)
 
 Source `e4fff90` (merge of agent/cleanup-sweep): deleted the dead assistant-disconnect path,
@@ -396,8 +424,8 @@ references. Inspect revision readiness before selecting a recorded revision:
 gcloud run revisions list --service=milton-app --project=milton-510506 --region=us-east4
 ```
 
-Now serving (2026-11-07): app `milton-app-sweep-e4fff90` and MCP
-`milton-mcp-sweep-e4fff90` (source `e4fff90`), and auth `milton-auth-00004-69s`. The
+Now serving (2026-11-07): app `milton-app-pool-e4a7dc7` and MCP
+`milton-mcp-pool-e4a7dc7` (source `e4a7dc7`), and auth `milton-auth-00005-jj6`. The
 release records above give images, secret versions and rollback revisions.
 
 Current edit-mode release: image index

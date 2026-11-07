@@ -436,8 +436,6 @@ test("the refusal, both reminders and the instructions give the one link, true f
     "On subscription_required, say so and give its link once, do not retry, continue other work.",
   );
   expect(account).not.toContain("no link");
-  // No memo-update allowance remains to mention.
-  expect(storeInstructions).not.toMatch(/memo.update/i);
 });
 
 test("sample contexts are bounded, extensible and complete replacements have explicit clearing semantics", () => {

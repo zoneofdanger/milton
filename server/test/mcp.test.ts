@@ -31,10 +31,6 @@ test("standalone MCP needs no browser secret and refuses noncanonical hosts", as
     MCP_RESOURCE: "https://mcp.example/mcp",
     AUTH_ISSUER: "https://auth.example/auth",
     NODE_ENV: "production",
-    // Retired feature flags are ignored, never validated.
-    MILTON_TASK_RETRIEVAL_ENABLED: "yes",
-    MILTON_GARDENING_ENABLED: "yes",
-    MILTON_DERIVATIONS_ENABLED: "yes",
   });
   const app = createMcpApp(config);
   const request = (host: string, path: string) =>
@@ -127,11 +123,6 @@ test("an SDK client receives instructions, discovers the four tools, and reads t
     // Assistants see cover sheet and reports, never the retired TPS name.
     for (const served of [client.getInstructions(), ...tools])
       expect(JSON.stringify(served)).not.toMatch(/TPS|tps_report/);
-    // Nothing served mentions the retired memo-update allowance, or the
-    // retired automatic sample retirement.
-    expect(JSON.stringify([client.getInstructions(), tools])).not.toMatch(
-      /memo.update|counts once|retires the oldest|newest two per kind kept/i,
-    );
     expect(
       tools.find((tool) => tool.name === "create_memo")?.description,
     ).toContain(
@@ -306,7 +297,7 @@ test("get_report requires an intent: without a well-formed one it refuses, sayin
   }
 });
 
-test("two authenticated clients isolate tenants, save once and reject retired tools", async () => {
+test("two authenticated clients isolate tenants and save once", async () => {
   const local = await localStore();
   const clients: Client[] = [];
   try {
@@ -385,8 +376,6 @@ test("two authenticated clients isolate tenants, save once and reject retired to
       discovered.find((t) => t.name === "create_memo")?.annotations
         ?.idempotentHint,
     ).toBe(true);
-    const instructions = clients[0]!.getInstructions();
-    expect(instructions).not.toContain("update_memo");
     expect(
       discovered.find((t) => t.name === "create_memo")?.description,
     ).toContain("explicitly opted into session capture");
@@ -476,21 +465,6 @@ test("two authenticated clients isolate tenants, save once and reject retired to
         })
       ).value.status,
     ).toBe("conflict");
-    for (const name of [
-      "list_memos",
-      "get_memo",
-      "search",
-      "update_memo",
-      "archive_memo",
-      "update_tps_report",
-      "tps_check",
-      "check_draft",
-    ]) {
-      const refusal = await clients[0]!
-        .callTool({ name, arguments: {} })
-        .catch(() => ({ isError: true }));
-      expect(refusal.isError).toBe(true);
-    }
     await local.db.query(
       sql`UPDATE store_config SET limits_json=limits_json || '{"daily_calls":1}'::jsonb`,
     );

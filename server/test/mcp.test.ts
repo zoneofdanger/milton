@@ -18,7 +18,6 @@ import { createMiltonHandler } from "../src/handler";
 import { createAccessTokenVerifier } from "../src/token";
 import {
   connectionKeysForAccount,
-  deleteAccount,
   lookupIdentityAccount,
   resolveIdentityAccount,
 } from "../src/store";

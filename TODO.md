@@ -32,11 +32,6 @@ reports, memos) and plain text on security screens and anything an assistant rea
       Keep the ordinary folder. If resumed, Friday follows each visitor's local time zone;
       choose new artwork and check its readability at navigation-icon size first.
 
-- [ ] #7 (server, low) **Hash the sign-in subject in assistant_disconnects.** Shipped 2026-11-02
-      in 0019 with the raw provider subject per refused (provider, subject, client_id), so the
-      deletion fingerprint in deleted_identities adds little privacy. Store a one-way hash of
-      provider:subject instead, keep the lookup on every MCP request, and migrate existing rows.
-
 - [ ] #8 (ops, med, founder) **Get end-to-end evidence for the newcomer path.** Never rehearsed:
       sign up, connect an assistant, approve, first setup, save, fresh-chat read, correction,
       download. Also unanswered with evidence: why Milton over the assistant's built-in memory,

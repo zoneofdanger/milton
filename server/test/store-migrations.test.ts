@@ -197,7 +197,6 @@ test("the runtime has only current grants, its guards hold, and later tables inh
       accepted_changes: "INSERT",
       assistant_disconnects: "DELETE,INSERT,SELECT",
       connection_keys: "",
-      deleted_identities: "INSERT,SELECT",
       guide_accounts: "SELECT",
       guide_budget_lock: "",
       guide_spend: "",
@@ -346,7 +345,6 @@ test("the runtime has only current grants, its guards hold, and later tables inh
         "DELETE FROM save_requests",
         "DELETE FROM usage_daily",
         "DELETE FROM trial_accounts",
-        "DELETE FROM deleted_identities",
         "DELETE FROM identities",
         "UPDATE identities SET user_id=user_id",
         "UPDATE store_config SET trials_enabled=true",
@@ -759,6 +757,65 @@ test("guide migration preserves populated approved sources, defaults off and iso
     ).rejects.toThrow("permission denied");
     await pg.exec("RESET ROLE");
   } finally {
+    await pg.close();
+    await rm(scratch, { recursive: true, force: true });
+  }
+});
+
+test("0005 drops the unread deleted_identities table and its rollback recreates it empty with the 0004 definition and grants", async () => {
+  const folder = new URL("../drizzle/", import.meta.url).pathname;
+  const scratch = await mkdtemp(join(tmpdir(), "milton-0005-"));
+  const pg = new PGlite();
+  const current = await localStore();
+  try {
+    await cp(folder, scratch, { recursive: true });
+    const journal = await Bun.file(join(scratch, "meta/_journal.json")).json();
+    journal.entries = journal.entries.filter((e: { idx: number }) => e.idx < 5);
+    await writeFile(
+      join(scratch, "meta/_journal.json"),
+      JSON.stringify(journal),
+    );
+    await migrate(drizzle(pg), { migrationsFolder: scratch });
+    const acl = async () =>
+      (
+        await pg.query(
+          "SELECT a.grantee::regrole::text AS grantee,a.privilege_type FROM pg_class c CROSS JOIN LATERAL aclexplode(c.relacl) a WHERE c.oid='public.deleted_identities'::regclass ORDER BY 1,2",
+        )
+      ).rows;
+    const before = await schemaCatalog(pg),
+      beforeAcl = await acl();
+    await seedUsers(pg, "kept");
+    await pg.exec(
+      `INSERT INTO deleted_identities(identity_hash) VALUES ('${"a".repeat(64)}')`,
+    );
+    await migrate(drizzle(pg), { migrationsFolder: folder });
+    const after = await schemaCatalog(current.pg);
+    expect(await schemaCatalog(pg)).toEqual(after);
+    expect(after.tables).not.toContain("deleted_identities");
+    await pg.exec(
+      await Bun.file(
+        folder + "rollback/0005_drop_deleted_identities.sql",
+      ).text(),
+    );
+    expect(await schemaCatalog(pg)).toEqual(before);
+    expect(await acl()).toEqual(beforeAcl);
+    expect(
+      (await pg.query("SELECT count(*)::int AS n FROM deleted_identities"))
+        .rows,
+    ).toEqual([{ n: 0 }]);
+    // The journal row stays: re-forwarding runs the file by hand, as one
+    // transaction.
+    await pg.exec(
+      "BEGIN;" +
+        (await Bun.file(folder + "0005_drop_deleted_identities.sql").text()) +
+        "COMMIT;",
+    );
+    expect(await schemaCatalog(pg)).toEqual(after);
+    expect((await pg.query("SELECT id FROM users")).rows).toEqual([
+      { id: "kept" },
+    ]);
+  } finally {
+    await current.dispose();
     await pg.close();
     await rm(scratch, { recursive: true, force: true });
   }

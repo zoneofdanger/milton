@@ -36,6 +36,13 @@
       "when": 1794045415975,
       "tag": "0004_connection_keys",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1794086310439,
+      "tag": "0005_drop_deleted_identities",
+      "breakpoints": true
     }
   ]
 }

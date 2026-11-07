@@ -73,8 +73,11 @@ reports, memos) and plain text on security screens and anything an assistant rea
       leaves them unable to connect today. Plan (2026-11-07): connection keys created on the
       Connected assistants page and sent as a bearer header (Claude Code `--header`, Codex
       `bearer_token_env_var`, Cursor `headers`): read-only by default with saving opt-in,
-      shown once and stored hashed, expiring (e.g. 90 days), listed and revocable one by one,
-      checked live on every call like disconnects. ⚠ The MCP server would then accept a second
+      shown once and stored hashed, checked live on every call like disconnects. Expiry is the
+      person's choice, including never (decided 2026-11-07, Peter); default to a set term. Ship
+      key management UX with it, built from packages/theme: create with a name, scope and
+      expiry; a list showing name, scope, created, last used and expiry (never-expiring keys
+      clearly marked); revoke one key at a time. ⚠ The MCP server would then accept a second
       token type beside the strict native tokens: security review before release. Device
       sign-in (a code approved at auth.meetmilton.com/device; Better Auth has a plugin,
       unchecked against this build) keeps the native token model, but MCP clients lack it and

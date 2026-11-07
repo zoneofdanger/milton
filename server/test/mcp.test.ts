@@ -166,6 +166,16 @@ test("an SDK client receives instructions, discovers the four tools, and reads t
     expect(JSON.stringify(read.inputSchema.properties?.intent)).toContain(
       "get_report.kinds",
     );
+    // The guide block carries its own precedence; descriptions do not repeat it.
+    const list = tools.find((tool) => tool.name === "list_reports")!;
+    for (const { description } of [read, list])
+      expect(description).not.toMatch(/guide|Eligible opted-in/);
+    expect(read.description).toEndWith(
+      "do not guess at one. Reads make no model call or write.",
+    );
+    expect(list.description).toContain(
+      "and version. For clients that want everything loaded after get_cover_sheet;",
+    );
     const text = client.getInstructions();
     expect(text).toContain('"Did you get the memo?"');
     expect(text).toContain('"Did you get that memo?"');

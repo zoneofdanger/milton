@@ -1,11 +1,8 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { createServer } from "node:net";
+import { readFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import pg from "pg";
+import { startCluster } from "./cluster.ts";
 
 export async function disposable(
   prerequisitesFile = new URL(
@@ -13,77 +10,15 @@ export async function disposable(
     import.meta.url,
   ),
 ) {
-  const bin = process.env.PG_BIN ?? "/opt/homebrew/opt/postgresql@18/bin";
   const port = 55543;
-  await new Promise<void>((resolve, reject) => {
-    const s = createServer();
-    s.once("error", () => reject(new Error("disposable_port_in_use")));
-    s.listen(port, "127.0.0.1", () => s.close(() => resolve()));
+  const cluster = await startCluster({
+    port,
+    prefix: "milton-auth-disposable-",
+    portRefusal: "disposable_port_in_use",
+    hba: "host all all 127.0.0.1/32 scram-sha-256\n",
   });
-  const dir = mkdtempSync(join(tmpdir(), "milton-auth-disposable-"));
-  const command = (name: string, args: string[]) => {
-    const r = spawnSync(join(bin, name), args, {
-      encoding: "utf8",
-      env: { PATH: process.env.PATH, LC_ALL: "C", HOME: dir },
-    });
-    if (r.status !== 0) throw new Error(`disposable_${name}_exit_${r.status}`);
-  };
-  let running = false;
+  const cert = cluster.cert;
   try {
-    command("initdb", [
-      "-D",
-      join(dir, "pgdata"),
-      "--username=disposable_cluster",
-      "--auth-local=trust",
-      "--auth-host=scram-sha-256",
-      "--encoding=UTF8",
-      "--no-locale",
-    ]);
-    const cert = join(dir, "cert.pem"),
-      key = join(dir, "key.pem");
-    const tls = spawnSync(
-      "openssl",
-      [
-        "req",
-        "-x509",
-        "-newkey",
-        "rsa:2048",
-        "-nodes",
-        "-keyout",
-        key,
-        "-out",
-        cert,
-        "-days",
-        "1",
-        "-subj",
-        "/CN=localhost",
-        "-addext",
-        "subjectAltName=DNS:localhost,IP:127.0.0.1",
-      ],
-      { stdio: "ignore", env: { PATH: process.env.PATH, LC_ALL: "C" } },
-    );
-    if (tls.status !== 0) throw new Error("fixture_tls_generation_failed");
-    const chmod = spawnSync("chmod", ["600", key]);
-    if (chmod.status !== 0) throw new Error("fixture_tls_permissions_failed");
-    writeFileSync(
-      join(dir, "pgdata", "postgresql.auto.conf"),
-      `listen_addresses='127.0.0.1'\nport=${port}\nunix_socket_directories='${dir}'\nssl=on\nssl_cert_file='${cert}'\nssl_key_file='${key}'\nlog_statement='none'\nlog_min_messages='panic'\nlog_min_error_statement='panic'\n`,
-      { mode: 0o600 },
-    );
-    writeFileSync(
-      join(dir, "pgdata", "pg_hba.conf"),
-      "local all all trust\nhost all disposable_cluster 127.0.0.1/32 trust\nhost all all 127.0.0.1/32 scram-sha-256\n",
-      { mode: 0o600 },
-    );
-    command("pg_ctl", [
-      "-D",
-      join(dir, "pgdata"),
-      "-l",
-      join(dir, "pg.log"),
-      "-w",
-      "start",
-    ]);
-    running = true;
     const admin = new pg.Pool({
       host: "127.0.0.1",
       port,
@@ -231,29 +166,11 @@ export async function disposable(
       caPath: cert,
       stop: async () => {
         await owner.end();
-        command("pg_ctl", [
-          "-D",
-          join(dir, "pgdata"),
-          "-m",
-          "fast",
-          "-w",
-          "stop",
-        ]);
-        running = false;
-        rmSync(dir, { recursive: true });
+        cluster.stop();
       },
     };
   } catch (e) {
-    if (running)
-      command("pg_ctl", [
-        "-D",
-        join(dir, "pgdata"),
-        "-m",
-        "fast",
-        "-w",
-        "stop",
-      ]);
-    rmSync(dir, { recursive: true });
+    cluster.stop();
     throw e;
   }
 }

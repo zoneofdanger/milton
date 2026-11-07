@@ -53,14 +53,33 @@ test("canonical auth HTTP boundary rejects alternate host, missing Origin, and d
       }),
     )?.status,
   ).toBe(403);
-  expect(
-    guardRequest(
-      new Request("https://auth.meetmilton.com/api/auth/change-email", {
-        method: "POST",
-        headers: { origin: "https://auth.meetmilton.com" },
-      }),
-    )?.status,
-  ).toBe(403);
+  // Native's server-only and deferred endpoints are refused here, before
+  // native sees them (handler calls guardRequest first); native has no second
+  // list of disabled paths.
+  for (const path of [
+    "/token",
+    "/delete-user",
+    "/delete-user/callback",
+    "/change-email",
+    "/update-user",
+    "/update-session",
+    "/set-password",
+    "/oauth2/update-consent",
+    "/oauth2/delete-consent",
+  ])
+    for (const suffix of ["", "/"])
+      for (const method of ["GET", "POST"]) {
+        const refused = guardRequest(
+          new Request("https://auth.meetmilton.com/api/auth" + path + suffix, {
+            method,
+            headers: { origin: "https://auth.meetmilton.com" },
+          }),
+        );
+        expect(refused?.status).toBe(403);
+        expect(((await refused!.json()) as { error: string }).error).toBe(
+          "method_not_available",
+        );
+      }
 });
 
 test("startup role check retries connection failures only, within its budget", async () => {

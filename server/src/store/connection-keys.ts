@@ -223,9 +223,7 @@ export async function revokeConnectionKey(
 }
 
 export type KeyCheck =
-  | { ok: true; userId: string; keyId: string; scope: KeyScope }
-  /** `known` is false only when no key has the id at all. */
-  | { ok: false; known: boolean };
+  { ok: true; userId: string; keyId: string; scope: KeyScope } | { ok: false };
 
 /**
  * The account and scope a parsed key grants, or a refusal: unknown id, wrong
@@ -259,8 +257,7 @@ export async function authenticateConnectionKey(
   // Compare in constant time, against a stand-in when no key has this id.
   const stored = Buffer.from(row?.secret_hash ?? "0".repeat(64), "hex");
   const matches = timingSafeEqual(stored, secretHash(secret)) && !!row;
-  if (!row || !matches || row.usable !== true)
-    return { ok: false, known: !!row };
+  if (!row || !matches || row.usable !== true) return { ok: false };
   if (row.stale)
     await db
       .query(

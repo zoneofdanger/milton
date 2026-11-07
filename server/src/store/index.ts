@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { z } from "zod";
 import { sql } from "drizzle-orm";
 import {
@@ -82,10 +81,6 @@ const parseIdentity = (identity: VerifiedIdentity): VerifiedIdentity => ({
   subject: z.string().min(1).max(512).parse(identity.subject),
 });
 
-// One-way fingerprint of a sign-in identity, stored after account deletion.
-const identityHash = (provider: string, subject: string) =>
-  createHash("sha256").update(`${provider}:${subject}`).digest("hex");
-
 /** Records trial-eligibility fingerprints for an account; each keeps its first
  * claimant. */
 export async function saveFingerprints(
@@ -123,9 +118,6 @@ export async function resolveIdentityAccount(
   fingerprints: readonly string[] = [],
 ) {
   const { provider, subject } = parseIdentity(identity);
-  const legacyDeleted = fingerprints.length
-    ? sql`EXISTS(SELECT 1 FROM milton_app.legacy_mapping l WHERE l.issuer=${provider} AND l.subject=${subject} AND l.deleted)`
-    : sql`false`;
   return database(bindings)
     .transaction(async (tx) => {
       await readLimits(tx);
@@ -157,9 +149,10 @@ export async function resolveIdentityAccount(
               "The memo store is unavailable. Try again.",
             );
         } else {
-          // A sign-in identity whose account was deleted gets no second trial:
-          // its row starts canceled, so it reads as expired whenever trials are
-          // enabled (now or later), has no effect while they are off, and sign-up
+          // A new account sharing a trial-eligibility fingerprint with an
+          // earlier one (kept after deletion) gets no second trial: its row
+          // starts canceled, so it reads as expired whenever trials are enabled
+          // (now or later), has no effect while they are off, and sign-up
           // creates no subscription for it.
           await saveFingerprints(tx, id, fingerprints);
           let returning = false;
@@ -173,12 +166,10 @@ export async function resolveIdentityAccount(
           }
           await tx.query(sql`INSERT INTO trial_accounts(user_id,started_at,subscription_status)
             SELECT u.id,u.created_at,
-              CASE WHEN d.identity_hash IS NULL AND NOT ${returning} AND NOT ${legacyDeleted} THEN NULL ELSE 'canceled' END
+              CASE WHEN ${returning} THEN 'canceled' END
             FROM users u CROSS JOIN store_config c
-            LEFT JOIN deleted_identities d
-              ON d.identity_hash=${identityHash(provider, subject)}
             WHERE u.id=${id} AND c.singleton=1
-            AND (c.trials_enabled OR d.identity_hash IS NOT NULL OR ${returning} OR ${legacyDeleted})`);
+            AND (c.trials_enabled OR ${returning})`);
           account = { id, status: "active" };
         }
       }
@@ -222,14 +213,13 @@ export async function lookupIdentityAccount(
 }
 
 /** The account a parsed connection key grants and the key's scope, or a
- * refusal alike for every reason (see authenticateConnectionKey); `known` is
- * false only when no key has the id. */
+ * refusal alike for every reason (see authenticateConnectionKey). */
 export async function connectionKeyAccount(
   bindings: StoreBindings & { issuer: string },
   key: { id: string; secret: string },
 ): Promise<
   | { ok: true; auth: VerifiedStoreAuth; keyId: string; scope: KeyScope }
-  | { ok: false; known: boolean }
+  | { ok: false }
 > {
   const checked = await authenticateConnectionKey(
     database(bindings),

@@ -326,17 +326,6 @@ export function createProvider(
       },
     },
     rateLimit: { enabled: true, storage: "database", window: 60, max: 120 },
-    disabledPaths: [
-      "/token",
-      "/delete-user",
-      "/delete-user/callback",
-      "/change-email",
-      "/update-user",
-      "/update-session",
-      "/set-password",
-      "/oauth2/update-consent",
-      "/oauth2/delete-consent",
-    ],
     databaseHooks: {
       account: {
         create: {

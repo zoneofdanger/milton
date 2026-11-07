@@ -59,8 +59,9 @@ export const users = pgTable(
   ],
 );
 // No row, or a row with no status, reads as early access. Rows are created by
-// first sign-in, with no status while trials_enabled is on, or canceled for a
-// sign-in identity in deleted_identities whether trials are on or off; and by
+// first sign-in, with no status while trials_enabled is on, or canceled for an
+// account whose trial-eligibility fingerprint an earlier account claimed
+// (milton_app.trial_fingerprint) whether trials are on or off; and by
 // the subscription backfill script (enrollForBackfill), with no status, for an
 // active account that has none. Stripe owns the trial and the subscription: the
 // stripe_* columns and subscription_status mirror what Stripe last answered, and
@@ -197,9 +198,9 @@ export const connectionKeys = pgTable(
     ),
   ],
 );
-// One-way sha256("provider:subject") of each deleted sign-in identity, kept only
-// so a re-created account gets no second trial. No foreign key: it outlives the
-// account, and holds no content, email or Milton user id.
+// One-way sha256("provider:subject") of each deleted sign-in identity. No longer
+// written or read: trial-eligibility fingerprints alone refuse a second trial.
+// Kept until a later migration, released after this code, drops it.
 export const deletedIdentities = pgTable(
   "deleted_identities",
   {

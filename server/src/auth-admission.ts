@@ -2,7 +2,14 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
 import type { RuntimeConfig } from "./config";
-import { database, resolveIdentityAccount, StoreError } from "./store";
+import {
+  database,
+  lockActiveAccount,
+  resolveIdentityAccount,
+  saveFingerprints,
+  StoreError,
+} from "./store";
+import type { StoreSession } from "./store/database";
 import { ensureSubscription } from "./billing";
 import { AuthError } from "./token";
 import { boundRequest } from "./http";
@@ -55,6 +62,27 @@ export function trialFingerprints(
 }
 export const fingerprintKeyCheck = (key: string) =>
   createHmac("sha256", key).update("milton trial eligibility v1").digest("hex");
+/** Saves an account's trial-eligibility fingerprints, refusing while the stored
+ * key check does not match the configured fingerprint key. */
+export async function saveEligibility(
+  tx: StoreSession,
+  config: RuntimeConfig,
+  userId: string,
+  proof: Pick<Admission, "verifiedEmail" | "verifiedIdentities">,
+) {
+  const policy = (
+    await tx.query<{ key_check: string }>(
+      sql`SELECT key_check FROM milton_app.eligibility_policy WHERE singleton`,
+    )
+  )[0];
+  if (policy?.key_check !== fingerprintKeyCheck(config.trialFingerprintKey))
+    throw unavailable();
+  await saveFingerprints(
+    tx,
+    userId,
+    trialFingerprints(config.trialFingerprintKey, proof),
+  );
+}
 export function authAdmission(config: RuntimeConfig) {
   return async (request: Request): Promise<Response> => {
     const headers = { "Cache-Control": "no-store" };
@@ -94,34 +122,10 @@ export function authAdmission(config: RuntimeConfig) {
           .safeParse(await securityStatus(config, p));
         if (!metadata.success) throw invalid();
         await database(config).transaction(async (tx) => {
-          const account = (
-            await tx.query<{ id: string }>(
-              sql`SELECT u.id FROM public.users u JOIN public.identities i ON i.user_id=u.id WHERE u.status='active' AND i.provider=${p.issuer} AND i.subject=${p.subject} FOR UPDATE OF u`,
-            )
-          )[0];
+          const account = await lockActiveAccount(tx, p.issuer, p.subject);
           // Security removal must never admit a native-only user or touch billing.
           if (!account) return;
-          const policy = (
-            await tx.query<{ key_check: string }>(
-              sql`SELECT key_check FROM milton_app.eligibility_policy WHERE singleton`,
-            )
-          )[0];
-          if (
-            policy?.key_check !==
-            fingerprintKeyCheck(config.trialFingerprintKey)
-          )
-            throw unavailable();
-          for (const fingerprint of trialFingerprints(
-            config.trialFingerprintKey,
-            metadata.data,
-          )) {
-            await tx.query(
-              sql`INSERT INTO milton_app.trial_fingerprint(fingerprint,first_user_id) VALUES(${fingerprint},${account.id}) ON CONFLICT DO NOTHING`,
-            );
-            await tx.query(
-              sql`INSERT INTO milton_app.account_fingerprint(user_id,fingerprint) VALUES(${account.id},${fingerprint}) ON CONFLICT DO NOTHING`,
-            );
-          }
+          await saveEligibility(tx, config, account, metadata.data);
         });
         return new Response(null, { status: 204, headers });
       } catch (error) {

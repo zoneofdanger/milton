@@ -1,18 +1,14 @@
 import { sql } from "drizzle-orm";
 import { z } from "zod";
 import type { RuntimeConfig } from "./config";
-import { database, lookupIdentityAccount } from "./store";
+import { database, lockActiveAccount, lookupIdentityAccount } from "./store";
 import type { SessionUser } from "./auth-session";
 import { endStripeCustomer } from "./billing";
 import { hash } from "./auth-oidc";
 import { invalid, unavailable } from "./auth-authority";
 import { AuthError } from "./token";
 import { securityStatus } from "./auth-authority";
-import {
-  eligibilityProof,
-  trialFingerprints,
-  fingerprintKeyCheck,
-} from "./auth-admission";
+import { eligibilityProof, saveEligibility } from "./auth-admission";
 
 const operationSchema = z.object({
   operation_id: z.uuid(),
@@ -143,36 +139,9 @@ export async function startOperation(
       );
     const metadata = proof?.data;
     await database(config).transaction(async (tx) => {
-      if (
-        !(
-          await tx.query(
-            sql`SELECT u.id FROM public.users u JOIN public.identities i ON i.user_id=u.id WHERE u.id=${userId} AND u.status='active' AND i.provider=${config.issuer} AND i.subject=${user.id} FOR UPDATE OF u`,
-          )
-        ).length
-      )
+      if (!(await lockActiveAccount(tx, config.issuer, user.id, userId)))
         throw invalid();
-      if (metadata) {
-        const policy = (
-          await tx.query<{ key_check: string }>(
-            sql`SELECT key_check FROM milton_app.eligibility_policy WHERE singleton`,
-          )
-        )[0];
-        if (
-          policy?.key_check !== fingerprintKeyCheck(config.trialFingerprintKey)
-        )
-          throw unavailable();
-        for (const fingerprint of trialFingerprints(
-          config.trialFingerprintKey,
-          metadata,
-        )) {
-          await tx.query(
-            sql`INSERT INTO milton_app.trial_fingerprint(fingerprint,first_user_id) VALUES(${fingerprint},${userId}) ON CONFLICT DO NOTHING`,
-          );
-          await tx.query(
-            sql`INSERT INTO milton_app.account_fingerprint(user_id,fingerprint) VALUES(${userId},${fingerprint}) ON CONFLICT DO NOTHING`,
-          );
-        }
-      }
+      if (metadata) await saveEligibility(tx, config, userId, metadata);
       await tx.query(
         sql`INSERT INTO milton_app.lifecycle(operation_id,issuer,subject,incarnation,user_id,client_id,kind,requester_hash) VALUES(${id}::uuid,${config.issuer},${user.id},${user.incarnation},${userId},${client},${kind},${hash(token)}) ON CONFLICT DO NOTHING`,
       );

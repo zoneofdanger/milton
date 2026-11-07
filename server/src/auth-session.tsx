@@ -4,7 +4,6 @@ import { z } from "zod";
 import { sql } from "drizzle-orm";
 import { database } from "./store";
 import {
-  appActive,
   authoritySchema,
   securityStatus,
   unavailable,
@@ -66,14 +65,15 @@ export function pageContext(
     try {
       row = (
         await database(config).query(
-          sql`SELECT subject,sid,binding,incarnation,generation,email FROM milton_app.session WHERE token_hash=${hash(token)} AND issuer=${config.issuer} AND expires_at>clock_timestamp()`,
+          // The session row and its native app status in one statement.
+          sql`SELECT subject,sid,binding,incarnation,generation,email,milton_guard.app_status(binding,subject,${config.oidc.clientId},sid,incarnation,generation) AS active FROM milton_app.session WHERE token_hash=${hash(token)} AND issuer=${config.issuer} AND expires_at>clock_timestamp()`,
         )
       )[0];
     } catch {
       throw unavailable();
     }
     const proof = authoritySchema.safeParse(row);
-    if (!proof.success || !(await appActive(config, proof.data))) return null;
+    if (!proof.success || row?.active !== true) return null;
     return {
       ...proof.data,
       id: proof.data.subject,

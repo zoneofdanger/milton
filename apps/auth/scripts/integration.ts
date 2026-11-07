@@ -8,28 +8,17 @@ import { httpFixture } from "./http-fixture.ts";
 import { checkRuntimeRole } from "./check-role.ts";
 import { disposable } from "./disposable.ts";
 import { provisionFixedApp } from "./provision.ts";
+import { fixtureConfig } from "../test/fixture-config.ts";
+import { AUTH_MIGRATIONS } from "./migrations.ts";
 import { deliverMail, openMail, type MailJob } from "../src/mail.ts";
 import { createProvider } from "../src/provider.ts";
-import { AUTH_ORIGIN, ISSUER, safeError, type Config } from "../src/config.ts";
+import { AUTH_ORIGIN, ISSUER, safeError } from "../src/config.ts";
 
 const p = await disposable();
 const secret = () => randomBytes(32).toString("hex");
 // Direct handler calls come from one fixed client; network buckets key on it.
 const TEST_PEER = "127.0.0.1";
-const config: Config = {
-  AUTH_DATABASE_URL: "postgresql://unused.invalid/disposable",
-  AUTH_SECRET: secret(),
-  AUTH_ADMISSION_SECRET: secret(),
-  AUTH_RATE_SECRET: secret(),
-  AUTH_APP_CLIENT_ID: "fixed-app-fixture",
-  AUTH_GOOGLE_CLIENT_ID: "fictional-google",
-  AUTH_GOOGLE_CLIENT_SECRET: secret(),
-  AUTH_GITHUB_CLIENT_ID: "fictional-github",
-  AUTH_GITHUB_CLIENT_SECRET: secret(),
-  AUTH_RESEND_API_KEY: "fictional-not-sent",
-  AUTH_MAIL_FROM: "auth@notifications.meetmilton.com",
-  PORT: 19911,
-};
+const config = fixtureConfig();
 const admissions: Record<string, unknown>[] = [];
 const mail: { to: string; url: string; kind: "reset" | "verify" }[] = [];
 const boundaries = {
@@ -80,13 +69,10 @@ try {
   await p.owner.query(
     `insert into milton_auth.verification(id,identifier,value,"expiresAt","createdAt","updatedAt") values('fictional-pre-upgrade','reset-password:fictional-pre-upgrade','preserved',now()+interval '1 hour',now(),now()),('fictional-non-recovery','fictional-non-recovery','fictional-non-recovery',now()+interval '1 hour',now(),now())`,
   );
-  for (const n of [
-    "002-credential",
-    "003-mechanism",
-    "004-product",
-    "005-recovery",
-    "006-mail",
-  ])
+  // The rest over rows 001 left; this suite never needs 007.
+  for (const n of AUTH_MIGRATIONS.filter(
+    (n) => n !== "001-native" && n !== "007-connection-key-status",
+  ))
     await p.owner.query(
       readFileSync(
         new URL(`../migrations/${n}.up.sql`, import.meta.url),

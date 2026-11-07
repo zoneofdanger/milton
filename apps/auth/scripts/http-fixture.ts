@@ -2,48 +2,23 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createServer as tcpServer } from "node:net";
 import { createServer, request } from "node:https";
-import { spawnSync } from "node:child_process";
 import { serve } from "@hono/node-server";
 import type { AuthService } from "../src/provider.ts";
 import { AUTH_ORIGIN } from "../src/config.ts";
 import { SECURITY_HEADERS } from "../src/http.ts";
+import { assertPortFree, selfSignedCertificate } from "./cluster.ts";
 export async function httpFixture(auth: AuthService) {
   const port = 19911;
-  await new Promise<void>((resolve, reject) => {
-    const s = tcpServer();
-    s.once("error", () => reject(new Error("owned_http_port_in_use")));
-    s.listen(port, "127.0.0.1", () => s.close(() => resolve()));
-  });
+  await assertPortFree(port, "owned_http_port_in_use");
   const directory = mkdtempSync(join(tmpdir(), "milton-auth-local-tls-"));
-  const key = join(directory, "key.pem"),
-    certificate = join(directory, "cert.pem");
   let server: ReturnType<typeof serve> | undefined;
   try {
-    const cert = spawnSync(
-      "openssl",
-      [
-        "req",
-        "-x509",
-        "-newkey",
-        "rsa:2048",
-        "-sha256",
-        "-nodes",
-        "-keyout",
-        key,
-        "-out",
-        certificate,
-        "-days",
-        "1",
-        "-subj",
-        "/CN=auth.meetmilton.com",
-        "-addext",
-        "subjectAltName=DNS:auth.meetmilton.com",
-      ],
-      { stdio: "ignore" },
+    const { key, cert: certificate } = selfSignedCertificate(
+      directory,
+      "auth.meetmilton.com",
+      "DNS:auth.meetmilton.com",
     );
-    if (cert.status !== 0) throw new Error("local_tls_fixture_failed");
     const { createApp }: typeof import("../src/app.tsx") = await import(
       new URL("../dist/app.js", import.meta.url).href
     );

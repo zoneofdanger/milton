@@ -1,6 +1,7 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { validPassword } from "../src/password.ts";
 import { readConfig } from "../src/config.ts";
+import { fixtureConfig } from "./fixture-config.ts";
 describe("auth product boundaries", () => {
   test("native NFKC policy has predictable Unicode bounds without trimming", () => {
     expect(validPassword(" password with spaces ")).toBe(true);
@@ -193,8 +194,6 @@ test("the security page's session lookup takes each client's own network bucket"
   const { rmSync } = await import("node:fs");
   const { createProvider } = await import("../src/provider.ts");
   const { createApp } = await import("../src/app.tsx");
-  const { randomBytes } = await import("node:crypto");
-  const secret = () => randomBytes(32).toString("hex");
   // Each network bucket holds one request; every decision is recorded.
   const taken = new Map<unknown, number>();
   const decisions: boolean[] = [];
@@ -214,23 +213,9 @@ test("the security page's session lookup takes each client's own network bucket"
     },
   };
   const app = createApp(
-    createProvider(
-      {
-        AUTH_DATABASE_URL: "postgresql://unused.invalid/fixture",
-        AUTH_SECRET: secret(),
-        AUTH_ADMISSION_SECRET: secret(),
-        AUTH_RATE_SECRET: secret(),
-        AUTH_APP_CLIENT_ID: "fixed-app-fixture",
-        AUTH_GOOGLE_CLIENT_ID: "fictional-google",
-        AUTH_GOOGLE_CLIENT_SECRET: secret(),
-        AUTH_GITHUB_CLIENT_ID: "fictional-github",
-        AUTH_GITHUB_CLIENT_SECRET: secret(),
-        AUTH_RESEND_API_KEY: "fictional-not-sent",
-        AUTH_MAIL_FROM: "auth@notifications.meetmilton.com",
-        PORT: 19911,
-      },
-      { pool: pool as unknown as import("pg").Pool },
-    ),
+    createProvider(fixtureConfig(), {
+      pool: pool as unknown as import("pg").Pool,
+    }),
     assets,
   );
   rmSync(assets, { recursive: true, force: true });
@@ -250,8 +235,6 @@ describe("OAuth profile refusals before database access", () => {
   // every admitted request makes first, and refuses it.
   const fixture = async () => {
     const { createProvider } = await import("../src/provider.ts");
-    const { randomBytes } = await import("node:crypto");
-    const secret = () => randomBytes(32).toString("hex");
     const queries: string[] = [];
     const pool = {
       on: () => pool,
@@ -265,23 +248,9 @@ describe("OAuth profile refusals before database access", () => {
         throw new Error("fixture_database_refused");
       },
     };
-    const { handler } = createProvider(
-      {
-        AUTH_DATABASE_URL: "postgresql://unused.invalid/fixture",
-        AUTH_SECRET: secret(),
-        AUTH_ADMISSION_SECRET: secret(),
-        AUTH_RATE_SECRET: secret(),
-        AUTH_APP_CLIENT_ID: "fixed-app-fixture",
-        AUTH_GOOGLE_CLIENT_ID: "fictional-google",
-        AUTH_GOOGLE_CLIENT_SECRET: secret(),
-        AUTH_GITHUB_CLIENT_ID: "fictional-github",
-        AUTH_GITHUB_CLIENT_SECRET: secret(),
-        AUTH_RESEND_API_KEY: "fictional-not-sent",
-        AUTH_MAIL_FROM: "auth@notifications.meetmilton.com",
-        PORT: 19911,
-      },
-      { pool: pool as unknown as import("pg").Pool },
-    );
+    const { handler } = createProvider(fixtureConfig(), {
+      pool: pool as unknown as import("pg").Pool,
+    });
     const post = (path: string, init: RequestInit = {}) =>
       handler(
         new Request("https://auth.meetmilton.com/api/auth" + path, {

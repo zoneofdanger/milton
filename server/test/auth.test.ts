@@ -836,8 +836,22 @@ test("connection keys: create shows the key once, the list never shows secrets, 
     expect(listed).toContain("Never used");
     expect(listed).toContain("<strong>Never expires</strong>");
     expect(listed).toMatch(/Expires <time datetime="/);
-    // Revoking asks first, with a plain form, then refuses the key.
+    // Expired keys move to their own bounded history, and a key bound to an
+    // earlier native generation is marked as stopped.
     const id = key.slice(3, 25);
+    await local.db.query(
+      sql`UPDATE connection_keys SET generation='f:0' WHERE name='CI'`,
+    );
+    await local.db.query(
+      sql`UPDATE connection_keys SET created_at=now()-interval '91 days',expires_at=now()-interval '1 day' WHERE id=${id}`,
+    );
+    const history = await (await send("/assistants")).text();
+    expect(history).toContain("<h3>Expired keys</h3>");
+    expect(history.indexOf("Nightly &lt;job&gt;")).toBeGreaterThan(
+      history.indexOf("<h3>Expired keys</h3>"),
+    );
+    expect(history).toContain("<strong>Stopped working.</strong>");
+    // Revoking asks first, with a plain form, then refuses the key.
     const confirm = await send(`/assistants/keys/revoke?key=${id}`);
     expect(confirm.status).toBe(200);
     const confirmHtml = await confirm.text();

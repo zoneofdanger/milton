@@ -66,7 +66,9 @@ Files: `server/src/handler.ts`, `server/src/token.ts`, `server/src/mcp.ts`,
 - A bad token gets a 401 that points the client to the sign-in metadata.
 - A Bearer value starting with `mk_` is a connection key; every other value takes the native token path unchanged.
 - A key must be exactly `mk_` + 22-character id + `_` + 43-character secret in canonical base64url; it is looked up by id and its secret's SHA-256 compared in constant time.
-- A malformed, unknown, wrong, revoked or expired key, or one whose account is not active, gets the same 401 and challenge as a bad token, with no reason.
+- A key is bound at creation to the native issuer and subject and the identity incarnation and security generation of the validated fresh session; no runtime can change that binding, and it is never moved to a newer generation.
+- Every key call asks native `milton_guard.connection_key_status` (native 007) whether that binding is still current, the native user verified and no deletion begun; a recovery, credential or method change, or a begun deletion stops the key for good, even while the writing account is still active.
+- A malformed, unknown, wrong, revoked or expired key, one whose account is not active, or one whose native binding is no longer current gets the same 401 and challenge as a bad token, with no reason; a failed status lookup is a 503, never an acceptance.
 - A read key lists three tools and is refused `create_memo` (403); a read-and-save key lists four. Key saves are attributed to the key's id.
 - Keys pass the same daily allowance, trial and billing gates as OAuth calls.
 - A key's last use is recorded at most once a minute; failing to record it never fails the call.
@@ -292,11 +294,12 @@ Files: `server/src/pages.tsx`, `server/src/memo-pages.tsx`, `server/src/auth.tsx
   its sample count as shown, explains its newest-eight-per-report limit and links to
   the complete download, including when assistant access is paused.
 - `/assistants` lists bounded live native connections grouped by client and read/write access, and original incomplete disconnects; a full native page explicitly reports incomplete listing.
-- `/assistants` also lists connection keys that are not revoked (name, access, created, last used, expiry; never-expiring keys say "Never expires", expired keys say so), at most 100, never a secret or hash.
+- `/assistants` also lists every active connection key (name, access, created, last used, expiry; never-expiring keys say "Never expires"; keys a security change stopped say so), then under "Expired keys" the 20 most recently expired, never a secret or hash.
 - Creating a key takes a name (1–60 characters, one line), Read only (default) or Read and save, and 30, 90 (default) or 365 days or Never; it needs the form's CSRF/Origin checks and a sign-in within 5 minutes.
 - An account can have 20 active (unrevoked, unexpired) keys; creation takes the account lock so the cap holds.
+- Under that lock, creation asks native SQL that the session's snapshot is still current (otherwise "Sign in again") and revokes this identity's active keys bound to any earlier snapshot, which can never work again.
 - The created key is shown once, with a Claude Code command, on a no-store page; only its hash is stored.
-- Revoking asks on a separate page with a plain form, revokes one key, and the key is refused from its next request.
+- Revoking asks on a separate page with a plain form, revokes one key, and the key is refused from its next request; both look the key up by id and owning account, independent of the list.
 - The setup prompt changes depending on whether the account is empty.
 - Account opens a native popover; Escape closes it and returns focus to Account, and
   clicking outside closes it.
@@ -381,7 +384,8 @@ Files: `server/drizzle/`, `server/src/store/schema.ts`, `server/src/store/databa
   the `retained_bytes` counter it read.
 - User IDs cannot change.
 - Disconnects and identity hashes have no foreign key to users, so they outlive the account.
-- `connection_keys` (0004) cascades from users, checks id, hash, name, scope and dates, and grants nothing to the legacy writing group; owner file `006-connection-keys-roles.sql` lets app read every column but the hash, insert and set `revoked_at`, and MCP read and set `last_used_at` only.
+- `connection_keys` (0004) cascades from users and from its (issuer, subject) identity, requires the native binding (issuer, subject, incarnation, generation), checks id, hash, name, scope, binding lengths and dates, and grants nothing to the legacy writing group; owner file `006-connection-keys-roles.sql` lets app read every column but the hash (binding included), insert and set `revoked_at`, and MCP read and set `last_used_at` only.
+- Native 007 adds only `milton_guard.connection_key_status(subject, incarnation, generation)`: SECURITY DEFINER, fixed `pg_catalog, pg_temp` path, false on NULL or any mismatch, no PUBLIC/auth/guide EXECUTE and no table grants; MCP and app may execute it. Its down file drops it, so every key is refused.
 - `stripe_events` keeps each event's ID, type, and body hash, never the payload.
 - The database holds cards and their immutable versions; the obsolete memo tables and
   the unused card-version `legacy` flag are removed by the cleanup.

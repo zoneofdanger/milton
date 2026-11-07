@@ -20,6 +20,8 @@ import {
   personStoreForCurrentRequest,
   connectionKeyAccount,
   connectionKeysForAccount,
+  EXPIRED_KEY_HISTORY,
+  parseConnectionKey,
 } from "../src/store";
 
 test("trial transition preserves saves and TPS while notices and access follow the Stripe subscription state", async () => {
@@ -1047,19 +1049,49 @@ test("account deletion removes every tenant row, keeps refusals, waits for an in
   }
 }, 30000);
 
+// Unit stand-in for native 007 (real SQL runs in the PG18 rehearsal): a key's
+// snapshot is current while it matches this table's row for its subject.
+async function nativeKeyStatus(local: Awaited<ReturnType<typeof localStore>>) {
+  await local.pg.exec(`CREATE SCHEMA IF NOT EXISTS milton_guard;
+    CREATE TABLE milton_guard.fixture_native(subject text PRIMARY KEY,incarnation text,generation text);
+    CREATE FUNCTION milton_guard.connection_key_status(text,text,text) RETURNS boolean LANGUAGE sql
+      AS $$ SELECT EXISTS(SELECT 1 FROM milton_guard.fixture_native WHERE (subject,incarnation,generation)=($1,$2,$3)) $$`);
+  return async (subject: string) => {
+    await local.pg.query(
+      "INSERT INTO milton_guard.fixture_native VALUES($1,'f:1','f:2')",
+      [subject],
+    );
+    return {
+      issuer: "neon",
+      subject,
+      incarnation: "f:1",
+      generation: "f:2",
+    };
+  };
+}
+
 test("connection keys store only a hash, list without secrets, expire, revoke, cap active keys and leave with the account", async () => {
   const local = await localStore();
   const quiet = spyOn(console, "error").mockImplementation(() => {});
   try {
     const neon = (subject: string) => ({ provider: "neon", subject });
+    const native = await nativeKeyStatus(local);
+    const env = { ...local.env, issuer: "neon" };
     await resolveIdentityAccount(local.env, neon("keys"));
     await resolveIdentityAccount(local.env, neon("other"));
     const auth = await lookupIdentityAccount(local.env, neon("keys"));
-    const keys = connectionKeysForAccount(local.env, auth);
+    const keys = connectionKeysForAccount(
+      local.env,
+      auth,
+      await native("keys"),
+    );
     const others = connectionKeysForAccount(
       local.env,
       await lookupIdentityAccount(local.env, neon("other")),
+      await native("other"),
     );
+    const check = (key: string) =>
+      connectionKeyAccount(env, parseConnectionKey(key)!);
     const made = await keys.create({
       name: "  Nightly job ",
       scope: "read",
@@ -1074,6 +1106,7 @@ test("connection keys store only a hash, list without secrets, expire, revoke, c
       scope: "read",
       lastUsedAt: null,
       expired: false,
+      stopped: false,
     });
     const days = (date: Date | null) =>
       Math.round((date!.getTime() - made.record.createdAt.getTime()) / 864e5);
@@ -1090,13 +1123,14 @@ test("connection keys store only a hash, list without secrets, expire, revoke, c
       createHash("sha256").update(secret!).digest("hex"),
     );
     const listed = await keys.list();
-    expect(listed.map((key) => key.id)).toEqual([id!]);
+    expect(listed.active.map((key) => key.id)).toEqual([id!]);
     expect(JSON.stringify(listed)).not.toContain(
       String(stored[0]!.secret_hash),
     );
-    expect(await others.list()).toEqual([]);
+    expect(await others.list()).toEqual({ active: [], expired: [] });
     // A good key grants its account and scope and records use once a minute.
-    expect(await connectionKeyAccount(local.env, made.key)).toMatchObject({
+    expect(await check(made.key)).toMatchObject({
+      ok: true,
       auth: { userId: auth.userId },
       keyId: id,
       scope: "read",
@@ -1110,19 +1144,19 @@ test("connection keys store only a hash, list without secrets, expire, revoke, c
       ).rows[0]!.at;
     const first = await used();
     expect(first).not.toBeNull();
-    await connectionKeyAccount(local.env, made.key);
+    await check(made.key);
     expect(await used()).toEqual(first);
     await local.pg.query(
       "UPDATE connection_keys SET last_used_at=now()-interval '2 minutes' WHERE id=$1",
       [id],
     );
-    await connectionKeyAccount(local.env, made.key);
+    await check(made.key);
     expect((await used())!.getTime()).toBeGreaterThanOrEqual(first!.getTime());
     // Failing to record use never refuses the key.
     await local.pg.exec(`UPDATE connection_keys SET last_used_at=NULL;
       CREATE FUNCTION fixture_refuse() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fictional write outage'; END $$;
       CREATE TRIGGER fixture_refuse BEFORE UPDATE OF last_used_at ON connection_keys FOR EACH ROW EXECUTE FUNCTION fixture_refuse()`);
-    expect((await connectionKeyAccount(local.env, made.key))?.keyId).toBe(id);
+    expect(await check(made.key)).toMatchObject({ ok: true, keyId: id });
     await local.pg.exec("DROP TRIGGER fixture_refuse ON connection_keys");
     // A wrong, altered, padded or non-canonical key reads as no key at all.
     const flip = (s: string) => (s[0] === "A" ? "B" : "A") + s.slice(1);
@@ -1135,7 +1169,19 @@ test("connection keys store only a hash, list without secrets, expire, revoke, c
       `mk_${id}_${secret!.slice(0, -1)}${secret!.endsWith("A") ? "B" : "A"}`,
       `mk_${id}-${secret}`,
     ])
-      expect(await connectionKeyAccount(local.env, bad)).toBeUndefined();
+      expect(
+        parseConnectionKey(bad) &&
+          (await connectionKeyAccount(env, parseConnectionKey(bad)!)).ok,
+      ).toBeFalsy();
+    // An unknown id is reported as unknown; a known one with a wrong secret is not.
+    expect(await check(`mk_${flip(id!)}_${secret}`)).toEqual({
+      ok: false,
+      known: false,
+    });
+    expect(await check(`mk_${id}_${flip(secret!)}`)).toEqual({
+      ok: false,
+      known: true,
+    });
     // Never-expiring keys have no expiry; expired keys stay listed, refused.
     const forever = await keys.create({
       name: "CI",
@@ -1147,17 +1193,20 @@ test("connection keys store only a hash, list without secrets, expire, revoke, c
       "UPDATE connection_keys SET created_at=now()-interval '91 days',expires_at=now()-interval '1 day' WHERE id=$1",
       [id],
     );
-    expect(await connectionKeyAccount(local.env, made.key)).toBeUndefined();
-    expect((await keys.list()).map((key) => [key.name, key.expired])).toEqual([
-      ["CI", false],
+    expect((await check(made.key)).ok).toBe(false);
+    const both = await keys.list();
+    expect(both.active.map((key) => key.name)).toEqual(["CI"]);
+    expect(both.expired.map((key) => [key.name, key.expired])).toEqual([
       ["Nightly job", true],
     ]);
     // Revocation is per key and per account, once.
     expect(await others.revoke(forever.record.id)).toBe(false);
     expect(await keys.revoke(forever.record.id)).toBe(true);
     expect(await keys.revoke(forever.record.id)).toBe(false);
-    expect(await connectionKeyAccount(local.env, forever.key)).toBeUndefined();
-    expect((await keys.list()).map((key) => key.name)).toEqual(["Nightly job"]);
+    expect((await check(forever.key)).ok).toBe(false);
+    expect((await keys.list()).expired.map((key) => key.name)).toEqual([
+      "Nightly job",
+    ]);
     for (const name of ["", "   ", "a\nb", "tab\there", "x".repeat(61)])
       await expect(
         keys.create({ name, scope: "read", expiry: 30 }),
@@ -1169,18 +1218,19 @@ test("connection keys store only a hash, list without secrets, expire, revoke, c
       keys.create({ name: "One more", scope: "read", expiry: 30 }),
     ).rejects.toMatchObject({ code: "connection_key_limit", status: 409 });
     // A closing account's keys are refused; deletion removes them.
-    await keys.revoke((await keys.list())[0]!.id);
+    await keys.revoke((await keys.list()).active[0]!.id);
     const last = await keys.create({ name: "Last", scope: "read", expiry: 30 });
     await local.pg.query("UPDATE users SET status='deleting' WHERE id=$1", [
       auth.userId,
     ]);
-    expect(await connectionKeyAccount(local.env, last.key)).toBeUndefined();
+    expect((await check(last.key)).ok).toBe(false);
     await local.pg.query("UPDATE users SET status='active' WHERE id=$1", [
       auth.userId,
     ]);
-    expect((await connectionKeyAccount(local.env, last.key))?.keyId).toBe(
-      last.record.id,
-    );
+    expect(await check(last.key)).toMatchObject({
+      ok: true,
+      keyId: last.record.id,
+    });
     await deleteAccount(local.env, neon("keys"), []);
     expect(
       (await local.pg.query("SELECT 1 FROM connection_keys")).rows,
@@ -1190,3 +1240,45 @@ test("connection keys store only a hash, list without secrets, expire, revoke, c
     await local.dispose();
   }
 });
+
+test("an active key older than many expired keys stays listed, confirmable and revocable", async () => {
+  const local = await localStore();
+  try {
+    const native = await nativeKeyStatus(local);
+    const identity = { provider: "neon", subject: "rotating" };
+    await resolveIdentityAccount(local.env, identity);
+    const auth = await lookupIdentityAccount(local.env, identity);
+    const keys = connectionKeysForAccount(
+      local.env,
+      auth,
+      await native("rotating"),
+    );
+    const old = await keys.create({ name: "Old", scope: "read", expiry: null });
+    await local.pg.query(
+      "UPDATE connection_keys SET created_at=now()-interval '2 years' WHERE id=$1",
+      [old.record.id],
+    );
+    // 120 rotations later: newer keys, all expired, none revoked.
+    for (let n = 0; n < 120; n++) {
+      const made = await keys.create({
+        name: `Rotated ${n}`,
+        scope: "read",
+        expiry: 30,
+      });
+      await local.pg.query(
+        "UPDATE connection_keys SET created_at=now()-make_interval(days=>40,mins=>$2),expires_at=now()-make_interval(days=>10,mins=>$2) WHERE id=$1",
+        [made.record.id, n],
+      );
+    }
+    const listed = await keys.list();
+    expect(listed.active.map((key) => key.id)).toEqual([old.record.id]);
+    expect(listed.expired).toHaveLength(EXPIRED_KEY_HISTORY);
+    expect(listed.expired[0]!.name).toBe("Rotated 0");
+    expect(await keys.find(old.record.id)).toMatchObject({ name: "Old" });
+    expect(await keys.revoke(old.record.id)).toBe(true);
+    expect(await keys.find(old.record.id)).toBeUndefined();
+    expect((await keys.list()).active).toEqual([]);
+  } finally {
+    await local.dispose();
+  }
+}, 30000);

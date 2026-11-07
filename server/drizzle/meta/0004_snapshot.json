@@ -1,5 +1,5 @@
 {
-  "id": "b86582b9-fb44-4c1f-a1c4-621d5466470b",
+  "id": "77789861-0c27-4403-acac-75aed112ffcb",
   "prevId": "df22a903-ed30-4921-a0db-9a56140ded6d",
   "version": "7",
   "dialect": "postgresql",
@@ -199,6 +199,30 @@
           "primaryKey": false,
           "notNull": true
         },
+        "issuer": {
+          "name": "issuer",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "subject": {
+          "name": "subject",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "incarnation": {
+          "name": "incarnation",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "generation": {
+          "name": "generation",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
         "secret_hash": {
           "name": "secret_hash",
           "type": "text",
@@ -258,6 +282,27 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "connection_keys_by_identity": {
+          "name": "connection_keys_by_identity",
+          "columns": [
+            {
+              "expression": "issuer",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "subject",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -273,12 +318,31 @@
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
+        },
+        "connection_keys_identity_fk": {
+          "name": "connection_keys_identity_fk",
+          "tableFrom": "connection_keys",
+          "tableTo": "identities",
+          "columnsFrom": [
+            "issuer",
+            "subject"
+          ],
+          "columnsTo": [
+            "provider",
+            "subject"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
+        "connection_key_binding": {
+          "name": "connection_key_binding",
+          "value": "char_length(\"connection_keys\".\"issuer\") BETWEEN 1 AND 512 AND char_length(\"connection_keys\".\"subject\") BETWEEN 1 AND 512 AND char_length(\"connection_keys\".\"incarnation\") BETWEEN 1 AND 128 AND char_length(\"connection_keys\".\"generation\") BETWEEN 1 AND 128"
+        },
         "connection_key_id": {
           "name": "connection_key_id",
           "value": "\"connection_keys\".\"id\" ~ '^[A-Za-z0-9_-]{22}$'"

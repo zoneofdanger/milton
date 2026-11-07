@@ -103,7 +103,8 @@ import SiteLayout from "../layouts/SiteLayout.astro";
         Treat a key like a password. Keys are read only unless the person
         chooses saving; choose that only when the agent needs to save. Revoke
         keys that are no longer used. A revoked or expired key is refused on its
-        next request.
+        next request, and so is every key after a password reset or another
+        sign-in security change; create a new key then.
       </p>
     </section>
 

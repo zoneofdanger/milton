@@ -70,6 +70,7 @@ export async function checkProductRuntimeRole(
       AND NOT has_table_privilege((SELECT c.oid FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='milton_auth' AND c.relname='verification'),'SELECT')
       AND NOT has_table_privilege('milton_guard.authorization_binding','SELECT')
       AND has_function_privilege('milton_guard.binding_status(text,text,text,text[],text[])','EXECUTE')
+      AND has_function_privilege('milton_guard.connection_key_status(text,text,text)','EXECUTE')
       AND has_table_privilege((SELECT c.oid FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='milton_app' AND c.relname='session'),'SELECT')=${service === "app"}
       AND has_function_privilege('milton_guard.app_status(text,text,text,text,text,text)','EXECUTE')=${service === "app"}
       AND has_function_privilege('milton_guard.begin_operation(text,text,text,text,text)','EXECUTE')=${service === "app"}

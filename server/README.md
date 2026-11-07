@@ -375,9 +375,12 @@ ID/session JWTs and unsupported confirmation/DPoP. Every call independently chec
 native SQL status. Read grants list three tools; write grants list four. All reads require
 `milton:read`; `create_memo` requires read+write even on a direct call. A scope grant never
 approves memo text. A Bearer value starting with `mk_` is instead a connection key the
-person created in the app: stored as a SHA-256 of its secret, checked live on every call
-(revoked, expired, closed-account and malformed keys all get the invalid-token 401), with
-read keys listing three tools and read-and-save keys four. Read-only setup explains
+person created in the app: stored as a SHA-256 of its secret and bound to the native
+subject, incarnation and security generation of the fresh session that created it. Every
+call checks the key and native `connection_key_status` (native 007) live: revoked, expired,
+closed-account, malformed and natively stale keys (after recovery, a security change or a
+begun deletion) all get the invalid-token 401. Read keys list three tools and read-and-save
+keys four. Read-only setup explains
 reconnecting for saves rather than offering an unavailable save.
 
 App `/account/security` takes the person to native method/password/session management.
@@ -689,7 +692,9 @@ views/functions/default privileges against the real retained schema before cutov
 Connection keys (`connection_keys`, Drizzle `0004`) get no legacy-group grants.
 The owner applies `migrations/006-connection-keys-roles.sql` after `005-app-roles.sql`:
 app may read every column except `secret_hash`, insert, and set `revoked_at`; MCP may
-read and set `last_used_at` only. Rerunning it converges.
+read and set `last_used_at` only. No runtime can change a key's binding columns. Native
+`007-connection-key-status` grants `connection_key_status` EXECUTE to MCP and app only.
+Rerunning 006 converges.
 
 App and MCP read `sample_versions` and the guide state in `guide_accounts` and
 `report_guides`; MCP appends to `samples` and `sample_versions` but cannot update
@@ -697,4 +702,4 @@ either, because migration `0002` makes every sample change an insert. Neither ru
 writes guide tables or reads `guide_spend`; the separate `milton_guide_worker`
 capability is described in [the guide pilot runbook](deploy/guides.md).
 
-Native auth mail now uses committed encrypted jobs/no-op receipts before generic public acceptance. No provider call occurs during an auth request; the separately selected auth-only `node deliver.js --apply` command drains bounded leased work using the original native target and exact message. App/MCP receive no mail payload/table/function privileges. [Auth operations](../apps/auth/README.md#bounded-mail-delivery-and-retention) describe uncertain503 recovery, retry/retention bounds, key recovery and disabled job preparation. Native migrations run through006. Old inline-send writers remain unsafe for public fallback; select a compatible fixed self-hosted revision/forward fix. Retained disabled managed sign-in schema/data/backups require separately selected cleanup and are disclosed in the candidate privacy/intake wording.
+Native auth mail now uses committed encrypted jobs/no-op receipts before generic public acceptance. No provider call occurs during an auth request; the separately selected auth-only `node deliver.js --apply` command drains bounded leased work using the original native target and exact message. App/MCP receive no mail payload/table/function privileges. [Auth operations](../apps/auth/README.md#bounded-mail-delivery-and-retention) describe uncertain503 recovery, retry/retention bounds, key recovery and disabled job preparation. Native migrations run through007. Old inline-send writers remain unsafe for public fallback; select a compatible fixed self-hosted revision/forward fix. Retained disabled managed sign-in schema/data/backups require separately selected cleanup and are disclosed in the candidate privacy/intake wording.

@@ -37,16 +37,21 @@ import { readLimits } from "./limits";
 import {
   authenticateConnectionKey,
   createConnectionKey,
+  findConnectionKey,
   listConnectionKeys,
   revokeConnectionKey,
+  type KeyBinding,
   type KeyScope,
 } from "./connection-keys";
 export { StoreError } from "./errors";
 export {
+  EXPIRED_KEY_HISTORY,
   keyExpiries,
   keyName,
   MAX_ACTIVE_KEYS,
+  parseConnectionKey,
   type ConnectionKey,
+  type KeyBinding,
   type KeyExpiry,
   type KeyScope,
 } from "./connection-keys";
@@ -234,34 +239,43 @@ export async function lookupIdentityAccount(
   return { userId: row.id, [verifiedStoreIdentity]: true };
 }
 
-/** The account a presented connection key grants and the key's scope, or
- * undefined for every refusal alike (see authenticateConnectionKey). */
+/** The account a parsed connection key grants and the key's scope, or a
+ * refusal alike for every reason (see authenticateConnectionKey); `known` is
+ * false only when no key has the id. */
 export async function connectionKeyAccount(
-  bindings: StoreBindings,
-  presented: string,
+  bindings: StoreBindings & { issuer: string },
+  key: { id: string; secret: string },
 ): Promise<
-  { auth: VerifiedStoreAuth; keyId: string; scope: KeyScope } | undefined
+  | { ok: true; auth: VerifiedStoreAuth; keyId: string; scope: KeyScope }
+  | { ok: false; known: boolean }
 > {
-  const key = await authenticateConnectionKey(database(bindings), presented);
-  return (
-    key && {
-      auth: { userId: key.userId, [verifiedStoreIdentity]: true },
-      keyId: key.keyId,
-      scope: key.scope,
-    }
+  const checked = await authenticateConnectionKey(
+    database(bindings),
+    bindings.issuer,
+    key,
   );
+  if (!checked.ok) return checked;
+  return {
+    ok: true,
+    auth: { userId: checked.userId, [verifiedStoreIdentity]: true },
+    keyId: checked.keyId,
+    scope: checked.scope,
+  };
 }
 
-/** One signed-in account's connection keys, for the Connected assistants page. */
+/** One signed-in account's connection keys, for the Connected assistants page.
+ * `binding` is the signed-in session's validated native snapshot. */
 export function connectionKeysForAccount(
   bindings: StoreBindings,
   auth: VerifiedStoreAuth,
+  binding: KeyBinding,
 ) {
   const db = database(bindings);
   return {
-    list: () => listConnectionKeys(db, auth.userId),
-    create: (input: Parameters<typeof createConnectionKey>[2]) =>
-      createConnectionKey(db, auth.userId, input),
+    list: () => listConnectionKeys(db, auth.userId, binding),
+    find: (id: string) => findConnectionKey(db, auth.userId, binding, id),
+    create: (input: Parameters<typeof createConnectionKey>[3]) =>
+      createConnectionKey(db, auth.userId, binding, input),
     revoke: (id: string) => revokeConnectionKey(db, auth.userId, id),
   };
 }

@@ -655,7 +655,16 @@ test("connection keys get exactly their scope's tools; revoked, expired, malform
       provider: issuer,
       subject: "keyed",
     });
-    const keys = connectionKeysForAccount(local.env, auth);
+    // Unit stand-in for native 007; the real function runs in the PG18 rehearsal.
+    await local.pg.exec(`CREATE SCHEMA IF NOT EXISTS milton_guard;
+      CREATE FUNCTION milton_guard.connection_key_status(text,text,text) RETURNS boolean
+        LANGUAGE sql AS $$ SELECT ($1,$2,$3)=('keyed','f:1','f:2') $$`);
+    const keys = connectionKeysForAccount(local.env, auth, {
+      issuer,
+      subject: "keyed",
+      incarnation: "f:1",
+      generation: "f:2",
+    });
     const reader = await keys.create({
       name: "Reader",
       scope: "read",

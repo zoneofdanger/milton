@@ -149,6 +149,10 @@ export const assistantDisconnects = pgTable(
 // key's secret is stored; the full key is shown once, at creation. A key is
 // refused once revoked_at is set or expires_at has passed; NULL expires_at
 // never expires. Account deletion removes the account's keys.
+// Each key is bound to the native identity (issuer, subject) and the identity
+// incarnation and security generation of the fresh session that created it.
+// No runtime may change the binding: a native recovery, security change or
+// deletion stops the key for good, and it is never moved to a newer generation.
 export const connectionKeys = pgTable(
   "connection_keys",
   {
@@ -156,6 +160,10 @@ export const connectionKeys = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    issuer: text("issuer").notNull(),
+    subject: text("subject").notNull(),
+    incarnation: text("incarnation").notNull(),
+    generation: text("generation").notNull(),
     secretHash: text("secret_hash").notNull(),
     name: text("name").notNull(),
     scope: text("scope").notNull(),
@@ -166,6 +174,16 @@ export const connectionKeys = pgTable(
   },
   (t) => [
     index("connection_keys_by_user").on(t.userId),
+    index("connection_keys_by_identity").on(t.issuer, t.subject),
+    foreignKey({
+      name: "connection_keys_identity_fk",
+      columns: [t.issuer, t.subject],
+      foreignColumns: [identities.provider, identities.subject],
+    }).onDelete("cascade"),
+    check(
+      "connection_key_binding",
+      sql`char_length(${t.issuer}) BETWEEN 1 AND 512 AND char_length(${t.subject}) BETWEEN 1 AND 512 AND char_length(${t.incarnation}) BETWEEN 1 AND 128 AND char_length(${t.generation}) BETWEEN 1 AND 128`,
+    ),
     check("connection_key_id", sql`${t.id} ~ '^[A-Za-z0-9_-]{22}$'`),
     check("connection_key_hash", sql`${t.secretHash} ~ '^[a-f0-9]{64}$'`),
     check(

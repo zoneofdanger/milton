@@ -125,19 +125,37 @@ retirement, replay, stale-write and account-delete behavior before reopening.
 
 ## Connection keys release (prepared, not applied)
 
-Connection keys add one additive table and one owner grant file; old app/MCP code never
-reads the table, so traffic may stay open under the additive procedure in
+Connection keys add one native status function, one additive writing table and one owner
+grant file. Old app/MCP code never calls the function or reads the table, so traffic may
+stay open under the additive procedure in
 [Release verification and rollback](#release-verification-and-rollback). In order:
-snapshot; apply Drizzle `0004_connection_keys` with `bun run --cwd server db:migrate`
-(creates `connection_keys`, its user index and cascade, and revokes the legacy
-`milton_runtime` default grants on it); then, as the owner, apply
-`server/migrations/006-connection-keys-roles.sql` (app: SELECT on every column except
-`secret_hash`, INSERT, UPDATE(`revoked_at`); MCP: SELECT, UPDATE(`last_used_at`); nothing
-else). The file revokes before granting, so rerunning it converges. Only then roll out
-app and MCP: new code without 006 fails the Connected assistants page, key pages and key
-calls with `store_unavailable` but leaves OAuth calls unchanged. Rollback is the previous
-app/MCP revisions; the table and grants can stay in place, unread. Live key creation
-needs a person's own fresh sign-in.
+
+1. Snapshot.
+2. Native `007-connection-key-status` as `milton_auth_delegate`, assuming
+   `milton_auth_owner` (`AUTH_OWNER_DATABASE_URL` with `options=-c%20role%3Dmilton_auth_owner`,
+   see below): `node --experimental-strip-types apps/auth/scripts/migrate.ts up --apply`
+   applies only 007 when the ledger holds 001–006. It adds
+   `milton_guard.connection_key_status(text,text,text)` (SECURITY DEFINER, fixed
+   `pg_catalog, pg_temp` path, EXECUTE for `milton_mcp_runtime` and `milton_app_runtime`
+   only, no table grants) and changes no auth runtime code, so `milton-auth` is not
+   redeployed. Check: ledger has 7 entries; `has_function_privilege` is true for MCP and
+   app and false for `milton_auth_runtime`, `milton_guide_runtime` and PUBLIC.
+3. Writing Drizzle `0004_connection_keys` with `bun run --cwd server db:migrate`
+   (creates `connection_keys` with its NOT NULL native binding columns, user and identity
+   indexes and cascades, and revokes the legacy `milton_runtime` default grants on it).
+4. As the owner, `server/migrations/006-connection-keys-roles.sql` (app: SELECT on every
+   column except `secret_hash`, binding included; INSERT; UPDATE(`revoked_at`). MCP:
+   SELECT, UPDATE(`last_used_at`). Nothing else). It revokes before granting, so
+   rerunning converges.
+5. `check-runtime-role.ts` for app and MCP (it now requires the 007 EXECUTE grant), then
+   roll out app and MCP.
+
+Order matters. New code without 007 refuses every key call (503) and every key creation;
+without 006 it fails the Connected assistants page, key pages and key calls with
+`store_unavailable`. OAuth calls are unchanged either way. Never apply 007 down while new
+MCP code serves keys unless refusing every key is intended. Rollback is the previous
+app/MCP revisions; the function, table and grants can stay in place, unused. Live key
+creation needs a person's own fresh sign-in.
 
 ## Optional guide worker
 

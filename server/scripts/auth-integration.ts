@@ -21,6 +21,7 @@ import {
   authenticateConnectionKey,
   createConnectionKey,
   listConnectionKeys,
+  parseConnectionKey,
   revokeConnectionKey,
 } from "../src/store/connection-keys";
 import { importIdentities } from "./auth-identity-import";
@@ -175,6 +176,7 @@ try {
     "004-product",
     "005-recovery",
     "006-mail",
+    "007-connection-key-status",
   ])
     await authOwner.query(
       readFileSync(
@@ -688,11 +690,15 @@ try {
   const keyColumns = [
     "created_at",
     "expires_at",
+    "generation",
     "id",
+    "incarnation",
+    "issuer",
     "last_used_at",
     "name",
     "revoked_at",
     "scope",
+    "subject",
     "user_id",
   ];
   assert.deepEqual(
@@ -719,21 +725,80 @@ try {
     "milton_runtime",
   ])
     assert.deepEqual(await keyPrivileges(role), [], role);
+  // Native 007: one narrow SECURITY DEFINER status function with a fixed path,
+  // EXECUTE for MCP and app only, never PUBLIC, auth or the guide.
+  const keyStatus = "milton_guard.connection_key_status(text,text,text)";
+  const keyStatusShape = async () =>
+    (
+      await owner.query<{
+        definer: boolean;
+        config: string[];
+        public: boolean;
+        app: boolean;
+        mcp: boolean;
+        auth: boolean;
+        guide: boolean;
+      }>(
+        `SELECT p.prosecdef definer,p.proconfig config,
+          EXISTS(SELECT 1 FROM aclexplode(p.proacl) a WHERE a.grantee=0) public,
+          has_function_privilege('milton_app_runtime',p.oid,'EXECUTE') app,
+          has_function_privilege('milton_mcp_runtime',p.oid,'EXECUTE') mcp,
+          has_function_privilege('milton_auth_runtime',p.oid,'EXECUTE') auth,
+          has_function_privilege('milton_guide_runtime',p.oid,'EXECUTE') guide
+          FROM pg_proc p WHERE p.oid=to_regprocedure($1)`,
+        [keyStatus],
+      )
+    ).rows[0];
+  const keyStatusGrants = {
+    definer: true,
+    config: ["search_path=pg_catalog, pg_temp"],
+    public: false,
+    app: true,
+    mcp: true,
+    auth: false,
+    guide: false,
+  };
+  assert.deepEqual(await keyStatusShape(), keyStatusGrants);
   {
     const keyUser = "m_00000000-0000-4000-8000-0000000000c0";
     await owner.query("INSERT INTO users(id) VALUES($1)", [keyUser]);
+    // A real native subject maps to the account; keys bind to its snapshot.
+    const nativeKeyUser = (
+      await authOwner.query<{
+        id: string;
+        incarnation: string;
+        generation: string;
+      }>(
+        `INSERT INTO milton_auth."user"(id,name,email,"emailVerified") VALUES('fictional-key-subject','Fictional','keys@example.invalid',true) RETURNING id,"miltonIdentityIncarnation" incarnation,"miltonSecurityGeneration" generation`,
+      )
+    ).rows[0]!;
+    await owner.query(
+      "INSERT INTO identities(provider,subject,user_id) VALUES($1,$2,$3)",
+      [ISSUER, nativeKeyUser.id, keyUser],
+    );
+    const keyBinding = {
+      issuer: ISSUER,
+      subject: nativeKeyUser.id,
+      incarnation: nativeKeyUser.incarnation,
+      generation: nativeKeyUser.generation,
+    };
     const appDb = postgresDatabase(url("app")),
       mcpDb = postgresDatabase(url("mcp"));
-    const made = await createConnectionKey(appDb, keyUser, {
+    const keyCheck = (key: string) =>
+      authenticateConnectionKey(mcpDb, ISSUER, parseConnectionKey(key)!);
+    const made = await createConnectionKey(appDb, keyUser, keyBinding, {
       name: "Fictional nightly job",
       scope: "read",
       expiry: 30,
     });
     assert.deepEqual(
-      (await listConnectionKeys(appDb, keyUser)).map((k) => k.id),
+      (await listConnectionKeys(appDb, keyUser, keyBinding)).active.map(
+        (k) => k.id,
+      ),
       [made.record.id],
     );
-    assert.deepEqual(await authenticateConnectionKey(mcpDb, made.key), {
+    assert.deepEqual(await keyCheck(made.key), {
+      ok: true,
       userId: keyUser,
       keyId: made.record.id,
       scope: "read",
@@ -747,33 +812,81 @@ try {
       ).rows[0].used,
       true,
     );
+    // A key presented for another issuer is refused.
+    assert.equal(
+      (
+        await authenticateConnectionKey(
+          mcpDb,
+          "https://other.example/auth",
+          parseConnectionKey(made.key)!,
+        )
+      ).ok,
+      false,
+    );
     for (const [pool, statement] of [
       [
         mcpPool,
-        `INSERT INTO connection_keys(id,user_id,secret_hash,name,scope) VALUES('${"B".repeat(22)}','${keyUser}','${"0".repeat(64)}','Forged','read_write')`,
+        `INSERT INTO connection_keys(id,user_id,issuer,subject,incarnation,generation,secret_hash,name,scope) VALUES('${"B".repeat(22)}','${keyUser}','${ISSUER}','${nativeKeyUser.id}','${nativeKeyUser.incarnation}','${nativeKeyUser.generation}','${"0".repeat(64)}','Forged','read_write')`,
       ],
       [mcpPool, "UPDATE connection_keys SET revoked_at=NULL"],
       [mcpPool, "UPDATE connection_keys SET scope='read_write'"],
+      [mcpPool, "UPDATE connection_keys SET generation='f:999999'"],
       [mcpPool, "DELETE FROM connection_keys"],
       [appPool, "UPDATE connection_keys SET last_used_at=now()"],
       [appPool, "UPDATE connection_keys SET scope='read_write'"],
+      [appPool, "UPDATE connection_keys SET generation='f:999999'"],
+      [appPool, "UPDATE connection_keys SET incarnation='f:999999'"],
+      [appPool, "UPDATE connection_keys SET subject='other'"],
       [appPool, "SELECT secret_hash FROM connection_keys"],
       [appPool, "SELECT * FROM connection_keys"],
       [appPool, "DELETE FROM connection_keys"],
       [authPool, "SELECT id FROM connection_keys"],
+      [authPool, `SELECT milton_guard.connection_key_status('a','b','c')`],
     ] as const)
       await assert.rejects(
         pool.query(statement),
         (e: { code?: string }) => e.code === "42501",
         statement,
       );
+    // Native 007 down/reapply alone: without the function every key is
+    // refused as an outage (fail closed), with nothing stored or granted.
+    await authOwner.query(
+      readFileSync(
+        new URL(
+          "../apps/auth/migrations/007-connection-key-status.down.sql",
+          sourceRoot,
+        ),
+        "utf8",
+      ),
+    );
+    assert.equal(await keyStatusShape(), undefined);
+    await assert.rejects(keyCheck(made.key), (e) => e instanceof StoreError);
+    await assert.rejects(
+      createConnectionKey(appDb, keyUser, keyBinding, {
+        name: "Fictional refused",
+        scope: "read",
+        expiry: 30,
+      }),
+      (e) => e instanceof StoreError,
+    );
+    await authOwner.query(
+      readFileSync(
+        new URL(
+          "../apps/auth/migrations/007-connection-key-status.up.sql",
+          sourceRoot,
+        ),
+        "utf8",
+      ),
+    );
+    assert.deepEqual(await keyStatusShape(), keyStatusGrants);
+    assert.equal((await keyCheck(made.key)).ok, true);
     assert.equal(
       await revokeConnectionKey(appDb, keyUser, made.record.id),
       true,
     );
-    assert.equal(await authenticateConnectionKey(mcpDb, made.key), undefined);
+    assert.deepEqual(await keyCheck(made.key), { ok: false, known: true });
     // Account deletion by the app runtime removes the account's keys.
-    await createConnectionKey(appDb, keyUser, {
+    await createConnectionKey(appDb, keyUser, keyBinding, {
       name: "Fictional CI",
       scope: "read_write",
       expiry: null,
@@ -788,6 +901,9 @@ try {
       ).rows[0].n,
       0,
     );
+    await authOwner.query(`DELETE FROM milton_auth."user" WHERE id=$1`, [
+      nativeKeyUser.id,
+    ]);
   }
   pass(
     "real TLS login roles separate native secrets, app credentials and writing with no DDL/TEMP path; connection-key grants hold on real roles; production DB errors map safely and preserve callbacks/rollback",
@@ -879,7 +995,7 @@ try {
   nativeOwnerUrl.searchParams.delete("sslrootcert");
   nativeOwnerUrl.searchParams.set("options", "-c role=milton_auth_owner");
   await authOwner.query(
-    "create table milton_credential.migration_ledger(name text primary key); insert into milton_credential.migration_ledger values('001-native'),('002-credential'),('003-mechanism'),('004-product'),('005-recovery'),('006-mail')",
+    "create table milton_credential.migration_ledger(name text primary key); insert into milton_credential.migration_ledger values('001-native'),('002-credential'),('003-mechanism'),('004-product'),('005-recovery'),('006-mail'),('007-connection-key-status')",
   );
   const ownerEnv = { AUTH_OWNER_DATABASE_URL: nativeOwnerUrl.href };
   child(
@@ -897,6 +1013,21 @@ try {
     ],
     ownerEnv,
   );
+  const ledger = async () =>
+    (
+      await owner.query<{ name: string }>(
+        "SELECT name FROM milton_credential.migration_ledger ORDER BY name",
+      )
+    ).rows.map((r) => r.name);
+  const nativeNames = [
+    "001-native",
+    "002-credential",
+    "003-mechanism",
+    "004-product",
+    "005-recovery",
+    "006-mail",
+    "007-connection-key-status",
+  ];
   child(
     [
       new URL("../apps/auth/scripts/migrate.ts", sourceRoot).pathname,
@@ -905,6 +1036,9 @@ try {
     ],
     ownerEnv,
   );
+  // The native migrator reverses 007 first and records it.
+  assert.equal(await keyStatusShape(), undefined);
+  assert.deepEqual(await ledger(), ["001-native"]);
   child(
     [
       new URL("../apps/auth/scripts/migrate.ts", sourceRoot).pathname,
@@ -913,6 +1047,8 @@ try {
     ],
     ownerEnv,
   );
+  assert.deepEqual(await keyStatusShape(), keyStatusGrants);
+  assert.deepEqual(await ledger(), nativeNames);
   const provisionOutput = join(root, "fictional-fixed-client.json");
   child(
     [
@@ -1391,6 +1527,98 @@ try {
   pass(
     "actual native controlled code/refresh grant reaches scoped product MCP: four/three tools and model-free save",
   );
+  // Connection keys against real native authority (native 007): created through
+  // the app from a fresh session, checked by the real MCP role on every call.
+  stage = "connection keys bound to native authority";
+  const keyCall = async (key: string) => {
+    const response = await rpc(key, "tools/list");
+    await response.body?.cancel();
+    return response.status;
+  };
+  const appKey = async (name: string) => {
+    await request(app, config.appOrigin + "/assistants", appCookies);
+    const created = await request(
+      app,
+      config.appOrigin + "/assistants/keys",
+      appCookies,
+      {
+        csrf: appCookies.get("__Host-milton-csrf")!,
+        name,
+        scope: "read_write",
+        expiry: "never",
+      },
+      true,
+    );
+    assert.equal(created.status, 200, "app creates a key from a fresh session");
+    return /mk_[A-Za-z0-9_-]{22}_[A-Za-z0-9_-]{43}/.exec(
+      await created.text(),
+    )![0];
+  };
+  // A key row as it would be committed, with any binding (owner fixture only).
+  const storedKey = async (
+    userId: string,
+    b: { subject: string; incarnation: string; generation: string },
+  ) => {
+    const id = randomBytes(16).toString("base64url"),
+      keySecret = randomBytes(32).toString("base64url");
+    await owner.query(
+      "INSERT INTO connection_keys(id,user_id,issuer,subject,incarnation,generation,secret_hash,name,scope) VALUES($1,$2,$3,$4,$5,$6,$7,'Fictional fixture','read')",
+      [
+        id,
+        userId,
+        ISSUER,
+        b.subject,
+        b.incarnation,
+        b.generation,
+        createHash("sha256").update(keySecret).digest("hex"),
+      ],
+    );
+    return `mk_${id}_${keySecret}`;
+  };
+  const keyRevoked = async (key: string) =>
+    (
+      await owner.query(
+        "SELECT revoked_at IS NOT NULL AS revoked FROM connection_keys WHERE id=$1",
+        [key.slice(3, 25)],
+      )
+    ).rows[0].revoked as boolean;
+  const personAccount = await lookupIdentityAccount(config, {
+    provider: ISSUER,
+    subject: session.user.id,
+  });
+  const racedKeys: string[] = [];
+  const beforeRecoveryKey = await appKey("Fictional nightly job");
+  assert.equal(await keyCall(beforeRecoveryKey), 200);
+  // An unrelated account, with its own native subject and key.
+  const unrelated = (
+    await authOwner.query<{
+      id: string;
+      incarnation: string;
+      generation: string;
+    }>(
+      `INSERT INTO milton_auth."user"(id,name,email,"emailVerified") VALUES('fictional-unrelated-subject','Fictional','unrelated@example.invalid',true) RETURNING id,"miltonIdentityIncarnation" incarnation,"miltonSecurityGeneration" generation`,
+    )
+  ).rows[0]!;
+  const unrelatedUser = "m_00000000-0000-4000-8000-0000000000c1";
+  await owner.query("INSERT INTO users(id) VALUES($1)", [unrelatedUser]);
+  await owner.query(
+    "INSERT INTO identities(provider,subject,user_id) VALUES($1,$2,$3)",
+    [ISSUER, unrelated.id, unrelatedUser],
+  );
+  const unrelatedKey = (
+    await createConnectionKey(
+      postgresDatabase(url("app")),
+      unrelatedUser,
+      {
+        issuer: ISSUER,
+        subject: unrelated.id,
+        incarnation: unrelated.incarnation,
+        generation: unrelated.generation,
+      },
+      { name: "Fictional unrelated", scope: "read", expiry: null },
+    )
+  ).key;
+  assert.equal(await keyCall(unrelatedKey), 200);
   let row = (
     await appPool.query(
       "SELECT subject,sid,binding,incarnation,generation FROM milton_app.session ORDER BY created_at DESC LIMIT 1",
@@ -1499,6 +1727,9 @@ try {
       resource: config.resource,
     }),
   );
+  // Recovery fences connection keys too, and only this account's.
+  assert.equal(await keyCall(beforeRecoveryKey), 401);
+  assert.equal(await keyCall(unrelatedKey), 200);
   pass(
     "actual offline refresh survives ordinary browser logout; native recovery fences access and refresh",
   );
@@ -1570,6 +1801,42 @@ try {
     ).rows[0].n,
     0,
   );
+  {
+    // A security-generation change (as the native credential/method triggers
+    // make it) stops a key; a key created racing it is refused at creation, and
+    // one whose insert committed after the change never authenticates.
+    const snapshot = {
+      issuer: ISSUER,
+      subject: row.subject,
+      incarnation: row.incarnation,
+      generation: row.generation,
+    };
+    const appDb = postgresDatabase(url("app"));
+    const current = await createConnectionKey(
+      appDb,
+      personAccount.userId,
+      snapshot,
+      { name: "Fictional current", scope: "read", expiry: 30 },
+    );
+    assert.equal(await keyCall(current.key), 200);
+    await authOwner.query(
+      `UPDATE milton_auth."user" SET "miltonSecurityGeneration"=milton_credential.next_fence() WHERE id=$1`,
+      [row.subject],
+    );
+    assert.equal(await keyCall(current.key), 401);
+    await assert.rejects(
+      createConnectionKey(appDb, personAccount.userId, snapshot, {
+        name: "Fictional racing",
+        scope: "read",
+        expiry: 30,
+      }),
+      (e) => e instanceof StoreError && e.code === "session_required",
+    );
+    const committedLate = await storedKey(personAccount.userId, snapshot);
+    assert.equal(await keyCall(committedLate), 401);
+    assert.equal(await keyCall(unrelatedKey), 200);
+    racedKeys.push(current.key, committedLate);
+  }
   assert.equal(
     (
       await request(native.handler, ISSUER + "/sign-in/email", authCookies, {
@@ -1606,6 +1873,13 @@ try {
   ).rows[0];
   assert(row);
   token = appCookies.get("__Host-milton-session")!;
+  // A fresh session after the changes creates a working key; doing so retires
+  // the keys bound to earlier generations, which can never work again.
+  const deletionKey = await appKey("Fictional after recovery");
+  assert.equal(await keyCall(deletionKey), 200);
+  for (const dead of [beforeRecoveryKey, ...racedKeys])
+    assert.equal(await keyRevoked(dead), true, "dead key retired");
+  assert.equal(await keyRevoked(unrelatedKey), false);
   const deletePage = await request(
     app,
     config.appOrigin + "/account/delete",
@@ -1655,6 +1929,37 @@ try {
     ).rows[0].n,
     1,
     "Stripe failure preserves writing account",
+  );
+  // Deletion has begun natively; the writing account is still active, yet
+  // the key is refused, as is a key bound to the post-deletion snapshot.
+  assert.equal(
+    (
+      await owner.query("SELECT status FROM users WHERE id=$1", [
+        deletion.user_id,
+      ])
+    ).rows[0].status,
+    "active",
+  );
+  assert.equal(await keyCall(deletionKey), 401);
+  const afterBegin = (
+    await authOwner.query<{ incarnation: string; generation: string }>(
+      `SELECT "miltonIdentityIncarnation" incarnation,"miltonSecurityGeneration" generation FROM milton_auth."user" WHERE id=$1 AND "emailVerified"`,
+      [row.subject],
+    )
+  ).rows[0]!;
+  assert.equal(
+    await keyCall(
+      await storedKey(deletion.user_id, {
+        subject: row.subject,
+        ...afterBegin,
+      }),
+    ),
+    401,
+    "pending deletion refuses even an exactly current snapshot",
+  );
+  assert.equal(await keyCall(unrelatedKey), 200);
+  pass(
+    "connection keys follow native authority: recovery, a generation change, a creation race and a begun deletion each refuse; dead keys retire; an unrelated account's key keeps working",
   );
   assert.equal(
     (

@@ -4,6 +4,7 @@ import { page } from "./pages";
 import type { PageContext, SessionUser } from "./auth-session";
 import {
   connectionKeysForAccount,
+  EXPIRED_KEY_HISTORY,
   keyExpiries,
   lookupIdentityAccount,
   MAX_ACTIVE_KEYS,
@@ -34,7 +35,8 @@ const expiry = (key: ConnectionKey) =>
     <>Expires {when(key.expiresAt)}</>
   );
 
-/** The signed-in person's keys, by their Milton account. */
+/** The signed-in person's keys, by their Milton account, bound to the
+ * session's validated native identity, incarnation and generation. */
 export const accountKeys = async (ctx: PageContext, user: SessionUser) =>
   connectionKeysForAccount(
     ctx.config,
@@ -42,11 +44,57 @@ export const accountKeys = async (ctx: PageContext, user: SessionUser) =>
       provider: ctx.config.issuer,
       subject: user.id,
     }),
+    {
+      issuer: ctx.config.issuer,
+      subject: user.id,
+      incarnation: user.incarnation,
+      generation: user.generation,
+    },
   );
 
-/** The Connected assistants page's section: the key list and the create form. */
-export function keysSection(keys: ConnectionKey[], csrfField: () => Child) {
-  const active = keys.filter((key) => !key.expired).length;
+const keyItems = (keys: ConnectionKey[]) => (
+  <ul class="assistant-list">
+    {keys.map((key) => (
+      <li>
+        <p>
+          <strong>{key.name}</strong>
+        </p>
+        <p class="small-note">
+          {access(key.scope)} · Created {when(key.createdAt)} ·{" "}
+          {key.lastUsedAt ? (
+            <>Last used {when(key.lastUsedAt)}</>
+          ) : (
+            "Never used"
+          )}{" "}
+          · {expiry(key)}
+        </p>
+        {key.stopped && (
+          <p>
+            <strong>Stopped working.</strong> Your sign-in security changed
+            after this key was created, for example by a password reset.
+            Creating a key revokes it.
+          </p>
+        )}
+        <p>
+          <a
+            class="button secondary"
+            href={`/assistants/keys/revoke?key=${key.id}`}
+          >
+            Revoke
+          </a>
+        </p>
+      </li>
+    ))}
+  </ul>
+);
+
+/** The Connected assistants page's section: every active key, the most
+ * recently expired ones, and the create form. */
+export function keysSection(
+  keys: { active: ConnectionKey[]; expired: ConnectionKey[] },
+  csrfField: () => Child,
+) {
+  const live = keys.active.filter((key) => !key.stopped).length;
   return (
     <section aria-labelledby="connection-keys-h" id="connection-keys">
       <h2 id="connection-keys-h">Connection keys</h2>
@@ -56,37 +104,26 @@ export function keysSection(keys: ConnectionKey[], csrfField: () => Child) {
         key like a password: choose read only unless the agent needs to save,
         and revoke keys you no longer use.
       </p>
-      {keys.length === 0 ? (
-        <p>No connection keys.</p>
+      {keys.active.length === 0 ? (
+        <p>
+          {keys.expired.length === 0
+            ? "No connection keys."
+            : "No active connection keys."}
+        </p>
       ) : (
-        <ul class="assistant-list">
-          {keys.map((key) => (
-            <li>
-              <p>
-                <strong>{key.name}</strong>
-              </p>
-              <p class="small-note">
-                {access(key.scope)} · Created {when(key.createdAt)} ·{" "}
-                {key.lastUsedAt ? (
-                  <>Last used {when(key.lastUsedAt)}</>
-                ) : (
-                  "Never used"
-                )}{" "}
-                · {expiry(key)}
-              </p>
-              <p>
-                <a
-                  class="button secondary"
-                  href={`/assistants/keys/revoke?key=${key.id}`}
-                >
-                  Revoke
-                </a>
-              </p>
-            </li>
-          ))}
-        </ul>
+        keyItems(keys.active)
       )}
-      {active >= MAX_ACTIVE_KEYS ? (
+      {keys.expired.length > 0 && (
+        <>
+          <h3>Expired keys</h3>
+          <p class="small-note">
+            Expired keys no longer work. The {EXPIRED_KEY_HISTORY} most recently
+            expired are shown.
+          </p>
+          {keyItems(keys.expired)}
+        </>
+      )}
+      {live >= MAX_ACTIVE_KEYS ? (
         <p>
           You have {MAX_ACTIVE_KEYS} active keys, the most an account can have.
           Revoke one to create another.
@@ -226,9 +263,10 @@ export const connectionKeyRoutes = async (
   }
   if (request.method === "GET") {
     const user = await signedIn();
-    const target = (await (await accountKeys(ctx, user)).list()).find(
-      (key) => key.id === url.searchParams.get("key"),
-    );
+    // By id and owning account, never through the bounded list.
+    const target = await (
+      await accountKeys(ctx, user)
+    ).find(url.searchParams.get("key") ?? "");
     if (!target)
       return page(
         "Key not found",

@@ -6,6 +6,7 @@ import { createMiltonServer } from "./mcp";
 import {
   connectionKeyAccount,
   lookupIdentityAccount,
+  parseConnectionKey,
   storeForCurrentRequest,
   type StoreBindings,
   StoreError,
@@ -88,6 +89,8 @@ function validateMcpTransport(
     return withMcpCors(new Response(null, { status: 200 }));
   return null;
 }
+const invalidKey = () =>
+  new AuthError("invalid_token", "Reconnect your assistant to Milton.", 401);
 export function createMiltonHandler(
   config: McpConfig,
   verify: AccessTokenVerifier = createAccessTokenVerifier(config),
@@ -144,13 +147,10 @@ export function createMiltonHandler(
       if (authorization !== null && /^Bearer mk_/i.test(authorization)) {
         // A connection key. Every refusal, whatever its reason, answers like
         // an invalid token. Only the key's public id is ever logged.
-        const key = await connectionKeyAccount(config, authorization.slice(7));
-        if (!key)
-          throw new AuthError(
-            "invalid_token",
-            "Reconnect your assistant to Milton.",
-            401,
-          );
+        const parsed = parseConnectionKey(authorization.slice(7));
+        if (!parsed) throw invalidKey();
+        const key = await connectionKeyAccount(config, parsed);
+        if (!key.ok) throw invalidKey();
         write = key.scope === "read_write";
         if (call.success && call.data.params.name === "create_memo" && !write)
           throw new AuthError(

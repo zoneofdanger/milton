@@ -35,6 +35,7 @@ export async function appStorage(pg: PGlite) {
     CREATE FUNCTION milton_guard.app_status(text,text,text,text,text,text) RETURNS boolean LANGUAGE SQL AS 'SELECT active FROM milton_guard.fixture_authority WHERE subject=$2';
     CREATE FUNCTION milton_guard.security_status(text,text,text,text) RETURNS jsonb LANGUAGE SQL AS 'SELECT jsonb_build_object(''fresh'',fresh,''verified'',true,''sessionId'',$4) FROM milton_guard.fixture_authority WHERE subject=$1 AND active';
     CREATE FUNCTION milton_guard.list_connections(text,text,integer) RETURNS jsonb LANGUAGE SQL AS $$ SELECT '[]'::jsonb $$;
+    CREATE FUNCTION milton_guard.connection_key_status(text,text,text) RETURNS boolean LANGUAGE SQL AS $$ SELECT coalesce((SELECT active FROM milton_guard.fixture_authority WHERE subject=$1),false) AND ($2,$3)=('f:1','f:2') $$;
   `);
 }
 export async function pageFixture(

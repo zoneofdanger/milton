@@ -140,6 +140,14 @@ test("rate-limit network is the client the load balancer appended, never a leadi
   // IPv6 clients share a /64, as Better Auth's own limiter groups them.
   expect(client(`2001:db8:1:2::5, ${lb}`)).toBe("2001:db8:1:2::");
   expect(client(`2001:DB8:1:2:aa::9, ${lb}`)).toBe("2001:db8:1:2::");
+  // IPv4-mapped IPv6 clients are their IPv4 address, never one shared /64.
+  for (const mapped of [
+    "::ffff:192.0.2.1",
+    "::FFFF:c000:201",
+    "0:0:0:0:0:ffff:192.0.2.1",
+  ])
+    expect(client(`${mapped}, ${lb}`)).toBe("192.0.2.1");
+  expect(client(`::ffff:198.51.100.2, ${lb}`)).toBe("198.51.100.2");
   // No well-formed pair: the caller keeps the socket peer.
   for (const malformed of [
     null,

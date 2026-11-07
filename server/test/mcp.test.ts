@@ -14,7 +14,7 @@ import {
   type ToolCall,
 } from "../src/mcp";
 import { saveMemoInput } from "../src/mcp-tools";
-import { createMiltonHandler } from "../src/handler";
+import { createMiltonHandler, keyAttemptSource } from "../src/handler";
 import { createAccessTokenVerifier } from "../src/token";
 import {
   connectionKeysForAccount,
@@ -995,6 +995,21 @@ test("key attempts are limited per load-balancer client before database access: 
     for (const forged of ["192.0.2.1", "192.0.2.2, 192.0.2.3", "unknown"])
       expect((await post(invented(), `${forged}, ${a}`)).status).toBe(429);
     expect(queries).toBe(before);
+    // IPv4-mapped IPv6 clients are their IPv4 address, never one shared /64.
+    const source = (client: string) =>
+      keyAttemptSource(
+        new Request(resource, {
+          headers: { "X-Forwarded-For": `${client}, 203.0.113.1` },
+        }),
+      );
+    for (const mapped of [
+      "::ffff:192.0.2.1",
+      "::FFFF:c000:201",
+      "0:0:0:0:0:ffff:192.0.2.1",
+    ])
+      expect(source(mapped)).toBe("192.0.2.1");
+    expect(source("::ffff:198.51.100.2")).toBe("198.51.100.2");
+    expect(source("2001:db8:1:2::5")).toBe("2001:db8:1:2::/64");
     // Source B's real key keeps working, past the burst and the per-minute rate.
     for (let n = 0; n < 15; n++)
       expect((await post(real.key, b)).status).toBe(200);

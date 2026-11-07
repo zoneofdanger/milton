@@ -1,6 +1,16 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { readFileSync, existsSync } from "node:fs";
+import {
+  readFileSync,
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { jwtVerify, createLocalJWKSet } from "jose";
 import { randomUUID, createHash, randomBytes } from "node:crypto";
 import pg from "pg";
@@ -190,16 +200,16 @@ try {
     ownerUrl.username = String(o.user);
     ownerUrl.password = String(o.password);
     ownerUrl.searchParams.set("options", "-c role=milton_auth_owner");
-    const migrate = (direction: string) =>
-      new Promise<number | null>((resolve) =>
-        spawn(
+    let stderr = "";
+    const migrate = (
+      direction: string,
+      runner = new URL("./migrate.ts", import.meta.url).pathname,
+    ) =>
+      new Promise<number | null>((resolve) => {
+        stderr = "";
+        const child = spawn(
           process.execPath,
-          [
-            "--experimental-strip-types",
-            new URL("./migrate.ts", import.meta.url).pathname,
-            direction,
-            "--apply",
-          ],
+          ["--experimental-strip-types", runner, direction, "--apply"],
           {
             env: {
               PATH: process.env.PATH,
@@ -207,10 +217,12 @@ try {
               NODE_EXTRA_CA_CERTS: p.caPath,
               AUTH_OWNER_DATABASE_URL: ownerUrl.href,
             },
-            stdio: "ignore",
+            stdio: ["ignore", "ignore", "pipe"],
           },
-        ).on("exit", resolve),
-      );
+        );
+        child.stderr.on("data", (d) => (stderr += d));
+        child.on("exit", resolve);
+      });
     const admin = new pg.Pool({
       host: "127.0.0.1",
       port: o.port,
@@ -271,8 +283,75 @@ try {
       ).rows[0].n,
       7,
     );
+    // A file that commits its own transaction is caught after the fact (its
+    // work is committed) and gets no ledger row. A fixture copy of the runner
+    // reads a 007 whose grant line ends in an inline COMMIT.
+    const fixture = mkdtempSync(join(tmpdir(), "milton-migrate-fixture-"));
+    try {
+      mkdirSync(join(fixture, "scripts"));
+      mkdirSync(join(fixture, "migrations"));
+      const runner = readFileSync(
+        new URL("./migrate.ts", import.meta.url),
+        "utf8",
+      );
+      const fixtureRunner = runner
+        .replaceAll('"../src/', `"${new URL("../src/", import.meta.url).href}`)
+        .replace('from "pg"', `from "${import.meta.resolve("pg")}"`);
+      assert(!/"\.\.\/src\/|from "pg"/.test(fixtureRunner));
+      writeFileSync(join(fixture, "scripts", "migrate.ts"), fixtureRunner);
+      for (const file of readdirSync(
+        new URL("../migrations/", import.meta.url),
+      ))
+        writeFileSync(
+          join(fixture, "migrations", file),
+          readFileSync(
+            new URL(`../migrations/${file}`, import.meta.url),
+            "utf8",
+          ),
+        );
+      const grant =
+        /^(GRANT EXECUTE ON FUNCTION milton_guard\.connection_key_status.*;)$/m;
+      const up = join(
+        fixture,
+        "migrations",
+        "007-connection-key-status.up.sql",
+      );
+      assert.match(readFileSync(up, "utf8"), grant);
+      writeFileSync(up, readFileSync(up, "utf8").replace(grant, "$1 COMMIT;"));
+      const down = readFileSync(
+        new URL(
+          "../migrations/007-connection-key-status.down.sql",
+          import.meta.url,
+        ),
+        "utf8",
+      );
+      await p.owner.query(
+        `${down}; delete from milton_credential.migration_ledger where name='007-connection-key-status'`,
+      );
+      assert.notEqual(
+        await migrate("up", join(fixture, "scripts", "migrate.ts")),
+        0,
+      );
+      assert.match(
+        stderr,
+        /007-connection-key-status\.up\.sql .*MIGRATION_MUST_NOT_MANAGE_TRANSACTION/,
+      );
+      assert.equal(
+        (
+          await admin.query(
+            "select count(*)::int n from milton_credential.migration_ledger where name='007-connection-key-status'",
+          )
+        ).rows[0].n,
+        0,
+      );
+      await p.owner.query(down);
+    } finally {
+      rmSync(fixture, { recursive: true });
+    }
+    assert.equal(await migrate("up"), 0);
+    assert.equal(await agreed(), true);
     group(
-      "native migrator killed at its ledger write leaves schema and ledger agreeing",
+      "native migrator killed at its ledger write leaves schema and ledger agreeing; a file ending its own transaction gets no ledger row",
     );
   }
   const authPool = new pg.Pool(p.configs.auth),

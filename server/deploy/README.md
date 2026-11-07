@@ -34,7 +34,10 @@ one-time procedures are in git history; the last full version is at commit 492b9
   5-minute watch.
 - **#37 (milton-perf):** minified app/MCP and guide-worker bundles (`cloud-run.js` 4.6 → 3.3
   MB; identifiers kept; no source maps in the image). App/MCP `milton-*-min-06d01e6` at
-  23:23Z (image `sha256:fc9013130006ea87102a3737cf2f7129d90e93096967f680aeeb95d595942dd6`). 0 errors in a 5-minute watch.
+  23:23Z (image `sha256:fc9013130006ea87102a3737cf2f7129d90e93096967f680aeeb95d595942dd6`). In the
+  5-minute watch: no 5xx or application errors; one audit-log ERROR at 23:23:08Z, a
+  `ReplaceService` call from the deploy that hit "Deadline expired" while the revision
+  still went Ready and took 100% of traffic.
 - **No deploy needed:** #35 and #36 (test-trim; #35 retires the auth down migrations, Peter's
   decision: snapshot restore is the only auth schema rollback) and #34 (milton-qa; the auth
   migrator runs each file and its ledger row in one transaction under an advisory lock).

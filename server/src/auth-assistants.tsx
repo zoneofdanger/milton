@@ -3,8 +3,9 @@ import { page } from "./pages";
 import { connectSteps } from "./memo-pages";
 import { cookieValue, type PageContext } from "./auth-session";
 import { cookieName } from "./auth-oidc";
-import { connections, lifecycle } from "./auth-lifecycle";
+import { connections, lifecycle, type Operation } from "./auth-lifecycle";
 import { accountKeys, keysSection } from "./auth-keys";
+import { supportEmail } from "./config";
 
 export const clientHost = (clientId: string) => {
   try {
@@ -38,13 +39,42 @@ export const assistants = async (ctx: PageContext): Promise<Response> => {
     );
   const token = cookieValue(request, cookieName(config, "session"));
   const disconnects = lifecycle({ ...ctx, token });
+  /** The incomplete disconnect `op`, with a form that retries it. */
+  const retry = (op: Operation) => (
+    <>
+      <p>
+        Disconnect cleanup is incomplete. Retry to finish disconnecting{" "}
+        {clientHost(op.client_id) || op.client_id}.
+      </p>
+      <form method="post" action="/assistants/disconnect">
+        {csrfField()}
+        <input type="hidden" name="operation" value={op.operation_id} />
+        <button>Retry disconnect</button>
+      </form>
+    </>
+  );
   if (request.method === "POST") {
     const form = await readForm();
-    await disconnects.run(
+    const { operation, failed } = await disconnects.run(
       "disconnect",
       form.get("operation") ?? "",
       form.get("connection"),
     );
+    if (failed || operation.progress !== "complete")
+      return page(
+        "Finish disconnecting",
+        <>
+          {retry(operation)}
+          <p>
+            If retry does not finish, contact{" "}
+            <a href={`mailto:${supportEmail(config)}`}>
+              {supportEmail(config)}
+            </a>
+            .
+          </p>
+        </>,
+        503,
+      );
     return Response.redirect(config.appOrigin + "/assistants", 303);
   }
   const user = await signedIn();
@@ -63,17 +93,7 @@ export const assistants = async (ctx: PageContext): Promise<Response> => {
         access immediately. To use it again, reconnect from the assistant.
       </p>
       {pending.map((op) => (
-        <section>
-          <p>
-            Disconnect cleanup is incomplete. Retry to finish disconnecting{" "}
-            {clientHost(op.client_id) || op.client_id}.
-          </p>
-          <form method="post" action="/assistants/disconnect">
-            {csrfField()}
-            <input type="hidden" name="operation" value={op.operation_id} />
-            <button>Retry disconnect</button>
-          </form>
-        </section>
+        <section>{retry(op)}</section>
       ))}
       {full && (
         <p>

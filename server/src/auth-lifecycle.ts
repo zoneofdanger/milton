@@ -85,7 +85,8 @@ export function lifecycle({
     },
     /** Resumes this session's operation `id`, or starts it for the signed-in
      * person (deletion after a fresh sign-in; disconnect for the listed
-     * `connection`), then advances it as far as it can go. */
+     * `connection`), then advances it as far as it can go. A failed step
+     * returns the operation as it stands, with `failed`, for a retry page. */
     async run(kind: Kind, id: string, connection?: string | null) {
       let op = await findOperation(config, token, id, kind);
       if (!op) {
@@ -103,12 +104,9 @@ export function lifecycle({
       }
       try {
         return { operation: await advanceOperation(config, op), failed: false };
-      } catch (error) {
-        // A failed deletion step shows its retry page, while a failed disconnect
-        // reaches the error page; this difference is kept as it was.
-        if (kind === "disconnect") throw error;
+      } catch {
         return {
-          operation: (await findOperation(config, token, id)) ?? op,
+          operation: (await findOperation(config, token, id, kind)) ?? op,
           failed: true,
         };
       }

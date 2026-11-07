@@ -1,4 +1,4 @@
-BEGIN;
+-- scripts/migrate.ts runs this file and its ledger row in one transaction.
 CREATE TABLE milton_guard.rate_bucket (key text PRIMARY KEY, started_at timestamptz NOT NULL, hits integer NOT NULL);
 CREATE FUNCTION milton_guard.take_rate(p_key text,p_window integer,p_max integer) RETURNS boolean
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
@@ -114,4 +114,3 @@ GRANT EXECUTE ON FUNCTION milton_guard.admission_identity(text,text,text,text),m
 GRANT EXECUTE ON FUNCTION milton_guard.security_status(text,text,text,text),milton_guard.list_connections(text,text,integer) TO milton_app_runtime;
 GRANT DELETE ON milton_auth.account TO milton_auth_runtime;
 GRANT SELECT,INSERT,UPDATE,DELETE ON milton_auth."rateLimit" TO milton_auth_runtime;
-COMMIT;

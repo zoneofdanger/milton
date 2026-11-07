@@ -1,4 +1,4 @@
-BEGIN;
+-- scripts/migrate.ts runs this file and its ledger row in one transaction.
 -- Mechanism storage, deliberately no native-user FK/cascade. Lazy bounded fencing
 -- cannot make native deletion unbounded or prevent its immediate authority change.
 CREATE TABLE milton_guard.mail_job (
@@ -104,4 +104,3 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION milton_guard.accept_mail(uuid,text,text,text,text,timestamptz,text),milton_guard.mail_fenced(milton_guard.mail_job),milton_guard.claim_mail(integer),milton_guard.finish_mail(uuid,uuid,text,integer),milton_guard.cleanup_expired(integer) FROM PUBLIC,milton_auth_runtime,milton_app_runtime,milton_mcp_runtime;
 GRANT EXECUTE ON FUNCTION milton_guard.accept_mail(uuid,text,text,text,text,timestamptz,text),milton_guard.claim_mail(integer),milton_guard.finish_mail(uuid,uuid,text,integer) TO milton_auth_runtime;
-COMMIT;

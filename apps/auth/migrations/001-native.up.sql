@@ -1,5 +1,5 @@
+-- scripts/migrate.ts runs this file and its ledger row in one transaction.
 -- Generated from the pinned public native migration planner; reviewed before application.
-BEGIN;
 create schema if not exists "milton_auth";
 
 create table "milton_auth"."user" ("id" text not null primary key, "name" text not null, "email" text not null unique, "emailVerified" boolean not null, "image" text, "createdAt" timestamptz default CURRENT_TIMESTAMP not null, "updatedAt" timestamptz default CURRENT_TIMESTAMP not null);
@@ -63,4 +63,3 @@ create index "oauthConsent_clientId_idx" on "milton_auth"."oauthConsent" ("clien
 create index "oauthConsent_userId_idx" on "milton_auth"."oauthConsent" ("userId");
 
 create unique index "oauthClientResource_clientId_resourceId_uidx" on "milton_auth"."oauthClientResource" ("clientId", "resourceId");
-COMMIT;

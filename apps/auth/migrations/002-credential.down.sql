@@ -1,4 +1,4 @@
-BEGIN;
+-- scripts/migrate.ts runs this file and its ledger row in one transaction.
 DROP TRIGGER credential_gate ON milton_auth.account;
 DROP TRIGGER session_gate ON milton_auth.session;
 
@@ -11,4 +11,3 @@ REVOKE ALL ON milton_auth."user",milton_auth.account,milton_auth.session,milton_
 GRANT SELECT,INSERT,UPDATE,DELETE ON milton_auth."user",milton_auth.account,milton_auth.session,milton_auth.verification TO milton_auth_runtime;
 DROP FUNCTION milton_credential.next_fence();
 -- Deliberately retain the owner-only noncycling fence_ids high-water mark.
-COMMIT;

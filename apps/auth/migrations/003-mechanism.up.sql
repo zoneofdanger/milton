@@ -1,4 +1,4 @@
-BEGIN;
+-- scripts/migrate.ts runs this file and its ledger row in one transaction.
 CREATE SCHEMA milton_guard AUTHORIZATION milton_auth_owner;
 REVOKE ALL ON SCHEMA milton_guard FROM PUBLIC;
 CREATE TABLE milton_guard.authorization_binding (
@@ -224,4 +224,3 @@ CREATE FUNCTION milton_guard.app_status(p_ref text,p_user text,p_client text,p_s
 $$;
 REVOKE ALL ON FUNCTION milton_guard.app_status(text,text,text,text,text,text) FROM PUBLIC,milton_auth_runtime,milton_mcp_runtime;
 GRANT EXECUTE ON FUNCTION milton_guard.app_status(text,text,text,text,text,text) TO milton_app_runtime;
-COMMIT;

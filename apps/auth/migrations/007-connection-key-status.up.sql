@@ -1,4 +1,4 @@
-BEGIN;
+-- scripts/migrate.ts runs this file and its ledger row in one transaction.
 -- Live native authority for a connection key, independent of any browser session
 -- or OAuth binding. True only while the key's original subject still has the
 -- exact incarnation and security generation captured from the fresh session that
@@ -17,4 +17,3 @@ REVOKE ALL ON FUNCTION milton_guard.connection_key_status(text,text,text) FROM P
 -- MCP checks every key call. App checks a creating session's snapshot under the
 -- account lock before it stores a key or retires keys that snapshot replaced.
 GRANT EXECUTE ON FUNCTION milton_guard.connection_key_status(text,text,text) TO milton_mcp_runtime,milton_app_runtime;
-COMMIT;

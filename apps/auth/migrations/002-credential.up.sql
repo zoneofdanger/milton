@@ -1,4 +1,4 @@
-BEGIN;
+-- scripts/migrate.ts runs this file and its ledger row in one transaction.
 CREATE SCHEMA IF NOT EXISTS milton_credential AUTHORIZATION milton_auth_owner;
 GRANT USAGE ON SCHEMA milton_credential TO milton_auth_runtime; 
 -- Kept on down/reapply: rolling back schema must never rewind an identifier allocator.
@@ -60,4 +60,3 @@ GRANT INSERT(id,name,email,"emailVerified",image,"createdAt","updatedAt"),UPDATE
 GRANT INSERT(id,"userId","accountId","providerId","accessToken","refreshToken","idToken","accessTokenExpiresAt","refreshTokenExpiresAt",scope,password,"createdAt","updatedAt","miltonExpectedCredentialRevision"),UPDATE("accessToken","refreshToken","idToken","accessTokenExpiresAt","refreshTokenExpiresAt",scope,password,"updatedAt","miltonExpectedCredentialRevision") ON milton_auth.account TO milton_auth_runtime;
 GRANT INSERT(id,"userId",token,"expiresAt","ipAddress","userAgent","createdAt","updatedAt","miltonIdentityIncarnation","miltonSecurityGeneration"),UPDATE("expiresAt","updatedAt","ipAddress","userAgent"),DELETE ON milton_auth.session TO milton_auth_runtime;
 GRANT INSERT,UPDATE,DELETE ON milton_auth.verification TO milton_auth_runtime;
-COMMIT;

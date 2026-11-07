@@ -1,4 +1,4 @@
-BEGIN;
+-- scripts/migrate.ts runs this file and its ledger row in one transaction.
 CREATE FUNCTION milton_credential.invalidate_recovery() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
 BEGIN
@@ -13,4 +13,3 @@ CREATE INDEX recovery_subject ON milton_auth.verification(value) WHERE identifie
 REVOKE ALL ON FUNCTION milton_credential.invalidate_recovery() FROM PUBLIC,milton_auth_runtime,milton_app_runtime,milton_mcp_runtime;
 -- Pre-upgrade native reset rows have no original issuance provenance. Retire them.
 DELETE FROM milton_auth.verification WHERE identifier LIKE 'reset-password:%';
-COMMIT;

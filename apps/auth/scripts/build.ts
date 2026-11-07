@@ -2,17 +2,21 @@ import { mkdir, cp, readFile, writeFile } from "node:fs/promises";
 import { versionAssets } from "@milton/theme/assets";
 const base = new URL("../", import.meta.url);
 await mkdir(new URL("dist/public/fonts/", base), { recursive: true });
-const theme = await readFile(
-  new URL("../../../packages/theme/base.css", import.meta.url),
-  "utf8",
-);
-const css = await readFile(new URL("src/auth.css", base), "utf8");
-const themeImport =
-  /@import\s+(["'])\.\.\/\.\.\/\.\.\/packages\/theme\/base\.css\1\s*;/g;
-if ([...css.matchAll(themeImport)].length !== 1) {
-  throw new Error("auth_theme_import_missing_or_duplicated");
+let bundledCss = await readFile(new URL("src/auth.css", base), "utf8");
+for (const sheet of ["mono-split", "base"]) {
+  const theme = await readFile(
+    new URL(`../../../packages/theme/${sheet}.css`, import.meta.url),
+    "utf8",
+  );
+  const themeImport = new RegExp(
+    `@import\\s+(["'])\\.\\./\\.\\./\\.\\./packages/theme/${sheet}\\.css\\1\\s*;`,
+    "g",
+  );
+  if ([...bundledCss.matchAll(themeImport)].length !== 1) {
+    throw new Error(`auth_theme_import_missing_or_duplicated ${sheet}`);
+  }
+  bundledCss = bundledCss.replace(themeImport, () => theme);
 }
-const bundledCss = css.replace(themeImport, () => theme);
 if (/@import\b/i.test(bundledCss)) {
   throw new Error("auth_css_unresolved_import");
 }
@@ -30,6 +34,7 @@ versionAssets(new URL("dist/public/", base).pathname, [
   "/auth.css",
   "/favicon.svg",
   "/fonts/geist-latin-variable.woff2",
+  "/fonts/jetbrains-mono-latin.woff2",
   "/fonts/jetbrains-mono-regular.woff2",
 ]);
 const r = await Bun.build({

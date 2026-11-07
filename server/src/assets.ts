@@ -12,6 +12,7 @@ export const PUBLIC_ASSETS = [
   "/milton.css",
   "/favicon.svg",
   "/favicon.ico",
+  "/fonts/jetbrains-mono-latin.woff2",
   "/fonts/jetbrains-mono-regular.woff2",
   "/fonts/geist-latin-variable.woff2",
 ];

@@ -53,7 +53,7 @@ The fonts in `public/fonts` are self-hosted, with their upstream licenses:
   One file serves regular and semibold.
 - `jetbrains-mono-regular.woff2`: JetBrains Mono, upright 400; display headings,
   report titles, brand, labels and code. `--font-display` and `--font-mono` share
-  this one file. `--font-display-weight` avoids synthesizing a heavier display face.
+  this one family. `--font-display-weight` avoids synthesizing a heavier display face.
 - `jetbrains-mono-latin.woff2`: a Latin subset of that file with identical glyphs;
   see below.
 
@@ -61,16 +61,34 @@ Geist source: https://fonts.gstatic.com/s/geist/v5/gyByhwUxId8gMEwcGFWNOITd.woff
 Their SIL Open Font Licenses are included beside the files. JetBrains source:
 https://raw.githubusercontent.com/JetBrains/JetBrainsMono/master/fonts/webfonts/JetBrainsMono-Regular.woff2
 
-The app serves this full JetBrains Mono master. `jetbrains-mono-latin.woff2` is a
-Latin subset of it, kept here so every build copies it. Only the site uses it today:
-its Astro config copies it over the site's `/fonts/jetbrains-mono-regular.woff2`,
-so the CSS, the preload and the display behavior are unchanged. The subset keeps Latin-1, Latin Extended-A/B and
+`jetbrains-mono-latin.woff2` is a Latin subset of the master. Each product declares
+JetBrains Mono itself, so `base.css` has no face for it:
+
+- The site imports `mono-site.css`, one face at `/fonts/jetbrains-mono-regular.woff2`,
+  and its Astro config copies the subset over that file.
+- The app and auth import `mono-split.css`: the subset, with the `--unicodes` list
+  below as its `unicode-range`, and the master with the rest of Unicode plus the
+  combining marks U+0300–036F. Latin text without combining marks fetches only the
+  subset. Text with other characters fetches the master on demand, and they render
+  in JetBrains Mono when the master has them; characters it lacks, such as emoji,
+  fall back to the system monospace font.
+- The ranges overlap only on combining marks. All of the master's marks are in
+  that block, so a non-Latin letter and its mark (`и` + U+0301) render together
+  from the master, while a Latin letter and its mark render from the subset. An
+  overlap on ordinary Latin makes Chromium download both files on every page: it also fetches
+  a covering face while an earlier one is loading. A full-font fallback family
+  with no range has the same cost. The subset holds every master glyph in the
+  list, so no master glyph is out of reach. A server test checks both ranges
+  against the list below; change the list and both ranges together.
+
+The subset keeps Latin-1, Latin Extended-A/B and
 Additional (including Vietnamese), IPA, spacing modifiers and combining marks,
 general punctuation, super/subscripts, currency and letterlike symbols, plus the
 basic arrows `←`–`↙`, `− ∕ ∙ ∞ ≈ ≠ ≤ ≥` and `✓ ✕ ✗`. It keeps every OpenType
 feature and the original hinting, metrics and glyph names; dropping the names
-changes Chromium's small-size rasterization. Other symbols, Greek, Cyrillic, box
-drawing and code-only glyphs fall back to the system monospace font. Its glyphs are
+changes Chromium's small-size rasterization. On the site, other symbols, Greek,
+Cyrillic, box drawing and code-only glyphs fall back to the system monospace font;
+the app and auth load the master for them. Its glyphs are
 identical to the master's. It is the same OFL font, so the license above covers it.
 After changing the master, regenerate it with FontTools 4.63 and Brotli
 (`pip install "fonttools[woff]"`), from the repository root:
@@ -85,7 +103,8 @@ pyftsubset packages/theme/public/fonts/jetbrains-mono-regular.woff2 \
 
 Both active faces use `font-display: optional`: if a font arrives too late,
 keep the first rendered fallback for that visit instead of resizing visible text.
-The landing layout, app pages and auth pages preload both faces. The server build and Astro config
+The landing layout preloads Geist and the site's JetBrains Mono file; app and auth
+pages preload Geist and the subset, never the master. The server build and Astro config
 copy the same assets into their public directories; no runtime font service is used.
 
 `brand.ts` owns the plain folder navigation SVG and shared favicon links. The

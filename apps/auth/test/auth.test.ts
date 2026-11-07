@@ -183,6 +183,7 @@ async function versionedAssets() {
     "/auth.css",
     "/favicon.svg",
     "/fonts/geist-latin-variable.woff2",
+    "/fonts/jetbrains-mono-latin.woff2",
     "/fonts/jetbrains-mono-regular.woff2",
   ]);
   return assets;
@@ -408,7 +409,9 @@ test("static assets cache by content version and keep the other security headers
   const login = await call("/login");
   const html = await login.text();
   const css = html.match(/href="(\/auth\.css\?v=[\w-]{16})"/)?.[1];
-  const fonts = ["geist-latin-variable", "jetbrains-mono-regular"].map(
+  // Only the Latin JetBrains Mono is preloaded; the master loads on demand.
+  expect(html).not.toContain("jetbrains-mono-regular");
+  const fonts = ["geist-latin-variable", "jetbrains-mono-latin"].map(
     (font) =>
       html.match(
         new RegExp(

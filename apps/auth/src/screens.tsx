@@ -3,10 +3,11 @@ import type { Child } from "hono/jsx";
 import type { StaticAssets } from "@milton/theme/assets";
 
 // Both faces render on every page; preloading lets them arrive before first
-// paint under font-display: optional.
+// paint under font-display: optional. Only the Latin JetBrains Mono is
+// preloaded; the master loads for other text.
 const fonts = [
   "/fonts/geist-latin-variable.woff2",
-  "/fonts/jetbrains-mono-regular.woff2",
+  "/fonts/jetbrains-mono-latin.woff2",
 ];
 
 /** The page shell; `assets` supplies the content-versioned asset URLs. */

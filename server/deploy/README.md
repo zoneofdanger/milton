@@ -73,7 +73,11 @@ untracked): `.agents/tmp/auth-cutover/` (`runbook.md`, `phase1-report.md`,
 same env 2 / key 1); the mail and maintenance jobs use the same image. Startup retries the
 role check on connection failures for about 15 s; refusals still fail immediately. Checks:
 health 200, Claude Code authorize 302, 5-minute watch clean. Rollback:
-`milton-auth-00002-jj7`.
+`milton-auth-00002-jj7`. The same check found both Scheduler triggers had malformed
+URLs since the cutover (a shell expansion turned `:run` into `un`), so the mail and
+maintenance jobs never ran on schedule (404). Fixed at 09:21Z; the first scheduled mail
+run succeeded at 09:22Z. Nothing was lost: the only queued mail was the cutover test,
+already sent by hand.
 
 ## Release record: store refactor, part 2 (2026-11-07)
 

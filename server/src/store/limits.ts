@@ -13,11 +13,16 @@ const limitsSchema = z.object({
 export type StoreLimits = z.infer<typeof limitsSchema>;
 
 export async function readLimits(db: StoreSession): Promise<StoreLimits> {
-  const value = (
-    await db.query<{ limits_json: unknown }>(
-      sql`SELECT limits_json FROM store_config WHERE singleton = 1`,
-    )
-  )[0]?.limits_json;
+  return parseLimits(
+    (
+      await db.query<{ limits_json: unknown }>(
+        sql`SELECT limits_json FROM store_config WHERE singleton = 1`,
+      )
+    )[0]?.limits_json,
+  );
+}
+/** `store_config.limits_json` as read, or the refusal for invalid limits. */
+export function parseLimits(value: unknown): StoreLimits {
   const result = limitsSchema.safeParse(value);
   if (!result.success)
     throw new StoreError("configuration", "The memo store limits are invalid.");

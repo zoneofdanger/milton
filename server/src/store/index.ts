@@ -33,7 +33,7 @@ import {
   type SaveOutcome,
 } from "./compiled";
 import type { ReportIntent } from "./reports";
-import { readLimits } from "./limits";
+import { parseLimits, readLimits } from "./limits";
 import {
   authenticateConnectionKey,
   createConnectionKey,
@@ -265,7 +265,6 @@ export async function storeForCurrentRequest(
 ): Promise<TenantStore> {
   const userId = auth.userId;
   const db = database(bindings);
-  const limits = await readLimits(db);
   await requireActiveAccount(db, userId, { lock: false });
   const compiled = compiledMemos(db, userId, assistant);
   return {
@@ -279,26 +278,48 @@ export async function storeForCurrentRequest(
     readTpsReport: compiled.getTpsReport,
     readDocuments: compiled.readDocuments,
     saveMemo: compiled.saveMemo,
+    /** One statement, so one implicit transaction and one round trip. It
+     * takes the account row lock the deletion and every writer take, held
+     * until the statement commits: a deletion that holds it first leaves no
+     * active row (the charge refuses and counts nothing); one that comes
+     * second waits and then sees, and cascades, the counted call. The limits
+     * are read in the same statement, so a change applies to the next call. */
     async chargeToolCall() {
-      return db.transaction(async (tx) => {
-        await requireActiveAccount(tx, userId, { lock: true });
-        const { day } = (
-          await tx.query<{ day: string }>(
-            sql`SELECT (clock_timestamp() AT TIME ZONE 'UTC')::date::text AS day`,
-          )
-        )[0]!;
-        const charged =
-          await tx.query(sql`INSERT INTO usage_daily (user_id,day_utc,tool_calls) VALUES (${userId},${day}::date,1)
-          ON CONFLICT (user_id,day_utc) DO UPDATE SET tool_calls = usage_daily.tool_calls + 1
-          WHERE usage_daily.tool_calls < ${limits.daily_calls} RETURNING tool_calls`);
-        return charged.length
-          ? { allowed: true as const }
-          : {
-              allowed: false as const,
-              limit: "day" as const,
-              retry_at_ms: Date.parse(`${day}T00:00:00Z`) + 86400000,
-            };
-      });
+      const row = (
+        await db.query<{
+          limits: unknown;
+          day: string;
+          open: boolean;
+          charged: boolean;
+        }>(sql`WITH account AS (
+            SELECT id FROM users WHERE id=${userId} AND status='active' FOR UPDATE),
+          config AS (
+            SELECT limits_json AS limits,
+              (clock_timestamp() AT TIME ZONE 'UTC')::date AS day,
+              CASE WHEN jsonb_typeof(limits_json->'daily_calls')='number'
+                THEN (limits_json->>'daily_calls')::numeric END AS daily_calls
+            FROM store_config WHERE singleton=1),
+          charged AS (
+            INSERT INTO usage_daily (user_id,day_utc,tool_calls)
+            SELECT account.id, config.day, 1 FROM account, config
+            WHERE config.daily_calls >= 1
+            ON CONFLICT (user_id,day_utc) DO UPDATE SET tool_calls = usage_daily.tool_calls + 1
+            WHERE usage_daily.tool_calls < (SELECT daily_calls FROM config)
+            RETURNING tool_calls)
+          SELECT config.limits, config.day::text AS day,
+            EXISTS(SELECT 1 FROM account) AS open,
+            EXISTS(SELECT 1 FROM charged) AS charged
+          FROM config`)
+      )[0];
+      parseLimits(row?.limits);
+      if (!row!.open) throw accountUnavailable();
+      return row!.charged
+        ? { allowed: true as const }
+        : {
+            allowed: false as const,
+            limit: "day" as const,
+            retry_at_ms: Date.parse(`${row!.day}T00:00:00Z`) + 86400000,
+          };
     },
   };
 }

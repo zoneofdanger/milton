@@ -59,6 +59,28 @@ Geist source: https://fonts.gstatic.com/s/geist/v5/gyByhwUxId8gMEwcGFWNOITd.woff
 Their SIL Open Font Licenses are included beside the files. JetBrains source:
 https://raw.githubusercontent.com/JetBrains/JetBrainsMono/master/fonts/webfonts/JetBrainsMono-Regular.woff2
 
+The app serves this full JetBrains Mono master. The site serves a Latin subset,
+`apps/site/fonts/jetbrains-mono-latin.woff2`, which its Astro config copies over the
+same `/fonts/jetbrains-mono-regular.woff2` path, so the CSS, the preload and the
+display behavior are unchanged. The subset keeps Latin-1, Latin Extended-A/B and
+Additional (including Vietnamese), IPA, spacing modifiers and combining marks,
+general punctuation, super/subscripts, currency, letterlike symbols, arrows,
+mathematical operators, geometric shapes, dingbats and supplemental arrows and math,
+with every OpenType feature and the original hinting, metrics and names. It drops
+Greek, Cyrillic, box drawing, block elements, technical symbols and code-only
+glyphs; those characters fall back to the system monospace font. Its glyphs are
+identical to the master's. It is the same OFL font, so the license above covers it.
+After changing the master, regenerate it with FontTools 4.63 and Brotli
+(`pip install "fonttools[woff]"`), from the repository root:
+
+```sh
+pyftsubset packages/theme/public/fonts/jetbrains-mono-regular.woff2 \
+  --unicodes="U+0000-036F,U+1E00-1EFF,U+2000-22FF,U+25A0-27FF,U+2900-2BFF,U+FEFF,U+FFFD" \
+  --layout-features='*' --name-IDs='*' --name-languages='*' --name-legacy \
+  --notdef-outline --flavor=woff2 \
+  --output-file=apps/site/fonts/jetbrains-mono-latin.woff2
+```
+
 Both active faces use `font-display: optional`: if a font arrives too late,
 keep the first rendered fallback for that visit instead of resizing visible text.
 The landing layout preloads both faces. The server build and Astro config

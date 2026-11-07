@@ -1,5 +1,16 @@
 import assert from "node:assert/strict";
-import { readFileSync, existsSync } from "node:fs";
+import { spawn } from "node:child_process";
+import {
+  readFileSync,
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { jwtVerify, createLocalJWKSet } from "jose";
 import { randomUUID, createHash, randomBytes } from "node:crypto";
 import pg from "pg";
@@ -124,6 +135,176 @@ try {
   group(
     "additive migrations preserve native rows and retire pre-upgrade reset proofs",
   );
+  {
+    // The real migrator, killed at its ledger write after 007's work: the
+    // schema and the ledger must agree (both applied or neither).
+    const o = p.configs.owner!;
+    const ownerUrl = new URL(`postgresql://127.0.0.1:${o.port}/${o.database}`);
+    ownerUrl.username = String(o.user);
+    ownerUrl.password = String(o.password);
+    ownerUrl.searchParams.set("options", "-c role=milton_auth_owner");
+    let stderr = "";
+    const migrate = (
+      runner = new URL("./migrate.ts", import.meta.url).pathname,
+    ) =>
+      new Promise<number | null>((resolve) => {
+        stderr = "";
+        const child = spawn(
+          process.execPath,
+          ["--experimental-strip-types", runner, "up", "--apply"],
+          {
+            env: {
+              PATH: process.env.PATH,
+              LC_ALL: "C",
+              NODE_EXTRA_CA_CERTS: p.caPath,
+              AUTH_OWNER_DATABASE_URL: ownerUrl.href,
+            },
+            stdio: ["ignore", "ignore", "pipe"],
+          },
+        );
+        child.stderr.on("data", (d) => (stderr += d));
+        child.on("exit", resolve);
+      });
+    const admin = new pg.Pool({
+      host: "127.0.0.1",
+      port: o.port,
+      user: "disposable_cluster",
+      database: o.database,
+      max: 2,
+    });
+    pools.push(admin);
+    const agreed = async () => {
+      const r = (
+        await admin.query(
+          "select to_regprocedure('milton_guard.connection_key_status(text,text,text)') is not null as schema, exists(select 1 from milton_credential.migration_ledger where name='007-connection-key-status') as ledger",
+        )
+      ).rows[0];
+      assert.equal(r.schema, r.ledger, "native 007 schema and ledger disagree");
+      return r.schema as boolean;
+    };
+    const killedAtLedgerWrite = async () => {
+      const blocker = await admin.connect();
+      try {
+        // EXCLUSIVE blocks only the ledger insert, not its reads.
+        await blocker.query(
+          "begin; lock table milton_credential.migration_ledger in exclusive mode",
+        );
+        const exit = migrate();
+        let pid: number | undefined;
+        for (let n = 0; n < 400 && !pid; n++) {
+          pid = (
+            await admin.query(
+              "select pid from pg_stat_activity where usename='fictional_migrator' and wait_event_type='Lock' and query ~* '^insert into milton_credential.migration_ledger'",
+            )
+          ).rows[0]?.pid;
+          if (!pid) await new Promise((r) => setTimeout(r, 25));
+        }
+        assert(pid, "migrator reached its ledger write");
+        await admin.query("select pg_terminate_backend($1)", [pid]);
+        assert.notEqual(await exit, 0);
+      } finally {
+        await blocker.query("rollback");
+        blocker.release();
+      }
+    };
+    // 001-006 are applied above; record them so the runner has only 007 left.
+    await p.owner.query(
+      "create table milton_credential.migration_ledger(name text primary key)",
+    );
+    await p.owner.query(
+      "insert into milton_credential.migration_ledger select unnest($1::text[])",
+      [AUTH_MIGRATIONS.filter((n) => n !== "007-connection-key-status")],
+    );
+    await killedAtLedgerWrite();
+    assert.equal(await agreed(), false);
+    // A file that ends or rewinds the runner's transaction gets no ledger row
+    // (a COMMIT is caught after the fact: its work is committed). A fixture
+    // copy of the runner reads a 007 whose grant line carries the variant.
+    const fixture = mkdtempSync(join(tmpdir(), "milton-migrate-fixture-"));
+    try {
+      mkdirSync(join(fixture, "scripts"));
+      mkdirSync(join(fixture, "migrations"));
+      const runner = readFileSync(
+        new URL("./migrate.ts", import.meta.url),
+        "utf8",
+      );
+      const fixtureRunner = runner
+        .replaceAll('"../src/', `"${new URL("../src/", import.meta.url).href}`)
+        .replace('from "pg"', `from "${import.meta.resolve("pg")}"`)
+        .replace(
+          '"./migrations.ts"',
+          `"${new URL("./migrations.ts", import.meta.url).href}"`,
+        );
+      assert(
+        !/"\.\.\/src\/|from "pg"|"\.\/migrations\.ts"/.test(fixtureRunner),
+      );
+      writeFileSync(join(fixture, "scripts", "migrate.ts"), fixtureRunner);
+      for (const file of readdirSync(
+        new URL("../migrations/", import.meta.url),
+      ))
+        writeFileSync(
+          join(fixture, "migrations", file),
+          readFileSync(
+            new URL(`../migrations/${file}`, import.meta.url),
+            "utf8",
+          ),
+        );
+      const grant =
+        /^(GRANT EXECUTE ON FUNCTION milton_guard\.connection_key_status.*;)$/m;
+      const up = join(
+        fixture,
+        "migrations",
+        "007-connection-key-status.up.sql",
+      );
+      const original = readFileSync(up, "utf8");
+      assert.match(original, grant);
+      for (const [suffix, refused] of [
+        [" COMMIT;", true],
+        // The chained transaction stays open and recreates a guessable name.
+        [" COMMIT AND CHAIN; SAVEPOINT migration_file;", true],
+        // Undoing the file's work in place must not leave its ledger row.
+        [" ROLLBACK TO SAVEPOINT migration_file;", false],
+      ] as const) {
+        writeFileSync(up, original.replace(grant, `$1${suffix}`));
+        assert.notEqual(
+          await migrate(join(fixture, "scripts", "migrate.ts")),
+          0,
+          suffix,
+        );
+        if (refused)
+          assert.match(
+            stderr,
+            /007-connection-key-status\.up\.sql .*MIGRATION_MUST_NOT_MANAGE_TRANSACTION/,
+            suffix,
+          );
+        const r = (
+          await admin.query(
+            "select to_regprocedure('milton_guard.connection_key_status(text,text,text)') is not null as schema, exists(select 1 from milton_credential.migration_ledger where name='007-connection-key-status') as ledger",
+          )
+        ).rows[0];
+        assert.equal(r.ledger, false, suffix);
+        if (r.schema)
+          await p.owner.query(
+            "DROP FUNCTION milton_guard.connection_key_status(text,text,text)",
+          );
+      }
+    } finally {
+      rmSync(fixture, { recursive: true });
+    }
+    assert.equal(await migrate(), 0);
+    assert.equal(await agreed(), true);
+    assert.equal(
+      (
+        await admin.query(
+          "select count(*)::int n from milton_credential.migration_ledger",
+        )
+      ).rows[0].n,
+      AUTH_MIGRATIONS.length,
+    );
+    group(
+      "native migrator killed at its ledger write leaves schema and ledger agreeing; a file ending its own transaction gets no ledger row",
+    );
+  }
   const authPool = new pg.Pool(p.configs.auth),
     appPool = new pg.Pool(p.configs.app),
     mcpPool = new pg.Pool(p.configs.mcp);

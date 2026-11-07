@@ -354,9 +354,7 @@ code reads, release the code first.
 - Native auth: as the delegated NOINHERIT login `milton_auth_delegate`, assuming
   `milton_auth_owner` (`AUTH_OWNER_DATABASE_URL` with `options=-c%20role%3Dmilton_auth_owner`),
   `node --experimental-strip-types apps/auth/scripts/migrate.ts up --apply` applies the
-  pending files in order. Each file commits separately from its ledger write; after a
-  crash, stop and follow the ledger crash-gap steps in
-  [auth operations](../../apps/auth/README.md#retained-login-bootstrap-and-delegated-owner).
+  pending files in order, each in one transaction with its ledger row.
 - Owner grant files in `server/migrations/` run as the owner with
   `psql -X -v ON_ERROR_STOP=1 -f <file>`; for example `006-connection-keys-roles.sql`
   revokes before granting, so rerunning converges.

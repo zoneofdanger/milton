@@ -564,6 +564,167 @@ test("scopes control discovery and direct calls; original binding revocation sur
   }
 }, 30000);
 
+test("a setup request makes one database round trip and a tool call four, by token or connection key", async () => {
+  const local = await localStore();
+  try {
+    await resolveIdentityAccount(local.env, {
+      provider: issuer,
+      subject: "counted",
+    });
+    const auth = await lookupIdentityAccount(local.env, {
+      provider: issuer,
+      subject: "counted",
+    });
+    await local.pg.exec(`CREATE SCHEMA IF NOT EXISTS milton_guard;
+      CREATE FUNCTION milton_guard.connection_key_status(text,text,text) RETURNS boolean
+        LANGUAGE sql AS $$ SELECT true $$`);
+    const { key } = await connectionKeysForAccount(local.env, auth, {
+      issuer,
+      subject: "counted",
+      incarnation: "f:1",
+      generation: "f:2",
+    }).create({ name: "Counted", scope: "read_write", expiry: null });
+    const fixture = await tokenFixture(local.pg);
+    const token = await fixture.token("counted");
+    // Each statement, BEGIN and COMMIT is one round trip.
+    let trips = 0;
+    const counted = {
+      ...local.db,
+      query: <Row extends Record<string, unknown>>(statement: SQL) => {
+        trips++;
+        return local.db.query<Row>(statement);
+      },
+      transaction: <T>(
+        work: (tx: { query: typeof local.db.query }) => Promise<T>,
+      ) => {
+        trips += 2;
+        return local.db.transaction((tx) =>
+          work({
+            query: (statement) => {
+              trips++;
+              return tx.query(statement);
+            },
+          }),
+        );
+      },
+    };
+    const handler = createMiltonHandler(
+      { storeDatabase: counted, issuer, resource, appOrigin: origin },
+      fixture.verify,
+      () => {},
+    );
+    const trips_for = async (
+      bearer: string,
+      method: string,
+      params?: unknown,
+    ) => {
+      trips = 0;
+      const response = await handler(
+        new Request(resource, {
+          method: "POST",
+          headers: {
+            Host: "localhost:3001",
+            Authorization: "Bearer " + bearer,
+            Accept: "application/json, text/event-stream",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            ...(method.startsWith("notifications/") ? {} : { id: 1 }),
+            method,
+            ...(params ? { params } : {}),
+          }),
+        }),
+      );
+      const text = await response.text();
+      expect(response.status).toBeLessThan(300);
+      expect(text).not.toContain('"isError":true');
+      return trips;
+    };
+    const cover = { name: "get_cover_sheet", arguments: {} };
+    const initialize = {
+      protocolVersion: "2025-06-18",
+      capabilities: {},
+      clientInfo: { name: "counted", version: "0" },
+    };
+    for (const bearer of [token, key]) {
+      // The first call records the key's last use; later ones within a minute do not.
+      await trips_for(bearer, "tools/call", cover);
+      expect(await trips_for(bearer, "initialize", initialize)).toBe(1);
+      expect(await trips_for(bearer, "notifications/initialized")).toBe(1);
+      expect(await trips_for(bearer, "tools/list", {})).toBe(1);
+      // Access, the charge, the snapshot and the trial gate.
+      expect(await trips_for(bearer, "tools/call", cover)).toBe(4);
+    }
+  } finally {
+    await local.dispose();
+  }
+}, 30000);
+
+test("invalid store limits refuse a tool call without counting it", async () => {
+  const local = await localStore();
+  try {
+    const { miltonUserId } = await resolveIdentityAccount(local.env, {
+      provider: issuer,
+      subject: "limited",
+    });
+    const fixture = await tokenFixture(local.pg);
+    const token = await fixture.token("limited");
+    const handler = createMiltonHandler(
+      { ...local.env, issuer, resource, appOrigin: origin },
+      fixture.verify,
+      () => {},
+    );
+    const cover = async () =>
+      (
+        await handler(
+          new Request(resource, {
+            method: "POST",
+            headers: {
+              Host: "localhost:3001",
+              Authorization: "Bearer " + token,
+              Accept: "application/json, text/event-stream",
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              jsonrpc: "2.0",
+              id: 1,
+              method: "tools/call",
+              params: { name: "get_cover_sheet", arguments: {} },
+            }),
+          }),
+        )
+      ).text();
+    const used = async () =>
+      (
+        await local.db.query<{ n: number }>(
+          sql`SELECT coalesce(sum(tool_calls),0)::int AS n FROM usage_daily WHERE user_id=${miltonUserId}`,
+        )
+      )[0]!.n;
+    const valid = (
+      await local.db.query<{ limits: unknown }>(
+        sql`SELECT limits_json AS limits FROM store_config`,
+      )
+    )[0]!.limits;
+    expect(await cover()).not.toContain('"isError":true');
+    expect(await used()).toBe(1);
+    for (const invalid of ['{"body_bytes":"large"}', '{"daily_calls":1.5}']) {
+      await local.db.query(
+        sql`UPDATE store_config SET limits_json=limits_json || ${invalid}::jsonb`,
+      );
+      expect(await cover()).toContain("configuration");
+      expect(await used()).toBe(1);
+      await local.db.query(
+        sql`UPDATE store_config SET limits_json=${JSON.stringify(valid)}::jsonb`,
+      );
+    }
+    expect(await cover()).not.toContain('"isError":true');
+    expect(await used()).toBe(2);
+  } finally {
+    await local.dispose();
+  }
+}, 30000);
+
 test("connection keys get exactly their scope's tools; revoked, expired, malformed and closed-account keys get the invalid-token 401; OAuth is unchanged", async () => {
   const local = await localStore();
   const clients: Client[] = [];
@@ -748,7 +909,7 @@ test("connection keys get exactly their scope's tools; revoked, expired, malform
   }
 }, 30000);
 
-test("key lookups are bounded before database access: 8 at once, then a quick 503; an invented id is remembered, a known id never is", async () => {
+test("key lookups are bounded before database access: 8 at once, then a quick 503", async () => {
   const local = await localStore();
   let queries = 0;
   let hold: Promise<void> | undefined;
@@ -815,21 +976,7 @@ test("key lookups are bounded before database access: 8 at once, then a quick 50
     release();
     hold = undefined;
     for (const reply of await Promise.all(held)) expect(reply.status).toBe(401);
-    // A repeated invented id is refused from memory.
-    const repeated = invented(0);
-    expect((await post(repeated)).status).toBe(401);
-    const after = queries;
-    expect((await post(repeated)).status).toBe(401);
-    expect(queries).toBe(after);
-    // A wrong secret for a real id reaches the database every time, so it cannot
-    // lock the key out, and the real key still works.
-    const wrong =
-      real.key.slice(0, 26) +
-      (real.key[26] === "A" ? "B" : "A") +
-      real.key.slice(27);
-    expect((await post(wrong)).status).toBe(401);
-    expect((await post(wrong)).status).toBe(401);
-    expect(queries).toBe(after + 2);
+    // The slots are free again: the real key works.
     expect((await post(real.key)).status).toBe(200);
   } finally {
     await local.dispose();

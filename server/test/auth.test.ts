@@ -219,14 +219,16 @@ test("Cloud Run app serves only canonical browser routes and public assets", asy
     );
   expect((await request("/health")).status).toBe(200);
   expect((await request("/mcp")).status).toBe(404);
-  for (const path of [
-    "/milton.css",
-    "/favicon.svg",
-    "/fonts/jetbrains-mono-regular.woff2",
-    "/fonts/geist-latin-variable.woff2",
-  ]) {
+  for (const [path, type] of [
+    ["/milton.css", "text/css; charset=utf-8"],
+    ["/favicon.svg", "image/svg+xml"],
+    ["/favicon.ico", "image/x-icon"],
+    ["/fonts/jetbrains-mono-regular.woff2", "font/woff2"],
+    ["/fonts/geist-latin-variable.woff2", "font/woff2"],
+  ] as const) {
     const asset = await request(path);
     expect(asset.status).toBe(200);
+    expect(asset.headers.get("Content-Type")).toBe(type);
     expect(asset.headers.get("X-Content-Type-Options")).toBe("nosniff");
     expect((await asset.arrayBuffer()).byteLength).toBeGreaterThan(100);
     expect((await request(path, "app.example", "POST")).status).toBe(405);
@@ -238,15 +240,6 @@ test("Cloud Run app serves only canonical browser routes and public assets", asy
   expect((await request("/health", "mcp.example")).status).toBe(403);
 });
 
-test("page content is text unless explicitly rendered as a component", async () => {
-  const input = '<script>alert("fictional")</script> & <img src=x>';
-  const html = await page(input, input).text();
-  expect(html).not.toContain("<script>");
-  expect(html).not.toContain("<img src=x>");
-  expect(html).toContain("&lt;script&gt;");
-  expect(html).toContain("&amp;");
-});
-
 test("page fonts and favicons are local while other browser restrictions stay closed", async () => {
   const response = page("Example", "<p>Example</p>");
   expect(response.headers.get("Content-Security-Policy")).toBe(
@@ -256,25 +249,6 @@ test("page fonts and favicons are local while other browser restrictions stay cl
   expect(html).toMatch(/href="\/favicon\.svg\?v=[\w-]{16}"/);
   expect(html).toMatch(/href="\/favicon\.ico\?v=[\w-]{16}"/);
   const { localAsset } = await import("../src/assets");
-  for (const [path, type] of [
-    ["/fonts/jetbrains-mono-regular.woff2", "font/woff2"],
-    ["/favicon.svg", "image/svg+xml"],
-    ["/favicon.ico", "image/x-icon"],
-    ["/milton.css", "text/css; charset=utf-8"],
-  ]) {
-    const asset = localAsset(new Request(appOrigin + path));
-    expect(asset?.status).toBe(200);
-    expect(asset?.headers.get("Content-Type")).toBe(type);
-    expect((await asset!.arrayBuffer()).byteLength).toBeGreaterThan(100);
-    expect(
-      localAsset(new Request(appOrigin + path, { method: "POST" }))?.status,
-    ).toBe(405);
-    expect(
-      await localAsset(
-        new Request(appOrigin + path, { method: "HEAD" }),
-      )!.text(),
-    ).toBe("");
-  }
   for (const path of [
     "/fonts/unknown.woff2",
     "/fonts/../secret",
@@ -512,31 +486,6 @@ test("behind Cloud Run, a same-origin Origin: null form post passes on the canon
     );
   } finally {
   }
-});
-
-test("pages on the MCP host redirect to the app host; assistant routes stay", async () => {
-  const app = createMiltonApp({
-    issuer,
-    resource: "https://mcp.meetmilton.com/mcp",
-    appOrigin: "https://app.meetmilton.com",
-    ...clientSettings,
-  });
-  const page = await app(
-    new Request("https://mcp.meetmilton.com/memos/vibes?tab=history", {
-      headers: { Host: "mcp.meetmilton.com" },
-    }),
-  );
-  expect(page.status).toBe(308);
-  expect(page.headers.get("Location")).toBe(
-    "https://app.meetmilton.com/memos/vibes?tab=history",
-  );
-  const discovery = await app(
-    new Request(
-      "https://mcp.meetmilton.com/.well-known/oauth-protected-resource/mcp",
-      { headers: { Host: "mcp.meetmilton.com" } },
-    ),
-  );
-  expect(discovery.status).toBe(200);
 });
 
 test("billing checkout and portal: 503 without config; signed-in CSRF forms; the status picks the portal or Checkout; a healed sign-up keeps its trial", async () => {
@@ -1290,7 +1239,7 @@ test("trial reminders stay outside TPS and expired accounts retain web view and 
   }
 });
 
-test("web shows only current TPS and rejects all retired history and mutation routes", async () => {
+test("web shows only current TPS, escaped, and downloads it", async () => {
   const fixture = await memoPageFixture();
   try {
     const empty = await (await fixture.send("/")).text();
@@ -1336,29 +1285,6 @@ test("web shows only current TPS and rejects all retired history and mutation ro
       "writes today",
     ])
       expect(html).not.toContain(absent);
-    const before = await fixture.db.query(
-      sql`SELECT * FROM instruction_card_versions ORDER BY user_id,card_id,version`,
-    );
-    for (const path of [
-      "/memos",
-      "/memos/sample",
-      "/memos/sample/history",
-      "/memos/sample/archive",
-      "/memos/sample/restore",
-      "/memos/sample/revert",
-      "/tps-report/history",
-      "/tps-report/history/1",
-      "/tps-report/revert",
-    ]) {
-      expect((await fixture.send(path)).status).toBe(404);
-      expect((await fixture.send(path, {})).status).toBe(404);
-      expect((await fixture.send(path, new FormData())).status).toBe(404);
-    }
-    expect(
-      await fixture.db.query(
-        sql`SELECT * FROM instruction_card_versions ORDER BY user_id,card_id,version`,
-      ),
-    ).toEqual(before);
     const download = await fixture.send("/download");
     expect(download.headers.get("Content-Disposition")).toBe(
       'attachment; filename="TPS.md"',

@@ -33,6 +33,12 @@ Build the container from the repository root:
 docker build --platform linux/amd64 -f server/Dockerfile -t milton-runtime .
 ```
 
+The build minifies whitespace and syntax but keeps identifiers, so logged class names
+and stack function names read as in source. It writes source maps beside the bundles;
+the image leaves them out and runs without `--enable-source-maps`, since logs carry no
+stacks and loading the maps slows startup. Locally,
+`node --enable-source-maps server/dist/cloud-run.js` maps stacks to `server/src`.
+
 Cloud Run listens on `0.0.0.0:$PORT`. SIGTERM stops accepting requests and allows up
 to eight seconds to finish.
 

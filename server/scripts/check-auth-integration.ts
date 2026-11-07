@@ -11,6 +11,9 @@ try {
     format: "esm",
     naming: "integration.mjs",
     external: ["zod", "pg-native"],
+    // Same minification as scripts/build.ts, so logged class names are checked
+    // as production bundles them.
+    minify: { whitespace: true, syntax: true, identifiers: false },
   });
   if (!result.success) throw new Error("local integration bundle failed");
   const child = Bun.spawn(["node", join(dir, "integration.mjs")], {

@@ -19,6 +19,12 @@ const cloud = await Bun.build({
   naming: "[name].js",
   target: "node",
   format: "esm",
+  // Smaller bundles load faster on deploys and scale-out. Identifiers stay:
+  // error-log.ts logs constructor names, and Bun 1.4.4 ignores keepNames.
+  minify: { whitespace: true, syntax: true, identifiers: false },
+  // Maps stay beside the bundles for local `node --enable-source-maps`; the
+  // image copies only the bundles.
+  sourcemap: "linked",
 });
 if (!cloud.success)
   throw new Error("Bundling the Cloud Run entrypoint failed.");

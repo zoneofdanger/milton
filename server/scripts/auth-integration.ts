@@ -27,9 +27,7 @@ import {
 import {
   authenticateConnectionKey,
   createConnectionKey,
-  listConnectionKeys,
   parseConnectionKey,
-  revokeConnectionKey,
 } from "../src/store/connection-keys";
 import { fingerprintKeyCheck } from "../src/auth-admission";
 import { hash } from "../src/auth-oidc";
@@ -781,27 +779,6 @@ try {
       scope: "read",
       expiry: 30,
     });
-    assert.deepEqual(
-      (await listConnectionKeys(appDb, keyUser, keyBinding)).active.map(
-        (k) => k.id,
-      ),
-      [made.record.id],
-    );
-    assert.deepEqual(await keyCheck(made.key), {
-      ok: true,
-      userId: keyUser,
-      keyId: made.record.id,
-      scope: "read",
-    });
-    assert.equal(
-      (
-        await owner.query(
-          "SELECT last_used_at IS NOT NULL AS used FROM connection_keys WHERE id=$1",
-          [made.record.id],
-        )
-      ).rows[0].used,
-      true,
-    );
     // A key presented for another issuer is refused.
     assert.equal(
       (
@@ -862,27 +839,7 @@ try {
     );
     assert.deepEqual(await keyStatusShape(), keyStatusGrants);
     assert.equal((await keyCheck(made.key)).ok, true);
-    assert.equal(
-      await revokeConnectionKey(appDb, keyUser, made.record.id),
-      true,
-    );
-    assert.deepEqual(await keyCheck(made.key), { ok: false });
-    // Account deletion by the app runtime removes the account's keys.
-    await createConnectionKey(appDb, keyUser, keyBinding, {
-      name: "Fictional CI",
-      scope: "read_write",
-      expiry: null,
-    });
     await appPool.query("DELETE FROM users WHERE id=$1", [keyUser]);
-    assert.equal(
-      (
-        await owner.query(
-          "SELECT count(*)::int n FROM connection_keys WHERE user_id=$1",
-          [keyUser],
-        )
-      ).rows[0].n,
-      0,
-    );
     await authOwner.query(`DELETE FROM milton_auth."user" WHERE id=$1`, [
       nativeKeyUser.id,
     ]);

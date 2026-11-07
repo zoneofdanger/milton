@@ -306,8 +306,9 @@ test("pages link content-versioned assets that cache for a year; legacy URLs rev
   const immutable = "public, max-age=31536000, immutable";
   const stylesheet = await get(css).text();
   for (const font of fonts) expect(stylesheet).toContain(`url(${font})`);
-  // JetBrains Mono is the README's Latin subset plus the master for exactly
-  // the rest of Unicode, so Latin-only text never fetches the master.
+  // JetBrains Mono is the README's Latin subset plus the master for the rest
+  // of Unicode, so Latin-only text never fetches the master. They share only
+  // the combining marks, so a non-Latin letter and its mark render together.
   const ranges = (list: string) =>
     [...list.matchAll(/U\+([\dA-F?]+)(?:-([\dA-F]+))?/gi)].map(([, lo, hi]) =>
       [lo!.replaceAll("?", "0"), hi ?? lo!.replaceAll("?", "F")].map((n) =>
@@ -330,14 +331,14 @@ test("pages link content-versioned assets that cache for a year; legacy URLs rev
   expect(latin!.ranges).toEqual(
     ranges(/--unicodes="([^"]*)"/.exec(readme)![1]!),
   );
-  let next = 0;
-  for (const [lo, hi] of [...latin!.ranges, ...master!.ranges].sort(
-    (a, b) => a[0]! - b[0]!,
-  )) {
-    expect(lo).toBe(next);
-    next = hi! + 1;
+  const covers = (list: number[][], c: number) =>
+    list.some(([lo, hi]) => lo! <= c && c <= hi!);
+  const wrong: number[] = [];
+  for (let c = 0; c < 0x110000; c++) {
+    const [l, m] = [latin!, master!].map((face) => covers(face.ranges, c));
+    if (!(l || m) || (l && m) !== (c >= 0x300 && c <= 0x36f)) wrong.push(c);
   }
-  expect(next).toBe(0x110000);
+  expect(wrong).toEqual([]);
   fonts.push(master!.url);
   for (const [path, type] of [
     [css, "text/css; charset=utf-8"],

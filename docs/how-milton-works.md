@@ -430,7 +430,7 @@ Files: `apps/site/`.
 
 Files: `packages/theme/`, `server/scripts/`, `.github/workflows/checks.yml`.
 
-- A shared theme supplies fonts, favicons, and tokens, with a WCAG contrast test. App and auth text outside the Latin JetBrains Mono subset fetches the full master on demand; the site serves only the subset.
+- A shared theme supplies fonts, favicons, and tokens, with a WCAG contrast test. App and auth text outside the Latin JetBrains Mono subset fetches the full master on demand, which also renders a non-Latin letter with its combining mark; the site serves only the subset.
 - `migrate.ts` applies writing migrations only as neondb_owner; explicit --app-auth applies app-only migration005 after native004 as an approved app migration owner, with no runtime startup migration.
 - It takes the owner connection from `MILTON_OWNER_DATABASE_URL` for a release, otherwise
   from `server/.dev.vars`, and never from an inherited `DATABASE_URL`.

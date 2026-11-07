@@ -185,7 +185,7 @@ export async function httpFixture(auth: AuthService) {
       );
       assert.match(
         sheet,
-        /url\("\/fonts\/jetbrains-mono-regular\.woff2\?v=[\w-]{16}"\)[^}]*unicode-range:\s*U\+0370-1DFF,/,
+        /url\("\/fonts\/jetbrains-mono-regular\.woff2\?v=[\w-]{16}"\)[^}]*unicode-range:\s*U\+0300-1DFF,/,
       );
       const r = await call(css, undefined, { "accept-encoding": "br, gzip" });
       assert.equal(r.status, 200);

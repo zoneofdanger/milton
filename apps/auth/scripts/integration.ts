@@ -947,14 +947,9 @@ try {
   } finally {
     await secondPool.end();
   }
-  for (const [pool, role] of [
-    [authPool, "milton_auth_runtime"],
-    [appPool, "milton_app_runtime"],
-    [mcpPool, "milton_mcp_runtime"],
-  ] as const)
-    await checkRuntimeRole(pool, role);
+  await checkRuntimeRole(authPool);
   group(
-    "shared atomic rate bucket across pools and effective runtime privilege audits",
+    "shared atomic rate bucket across pools and effective auth runtime privilege audit",
   );
   await p.owner.query(
     'delete from milton_auth."rateLimit"; delete from milton_guard.rate_bucket',

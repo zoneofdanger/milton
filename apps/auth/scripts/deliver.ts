@@ -21,7 +21,7 @@ if (process.argv[2] !== "--apply" || process.argv.length !== 3) {
       query_timeout: 6000,
       idleTimeoutMillis: 1000,
     });
-    await checkRuntimeRole(pool, "milton_auth_runtime");
+    await checkRuntimeRole(pool);
     console.log("auth_mail_pass", await deliverMail(pool, config));
   } catch (error) {
     console.error("auth_mail_pass", safeError(error));

@@ -14,6 +14,9 @@
 !packages/theme/*.ts
 !packages/theme/*.css
 !packages/theme/public/**
+!packages/forwarded-client/
+!packages/forwarded-client/package.json
+!packages/forwarded-client/*.ts
 !apps/
 !apps/site/
 !apps/site/package.json

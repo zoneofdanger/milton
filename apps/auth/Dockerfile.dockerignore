@@ -16,6 +16,7 @@
 !apps/auth/scripts/maintain.ts
 !packages/
 !packages/theme/**
+!packages/forwarded-client/**
 **/.env*
 **/*.pem
 **/node_modules

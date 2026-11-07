@@ -66,6 +66,17 @@ untracked): `.agents/tmp/auth-cutover/` (`runbook.md`, `phase1-report.md`,
 - Rollback: the old `*-edit-00223ec` revisions are not compatible with this schema. Fix
   forward, or restore `snap-fancy-hat-b8j5ls14` per the runbook's rollback section.
 
+## Release record: store refactor (2026-11-07)
+
+App and MCP moved to `milton-app-store-95587e5` / `milton-mcp-store-95587e5` at 08:30:41Z
+(server image `sha256:e9e9d5922e3884c0fb17aad8bfdc0ab36b8e90a03021ead77e035c925787b0f8`,
+source `95587e5`, same env 4 / key 2). Structure only: one save module, database errors
+mapped where the database is chosen, no runtime import cycles. Checks: health 200,
+unauthenticated MCP 401, forms probe PASS, production read version unchanged, 0 errors in
+five minutes (low traffic). Rollback: traffic back to `*-cut-eaf898e`. An auth instance
+failed startup at 08:30:47Z when the Neon compute restarted (08:30:50Z), probably from the
+`neondb_owner` password reset; the service recovered without action.
+
 ## Sample revision schema/API cutover (applied 2026-11-07, see above)
 
 `0002_sample_versions` is a breaking forward migration.

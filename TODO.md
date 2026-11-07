@@ -62,23 +62,6 @@ reports, memos) and plain text on security screens and anything an assistant rea
       answer, and the subscription_required message. Until then it does not exist; the landing
       page's unread joke address is a different alias.
 
-- [ ] #25 (server, med, blocked: self-hosted auth cutover) **Let headless and background
-      agents connect.** Scheduled or cloud agents (Claude Code routines, Codex cloud tasks, CI
-      jobs, agent servers) have no browser and no one to approve consent, so OAuth sign-in
-      leaves them unable to connect today. Plan (2026-11-07): connection keys created on the
-      Connected assistants page and sent as a bearer header (Claude Code `--header`, Codex
-      `bearer_token_env_var`, Cursor `headers`): read-only by default with saving opt-in,
-      shown once and stored hashed, checked live on every call like disconnects. Expiry is the
-      person's choice, including never (decided 2026-11-07, Peter); default to a set term. Ship
-      key management UX with it, built from packages/theme: create with a name, scope and
-      expiry; a list showing name, scope, created, last used and expiry (never-expiring keys
-      clearly marked); revoke one key at a time. ⚠ The MCP server would then accept a second
-      token type beside the strict native tokens: security review before release. Device
-      sign-in (a code approved at auth.meetmilton.com/device; Better Auth has a plugin,
-      unchecked against this build) keeps the native token model, but MCP clients lack it and
-      it would need a `milton login` helper; consider it after keys. Update /for-agents when
-      this ships.
-
 - [ ] #26 (server, low, blocked: self-hosted auth cutover) **Simplify auth email to inline
       Resend sends.** Auth mail (apps/auth/src/mail.ts, migration 006, deliver.js) is a durable
       encrypted outbox with leases, fences, throttle pause, receipts, a once-a-minute delivery

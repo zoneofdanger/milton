@@ -39,7 +39,7 @@ Provisioning that job/scheduler is separate authorized release work; no live man
 or cloud resource is changed here. Leases still protect each report if runs overlap.
 
 Give this job its own dotenvx payload/key, containing only `GUIDE_DATABASE_URL` and
-`ANTHROPIC_API_KEY` (`GUIDE_MODEL` may select only `claude-opus-4-6` in this pilot).
+`ANTHROPIC_API_KEY` (`GUIDE_MODEL` may select only `claude-opus-5-5` in this pilot).
 `MILTON_ENCRYPTED_ENV_FILE` and the platform-held dotenvx key load that worker-only
 payload. Never mount the app/MCP/auth payload. The worker verifies its plain scoped
 role before contacting the provider. Build/tests require no credentials or account.
@@ -82,18 +82,19 @@ The entire serialized request, prompt and output schema must fit a conservative 
 UTF-8 byte preflight bound and 200,000 provider-counted input tokens. Overflow is terminal
 unavailable. Token counting is provider processing and therefore requires eligibility.
 
-Opus 4.6 has no tools, disabled thinking and a versioned system prompt with strict JSON
-output. Local validation checks completion/refusal, shape, at most eight bounded tendencies,
-all stable-ID/revision references and a 6,000-character rendered cap. References validate
+Opus 5.5 has no tools, low effort (its thinking cannot be disabled) and a versioned system
+prompt with strict JSON output. Local validation checks completion/refusal, shape (thinking
+blocks are ignored, never shown or stored; exactly one text block), at most eight bounded
+tendencies, all stable-ID/revision references and a 6,000-character rendered cap. References validate
 before activation but are omitted from human-readable guide text; source/current versions
 remain in MCP metadata. The app shows tendencies/applicability, plain update/unavailable
 reasons and a stale explanation, without source numbers or worker diagnostics. Insufficient evidence
 must have no tendencies. There is no paid repair/second judge. Mechanical validation and
 fake-provider tests cannot establish semantic truth or immunity to prompt injection.
 
-Each generation atomically reserves $1.102400: the full 200,000 input-token ceiling
-at $5/M plus the maximum 4,096 output tokens at $25/M, even for tiny reports. The count
-endpoint supplies an estimate for the input admission check, not a guaranteed upper
+Each generation atomically reserves $1.120000: the full 200,000 input-token ceiling
+at $4/M plus the maximum 16,000 output tokens (thinking included) at $20/M, even for
+tiny reports. The count endpoint supplies an estimate for the input admission check, not a guaranteed upper
 bound, so it never reduces the reservation. Generation explicitly sets
 `service_tier: "standard_only"`; the count payload omits that generation-only field.
 

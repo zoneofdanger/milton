@@ -1500,7 +1500,7 @@ test("guide leases, source moves, revoked eligibility and account deletion fence
 test("guide reservations and recovery bound concurrent spend and retries", async () => {
   const { setGuideEnrollment } = await import("../src/guides/store");
   const { runGuideWorker } = await import("../src/guides/worker");
-  const conservativeReservation = 1_102_400; // Full 200k input + 4096 output, even for tiny reports.
+  const conservativeReservation = 1_120_000; // Full 200k input + 16,000 output, even for tiny reports.
   const local = await localStore();
   try {
     for (const id of ["budget-a", "budget-b"]) {
@@ -1608,7 +1608,7 @@ test("guide reservations and recovery bound concurrent spend and retries", async
 test("guide bounds reject whole oversize input before processing and reserve monthly/account caps", async () => {
   const { setGuideEnrollment } = await import("../src/guides/store");
   const { runGuideWorker } = await import("../src/guides/worker");
-  const conservativeReservation = 1_102_400; // Full 200k input + 4096 output, even for tiny reports.
+  const conservativeReservation = 1_120_000; // Full 200k input + 16,000 output, even for tiny reports.
   const local = await localStore();
   try {
     await seedUsers(local.pg, "bounded");
@@ -1696,14 +1696,14 @@ test("guide bounds reject whole oversize input before processing and reserve mon
       "UPDATE report_guides SET next_attempt_at=now() WHERE user_id='bounded'",
     );
     await runGuideWorker(local.db, provider, { maxReports: 1 });
-    expect(calls).toBe(1); // $2 account/day blocks another unknown $1.1024 request
+    expect(calls).toBe(1); // $2 account/day blocks another unknown $1.12 request
     expect(
       (
         await local.pg.query<{ amount_micros: number }>(
           "SELECT amount_micros FROM guide_spend",
         )
       ).rows,
-    ).toEqual([{ amount_micros: 1_102_400 }]);
+    ).toEqual([{ amount_micros: 1_120_000 }]);
   } finally {
     await local.dispose();
   }
@@ -1714,11 +1714,11 @@ test("guide billing records recognized usage up or down once and retains unknown
   const local = await localStore();
   try {
     await local.pg.exec(
-      "INSERT INTO guide_spend(id,account_key,amount_micros) VALUES ('up','fictional',1102400),('down','fictional',1102400),('unknown','fictional',1102400)",
+      "INSERT INTO guide_spend(id,account_key,amount_micros) VALUES ('up','fictional',1120000),('down','fictional',1120000),('unknown','fictional',1120000)",
     );
     // Usage beyond the activation bound still costs money even when no guide can activate.
     await settleGuideSpend(local.db, "up", {
-      usage: { input_tokens: 200001, output_tokens: 4096 },
+      usage: { input_tokens: 200001, output_tokens: 16000 },
     });
     await Promise.all([
       settleGuideSpend(local.db, "up", {
@@ -1740,9 +1740,9 @@ test("guide billing records recognized usage up or down once and retains unknown
         )
       ).rows,
     ).toEqual([
-      { id: "down", amount_micros: 3000, settled: true },
-      { id: "unknown", amount_micros: 1102400, settled: false },
-      { id: "up", amount_micros: 1102405, settled: true },
+      { id: "down", amount_micros: 2400, settled: true },
+      { id: "unknown", amount_micros: 1120000, settled: false },
+      { id: "up", amount_micros: 1120004, settled: true },
     ]);
   } finally {
     await local.dispose();

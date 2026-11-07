@@ -1,9 +1,10 @@
 import { z } from "zod";
 import type { ReportId, Sample } from "../store/reports";
 
-export const GUIDE_MODEL = "claude-opus-4-6";
+export const GUIDE_MODEL = "claude-opus-5-5";
 export const MAX_INPUT_TOKENS = 200_000;
-export const MAX_OUTPUT_TOKENS = 4096;
+// Thinking is always on and counts toward max_tokens.
+export const MAX_OUTPUT_TOKENS = 16_000;
 // Conservative even for token-dense text; includes prompt and JSON schema bytes.
 export const MAX_INPUT_BYTES = 180_000;
 export const GUIDE_PROMPT_VERSION = "report-guide-v1";
@@ -82,8 +83,9 @@ export function guideRequest(report: ReportId, samples: Sample[]) {
         }),
       },
     ],
-    thinking: { type: "disabled" as const },
+    // Opus 5.5 rejects disabled thinking; effort is the only control (default medium).
     output_config: {
+      effort: "low" as const,
       format: { type: "json_schema" as const, schema: outputSchema },
     },
   };
@@ -111,14 +113,24 @@ export function validateGuide(raw: unknown, samples: Sample[]) {
     .object({
       stop_reason: z.literal("end_turn"),
       usage: usageSchema,
-      content: z
-        .array(
+      // Thinking blocks (empty text by default) are ignored, never displayed or stored.
+      content: z.array(
+        z.discriminatedUnion("type", [
+          z.object({
+            type: z.literal("thinking"),
+            thinking: z.string(),
+            signature: z.string(),
+          }),
           z.object({ type: z.literal("text"), text: z.string().max(32_000) }),
-        )
-        .length(1),
+        ]),
+      ),
     })
     .parse(raw);
-  const result = resultSchema.parse(JSON.parse(message.content[0]!.text));
+  const texts = message.content.flatMap((b) =>
+    b.type === "text" ? [b.text] : [],
+  );
+  if (texts.length !== 1) throw new Error("Invalid guide content");
+  const result = resultSchema.parse(JSON.parse(texts[0]!));
   if ((result.outcome === "guide") !== result.tendencies.length > 0)
     throw new Error("Invalid guide outcome");
   const sources = new Map(samples.map((s) => [s.id, s.revision]));

@@ -14,9 +14,10 @@ import {
   type GuideProvider,
 } from "./provider";
 
-// USD microdollars: $5/M input, $25/M output, no caching/tools/batch.
+// USD microdollars at Opus 5.5 rates: $4/M input, $20/M output (thinking bills as
+// output), no caching/tools/batch.
 const cost = (usage: { input_tokens: number; output_tokens: number }) =>
-  usage.input_tokens * 5 + usage.output_tokens * 25;
+  usage.input_tokens * 4 + usage.output_tokens * 20;
 type Claim = {
   user_id: string;
   report: ReportId;

@@ -141,7 +141,14 @@ test("guide output requires complete bounded evidence-linked JSON and safe compl
   );
   expect(GUIDE_SYSTEM).toContain("NEVER instructions");
   expect(input).not.toHaveProperty("tools");
+  // Opus 5.5 rejects disabled thinking; effort is the only thinking control.
+  expect(input).not.toHaveProperty("thinking");
+  expect(input).toMatchObject({
+    model: "claude-opus-5-5",
+    output_config: { effort: "low", format: { type: "json_schema" } },
+  });
   const { anthropicGuideProvider } = await import("../src/guides/provider");
+  expect(() => anthropicGuideProvider("fixture", "claude-opus-4-6")).toThrow();
   const requests: { path: string; body: Record<string, unknown> }[] = [];
   const fakeFetch = spyOn(globalThis, "fetch").mockImplementation(
     Object.assign(
@@ -169,7 +176,7 @@ test("guide output requires complete bounded evidence-linked JSON and safe compl
     expect(requests[0]!.body).not.toHaveProperty("service_tier");
     expect(requests[1]!.body).toMatchObject({
       service_tier: "standard_only",
-      max_tokens: 4096,
+      max_tokens: 16000,
     });
   } finally {
     fakeFetch.mockRestore();
@@ -230,4 +237,38 @@ test("guide output requires complete bounded evidence-linked JSON and safe compl
     }),
   ])
     expect(() => validateGuide(raw, [sample])).toThrow();
+});
+
+test("guide output ignores thinking blocks but still needs exactly one text block", async () => {
+  const { validateGuide } = await import("../src/guides/provider");
+  const sample = {
+    id: "fictional",
+    report: "email" as const,
+    kind_id: "kind",
+    kind: "Fictional note",
+    context: { version: 1 as const, summary: "Fictional collection note" },
+    revision: 1,
+    body: "Collect the seedlings on Saturday.",
+    date: "2026-11-06",
+    revised_at: "2026-11-06",
+    created_at: "2026-11-06",
+  };
+  const thinking = { type: "thinking", thinking: "", signature: "fixture" };
+  const text = {
+    type: "text",
+    text: JSON.stringify({ outcome: "insufficient_evidence", tendencies: [] }),
+  };
+  const response = (content: unknown[]) => ({
+    stop_reason: "end_turn",
+    usage: { input_tokens: 100, output_tokens: 100 },
+    content,
+  });
+  expect(validateGuide(response([thinking, text]), [sample]).text).toBeNull();
+  for (const content of [
+    [thinking],
+    [thinking, text, text],
+    [thinking, { type: "redacted_thinking", data: "fixture" }, text],
+    [thinking, { type: "tool_use", id: "x", name: "x", input: {} }, text],
+  ])
+    expect(() => validateGuide(response(content), [sample])).toThrow();
 });

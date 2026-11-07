@@ -108,7 +108,7 @@ and apply atomically. Anchors resolve uniquely within active card bodies, never
 against generated text; overlapping edits fail. The source/report fences, receipt and
 replay, history, size and heading limits still apply; reservation is always zero. A
 report exceeding its bound refuses the entire save; source instructions are never
-truncated. There is no separate save allowance: the 10,000/day attempted-call limit
+truncated. There is no separate save allowance: the 10,000/day admitted-call limit
 bounds saves and reads alike; retained history has no cap (0030). A save runs in one
 transaction, takes only the account lock and reads `store_config` without locking it.
 

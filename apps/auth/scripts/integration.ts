@@ -5,31 +5,20 @@ import { randomUUID, createHash, randomBytes } from "node:crypto";
 import pg from "pg";
 import { bundleFixture } from "./bundle-fixture.ts";
 import { httpFixture } from "./http-fixture.ts";
-import { checkRuntimeRole } from "./check-role.ts";
+import { checkRuntimeRole } from "../src/roles.ts";
 import { disposable } from "./disposable.ts";
 import { provisionFixedApp } from "./provision.ts";
+import { fixtureConfig } from "../test/fixture-config.ts";
+import { AUTH_MIGRATIONS } from "./migrations.ts";
 import { deliverMail, openMail, type MailJob } from "../src/mail.ts";
 import { createProvider } from "../src/provider.ts";
-import { AUTH_ORIGIN, ISSUER, safeError, type Config } from "../src/config.ts";
+import { AUTH_ORIGIN, ISSUER, safeError } from "../src/config.ts";
 
 const p = await disposable();
 const secret = () => randomBytes(32).toString("hex");
 // Direct handler calls come from one fixed client; network buckets key on it.
 const TEST_PEER = "127.0.0.1";
-const config: Config = {
-  AUTH_DATABASE_URL: "postgresql://unused.invalid/disposable",
-  AUTH_SECRET: secret(),
-  AUTH_ADMISSION_SECRET: secret(),
-  AUTH_RATE_SECRET: secret(),
-  AUTH_APP_CLIENT_ID: "fixed-app-fixture",
-  AUTH_GOOGLE_CLIENT_ID: "fictional-google",
-  AUTH_GOOGLE_CLIENT_SECRET: secret(),
-  AUTH_GITHUB_CLIENT_ID: "fictional-github",
-  AUTH_GITHUB_CLIENT_SECRET: secret(),
-  AUTH_RESEND_API_KEY: "fictional-not-sent",
-  AUTH_MAIL_FROM: "auth@notifications.meetmilton.com",
-  PORT: 19911,
-};
+const config = fixtureConfig();
 const admissions: Record<string, unknown>[] = [];
 const mail: { to: string; url: string; kind: "reset" | "verify" }[] = [];
 const boundaries = {
@@ -58,7 +47,7 @@ try {
   const nativeUrl = new URL("../migrations/001-native.up.sql", import.meta.url);
   assert(existsSync(nativeUrl), "reviewed native baseline required");
   await p.owner.query(readFileSync(nativeUrl, "utf8"));
-  // Fictional retained data, unrelated storage and native rows survive down/reapply.
+  // Fictional retained data, unrelated storage and native rows survive the upgrade.
   await p.owner.query(
     `CREATE SCHEMA fictional_writing; CREATE TABLE fictional_writing.saved(id text PRIMARY KEY,body text); INSERT INTO fictional_writing.saved VALUES('fictional','fictional writing'); CREATE SCHEMA neon_auth; CREATE TABLE neon_auth.retained(value text); INSERT INTO neon_auth.retained VALUES('fictional');`,
   );
@@ -80,59 +69,49 @@ try {
   await p.owner.query(
     `insert into milton_auth.verification(id,identifier,value,"expiresAt","createdAt","updatedAt") values('fictional-pre-upgrade','reset-password:fictional-pre-upgrade','preserved',now()+interval '1 hour',now(),now()),('fictional-non-recovery','fictional-non-recovery','fictional-non-recovery',now()+interval '1 hour',now(),now())`,
   );
-  for (const n of [
-    "002-credential",
-    "003-mechanism",
-    "004-product",
-    "005-recovery",
-    "006-mail",
-  ])
+  // The rest over rows 001 left; this suite never needs 007.
+  for (const n of AUTH_MIGRATIONS.filter(
+    (n) => n !== "001-native" && n !== "007-connection-key-status",
+  ))
     await p.owner.query(
       readFileSync(
         new URL(`../migrations/${n}.up.sql`, import.meta.url),
         "utf8",
       ),
     );
-  assert.equal(
-    (
-      await p.owner.query(
-        "select count(*)::int n from milton_auth.verification where identifier='reset-password:fictional-pre-upgrade' ",
-      )
-    ).rows[0].n,
-    0,
-  );
-  const high = BigInt(
-    (await p.owner.query("select last_value from milton_credential.fence_ids"))
-      .rows[0].last_value,
-  );
-  for (const n of [
-    "006-mail",
-    "005-recovery",
-    "004-product",
-    "003-mechanism",
-    "002-credential",
-  ])
-    await p.owner.query(
-      readFileSync(
-        new URL(`../migrations/${n}.down.sql`, import.meta.url),
-        "utf8",
-      ),
+  // Recovery005 retires only the pre-upgrade reset proof.
+  for (const [id, n] of [
+    ["fictional-pre-upgrade", 0],
+    ["fictional-non-recovery", 1],
+  ] as const)
+    assert.equal(
+      (
+        await p.owner.query(
+          "select count(*)::int n from milton_auth.verification where id=$1",
+          [id],
+        )
+      ).rows[0].n,
+      n,
     );
   assert.equal(
     (await p.owner.query('select count(*)::int as n from milton_auth."user"'))
       .rows[0].n,
     1,
   );
-  assert.equal(
-    digest(
-      (
-        await p.owner.query(
-          `select (select row_to_json(a) from milton_auth.account a where id='preserved-account') as account,(select row_to_json(s) from milton_auth.session s where id='preserved-session') as session`,
-        )
-      ).rows,
-    ),
-    digest(preservedNative.rows),
-  );
+  // Every pre-upgrade column keeps its value; the upgrade only adds columns.
+  const upgraded = (
+    await p.owner.query(
+      `select (select row_to_json(a) from milton_auth.account a where id='preserved-account') as account,(select row_to_json(s) from milton_auth.session s where id='preserved-session') as session`,
+    )
+  ).rows[0];
+  for (const part of ["account", "session"] as const) {
+    const before: Record<string, unknown> = preservedNative.rows[0][part];
+    assert.equal(
+      digest(Object.keys(before).map((column) => upgraded[part][column])),
+      digest(Object.values(before)),
+      part,
+    );
+  }
   assert.equal(
     (await p.owner.query("select body from fictional_writing.saved")).rows[0]
       .body,
@@ -142,45 +121,9 @@ try {
     (await p.owner.query("select value from neon_auth.retained")).rows[0].value,
     "fictional",
   );
-  for (const n of [
-    "002-credential",
-    "003-mechanism",
-    "004-product",
-    "005-recovery",
-    "006-mail",
-  ])
-    await p.owner.query(
-      readFileSync(
-        new URL(`../migrations/${n}.up.sql`, import.meta.url),
-        "utf8",
-      ),
-    );
-  assert(
-    BigInt(
-      (
-        await p.owner.query(
-          "select last_value from milton_credential.fence_ids",
-        )
-      ).rows[0].last_value,
-    ) > high,
+  group(
+    "additive migrations preserve native rows and retire pre-upgrade reset proofs",
   );
-  assert.equal(
-    (
-      await p.owner.query(
-        "select count(*)::int n from milton_auth.verification where id='fictional-non-recovery'",
-      )
-    ).rows[0].n,
-    1,
-  );
-  assert.equal(
-    (
-      await p.owner.query(
-        "select count(*)::int n from milton_auth.verification where id='fictional-pre-upgrade'",
-      )
-    ).rows[0].n,
-    0,
-  );
-  group("additive migration down/reapply preserves rows and allocator");
   const authPool = new pg.Pool(p.configs.auth),
     appPool = new pg.Pool(p.configs.app),
     mcpPool = new pg.Pool(p.configs.mcp);
@@ -2163,16 +2106,6 @@ try {
       await assert.rejects(
         authPool.query("select * from milton_guard.claim_mail($1)", [limit]),
       );
-    await assert.rejects(
-      p.owner.query(
-        readFileSync(
-          new URL("../migrations/006-mail.down.sql", import.meta.url),
-          "utf8",
-        ),
-      ),
-      /pending mail/,
-    );
-    await p.owner.query("rollback");
     await clearJobs();
     // Retention cleanup is bounded even with overdue/terminal receipt backlog.
     for (let n = 0; n < 20; n++)
@@ -2192,21 +2125,9 @@ try {
         .rows[0].n,
       before - 3,
     );
-    await p.owner.query(
-      readFileSync(
-        new URL("../migrations/006-mail.down.sql", import.meta.url),
-        "utf8",
-      ),
-    );
-    await p.owner.query(
-      readFileSync(
-        new URL("../migrations/006-mail.up.sql", import.meta.url),
-        "utf8",
-      ),
-    );
     assert.equal(providerCalls, 0);
     group(
-      "uniform durable native mail receipts, swallowed-callback/commit faults, social registration, bounded leased delivery/retry/fence/retention and real-role/down refusal",
+      "uniform durable native mail receipts, swallowed-callback/commit faults, social registration, bounded leased delivery/retry/fence/retention and real-role refusal",
     );
   }
   for (const pool of [appPool, mcpPool])

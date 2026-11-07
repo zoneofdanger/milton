@@ -50,14 +50,6 @@ CREATE TABLE IF NOT EXISTS milton_app.lifecycle (
  created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS one_account_deletion ON milton_app.lifecycle(issuer,subject,incarnation) WHERE kind='delete';
--- Original metadata imported only by an owner after exact source verification.
--- A hash-only neon:subject deletion marker cannot be inverted or renamed.
-CREATE TABLE IF NOT EXISTS milton_app.legacy_mapping (
- legacy_hash text PRIMARY KEY CHECK(length(legacy_hash)=64),
- issuer text NOT NULL, subject text NOT NULL,
- user_id text, deleted boolean NOT NULL,
- CHECK(deleted = (user_id IS NULL)), UNIQUE(issuer,subject)
-);
 REVOKE ALL ON ALL TABLES IN SCHEMA milton_app FROM PUBLIC,milton_auth_runtime,milton_mcp_runtime;
 GRANT USAGE ON SCHEMA milton_app TO milton_app_runtime;
 GRANT SELECT,INSERT,DELETE ON milton_app.flow,milton_app.session TO milton_app_runtime;
@@ -65,6 +57,5 @@ GRANT SELECT,INSERT ON milton_app.admission,milton_app.trial_fingerprint,milton_
 GRANT DELETE ON milton_app.admission TO milton_app_runtime;
 GRANT SELECT,INSERT ON milton_app.lifecycle TO milton_app_runtime;
 GRANT UPDATE(progress) ON milton_app.lifecycle TO milton_app_runtime;
-GRANT SELECT ON milton_app.legacy_mapping TO milton_app_runtime;
 GRANT SELECT ON milton_app.eligibility_policy TO milton_app_runtime;
 COMMIT;

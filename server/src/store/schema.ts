@@ -198,21 +198,6 @@ export const connectionKeys = pgTable(
     ),
   ],
 );
-// One-way sha256("provider:subject") of each deleted sign-in identity. No longer
-// written or read: trial-eligibility fingerprints alone refuse a second trial.
-// Kept until a later migration, released after this code, drops it.
-export const deletedIdentities = pgTable(
-  "deleted_identities",
-  {
-    identityHash: text("identity_hash").primaryKey(),
-    deletedAt: timestamp("deleted_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-  },
-  (t) => [
-    check("deleted_identities_hash", sql`${t.identityHash} ~ '^[a-f0-9]{64}$'`),
-  ],
-);
 export const usageDaily = pgTable(
   "usage_daily",
   {

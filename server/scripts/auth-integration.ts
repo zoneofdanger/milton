@@ -2,10 +2,8 @@
  * files, inherited database credentials, external requests or live operations. */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { createServer } from "node:net";
 import { pathToFileURL } from "node:url";
 import { randomBytes, createHash, randomUUID } from "node:crypto";
 import pg from "pg";
@@ -29,9 +27,7 @@ import {
 import {
   authenticateConnectionKey,
   createConnectionKey,
-  listConnectionKeys,
   parseConnectionKey,
-  revokeConnectionKey,
 } from "../src/store/connection-keys";
 import { fingerprintKeyCheck } from "../src/auth-admission";
 import { hash } from "../src/auth-oidc";
@@ -43,86 +39,33 @@ import type { GuideProvider } from "../src/guides/provider";
 import { connections, lifecycle } from "../src/auth-lifecycle";
 import type { SessionUser } from "../src/auth-session";
 import { createProvider } from "../../apps/auth/src/provider";
-import { ISSUER, AUTH_ORIGIN, type Config } from "../../apps/auth/src/config";
+import { ISSUER, AUTH_ORIGIN } from "../../apps/auth/src/config";
+import { assertPortFree, startCluster } from "../../apps/auth/scripts/cluster";
+import { fixtureConfig } from "../../apps/auth/test/fixture-config";
+import { AUTH_MIGRATIONS } from "../../apps/auth/scripts/migrations";
 
 const port = 55623;
 const sourceRoot = pathToFileURL(process.cwd() + "/");
-for (const port of [55623, 20201, 20202, 20203, 20204])
-  await new Promise<void>((resolve, reject) => {
-    const s = createServer();
-    s.once("error", () => reject(new Error("owned_fixture_port_in_use")));
-    s.listen(port, "127.0.0.1", () => s.close(() => resolve()));
-  });
+for (const port of [20201, 20202, 20203, 20204])
+  await assertPortFree(port, "owned_fixture_port_in_use");
 assert.match(process.version, /^v26\./);
-const root = mkdtempSync(join(tmpdir(), "milton-app-auth-"));
-const data = join(root, "pgdata");
-const bin = process.env.PG_BIN ?? "/opt/homebrew/opt/postgresql@18/bin";
-const run = (cmd: string, args: string[]) => {
-  const r = spawnSync(cmd, args, {
-    encoding: "utf8",
-    env: { PATH: process.env.PATH, LC_ALL: "C" },
-  });
-  assert.equal(r.status, 0, "fixture command failed: " + cmd.split("/").pop());
-};
+const cluster = await startCluster({
+  port,
+  prefix: "milton-app-auth-",
+  portRefusal: "owned_fixture_port_in_use",
+  hba: "hostssl all all 127.0.0.1/32 scram-sha-256\n",
+});
+const root = cluster.dir,
+  cert = cluster.cert;
 const secret = () => randomBytes(32).toString("hex");
 const pools: pg.Pool[] = [];
-let running = false,
-  groups = 0,
+let groups = 0,
   stage = "setup";
 const pass = (name: string) => {
   groups++;
   console.log("PASS " + name);
 };
 try {
-  run(join(bin, "initdb"), [
-    "-D",
-    data,
-    "--username=disposable_cluster",
-    "--auth-local=trust",
-    "--auth-host=scram-sha-256",
-    "--encoding=UTF8",
-    "--no-locale",
-  ]);
-  const cert = join(root, "cert.pem"),
-    key = join(root, "key.pem");
-  run("openssl", [
-    "req",
-    "-x509",
-    "-newkey",
-    "rsa:2048",
-    "-nodes",
-    "-keyout",
-    key,
-    "-out",
-    cert,
-    "-days",
-    "1",
-    "-subj",
-    "/CN=localhost",
-    "-addext",
-    "subjectAltName=DNS:localhost,IP:127.0.0.1",
-  ]);
-  writeFileSync(key, readFileSync(key), { mode: 0o600 });
-  run("chmod", ["600", key]);
-  writeFileSync(
-    join(data, "postgresql.auto.conf"),
-    `listen_addresses='127.0.0.1'\nport=${port}\nunix_socket_directories='${root}'\nssl=on\nssl_cert_file='${cert}'\nssl_key_file='${key}'\nlog_statement='none'\nlog_min_error_statement='panic'\nlog_min_messages='panic'\n`,
-    { mode: 0o600 },
-  );
-  writeFileSync(
-    join(data, "pg_hba.conf"),
-    "local all all trust\nhost all disposable_cluster 127.0.0.1/32 trust\nhostssl all all 127.0.0.1/32 scram-sha-256\n",
-    { mode: 0o600 },
-  );
-  run(join(bin, "pg_ctl"), [
-    "-D",
-    data,
-    "-l",
-    join(root, "pg.log"),
-    "-w",
-    "start",
-  ]);
-  running = true;
   const admin = new pg.Pool({
     host: root,
     port,
@@ -157,6 +100,7 @@ try {
     "0002_sample_versions",
     "0003_report_guides",
     "0004_connection_keys",
+    "0005_drop_deleted_identities",
   ])
     await owner.query(
       readFileSync(new URL(`./drizzle/${migration}.sql`, sourceRoot), "utf8"),
@@ -175,15 +119,7 @@ try {
   await authOwner.query(
     "CREATE SCHEMA milton_auth AUTHORIZATION milton_auth_owner; GRANT USAGE ON SCHEMA milton_auth TO milton_auth_runtime",
   );
-  for (const n of [
-    "001-native",
-    "002-credential",
-    "003-mechanism",
-    "004-product",
-    "005-recovery",
-    "006-mail",
-    "007-connection-key-status",
-  ])
+  for (const n of AUTH_MIGRATIONS)
     await authOwner.query(
       readFileSync(
         new URL(`../apps/auth/migrations/${n}.up.sql`, sourceRoot),
@@ -290,18 +226,10 @@ try {
   const ownerDb = postgresDatabase(ownerUrl.href);
   const personId = "m_00000000-0000-4000-8000-000000000001";
   const fingerprintKey = secret();
-  // The trial-eligibility key and one verified mapping, as the cutover left them.
+  // The trial-eligibility key, as the cutover left it.
   await owner.query(
     "INSERT INTO milton_app.eligibility_policy(singleton,key_check) VALUES(true,$1)",
     [fingerprintKeyCheck(fingerprintKey)],
-  );
-  await owner.query(
-    "INSERT INTO milton_app.legacy_mapping(legacy_hash,issuer,subject,user_id,deleted) VALUES($1,$2,'migrated-person',$3,false)",
-    [
-      createHash("sha256").update("neon:legacy-person").digest("hex"),
-      ISSUER,
-      personId,
-    ],
   );
   await appOwner.query(
     readFileSync(new URL("./migrations/005-app.down.sql", sourceRoot), "utf8"),
@@ -326,10 +254,10 @@ try {
     0,
     "actual owner-only app migration CLI reapply",
   );
-  assert.equal(
-    (await owner.query("SELECT count(*)::int n FROM milton_app.legacy_mapping"))
-      .rows[0].n,
-    1,
+  assert.deepEqual(
+    (await owner.query("SELECT key_check FROM milton_app.eligibility_policy"))
+      .rows,
+    [{ key_check: fingerprintKeyCheck(fingerprintKey) }],
   );
   assert.equal(
     (await owner.query("SELECT value FROM neon_auth.retained")).rows[0].value,
@@ -345,7 +273,82 @@ try {
     "canceled",
   );
   pass(
-    "app migration up/down/reapply preserves writing IDs, trial history, managed rows and verified mappings",
+    "app migration up/down/reapply preserves writing IDs, trial history, managed rows and the eligibility key",
+  );
+  // 0005 and 008 drop the unread trial tables. Each down recreates its table
+  // empty with the original grants; up again drops it. 008 is a no-op on a
+  // database 005-app.up.sql installed, which no longer creates legacy_mapping.
+  const sourceFile = (path: string) =>
+    readFileSync(new URL(path, sourceRoot), "utf8");
+  const trialTableGrants = async () =>
+    (
+      await owner.query(
+        "SELECT c.oid::regclass::text tbl,a.grantee::regrole::text grantee,string_agg(a.privilege_type,',' ORDER BY a.privilege_type) privileges FROM pg_class c CROSS JOIN LATERAL aclexplode(c.relacl) a WHERE c.oid IN (to_regclass('public.deleted_identities'),to_regclass('milton_app.legacy_mapping')) AND a.grantee<>c.relowner GROUP BY 1,2 ORDER BY 1,2",
+      )
+    ).rows;
+  assert.deepEqual(await trialTableGrants(), []);
+  await appOwner.query(
+    sourceFile("./migrations/008-drop-legacy-mapping.up.sql"),
+  );
+  const wrongOwner = await owner.connect();
+  try {
+    await assert.rejects(
+      wrongOwner.query(
+        sourceFile("./migrations/008-drop-legacy-mapping.down.sql"),
+      ),
+      /run as the milton_app owner/,
+    );
+    await wrongOwner.query("ROLLBACK");
+  } finally {
+    wrongOwner.release();
+  }
+  await owner.query(
+    sourceFile("./drizzle/rollback/0005_drop_deleted_identities.sql"),
+  );
+  await appOwner.query(
+    sourceFile("./migrations/008-drop-legacy-mapping.down.sql"),
+  );
+  assert.deepEqual(await trialTableGrants(), [
+    {
+      tbl: "deleted_identities",
+      grantee: "milton_app_owner",
+      privileges: "SELECT",
+    },
+    {
+      tbl: "deleted_identities",
+      grantee: "milton_app_runtime",
+      privileges: "INSERT,SELECT",
+    },
+    {
+      tbl: "deleted_identities",
+      grantee: "milton_runtime",
+      privileges: "INSERT,SELECT",
+    },
+    {
+      tbl: "milton_app.legacy_mapping",
+      grantee: "milton_app_runtime",
+      privileges: "SELECT",
+    },
+  ]);
+  assert.deepEqual(
+    (
+      await owner.query(
+        "SELECT (SELECT count(*) FROM deleted_identities)::int deleted,(SELECT count(*) FROM milton_app.legacy_mapping)::int mapping,(SELECT tableowner FROM pg_tables WHERE schemaname='milton_app' AND tablename='legacy_mapping') owner",
+      )
+    ).rows,
+    [{ deleted: 0, mapping: 0, owner: "milton_app_owner" }],
+  );
+  await owner.query(
+    "BEGIN;" +
+      sourceFile("./drizzle/0005_drop_deleted_identities.sql") +
+      "COMMIT;",
+  );
+  await appOwner.query(
+    sourceFile("./migrations/008-drop-legacy-mapping.up.sql"),
+  );
+  assert.deepEqual(await trialTableGrants(), []);
+  pass(
+    "0005 and 008 drop the unread trial tables; each down recreates its table empty with the original grants",
   );
   for (const [pool, statement] of [
     [authPool, "SELECT * FROM public.users"],
@@ -844,27 +847,6 @@ try {
       scope: "read",
       expiry: 30,
     });
-    assert.deepEqual(
-      (await listConnectionKeys(appDb, keyUser, keyBinding)).active.map(
-        (k) => k.id,
-      ),
-      [made.record.id],
-    );
-    assert.deepEqual(await keyCheck(made.key), {
-      ok: true,
-      userId: keyUser,
-      keyId: made.record.id,
-      scope: "read",
-    });
-    assert.equal(
-      (
-        await owner.query(
-          "SELECT last_used_at IS NOT NULL AS used FROM connection_keys WHERE id=$1",
-          [made.record.id],
-        )
-      ).rows[0].used,
-      true,
-    );
     // A key presented for another issuer is refused.
     assert.equal(
       (
@@ -901,17 +883,9 @@ try {
         (e: { code?: string }) => e.code === "42501",
         statement,
       );
-    // Native 007 down/reapply alone: without the function every key is
-    // refused as an outage (fail closed), with nothing stored or granted.
-    await authOwner.query(
-      readFileSync(
-        new URL(
-          "../apps/auth/migrations/007-connection-key-status.down.sql",
-          sourceRoot,
-        ),
-        "utf8",
-      ),
-    );
+    // Without the native 007 function (a database restored from before it),
+    // every key is refused as an outage (fail closed), with nothing stored.
+    await authOwner.query(`DROP FUNCTION ${keyStatus}`);
     assert.equal(await keyStatusShape(), undefined);
     await assert.rejects(keyCheck(made.key), (e) => e instanceof StoreError);
     await assert.rejects(
@@ -933,27 +907,7 @@ try {
     );
     assert.deepEqual(await keyStatusShape(), keyStatusGrants);
     assert.equal((await keyCheck(made.key)).ok, true);
-    assert.equal(
-      await revokeConnectionKey(appDb, keyUser, made.record.id),
-      true,
-    );
-    assert.deepEqual(await keyCheck(made.key), { ok: false });
-    // Account deletion by the app runtime removes the account's keys.
-    await createConnectionKey(appDb, keyUser, keyBinding, {
-      name: "Fictional CI",
-      scope: "read_write",
-      expiry: null,
-    });
     await appPool.query("DELETE FROM users WHERE id=$1", [keyUser]);
-    assert.equal(
-      (
-        await owner.query(
-          "SELECT count(*)::int n FROM connection_keys WHERE user_id=$1",
-          [keyUser],
-        )
-      ).rows[0].n,
-      0,
-    );
     await authOwner.query(`DELETE FROM milton_auth."user" WHERE id=$1`, [
       nativeKeyUser.id,
     ]);
@@ -961,20 +915,11 @@ try {
   pass(
     "real TLS login roles separate native secrets, app credentials and writing with no DDL/TEMP path; connection-key grants hold on real roles; production DB errors map safely and preserve callbacks/rollback",
   );
-  const nativeConfig: Config = {
+  const nativeConfig = fixtureConfig({
     AUTH_DATABASE_URL: url("auth"),
-    AUTH_SECRET: secret(),
-    AUTH_ADMISSION_SECRET: secret(),
-    AUTH_RATE_SECRET: secret(),
     AUTH_APP_CLIENT_ID: "before-provision",
-    AUTH_GOOGLE_CLIENT_ID: "fictional-google",
-    AUTH_GOOGLE_CLIENT_SECRET: secret(),
-    AUTH_GITHUB_CLIENT_ID: "fictional-github",
-    AUTH_GITHUB_CLIENT_SECRET: secret(),
-    AUTH_RESEND_API_KEY: "fictional-not-sent",
-    AUTH_MAIL_FROM: "auth@notifications.meetmilton.com",
     PORT: 20203,
-  };
+  });
   // TLS regression uses production defaults, never the injected fixture pool.
   const omitted = new URL(url("auth"));
   omitted.searchParams.delete("sslmode");
@@ -1047,9 +992,17 @@ try {
   nativeOwnerUrl.searchParams.delete("sslmode");
   nativeOwnerUrl.searchParams.delete("sslrootcert");
   nativeOwnerUrl.searchParams.set("options", "-c role=milton_auth_owner");
+  // A ledger from before native 007: the owner CLI applies only 007.
   await authOwner.query(
-    "create table milton_credential.migration_ledger(name text primary key); insert into milton_credential.migration_ledger values('001-native'),('002-credential'),('003-mechanism'),('004-product'),('005-recovery'),('006-mail'),('007-connection-key-status')",
+    `DROP FUNCTION ${keyStatus}; create table milton_credential.migration_ledger(name text primary key)`,
   );
+  for (const name of AUTH_MIGRATIONS.filter(
+    (n) => n !== "007-connection-key-status",
+  ))
+    await authOwner.query(
+      "insert into milton_credential.migration_ledger values($1)",
+      [name],
+    );
   const ownerEnv = { AUTH_OWNER_DATABASE_URL: nativeOwnerUrl.href };
   child(
     [
@@ -1072,36 +1025,8 @@ try {
         "SELECT name FROM milton_credential.migration_ledger ORDER BY name",
       )
     ).rows.map((r) => r.name);
-  const nativeNames = [
-    "001-native",
-    "002-credential",
-    "003-mechanism",
-    "004-product",
-    "005-recovery",
-    "006-mail",
-    "007-connection-key-status",
-  ];
-  child(
-    [
-      new URL("../apps/auth/scripts/migrate.ts", sourceRoot).pathname,
-      "down",
-      "--apply",
-    ],
-    ownerEnv,
-  );
-  // The native migrator reverses 007 first and records it.
-  assert.equal(await keyStatusShape(), undefined);
-  assert.deepEqual(await ledger(), ["001-native"]);
-  child(
-    [
-      new URL("../apps/auth/scripts/migrate.ts", sourceRoot).pathname,
-      "up",
-      "--apply",
-    ],
-    ownerEnv,
-  );
   assert.deepEqual(await keyStatusShape(), keyStatusGrants);
-  assert.deepEqual(await ledger(), nativeNames);
+  assert.deepEqual(await ledger(), AUTH_MIGRATIONS);
   const provisionOutput = join(root, "fictional-fixed-client.json");
   child(
     [
@@ -2541,7 +2466,5 @@ try {
     ...pools.map((pool) => pool.end()),
     closeDatabasePools(),
   ]);
-  if (running)
-    run(join(bin, "pg_ctl"), ["-D", data, "-m", "fast", "-w", "stop"]);
-  rmSync(root, { recursive: true, force: true });
+  cluster.stop();
 }

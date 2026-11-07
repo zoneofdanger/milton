@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
 import type { StoreSession } from "./database";
 import { StoreError } from "./errors";
 
@@ -25,18 +25,27 @@ const ENDED = new Set([
   "paused",
 ]);
 
+/** A check read in the status statement's own row: `admit` sees its value
+ * and refuses before the status is decided. */
+export interface StatusGuard {
+  value: SQL;
+  admit(value: unknown): void;
+}
+
 export async function trialStatus(
   db: StoreSession,
   userId: string,
+  guard?: StatusGuard,
 ): Promise<TrialStatus> {
   const row = (
     await db.query<{
+      guard: unknown;
       enabled: boolean;
       status: string | null;
       trial_end: Date | string | null;
       now: Date | string;
       in_grace: boolean;
-    }>(sql`SELECT c.trials_enabled AS enabled, t.subscription_status AS status,
+    }>(sql`SELECT ${guard?.value ?? sql`NULL`} AS guard, c.trials_enabled AS enabled, t.subscription_status AS status,
     t.trial_end, clock_timestamp() AS now,
     coalesce(clock_timestamp() < t.current_period_start + interval '3 days',true) AS in_grace
     FROM store_config c LEFT JOIN trial_accounts t ON t.user_id=${userId}
@@ -44,6 +53,7 @@ export async function trialStatus(
   )[0];
   if (!row)
     throw new StoreError("configuration", "Account access is unavailable.");
+  guard?.admit(row.guard);
   const { status } = row;
   if (!row.enabled || !status)
     return { status: "early_access", reminder_stage: 0 };
@@ -92,8 +102,9 @@ export const trialEndingMessage = (endsAt: string, appOrigin: string) =>
 export async function assertTrialAccess(
   db: StoreSession,
   userId: string,
+  guard?: StatusGuard,
 ): Promise<TrialStatus> {
-  const status = await trialStatus(db, userId);
+  const status = await trialStatus(db, userId, guard);
   if (status.status === "expired") throw subscriptionRequired();
   return status;
 }

@@ -408,7 +408,6 @@ rehearsal below dispatches those requests in-process without DNS or external req
 bun --no-env-file server/scripts/check-auth-integration.ts
 bun run --cwd server check-types
 bun --no-env-file test server/test
-bun run --cwd server test:client
 ```
 
 The explicit rehearsal builds actual server/native product modules with Bun, executes
@@ -421,10 +420,9 @@ The combined rehearsal leaves zod external to avoid Bun's combined-bundle initia
 cycle; installed declared dependencies are required. Production bundle/container closure
 must also be checked independently.
 
-The optional interactive `test:local` uses the configured issuer and can reach a live
-provider; running it is a separate authorized action. Root global checks are types,
-`bun test` and `bun run format:check`; CI also runs this rehearsal and the apps/auth
-integration suite on every pull request. The release coordinator owns actual cutover.
+Root global checks are types, `bun test` and `bun run format:check`; CI also runs this
+rehearsal and the apps/auth integration suite on every pull request. The release
+coordinator owns actual cutover.
 
 ## Store, history, and limits
 

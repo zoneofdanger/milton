@@ -149,12 +149,24 @@ export function pageContext(
       );
     return form;
   };
+  // The signed-in person's active account, looked up once per request and
+  // shared by every part of the page that needs it.
+  let found:
+    { subject: string; account: Promise<VerifiedStoreAuth> } | undefined;
+  const account = (user: SessionUser) => {
+    if (found?.subject !== user.id)
+      found = {
+        subject: user.id,
+        account: lookupIdentityAccount(config, {
+          provider: config.issuer,
+          subject: user.id,
+        }),
+      };
+    return found.account;
+  };
   const renderMemos = async (signedInUser?: SessionUser) => {
     const user = signedInUser ?? (await signedIn());
-    const verified: VerifiedStoreAuth = await lookupIdentityAccount(config, {
-      provider: config.issuer,
-      subject: user.id,
-    });
+    const verified = await account(user);
     const store = await personStoreForCurrentRequest(config, verified);
     return memoPages(request, store, csrfField, user.email, {
       billing: !!config.billing,
@@ -165,10 +177,7 @@ export function pageContext(
   const accountBilling = async (user: SessionUser) => {
     if (!config.billing) return undefined;
     try {
-      const { userId } = await lookupIdentityAccount(config, {
-        provider: config.issuer,
-        subject: user.id,
-      });
+      const { userId } = await account(user);
       return billingItem(await accountTrialStatus(config, userId));
     } catch {
       return undefined;
@@ -189,6 +198,7 @@ export function pageContext(
     session,
     signedIn,
     readForm,
+    account,
     renderMemos,
     accountBilling,
   };

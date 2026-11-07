@@ -6,7 +6,6 @@ import {
   connectionKeysForAccount,
   EXPIRED_KEY_HISTORY,
   keyExpiries,
-  lookupIdentityAccount,
   MAX_ACTIVE_KEYS,
   StoreError,
   type ConnectionKey,
@@ -38,19 +37,12 @@ const expiry = (key: ConnectionKey) =>
 /** The signed-in person's keys, by their Milton account, bound to the
  * session's validated native identity, incarnation and generation. */
 export const accountKeys = async (ctx: PageContext, user: SessionUser) =>
-  connectionKeysForAccount(
-    ctx.config,
-    await lookupIdentityAccount(ctx.config, {
-      provider: ctx.config.issuer,
-      subject: user.id,
-    }),
-    {
-      issuer: ctx.config.issuer,
-      subject: user.id,
-      incarnation: user.incarnation,
-      generation: user.generation,
-    },
-  );
+  connectionKeysForAccount(ctx.config, await ctx.account(user), {
+    issuer: ctx.config.issuer,
+    subject: user.id,
+    incarnation: user.incarnation,
+    generation: user.generation,
+  });
 
 const keyItems = (keys: ConnectionKey[]) => (
   <ul class="assistant-list">

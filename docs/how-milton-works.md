@@ -117,6 +117,8 @@ Files: `server/src/store/compiled.ts`, `server/src/store/snapshot.ts`,
   view is not.
 - An assistant read is two queries (that statement and the trial gate) and opens no
   database connection; the web view's is one.
+- The web view reads no store limits and makes no account check of its own: its
+  account lookup and that statement each require an active account.
 
 ## Assembling documents
 

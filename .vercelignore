@@ -10,6 +10,8 @@
 /packages/*
 !/packages/theme
 /packages/theme/node_modules
+!/packages/forwarded-client
+/packages/forwarded-client/node_modules
 !/server
 /server/*
 !/server/package.json

@@ -18,6 +18,22 @@ The retired combined Vercel `milton-mcp` project, deployments, aliases, project
 secrets and firewall configuration were removed during the authorized hosting
 decommission on 2026-11-01. Hosting rollback now uses Cloud Run revisions.
 
+## Release record: overengineering sweep cleanup (2026-11-07)
+
+Source `e4fff90` (merge of agent/cleanup-sweep): deleted the dead assistant-disconnect path,
+the retired setup-quiz catalog (a `Baseline: ` rule is now refused outright), one-time cutover
+tooling, and the Neon serverless adapter. The web report now reads once per view, and the
+guide sentences are gone from the `get_report`/`list_reports` descriptions (1995→1627 and
+699→481 characters). About 1,400 lines net. The local three-service rehearsal had failed
+since the connection-key limiter commits (every key call shared one "unknown" source); it
+was not rerun at that release. `7ce5672` fixed the test, and the rehearsal passed 12/12.
+App/MCP `milton-*-sweep-e4fff90` at 19:16Z (image
+`sha256:fe5be304290048125320cef4fa65b5fbfb9912f5f2037ed80d80cc371b6d835b`); auth unchanged.
+Checks: types, 122 tests, format, contract test, build, rehearsal all 0; health 200 ×3; MCP
+unauthenticated and fake-key 401; signed-out report 403; 0 errors in a 5-minute watch. Not
+verified live: a signed-in report page view. Rollback: app/MCP `milton-*-rate-bc66f6a`. No
+schema change; the `assistant_disconnects` table remains, unused.
+
 ## Release record: per-client rate limits (2026-11-07)
 
 Source `bc66f6a` (9bd2a4f + bc66f6a, Astra REVISE then fixed). Auth rate limits had keyed on
@@ -380,8 +396,8 @@ references. Inspect revision readiness before selecting a recorded revision:
 gcloud run revisions list --service=milton-app --project=milton-510506 --region=us-east4
 ```
 
-Now serving (2026-11-07): app `milton-app-rate-bc66f6a` and MCP
-`milton-mcp-rate-bc66f6a` (source `bc66f6a`), and auth `milton-auth-00004-69s`. The
+Now serving (2026-11-07): app `milton-app-sweep-e4fff90` and MCP
+`milton-mcp-sweep-e4fff90` (source `e4fff90`), and auth `milton-auth-00004-69s`. The
 release records above give images, secret versions and rollback revisions.
 
 Current edit-mode release: image index

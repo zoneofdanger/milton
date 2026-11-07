@@ -130,31 +130,158 @@ test("startup role check retries connection failures only, within its budget", a
   expect(sleeps).toEqual([500, 1000, 2000, 4000, 4000]);
 });
 
-test("rate-limit network is the client the load balancer appended, never a leading entry", async () => {
+test("rate-limit network is forwardedClient's client, as a valid address", async () => {
   const { loadBalancerClient: client } = await import("../src/http.ts");
   const lb = "34.149.0.10";
   expect(client(`203.0.113.7, ${lb}`)).toBe("203.0.113.7");
-  expect(client(`198.51.100.9, ${lb}`)).toBe("198.51.100.9");
-  // A client cannot claim someone else's bucket with a leading entry.
-  expect(client(`198.51.100.9, 203.0.113.66, ${lb}`)).toBe("203.0.113.66");
   // IPv6 clients share a /64, as Better Auth's own limiter groups them.
   expect(client(`2001:db8:1:2::5, ${lb}`)).toBe("2001:db8:1:2::");
-  expect(client(`2001:DB8:1:2:aa::9, ${lb}`)).toBe("2001:db8:1:2::");
-  // IPv4-mapped IPv6 clients are their IPv4 address, never one shared /64.
-  for (const mapped of [
-    "::ffff:192.0.2.1",
-    "::FFFF:c000:201",
-    "0:0:0:0:0:ffff:192.0.2.1",
-  ])
-    expect(client(`${mapped}, ${lb}`)).toBe("192.0.2.1");
-  expect(client(`::ffff:198.51.100.2, ${lb}`)).toBe("198.51.100.2");
   // No well-formed pair: the caller keeps the socket peer.
-  for (const malformed of [
-    null,
-    "",
-    "203.0.113.7",
-    `nonsense, ${lb}`,
-    "203.0.113.7, x",
-  ])
-    expect(client(malformed)).toBeUndefined();
+  expect(client(null)).toBeUndefined();
+});
+
+describe("OAuth profile refusals before database access", () => {
+  // A pool that never connects: it records the network rate-limit query that
+  // every admitted request makes first, and refuses it.
+  const fixture = async () => {
+    const { createProvider } = await import("../src/provider.ts");
+    const { randomBytes } = await import("node:crypto");
+    const secret = () => randomBytes(32).toString("hex");
+    const queries: string[] = [];
+    const pool = {
+      on: () => pool,
+      query: async (text: string) => {
+        queries.push(text);
+        if (!text.includes("milton_guard.take_rate"))
+          throw new Error("fixture_database_refused");
+        return { rows: [{ allowed: false }] };
+      },
+      connect: async () => {
+        throw new Error("fixture_database_refused");
+      },
+    };
+    const { handler } = createProvider(
+      {
+        AUTH_DATABASE_URL: "postgresql://unused.invalid/fixture",
+        AUTH_SECRET: secret(),
+        AUTH_ADMISSION_SECRET: secret(),
+        AUTH_RATE_SECRET: secret(),
+        AUTH_APP_CLIENT_ID: "fixed-app-fixture",
+        AUTH_GOOGLE_CLIENT_ID: "fictional-google",
+        AUTH_GOOGLE_CLIENT_SECRET: secret(),
+        AUTH_GITHUB_CLIENT_ID: "fictional-github",
+        AUTH_GITHUB_CLIENT_SECRET: secret(),
+        AUTH_RESEND_API_KEY: "fictional-not-sent",
+        AUTH_MAIL_FROM: "auth@notifications.meetmilton.com",
+        PORT: 19911,
+      },
+      { pool: pool as unknown as import("pg").Pool },
+    );
+    const post = (path: string, init: RequestInit = {}) =>
+      handler(
+        new Request("https://auth.meetmilton.com/api/auth" + path, {
+          method: "POST",
+          ...init,
+        }),
+      );
+    const json = (body: unknown) => ({
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const form = (body: Record<string, string>, headers = {}) => ({
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        ...headers,
+      },
+      body: new URLSearchParams(body).toString(),
+    });
+    const refused = async (reply: Promise<Response>) => {
+      const r = await reply;
+      return [r.status, ((await r.json()) as { error: string }).error];
+    };
+    return { post, json, form, refused, queries };
+  };
+  const client = {
+    redirect_uris: ["https://client.example/callback"],
+    token_endpoint_auth_method: "none",
+  };
+
+  test("registration is public only: an authorized registration is refused", async () => {
+    const { post, json, refused, queries } = await fixture();
+    expect(
+      await refused(
+        post("/oauth2/register", {
+          ...json(client),
+          headers: {
+            "content-type": "application/json",
+            authorization: "Bearer fictional-initial-access-token",
+          },
+        }),
+      ),
+    ).toEqual([403, "public_registration_only"]);
+    expect(queries).toEqual([]);
+  });
+
+  test("DPoP, client assertions, request objects and JWT client auth are refused", async () => {
+    const { post, json, form, refused, queries } = await fixture();
+    for (const reply of [
+      post(
+        "/oauth2/token",
+        form({ grant_type: "refresh_token" }, { dpop: "fictional.dpop.proof" }),
+      ),
+      post(
+        "/oauth2/token",
+        form({ grant_type: "authorization_code", client_assertion: "x.y.z" }),
+      ),
+      post("/oauth2/token?request_uri=urn%3Aexample", form({})),
+      post(
+        "/oauth2/register",
+        json({ ...client, token_endpoint_auth_method: "private_key_jwt" }),
+      ),
+    ])
+      expect(await refused(reply)).toEqual([400, "unsupported_oauth_profile"]);
+    expect(queries).toEqual([]);
+  });
+
+  test("registration cannot claim consent skips, logout channels or key material", async () => {
+    const { post, json, refused, queries } = await fixture();
+    for (const extra of [
+      { skip_consent: true },
+      { backchannel_logout_uri: "https://client.example/logout" },
+      { jwks_uri: "https://client.example/jwks" },
+      { post_logout_redirect_uris: ["https://client.example/"] },
+    ])
+      expect(
+        await refused(post("/oauth2/register", json({ ...client, ...extra }))),
+      ).toEqual([400, "client_capability_refused"]);
+    expect(queries).toEqual([]);
+  });
+
+  test("only the app client may introspect, by form post without header or query credentials", async () => {
+    const { post, form, refused, queries } = await fixture();
+    const app = { client_id: "fixed-app-fixture", token: "fictional" };
+    for (const reply of [
+      post("/oauth2/introspect", form({ ...app, client_id: "other-client" })),
+      post(
+        "/oauth2/introspect",
+        form(app, { authorization: "Basic ZmljdGlvbmFsOng=" }),
+      ),
+      post("/oauth2/introspect", {
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(app),
+      }),
+      post("/oauth2/introspect?client_id=fixed-app-fixture", form(app)),
+    ])
+      expect(await refused(reply)).toEqual([
+        403,
+        "introspection_caller_refused",
+      ]);
+    expect(queries).toEqual([]);
+    // The app client's own form post passes these checks to the rate limit.
+    expect(await refused(post("/oauth2/introspect", form(app)))).toEqual([
+      429,
+      "rate_limited",
+    ]);
+    expect(queries).toHaveLength(1);
+  });
 });

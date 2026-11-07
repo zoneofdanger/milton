@@ -22,6 +22,7 @@
         "@better-auth/oauth-provider": "1.7.18",
         "@dotenvx/dotenvx": "2.38.2",
         "@hono/node-server": "2.1.5",
+        "@milton/forwarded-client": "workspace:*",
         "@milton/theme": "workspace:*",
         "better-auth": "1.7.18",
         "hono": "4.13.16",
@@ -50,6 +51,15 @@
         "typescript": "6.0.3",
       },
     },
+    "packages/forwarded-client": {
+      "name": "@milton/forwarded-client",
+      "version": "0.0.0",
+      "devDependencies": {
+        "@types/bun": "catalog:",
+        "@types/node": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
     "packages/theme": {
       "name": "@milton/theme",
       "version": "0.0.0",
@@ -65,6 +75,7 @@
       "dependencies": {
         "@dotenvx/dotenvx": "2.38.2",
         "@hono/node-server": "2.1.5",
+        "@milton/forwarded-client": "workspace:*",
         "@milton/theme": "workspace:*",
         "@modelcontextprotocol/server": "2.4.0",
         "drizzle-orm": "0.45.4",
@@ -337,6 +348,8 @@
     "@jridgewell/sourcemap-codec": ["@jridgewell/sourcemap-codec@1.6.0", "", {}, "sha512-T7jf+5zgsZHwNJ4lvQ7/aezbyk0nNX+zJVWpmHA7VYsEx7a7qr5Rg5IbtJFqkgze5Y2sruq1RUY8Q837Od7iFw=="],
 
     "@milton/auth": ["@milton/auth@workspace:apps/auth"],
+
+    "@milton/forwarded-client": ["@milton/forwarded-client@workspace:packages/forwarded-client"],
 
     "@milton/server": ["@milton/server@workspace:server"],
 

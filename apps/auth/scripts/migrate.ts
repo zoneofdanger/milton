@@ -9,6 +9,7 @@ const names = [
   "004-product",
   "005-recovery",
   "006-mail",
+  "007-connection-key-status",
 ];
 const direction = process.argv[2];
 if (

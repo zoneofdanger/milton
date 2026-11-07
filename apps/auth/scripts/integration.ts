@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { readFileSync, existsSync } from "node:fs";
 import { jwtVerify, createLocalJWKSet } from "jose";
 import { randomUUID, createHash, randomBytes } from "node:crypto";
@@ -181,6 +182,99 @@ try {
     0,
   );
   group("additive migration down/reapply preserves rows and allocator");
+  {
+    // The real migrator, killed at its ledger write after 007's work: the
+    // schema and the ledger must agree (both applied or neither).
+    const o = p.configs.owner!;
+    const ownerUrl = new URL(`postgresql://127.0.0.1:${o.port}/${o.database}`);
+    ownerUrl.username = String(o.user);
+    ownerUrl.password = String(o.password);
+    ownerUrl.searchParams.set("options", "-c role=milton_auth_owner");
+    const migrate = (direction: string) =>
+      new Promise<number | null>((resolve) =>
+        spawn(
+          process.execPath,
+          [
+            "--experimental-strip-types",
+            new URL("./migrate.ts", import.meta.url).pathname,
+            direction,
+            "--apply",
+          ],
+          {
+            env: {
+              PATH: process.env.PATH,
+              LC_ALL: "C",
+              NODE_EXTRA_CA_CERTS: p.caPath,
+              AUTH_OWNER_DATABASE_URL: ownerUrl.href,
+            },
+            stdio: "ignore",
+          },
+        ).on("exit", resolve),
+      );
+    const admin = new pg.Pool({
+      host: "127.0.0.1",
+      port: o.port,
+      user: "disposable_cluster",
+      database: o.database,
+      max: 2,
+    });
+    pools.push(admin);
+    const agreed = async () => {
+      const r = (
+        await admin.query(
+          "select to_regprocedure('milton_guard.connection_key_status(text,text,text)') is not null as schema, exists(select 1 from milton_credential.migration_ledger where name='007-connection-key-status') as ledger",
+        )
+      ).rows[0];
+      assert.equal(r.schema, r.ledger, "native 007 schema and ledger disagree");
+      return r.schema as boolean;
+    };
+    const killedAtLedgerWrite = async (direction: string) => {
+      const blocker = await admin.connect();
+      try {
+        // EXCLUSIVE blocks only the ledger insert/delete, not its reads.
+        await blocker.query(
+          "begin; lock table milton_credential.migration_ledger in exclusive mode",
+        );
+        const exit = migrate(direction);
+        let pid: number | undefined;
+        for (let n = 0; n < 400 && !pid; n++) {
+          pid = (
+            await admin.query(
+              "select pid from pg_stat_activity where usename='fictional_migrator' and wait_event_type='Lock' and query ~* '^(insert into|delete from) milton_credential.migration_ledger'",
+            )
+          ).rows[0]?.pid;
+          if (!pid) await new Promise((r) => setTimeout(r, 25));
+        }
+        assert(pid, `migrator ${direction} reached its ledger write`);
+        await admin.query("select pg_terminate_backend($1)", [pid]);
+        assert.notEqual(await exit, 0);
+      } finally {
+        await blocker.query("rollback");
+        blocker.release();
+      }
+    };
+    await p.owner.query(
+      "create table milton_credential.migration_ledger(name text primary key); insert into milton_credential.migration_ledger values('001-native'),('002-credential'),('003-mechanism'),('004-product'),('005-recovery'),('006-mail')",
+    );
+    await killedAtLedgerWrite("up");
+    assert.equal(await agreed(), false);
+    assert.equal(await migrate("up"), 0);
+    assert.equal(await agreed(), true);
+    await killedAtLedgerWrite("down");
+    assert.equal(await agreed(), true);
+    assert.equal(await migrate("up"), 0);
+    assert.equal(
+      (
+        await admin.query(
+          "select count(*)::int n from milton_credential.migration_ledger",
+        )
+      ).rows[0].n,
+      7,
+    );
+    group(
+      "native migrator killed at its ledger write leaves schema and ledger agreeing",
+    );
+  }
   const authPool = new pg.Pool(p.configs.auth),
     appPool = new pg.Pool(p.configs.app),
     mcpPool = new pg.Pool(p.configs.mcp);

@@ -66,6 +66,15 @@ untracked): `.agents/tmp/auth-cutover/` (`runbook.md`, `phase1-report.md`,
 - Rollback: the old `*-edit-00223ec` revisions are not compatible with this schema. Fix
   forward, or restore `snap-fancy-hat-b8j5ls14` per the runbook's rollback section.
 
+## Release record: auth startup retry (2026-11-07)
+
+`milton-auth-00003-ggx` at 09:15Z (auth image
+`sha256:941bd4cd197b4f0d5b51e4241259e283d57bc7c4e396e1ee1185620beeb3c726`, source `f1656b5`,
+same env 2 / key 1); the mail and maintenance jobs use the same image. Startup retries the
+role check on connection failures for about 15 s; refusals still fail immediately. Checks:
+health 200, Claude Code authorize 302, 5-minute watch clean. Rollback:
+`milton-auth-00002-jj7`.
+
 ## Release record: store refactor, part 2 (2026-11-07)
 
 App and MCP moved to `milton-app-store2-b64ec6a` / `milton-mcp-store2-b64ec6a` at 08:58:21Z

@@ -96,7 +96,8 @@ Files: `server/src/store/tools.ts`, `server/src/mcp.ts`.
 
 ## Reads
 
-Files: `server/src/store/compiled.ts`, `server/src/store/cards.ts`.
+Files: `server/src/store/compiled.ts`, `server/src/store/snapshot.ts`,
+`server/src/store/cards.ts`.
 
 - A read takes no lock and writes nothing: one statement loads the latest card versions,
   the active samples and whether the account is active, so a save shows whole or not at
@@ -133,8 +134,8 @@ Files: `server/src/store/reports.ts`, `server/src/store/compiled.ts`.
 ## Saves
 
 Files: `server/src/store/compiled.ts`, `server/src/store/save.ts`,
-`server/src/store/save-apply.ts`, `server/src/store/save-publish.ts`,
-`server/src/store/provenance.ts`, `server/src/exact-edits.ts`.
+`server/src/store/snapshot.ts`, `server/src/store/provenance.ts`,
+`server/src/exact-edits.ts`.
 
 A save runs in one transaction under the account lock: replay or gates, then
 validation, the writes, publishing and the receipt, which commits with its result or

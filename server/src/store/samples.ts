@@ -3,7 +3,7 @@ import { sql } from "drizzle-orm";
 import type { StoreSession } from "./database";
 import { StoreError } from "./errors";
 import { resolveReportId, type Sample } from "./reports";
-import type { SaveContext, Snapshot } from "./save-context";
+import type { SaveMemoInput } from "./compiled";
 
 /** Latest complete revisions, including retirement. Filter after choosing heads. */
 export const sampleHeads = (userId: string) => sql`
@@ -14,12 +14,12 @@ export const sampleHeads = (userId: string) => sql`
 /** The account lock and savepoint belong to runSave. All operations use its
  * original snapshot and either commit together with the rules or roll back. */
 export async function applySampleChanges(
-  ctx: SaveContext,
   tx: StoreSession,
-  current: Snapshot,
+  userId: string,
+  input: SaveMemoInput,
+  current: { samples: Sample[] },
   attribution: string,
 ) {
-  const { input, userId } = ctx;
   const conflict = (message: string): never => {
     throw new StoreError(
       "sample_conflict",

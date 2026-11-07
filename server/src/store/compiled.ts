@@ -1,36 +1,21 @@
-import { guidePresentation, type GuidePresentation } from "../guides/store";
-import { cardHeadsJson, cardFingerprint, type CardHead } from "./cards";
 import {
-  assembleDocuments,
   assembleExport,
   FILINGS,
   REPORT_IDS,
   type Documents,
   type ReportIntent,
-  type ReportId,
-  type Sample,
 } from "./reports";
-import { createHash } from "node:crypto";
-import { sql } from "drizzle-orm";
 import { z } from "zod";
-import type { StoreDatabase, StoreSession } from "./database";
+import type { StoreDatabase } from "./database";
 import { databaseFailure } from "./database";
 import { StoreError } from "./errors";
-import { readLimits, utf8Bytes } from "./index";
+import { utf8Bytes } from "./limits";
 import { assertTrialAccess } from "./trials";
-import type {
-  Receipt,
-  SaveContext,
-  SaveOutcome,
-  Snapshot,
-} from "./save-context";
-import { sampleHeads } from "./samples";
-import { runSave } from "./save";
+import { readSnapshot } from "./snapshot";
+import { runSave, type SaveOutcome } from "./save";
 import { oneLine, sampleContextInput } from "./sample-context";
 export { oneLine } from "./sample-context";
 
-const hash = (value: unknown) =>
-  createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const text = z
   .string()
   .max(131072)
@@ -187,147 +172,24 @@ export type CompiledReport = {
   is_empty: boolean;
 };
 export type { Documents, ReportDocument } from "./reports";
-export type { SaveOutcome } from "./save-context";
+export type { SaveOutcome } from "./save";
 
 export function compiledMemos(
   db: StoreDatabase,
   userId: string,
   actor?: { issuer: string; clientId: string },
 ) {
-  const unavailable = () =>
-    new StoreError(
-      "account_unavailable",
-      "This Milton account is unavailable.",
-      403,
-    );
-  async function lock(tx: StoreSession) {
-    if (
-      !(
-        await tx.query(
-          sql`SELECT id FROM users WHERE id=${userId} AND status='active' FOR UPDATE`,
-        )
-      ).length
-    )
-      throw unavailable();
-  }
-  // Every active sample revision fences writes, including samples outside eight.
-  const version = (documents: Documents, samples: Sample[]) =>
-    hash([
-      "documents",
-      userId,
-      documents.cover,
-      documents.reports.map((r) => [
-        r.id,
-        r.body,
-        samples
-          .filter((s) => s.report === r.id)
-          .map((s) => [s.id, s.kind_id, s.kind, s.revision]),
-      ]),
-    ]);
-  async function snapshot(
-    session: StoreSession,
-    intent?: ReportIntent,
-    includeGuides = false,
-  ): Promise<
-    Snapshot & {
-      served?: Documents;
-      guides: Partial<Record<ReportId, GuidePresentation>>;
-    }
-  > {
-    // One statement reads every head (including archive state) and the active
-    // samples, so a read without a transaction still sees a save whole or not
-    // at all. Never page this input.
-    const row = (
-      await session.query<{
-        open: boolean;
-        heads: CardHead[];
-        samples: Sample[];
-        kind_valid: boolean;
-        guides: Partial<Record<ReportId, GuidePresentation>>;
-      }>(
-        sql`SELECT EXISTS(SELECT 1 FROM users WHERE id=${userId} AND status='active') AS open,
-      (${cardHeadsJson(userId)}) AS heads,
-      (SELECT coalesce(json_agg(json_build_object('id',s.id,'report',s.report,'kind_id',s.kind_id,'kind',k.label,'context',s.context,'revision',s.version,'body',s.body,
-        'date',to_char(s.created_at AT TIME ZONE 'UTC','YYYY-MM-DD'),
-        'lexical_rank',${intent ? sql`ts_rank(s.search,replace(plainto_tsquery('english',${intent.situation})::text,'&','|')::tsquery)` : sql`0`},
-        'revised_at',to_char(s.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
-        'created_at',to_char(s.original_created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"')) ORDER BY s.created_at,s.id),'[]'::json)
-        FROM (${sampleHeads(userId)}) s JOIN sample_kinds k ON k.user_id=s.user_id AND k.id=s.kind_id
-        WHERE s.user_id=${userId} AND NOT s.retired) AS samples,
-      ${intent?.kind_id ? sql`EXISTS(SELECT 1 FROM sample_kinds WHERE user_id=${userId} AND id=${intent.kind_id} AND report=${intent.report})` : sql`true`} AS kind_valid,
-      (${includeGuides ? guidePresentation(userId) : sql`SELECT '{}'::json`}) AS guides`,
-      )
-    )[0]!;
-    if (!row.open) throw unavailable();
-    if (!row.kind_valid)
-      throw new StoreError(
-        "invalid_kind",
-        "kind_id must name an existing personal kind in this report. Nothing was read.",
-        400,
-      );
-    const { heads, samples } = row;
-    // Without samples the source fingerprint is the card fingerprint alone.
-    const fingerprint = samples.length
-      ? hash([
-          cardFingerprint(heads),
-          samples.map((s) => [s.id, s.kind_id, s.revision]),
-        ])
-      : cardFingerprint(heads);
-    const active = heads.filter((h) => !h.archived && h.body.trim());
-    const documents = assembleDocuments(active, samples);
-    return {
-      open: row.open,
-      guides: row.guides,
-      heads,
-      samples,
-      fingerprint,
-      active,
-      documents,
-      version: version(documents, samples),
-      ...(intent
-        ? {
-            served: assembleDocuments(active, samples, {
-              report: intent.report,
-              intent,
-            }),
-          }
-        : {}),
-    };
-  }
   /** A read assembles the documents from cards and samples. It takes no lock
    * and writes nothing: one statement for the snapshot, then the trial gate
    * for an assistant. The size cap bounds saves; a read serves what is on file. */
   async function read(intent?: ReportIntent, includeGuides = false) {
     try {
-      const current = await snapshot(db, intent, includeGuides);
+      const current = await readSnapshot(db, userId, intent, includeGuides);
       if (actor) await assertTrialAccess(db, userId);
       return current;
     } catch (error) {
       throw databaseFailure(error);
     }
-  }
-  async function receipt(tx: StoreSession, id: string) {
-    return (
-      await tx.query<Receipt>(
-        sql`SELECT input_hash,result_json FROM save_requests WHERE user_id=${userId} AND request_id=${id}`,
-      )
-    )[0];
-  }
-  async function checkSize(tx: StoreSession, documents: Documents) {
-    // Every source byte is preserved; only headings, when lines, sample context
-    // and quoting, and blank lines are added. Each body has its own cap.
-    const limits = await readLimits(tx);
-    const cap = Math.min(limits.report_body_bytes, 262144);
-    if (
-      utf8Bytes(documents.cover) > cap ||
-      documents.reports.some((r) => utf8Bytes(r.body) > cap) ||
-      utf8Bytes(documents.full) > 1572864
-    )
-      throw new StoreError(
-        "tps_body_limit",
-        "A report exceeds its size limit. Nothing was truncated or published.",
-        422,
-      );
   }
   return {
     /** The cover sheet and the five reports at one version. With an intent,
@@ -376,33 +238,7 @@ export function compiledMemos(
           "Save memos through your connected assistant.",
           403,
         );
-      const input = parsed.data;
-      const inputHash = hash(input);
-      // Every save is exact: the caller sends the bytes, and no model rewrites them.
-      const structured =
-        input.rules !== undefined ||
-        input.exact_edits !== undefined ||
-        input.moves !== undefined ||
-        input.sample !== undefined ||
-        input.sample_context !== undefined ||
-        input.retire_samples !== undefined;
-      const result = (
-        status: SaveOutcome["status"],
-        rest: Partial<SaveOutcome> = {},
-      ): SaveOutcome => ({ status, request_id: input.request_id, ...rest });
-      const ctx: SaveContext = {
-        db,
-        userId,
-        actor,
-        input,
-        inputHash,
-        result,
-        lock,
-        snapshot,
-        receipt,
-        checkSize,
-      };
-      return runSave(ctx, structured);
+      return runSave(db, userId, actor, parsed.data);
     },
   };
 }

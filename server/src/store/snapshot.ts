@@ -1,0 +1,139 @@
+import { createHash } from "node:crypto";
+import { sql } from "drizzle-orm";
+import { guidePresentation, type GuidePresentation } from "../guides/store";
+import { cardHeadsJson, cardFingerprint, type CardHead } from "./cards";
+import type { StoreSession } from "./database";
+import { StoreError } from "./errors";
+import {
+  assembleDocuments,
+  type Documents,
+  type ReportIntent,
+  type ReportId,
+  type Sample,
+} from "./reports";
+import { sampleHeads } from "./samples";
+
+// One account's cards and samples as reads and saves see them: the snapshot
+// statement, the account lock and the hash behind versions and fingerprints.
+export const hash = (value: unknown) =>
+  createHash("sha256").update(JSON.stringify(value)).digest("hex");
+
+const unavailable = () =>
+  new StoreError(
+    "account_unavailable",
+    "This Milton account is unavailable.",
+    403,
+  );
+
+/** What `readSnapshot` reads in one statement. */
+export type Snapshot = {
+  /** The account exists and is active. */
+  open: boolean;
+  heads: CardHead[];
+  samples: Sample[];
+  /** The source fingerprint: card heads and active sample IDs, kinds and revisions. */
+  fingerprint: string;
+  active: CardHead[];
+  documents: Documents;
+  /** The fingerprint of the assembled documents; every save fences on it. */
+  version: string;
+};
+
+/** The account row lock every writer takes; refuses a closed account. */
+export async function lockAccount(tx: StoreSession, userId: string) {
+  if (
+    !(
+      await tx.query(
+        sql`SELECT id FROM users WHERE id=${userId} AND status='active' FOR UPDATE`,
+      )
+    ).length
+  )
+    throw unavailable();
+}
+
+// Every active sample revision fences writes, including samples outside eight.
+const version = (userId: string, documents: Documents, samples: Sample[]) =>
+  hash([
+    "documents",
+    userId,
+    documents.cover,
+    documents.reports.map((r) => [
+      r.id,
+      r.body,
+      samples
+        .filter((s) => s.report === r.id)
+        .map((s) => [s.id, s.kind_id, s.kind, s.revision]),
+    ]),
+  ]);
+
+export async function readSnapshot(
+  session: StoreSession,
+  userId: string,
+  intent?: ReportIntent,
+  includeGuides = false,
+): Promise<
+  Snapshot & {
+    served?: Documents;
+    guides: Partial<Record<ReportId, GuidePresentation>>;
+  }
+> {
+  // One statement reads every head (including archive state) and the active
+  // samples, so a read without a transaction still sees a save whole or not
+  // at all. Never page this input.
+  const row = (
+    await session.query<{
+      open: boolean;
+      heads: CardHead[];
+      samples: Sample[];
+      kind_valid: boolean;
+      guides: Partial<Record<ReportId, GuidePresentation>>;
+    }>(
+      sql`SELECT EXISTS(SELECT 1 FROM users WHERE id=${userId} AND status='active') AS open,
+      (${cardHeadsJson(userId)}) AS heads,
+      (SELECT coalesce(json_agg(json_build_object('id',s.id,'report',s.report,'kind_id',s.kind_id,'kind',k.label,'context',s.context,'revision',s.version,'body',s.body,
+        'date',to_char(s.created_at AT TIME ZONE 'UTC','YYYY-MM-DD'),
+        'lexical_rank',${intent ? sql`ts_rank(s.search,replace(plainto_tsquery('english',${intent.situation})::text,'&','|')::tsquery)` : sql`0`},
+        'revised_at',to_char(s.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
+        'created_at',to_char(s.original_created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"')) ORDER BY s.created_at,s.id),'[]'::json)
+        FROM (${sampleHeads(userId)}) s JOIN sample_kinds k ON k.user_id=s.user_id AND k.id=s.kind_id
+        WHERE s.user_id=${userId} AND NOT s.retired) AS samples,
+      ${intent?.kind_id ? sql`EXISTS(SELECT 1 FROM sample_kinds WHERE user_id=${userId} AND id=${intent.kind_id} AND report=${intent.report})` : sql`true`} AS kind_valid,
+      (${includeGuides ? guidePresentation(userId) : sql`SELECT '{}'::json`}) AS guides`,
+    )
+  )[0]!;
+  if (!row.open) throw unavailable();
+  if (!row.kind_valid)
+    throw new StoreError(
+      "invalid_kind",
+      "kind_id must name an existing personal kind in this report. Nothing was read.",
+      400,
+    );
+  const { heads, samples } = row;
+  // Without samples the source fingerprint is the card fingerprint alone.
+  const fingerprint = samples.length
+    ? hash([
+        cardFingerprint(heads),
+        samples.map((s) => [s.id, s.kind_id, s.revision]),
+      ])
+    : cardFingerprint(heads);
+  const active = heads.filter((h) => !h.archived && h.body.trim());
+  const documents = assembleDocuments(active, samples);
+  return {
+    open: row.open,
+    guides: row.guides,
+    heads,
+    samples,
+    fingerprint,
+    active,
+    documents,
+    version: version(userId, documents, samples),
+    ...(intent
+      ? {
+          served: assembleDocuments(active, samples, {
+            report: intent.report,
+            intent,
+          }),
+        }
+      : {}),
+  };
+}

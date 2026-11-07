@@ -60,7 +60,7 @@ Files: `server/src/handler.ts`, `server/src/token.ts`, `server/src/mcp.ts`,
   MCP spec's rule that servers validate Origin.
 - JOSE checks EdDSA at+jwt against the exact configured issuer and MCP audience; native's fixed implicit UserInfo audience is allowed only with openid, and JWKS keys cache for 10 minutes.
 - Tokens require matching client_id/azp, supported scopes and original binding/incarnation/generation; ID/session JWTs and confirmation/DPoP are refused.
-- Every call checks live immutable native binding status; invalid/inactive is 401, real status/key outage is 503, with no stale-positive fallback.
+- Every call checks live immutable native binding status, in the statement that looks up the account; invalid/inactive is 401, real status/key outage is 503, with no stale-positive fallback, and a bad binding refuses before scope and scope before the account.
 - All three reads require milton:read; create_memo requires read+write, including direct calls. Read grants list three tools; write grants list four.
 - Read-only setup explains reconnecting for saves; scope never establishes approval of memo text.
 - A bad token gets a 401 that points the client to the sign-in metadata.

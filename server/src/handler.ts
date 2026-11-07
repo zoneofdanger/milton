@@ -28,7 +28,7 @@ import {
   type ToolCall,
 } from "./mcp-outcomes";
 import { storeResult } from "./mcp-tools";
-import { bindingActive } from "./auth-authority";
+import { bindingStatus, checkBinding, unavailable } from "./auth-authority";
 
 const incomingTool = z.object({
   method: z.literal("tools/call"),
@@ -311,23 +311,32 @@ export function createMiltonHandler(
         announcedAs = `${auth.userId}\nconnection_key\n${key.keyId}`;
       } else {
         const identity = await verify(authorization);
-        await bindingActive(config, identity);
         const scopes = identity.scope.split(" ");
-        if (
-          !scopes.includes("milton:read") ||
-          (call.success &&
-            call.data.params.name === "create_memo" &&
-            !scopes.includes("milton:write"))
-        )
-          throw new AuthError(
-            "insufficient_scope",
-            "Reconnect this assistant with the permission this action needs.",
-            403,
-          );
-        auth = await lookupIdentityAccount(config, {
-          provider: identity.issuer,
-          subject: identity.subject,
-        });
+        // One statement reads the native binding and the account; refusals
+        // keep their order: binding (401), scope (403), then account (403).
+        // A failed statement is an auth outage (503).
+        auth = await lookupIdentityAccount(
+          config,
+          { provider: identity.issuer, subject: identity.subject },
+          {
+            value: bindingStatus(config, identity),
+            admit(status) {
+              checkBinding(status, identity);
+              if (
+                !scopes.includes("milton:read") ||
+                (call.success &&
+                  call.data.params.name === "create_memo" &&
+                  !scopes.includes("milton:write"))
+              )
+                throw new AuthError(
+                  "insufficient_scope",
+                  "Reconnect this assistant with the permission this action needs.",
+                  403,
+                );
+            },
+            outage: unavailable,
+          },
+        );
         write = scopes.includes("milton:write");
         assistant = { issuer: identity.issuer, clientId: identity.clientId };
         announcedAs = `${auth.userId}\n${identity.clientId}`;

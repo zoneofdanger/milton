@@ -33,27 +33,20 @@ export async function appActive(config: RuntimeConfig, a: Authority) {
     throw unavailable();
   }
 }
-export async function bindingActive(
-  config: StoreBindings & { resource: string },
-  a: {
-    subject: string;
-    clientId: string;
-    scope: string;
-    binding: string;
-    incarnation: string;
-    generation: string;
-  },
-) {
-  let status: unknown;
-  try {
-    status = (
-      await database(config).query<{ status: unknown }>(
-        sql`SELECT milton_guard.binding_status(${a.binding},${a.subject},${a.clientId},ARRAY(SELECT jsonb_array_elements_text(${JSON.stringify(a.scope.split(" "))}::jsonb)),ARRAY[${config.resource}]::text[]) AS status`,
-      )
-    )[0]?.status;
-  } catch {
-    throw unavailable();
-  }
+type BindingClaims = {
+  subject: string;
+  clientId: string;
+  scope: string;
+  binding: string;
+  incarnation: string;
+  generation: string;
+};
+/** The SQL expression for a token's live native binding status. */
+export const bindingStatus = (config: { resource: string }, a: BindingClaims) =>
+  sql`milton_guard.binding_status(${a.binding},${a.subject},${a.clientId},ARRAY(SELECT jsonb_array_elements_text(${JSON.stringify(a.scope.split(" "))}::jsonb)),ARRAY[${config.resource}]::text[])`;
+/** Refuses with invalid_token unless `status` is the token's own binding,
+ * incarnation and generation. */
+export function checkBinding(status: unknown, a: BindingClaims) {
   const parsed = z
     .object({
       reference: bounded,
@@ -68,6 +61,22 @@ export async function bindingActive(
     parsed.data.miltonSecurityGeneration !== a.generation
   )
     throw invalid();
+}
+export async function bindingActive(
+  config: StoreBindings & { resource: string },
+  a: BindingClaims,
+) {
+  let status: unknown;
+  try {
+    status = (
+      await database(config).query<{ status: unknown }>(
+        sql`SELECT ${bindingStatus(config, a)} AS status`,
+      )
+    )[0]?.status;
+  } catch {
+    throw unavailable();
+  }
+  checkBinding(status, a);
 }
 export async function securityStatus(
   config: RuntimeConfig,

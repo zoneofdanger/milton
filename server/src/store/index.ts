@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { sql } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
 import {
   databaseFailure,
   mappedDatabase,
@@ -186,18 +186,43 @@ export interface VerifiedStoreAuth {
   readonly [verifiedStoreIdentity]: true;
 }
 
+/** A check read in the identity lookup's own statement: `admit` sees its
+ * value and throws the caller's refusal before the account is checked, and a
+ * failed statement is the caller's `outage`. */
+export interface IdentityGuard {
+  value: SQL;
+  admit(value: unknown): void;
+  outage(): Error;
+}
+
 /** Looks up the active account for a sign-in identity. */
 export async function lookupIdentityAccount(
   bindings: StoreBindings,
   identity: Pick<VerifiedIdentity, "provider" | "subject">,
+  guard?: IdentityGuard,
 ): Promise<VerifiedStoreAuth> {
   const { provider, subject } = parseIdentity(identity);
-  const row = (
-    await database(bindings).query<{ id: string }>(sql`
+  const account = sql`
         SELECT u.id FROM identities i JOIN users u ON u.id=i.user_id
-        WHERE i.provider=${provider} AND i.subject=${subject} AND u.status='active'`)
-  )[0];
-  if (!row)
+        WHERE i.provider=${provider} AND i.subject=${subject} AND u.status='active'`;
+  let row: { id: string | null } | undefined;
+  if (!guard)
+    row = (await database(bindings).query<{ id: string }>(account))[0];
+  else {
+    let guarded: { guard: unknown; id: string | null } | undefined;
+    try {
+      guarded = (
+        await database(bindings).query<{ guard: unknown; id: string | null }>(
+          sql`SELECT ${guard.value} AS guard, (${account}) AS id`,
+        )
+      )[0];
+    } catch {
+      throw guard.outage();
+    }
+    guard.admit(guarded?.guard);
+    row = guarded;
+  }
+  if (!row?.id)
     throw new StoreError(
       "account_unavailable",
       "Sign in to Milton before connecting your assistant.",

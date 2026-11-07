@@ -19,6 +19,14 @@ import { sampleHeads } from "./samples";
 export const hash = (value: unknown) =>
   createHash("sha256").update(JSON.stringify(value)).digest("hex");
 
+/** The refusal for an intent whose kind_id is not the account's in that report. */
+export const invalidKind = () =>
+  new StoreError(
+    "invalid_kind",
+    "kind_id must name an existing personal kind in this report. Nothing was read.",
+    400,
+  );
+
 /** What `readSnapshot` reads in one statement. */
 export type Snapshot = {
   /** The account exists and is active. */
@@ -84,12 +92,7 @@ export async function readSnapshot(
     )
   )[0]!;
   if (!row.open) throw accountUnavailable();
-  if (!row.kind_valid)
-    throw new StoreError(
-      "invalid_kind",
-      "kind_id must name an existing personal kind in this report. Nothing was read.",
-      400,
-    );
+  if (!row.kind_valid) throw invalidKind();
   const { heads, samples } = row;
   // Without samples the source fingerprint is the card fingerprint alone.
   const fingerprint = samples.length

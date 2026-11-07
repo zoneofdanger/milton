@@ -38,6 +38,7 @@ import {
   type SaveOutcome,
 } from "./compiled";
 import type { ReportIntent } from "./reports";
+import { invalidKind } from "./snapshot";
 import { parseLimits, readLimits } from "./limits";
 import {
   authenticateConnectionKey,
@@ -326,7 +327,12 @@ export interface TenantStore {
     intent?: ReportIntent,
   ): Promise<Documents & { version: string }>;
   saveMemo(input: SaveMemoInput): Promise<SaveOutcome>;
-  chargeToolCall(): Promise<CallAllowance>;
+  /** Counts one admitted call, on `session` (a save's own transaction) or
+   * alone; with an intent naming a kind, only when that kind is the account's. */
+  chargeToolCall(
+    session?: StoreSession,
+    intent?: ReportIntent,
+  ): Promise<CallAllowance>;
 }
 
 /** An account's store, refused once the account is not active. */
@@ -343,7 +349,14 @@ export async function storeForCurrentRequest(
 
 /** The store for an `auth` this request just looked up, which required an
  * active account; built without a query. Every tool call's charge and every
- * read and save check the account again. */
+ * read and save check the account again.
+ *
+ * A call is charged only once it is admitted: access, scope and limits were
+ * checked before the store was built and the SDK validated the input before
+ * the tool ran; each read and save then checks the trial gate, and the charge
+ * comes next, right before the tool's own work (the snapshot read, or the
+ * save's decision under its account lock). Any refusal before it counts
+ * nothing. */
 export function tenantStore(
   bindings: StoreBindings & { appOrigin: string },
   auth: AssistantAuth,
@@ -355,10 +368,27 @@ export function tenantStore(
   const db = database(bindings);
   // The trial status the latest read's gate admitted, for that call's notice.
   let gated: TrialStatus | undefined;
-  const compiled = compiledMemos(db, userId, assistant, (status) => {
-    gated = status;
-  });
-  return {
+  // Through the returned store, so a fixture can stand in for the charge.
+  const admit = async (session: StoreSession, intent?: ReportIntent) => {
+    const allowance = await store.chargeToolCall(session, intent);
+    if (!allowance.allowed)
+      throw new StoreError(
+        "rate_limited",
+        "The daily tool-call allowance is used.",
+        429,
+        { limit: allowance.limit, retry_at_ms: allowance.retry_at_ms },
+      );
+  };
+  const compiled = compiledMemos(
+    db,
+    userId,
+    assistant,
+    (status) => {
+      gated = status;
+    },
+    admit,
+  );
+  const store: TenantStore = {
     appOrigin: bindings.appOrigin,
     trialNotice: async () => {
       const status = gated;
@@ -376,31 +406,42 @@ export function tenantStore(
     readTpsReport: compiled.getTpsReport,
     readDocuments: compiled.readDocuments,
     saveMemo: compiled.saveMemo,
-    /** One statement, so one implicit transaction and one round trip. It
-     * takes the account row lock the deletion and every writer take, held
-     * until the statement commits: a deletion that holds it first leaves no
-     * active row (the charge refuses and counts nothing); one that comes
-     * second waits and then sees, and cascades, the counted call. The limit
-     * is the one this request's access statement read and validated. */
-    async chargeToolCall() {
+    /** One statement, so one round trip, in its own implicit transaction or
+     * the save's. It takes the account row lock the deletion and every writer
+     * take, held until that transaction commits: a deletion that holds it
+     * first leaves no active row (the charge refuses and counts nothing); one
+     * that comes second waits and then sees, and cascades, the counted call.
+     * The conditional increment is one row update, so concurrent charges
+     * never both take the last unit. The limit is the one this request's
+     * access statement read and validated. An unknown kind_id counts nothing
+     * and is refused as the read would refuse it. */
+    async chargeToolCall(session = db, intent) {
       const row = (
-        await db.query<{ day: string; open: boolean; charged: boolean }>(
+        await session.query<{
+          day: string;
+          open: boolean;
+          kind_valid: boolean;
+          charged: boolean;
+        }>(
           sql`WITH account AS (
             SELECT id FROM users WHERE id=${userId} AND status='active' FOR UPDATE),
           today AS (SELECT (clock_timestamp() AT TIME ZONE 'UTC')::date AS day),
+          kind AS (SELECT ${intent?.kind_id ? sql`EXISTS(SELECT 1 FROM sample_kinds WHERE user_id=${userId} AND id=${intent.kind_id} AND report=${intent.report})` : sql`true`} AS valid),
           charged AS (
             INSERT INTO usage_daily (user_id,day_utc,tool_calls)
-            SELECT account.id, today.day, 1 FROM account, today
+            SELECT account.id, today.day, 1 FROM account, today, kind WHERE kind.valid
             ON CONFLICT (user_id,day_utc) DO UPDATE SET tool_calls = usage_daily.tool_calls + 1
             WHERE usage_daily.tool_calls < ${limits.daily_calls}
             RETURNING tool_calls)
           SELECT today.day::text AS day,
             EXISTS(SELECT 1 FROM account) AS open,
+            (SELECT valid FROM kind) AS kind_valid,
             EXISTS(SELECT 1 FROM charged) AS charged
           FROM today`,
         )
       )[0]!;
       if (!row.open) throw accountUnavailable();
+      if (!row.kind_valid) throw invalidKind();
       return row.charged
         ? { allowed: true as const }
         : {
@@ -410,6 +451,7 @@ export function tenantStore(
           };
     },
   };
+  return store;
 }
 
 // The web app reads with the person's own session: no assistant, so no saves and

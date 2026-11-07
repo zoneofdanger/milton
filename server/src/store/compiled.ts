@@ -1,5 +1,5 @@
 import { assembleExport, type Documents, type ReportIntent } from "./reports";
-import type { StoreDatabase } from "./database";
+import type { StoreDatabase, StoreSession } from "./database";
 import { databaseFailure } from "./database";
 import { StoreError } from "./errors";
 import { assertTrialAccess, type TrialStatus } from "./trials";
@@ -25,18 +25,22 @@ export function compiledMemos(
   actor?: { issuer: string; clientId: string },
   /** Sees the trial status each assistant read's gate admitted. */
   gated?: (status: TrialStatus) => void,
+  /** Charges an admitted assistant call, on the given session, or refuses it;
+   * runs after every gate and before the work. */
+  admit?: (session: StoreSession, intent?: ReportIntent) => Promise<void>,
 ) {
   /** A read assembles the documents from cards and samples. It takes no lock
-   * and writes nothing: one statement for the snapshot, then the trial gate
-   * for an assistant. The size cap bounds saves; a read serves what is on file. */
+   * and writes only its charge: for an assistant the trial gate, then the
+   * charge, then one statement for the snapshot. The size cap bounds saves; a
+   * read serves what is on file. */
   async function read(intent?: ReportIntent, includeGuides = false) {
     try {
-      const current = await readSnapshot(db, userId, intent, includeGuides);
       if (actor) {
         const status = await assertTrialAccess(db, userId);
         gated?.(status);
       }
-      return current;
+      await admit?.(db, intent);
+      return await readSnapshot(db, userId, intent, includeGuides);
     } catch (error) {
       throw databaseFailure(error);
     }
@@ -88,7 +92,7 @@ export function compiledMemos(
           "Save memos through your connected assistant.",
           403,
         );
-      return runSave(db, userId, actor, parsed.data);
+      return runSave(db, userId, actor, parsed.data, admit);
     },
   };
 }

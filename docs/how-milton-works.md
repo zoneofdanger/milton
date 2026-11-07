@@ -83,11 +83,17 @@ Files: `server/src/handler.ts`, `server/src/token.ts`, `server/src/mcp.ts`,
   carries `notifications/tools/list_changed` ahead of its result, as does every
   `get_report` refused for a missing intent, so clients holding tool schemas from before
   a release refresh them; the announced set is per process and in memory.
-- Each `tools/call` increments a daily counter before running, and a call over the limit
-  returns `rate_limited` with a reset time. The request's access statement reads the
-  store limits, and invalid limits refuse the request before anything is counted; the
-  charge is then one statement under the account lock: a deletion holding it first makes
-  the call refuse as `account_unavailable`; one that comes second sees the counted call.
+- A `tools/call` is charged to a daily counter only once it is admitted: after access,
+  scope and the store limits (the request's access statement), the input schema, the
+  `get_report` intent and `kind_id`, and the trial and billing gate, and right before the
+  tool's own work (the snapshot read, or a save's decision under its account lock). Every
+  refusal before that, `subscription_required` included, counts nothing. A save is
+  charged inside its transaction, so it counts once exactly when it records an outcome
+  (`saved`, `unchanged`, `conflict` or `failed`); replaying that receipt counts nothing
+  and works over the limit. A call over the limit returns `rate_limited` with a reset
+  time. The charge is one conditional increment under the account lock, so two calls
+  never both take the last unit: a deletion holding the lock first makes the call refuse
+  as `account_unavailable`; one that comes second sees the counted call.
 - Each call logs the tool, outcome, time, and an error code from a fixed list, never
   text or identity.
 - The tool name is read early, so calls refused before dispatch are still logged.

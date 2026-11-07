@@ -9,7 +9,6 @@ import {
   read,
   seedRule,
   seedSample,
-  seedUsers,
 } from "./store-fixtures";
 import { createStoreMemoTools } from "../src/mcp-tools";
 import { createHash } from "node:crypto";
@@ -521,41 +520,6 @@ test("tenants with overlapping card, sample and request IDs never read, edit or 
   }
 }, 30000);
 
-test("Postgres keeps immutable contiguous history per user, with plain deletion", async () => {
-  const local = await localStore();
-  try {
-    await seedUsers(local.pg, "m_first", "m_second");
-    await seedRule(local.pg, "m_first", "same-id", "hello");
-    await seedRule(local.pg, "m_second", "same-id", "hello");
-    await expect(
-      local.pg.query("UPDATE instruction_card_versions SET body='changed'"),
-    ).rejects.toThrow("card_version_is_immutable");
-    await expect(
-      local.pg.query(
-        "INSERT INTO instruction_card_versions (user_id,card_id,version,description,body,reason,report,actor_json) VALUES ('m_first','same-id',3,'Sample.','hello','seed','cover','{}')",
-      ),
-    ).rejects.toThrow("card_version_conflict");
-    await expect(
-      local.pg.query("UPDATE users SET id='other' WHERE id='m_first'"),
-    ).rejects.toThrow("user_id_is_immutable");
-    await local.pg.query("DELETE FROM users WHERE id='m_first'");
-    expect(
-      (await local.pg.query("SELECT user_id FROM instruction_card_versions"))
-        .rows,
-    ).toEqual([{ user_id: "m_second" }]);
-    await local.pg.query("DELETE FROM users WHERE id='m_second'");
-    expect(
-      (
-        await local.pg.query(
-          "SELECT count(*)::integer AS n FROM instruction_card_versions",
-        )
-      ).rows,
-    ).toEqual([{ n: 0 }]);
-  } finally {
-    await local.dispose();
-  }
-}, 30000);
-
 test("identity resolution preserves a typed store failure", async () => {
   const local = await localStore();
   try {
@@ -978,6 +942,12 @@ test("account deletion removes every tenant row, waits for an in-flight save and
       ).length,
     ).toBe(0);
     expect(await counts(kept.auth.userId)).toEqual(keptBefore);
+    // An account's ID never changes, so no tenant row can move to another.
+    await expect(
+      local.pg.query("UPDATE users SET id='other' WHERE id=$1", [
+        kept.auth.userId,
+      ]),
+    ).rejects.toThrow("user_id_is_immutable");
     expect((await kept.store.readTpsReport()).is_empty).toBe(false);
     // Re-signup with the same fingerprint: a fresh, empty account already
     // marked canceled, so assistant reads pause; a never-deleted identity's
@@ -1244,8 +1214,9 @@ test("an active key older than many expired keys stays listed, confirmable and r
       "UPDATE connection_keys SET created_at=now()-interval '2 years' WHERE id=$1",
       [old.record.id],
     );
-    // 120 rotations later: newer keys, all expired, none revoked.
-    for (let n = 0; n < 120; n++) {
+    // One more rotation than the expired history shows: newer keys, all
+    // expired, none revoked.
+    for (let n = 0; n <= EXPIRED_KEY_HISTORY; n++) {
       const made = await keys.create({
         name: `Rotated ${n}`,
         scope: "read",

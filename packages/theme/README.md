@@ -54,15 +54,17 @@ The fonts in `public/fonts` are self-hosted, with their upstream licenses:
 - `jetbrains-mono-regular.woff2`: JetBrains Mono, upright 400; display headings,
   report titles, brand, labels and code. `--font-display` and `--font-mono` share
   this one file. `--font-display-weight` avoids synthesizing a heavier display face.
+- `jetbrains-mono-latin.woff2`: a Latin subset of that file with identical glyphs;
+  see below.
 
 Geist source: https://fonts.gstatic.com/s/geist/v5/gyByhwUxId8gMEwcGFWNOITd.woff2
 Their SIL Open Font Licenses are included beside the files. JetBrains source:
 https://raw.githubusercontent.com/JetBrains/JetBrainsMono/master/fonts/webfonts/JetBrainsMono-Regular.woff2
 
-The app serves this full JetBrains Mono master. The site serves a Latin subset,
-`apps/site/fonts/jetbrains-mono-latin.woff2`, which its Astro config copies over the
-same `/fonts/jetbrains-mono-regular.woff2` path, so the CSS, the preload and the
-display behavior are unchanged. The subset keeps Latin-1, Latin Extended-A/B and
+The app serves this full JetBrains Mono master. `jetbrains-mono-latin.woff2` is a
+Latin subset of it, kept here so every build copies it. Only the site uses it today:
+its Astro config copies it over the site's `/fonts/jetbrains-mono-regular.woff2`,
+so the CSS, the preload and the display behavior are unchanged. The subset keeps Latin-1, Latin Extended-A/B and
 Additional (including Vietnamese), IPA, spacing modifiers and combining marks,
 general punctuation, super/subscripts, currency and letterlike symbols, plus the
 basic arrows `←`–`↙`, `− ∕ ∙ ∞ ≈ ≠ ≤ ≥` and `✓ ✕ ✗`. It keeps every OpenType
@@ -78,7 +80,7 @@ pyftsubset packages/theme/public/fonts/jetbrains-mono-regular.woff2 \
   --unicodes="U+0000-036F,U+1E00-1EFF,U+2000-206F,U+2070-209F,U+20A0-20CF,U+2100-214F,U+2190-2199,U+2212,U+2215,U+2219,U+221E,U+2248,U+2260,U+2264-2265,U+2713,U+2715,U+2717,U+FEFF,U+FFFD" \
   --layout-features='*' --name-IDs='*' --name-languages='*' --name-legacy \
   --notdef-outline --glyph-names --flavor=woff2 \
-  --output-file=apps/site/fonts/jetbrains-mono-latin.woff2
+  --output-file=packages/theme/public/fonts/jetbrains-mono-latin.woff2
 ```
 
 Both active faces use `font-display: optional`: if a font arrives too late,

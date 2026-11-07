@@ -393,7 +393,7 @@ Files: `server/drizzle/`, `server/src/store/schema.ts`, `server/src/store/databa
 - The runtime role can read and lock the `store_config` row but cannot change its settings.
 - PostgreSQL connection, query, transaction-control and close failures become store errors: known triggers and constraints get clean coded responses, unknown failures log only class/code, and callback errors survive rollback/close unchanged.
 - The store opens only a database named `milton`, over TLS.
-- Runtime queries borrow bounded direct PostgreSQL TLS connections from one process pool per URL (at most 40, waiting at most 5 s for one); a connection idle over 30 s by the wall clock, or whose last command, BEGIN, COMMIT or ROLLBACK failed, is closed instead of reused; transactions keep one connection with lock and statement timeouts; app/MCP close the pools on SIGTERM after in-flight requests, and the guide job when it ends.
+- Runtime queries borrow bounded direct PostgreSQL TLS connections from one process pool per URL (at most 40, waiting at most 5 s for one); a connection idle over 30 s by the wall clock, whose last command, BEGIN, COMMIT or ROLLBACK failed, or with a query or transaction unfinished when its operation ends, is closed instead of reused, and that operation's later calls refuse; transactions keep one connection with lock and statement timeouts; app/MCP close the pools on SIGTERM after in-flight requests, and the guide job when it ends.
 
 ## Static site
 

@@ -598,6 +598,36 @@ try {
         pooled,
         "a connection idle past the bound is not reused",
       );
+      // A callback that rejects with its transaction still open.
+      let opened!: () => void,
+        resume!: () => void,
+        openPid = 0;
+      const open = new Promise<void>((resolve) => (opened = resolve));
+      const held = new Promise<void>((resolve) => (resume = resolve));
+      let leftover: Promise<unknown> | undefined;
+      const early = new Error("Fictional early failure.");
+      await assert.rejects(
+        timed.withConnection(async (connection) => {
+          leftover = connection.transaction(async (tx) => {
+            openPid = (
+              await tx.query<{ pid: number }>(sql`SELECT pg_backend_pid() pid`)
+            )[0]!.pid;
+            opened();
+            await held;
+            return tx.query(sql`SELECT 1`);
+          });
+          await open;
+          throw early;
+        }),
+        (error) => error === early,
+      );
+      assert.notEqual(
+        await backend(),
+        openPid,
+        "a connection with an open transaction is not reused",
+      );
+      resume();
+      await assert.rejects(leftover!, unavailable);
       assert.deepEqual(logs, []);
     } finally {
       console.error = originalError;

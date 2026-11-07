@@ -83,14 +83,25 @@ export function postgresDatabase(
     } catch (error) {
       throw databaseFailure(error);
     }
-    // Reused only when its last command succeeded and no BEGIN, COMMIT or
-    // ROLLBACK failed: an error inside a transaction is fine after its ROLLBACK.
+    // Reused only when its last command succeeded, no BEGIN, COMMIT or ROLLBACK
+    // failed (an error inside a transaction is fine after its ROLLBACK), and no
+    // query or transaction is still unfinished when `work` settles.
     let lastFailed = false,
-      broken = false;
+      broken = false,
+      released = false,
+      running = 0,
+      open = 0;
     const run = async <Row extends Record<string, unknown>>(
       text: string,
       params?: unknown[],
     ) => {
+      // Once released, the client may belong to another borrower.
+      if (released)
+        throw new StoreError(
+          "store_unavailable",
+          "The memo store is unavailable. Try again.",
+        );
+      running++;
       try {
         const result = await client.query<Row>(text, params);
         lastFailed = false;
@@ -98,6 +109,8 @@ export function postgresDatabase(
       } catch (error) {
         lastFailed = true;
         throw error;
+      } finally {
+        running--;
       }
     };
     const control = async (command: string) => {
@@ -118,26 +131,31 @@ export function postgresDatabase(
         }
       },
       async transaction(work) {
+        open++;
         try {
-          await control("BEGIN");
-        } catch (error) {
-          throw databaseFailure(error);
-        }
-        let callbackCompleted = false;
-        try {
-          const result = await work(session);
-          callbackCompleted = true;
-          await control("COMMIT");
-          return result;
-        } catch (error) {
           try {
-            await control("ROLLBACK");
-          } catch (rollbackError) {
-            databaseFailure(rollbackError);
+            await control("BEGIN");
+          } catch (error) {
+            throw databaseFailure(error);
           }
-          // Query failures are already mapped; callback rejections keep identity.
-          if (!callbackCompleted) throw error;
-          throw databaseFailure(error);
+          let callbackCompleted = false;
+          try {
+            const result = await work(session);
+            callbackCompleted = true;
+            await control("COMMIT");
+            return result;
+          } catch (error) {
+            try {
+              await control("ROLLBACK");
+            } catch (rollbackError) {
+              databaseFailure(rollbackError);
+            }
+            // Query failures are already mapped; callback rejections keep identity.
+            if (!callbackCompleted) throw error;
+            throw databaseFailure(error);
+          }
+        } finally {
+          open--;
         }
       },
       withConnection: (work) => work(session),
@@ -145,7 +163,8 @@ export function postgresDatabase(
     try {
       return await work(session);
     } finally {
-      const reusable = !lastFailed && !broken;
+      released = true;
+      const reusable = !lastFailed && !broken && running === 0 && open === 0;
       if (reusable) releasedAt.set(client, now());
       client.release(!reusable);
     }

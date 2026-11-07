@@ -10,7 +10,7 @@ landed and the item is still open), `blocked: <why or #id>`. A bolded headline o
 or fewer states the task; one item is one landing. **A section heading and its preamble are
 shared context for every item beneath it.**
 
-**next-id: 29.** Ids are never reused, so this counter survives deleting the newest item.
+**next-id: 30.** Ids are never reused, so this counter survives deleting the newest item.
 
 ## MVP
 
@@ -63,6 +63,19 @@ reports, memos) and plain text on security screens and anything an assistant rea
       apart (found in the 2026-11-07 cutover rehearsal). Give each refusal a stable code that
       safeError prints, without secrets. Also make provision.ts's "output outside the
       repository" check resolve the real repository root rather than only its own checkout.
+
+- [ ] #29 (server, med) **Set query timeouts on the runtime database roles.** Reported
+      2026-11-07 by milton-ux, not yet confirmed: through Neon's pooler (PgBouncer, transaction
+      mode) the connect-time `statement_timeout` (20 s) and `lock_timeout` (10 s) that
+      `postgresDatabase` passes in server/src/store/database.ts (and the auth service's 5 s in
+      apps/auth/src/provider.ts) never reach the server; `SHOW` returns 0 for both and no role
+      sets them. Only the client-side 20 s `query_timeout` and the in-transaction `SET LOCAL`s
+      (store/index.ts) apply. ⚠ billing.tsx relies on the 10 s lock_timeout to answer 503. First
+      confirm with `SHOW` as each runtime role through the pooler host. Then add a migration that
+      runs `ALTER ROLE … SET` for each login role the app, MCP, guide job and auth service use
+      (server/scripts/check-runtime-role.ts names them), with values matching the code. Rehearse
+      on a throwaway branch per server/deploy/README.md. A role setting reaches only new
+      sessions, so check it after the release.
 
 ## From the audit of 2026-11-02 (`.agents/tmp/audit/report.md`)
 

@@ -465,8 +465,8 @@ Retained history has no cap.
 The website shows the current cover sheet and reports, escapes their text and serves no browser JavaScript.
 It displays one bullet per complete active instruction card, preserving internal
 line breaks and conditions and dropping one stored leading `- ` as assembly does,
-from one read per page view. Report
-pages preload the shared Geist and JetBrains Mono fonts; the theme uses
+from one read per page view. Every
+page preloads the shared Geist and JetBrains Mono fonts; the theme uses
 `font-display: optional` to avoid a late font swap.
 `/download` returns the cover rules and every non-empty report, including all active
 approved samples, as `TPS.md`. Old memo/history/recovery

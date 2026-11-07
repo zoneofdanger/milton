@@ -1,7 +1,9 @@
 import { runtimeConfig } from "../src/config";
 import { createMiltonApp } from "../src/index";
 import { loadEnvironment } from "../src/environment";
-import { localAsset } from "../src/assets";
+import { fileURLToPath } from "node:url";
+import { versionAssets } from "@milton/theme/assets";
+import { localAsset, PUBLIC_ASSETS, reloadAssets } from "../src/assets";
 import { build } from "vite";
 import assets from "../vite.config";
 
@@ -15,6 +17,18 @@ await build({
   ...assets,
   configFile: false,
   build: { ...assets.build, watch: {} },
+  plugins: [
+    {
+      name: "milton-version-assets",
+      closeBundle() {
+        versionAssets(
+          fileURLToPath(new URL("../public/", import.meta.url)),
+          PUBLIC_ASSETS,
+        );
+        reloadAssets();
+      },
+    },
+  ],
 });
 const server = Bun.serve({
   hostname: "127.0.0.1",

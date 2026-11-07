@@ -43,7 +43,7 @@ Files: `server/src/index.ts`, `server/src/cloud-app.ts`, `server/src/http.ts`,
 - `GET /health` returns ok.
 - `/.well-known/oauth-protected-resource` publishes the resource and its auth issuer.
 - Any other path on the MCP host redirects to the app host with a 308.
-- Static files are served from a fixed list of five, never arbitrary paths.
+- Static files are served from a fixed list of five, never arbitrary paths. A URL whose `?v=` matches the bytes' build hash caches for a year as immutable; any other URL revalidates by ETag; CSS and SVG go out brotli or gzip per Accept-Encoding.
 - Errors that escape the routes show browsers a "PC LOAD LETTER" page, and everything else
   gets a JSON 503.
 - Error logs hold only the location, class name, and code, never messages or tokens.
@@ -242,6 +242,7 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
 `server/scripts/backfill-subscriptions.ts`, `packages/forwarded-client/`.
 
 - Native auth hosts verified password/email, Google/GitHub, consent and account security; own form destinations and direct native URL-encoded browser form POST redirects (including logout confirmation) share an escaped fresh-document Continue navigation under strict same-origin form policy; direct GET, JSON/fetch and machine calls retain native redirects, and finalized native/static/refusal responses use strict-origin referrers (origin only, no paths/queries/proofs, suppressed on HTTPS downgrade) so same-origin form POSTs retain Origin while missing/null/foreign Origins stay refused; responses retain their security headers and native cookies; app never handles passwords or native cookies.
+- Auth's CSS, favicon and fonts keep every security header but cache like the app's assets (immutable at the versioned URL, otherwise no-cache); every other auth response stays no-store.
 - App uses maintained code/S256 OIDC with shared SQL one-use state/nonce/verifier, exact callback, signature/issuer/audience/subject and matching UserInfo/opaque-token proof.
 - Identity-only app sessions last at most one absolute hour and never outlive their native opaque token; renewal starts a new SSO flow with no refresh/offline scope.
 - App cookies are host-only Secure/HttpOnly/SameSite=Lax over HTTPS; every use checks the original nonempty sid, immutable binding, incarnation and generation against native SQL.
@@ -277,7 +278,7 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
 Files: `server/src/pages.tsx`, `server/src/memo-pages.tsx`, `server/src/auth.tsx`,
 `server/src/auth-session.tsx`, `server/src/auth-assistants.tsx`.
 
-- Pages run no scripts, under a strict CSP, and are not cached.
+- Pages run no scripts, under a strict CSP, and are not cached; they link content-versioned assets and preload both theme fonts.
 - A page route that fails shows "Unable to continue" at the error's status, with a link back
   where one applies.
 - An unknown error there reads as a 503 and is logged.
@@ -431,7 +432,7 @@ Files: `packages/theme/`, `server/scripts/`, `.github/workflows/checks.yml`.
 - `check-local` is an explicitly invoked interactive configured-issuer check; the isolated check-auth-integration builds actual product modules under Node26/PG18 and mocks only external boundaries.
 - `check-runtime-role` audits selected NOINHERIT app/MCP roles, ownership, DDL/TEMP, native/app credential/function boundaries and the role's own 20 s statement / 10 s lock timeouts.
 - `probe-forms` confirms a signed-out form post passes CSRF.
-- `build.ts` builds the CSS with Vite and bundles the Cloud Run entry with Bun.
+- `build.ts` builds the CSS with Vite, versions the public assets by content hash, and bundles the Cloud Run entry with Bun.
 - `dev.ts` serves the app on loopback and rebuilds the CSS on change.
 - CI runs types, tests, formatting, and both integration suites on PostgreSQL 18, holds no secrets, and does not deploy.
 

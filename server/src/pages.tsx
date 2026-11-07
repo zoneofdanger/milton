@@ -1,7 +1,8 @@
 /** @jsxImportSource hono/jsx */
 import { AuthError } from "./token";
 import { isLoopback } from "./config";
-import { faviconLinks, folderMark } from "@milton/theme/brand";
+import { faviconLinksFor, folderMark } from "@milton/theme/brand";
+import { assetUrl } from "./assets";
 import type { Child } from "hono/jsx";
 import { raw } from "hono/html";
 import type { TrialStatus } from "./store/trials";
@@ -90,6 +91,13 @@ function accountMenu({ csrf, email, billing }: Account) {
   );
 }
 
+// Every page uses both faces (Geist body, JetBrains Mono headings); preloading
+// them lets them arrive before first paint under font-display: optional.
+const pageFonts = [
+  "/fonts/geist-latin-variable.woff2",
+  "/fonts/jetbrains-mono-regular.woff2",
+];
+
 /**
  * One shell for every page. A sheet page (the cover sheet) brings its own
  * title; every other page gets an h1 and a readable-width body.
@@ -107,8 +115,17 @@ export function page(
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width,initial-scale=1" />
         <title>{title} · Milton</title>
-        {raw(faviconLinks)}
-        <link rel="stylesheet" href="/milton.css" />
+        {raw(faviconLinksFor(assetUrl))}
+        {pageFonts.map((font) => (
+          <link
+            rel="preload"
+            href={assetUrl(font)}
+            as="font"
+            type="font/woff2"
+            crossorigin="anonymous"
+          />
+        ))}
+        <link rel="stylesheet" href={assetUrl("/milton.css")} />
         {head}
       </head>
       <body>

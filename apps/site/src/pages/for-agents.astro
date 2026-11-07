@@ -69,6 +69,44 @@ import SiteLayout from "../layouts/SiteLayout.astro";
       </ul>
     </section>
 
+    <section aria-labelledby="headless">
+      <h2 id="headless">Headless and background agents</h2>
+      <p>
+        Agents with no browser, such as scheduled tasks, cloud agents and CI
+        jobs, can’t complete OAuth sign-in. The person creates a connection key
+        on the app’s Connected assistants page and gives it to the agent, which
+        sends it as <code>Authorization: Bearer &lt;key&gt;</code>. The key is
+        shown once.
+      </p>
+      <ul class="instruction-list">
+        <li>
+          Claude Code:{" "}
+          <code>
+            claude mcp add --transport http milton
+            https://mcp.meetmilton.com/mcp --header "Authorization: Bearer
+            &lt;key&gt;"
+          </code>
+        </li>
+        <li>
+          Codex: in <code>~/.codex/config.toml</code>, under{" "}
+          <code>[mcp_servers.milton]</code>, set <code>url</code> to the server
+          above and <code>bearer_token_env_var</code> to the name of an
+          environment variable holding the key.
+        </li>
+        <li>
+          Cursor: in <code>mcp.json</code>, give the Milton server a{" "}
+          <code>headers</code> entry of{" "}
+          <code>"Authorization": "Bearer $&#123;env:MILTON_KEY&#125;"</code>.
+        </li>
+      </ul>
+      <p>
+        Treat a key like a password. Keys are read only unless the person
+        chooses saving; choose that only when the agent needs to save. Revoke
+        keys that are no longer used. A revoked or expired key is refused on its
+        next request.
+      </p>
+    </section>
+
     <section aria-labelledby="approval">
       <h2 id="approval">Approval and export</h2>
       <p>

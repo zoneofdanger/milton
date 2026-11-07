@@ -328,7 +328,7 @@ async function billingRoute(ctx: PageContext): Promise<Response> {
     config,
     (
       await lookupIdentityAccount(config, {
-        provider: "neon",
+        provider: config.issuer,
         subject: user.id,
       })
     ).userId,

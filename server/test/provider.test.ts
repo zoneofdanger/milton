@@ -26,26 +26,43 @@ test("resource tokens require an EdDSA signature, exact issuer, audience and acc
     aud: [resource, issuer + "/oauth2/userinfo"],
     sub: "neon-fixture",
     client_id: "fixture-client",
-    scope: "openid",
+    azp: "fixture-client",
+    scope: "openid milton:read",
+    miltonBinding: "binding-fixture",
+    miltonIdentityIncarnation: "f:1",
+    miltonSecurityGeneration: "f:2",
     exp: Math.floor(Date.now() / 1000) + 3600,
+    iat: Math.floor(Date.now() / 1000),
+    jti: "fictional-token-id",
   };
   const sign = (payload: JWTPayload, signingKey = key.privateKey) =>
     new SignJWT(payload)
-      .setProtectedHeader({ alg: "EdDSA", kid: "first" })
+      .setProtectedHeader({ alg: "EdDSA", kid: "first", typ: "at+jwt" })
       .sign(signingKey);
   expect(await verify(`Bearer ${await sign(claims)}`)).toMatchObject({
     subject: "neon-fixture",
     clientId: "fixture-client",
-    scope: "openid",
+    scope: "openid milton:read",
   });
   for (const payload of [
     { ...claims, iss: "https://other-branch.example/auth" },
     { ...claims, aud: "https://other.example/mcp" },
+    { ...claims, aud: [resource, "https://other.example/mcp"] },
+    { ...claims, aud: [resource, resource] },
     { ...claims, aud: undefined },
     { ...claims, exp: 1 },
     { ...claims, exp: undefined },
+    { ...claims, iat: undefined },
+    { ...claims, jti: undefined },
+    { ...claims, exp: Math.floor(Date.now() / 1000) + 7200 },
     { ...claims, sub: "" },
     { ...claims, client_id: undefined },
+    { ...claims, azp: "other-client" },
+    { ...claims, miltonBinding: undefined },
+    { ...claims, miltonIdentityIncarnation: "" },
+    { ...claims, miltonSecurityGeneration: "" },
+    { ...claims, scope: "openid unknown" },
+    { ...claims, cnf: { jkt: "unsupported" } },
     { ...claims, scope: ["openid"] },
     { ...claims, nbf: Math.floor(Date.now() / 1000) + 3600 },
   ])
@@ -69,7 +86,13 @@ test("resource tokens require an EdDSA signature, exact issuer, audience and acc
   await expect(verify(`Bearer ${symmetric}`)).rejects.toMatchObject({
     status: 401,
   });
-  expect(requested).toEqual([issuer + "/.well-known/jwks.json"]);
+  const wrongType = await new SignJWT(claims)
+    .setProtectedHeader({ alg: "EdDSA", kid: "first", typ: "JWT" })
+    .sign(key.privateKey);
+  await expect(verify(`Bearer ${wrongType}`)).rejects.toMatchObject({
+    status: 401,
+  });
+  expect(requested).toEqual([issuer + "/jwks"]);
 });
 
 test("JWKS keys cache and rotate within bounds; a cold key-service failure is 503", async () => {
@@ -84,11 +107,21 @@ test("JWKS keys cache and rotate within bounds; a cold key-service failure is 50
     return Response.json({ keys });
   });
   const sign = (kid: string, key: CryptoKey) =>
-    new SignJWT({ sub: "fixture", client_id: "client", scope: "" })
-      .setProtectedHeader({ alg: "EdDSA", kid })
+    new SignJWT({
+      sub: "fixture",
+      client_id: "client",
+      azp: "client",
+      scope: "milton:read",
+      miltonBinding: "binding",
+      miltonIdentityIncarnation: "f:1",
+      miltonSecurityGeneration: "f:2",
+    })
+      .setProtectedHeader({ alg: "EdDSA", kid, typ: "at+jwt" })
       .setIssuer(issuer)
       .setAudience(resource)
       .setExpirationTime("1h")
+      .setIssuedAt()
+      .setJti(crypto.randomUUID())
       .sign(key);
   const original = await sign("first", first.privateKey);
   const rotated = await sign("next", next.privateKey);

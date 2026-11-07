@@ -1,8 +1,7 @@
-// Checks that a signed-out browser form post passes the CSRF check on the app
-// host: GET /login for a CSRF token, then POST /assistants/disconnect the way
-// Chrome does under Referrer-Policy: no-referrer (Origin: null). Signed out, a
-// passing check reaches the sign-in requirement. Never prints the token.
-// Usage: bun scripts/probe-forms.ts https://app.example
+// Checks a signed-out same-origin double-submit form under no-referrer policy.
+// It uses a fresh fictional CSRF value, never signs in or follows an auth flow,
+// and prints no cookie. Running against hosting is a separately selected action.
+import { randomBytes } from "node:crypto";
 const base = process.argv[2];
 if (!base || !/^https?:\/\/[^/?#@]+\/?$/.test(base)) {
   console.error("Usage: bun scripts/probe-forms.ts <app origin>");
@@ -10,20 +9,11 @@ if (!base || !/^https?:\/\/[^/?#@]+\/?$/.test(base)) {
 }
 const app = new URL(base).origin;
 
-const login = await fetch(app + "/login", { redirect: "manual" });
-const cookie = login.headers
-  .getSetCookie()
-  .map((value) => value.split(";")[0]!)
-  .find((pair) => /^(__Host-)?milton-csrf=/.test(pair));
-const field = /name="csrf" value="([A-Za-z0-9_-]{43})"/.exec(
-  await login.text(),
-)?.[1];
-if (!cookie || !field) {
-  console.error(
-    `UNEXPECTED: GET /login (${login.status}) issued no CSRF token`,
-  );
-  process.exit(1);
-}
+const field = randomBytes(32).toString("base64url");
+const cookie =
+  (new URL(app).protocol === "https:" ? "__Host-" : "") +
+  "milton-csrf=" +
+  field;
 
 const post = await fetch(app + "/assistants/disconnect", {
   method: "POST",

@@ -4,6 +4,7 @@ COPY package.json bun.lock ./
 COPY server/package.json server/package.json
 COPY packages/theme/package.json packages/theme/package.json
 COPY apps/site/package.json apps/site/package.json
+COPY apps/auth/package.json apps/auth/package.json
 RUN bun install --frozen-lockfile --filter @milton/server
 COPY server/src server/src
 COPY server/scripts/build.ts server/scripts/build.ts

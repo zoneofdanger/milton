@@ -24,6 +24,7 @@ import {
   type ToolCall,
 } from "./mcp-outcomes";
 import { storeResult } from "./store/tools";
+import { bindingActive } from "./auth-authority";
 
 const incomingTool = z.object({
   method: z.literal("tools/call"),
@@ -132,11 +133,22 @@ export function createMiltonHandler(
       );
       if (call.success) pending = knownTool(call.data.params.name);
       const identity = await verify(request.headers.get("Authorization"));
-      // Also refuses an assistant the person disconnected, on every request.
+      await bindingActive(config, identity);
+      const scopes = identity.scope.split(" ");
+      if (
+        !scopes.includes("milton:read") ||
+        (call.success &&
+          call.data.params.name === "create_memo" &&
+          !scopes.includes("milton:write"))
+      )
+        throw new AuthError(
+          "insufficient_scope",
+          "Reconnect this assistant with the permission this action needs.",
+          403,
+        );
       const auth = await lookupIdentityAccount(config, {
-        provider: "neon",
+        provider: identity.issuer,
         subject: identity.subject,
-        clientId: identity.clientId,
       });
       const store = await storeForCurrentRequest(config, auth, {
         issuer: identity.issuer,
@@ -150,7 +162,10 @@ export function createMiltonHandler(
       }
       const sdk = createMcpHandler(
         () =>
-          createMiltonServer(store, emit, { announceToolsChanged: announce }),
+          createMiltonServer(store, emit, {
+            announceToolsChanged: announce,
+            readOnly: !scopes.includes("milton:write"),
+          }),
         {
           legacy: "stateless",
           maxSubscriptions: 0,
@@ -181,6 +196,11 @@ export function createMiltonHandler(
             `Bearer resource_metadata="${new URL("/.well-known/oauth-protected-resource/mcp", config.resource).href}"${invalid}`,
           );
         }
+        if (error.code === "insufficient_scope")
+          headers.set(
+            "WWW-Authenticate",
+            `Bearer error="insufficient_scope", scope="milton:read${pending === "create_memo" ? " milton:write" : ""}"`,
+          );
         return withMcpCors(
           Response.json(
             { error: error.code, message: error.message },

@@ -131,7 +131,19 @@ export const reportList = (documents: Documents & { version: string }) => ({
   version: documents.version,
 });
 
-export function createStoreMemoTools(store: TenantStore) {
+export function createStoreMemoTools(
+  store: TenantStore,
+  options: { readOnly?: boolean } = {},
+) {
+  function permission<T extends { setup?: unknown }>(value: T) {
+    if (!options.readOnly) return value;
+    const { setup: _setup, ...read } = value;
+    return {
+      ...read,
+      permission:
+        "Read only. To save approved writing guidance, reconnect with Read and write.",
+    };
+  }
   async function withNotice<T extends object>(value: T) {
     // A failed claim must never turn an accepted save into an apparent failure.
     // Claiming means offered in one response, not displayed/acknowledged by a user,
@@ -168,26 +180,46 @@ export function createStoreMemoTools(store: TenantStore) {
   return {
     get_cover_sheet: () =>
       run(async () =>
-        storeResult(await withNotice(coverSheet(await store.readDocuments()))),
+        storeResult(
+          await withNotice(permission(coverSheet(await store.readDocuments()))),
+        ),
       ),
     get_report: (input: z.infer<typeof reportInput>) =>
       run(async () => {
         const report = resolveReportId(input.report_id)!;
         return storeResult(
           await withNotice(
-            reportEnvelope(
-              await store.readDocuments({ ...input.intent, report }),
-              report,
+            permission(
+              reportEnvelope(
+                await store.readDocuments({ ...input.intent, report }),
+                report,
+              ),
             ),
           ),
         );
       }),
     list_reports: () =>
-      run(async () =>
-        storeResult(await withNotice(reportList(await store.readDocuments()))),
-      ),
+      run(async () => {
+        const list = reportList(await store.readDocuments());
+        return storeResult(
+          await withNotice(
+            options.readOnly
+              ? { ...list, reports: list.reports.map(permission) }
+              : list,
+          ),
+        );
+      }),
     create_memo: (input: SaveMemoInput) =>
       run(async () => {
+        if (options.readOnly)
+          return storeResult(
+            {
+              error: "insufficient_scope",
+              message:
+                "This connection is read only. Reconnect with Read and write to save approved guidance.",
+            },
+            true,
+          );
         const outcome = await store.saveMemo(input);
         if (outcome.error === "subscription_required") {
           const error = subscriptionRequired(store.appOrigin);

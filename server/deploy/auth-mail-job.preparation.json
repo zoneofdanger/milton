@@ -1,0 +1,37 @@
+{
+  "templateOnly": true,
+  "deployable": false,
+  "enabled": false,
+  "requiredOwnerPreparation": [
+    "Select a compatible FIXED self-hosted image pinned by sha256; preserve selected revisions and rollback images",
+    "Snapshot and reconcile migrations through 006, effective runtime roles and actual migration ledger before any apply",
+    "Select separate auth-only runtime identity, protected dotenvx payload and numeric platform key version",
+    "Verify actual Resend sender and effective account quota with an explicitly authorized controlled send",
+    "Rehearse queue backlog, lease expiry, cleanup throughput and failures before selecting cadence",
+    "Schedule creation or enablement requires separate recorded release selection; this file cannot enable a job"
+  ],
+  "jobPreparation": {
+    "name": "milton-auth-mail",
+    "image": "REQUIRES_FIXED_IMAGE_AT_SHA256_DIGEST",
+    "command": ["node", "deliver.js"],
+    "args": [],
+    "applyArgsAfterSelection": ["--apply"],
+    "serviceAccount": "REQUIRES_AUTH_ONLY_RUNTIME_IDENTITY",
+    "platformKeySecretVersion": "REQUIRES_NUMERIC_SECRET_VERSION",
+    "taskCount": 1,
+    "parallelism": 1,
+    "maxRetries": 0,
+    "timeoutSeconds": 180,
+    "poolMax": 1,
+    "candidateLimitPerPass": 16,
+    "deliveryPassDeadlineSeconds": 90,
+    "networkTimeoutSeconds": 5,
+    "leaseSeconds": 120
+  },
+  "schedulePreparation": {
+    "paused": true,
+    "cadence": "REQUIRES_OWNER_SELECTION_AFTER_REHEARSAL",
+    "rehearsalCandidate": "once per minute, at most16 candidates per pass before throttling/fencing",
+    "maintenance": "separately select owner-only cleanup_expired(16); do not give owner credentials to the mail job"
+  }
+}

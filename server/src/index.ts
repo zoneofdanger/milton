@@ -12,6 +12,7 @@ import { boundRequest } from "./http";
 import { logUnexpected } from "./error-log";
 import { unavailablePage } from "./pages";
 import { Hono } from "hono";
+import { authAdmission } from "./auth-admission";
 
 export function createMiltonApp(config: RuntimeConfig, browserOnly = false) {
   return createHttpApp(
@@ -19,6 +20,7 @@ export function createMiltonApp(config: RuntimeConfig, browserOnly = false) {
     browserPages(config),
     browserOnly,
     stripeWebhook(config),
+    authAdmission(config),
   );
 }
 
@@ -55,6 +57,7 @@ function createHttpApp(
   pages?: ReturnType<typeof browserPages>,
   browserOnly = false,
   webhook?: ReturnType<typeof stripeWebhook>,
+  admission?: ReturnType<typeof authAdmission>,
 ) {
   const mcp = createMiltonHandler(config);
   const app = new Hono();
@@ -107,6 +110,7 @@ function createHttpApp(
           resource: config.resource,
           authorization_servers: [config.issuer],
           bearer_methods_supported: ["header"],
+          scopes_supported: ["milton:read", "milton:write"],
         }),
         "GET, OPTIONS",
       );
@@ -115,6 +119,12 @@ function createHttpApp(
   // before the browser pages, so no session, cookie or CSRF check reaches it.
   if (webhook)
     app.all("/billing/webhook", (context) => webhook(context.req.raw));
+  if (admission) {
+    app.all("/internal/auth/admit", (context) => admission(context.req.raw));
+    app.all("/internal/auth/preserve-eligibility", (context) =>
+      admission(context.req.raw),
+    );
+  }
   app.all("*", async (context) => {
     const request = context.req.raw;
     const resourceHost = new URL(config.resource).host;

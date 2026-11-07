@@ -87,7 +87,7 @@ const authProvider: OAuthClientProvider = {
     grant_types: ["authorization_code", "refresh_token"],
     response_types: ["code"],
     token_endpoint_auth_method: "none",
-    scope: "openid offline_access",
+    scope: "openid offline_access milton:read milton:write",
   },
   state: () => state,
   clientInformation: () => information,

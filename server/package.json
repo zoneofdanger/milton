@@ -20,13 +20,14 @@
     "@hono/node-server": "2.1.5",
     "@milton/theme": "workspace:*",
     "@modelcontextprotocol/server": "2.4.0",
-    "@neondatabase/auth": "0.7.0-beta",
     "@neondatabase/serverless": "1.2.0",
     "drizzle-orm": "0.45.4",
     "hono": "4.13.16",
-    "jose": "6.2.14",
+    "jose": "6.2.15",
     "stripe": "23.1.0",
-    "zod": "4.6.7"
+    "zod": "4.6.7",
+    "openid-client": "6.8.9",
+    "pg": "8.23.1"
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.5.13",
@@ -35,6 +36,7 @@
     "@types/node": "catalog:",
     "drizzle-kit": "0.31.11",
     "typescript": "catalog:",
-    "vite": "8.3.5"
+    "vite": "8.3.5",
+    "@types/pg": "8.15.5"
   }
 }

@@ -914,3 +914,117 @@ There is no reverse migration that restores the retired memo layer. If schema re
 required, stop writers and use the pre-cleanup snapshot under a separate recovery decision.
 Do not restore a database snapshot merely to change runtime traffic. Never point a fresh
 baseline at a populated old database: it refuses and directs the operator to the transition.
+
+## Self-hosted auth cutover preparation
+
+This section prepares the selected three-service build. It records no deployment,
+secret version, mapping approval, provider/mail readiness or live auth disable.
+All pinned production descriptors, images and rollback revisions above remain the
+managed deployment record. Only the selected release coordinator integrates/releases.
+
+The new issuer is `https://auth.meetmilton.com/api/auth`. Native auth is a separate
+service and cookie host, never mounted on app/MCP. Preserve app/MCP URLs and static-site
+hosting. Core owns auth routing/service preparation; apply no DNS/IAM/provider/mail
+change as part of a local build. Verify the actual LB transport identity before enabling
+network limits; a public Host never makes arbitrary forwarding headers trusted.
+
+Apply the following only in a separately authorized closed-ingress cutover, after a
+snapshot and rollback check. Rehearse against disposable data first:
+
+1. Audit retained source metadata/schema, role memberships, PUBLIC views/functions,
+   defaults, object ownership and DDL/TEMP rights. Prepare separate NOINHERIT
+   `milton_auth_runtime`, `milton_app_runtime`, `milton_mcp_runtime` and non-login
+   migration owners. Never grant the shared legacy writing group to these runtimes.
+   Preserve managed schema/data and existing writing/Stripe/trial IDs. Before running
+   auth000, reconcile an explicit complete retained-login CONNECT/audited TEMP JSON
+   inventory on the same privileged connection; missing or inconsistent inventory
+   refuses transactionally before PUBLIC revocation. See the exact invocation and
+   delegated NOINHERIT owner role/options in [auth operations](../../apps/auth/README.md#retained-login-bootstrap-and-delegated-owner).
+   Never copy owner credentials into auth/app/MCP or the delivery job.
+2. Apply existing writing migrations, then core native001–006 in order as its owner.
+   Auth receives no writing/Stripe/app-credential access. App/MCP receive only narrow
+   native guard EXECUTE privileges, never credential/recovery/provider/key reads.
+3. Review `server/migrations/000-app-owner.sql` to prepare the non-login app migration owner and metadata-only privileges after the writing baseline. Apply `server/migrations/005-app.up.sql` as that owner, after native005 (recovery-proof invalidation).
+   `migrate.ts --app-auth` requires explicit `MILTON_OWNER_DATABASE_URL` and refuses a
+   missing native security-status function. It is separate from Drizzle's writing journal.
+   Apply once; no service migrates on startup. The new schema has no writing-role default
+   grants. Owner-review/apply `005-app-roles.sql` against actual writing ownership.
+   Row locks get UPDATE(id) on the immutable-ID column, rather than account-state writes.
+4. Use verified metadata, not email equality, to map each retained legacy subject to an
+   exact native issuer/subject and retained internal m_* ID. Owner input for
+   `server/scripts/auth-identity-import.ts --dry-run <private-metadata.json>` includes
+   `legacySubject,issuer,subject,userId,verifiedEmail,verifiedIdentities`. Deleted records
+   have `userId:null` and must match an existing hash of `neon:subject`; those hashes
+   cannot be inverted, renamed or silently discarded. Resolve every missing/ambiguous
+   record before cutover. `--apply` is a separate explicit owner action; neither mode
+   scans private writing or accepts legacy tokens. Input and identity metadata stay private.
+5. Provision the dedicated stable `MILTON_TRIAL_FINGERPRINT_KEY` in app secret storage.
+   The verified import command (an empty batch for a genuinely fresh database) provisions
+   its durable key check. Admission refuses a missing/mismatched policy. Back up this key
+   separately from rotating auth cookies/provider encryption. Routine key rotation is not
+   supported: changing it requires a designed dual-key migration before any change, not
+   a fresh key that silently grants new trials. Keep minimal eligibility fingerprints and
+   their first claimant after deletion; do not expose them in claims or use them as owners.
+6. Owner-provision the fixed native confidential app client with exact callback/logout
+   URLs, code/S256, identity-only scopes, no resource, no refresh and no offline scope.
+   Distribute `AUTH_APP_CLIENT_ID/SECRET` only to app and native owner configuration;
+   `AUTH_ADMISSION_SECRET` only to app/auth. App runtime additionally gets its stable
+   eligibility key and Stripe settings. MCP gets issuer/resource/app URLs and its own
+   database login, no app/native/billing secrets. Use separate dotenvx payloads and numeric
+   platform secret versions; never export a secret through a product route.
+7. Run the actual role checks for app/MCP using `MILTON_SERVICE` and each private URL,
+   core's auth-role check, root types/tests/format, Node26 bundle/container checks and
+   `bun --no-env-file server/scripts/check-auth-integration.ts`. The local rehearsal owns
+   PG55623 and checks 20201–20204, uses fictional identities/real TLS login roles, dispatches
+   canonical HTTPS requests in-process and refuses external requests. It is not browser,
+   real Google/GitHub/mail, Muse portal, live mapping or production privilege acceptance.
+8. Complete browser and client acceptance on selected staged services: host-only cookie
+   separation, new-flow SSO renewal/absolute expiry, signed-out callback recovery, native
+   freshness, account/security actions, read/write discovery/direct refusal, disconnect
+   then reconnect/replay, offline logout/refresh then recovery, Stripe-first deletion retry,
+   full writing/download behavior and mobile/desktop wrapping. Verify configured real
+   provider/mail callbacks/sender and approved reviewer access through secure intake.
+9. Release code/routing/secrets only within recorded authorization, preserving rollback
+   images/revisions and snapshots. Reject old managed tokens and stale cookies. Verify
+   mappings/roles/protocol/behavior before disabling managed Auth; retain its data/schema.
+   No fallback to the old issuer exists in this build. Before reopening ingress, reconcile
+   public privacy/password/mail/deletion/eligibility statements and Muse intake copy with
+   parent/designer acceptance. No online submission is implied.
+
+`005-app.down.sql` is an offline rollback: it refuses unfinished lifecycle operations,
+removes ephemeral app sessions/flows, and preserves verified mappings, eligibility key
+policy/fingerprints and original lifecycle progress. Reapply restores app credentials;
+it does not roll native authority backward or make managed sessions usable. Do not
+roll back to a managed runtime after destructive native lifecycle work without explicit
+reconciliation and the corresponding data/secret snapshot. Keep native allocator fences.
+
+A deletion's original UUID/subject/incarnation/internal account and progress survive lost
+responses. App cleanup is at most four native calls of 16 rows per table per request;
+unknown owned-client/unbound inventory refuses instead of taking unbounded FK cascades.
+Retry the original operation from the original browser association. If that association
+is unavailable, keep ingress/refusal intact and reconcile the exact persisted operation
+privately as an owner; never select a current identity by email or reset its targets.
+Writing erasure occurs only after Stripe cancellation has committed, and native deletion
+is last. Record incomplete native cleanup honestly. Existing minute-based Stripe creation
+can still have remote-success/local-timeout ambiguity across a minute boundary; this build
+makes no universal exactly-once billing claim.
+
+App login flows expire after ten minutes and app sessions after at most one hour; new logins reclaim at most16 expired rows per table. Deletion erases app-held credentials for the original issuer/subject/incarnation after Stripe succeeds, while the separate original operation remains retryable. Admission correlations expire after24 hours and subsequent admissions reclaim at most16 expired rows. Eligibility fingerprints/key policy, verified legacy mapping metadata and immutable lifecycle associations remain indefinitely for no-second-trial and safe-replay purposes; public disclosures must state that limited retention.
+
+### Auth mail006 and operator recovery preparation
+
+Mail006 adds owner-owned encrypted message/receipt storage and auth-only accept/claim/finish functions, with no runtime CRUD or native-user FK. Apply it under the selected closed-ingress snapshot/migration procedure before selecting a compatible **fixed** self-hosted writer. Native proof issuance and mail acceptance are separate commits; a503 is uncertain/retryable, not rollback/delivery proof. Old inline-send revisions still have PR-04: never select one as a safe public fallback or run mixed vulnerable writers with public signup enabled. Closed prelaunch storage preparation is not public security acceptance. After launch select a compatible fixed revision/forward fix preserving queue/keys/data, retained rollback revisions, pinned images and numeric secret versions.
+
+[Mail job preparation](auth-mail-job.preparation.json) is disabled/nondeployable, has no apply argument and enables no scheduler. The auth image's `node deliver.js` defaults to a dry run with no environment/DB/provider access. Later explicit `node deliver.js --apply` uses only auth runtime credentials, AUTH_SECRET and the existing Resend key. Keep owner maintenance separately selected. Pool1, bounded connect/query timeouts, at most16 candidates per90-second delivery pass, one leased claim at a time,2-minute leases, five-second sends, at most5 claims and1/2/4/8-minute backoff limit work. Shared429 Retry-After pause stops the pass without claiming/burning later work; worker parsing and SQL storage cap it at24 hours while retaining valid3000-second pauses. Prepare a count-only alert for any `auth_mail_pass` with `throttled > 0` and an operator pause/backlog check; no alert is enabled here. The cap aligns with the documented daily reset window, does not prove this account's quota or provider recovery, and does not resolve monthly exhaustion. Use the [owner-only throttle inspection/reset procedure](../../apps/auth/README.md#throttle-inspection-and-recovery-prepared-not-enabled) only after verified recovery, through the separate delegated NOINHERIT login explicitly assuming NOLOGIN `milton_auth_owner`; never move owner credentials into delivery. Preserve job deadlines/attempts and re-inspect a changed pause. The prepared one-task job has no platform retries and180-second outer timeout for startup checks plus the pass. Its once/minute cadence is only a rehearsal candidate; choose actual cadence after verifying sender/effective quota, backlog, timeout/retry/lease behavior and bounded cleanup throughput. No enable/deploy command is selected here.
+
+Matching protected auth key material is needed to read backed-up pending payloads. Native domain-separated version1 encryption binds exact original job/target/fences/proof expiry and complete provider message. Retired/missing keys make pending messages terminal unreadable, requiring new native links. Resend job-id idempotency has vendor limits; local timeout after remote success or a crash before finish remains ambiguous, with identical payload/key on retry. No universal exactly-once claim.
+
+Delivery deadline is native proof expiry or15 minutes after acceptance, whichever is earlier. Terminal transition clears ciphertext. Bounded claim/owner `cleanup_expired(1..64)` clears expired/fenced payloads; delayed/disabled/backlogged maintenance can retain encrypted contents longer. No-op/terminal receipts become eligible after24 hours and also need bounded maintenance for physical removal. Native reset proofs retire immediately on security change/deletion; stateless verification expires at1 hour and remaining native verification rows become cleanup-eligible1 day after expiry. Document actual payload/receipt/backup/vendor retention before release. 006 down refuses any pending row; clear/drain bounded work first, without enabling a vulnerable writer or restoring retired proofs.
+
+Owner migration/provision/maintenance commands refuse unless the exact apply arguments and separate AUTH_OWNER_DATABASE_URL are selected. A delegated NOINHERIT login must explicitly assume NOLOGIN milton_auth_owner (`SET ROLE` for SQL, URL-encoded `options=-c%20role%3Dmilton_auth_owner` for Node commands); the privileged administrator grants SET membership without inheritance and CONNECT separately. See auth README for exact commands. New runtime roles have no owner membership, CREATE or TEMP.
+
+The existing native migrator commits each SQL file separately from its ledger write. A crash can leave actual schema ahead of or behind the ledger. Stop and fail closed: preserve the selected snapshot/image/numeric keys, compare actual qualified schema/functions/grants/data with the exact file and intended direction, then privately reconcile only a proven completed file or select compatible repair/snapshot recovery with stale-authority invalidation. Never blindly rerun/edit a migration, mark uncertain work applied, rewind allocator fences or resurrect retired proofs. This build does not close that engine crash gap.
+
+Retain disabled managed Neon schema/data and backups until separately selected cleanup or backup expiry; new native deletion does not erase them. Accurate native-deletion/public privacy/Muse candidate wording includes that legacy retention now, without waiting for cleanup. Designer acceptance, same-reviewer delta review, actual provider/browser/client/hosted/role/restore tests and release-coordinator selection remain later gates.
+
+Native reset links carry their proof in `/api/auth/reset-password/*`, not only a query. Before hosted use, verify full credential-path request-log exclusions at ingress/Cloud Run alongside verification/OAuth query exclusions; query-only redaction cannot protect that native path. Local code/bundle tests do not establish hosted logging behavior.

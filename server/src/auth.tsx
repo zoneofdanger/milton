@@ -15,11 +15,20 @@ import { billingRoutes } from "./billing";
 export function browserPages(config: RuntimeConfig) {
   const secure = !isLoopback(new URL(config.appOrigin).hostname);
   const csrfName = secure ? "__Host-milton-csrf" : "milton-csrf";
-  const loopName = secure ? "__Host-milton-continue" : "milton-continue";
   return async (request: Request): Promise<Response> => {
-    const ctx = pageContext(config, request, secure, csrfName, loopName);
+    const ctx = pageContext(config, request, secure, csrfName);
     const { url, cookies, renderMemos } = ctx;
     const perform = async (): Promise<Response> => {
+      if (
+        isMemoRoute(url.pathname) &&
+        url.pathname !== "/" &&
+        request.method !== "GET"
+      )
+        return page(
+          "Method not allowed",
+          <p>Use the page's controls to continue.</p>,
+          405,
+        );
       if (isMemoRoute(url.pathname) && url.pathname !== "/")
         return renderMemos();
       if (
@@ -33,12 +42,21 @@ export function browserPages(config: RuntimeConfig) {
         url.pathname === "/billing/portal"
       )
         return billingRoutes(ctx);
-      if (!["/", "/login", "/consent", "/logout"].includes(url.pathname))
+      if (
+        ![
+          "/",
+          "/login",
+          "/logout",
+          "/auth/callback",
+          "/auth/logged-out",
+          "/account/security",
+        ].includes(url.pathname)
+      )
         return page("Not found", <p>This page does not exist.</p>, 404);
       if (
         !["GET", "POST"].includes(request.method) ||
         (url.pathname === "/logout" && request.method !== "POST") ||
-        (url.pathname === "/" && request.method !== "GET")
+        (url.pathname !== "/logout" && request.method !== "GET")
       )
         return page(
           "Method not allowed",
@@ -68,6 +86,12 @@ export function browserPages(config: RuntimeConfig) {
             <p>
               <a class="button" href="/login">
                 Sign in to Milton
+              </a>
+            </p>
+          ) : failure.code === "fresh_sign_in_required" ? (
+            <p>
+              <a class="button" href={"/login?fresh=1&next=/account/delete"}>
+                Sign in again
               </a>
             </p>
           ) : failure.code === "auth_unavailable" && ctx.loginRecovery ? (

@@ -143,11 +143,9 @@ No sign-up cap anywhere, hosted or self-hosted (Peter, 2026-10-30). Sign-ups are
 the only mode; the allow-list and closed modes are gone (Peter, 2026-11-03).
 
 One shared Postgres database on Neon holds every account, with the user id on every row
-behind a mandatory tenant access layer. The services connect as a role that reads and
-writes rows but owns nothing, so the triggers that guard the data hold against them; only
+behind a mandatory tenant access layer. The services use distinct auth/app/MCP roles that own nothing, so the triggers that guard the data hold against them; only
 migrations run as the owner. Neon's point-in-time history for the whole branch is
-the backup (the retention is a project setting). Rehearsals run on a throwaway Neon branch
-made from production and deleted afterwards, never on the production branch.
+the backup (the retention is a project setting). Product rehearsals use a disposable PostgreSQL database and fictional identities. Verified production source-schema/metadata reconciliation remains a separate owner gate; build work does not read private writing.
 
 ### Session capture: MCP-only first
 
@@ -176,13 +174,11 @@ if evidence justifies their installation burden.
 ## Hybrid hosting and runtime
 
 The selected hosting architecture uses Hono JSX and Vite assets for the browser app and
-Hono MCP on separate Cloud Run services. The public Astro site stays on Vercel. Neon PostgreSQL and
-Neon Auth remain unchanged. Bun installs, builds and tests; Node 26 LTS runs deployed
+Hono MCP and self-hosted native auth on three separate Cloud Run services. The public Astro site stays on Vercel; PostgreSQL writing/billing identity stays stable. The prepared auth replacement requires a coordinated owner-verified cutover; it is not a record of a live release. Bun installs, builds and tests; Node 26 LTS runs deployed
 server code. Separate dotenvx payloads use platform-held private keys.
 
 The app and MCP are migrated. The private spend-alert worker and its scheduler are
-removed with migration 0023. Their canonical URLs and Neon identity remain
-unchanged. The [hosting runbook](server/deploy/README.md) defines release checks and rollback.
+removed with migration 0023. App and MCP canonical URLs remain unchanged. Auth has its own host, issuer and runtime role; exact verified issuer/subject maps to retained internal account IDs through owner-verified metadata. App OIDC sessions and MCP native bindings have separate authority. The [hosting runbook](server/deploy/README.md) defines release checks and rollback.
 The retired Vercel app/MCP project and migration validation services are decommissioned;
 there is no Vercel backend failover. Preserve the current Cloud Run revisions, pinned
 images and secret versions. Future runtime rollback uses Cloud Run revision traffic,

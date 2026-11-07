@@ -1,0 +1,1909 @@
+/** Explicit local rehearsal. Builds with Bun; executes under Node26. No env
+ * files, inherited database credentials, external requests or live operations. */
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createServer } from "node:net";
+import { pathToFileURL } from "node:url";
+import { randomBytes, createHash, randomUUID } from "node:crypto";
+import pg from "pg";
+import * as oidc from "openid-client";
+import { createMiltonHandler } from "../src/handler";
+import { createAccessTokenVerifier } from "../src/token";
+import { sql } from "drizzle-orm";
+import { createMiltonApp } from "../src/index";
+import { runtimeConfig, type RuntimeConfig } from "../src/config";
+import { postgresDatabase } from "../src/store/database";
+import { database, lookupIdentityAccount, StoreError } from "../src/store";
+import { importIdentities } from "./auth-identity-import";
+import { hash } from "../src/auth-oidc";
+import { appActive, bindingActive } from "../src/auth-authority";
+import { checkProductRuntimeRole } from "./check-runtime-role";
+import {
+  startOperation,
+  advanceOperation,
+  findOperation,
+} from "../src/auth-lifecycle";
+import { createProvider } from "../../apps/auth/src/provider";
+import { ISSUER, AUTH_ORIGIN, type Config } from "../../apps/auth/src/config";
+
+const port = 55623;
+const sourceRoot = pathToFileURL(process.cwd() + "/");
+for (const port of [55623, 20201, 20202, 20203, 20204])
+  await new Promise<void>((resolve, reject) => {
+    const s = createServer();
+    s.once("error", () => reject(new Error("owned_fixture_port_in_use")));
+    s.listen(port, "127.0.0.1", () => s.close(() => resolve()));
+  });
+assert.match(process.version, /^v26\./);
+const root = mkdtempSync(join(tmpdir(), "milton-app-auth-"));
+const data = join(root, "pgdata");
+const bin = process.env.PG_BIN ?? "/opt/homebrew/opt/postgresql@18/bin";
+const run = (cmd: string, args: string[]) => {
+  const r = spawnSync(cmd, args, {
+    encoding: "utf8",
+    env: { PATH: process.env.PATH, LC_ALL: "C" },
+  });
+  assert.equal(r.status, 0, "fixture command failed: " + cmd.split("/").pop());
+};
+const secret = () => randomBytes(32).toString("hex");
+const pools: pg.Pool[] = [];
+let running = false,
+  groups = 0,
+  stage = "setup";
+const pass = (name: string) => {
+  groups++;
+  console.log("PASS " + name);
+};
+try {
+  run(join(bin, "initdb"), [
+    "-D",
+    data,
+    "--username=disposable_cluster",
+    "--auth-local=trust",
+    "--auth-host=scram-sha-256",
+    "--encoding=UTF8",
+    "--no-locale",
+  ]);
+  const cert = join(root, "cert.pem"),
+    key = join(root, "key.pem");
+  run("openssl", [
+    "req",
+    "-x509",
+    "-newkey",
+    "rsa:2048",
+    "-nodes",
+    "-keyout",
+    key,
+    "-out",
+    cert,
+    "-days",
+    "1",
+    "-subj",
+    "/CN=localhost",
+    "-addext",
+    "subjectAltName=DNS:localhost,IP:127.0.0.1",
+  ]);
+  writeFileSync(key, readFileSync(key), { mode: 0o600 });
+  run("chmod", ["600", key]);
+  writeFileSync(
+    join(data, "postgresql.auto.conf"),
+    `listen_addresses='127.0.0.1'\nport=${port}\nunix_socket_directories='${root}'\nssl=on\nssl_cert_file='${cert}'\nssl_key_file='${key}'\nlog_statement='none'\nlog_min_error_statement='panic'\nlog_min_messages='panic'\n`,
+    { mode: 0o600 },
+  );
+  writeFileSync(
+    join(data, "pg_hba.conf"),
+    "local all all trust\nhost all disposable_cluster 127.0.0.1/32 trust\nhostssl all all 127.0.0.1/32 scram-sha-256\n",
+    { mode: 0o600 },
+  );
+  run(join(bin, "pg_ctl"), [
+    "-D",
+    data,
+    "-l",
+    join(root, "pg.log"),
+    "-w",
+    "start",
+  ]);
+  running = true;
+  const admin = new pg.Pool({
+    host: root,
+    port,
+    user: "disposable_cluster",
+    database: "postgres",
+  });
+  pools.push(admin);
+  for (const owner of ["milton_auth_owner", "milton_app_owner"])
+    await admin.query(`CREATE ROLE ${owner} NOLOGIN NOINHERIT`);
+  const credentials: Record<string, string> = {};
+  for (const service of ["auth", "app", "mcp"]) {
+    const password = secret();
+    credentials[service] = password;
+    await admin.query(
+      `CREATE ROLE milton_${service}_runtime LOGIN NOINHERIT PASSWORD '${password}'`,
+    );
+  }
+  await admin.query("CREATE DATABASE milton");
+  const owner = new pg.Pool({
+    host: root,
+    port,
+    user: "disposable_cluster",
+    database: "milton",
+  });
+  pools.push(owner);
+  await owner.query(
+    "REVOKE ALL ON DATABASE milton FROM PUBLIC; GRANT CONNECT ON DATABASE milton TO milton_auth_runtime,milton_app_runtime,milton_mcp_runtime; REVOKE CREATE ON SCHEMA public FROM PUBLIC; CREATE SCHEMA drizzle; CREATE TABLE drizzle.__drizzle_migrations(id serial,hash text,created_at bigint)",
+  );
+  for (const migration of ["0000_baseline", "0001_sample_context"])
+    await owner.query(
+      readFileSync(new URL(`./drizzle/${migration}.sql`, sourceRoot), "utf8"),
+    );
+  const authOwner = new pg.Pool({
+    host: root,
+    port,
+    user: "disposable_cluster",
+    database: "milton",
+    options: "-c role=milton_auth_owner",
+  });
+  pools.push(authOwner);
+  await owner.query(
+    "GRANT CREATE ON DATABASE milton TO milton_auth_owner,milton_app_owner; GRANT USAGE ON SCHEMA public TO milton_app_owner; GRANT REFERENCES ON public.users TO milton_app_owner; ALTER DEFAULT PRIVILEGES FOR ROLE milton_auth_owner REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC",
+  );
+  await authOwner.query(
+    "CREATE SCHEMA milton_auth AUTHORIZATION milton_auth_owner; GRANT USAGE ON SCHEMA milton_auth TO milton_auth_runtime",
+  );
+  for (const n of [
+    "001-native",
+    "002-credential",
+    "003-mechanism",
+    "004-product",
+    "005-recovery",
+    "006-mail",
+  ])
+    await authOwner.query(
+      readFileSync(
+        new URL(`../apps/auth/migrations/${n}.up.sql`, sourceRoot),
+        "utf8",
+      ),
+    );
+  const appOwner = new pg.Pool({
+    host: root,
+    port,
+    user: "disposable_cluster",
+    database: "milton",
+    options: "-c role=milton_app_owner",
+  });
+  pools.push(appOwner);
+  await owner.query(
+    "CREATE SCHEMA neon_auth; CREATE TABLE neon_auth.retained(value text); INSERT INTO neon_auth.retained VALUES('fictional retained metadata'); INSERT INTO users(id) VALUES('m_00000000-0000-4000-8000-000000000001'); INSERT INTO identities(provider,subject,user_id) VALUES('neon','legacy-person','m_00000000-0000-4000-8000-000000000001'); INSERT INTO trial_accounts(user_id,started_at,subscription_status) VALUES('m_00000000-0000-4000-8000-000000000001',now()-interval '40 days','canceled');",
+  );
+  await appOwner.query(
+    readFileSync(new URL("./migrations/005-app.up.sql", sourceRoot), "utf8"),
+  );
+  await owner.query(
+    readFileSync(new URL("./migrations/005-app-roles.sql", sourceRoot), "utf8"),
+  );
+  const poolConfig = (service: string): pg.PoolConfig => ({
+    host: "127.0.0.1",
+    port,
+    user: `milton_${service}_runtime`,
+    password: credentials[service],
+    database: "milton",
+    ssl: { ca: readFileSync(cert, "utf8"), rejectUnauthorized: true },
+  });
+  const authPool = new pg.Pool(poolConfig("auth")),
+    appPool = new pg.Pool(poolConfig("app")),
+    mcpPool = new pg.Pool(poolConfig("mcp"));
+  pools.push(authPool, appPool, mcpPool);
+  const url = (service: string) => {
+    const u = new URL(
+      `postgresql://milton_${service}_runtime@127.0.0.1:${port}/milton`,
+    );
+    u.password = credentials[service]!;
+    u.searchParams.set("sslmode", "verify-full");
+    u.searchParams.set("sslrootcert", cert);
+    return u.href;
+  };
+  const ownerUrl = new URL(
+    `postgresql://disposable_cluster@127.0.0.1:${port}/milton`,
+  );
+  ownerUrl.searchParams.set("sslmode", "verify-full");
+  ownerUrl.searchParams.set("sslrootcert", cert);
+  const ownerDb = postgresDatabase(ownerUrl.href);
+  const importData = [
+    {
+      legacySubject: "legacy-person",
+      issuer: ISSUER,
+      subject: "migrated-person",
+      userId: "m_00000000-0000-4000-8000-000000000001",
+      verifiedEmail: "legacy@example.invalid",
+      verifiedIdentities: [{ provider: "google", subject: "legacy-google" }],
+    },
+  ];
+  const deletedHash = createHash("sha256")
+    .update("neon:legacy-deleted")
+    .digest("hex");
+  await owner.query(
+    "INSERT INTO deleted_identities(identity_hash) VALUES($1)",
+    [deletedHash],
+  );
+  const metadata = [
+    ...importData,
+    {
+      legacySubject: "legacy-deleted",
+      issuer: ISSUER,
+      subject: "migrated-deleted",
+      userId: null,
+      verifiedEmail: "deleted@example.invalid",
+      verifiedIdentities: [
+        { provider: "github", subject: "fictional-deleted-github" },
+      ],
+    },
+  ];
+  const fingerprintKey = secret();
+  assert.equal(
+    (await importIdentities(ownerDb, metadata, ISSUER, fingerprintKey)).applied,
+    false,
+  );
+  assert.equal(
+    (
+      await owner.query(
+        "SELECT count(*)::int n FROM identities WHERE provider=$1",
+        [ISSUER],
+      )
+    ).rows[0].n,
+    0,
+  );
+  const missing = await importIdentities(ownerDb, [], ISSUER, fingerprintKey);
+  assert.equal(missing.unmappedActive, 1);
+  assert.equal(missing.unmappedDeleted, 1);
+  await assert.rejects(
+    importIdentities(ownerDb, [], ISSUER, fingerprintKey, true),
+  );
+  await importIdentities(ownerDb, metadata, ISSUER, fingerprintKey, true);
+  assert.equal(
+    (
+      await owner.query(
+        "SELECT user_id FROM identities WHERE provider=$1 AND subject='migrated-person'",
+        [ISSUER],
+      )
+    ).rows[0].user_id,
+    importData[0]!.userId,
+  );
+  await assert.rejects(
+    importIdentities(
+      ownerDb,
+      [...importData, { ...importData[0], subject: "ambiguous" }],
+      ISSUER,
+      fingerprintKey,
+      true,
+    ),
+  );
+  await appOwner.query(
+    readFileSync(new URL("./migrations/005-app.down.sql", sourceRoot), "utf8"),
+  );
+  const appMigrationUrl = new URL(ownerUrl);
+  appMigrationUrl.searchParams.set("options", "-c role=milton_app_owner");
+  const reapplied = spawnSync(
+    "bun",
+    ["--no-env-file", "scripts/migrate.ts", "--app-auth"],
+    {
+      cwd: process.cwd(),
+      env: {
+        PATH: process.env.PATH,
+        LC_ALL: "C",
+        MILTON_OWNER_DATABASE_URL: appMigrationUrl.href,
+      },
+      encoding: "utf8",
+    },
+  );
+  assert.equal(
+    reapplied.status,
+    0,
+    "actual owner-only app migration CLI reapply",
+  );
+  assert.equal(
+    (await owner.query("SELECT count(*)::int n FROM milton_app.legacy_mapping"))
+      .rows[0].n,
+    2,
+  );
+  assert.equal(
+    (await owner.query("SELECT value FROM neon_auth.retained")).rows[0].value,
+    "fictional retained metadata",
+  );
+  assert.equal(
+    (
+      await owner.query(
+        "SELECT subscription_status FROM trial_accounts WHERE user_id=$1",
+        [importData[0]!.userId],
+      )
+    ).rows[0].subscription_status,
+    "canceled",
+  );
+  pass(
+    "app migration up/down/reapply preserves writing IDs, trial history, managed rows and verified mappings",
+  );
+  for (const [pool, statement] of [
+    [authPool, "SELECT * FROM public.users"],
+    [authPool, "SELECT * FROM milton_app.session"],
+    [mcpPool, "SELECT * FROM milton_app.session"],
+    [appPool, "SELECT * FROM milton_auth.account"],
+    [mcpPool, "SELECT * FROM milton_auth.jwks"],
+    [appPool, "SELECT * FROM neon_auth.retained"],
+  ] as const)
+    await assert.rejects(
+      pool.query(statement),
+      (e) => (e as { code?: string }).code === "42501",
+    );
+  for (const pool of [authPool, appPool, mcpPool]) {
+    assert.equal(
+      (
+        await pool.query(
+          "SELECT rolinherit FROM pg_roles WHERE rolname=current_user",
+        )
+      ).rows[0].rolinherit,
+      false,
+    );
+    await assert.rejects(pool.query("CREATE TEMP TABLE forbidden(id int)"));
+    await assert.rejects(pool.query("CREATE TABLE public.forbidden(id int)"));
+  }
+  // One real-driver regression for the production factory's error boundary.
+  stage = "production PostgreSQL error mapping";
+  {
+    const db = database({ DATABASE_URL: url("app") });
+    const logs: string[] = [];
+    const originalError = console.error;
+    console.error = (...args) => {
+      assert.equal(args.length, 1);
+      logs.push(String(args[0]));
+    };
+    const mapped =
+      (code: string, status: number, message: string) => (error: unknown) => {
+        assert(
+          error instanceof StoreError,
+          `expected StoreError ${code}; got ${error instanceof Error ? error.constructor.name : typeof error}/${(error as { code?: string })?.code}`,
+        );
+        assert.deepEqual(
+          { code: error.code, status: error.status, message: error.message },
+          { code, status, message },
+        );
+        return true;
+      };
+    const unavailable = mapped(
+      "store_unavailable",
+      503,
+      "The memo store is unavailable. Try again.",
+    );
+    const safeLog = (codes: (string | undefined)[]) => {
+      assert.equal(logs.length, 1, "one sanitized log per driver failure");
+      const entry = JSON.parse(logs.pop()!);
+      assert.deepEqual(
+        Object.keys(entry).sort(),
+        (entry.code === undefined
+          ? ["event", "where", "class"]
+          : ["event", "where", "class", "code"]
+        ).sort(),
+      );
+      assert.equal(entry.event, "unexpected_error");
+      assert.equal(entry.where, "store");
+      assert(["Error", "DatabaseError"].includes(entry.class));
+      assert(codes.includes(entry.code));
+    };
+    const absent = async (id: string) => {
+      assert.equal(
+        (
+          await owner.query("SELECT count(*)::int n FROM users WHERE id=$1", [
+            id,
+          ])
+        ).rows[0].n,
+        0,
+        "failed transaction left no committed user",
+      );
+    };
+    try {
+      const id = importData[0]!.userId;
+      const cases = [
+        [
+          sql`UPDATE users SET id='fictional_changed_id' WHERE id=${id}`,
+          "user_id_is_immutable",
+          409,
+          "The Milton user id cannot be changed.",
+        ],
+        [
+          sql`INSERT INTO users(id) VALUES(${id})`,
+          "unique_violation",
+          409,
+          "A record with these identifiers already exists.",
+        ],
+        [
+          sql`INSERT INTO users(id,status) VALUES('fictional_check','fictional_invalid_status')`,
+          "check_violation",
+          422,
+          "The record does not meet the store requirements.",
+        ],
+      ] as const;
+      for (const mode of ["query", "transaction"] as const) {
+        for (const [statement, code, status, message] of cases) {
+          const marker = `m_${randomUUID()}`;
+          await assert.rejects(
+            mode === "query"
+              ? db.query(statement)
+              : db.transaction(async (tx) => {
+                  await tx.query(sql`INSERT INTO users(id) VALUES(${marker})`);
+                  await tx.query(statement);
+                }),
+            mapped(code, status, message),
+          );
+          await absent(marker);
+        }
+      }
+      assert.deepEqual(logs, [], "recognized failures are not unexpected");
+      for (const mode of ["query", "transaction"] as const) {
+        await assert.rejects(
+          mode === "query"
+            ? db.query(sql`SELECT 1 / 0 AS fictional_private_sql`)
+            : db.withConnection((connection) =>
+                connection.transaction((tx) =>
+                  tx.query(sql`SELECT 1 / 0 AS fictional_private_sql`),
+                ),
+              ),
+          unavailable,
+        );
+        safeLog(["22012"]);
+      }
+      const disconnected = new URL(url("app"));
+      disconnected.port = "20204"; // Preflighted, not started until later groups.
+      await assert.rejects(
+        database({ DATABASE_URL: disconnected.href }).query(sql`SELECT 1`),
+        unavailable,
+      );
+      safeLog(["ECONNREFUSED"]);
+      const defaultTlsUrl = new URL(url("app"));
+      defaultTlsUrl.searchParams.delete("sslmode");
+      defaultTlsUrl.searchParams.delete("sslrootcert");
+      await assert.rejects(
+        database({ DATABASE_URL: defaultTlsUrl.href }).query(sql`SELECT 1`),
+        unavailable,
+        "missing sslmode still negotiates verified TLS and refuses an untrusted fixture CA",
+      );
+      safeLog(["DEPTH_ZERO_SELF_SIGNED_CERT", "SELF_SIGNED_CERT_IN_CHAIN"]);
+
+      for (const method of ["withConnection", "transaction"] as const) {
+        for (const primary of [
+          new StoreError("fixture_domain", "Fictional domain refusal.", 409),
+          Object.assign(new Error("Fictional callback error."), {
+            code: "23505",
+          }),
+          "fictional_callback",
+          null,
+          undefined,
+        ]) {
+          const marker = `m_${randomUUID()}`;
+          await assert.rejects(
+            db[method](async (session) => {
+              if (method === "transaction")
+                await session.query(
+                  sql`INSERT INTO users(id) VALUES(${marker})`,
+                );
+              throw primary;
+            }),
+            (error) => {
+              assert.strictEqual(error, primary, "callback rejection identity");
+              return true;
+            },
+          );
+          await absent(marker);
+        }
+      }
+      assert.deepEqual(
+        logs,
+        [],
+        "callback errors are never remapped or logged",
+      );
+      const commitMarker = `m_${randomUUID()}`;
+      let reachedCommit = false;
+      await assert.rejects(
+        ownerDb.transaction(async (tx) => {
+          await tx.query(sql`INSERT INTO users(id) VALUES(${commitMarker})`);
+          await tx.query(sql`CREATE TEMP TABLE fictional_commit_check
+          (id int UNIQUE DEFERRABLE INITIALLY DEFERRED) ON COMMIT DROP`);
+          await tx.query(sql`INSERT INTO fictional_commit_check VALUES(1),(1)`);
+          reachedCommit = true;
+        }),
+        mapped(
+          "unique_violation",
+          409,
+          "A record with these identifiers already exists.",
+        ),
+      );
+      assert(
+        reachedCommit,
+        "deferred constraint fails at COMMIT, after callback",
+      );
+      await absent(commitMarker);
+      assert.deepEqual(
+        logs,
+        [],
+        "COMMIT constraint failures keep their mapping",
+      );
+
+      const primary = new StoreError(
+        "fixture_domain",
+        "Fictional domain refusal.",
+        409,
+      );
+      const rollbackMarker = `m_${randomUUID()}`;
+      await assert.rejects(
+        db.transaction(async (tx) => {
+          await tx.query(sql`INSERT INTO users(id) VALUES(${rollbackMarker})`);
+          const [backend] = await tx.query<{ pid: number }>(
+            sql`SELECT pg_backend_pid() pid`,
+          );
+          assert(backend);
+          assert.equal(
+            (
+              await owner.query("SELECT pg_terminate_backend($1,1000) ended", [
+                backend.pid,
+              ])
+            ).rows[0].ended,
+            true,
+          );
+          throw primary;
+        }),
+        (error) => {
+          assert.strictEqual(
+            error,
+            primary,
+            "failed rollback must preserve the callback error",
+          );
+          return true;
+        },
+      );
+      safeLog([undefined, "57P01"]);
+      await absent(rollbackMarker);
+      assert.equal(
+        await db.withConnection(async (connection) => {
+          const [before] = await connection.query<{
+            pid: number;
+            ssl: boolean;
+            statement: string;
+            lock: string;
+          }>(sql`
+          SELECT pg_backend_pid() pid, ssl,
+            current_setting('statement_timeout') statement, current_setting('lock_timeout') lock
+          FROM pg_stat_ssl WHERE pid=pg_backend_pid()`);
+          assert.equal(before!.ssl, true);
+          assert.equal(before!.statement, "20s");
+          assert.equal(before!.lock, "10s");
+          return connection.transaction(async (tx) => {
+            const [inside] = await tx.query<{ pid: number }>(
+              sql`SELECT pg_backend_pid() pid`,
+            );
+            assert.equal(
+              inside!.pid,
+              before!.pid,
+              "one connection across nested operations",
+            );
+            return 42;
+          });
+        }),
+        42,
+      );
+      assert.deepEqual(logs, []);
+    } finally {
+      console.error = originalError;
+    }
+  }
+  assert(await checkProductRuntimeRole(postgresDatabase(url("app")), "app"));
+  assert(await checkProductRuntimeRole(postgresDatabase(url("mcp")), "mcp"));
+  pass(
+    "real TLS login roles separate native secrets, app credentials and writing with no DDL/TEMP path; production DB errors map safely and preserve callbacks/rollback",
+  );
+  const nativeConfig: Config = {
+    AUTH_DATABASE_URL: url("auth"),
+    AUTH_SECRET: secret(),
+    AUTH_ADMISSION_SECRET: secret(),
+    AUTH_RATE_SECRET: secret(),
+    AUTH_APP_CLIENT_ID: "before-provision",
+    AUTH_GOOGLE_CLIENT_ID: "fictional-google",
+    AUTH_GOOGLE_CLIENT_SECRET: secret(),
+    AUTH_GITHUB_CLIENT_ID: "fictional-github",
+    AUTH_GITHUB_CLIENT_SECRET: secret(),
+    AUTH_RESEND_API_KEY: "fictional-not-sent",
+    AUTH_MAIL_FROM: "auth@notifications.meetmilton.com",
+    PORT: 20203,
+  };
+  // TLS regression uses production defaults, never the injected fixture pool.
+  const omitted = new URL(url("auth"));
+  omitted.searchParams.delete("sslmode");
+  omitted.searchParams.delete("sslrootcert");
+  const defaults = createProvider({
+    ...nativeConfig,
+    AUTH_DATABASE_URL: omitted.href,
+  });
+  try {
+    await assert.rejects(
+      defaults.pool.query("SELECT 1"),
+      (error) =>
+        ["DEPTH_ZERO_SELF_SIGNED_CERT", "SELF_SIGNED_CERT_IN_CHAIN"].includes(
+          String((error as { code?: string }).code),
+        ),
+      "native default pool must negotiate TLS and reject an untrusted CA when mode is omitted",
+    );
+  } finally {
+    await defaults.pool.end();
+  }
+  for (const query of [
+    "sslmode=disable",
+    "sslmode=prefer",
+    "sslmode=verify-ca",
+    "sslmode=no-verify",
+    "ssl=false",
+    "ssl=true",
+    "uselibpqcompat=true",
+    "sslmode=verify-full&sslmode=disable",
+    "sslmode=require&sslrootcert=a&sslrootcert=b",
+    "SSLMODE=disable",
+    "sslcert=a",
+    "options=a&options=b",
+  ])
+    assert.throws(
+      () =>
+        createProvider({
+          ...nativeConfig,
+          AUTH_DATABASE_URL: omitted.href + "?" + query,
+        }),
+      /verified_auth_database_tls_required/,
+    );
+  const childEnv = {
+    PATH: process.env.PATH!,
+    LC_ALL: "C",
+    NODE_EXTRA_CA_CERTS: cert,
+    ...Object.fromEntries(
+      Object.entries(nativeConfig).map(([k, v]) => [k, String(v)]),
+    ),
+    AUTH_DATABASE_URL: omitted.href,
+  };
+  const child = (args: string[], extra: Record<string, string> = {}) => {
+    const result = spawnSync(process.execPath, args, {
+      env: { ...childEnv, ...extra },
+      encoding: "utf8",
+    });
+    assert.equal(
+      result.status,
+      0,
+      "verified TLS child: " + result.stderr.slice(0, 300),
+    );
+    return result;
+  };
+  child([
+    "--input-type=module",
+    "-e",
+    `import assert from 'node:assert/strict'; import { createProvider } from ${JSON.stringify(new URL("../apps/auth/src/provider.ts", sourceRoot).href)}; import { readConfig } from ${JSON.stringify(new URL("../apps/auth/src/config.ts", sourceRoot).href)}; const service=createProvider(readConfig(process.env)); try { const r=await service.pool.query('select ssl from pg_stat_ssl where pid=pg_backend_pid()'); assert.equal(r.rows[0].ssl,true); } finally { await service.pool.end(); }`,
+  ]);
+  const nativeOwnerUrl = new URL(ownerUrl);
+  nativeOwnerUrl.searchParams.delete("sslmode");
+  nativeOwnerUrl.searchParams.delete("sslrootcert");
+  nativeOwnerUrl.searchParams.set("options", "-c role=milton_auth_owner");
+  await authOwner.query(
+    "create table milton_credential.migration_ledger(name text primary key); insert into milton_credential.migration_ledger values('001-native'),('002-credential'),('003-mechanism'),('004-product'),('005-recovery'),('006-mail')",
+  );
+  const ownerEnv = { AUTH_OWNER_DATABASE_URL: nativeOwnerUrl.href };
+  child(
+    [
+      new URL("../apps/auth/scripts/migrate.ts", sourceRoot).pathname,
+      "up",
+      "--apply",
+    ],
+    ownerEnv,
+  );
+  child(
+    [
+      new URL("../apps/auth/scripts/maintain.ts", sourceRoot).pathname,
+      "--apply",
+    ],
+    ownerEnv,
+  );
+  child(
+    [
+      new URL("../apps/auth/scripts/migrate.ts", sourceRoot).pathname,
+      "down",
+      "--apply",
+    ],
+    ownerEnv,
+  );
+  child(
+    [
+      new URL("../apps/auth/scripts/migrate.ts", sourceRoot).pathname,
+      "up",
+      "--apply",
+    ],
+    ownerEnv,
+  );
+  const provisionOutput = join(root, "fictional-fixed-client.json");
+  child(
+    [
+      new URL("../apps/auth/scripts/provision.ts", sourceRoot).pathname,
+      "--apply",
+      provisionOutput,
+    ],
+    ownerEnv,
+  );
+  const fixed = JSON.parse(readFileSync(provisionOutput, "utf8")) as {
+    AUTH_APP_CLIENT_ID: string;
+    AUTH_APP_CLIENT_SECRET: string;
+  };
+  pass(
+    "native default and owner CLI pools use verified TLS with omitted mode; unsafe/duplicate options and untrusted CA refuse",
+  );
+  nativeConfig.AUTH_APP_CLIENT_ID = fixed.AUTH_APP_CLIENT_ID;
+  let app: ReturnType<typeof createMiltonApp>;
+  const mail: { url: string; kind: string }[] = [];
+  const { deliverMail } = await import("../../apps/auth/src/mail.ts");
+  const drainMail = () =>
+    deliverMail(authPool, nativeConfig, async (_input, init) => {
+      const m = JSON.parse(String(init?.body)) as {
+        text: string;
+        subject: string;
+      };
+      mail.push({
+        url: m.text.split("\n")[0]!.split(": ").slice(1).join(": "),
+        kind: m.subject.startsWith("Verify") ? "verify" : "reset",
+      });
+      return new Response(null, { status: 200 });
+    });
+  let dropLinkNotification = false;
+  let preservationFailure: "none" | "before" | "after" = "none";
+  let preservationCalls = 0;
+  const native = createProvider(nativeConfig, {
+    pool: authPool,
+    boundaries: {
+      fetch: async (input, init) => {
+        if (
+          String(input) ===
+          "https://app.meetmilton.com/internal/auth/preserve-eligibility"
+        ) {
+          preservationCalls++;
+          if (preservationFailure === "before")
+            throw new Error("fictional_before_callback");
+          const response = await app(
+            new Request(String(input), {
+              ...init,
+              headers: {
+                ...Object.fromEntries(new Headers(init?.headers)),
+                Host: "app.meetmilton.com",
+              },
+            }),
+          );
+          if (preservationFailure === "after")
+            throw new Error("fictional_after_callback");
+          return response;
+        }
+        if (
+          String(input) === "https://app.meetmilton.com/internal/auth/admit"
+        ) {
+          if (dropLinkNotification)
+            throw new Error("fictional_link_notification_lost");
+          const handoff = new Request(String(input), {
+            ...init,
+            headers: {
+              ...Object.fromEntries(new Headers(init?.headers)),
+              Host: "app.meetmilton.com",
+            },
+          });
+          const [first, second] = await Promise.all([
+            app(handoff.clone()),
+            app(handoff.clone()),
+          ]);
+          assert.equal(first.status, 204, "native admission contract");
+          assert.equal(second.status, 204, "concurrent native admission");
+          return first;
+        }
+        throw new Error("external_network_refused");
+      },
+    },
+  });
+  const transport: NonNullable<RuntimeConfig["authFetch"]> = async (
+    input,
+    init,
+  ) => {
+    const u = new URL(String(input));
+    assert.equal(u.origin, AUTH_ORIGIN);
+    return native.handler(
+      new Request(u, {
+        method: init.method,
+        headers: init.headers,
+        body: init.body as BodyInit | undefined,
+        signal: init.signal,
+      }),
+    );
+  };
+  const config = runtimeConfig({
+    NODE_ENV: "production",
+    AUTH_ISSUER: ISSUER,
+    APP_ORIGIN: "https://app.meetmilton.com",
+    MCP_RESOURCE: "https://mcp.meetmilton.com/mcp",
+    DATABASE_URL: url("app"),
+    AUTH_APP_CLIENT_ID: fixed.AUTH_APP_CLIENT_ID,
+    AUTH_APP_CLIENT_SECRET: fixed.AUTH_APP_CLIENT_SECRET,
+    AUTH_ADMISSION_SECRET: nativeConfig.AUTH_ADMISSION_SECRET,
+    MILTON_TRIAL_FINGERPRINT_KEY: fingerprintKey,
+  });
+  const stripe = {
+    customers: 0,
+    subscriptions: 0,
+    deleteDown: false,
+    deleted: false,
+  };
+  config.billing = {
+    secretKey: "rk_test_fixtureNotAKey",
+    webhookSecret: "whsec_fixtureNotASecret",
+    priceId: "price_fixture",
+    fetch: async (input, init) => {
+      const path = new URL(input).pathname;
+      if (path === "/v1/customers" && init.method === "POST") {
+        stripe.customers++;
+        return Response.json({ id: "cus_fixture" });
+      }
+      if (path === "/v1/subscriptions" && init.method === "GET")
+        return Response.json({ data: [] });
+      if (path === "/v1/subscriptions" && init.method === "POST") {
+        stripe.subscriptions++;
+        const now = Math.floor(Date.now() / 1000);
+        return Response.json({
+          id: "sub_fixture",
+          status: "trialing",
+          created: now,
+          trial_end: now + 30 * 86400,
+          items: {
+            data: [
+              {
+                current_period_start: now,
+                current_period_end: now + 30 * 86400,
+              },
+            ],
+          },
+        });
+      }
+      if (path === "/v1/customers/cus_fixture" && init.method === "DELETE") {
+        if (stripe.deleteDown) return Response.json({}, { status: 503 });
+        stripe.deleted = true;
+        return Response.json({ deleted: true });
+      }
+      if (path === "/v1/customers/cus_fixture" && init.method === "GET")
+        return Response.json({ deleted: stripe.deleted });
+      throw new Error("unexpected_fictional_stripe_request");
+    },
+  };
+  await owner.query("UPDATE public.store_config SET trials_enabled=true");
+  config.authFetch = transport;
+  app = createMiltonApp(config, true);
+  const authCookies = new Map<string, string>(),
+    appCookies = new Map<string, string>();
+  const request = async (
+    handler: (r: Request) => Promise<Response>,
+    url: string,
+    jar: Map<string, string>,
+    body?: Record<string, unknown>,
+    form = false,
+  ) => {
+    const u = new URL(url),
+      headers = new Headers({
+        Host: u.host,
+        Origin: u.origin,
+        Accept: "text/html",
+        Cookie: [...jar].map(([k, v]) => k + "=" + v).join("; "),
+      });
+    if (body)
+      headers.set(
+        "Content-Type",
+        form ? "application/x-www-form-urlencoded" : "application/json",
+      );
+    const response = await handler(
+      new Request(u, {
+        method: body ? "POST" : "GET",
+        headers,
+        ...(body
+          ? {
+              body: form
+                ? new URLSearchParams(
+                    Object.fromEntries(
+                      Object.entries(body).map(([k, v]) => [k, String(v)]),
+                    ),
+                  )
+                : JSON.stringify(body),
+            }
+          : {}),
+      }),
+    );
+    await drainMail();
+    for (const cookie of response.headers.getSetCookie()) {
+      assert(!/;\s*Domain=/i.test(cookie));
+      const pair = cookie.split(";")[0]!;
+      const i = pair.indexOf("=");
+      if (/Max-Age=0/i.test(cookie)) jar.delete(pair.slice(0, i));
+      else jar.set(pair.slice(0, i), pair.slice(i + 1));
+    }
+    return response;
+  };
+  const password = "Fictional forest password with spaces 239";
+  assert.equal(
+    (
+      await request(native.handler, ISSUER + "/sign-up/email", authCookies, {
+        name: "Fictional Person",
+        email: "person@example.invalid",
+        password,
+      })
+    ).status,
+    200,
+  );
+  assert.equal(authCookies.size, 0);
+  assert.equal((await native.handler(new Request(mail[0]!.url))).status, 302);
+  assert.equal(
+    (
+      await request(native.handler, ISSUER + "/sign-in/email", authCookies, {
+        email: "person@example.invalid",
+        password,
+      })
+    ).status,
+    200,
+  );
+  const session = (await (
+    await request(native.handler, ISSUER + "/get-session", authCookies)
+  ).json()) as { user: { id: string }; session: { id: string } };
+  assert(session.user.id && session.session.id);
+  pass(
+    "actual native verified password signup/signin establishes independent host-only auth cookie",
+  );
+  const login = await request(
+    app,
+    "https://app.meetmilton.com/login",
+    appCookies,
+  );
+  assert.equal(login.status, 303);
+  const authorized = await request(
+    native.handler,
+    login.headers.get("Location")!,
+    authCookies,
+  );
+  assert(
+    [302, 303].includes(authorized.status),
+    "native admission and fixed-app authorization must succeed (verifiedIdentities contract required)",
+  );
+  const callback = authorized.headers.get("Location");
+  assert(callback && callback.startsWith(config.appOrigin + "/auth/callback?"));
+  const returned = await request(app, callback, appCookies);
+  assert.equal(
+    returned.status,
+    303,
+    "actual maintained-client native callback",
+  );
+  assert([...appCookies.keys()].includes("__Host-milton-session"));
+  assert(![...appCookies.keys()].some((k) => authCookies.has(k)));
+  assert.equal(
+    (await request(app, config.appOrigin + "/tps-report", appCookies)).status,
+    200,
+  );
+  assert.equal((await request(app, callback, appCookies)).status, 401);
+  assert.equal(stripe.customers, 1);
+  assert.equal(stripe.subscriptions, 1);
+  pass(
+    "actual product callback, app-only cookie, writing read, one-use replay and concurrent admission/one trial",
+  );
+  await owner.query(
+    'delete from milton_auth."rateLimit"; delete from milton_guard.rate_bucket',
+  );
+  const registration = await request(
+    native.handler,
+    ISSUER + "/oauth2/register",
+    authCookies,
+    {
+      client_name: "Fictional controlled assistant",
+      redirect_uris: ["https://assistant.example.invalid/callback"],
+      token_endpoint_auth_method: "client_secret_post",
+      scope: "openid offline_access milton:read milton:write",
+      grant_types: ["authorization_code", "refresh_token"],
+    },
+  );
+  assert.equal(registration.status, 201);
+  const assistant = (await registration.json()) as {
+    client_id: string;
+    client_secret: string;
+  };
+  const assistantClient = await oidc.discovery(
+    new URL(ISSUER),
+    assistant.client_id,
+    { id_token_signed_response_alg: "EdDSA" },
+    oidc.ClientSecretPost(assistant.client_secret),
+    {
+      [oidc.customFetch]: transport,
+      execute: [oidc.enableNonRepudiationChecks],
+      timeout: 5,
+    },
+  );
+  const authorizeAssistant = async (scope: string) => {
+    const state = oidc.randomState(),
+      nonce = oidc.randomNonce(),
+      verifier = oidc.randomPKCECodeVerifier();
+    const authorize = oidc.buildAuthorizationUrl(assistantClient, {
+      redirect_uri: "https://assistant.example.invalid/callback",
+      scope,
+      resource: config.resource,
+      state,
+      nonce,
+      code_challenge: await oidc.calculatePKCECodeChallenge(verifier),
+      code_challenge_method: "S256",
+    });
+    const response = await request(native.handler, authorize.href, authCookies);
+    let destination = response.headers.get("Location");
+    if (!destination)
+      destination = ((await response.json()) as { url: string }).url;
+    assert(destination);
+    if (new URL(destination, AUTH_ORIGIN).pathname === "/consent") {
+      const choice = await request(
+        native.handler,
+        ISSUER + "/oauth2/consent",
+        authCookies,
+        {
+          accept: true,
+          scope,
+          oauth_query: new URL(
+            destination,
+            AUTH_ORIGIN,
+          ).searchParams.toString(),
+        },
+      );
+      assert.equal(choice.status, 200);
+      destination = ((await choice.json()) as { url: string }).url;
+    }
+    return oidc.authorizationCodeGrant(
+      assistantClient,
+      new URL(destination, AUTH_ORIGIN),
+      {
+        expectedState: state,
+        expectedNonce: nonce,
+        pkceCodeVerifier: verifier,
+      },
+      { resource: config.resource },
+    );
+  };
+  const grant = await authorizeAssistant(
+    "openid offline_access milton:read milton:write",
+  );
+  assert(grant.refresh_token);
+  const mcpConfig = {
+    issuer: ISSUER,
+    resource: config.resource,
+    appOrigin: config.appOrigin,
+    DATABASE_URL: url("mcp"),
+  };
+  const verifier = createAccessTokenVerifier(mcpConfig, async (input, init) =>
+    native.handler(new Request(input, init)),
+  );
+  const mcp = createMiltonHandler(mcpConfig, verifier, () => {});
+  const rpc = (access: string, method: string, params: unknown = {}) =>
+    mcp(
+      new Request(config.resource, {
+        method: "POST",
+        headers: {
+          Host: "mcp.meetmilton.com",
+          Authorization: "Bearer " + access,
+          "Content-Type": "application/json",
+          Accept: "application/json, text/event-stream",
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+      }),
+    );
+  const result = async (response: Response) => {
+    assert.equal(response.status, 200, "MCP HTTP response");
+    const text = await response.text();
+    const messages =
+      text.startsWith("event:") || text.startsWith("data:")
+        ? text
+            .split("\n")
+            .filter((line) => line.startsWith("data: "))
+            .map((line) => JSON.parse(line.slice(6)))
+        : [JSON.parse(text)];
+    const message = messages.find((value: { id?: number }) => value.id === 1);
+    assert(
+      message?.result,
+      "MCP request result must follow any tool-change notifications",
+    );
+    return message as {
+      result: {
+        tools?: { name: string }[];
+        content?: { text: string }[];
+        isError?: boolean;
+      };
+    };
+  };
+  stage = "MCP tools/list";
+  const list = await rpc(grant.access_token, "tools/list");
+  assert.equal(list.status, 200, "actual native JWT profile and MCP role");
+  assert.equal((await result(list)).result.tools?.length, 4);
+  stage = "MCP cover sheet";
+  const read = await result(
+    await rpc(grant.access_token, "tools/call", {
+      name: "get_cover_sheet",
+      arguments: {},
+    }),
+  );
+  assert.equal(read.result.isError, undefined);
+  const cover = JSON.parse(read.result.content![0]!.text) as {
+    version: string;
+  };
+  stage = "MCP save";
+  const save = await result(
+    await rpc(grant.access_token, "tools/call", {
+      name: "create_memo",
+      arguments: {
+        text: "Keep fictional measurements explicit.",
+        rules: [
+          { report: "cover", text: "Keep fictional measurements explicit." },
+        ],
+        expected_version: cover.version,
+        request_id: crypto.randomUUID(),
+      },
+    }),
+  );
+  assert.equal(
+    save.result.isError,
+    undefined,
+    "real-role model-free writing save",
+  );
+  stage = "read-only native authorization";
+  const readGrant = await authorizeAssistant(
+    "openid offline_access milton:read",
+  );
+  const roList = await rpc(readGrant.access_token, "tools/list");
+  assert.equal(roList.status, 200);
+  assert.equal((await result(roList)).result.tools?.length, 3);
+  assert.equal(
+    (
+      await rpc(readGrant.access_token, "tools/call", {
+        name: "create_memo",
+        arguments: {},
+      })
+    ).status,
+    403,
+  );
+  await authOwner.query(
+    "REVOKE EXECUTE ON FUNCTION milton_guard.binding_status(text,text,text,text[],text[]) FROM milton_mcp_runtime",
+  );
+  assert.equal((await rpc(readGrant.access_token, "tools/list")).status, 503);
+  await authOwner.query(
+    "GRANT EXECUTE ON FUNCTION milton_guard.binding_status(text,text,text,text[],text[]) TO milton_mcp_runtime",
+  );
+  assert.equal((await rpc(readGrant.access_token, "tools/list")).status, 200);
+  await authOwner.query(
+    "REVOKE EXECUTE ON FUNCTION milton_guard.app_status(text,text,text,text,text,text) FROM milton_app_runtime",
+  );
+  assert.equal(
+    (await request(app, config.appOrigin + "/tps-report", appCookies)).status,
+    503,
+  );
+  await authOwner.query(
+    "GRANT EXECUTE ON FUNCTION milton_guard.app_status(text,text,text,text,text,text) TO milton_app_runtime",
+  );
+  assert.equal(
+    (await request(app, config.appOrigin + "/tps-report", appCookies)).status,
+    200,
+  );
+  pass(
+    "actual native controlled code/refresh grant reaches scoped product MCP: four/three tools and model-free save",
+  );
+  let row = (
+    await appPool.query(
+      "SELECT subject,sid,binding,incarnation,generation FROM milton_app.session ORDER BY created_at DESC LIMIT 1",
+    )
+  ).rows[0];
+  assert(row);
+  assert(await appActive(config, row));
+  let user = { ...row, id: row.subject };
+  let token = appCookies.get("__Host-milton-session")!;
+  const disconnect = await startOperation(
+    config,
+    user,
+    token,
+    crypto.randomUUID(),
+    "disconnect",
+    assistant.client_id,
+  );
+  assert.equal(
+    (await advanceOperation(config, disconnect)).progress,
+    "complete",
+  );
+  assert.equal((await rpc(grant.access_token, "tools/list")).status, 401);
+  assert.equal((await rpc(readGrant.access_token, "tools/list")).status, 401);
+  const reconnect = await authorizeAssistant(
+    "openid offline_access milton:read",
+  );
+  assert(reconnect.refresh_token);
+  assert.equal(
+    (await advanceOperation(config, disconnect)).progress,
+    "complete",
+  );
+  assert.equal((await rpc(reconnect.access_token, "tools/list")).status, 200);
+  assert.equal((await rpc(grant.access_token, "tools/list")).status, 401);
+  pass(
+    "app-owned persisted disconnect/reconnect retries cannot revive old bindings or remove a new grant",
+  );
+  stage = "fixed-client app/native RP logout";
+  // Ordinary native logout must leave offline assistants independent of sid.
+  await request(app, config.appOrigin + "/tps-report", appCookies);
+  const logout = await request(
+    app,
+    config.appOrigin + "/logout",
+    appCookies,
+    { csrf: appCookies.get("__Host-milton-csrf")! },
+    true,
+  );
+  assert.equal(logout.status, 200);
+  const logoutUrl = /content="0;url=([^"]+)"/
+    .exec(await logout.text())?.[1]
+    ?.replaceAll("&amp;", "&");
+  assert(logoutUrl);
+  assert.equal(
+    new URL(logoutUrl).searchParams.get("post_logout_redirect_uri"),
+    config.appOrigin + "/auth/logged-out",
+  );
+  const confirmation = await request(native.handler, logoutUrl, authCookies);
+  assert.equal(confirmation.status, 200);
+  const completed = await request(
+    native.handler,
+    ISSUER + "/oauth2/end-session/confirm",
+    authCookies,
+    { action: "confirm" },
+    true,
+  );
+  assert.equal(completed.status, 302);
+  assert.equal(
+    completed.headers.get("Location"),
+    config.appOrigin + "/auth/logged-out",
+  );
+  assert.equal(await appActive(config, row), false);
+  assert.equal(
+    (await request(app, config.appOrigin + "/tps-report", appCookies)).status,
+    403,
+  );
+  const refreshed = await oidc.refreshTokenGrant(
+    assistantClient,
+    reconnect.refresh_token,
+    { resource: config.resource },
+  );
+  assert.equal((await rpc(refreshed.access_token, "tools/list")).status, 200);
+  await request(
+    native.handler,
+    ISSUER + "/request-password-reset",
+    authCookies,
+    { email: "person@example.invalid" },
+  );
+  const reset = mail.findLast((m) => m.kind === "reset");
+  assert(reset);
+  const recovery = decodeURIComponent(
+    new URL(reset.url).pathname.split("/").at(-1)!,
+  );
+  assert(recovery);
+  const nextPassword = "A new fictional forest password 974";
+  assert.equal(
+    (
+      await request(native.handler, ISSUER + "/reset-password", authCookies, {
+        token: recovery,
+        newPassword: nextPassword,
+      })
+    ).status,
+    200,
+  );
+  assert.equal((await rpc(refreshed.access_token, "tools/list")).status, 401);
+  await assert.rejects(
+    oidc.refreshTokenGrant(assistantClient, refreshed.refresh_token!, {
+      resource: config.resource,
+    }),
+  );
+  pass(
+    "actual offline refresh survives ordinary browser logout; native recovery fences access and refresh",
+  );
+  assert.equal(
+    (
+      await request(native.handler, ISSUER + "/sign-in/email", authCookies, {
+        email: "person@example.invalid",
+        password: nextPassword,
+      })
+    ).status,
+    200,
+  );
+  // Owner fixture ages only the original native session; the new app cookie
+  // must not turn this old SSO proof into a fresh destructive-action proof.
+  await authOwner.query(
+    `UPDATE milton_auth.session SET "createdAt"=now()-interval '10 minutes' WHERE "userId"=$1`,
+    [session.user.id],
+  );
+  const newLogin = await request(app, config.appOrigin + "/login", appCookies);
+  assert.equal(newLogin.status, 303);
+  const newAuthorization = await request(
+    native.handler,
+    newLogin.headers.get("Location")!,
+    authCookies,
+  );
+  const newCallback = newAuthorization.headers.get("Location");
+  assert(newCallback);
+  assert.equal((await request(app, newCallback, appCookies)).status, 303);
+  row = (
+    await appPool.query(
+      "SELECT subject,sid,binding,incarnation,generation FROM milton_app.session ORDER BY created_at DESC LIMIT 1",
+    )
+  ).rows[0];
+  assert(row);
+  user = { ...row, id: row.subject };
+  token = appCookies.get("__Host-milton-session")!;
+  const firstDeletePage = await request(
+    app,
+    config.appOrigin + "/account/delete",
+    appCookies,
+  );
+  const staleOperation = /name="operation" value="([^"]+)"/.exec(
+    await firstDeletePage.text(),
+  )?.[1];
+  assert(staleOperation);
+  const deleteForm = (operation: string) => ({
+    csrf: appCookies.get("__Host-milton-csrf")!,
+    operation,
+    confirm: "delete my account",
+  });
+  assert.equal(
+    (
+      await request(
+        app,
+        config.appOrigin + "/account/delete",
+        appCookies,
+        deleteForm(staleOperation),
+        true,
+      )
+    ).status,
+    403,
+    "new local cookie cannot freshen old native SSO",
+  );
+  assert.equal(
+    (
+      await appPool.query(
+        "SELECT count(*)::int n FROM milton_app.lifecycle WHERE kind='delete'",
+      )
+    ).rows[0].n,
+    0,
+  );
+  assert.equal(
+    (
+      await request(native.handler, ISSUER + "/sign-in/email", authCookies, {
+        email: "person@example.invalid",
+        password: nextPassword,
+      })
+    ).status,
+    200,
+  );
+  const freshLogin = await request(
+    app,
+    config.appOrigin + "/login",
+    appCookies,
+  );
+  const freshAuthorization = await request(
+    native.handler,
+    freshLogin.headers.get("Location")!,
+    authCookies,
+  );
+  assert.equal(
+    (
+      await request(
+        app,
+        freshAuthorization.headers.get("Location")!,
+        appCookies,
+      )
+    ).status,
+    303,
+  );
+  row = (
+    await appPool.query(
+      "SELECT subject,sid,binding,incarnation,generation FROM milton_app.session ORDER BY created_at DESC LIMIT 1",
+    )
+  ).rows[0];
+  assert(row);
+  token = appCookies.get("__Host-milton-session")!;
+  const deletePage = await request(
+    app,
+    config.appOrigin + "/account/delete",
+    appCookies,
+  );
+  assert.equal(deletePage.status, 200);
+  const operation = /name="operation" value="([^"]+)"/.exec(
+    await deletePage.text(),
+  )?.[1];
+  assert(operation);
+  assert.equal(
+    (
+      await request(
+        app,
+        config.appOrigin + "/account/delete",
+        appCookies,
+        { ...deleteForm(operation), confirm: "wrong confirmation" },
+        true,
+      )
+    ).status,
+    400,
+  );
+  stripe.deleteDown = true;
+  const failedDeletion = await request(
+    app,
+    config.appOrigin + "/account/delete",
+    appCookies,
+    deleteForm(operation),
+    true,
+  );
+  assert.equal(failedDeletion.status, 503);
+  await failedDeletion.body?.cancel();
+  const deletion = await findOperation(config, token, operation);
+  assert(deletion);
+  const retry = await request(
+    app,
+    config.appOrigin + "/account/delete",
+    appCookies,
+  );
+  assert.equal(retry.status, 503);
+  assert((await retry.text()).includes(operation));
+  assert.equal(
+    (
+      await owner.query("SELECT count(*)::int n FROM users WHERE id=$1", [
+        deletion.user_id,
+      ])
+    ).rows[0].n,
+    1,
+    "Stripe failure preserves writing account",
+  );
+  assert.equal(
+    (
+      await appPool.query(
+        "SELECT progress FROM milton_app.lifecycle WHERE operation_id=$1",
+        [deletion.operation_id],
+      )
+    ).rows[0].progress,
+    "refused",
+  );
+  const rollbackProbe = await appOwner.connect();
+  try {
+    await assert.rejects(
+      rollbackProbe.query(
+        readFileSync(
+          new URL("./migrations/005-app.down.sql", sourceRoot),
+          "utf8",
+        ),
+      ),
+    );
+    await rollbackProbe.query("ROLLBACK");
+  } finally {
+    rollbackProbe.release();
+  }
+  stripe.deleteDown = false;
+  const completedDeletion = await request(
+    app,
+    config.appOrigin + "/account/delete",
+    appCookies,
+    deleteForm(operation),
+    true,
+  );
+  assert.equal(completedDeletion.status, 200);
+  assert((await completedDeletion.text()).includes("Account deleted"));
+  const finished = await advanceOperation(config, deletion);
+  assert.equal(finished.progress, "complete");
+  assert.equal(await appActive(config, row), false);
+  assert.equal(
+    (
+      await owner.query(
+        'SELECT count(*)::int n FROM milton_auth."user" WHERE id=$1',
+        [row.subject],
+      )
+    ).rows[0].n,
+    0,
+  );
+  assert.equal(
+    (
+      await appPool.query(
+        "SELECT progress FROM milton_app.lifecycle WHERE operation_id=$1",
+        [deletion.operation_id],
+      )
+    ).rows[0].progress,
+    "complete",
+  );
+  assert.equal((await advanceOperation(config, deletion)).progress, "complete");
+  assert(stripe.deleted);
+  pass(
+    "Stripe-first failure/retry preserves writing, then actual native refusal/cleanup keeps the original operation",
+  );
+  await owner.query(
+    'delete from milton_auth."rateLimit"; delete from milton_guard.rate_bucket',
+  );
+  assert.equal(
+    (
+      await request(native.handler, ISSUER + "/sign-up/email", authCookies, {
+        name: "Fictional replacement",
+        email: "person@example.invalid",
+        password,
+      })
+    ).status,
+    200,
+  );
+  const newMail = mail.findLast((m) => m.kind === "verify");
+  assert(newMail);
+  assert.equal((await native.handler(new Request(newMail.url))).status, 302);
+  assert.equal(
+    (
+      await request(native.handler, ISSUER + "/sign-in/email", authCookies, {
+        email: "person@example.invalid",
+        password,
+      })
+    ).status,
+    200,
+  );
+  const replacement = (await (
+    await request(native.handler, ISSUER + "/get-session", authCookies)
+  ).json()) as { user: { id: string } };
+  assert.notEqual(replacement.user.id, row.subject);
+  const replacementLogin = await request(
+    app,
+    config.appOrigin + "/login",
+    appCookies,
+  );
+  const replacementAuth = await request(
+    native.handler,
+    replacementLogin.headers.get("Location")!,
+    authCookies,
+  );
+  assert.equal(
+    (await request(app, replacementAuth.headers.get("Location")!, appCookies))
+      .status,
+    303,
+  );
+  const replacementAccount = await lookupIdentityAccount(config, {
+    provider: ISSUER,
+    subject: replacement.user.id,
+  });
+  assert.notEqual(replacementAccount.userId, deletion.user_id);
+  assert.equal(
+    (
+      await appPool.query(
+        "SELECT subscription_status FROM trial_accounts WHERE user_id=$1",
+        [replacementAccount.userId],
+      )
+    ).rows[0].subscription_status,
+    "canceled",
+  );
+  assert.equal(stripe.customers, 1);
+  assert.equal(stripe.subscriptions, 1);
+  assert.equal((await advanceOperation(config, deletion)).progress, "complete");
+  assert.equal(
+    (
+      await authPool.query(
+        'SELECT count(*)::int n FROM milton_auth."user" WHERE id=$1',
+        [replacement.user.id],
+      )
+    ).rows[0].n,
+    1,
+  );
+  pass(
+    "auth deletion/recreation keeps trial eligibility and replay cannot target the replacement account",
+  );
+  // PR-01: native callback commits, app notification never arrives, unlink, delete,
+  // then the same stable provider with a changed email must not earn a new trial.
+  {
+    stage = "unlink eligibility preservation";
+    const clearRates = () =>
+      owner.query(
+        'delete from milton_auth."rateLimit"; delete from milton_guard.rate_bucket',
+      );
+    const freshEmail = "unlink-preserve@example.invalid";
+    const identity = "fictional-unlink-stable-google";
+    const freshPassword = "Fictional unlink preservation password";
+    authCookies.clear();
+    appCookies.clear();
+    const signIn = async (address = freshEmail) => {
+      assert.equal(
+        (
+          await request(
+            native.handler,
+            ISSUER + "/sign-in/email",
+            authCookies,
+            { email: address, password: freshPassword },
+          )
+        ).status,
+        200,
+      );
+    };
+    const appLogin = async () => {
+      const start = await request(app, config.appOrigin + "/login", appCookies);
+      const authorized = await request(
+        native.handler,
+        start.headers.get("Location")!,
+        authCookies,
+      );
+      assert.equal(
+        (await request(app, authorized.headers.get("Location")!, appCookies))
+          .status,
+        303,
+      );
+    };
+    await clearRates();
+    await request(native.handler, ISSUER + "/sign-up/email", authCookies, {
+      email: freshEmail,
+      password: freshPassword,
+      name: "Fictional unlink",
+    });
+    await native.handler(
+      new Request(mail.findLast((m) => m.kind === "verify")!.url),
+    );
+    await signIn();
+    await appLogin();
+    const original = (
+      await appPool.query(
+        "select subject from milton_app.session order by created_at desc limit 1",
+      )
+    ).rows[0].subject;
+    const originalAccount = await lookupIdentityAccount(config, {
+      provider: ISSUER,
+      subject: original,
+    });
+    const trialBefore = stripe.subscriptions;
+    const nativeContext = await native.provider.$context;
+    const google = nativeContext.socialProviders.find(
+      (p) => p.id === "google",
+    )!;
+    google.validateAuthorizationCode = async () => ({
+      accessToken: "fictional-only",
+      scopes: ["openid", "email", "profile"],
+    });
+    let socialEmail = freshEmail;
+    google.getUserInfo = async () => ({
+      user: {
+        email: socialEmail,
+        emailVerified: true,
+        name: "Fictional social",
+      },
+      data: { sub: identity, email: socialEmail, email_verified: true },
+    });
+    const social = async (link: boolean) => {
+      const start = await request(
+        native.handler,
+        ISSUER + (link ? "/link-social" : "/sign-in/social"),
+        authCookies,
+        { provider: "google", callbackURL: AUTH_ORIGIN + "/security" },
+      );
+      assert.equal(start.status, 200);
+      const state = new URL(
+        ((await start.json()) as { url: string }).url,
+      ).searchParams.get("state");
+      return request(
+        native.handler,
+        ISSUER +
+          "/callback/google?code=fictional-code&state=" +
+          encodeURIComponent(state!),
+        authCookies,
+      );
+    };
+    dropLinkNotification = true;
+    assert.equal((await social(true)).status, 503);
+    dropLinkNotification = false;
+    const linked = (
+      await authPool.query(
+        `select id from milton_auth.account where "userId"=$1 and "providerId"='google'`,
+        [original],
+      )
+    ).rows[0];
+    assert(linked, "link committed despite lost notification");
+    await owner.query(
+      "update trial_accounts set subscription_status='canceled' where user_id=$1",
+      [originalAccount.userId],
+    );
+    const eligibilityCount = async () =>
+      (
+        await appPool.query(
+          "select count(*)::int n from milton_app.account_fingerprint where user_id=$1",
+          [originalAccount.userId],
+        )
+      ).rows[0].n;
+    const beforePreservation = await eligibilityCount();
+    preservationFailure = "before";
+    assert.equal(
+      (
+        await request(native.handler, ISSUER + "/unlink-account", authCookies, {
+          accountId: linked.id,
+        })
+      ).status,
+      503,
+    );
+    assert.equal(await eligibilityCount(), beforePreservation);
+    preservationFailure = "after";
+    assert.equal(
+      (
+        await request(native.handler, ISSUER + "/unlink-account", authCookies, {
+          accountId: linked.id,
+        })
+      ).status,
+      503,
+    );
+    const afterPreservation = await eligibilityCount();
+    assert(
+      afterPreservation > beforePreservation,
+      "callback committed eligibility before response was lost",
+    );
+    assert.equal(
+      (
+        await authPool.query(
+          "select count(*)::int n from milton_auth.account where id=$1",
+          [linked.id],
+        )
+      ).rows[0].n,
+      1,
+    );
+    preservationFailure = "none";
+    assert.equal(
+      (
+        await request(native.handler, ISSUER + "/unlink-account", authCookies, {
+          accountId: linked.id,
+        })
+      ).status,
+      200,
+      "expired billing cannot prevent security removal",
+    );
+    assert.equal(
+      await eligibilityCount(),
+      afterPreservation,
+      "retry is idempotent",
+    );
+    await clearRates();
+    await signIn();
+    await appLogin();
+    const authority = (
+      await appPool.query(
+        "select subject,sid,binding,incarnation,generation from milton_app.session order by created_at desc limit 1",
+      )
+    ).rows[0];
+    const operation = await startOperation(
+      config,
+      { ...authority, id: authority.subject },
+      appCookies.get("__Host-milton-session")!,
+      randomUUID(),
+      "delete",
+    );
+    assert.equal(
+      (await advanceOperation(config, operation)).progress,
+      "complete",
+    );
+    authCookies.clear();
+    appCookies.clear();
+    socialEmail = "unlink-changed@example.invalid";
+    await clearRates();
+    assert.equal((await social(false)).status, 302);
+    await appLogin();
+    const recreated = (
+      await appPool.query(
+        "select subject from milton_app.session order by created_at desc limit 1",
+      )
+    ).rows[0].subject;
+    assert.notEqual(recreated, original);
+    const recreatedAccount = await lookupIdentityAccount(config, {
+      provider: ISSUER,
+      subject: recreated,
+    });
+    assert.notEqual(
+      recreatedAccount.userId,
+      originalAccount.userId,
+      "provider eligibility never merges writing",
+    );
+    assert.equal(
+      (
+        await appPool.query(
+          "select subscription_status from trial_accounts where user_id=$1",
+          [recreatedAccount.userId],
+        )
+      ).rows[0].subscription_status,
+      "canceled",
+      "removed stable identity must survive lost link notification and changed email",
+    );
+    assert.equal(stripe.subscriptions, trialBefore, "no second trial");
+    // Unadmitted native-only subject: callback uncertainty cannot create writing or a trial.
+    await clearRates();
+    authCookies.clear();
+    appCookies.clear();
+    const nativeOnly = "unlink-native-only@example.invalid";
+    await request(native.handler, ISSUER + "/sign-up/email", authCookies, {
+      email: nativeOnly,
+      password: freshPassword,
+      name: "Fictional native only",
+    });
+    await native.handler(
+      new Request(mail.findLast((m) => m.kind === "verify")!.url),
+    );
+    await signIn(nativeOnly);
+    socialEmail = nativeOnly;
+    google.getUserInfo = async () => ({
+      user: { email: socialEmail, emailVerified: true, name: "Fictional only" },
+      data: {
+        sub: "fictional-native-only-google",
+        email: socialEmail,
+        email_verified: true,
+      },
+    });
+    dropLinkNotification = true;
+    assert.equal((await social(true)).status, 503);
+    dropLinkNotification = false;
+    const only = (
+      await authPool.query(
+        `select u.id,a.id as account from milton_auth."user" u join milton_auth.account a on a."userId"=u.id where u.email=$1 and a."providerId"='google'`,
+        [nativeOnly],
+      )
+    ).rows[0];
+    const counts = async () =>
+      JSON.stringify(
+        (
+          await owner.query(
+            "select (select count(*) from users) as users,(select count(*) from trial_accounts) as trials,(select count(*) from milton_app.trial_fingerprint) as fingerprints",
+          )
+        ).rows,
+      );
+    const unchanged = await counts();
+    for (const failure of ["before", "after"] as const) {
+      preservationFailure = failure;
+      assert.equal(
+        (
+          await request(
+            native.handler,
+            ISSUER + "/unlink-account",
+            authCookies,
+            { accountId: only.account },
+          )
+        ).status,
+        503,
+      );
+      assert.equal(
+        (
+          await authPool.query(
+            "select count(*)::int n from milton_auth.account where id=$1",
+            [only.account],
+          )
+        ).rows[0].n,
+        1,
+      );
+      assert.equal(await counts(), unchanged);
+    }
+    preservationFailure = "none";
+    assert.equal(
+      (
+        await request(native.handler, ISSUER + "/unlink-account", authCookies, {
+          accountId: only.account,
+        })
+      ).status,
+      200,
+    );
+    assert.equal(await counts(), unchanged);
+    assert(preservationCalls >= 4);
+    pass(
+      "lost native link notification -> unlink -> delete -> changed-email recreation preserves trial eligibility; callback uncertainty is safe and native-only unlink admits nobody",
+    );
+  }
+  console.log(
+    `PASS ${groups} product integration groups (Node26/PostgreSQL18 TLS, no external network)`,
+  );
+} catch (error) {
+  console.error(
+    "FAIL product integration",
+    stage,
+    error instanceof assert.AssertionError
+      ? error.message
+      : error instanceof Error
+        ? error.name
+        : "unknown",
+  );
+  process.exitCode = 1;
+} finally {
+  await Promise.allSettled(pools.map((pool) => pool.end()));
+  if (running)
+    run(join(bin, "pg_ctl"), ["-D", data, "-m", "fast", "-w", "stop"]);
+  rmSync(root, { recursive: true, force: true });
+}

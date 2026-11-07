@@ -53,6 +53,9 @@ test("a release passes the owner URL in its own variable, checked, and an empty 
   for (const bad of [
     "",
     "postgresql://owner:fixture@db.example.invalid/other",
+    "postgresql://owner:fixture@db.example.invalid/milton?ssl=false",
+    "postgresql://owner:fixture@db.example.invalid/milton?sslmode=require&sslmode=disable",
+    "postgresql://owner:fixture@db.example.invalid/milton?sslmode=require&uselibpqcompat=true",
   ]) {
     const refused = migrationUrl({ MILTON_OWNER_DATABASE_URL: bad });
     await expect(refused).rejects.toMatchObject({ code: "configuration" });

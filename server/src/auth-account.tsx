@@ -1,204 +1,138 @@
 /** @jsxImportSource hono/jsx */
-import { z } from "zod";
-import type { Child } from "hono/jsx";
-import { deleteAccount, lookupIdentityAccount, StoreError } from "./store";
-import { AuthError } from "./token";
-import { endStripeCustomer } from "./billing";
-import { logUnexpected } from "./error-log";
 import { page } from "./pages";
+import { cookieValue, type PageContext } from "./auth-session";
+import { cookieName, removeSession } from "./auth-oidc";
+import {
+  advanceOperation,
+  findOperation,
+  startOperation,
+  type Operation,
+} from "./auth-lifecycle";
+import { invalid } from "./auth-authority";
 import { supportEmail } from "./config";
-import { timed, type PageContext, type SessionUser } from "./auth-session";
-import { consentList, readConsents } from "./auth-assistants";
 
-// Account deletion. The phrase must match exactly; nothing is deleted
-// until Milton has recorded a disconnect for every live consent.
-const deletePhrase = "delete my account";
-const deletionUnavailable = () =>
-  new AuthError(
-    "deletion_unavailable",
-    "Account deletion is unavailable right now. Nothing was deleted. Try again.",
-    503,
-  );
-const activeAccount = async (ctx: PageContext, user: SessionUser) => {
-  const { config } = ctx;
-  try {
-    await lookupIdentityAccount(config, {
-      provider: "neon",
-      subject: user.id,
-    });
-  } catch (error) {
-    if (error instanceof StoreError && error.code === "account_unavailable")
-      throw new StoreError(
-        "account_unavailable",
-        "This Milton account is unavailable. It may already be deleted.",
-        403,
-      );
-    throw error;
-  }
-};
-const deletionPage = async (
-  ctx: PageContext,
-  user: SessionUser,
-  notice: Child = null,
-  status = 200,
-) => {
-  const { csrfField, config } = ctx;
-  const billing = await ctx.accountBilling(user);
-  return page(
-    "Delete your account",
-    <>
-      {notice}
-      <p>
-        Deleting your Milton account cannot be undone. To keep a copy of your
-        report, <a href="/download">download TPS.md</a> first.
-      </p>
-      <h2>Deleted now</h2>
-      <p>
-        Your rules, approved samples, report and its history, save receipts,
-        usage counters, and Milton's link to your sign-in. Every connected
-        assistant is disconnected and you are signed out. If you have a Stripe
-        customer record, it and any subscription end immediately, with no
-        refund.
-      </p>
-      <h2>Kept</h2>
-      <ul>
-        <li>
-          A record of the assistants you connected (sign-in ID and assistant ID,
-          no content), so their old tokens cannot reach a new account.
-        </li>
-        <li>
-          A one-way fingerprint of your sign-in, so a new account does not get a
-          second trial.
-        </li>
-        <li>
-          Your sign-in record (email, name, Google or GitHub link) stays with
-          our sign-in provider. To remove it, email{" "}
-          <a href={`mailto:${supportEmail(config)}`}>{supportEmail(config)}</a>.
-        </li>
-        <li>Stripe keeps past invoices and payment records.</li>
-        <li>
-          Copies in database backups are not erased immediately; they are
-          removed when those backups expire or are deleted.
-        </li>
-      </ul>
-      <form method="post" action="/account/delete">
-        {csrfField()}
-        <label>
-          <span>
-            Type <code>{deletePhrase}</code> to confirm.
-          </span>
-          <input
-            name="confirm"
-            autocomplete="off"
-            autocapitalize="none"
-            spellcheck={false}
-            required
-          />
-        </label>
-        <button class="secondary">Delete my account</button>
-      </form>
-    </>,
-    status,
-    null,
-    { account: { csrf: csrfField, email: user.email, billing } },
-  );
-};
+const phrase = "delete my account";
 export const accountDeletion = async (ctx: PageContext): Promise<Response> => {
-  const {
-    config,
-    request,
-    auth,
-    signedIn,
-    readForm,
-    writeCookie,
-    csrfName,
-    loopName,
-  } = ctx;
-  if (request.method !== "GET" && request.method !== "POST")
+  const { config, request, csrfField, readForm, signedIn, writeCookie } = ctx;
+  if (!["GET", "POST"].includes(request.method))
     return page(
       "Method not allowed",
       <p>Use the page's controls to continue.</p>,
       405,
     );
+  const token = cookieValue(request, cookieName(config, "session"));
+  const retryPage = (op: Operation) =>
+    page(
+      "Finish account deletion",
+      <>
+        <p>
+          {op.progress === "pending"
+            ? "Account deletion has not been confirmed. Retry to continue this original request."
+            : "Account deletion is incomplete. Access has been stopped. Retry to finish deleting this original account."}
+        </p>
+        {op.progress === "writing-erased" && (
+          <p>
+            Your writing has been erased. Sign-in cleanup still needs to finish.
+          </p>
+        )}
+        <form method="post" action="/account/delete">
+          {csrfField()}
+          <input type="hidden" name="operation" value={op.operation_id} />
+          <input type="hidden" name="confirm" value={phrase} />
+          <button>Retry deletion</button>
+        </form>
+        <p>
+          If retry does not finish, contact{" "}
+          <a href={`mailto:${supportEmail(config)}`}>{supportEmail(config)}</a>.
+        </p>
+      </>,
+      503,
+    );
   if (request.method === "GET") {
+    const pending = await findOperation(config, token);
+    if (pending && pending.progress !== "complete") return retryPage(pending);
     const user = await signedIn();
-    await activeAccount(ctx, user);
-    return deletionPage(ctx, user);
+    return page(
+      "Delete your account",
+      <>
+        <p>
+          Deleting your Milton account cannot be undone.{" "}
+          <a href="/download">Download TPS.md</a> first to keep a copy.
+        </p>
+        <p>
+          Your rules, approved samples, report history, receipts and usage
+          counters are deleted. Your subscription ends immediately, with no
+          refund. Connected assistants lose access, and your sign-in methods and
+          browser sessions are removed after cleanup finishes.
+        </p>
+        <p>
+          Milton keeps minimal one-way identity fingerprints to prevent another
+          free trial, original disconnect/deletion records to make retries safe,
+          Stripe's past payment records and copies until backups expire.
+        </p>
+        <form method="post" action="/account/delete">
+          {csrfField()}
+          <input type="hidden" name="operation" value={crypto.randomUUID()} />
+          <label>
+            Type <code>{phrase}</code> to confirm.
+            <input
+              name="confirm"
+              autocomplete="off"
+              autocapitalize="none"
+              spellcheck={false}
+              required
+            />
+          </label>
+          <button class="secondary">Delete my account</button>
+        </form>
+      </>,
+      200,
+      null,
+      {
+        account: {
+          csrf: csrfField,
+          email: user.email,
+          billing: await ctx.accountBilling(user),
+        },
+      },
+    );
   }
   const form = await readForm();
-  const user = await signedIn();
-  await activeAccount(ctx, user);
-  if (form.get("confirm") !== deletePhrase)
-    return deletionPage(
-      ctx,
-      user,
-      <p role="alert">
-        Type {deletePhrase} exactly to delete your account. Nothing was deleted.
-      </p>,
+  if (form.get("confirm") !== phrase)
+    return page(
+      "Confirmation required",
+      <p>Type {phrase} exactly. Nothing was deleted.</p>,
       400,
     );
-  let consents: z.infer<typeof consentList>;
-  try {
-    consents = await readConsents(ctx, user);
-  } catch (error) {
-    if (error instanceof AuthError && error.code === "session_required")
-      throw error;
-    throw deletionUnavailable();
+  const id = form.get("operation") ?? "";
+  let op = await findOperation(config, token, id);
+  if (!op) {
+    const user = await signedIn();
+    await ctx.fresh(user);
+    if (!token) throw invalid();
+    op = await startOperation(config, user, token, id, "delete");
   }
-  // Stripe first: otherwise a deleted account keeps being charged and Milton has
-  // lost the customer id. If the delete below fails, the row no longer holds the
-  // customer, so a retry has nothing to call.
-  const { userId } = await lookupIdentityAccount(config, {
-    provider: "neon",
-    subject: user.id,
-  });
   try {
-    await endStripeCustomer(config, userId);
-  } catch (error) {
-    logUnexpected("billing", error);
-    throw deletionUnavailable();
-  }
-  await deleteAccount(
-    config,
-    { provider: "neon", subject: user.id },
-    consents.map((consent) => consent.clientId),
-  );
-  // Best effort from here: Milton already refuses every listed assistant.
-  await Promise.allSettled(
-    consents.map((consent) =>
-      timed(auth.oauth2.deleteConsent({ id: consent.id })),
-    ),
-  );
-  let signedOut = false;
-  try {
-    signedOut = !(await timed(auth.signOut())).error;
+    op = await advanceOperation(config, op);
   } catch {
-    /* The account is gone either way. */
+    return retryPage((await findOperation(config, token, id)) ?? op);
   }
-  writeCookie(csrfName, "", 0);
-  writeCookie(loopName, "", 0);
+  if (op.progress !== "complete") return retryPage(op);
+  await removeSession(config, token);
+  writeCookie(cookieName(config, "session"), "", 0);
+  writeCookie(ctx.csrfName, "", 0);
   return page(
     "Account deleted",
     <>
-      <p role="status">Your Milton account is deleted.</p>
-      <p>
-        Your rules, approved samples, report and its history, save receipts and
-        usage counters are gone, and Milton no longer links to your sign-in.
-        Every connected assistant is disconnected.
-        {signedOut
-          ? " This browser is signed out."
-          : " Signing this browser out did not finish; sign out of your Google or GitHub account if this is a shared computer."}
+      <p role="status">
+        Your Milton account and sign-in have been deleted. Your writing is
+        erased, your subscription has ended, and connected assistants have lost
+        access.
       </p>
       <p>
-        If you had a Stripe customer record, it and any subscription ended
-        immediately, with no refund. Stripe keeps past invoices and payment
-        records.
-      </p>
-      <p>
-        Copies in database backups are not erased immediately; they are removed
-        when those backups expire or are deleted. Your sign-in record stays with
-        our sign-in provider. To remove it, email{" "}
-        <a href={`mailto:${supportEmail(config)}`}>{supportEmail(config)}</a>.
+        Stripe keeps past payment records. Backup copies expire according to
+        their retention schedule. Minimal fingerprints and original security
+        operation records remain to prevent another trial and keep retries safe.
       </p>
       <p>
         <a href="/">Milton home</a>

@@ -108,8 +108,7 @@ reliability has not yet been evaluated.
 
 ## What is here
 
-- [`server/`](server/): the Hono MCP server and web app, with Vite-built assets and Node 26 LTS runtimes. Sign-in is Neon
-  Auth (Google and GitHub); memos live in Neon Postgres. See its README to run your own.
+- [`server/`](server/): the Hono MCP server and web app, with Vite-built assets and Node 26 LTS runtimes. The prepared three-service build uses self-hosted native auth (verified password/email, Google and GitHub); memos remain in PostgreSQL. Its README and hosting runbook describe the required coordinated cutover.
 - [`apps/site`](apps/site/): the Astro page behind `meetmilton.com`.
 - [`packages/theme`](packages/theme/): Milton's design tokens, stylesheets, and contrast check.
 - [`design/`](design/): Milton's portrait.

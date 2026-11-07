@@ -14,9 +14,23 @@ export class AuthError extends Error {
 const accessClaims = z.object({
   sub: z.string().min(1).max(512),
   client_id: z.string().min(1).max(2048),
+  azp: z.string().min(1).max(2048),
   scope: z.string().max(2048),
   exp: z.number().int().positive(),
+  iat: z.number().int().nonnegative(),
+  jti: z.string().min(1).max(512),
+  miltonBinding: z.string().min(1).max(512),
+  miltonIdentityIncarnation: z.string().min(1).max(128),
+  miltonSecurityGeneration: z.string().min(1).max(128),
 });
+export const supportedScopes = new Set([
+  "openid",
+  "profile",
+  "email",
+  "offline_access",
+  "milton:read",
+  "milton:write",
+]);
 const verifiedAccess = Symbol("verifiedAccess");
 interface VerifiedAccess {
   readonly issuer: string;
@@ -24,6 +38,9 @@ interface VerifiedAccess {
   readonly clientId: string;
   readonly scope: string;
   readonly expiresAt: number;
+  readonly binding: string;
+  readonly incarnation: string;
+  readonly generation: string;
   readonly [verifiedAccess]: true;
 }
 export type AccessTokenVerifier = (
@@ -34,15 +51,12 @@ export function createAccessTokenVerifier(
   config: { issuer: string; resource: string },
   fetchKeys?: (url: string, options: RequestInit) => Promise<Response>,
 ): AccessTokenVerifier {
-  const keys = createRemoteJWKSet(
-    new URL(`${config.issuer}/.well-known/jwks.json`),
-    {
-      cacheMaxAge: 600000,
-      cooldownDuration: 30000,
-      timeoutDuration: 5000,
-      ...(fetchKeys ? { [customFetch]: fetchKeys } : {}),
-    },
-  );
+  const keys = createRemoteJWKSet(new URL(`${config.issuer}/jwks`), {
+    cacheMaxAge: 600000,
+    cooldownDuration: 30000,
+    timeoutDuration: 5000,
+    ...(fetchKeys ? { [customFetch]: fetchKeys } : {}),
+  });
   return async (authorization) => {
     const match =
       authorization &&
@@ -56,18 +70,44 @@ export function createAccessTokenVerifier(
         401,
       );
     try {
-      // Locally verified access JWTs remain valid for up to Neon's one-hour
-      // lifetime after grant revocation. A disconnected assistant is refused
-      // after verification, by the account lookup in handler.ts.
+      // Signature verification is followed by live immutable binding status in
+      // the HTTP handler, on every request, independently of this JWKS cache.
       const { payload } = await jwtVerify(match[1]!, keys, {
         issuer: config.issuer,
         audience: config.resource,
         algorithms: ["EdDSA"],
+        typ: "at+jwt",
         requiredClaims: ["iss", "aud", "sub", "exp", "client_id", "scope"],
         clockTolerance: 30,
       });
       const claims = accessClaims.safeParse(payload);
-      if (!claims.success || claims.data.exp <= Date.now() / 1000)
+      const scopes = claims.success ? claims.data.scope.split(" ") : [];
+      // Native 1.7.18 adds its fixed UserInfo audience for openid grants.
+      // Require MCP and permit only that documented implicit audience.
+      const audiences =
+        typeof payload.aud === "string" ? [payload.aud] : (payload.aud ?? []);
+      const allowedAudiences = new Set([
+        config.resource,
+        ...(scopes.includes("openid")
+          ? [config.issuer + "/oauth2/userinfo"]
+          : []),
+      ]);
+      if (
+        !claims.success ||
+        claims.data.exp <= Date.now() / 1000 ||
+        claims.data.iat > Date.now() / 1000 + 30 ||
+        claims.data.exp <= claims.data.iat ||
+        claims.data.exp - claims.data.iat > 3600 ||
+        payload.cnf !== undefined ||
+        !audiences.includes(config.resource) ||
+        new Set(audiences).size !== audiences.length ||
+        audiences.some((a) => !allowedAudiences.has(a)) ||
+        claims.data.client_id !== claims.data.azp ||
+        !scopes.length ||
+        new Set(scopes).size !== scopes.length ||
+        scopes.some((s) => !supportedScopes.has(s)) ||
+        (scopes.includes("milton:write") && !scopes.includes("milton:read"))
+      )
         throw new AuthError(
           "invalid_token",
           "Reconnect your assistant to Milton.",
@@ -79,6 +119,9 @@ export function createAccessTokenVerifier(
         clientId: claims.data.client_id,
         scope: claims.data.scope,
         expiresAt: claims.data.exp,
+        binding: claims.data.miltonBinding,
+        incarnation: claims.data.miltonIdentityIncarnation,
+        generation: claims.data.miltonSecurityGeneration,
         [verifiedAccess]: true,
       };
     } catch (error) {

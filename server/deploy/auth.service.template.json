@@ -1,0 +1,24 @@
+{
+  "templateOnly": true,
+  "requiredOwnerPreparation": [
+    "Pin a real auth image by sha256 digest and base images in the release build",
+    "Select numeric secret versions for a separate auth dotenvx payload/key",
+    "Select the auth-only runtime identity and database login",
+    "Verify canonical auth Host health probes, TLS and routing",
+    "Apply the authorized snapshot/migration/provisioning/cutover runbook"
+  ],
+  "servicePreparation": {
+    "name": "milton-auth",
+    "image": "REQUIRES_REAL_IMAGE_AT_SHA256_DIGEST",
+    "serviceAccount": "REQUIRES_AUTH_ONLY_RUNTIME_IDENTITY",
+    "publicOrigin": "https://auth.meetmilton.com",
+    "containerPort": 8080,
+    "concurrency": 8,
+    "timeoutSeconds": 15,
+    "maxInstances": 3,
+    "platformKeySecretVersion": "REQUIRES_NUMERIC_SECRET_VERSION",
+    "healthPath": "/health",
+    "healthHost": "auth.meetmilton.com",
+    "logPolicy": "Exclude token-bearing query strings and credential endpoints from platform request logs"
+  }
+}

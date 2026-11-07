@@ -1,3 +1,4 @@
+import { clientSettings } from "./auth-fixtures";
 import { expect, spyOn, test } from "bun:test";
 import { createHmac } from "node:crypto";
 import { sql } from "drizzle-orm";
@@ -67,7 +68,7 @@ async function webhookFixture(configured = true) {
   const app = createMiltonApp({
     issuer: "https://auth.example/milton/auth",
     resource: appOrigin + "/mcp",
-    cookieSecret: crypto.randomUUID(),
+    ...clientSettings,
     ...local.env,
     ...(configured ? { billing } : {}),
   });

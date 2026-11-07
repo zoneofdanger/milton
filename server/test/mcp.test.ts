@@ -9,6 +9,7 @@ import { checkMcp, stubStore } from "../scripts/check-mcp";
 import {
   createMiltonServer,
   storeInstructions,
+  readOnlyInstructions,
   type ToolCall,
 } from "../src/mcp";
 import { saveMemoInput } from "../src/store/compiled";
@@ -24,7 +25,7 @@ test("standalone MCP needs no browser secret and refuses noncanonical hosts", as
   const config = mcpRuntimeConfig({
     APP_ORIGIN: "https://app.example",
     MCP_RESOURCE: "https://mcp.example/mcp",
-    NEON_AUTH_BASE_URL: "https://auth.example/auth",
+    AUTH_ISSUER: "https://auth.example/auth",
     NODE_ENV: "production",
     // Retired feature flags are ignored, never validated.
     MILTON_TASK_RETRIEVAL_ENABLED: "yes",
@@ -49,7 +50,14 @@ test("standalone MCP needs no browser secret and refuses noncanonical hosts", as
 const issuer = "https://auth.example/milton/auth";
 const origin = "http://localhost:3001";
 const resource = origin + "/mcp";
-async function tokenFixture(target = resource) {
+async function tokenFixture(
+  pg: Awaited<ReturnType<typeof localStore>>["pg"],
+  target = resource,
+) {
+  await pg.exec(`CREATE SCHEMA IF NOT EXISTS milton_guard;
+  CREATE TABLE IF NOT EXISTS milton_guard.fixture_binding(reference text PRIMARY KEY,subject text,client_id text,active boolean DEFAULT true);
+  CREATE OR REPLACE FUNCTION milton_guard.binding_status(text,text,text,text[],text[]) RETURNS jsonb LANGUAGE SQL AS $$ SELECT jsonb_build_object('reference',reference,'miltonIdentityIncarnation','f:1','miltonSecurityGeneration','f:2') FROM milton_guard.fixture_binding WHERE reference=$1 AND subject=$2 AND client_id=$3 AND active $$;`);
+
   const key = await generateKeyPair("EdDSA");
   const jwk = {
     ...(await exportJWK(key.publicKey)),
@@ -60,17 +68,33 @@ async function tokenFixture(target = resource) {
     verify: createAccessTokenVerifier({ issuer, resource: target }, async () =>
       Response.json({ keys: [jwk] }),
     ),
-    token: (subject: string, clientId = "verified-client") =>
-      new SignJWT({
+    token: async (
+      subject: string,
+      clientId = "verified-client",
+      scope = "openid milton:read milton:write",
+    ) => {
+      const binding = crypto.randomUUID();
+      await pg.query(
+        `INSERT INTO milton_guard.fixture_binding(reference,subject,client_id) VALUES($1,$2,$3)`,
+        [binding, subject, clientId],
+      );
+      return new SignJWT({
         sub: subject,
         client_id: clientId,
-        scope: "openid",
+        azp: clientId,
+        scope,
+        miltonBinding: binding,
+        miltonIdentityIncarnation: "f:1",
+        miltonSecurityGeneration: "f:2",
       })
-        .setProtectedHeader({ alg: "EdDSA", kid: "fixture" })
+        .setProtectedHeader({ alg: "EdDSA", kid: "fixture", typ: "at+jwt" })
         .setIssuer(issuer)
         .setAudience(target)
         .setExpirationTime("1h")
-        .sign(key.privateKey),
+        .setIssuedAt()
+        .setJti(crypto.randomUUID())
+        .sign(key.privateKey);
+    },
   };
 }
 
@@ -267,8 +291,8 @@ test("two authenticated clients isolate tenants, save once and reject retired to
   const clients: Client[] = [];
   try {
     for (const subject of ["alpha", "beta"])
-      await resolveIdentityAccount(local.env, { provider: "neon", subject });
-    const fixture = await tokenFixture();
+      await resolveIdentityAccount(local.env, { provider: issuer, subject });
+    const fixture = await tokenFixture(local.pg);
     const handler = createMiltonHandler(
       {
         ...local.env,
@@ -516,102 +540,94 @@ test("two authenticated clients isolate tenants, save once and reject retired to
   }
 }, 30000);
 
-test("disconnected assistants and assistants of a deleted account are refused, even after re-signup; others keep working", async () => {
+test("scopes control discovery and direct calls; original binding revocation survives reconnection and status outages stay 503", async () => {
   const local = await localStore();
+  const clients: Client[] = [];
   try {
-    for (const subject of ["alpha", "beta"])
-      await resolveIdentityAccount(local.env, { provider: "neon", subject });
-    const fixture = await tokenFixture();
+    await resolveIdentityAccount(local.env, {
+      provider: issuer,
+      subject: "alpha",
+    });
+    const fixture = await tokenFixture(local.pg);
     const handler = createMiltonHandler(
-      {
-        ...local.env,
-        issuer,
-        resource,
-        appOrigin: origin,
-      },
+      { ...local.env, issuer, resource, appOrigin: origin },
       fixture.verify,
+      () => {},
     );
-    const tokens = {
-      alphaC: await fixture.token("alpha", "client-c"),
-      alphaD: await fixture.token("alpha", "client-d"),
-      betaC: await fixture.token("beta", "client-c"),
+    const readToken = await fixture.token(
+      "alpha",
+      "reader",
+      "openid milton:read",
+    );
+    const connect = async (token: string) => {
+      const client = new Client({ name: "scope-fixture", version: "0" });
+      clients.push(client);
+      await client.connect(
+        new StreamableHTTPClientTransport(new URL(resource), {
+          requestInit: {
+            headers: {
+              Authorization: "Bearer " + token,
+              Host: "localhost:3001",
+            },
+          },
+          fetch: (input, init) => handler(new Request(input, init)),
+        }),
+      );
+      return client;
     };
-    const rpc = (token: string, name: string, args = {}) =>
+    const reader = await connect(readToken);
+    expect(reader.getInstructions()).toBe(readOnlyInstructions);
+    expect(readOnlyInstructions.length).toBeLessThanOrEqual(4096);
+    expect((await reader.listTools()).tools.map((t) => t.name)).toEqual([
+      "get_cover_sheet",
+      "get_report",
+      "list_reports",
+    ]);
+    const cover = JSON.parse(
+      (
+        (await reader.callTool({ name: "get_cover_sheet", arguments: {} }))
+          .content as { text: string }[]
+      )[0]!.text,
+    );
+    expect(cover.setup).toBeUndefined();
+    expect(cover.permission).toContain("Read only");
+    await expect(
+      reader.callTool({ name: "create_memo", arguments: {} }),
+    ).rejects.toBeDefined();
+    const writer = await connect(await fixture.token("alpha", "writer"));
+    expect((await writer.listTools()).tools).toHaveLength(4);
+    const request = (token: string) =>
       handler(
         new Request(resource, {
           method: "POST",
           headers: {
             Host: "localhost:3001",
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
+            Authorization: "Bearer " + token,
             Accept: "application/json, text/event-stream",
+            "Content-Type": "application/json",
           },
-          body: JSON.stringify({
-            jsonrpc: "2.0",
-            id: 1,
-            method: "tools/call",
-            params: { name, arguments: args },
-          }),
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
         }),
       );
-    const cover = await rpc(tokens.alphaC, "get_cover_sheet");
-    expect(cover.status).toBe(200);
-    const version = /\\"version\\":\\"([^"\\]+)\\"/.exec(
-      await cover.text(),
-    )![1]!;
-    const save = {
-      text: "Lead with the answer.",
-      rules: [{ report: "cover", text: "Lead with the answer." }],
-      request_id: crypto.randomUUID(),
-      expected_version: version,
-    };
-    const saved = await rpc(tokens.alphaC, "create_memo", save);
-    expect(saved.status).toBe(200);
-    expect(await saved.text()).toContain("saved");
-    await local.db.query(
-      sql`INSERT INTO assistant_disconnects (provider,subject,client_id) VALUES ('neon','alpha','client-c')`,
+    await local.pg.exec(
+      `UPDATE milton_guard.fixture_binding SET active=false WHERE client_id='reader'`,
     );
-    for (const [name, args] of [
-      ["get_cover_sheet", {}],
-      ["create_memo", save],
-    ] as const) {
-      const refused = await rpc(tokens.alphaC, name, args);
-      expect(refused.status).toBe(401);
-      expect(refused.headers.get("WWW-Authenticate")).toContain(
-        'error="invalid_token"',
-      );
-      expect(await refused.json()).toEqual({
-        error: "invalid_token",
-        message:
-          "This assistant was disconnected from Milton. Reconnect it from your assistant.",
-      });
-    }
-    expect((await rpc(tokens.alphaD, "get_cover_sheet")).status).toBe(200);
-    expect((await rpc(tokens.betaC, "get_cover_sheet")).status).toBe(200);
-    // Deleting alpha's account disconnects its consented client D; a client
-    // that never had consent finds no account until alpha signs up again.
-    const alphaE = await fixture.token("alpha", "client-e");
-    await deleteAccount(local.env, { provider: "neon", subject: "alpha" }, [
-      "client-d",
-    ]);
-    const status = async (token: string) => {
-      const response = await rpc(token, "get_cover_sheet");
-      return [
-        response.status,
-        ((await response.json()) as { error: string }).error,
-      ];
-    };
-    expect(await status(tokens.alphaD)).toEqual([401, "invalid_token"]);
-    expect(await status(alphaE)).toEqual([403, "account_unavailable"]);
-    await resolveIdentityAccount(local.env, {
-      provider: "neon",
-      subject: "alpha",
-    });
-    expect(await status(tokens.alphaD)).toEqual([401, "invalid_token"]);
-    expect(await status(tokens.alphaC)).toEqual([401, "invalid_token"]);
-    expect((await rpc(alphaE, "get_cover_sheet")).status).toBe(200);
-    expect((await rpc(tokens.betaC, "get_cover_sheet")).status).toBe(200);
+    expect((await request(readToken)).status).toBe(401);
+    expect(
+      (await request(await fixture.token("alpha", "reader", "milton:read")))
+        .status,
+    ).toBe(200);
+    expect((await request(readToken)).status).toBe(401);
+    expect(
+      (await request(await fixture.token("alpha", "identity-only", "openid")))
+        .status,
+    ).toBe(403);
+    await local.pg.exec(
+      `CREATE OR REPLACE FUNCTION milton_guard.binding_status(text,text,text,text[],text[]) RETURNS jsonb LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fictional status outage'; END $$`,
+    );
+    expect((await request(readToken)).status).toBe(503);
   } finally {
+    await Promise.all(clients.map((c) => c.close()));
     await local.dispose();
   }
 }, 30000);
@@ -631,7 +647,7 @@ test("MCP refuses unsafe transports and oversized bodies before database access"
         return Reflect.get(target, key);
       },
     });
-    const fixture = await tokenFixture(resource);
+    const fixture = await tokenFixture(local.pg, resource);
     const handler = createMiltonHandler(
       {
         storeDatabase: db,
@@ -698,10 +714,10 @@ test("one code constant bounds requests: an oversized body is refused once", asy
   let client: Client | undefined;
   try {
     await resolveIdentityAccount(local.env, {
-      provider: "neon",
+      provider: issuer,
       subject: "bound",
     });
-    const fixture = await tokenFixture();
+    const fixture = await tokenFixture(local.pg);
     const authorization = `Bearer ${await fixture.token("bound")}`;
     let verified = 0;
     const handler = createMiltonHandler(
@@ -848,11 +864,11 @@ test("final outcomes include early refusal/read failure and a logging failure ca
     client: Client | undefined;
   try {
     await resolveIdentityAccount(local.env, {
-      provider: "neon",
+      provider: issuer,
       subject: "outcome-fixture",
     });
     const auth = await lookupIdentityAccount(local.env, {
-      provider: "neon",
+      provider: issuer,
       subject: "outcome-fixture",
     });
     const store = await storeForCurrentRequest(local.env, auth, {
@@ -941,7 +957,7 @@ test("final outcomes include early refusal/read failure and a logging failure ca
     expect(JSON.stringify(events)).not.toContain("private-client");
     expect(JSON.stringify(events)).not.toContain("Fictional");
     expect(events).toHaveLength(4);
-    const fixture = await tokenFixture();
+    const fixture = await tokenFixture(local.pg);
     const early: import("../src/mcp").ToolCall[] = [];
     const broken = {
       ...local.db,
@@ -986,7 +1002,7 @@ test("final outcomes include early refusal/read failure and a logging failure ca
     expect(early[0]).toMatchObject({
       tool: "get_cover_sheet",
       outcome: "failed",
-      error_code: "store_unavailable",
+      error_code: "auth_unavailable",
     });
     expect(JSON.stringify(early)).not.toContain("Fictional");
   } finally {

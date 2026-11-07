@@ -1,13 +1,16 @@
 /** @jsxImportSource hono/jsx */
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import {
-  createAuthServer,
-  extractNeonAuthCookies,
-  NEON_AUTH_SESSION_DATA_COOKIE_NAME,
-  resolveNeonAuthLogging,
-  serializeSetCookie,
-} from "@neondatabase/auth/server";
 import { z } from "zod";
+import { sql } from "drizzle-orm";
+import { database } from "./store";
+import {
+  appActive,
+  authoritySchema,
+  securityStatus,
+  unavailable,
+  type Authority,
+} from "./auth-authority";
+import { cookieName, hash } from "./auth-oidc";
 import type { RuntimeConfig } from "./config";
 import {
   accountTrialStatus,
@@ -19,16 +22,7 @@ import { memoPages } from "./memo-pages";
 import { billingItem } from "./pages";
 import { AuthError } from "./token";
 
-const sessionSchema = z.object({
-  user: z.object({
-    id: z.string().min(1).max(512),
-    // Shown only in authenticated page chrome; an unusable value shows nothing.
-    email: z.string().min(1).max(254).optional().catch(undefined),
-  }),
-  session: z.object({ userId: z.string(), expiresAt: z.coerce.date() }),
-});
-export type SessionUser = z.infer<typeof sessionSchema>["user"];
-export const silentLog = resolveNeonAuthLogging({ logLevel: "silent" });
+export type SessionUser = Authority & { id: string; email?: string };
 export const cookieValue = (request: Request, name: string) =>
   request.headers
     .get("Cookie")
@@ -39,65 +33,19 @@ export const cookieValue = (request: Request, name: string) =>
 const equal = (left: string, right: string) =>
   left.length === right.length &&
   timingSafeEqual(Buffer.from(left), Buffer.from(right));
-export async function timed<T>(promise: Promise<T>) {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(
-          () =>
-            reject(
-              new AuthError(
-                "auth_unavailable",
-                "Sign-in is unavailable. Try again.",
-                503,
-              ),
-            ),
-          10000,
-        );
-      }),
-    ]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
-export function upstreamError(error: { status?: number } | null) {
-  if (error)
-    throw new AuthError(
-      error.status && error.status >= 500
-        ? "auth_unavailable"
-        : "authorization_invalid",
-      error.status && error.status >= 500
-        ? "Sign-in is unavailable. Try again."
-        : "This sign-in request is invalid or expired. Restart from your assistant.",
-      error.status && error.status >= 500 ? 503 : 400,
-    );
-}
-
-/** One browser request's session state: the cookies to set, the CSRF token,
- * the Neon auth server reading this request's cookies, and session checks.
- * Created once per request; the CSRF token is private to these closures. */
+/** One request owns its cookies and CSRF closure. App sessions are opaque,
+ * identity-only, server-held, absolute-lived and checked against native SQL. */
 export function pageContext(
   config: RuntimeConfig,
   request: Request,
   secure: boolean,
   csrfName: string,
-  loopName: string,
 ) {
   const url = new URL(request.url);
   const cookies: string[] = [];
   const writeCookie = (name: string, value: string, maxAge = 3600) =>
     cookies.push(
-      serializeSetCookie({
-        name,
-        value,
-        path: "/",
-        httpOnly: true,
-        secure,
-        sameSite: "lax",
-        maxAge,
-      }),
+      `${name}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure ? "; Secure" : ""}`,
     );
   let csrf = cookieValue(request, csrfName);
   const csrfField = () => {
@@ -111,47 +59,42 @@ export function pageContext(
     csrf = randomBytes(32).toString("base64url");
     writeCookie(csrfName, csrf);
   };
-  const auth = createAuthServer({
-    baseUrl: config.issuer,
-    cookieSecret: config.cookieSecret,
-    sameSite: "lax",
-    log: silentLog,
-    context: () => ({
-      // Sign-in and mutations always ask Neon for a live session, rather
-      // than accepting the SDK's cached session-data cookie as revocation proof.
-      getCookies: () =>
-        extractNeonAuthCookies(
-          (request.headers.get("Cookie") ?? "")
-            .split(";")
-            .filter(
-              (value) =>
-                !value
-                  .trim()
-                  .startsWith(NEON_AUTH_SESSION_DATA_COOKIE_NAME + "="),
-            )
-            .join(";"),
-        ),
-      setCookie: (name, value, options) => {
-        cookies.push(serializeSetCookie({ name, value, ...options }));
-      },
-      getHeader: (name) => request.headers.get(name),
-      getOrigin: () => config.appOrigin,
-      getFramework: () => "milton-node",
-    }),
-  });
-  const session = async () => {
-    const result = await timed(auth.getSession());
-    if (result.error?.status === 401) return null;
-    upstreamError(result.error);
-    if (!result.data?.session || !result.data.user) return null;
-    const parsed = sessionSchema.safeParse(result.data);
-    if (
-      !parsed.success ||
-      parsed.data.user.id !== parsed.data.session.userId ||
-      parsed.data.session.expiresAt.getTime() <= Date.now()
-    )
-      return null;
-    return parsed.data.user;
+  const session = async (): Promise<SessionUser | null> => {
+    const token = cookieValue(request, cookieName(config, "session"));
+    if (!token || !/^[A-Za-z0-9_-]{43}$/.test(token)) return null;
+    let row: Record<string, unknown> | undefined;
+    try {
+      row = (
+        await database(config).query(
+          sql`SELECT subject,sid,binding,incarnation,generation,email FROM milton_app.session WHERE token_hash=${hash(token)} AND issuer=${config.issuer} AND expires_at>clock_timestamp()`,
+        )
+      )[0];
+    } catch {
+      throw unavailable();
+    }
+    const proof = authoritySchema.safeParse(row);
+    if (!proof.success || !(await appActive(config, proof.data))) return null;
+    return {
+      ...proof.data,
+      id: proof.data.subject,
+      ...(typeof row?.email === "string" ? { email: row.email } : {}),
+    };
+  };
+  const fresh = async (user: SessionUser) => {
+    const status = await securityStatus(config, user);
+    const parsed = z
+      .object({
+        fresh: z.literal(true),
+        verified: z.literal(true),
+        sessionId: z.literal(user.sid),
+      })
+      .safeParse(status);
+    if (!parsed.success)
+      throw new AuthError(
+        "fresh_sign_in_required",
+        "Sign in again before continuing with this account change.",
+        403,
+      );
   };
   const signedIn = async () => {
     const user = await session();
@@ -209,7 +152,7 @@ export function pageContext(
   const renderMemos = async (signedInUser?: SessionUser) => {
     const user = signedInUser ?? (await signedIn());
     const verified: VerifiedStoreAuth = await lookupIdentityAccount(config, {
-      provider: "neon",
+      provider: config.issuer,
       subject: user.id,
     });
     const store = await personStoreForCurrentRequest(config, verified);
@@ -223,7 +166,7 @@ export function pageContext(
     if (!config.billing) return undefined;
     try {
       const { userId } = await lookupIdentityAccount(config, {
-        provider: "neon",
+        provider: config.issuer,
         subject: user.id,
       });
       return billingItem(await accountTrialStatus(config, userId));
@@ -236,14 +179,13 @@ export function pageContext(
     request,
     url,
     csrfName,
-    loopName,
     // Set by the sign-in routes; the error page links back to it.
     loginRecovery: undefined as string | undefined,
     cookies,
     writeCookie,
     csrfField,
     rotateCsrf,
-    auth,
+    fresh,
     session,
     signedIn,
     readForm,

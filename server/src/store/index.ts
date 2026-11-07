@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { sql } from "drizzle-orm";
 import {
-  neonDatabase,
+  postgresDatabase,
   databaseFailure,
   type StoreDatabase,
   type StoreSession,
@@ -40,11 +40,11 @@ export interface StoreBindings {
   // Private dependency injection for the embedded fixture; never populated from a request.
   storeDatabase?: StoreDatabase;
 }
-function database(bindings: StoreBindings): StoreDatabase {
+export function database(bindings: StoreBindings): StoreDatabase {
   if (bindings.storeDatabase) return bindings.storeDatabase;
   if (!bindings.DATABASE_URL)
     throw new StoreError("configuration", "The memo store is unavailable.");
-  return neonDatabase(bindings.DATABASE_URL);
+  return postgresDatabase(bindings.DATABASE_URL);
 }
 const positiveLimit = z.number().int().positive();
 const limitsSchema = z.object({
@@ -86,9 +86,13 @@ const identityHash = (provider: string, subject: string) =>
 export async function resolveIdentityAccount(
   bindings: StoreBindings,
   identity: VerifiedIdentity,
+  fingerprints: readonly string[] = [],
 ) {
   const provider = z.string().min(1).max(64).parse(identity.provider);
   const subject = z.string().min(1).max(512).parse(identity.subject);
+  const legacyDeleted = fingerprints.length
+    ? sql`EXISTS(SELECT 1 FROM milton_app.legacy_mapping l WHERE l.issuer=${provider} AND l.subject=${subject} AND l.deleted)`
+    : sql`false`;
   return database(bindings)
     .transaction(async (tx) => {
       await readLimits(tx);
@@ -124,14 +128,29 @@ export async function resolveIdentityAccount(
           // its row starts canceled, so it reads as expired whenever trials are
           // enabled (now or later), has no effect while they are off, and sign-up
           // creates no subscription for it.
+          let returning = false;
+          for (const fingerprint of [...new Set(fingerprints)].sort()) {
+            await tx.query(
+              sql`INSERT INTO milton_app.trial_fingerprint(fingerprint,first_user_id) VALUES(${fingerprint},${id}) ON CONFLICT DO NOTHING`,
+            );
+            const row = (
+              await tx.query<{ first_user_id: string }>(
+                sql`SELECT first_user_id FROM milton_app.trial_fingerprint WHERE fingerprint=${fingerprint}`,
+              )
+            )[0];
+            returning ||= row?.first_user_id !== id;
+            await tx.query(
+              sql`INSERT INTO milton_app.account_fingerprint(user_id,fingerprint) VALUES(${id},${fingerprint}) ON CONFLICT DO NOTHING`,
+            );
+          }
           await tx.query(sql`INSERT INTO trial_accounts(user_id,started_at,subscription_status)
             SELECT u.id,u.created_at,
-              CASE WHEN d.identity_hash IS NULL THEN NULL ELSE 'canceled' END
+              CASE WHEN d.identity_hash IS NULL AND NOT ${returning} AND NOT ${legacyDeleted} THEN NULL ELSE 'canceled' END
             FROM users u CROSS JOIN store_config c
             LEFT JOIN deleted_identities d
               ON d.identity_hash=${identityHash(provider, subject)}
             WHERE u.id=${id} AND c.singleton=1
-            AND (c.trials_enabled OR d.identity_hash IS NOT NULL)`);
+            AND (c.trials_enabled OR d.identity_hash IS NOT NULL OR ${returning} OR ${legacyDeleted})`);
           account = { id, status: "active" };
         }
       }
@@ -141,6 +160,16 @@ export async function resolveIdentityAccount(
           "This Milton account is unavailable.",
           403,
         );
+      // Linking records new eligibility proofs but never changes writing owner,
+      // starts another trial or rewinds an existing subscription.
+      for (const fingerprint of [...new Set(fingerprints)].sort()) {
+        await tx.query(
+          sql`INSERT INTO milton_app.trial_fingerprint(fingerprint,first_user_id) VALUES(${fingerprint},${account.id}) ON CONFLICT DO NOTHING`,
+        );
+        await tx.query(
+          sql`INSERT INTO milton_app.account_fingerprint(user_id,fingerprint) VALUES(${account.id},${fingerprint}) ON CONFLICT DO NOTHING`,
+        );
+      }
       return { miltonUserId: account.id };
     })
     .catch((error) => {

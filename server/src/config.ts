@@ -1,12 +1,17 @@
 import type { StoreBindings } from "./store";
 import { StoreError } from "./store/errors";
 import type { McpConfig } from "./handler";
+import type { customFetch, Configuration } from "openid-client";
 
 export interface RuntimeConfig extends StoreBindings {
   issuer: string;
   resource: string;
   appOrigin: string;
-  cookieSecret: string;
+  oidc: { clientId: string; clientSecret: string };
+  admissionSecret: string;
+  trialFingerprintKey: string;
+  /** Private protocol transport injection; never populated from env/requests. */
+  authFetch?: Configuration[typeof customFetch];
   /** The address pages give for support; the hosted one when unset. */
   supportEmail?: string;
   /** Stripe, for the app service only; unset means billing answers 503. */
@@ -64,7 +69,7 @@ export function mcpRuntimeConfig(
 ): McpConfig {
   try {
     const app = new URL(env.APP_ORIGIN!);
-    const issuer = new URL(env.NEON_AUTH_BASE_URL!);
+    const issuer = new URL(env.AUTH_ISSUER!);
     const resource = new URL(env.MCP_RESOURCE!);
     const valid = (url: URL) =>
       !url.username &&
@@ -102,7 +107,16 @@ export function runtimeConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): RuntimeConfig {
   const config = mcpRuntimeConfig(env);
-  if (!env.NEON_AUTH_COOKIE_SECRET || env.NEON_AUTH_COOKIE_SECRET.length < 32)
+  if (
+    !env.AUTH_APP_CLIENT_ID ||
+    env.AUTH_APP_CLIENT_ID.length > 2048 ||
+    !env.AUTH_APP_CLIENT_SECRET ||
+    env.AUTH_APP_CLIENT_SECRET.length < 32 ||
+    !env.AUTH_ADMISSION_SECRET ||
+    env.AUTH_ADMISSION_SECRET.length < 32 ||
+    !env.MILTON_TRIAL_FINGERPRINT_KEY ||
+    env.MILTON_TRIAL_FINGERPRINT_KEY.length < 32
+  )
     throw new StoreError(
       "configuration",
       "Milton's server configuration is unavailable.",
@@ -121,7 +135,12 @@ export function runtimeConfig(
   const billing = billingConfig(env);
   return {
     ...config,
-    cookieSecret: env.NEON_AUTH_COOKIE_SECRET,
+    oidc: {
+      clientId: env.AUTH_APP_CLIENT_ID,
+      clientSecret: env.AUTH_APP_CLIENT_SECRET,
+    },
+    admissionSecret: env.AUTH_ADMISSION_SECRET,
+    trialFingerprintKey: env.MILTON_TRIAL_FINGERPRINT_KEY,
     ...(support === undefined ? {} : { supportEmail: support }),
     ...(billing ? { billing } : {}),
   };

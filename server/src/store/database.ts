@@ -7,6 +7,8 @@ import {
 import type { SQL } from "drizzle-orm";
 import { StoreError } from "./errors";
 import { logUnexpected } from "../error-log";
+import { Client as PgClient } from "pg";
+import { PgDialect } from "drizzle-orm/pg-core";
 
 export interface StoreSession {
   query<Row extends Record<string, unknown> = Record<string, unknown>>(
@@ -16,6 +18,82 @@ export interface StoreSession {
 export interface StoreDatabase extends StoreSession {
   transaction<T>(work: (tx: StoreSession) => Promise<T>): Promise<T>;
   withConnection<T>(work: (db: StoreDatabase) => Promise<T>): Promise<T>;
+}
+
+/** Direct PostgreSQL, with one bounded connection per operation. No native auth
+ * SDK or credential-schema access is needed by either writing runtime. */
+export function postgresDatabase(url: string): StoreDatabase {
+  validateDatabaseUrl(url);
+  const dialect = new PgDialect();
+  const connect = async <T>(work: (db: StoreDatabase) => Promise<T>) => {
+    const client = new PgClient({
+      connectionString: url,
+      ssl: true,
+      connectionTimeoutMillis: 5000,
+      query_timeout: 20000,
+      statement_timeout: 20000,
+      lock_timeout: 10000,
+    });
+    client.on("error", () => {});
+    let failed = false;
+    try {
+      try {
+        await client.connect();
+      } catch (error) {
+        throw databaseFailure(error);
+      }
+      const session: StoreDatabase = {
+        async query<Row extends Record<string, unknown>>(statement: SQL) {
+          const query = dialect.sqlToQuery(statement);
+          try {
+            return (await client.query<Row>(query.sql, query.params)).rows;
+          } catch (error) {
+            throw databaseFailure(error);
+          }
+        },
+        async transaction(work) {
+          try {
+            await client.query("BEGIN");
+          } catch (error) {
+            throw databaseFailure(error);
+          }
+          let callbackCompleted = false;
+          try {
+            const result = await work(session);
+            callbackCompleted = true;
+            await client.query("COMMIT");
+            return result;
+          } catch (error) {
+            try {
+              await client.query("ROLLBACK");
+            } catch (rollbackError) {
+              databaseFailure(rollbackError);
+            }
+            // Query failures are already mapped; callback rejections keep identity.
+            if (!callbackCompleted) throw error;
+            throw databaseFailure(error);
+          }
+        },
+        withConnection: (work) => work(session),
+      };
+      return await work(session);
+    } catch (error) {
+      failed = true;
+      throw error;
+    } finally {
+      try {
+        await client.end();
+      } catch (error) {
+        const failure = databaseFailure(error);
+        if (!failed) throw failure;
+      }
+    }
+  };
+  return {
+    query: (statement) => connect((db) => db.query(statement)),
+    transaction: (work) => connect((db) => db.transaction(work)),
+    withConnection: connect,
+  };
 }
 
 export const triggerRefusals = new Map<
@@ -136,6 +214,9 @@ export function validateDatabaseUrl(value: string): string {
       /[\r\n\0]/.test(value) ||
       !["postgres:", "postgresql:"].includes(url.protocol) ||
       !url.hostname ||
+      url.searchParams.has("ssl") ||
+      url.searchParams.has("uselibpqcompat") ||
+      url.searchParams.getAll("sslmode").length > 1 ||
       decodeURIComponent(url.pathname) !== "/milton" ||
       !["require", "verify-full", "verify-ca"].includes(
         url.searchParams.get("sslmode") ?? "require",

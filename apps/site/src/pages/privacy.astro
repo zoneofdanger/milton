@@ -9,7 +9,7 @@ import SiteLayout from "../layouts/SiteLayout.astro";
 >
   <h1>Privacy policy</h1>
   <p class="updated">
-    Last updated: <time datetime="2026-11-03">November 3, 2026</time>
+    Last updated: <time datetime="2026-11-06">November 6, 2026</time>
   </p>
   <p>
     Milton is operated by Zone of Danger, LLC (“we”). Milton keeps the writing
@@ -19,27 +19,39 @@ import SiteLayout from "../layouts/SiteLayout.astro";
 
   <h2>What Milton stores</h2>
   <p style="text-wrap:pretty">
-    Your name and email address from Google or GitHub when you sign in; the
-    writing rules you ask your assistants to save; the samples of your writing
-    you approve for saving, stored exactly as approved, including any names they
-    contain; each rule and sample you saved, with its versions and which
-    assistant saved it; request receipts used to prevent duplicate saves;
-    internal records of accepted changes, including the exact submitted rules,
-    edits or samples, authorship and affected versions; connected assistants and
-    the assistants you disconnect; counts of tool calls you make each day; and
-    your billing record: your Stripe customer and subscription IDs, the
-    subscription’s status, its trial and billing period dates, and which trial
-    reminders have been sent.
+    Your name and email address when you sign up or sign in, and the identifiers
+    of Google or GitHub accounts you use to sign in or link; password hashes if
+    you use a password; sign-in sessions, email verification and password reset
+    records, assistant permissions and access tokens, and security rate-limit
+    records; the writing rules you ask your assistants to save; the samples of
+    your writing you approve for saving, stored exactly as approved, including
+    any names they contain; each rule and sample you saved, with its versions
+    and which assistant saved it; request receipts used to prevent duplicate
+    saves; internal records of accepted changes, including the exact submitted
+    rules, edits or samples, authorship and affected versions; connected
+    assistants and the assistants you disconnect; counts of tool calls you make
+    each day; and your billing record: your Stripe customer and subscription
+    IDs, the subscription’s status, its trial and billing period dates, and
+    which trial reminders have been sent.
   </p>
 
   <h2>How we use it</h2>
   <p>
-    Only to run Milton: to sign you in, store your rules, retain their internal
-    history, prepare the cover sheet and reports for the assistants you connect,
-    and run your trial and subscription. Accepted-change records remain with
-    your internal history until account deletion. Your data is encrypted at rest
-    by our database provider. We do not sell your data, show ads, or use your
-    rules or samples to train AI models.
+    Only to run Milton: to sign you in, verify your email, help you recover and
+    secure your account, store your rules, retain their internal history,
+    prepare the cover sheet and reports for the assistants you connect, and run
+    your trial and subscription. Accepted-change records remain with your
+    internal history until account deletion. Your data is encrypted at rest by
+    our database provider. We do not sell your data, show ads, or use your rules
+    or samples to train AI models.
+  </p>
+  <p>
+    Email/password sign-in requires a verified email address. If you use a
+    password, Milton’s sign-in service processes it and stores a salted password
+    hash using Better Auth’s scrypt hashing, rather than the password itself.
+    Verification and password reset emails go through Resend, which receives
+    your email address and the message, including its verification or reset
+    link.
   </p>
 
   <h2>Who can see your rules and samples</h2>
@@ -73,15 +85,31 @@ import SiteLayout from "../layouts/SiteLayout.astro";
 
   <h2>Where it is kept</h2>
   <p>
-    The database and sign-in run on Neon (United States). The public website
-    runs on Vercel; the app and MCP server run on Google Cloud Run (United
-    States). The public website uses Vercel Web Analytics, which sets no
-    cookies: it records each page view’s address and query parameters, referrer,
-    time, browser, operating system, device type and location down to city, and
-    counts visitors with a daily-reset hash of the request instead of tying
-    records to a person or IP address. DNS is on Cloudflare. Google and GitHub
-    also handle your sign-in with them. Stripe processes subscriptions and
-    payments.
+    The database runs on Neon (United States). Milton operates its own sign-in
+    service using Better Auth at auth.meetmilton.com on Google Cloud Run. Resend
+    delivers verification and password reset emails. The public website runs on
+    Vercel; the app and MCP server run on Google Cloud Run (United States). The
+    public website uses Vercel Web Analytics, which sets no cookies: it records
+    each page view’s address and query parameters, referrer, time, browser,
+    operating system, device type and location down to city, and counts visitors
+    with a daily-reset hash of the request instead of tying records to a person
+    or IP address. DNS is on Cloudflare. Google and GitHub also handle your
+    sign-in with them. Stripe processes subscriptions and payments. Earlier
+    managed sign-in records remain separately in Neon after the old sign-in
+    service is disabled. Its database structure, data and backups require their
+    own cleanup; deleting a new sign-in does not remove that earlier copy.
+  </p>
+
+  <p>
+    Verification and reset messages wait in an encrypted delivery queue with the
+    original destination and secret link. Delivery stops at the earlier of the
+    link’s expiry and 15 minutes after acceptance. Marking a message as sent,
+    failed or cancelled clears its encrypted contents. Delivery processing and
+    cleanup remove expired contents in small batches; delayed or disabled
+    cleanup can retain them longer. Message receipts include original sign-in
+    identifiers but no recipient or link and become eligible for removal 24
+    hours after acceptance. Actual removal depends on that cleanup. Resend’s
+    copies follow its own retention.
   </p>
 
   <h2>Billing</h2>
@@ -99,37 +127,63 @@ import SiteLayout from "../layouts/SiteLayout.astro";
   </p>
 
   <h2>Cookies</h2>
-  <p>Only the ones that keep you signed in.</p>
+  <p>
+    The app and sign-in service use separate cookies, each limited to its own
+    hostname, to keep you signed in and protect sign-in and account actions.
+    Signing out ends browser access; assistants with offline access stay
+    connected. Changing or resetting your password, or unlinking a sign-in
+    method, invalidates earlier browser sessions and assistant authorizations.
+    Assistants must reconnect with your consent to regain access.
+  </p>
 
   <h2>Deleting your account</h2>
   <p>
-    Choose Delete account in the Milton app. Deletion removes your rules,
-    samples, internal memos and their history, your cover sheet and reports,
-    request receipts, accepted-change records, usage counts, and Milton’s link
-    to your sign-in, and your billing record. It also disconnects every
-    assistant you connected and signs you out. If you have a Stripe customer,
-    deletion deletes it at Stripe, which ends any subscription immediately, with
-    no refund.
+    Choose Delete account in the Milton app. Deletion blocks account and
+    assistant access. If you have a Stripe customer, deletion deletes it at
+    Stripe first, which ends any subscription immediately, with no refund.
+    Milton then removes your rules, samples, internal memos and their history,
+    your cover sheet and reports, request receipts, accepted-change records,
+    usage counts and billing record, and the app’s sign-in sessions and
+    credentials. Cleanup then removes your sign-in profile, password hashes,
+    linked sign-in methods, browser sessions and assistant grants and tokens
+    from Milton’s sign-in service. If account cleanup is incomplete, the app
+    offers a retry; deletion is confirmed only when that cleanup finishes.
+    Unused password reset links stop working when account security changes or
+    deletion starts, as well as when they expire. Verification links expire
+    after one hour; remaining verification records become eligible for cleanup
+    one day after expiry and can remain until cleanup reaches them. The limited
+    records below remain.
   </p>
   <p>These records remain after deletion:</p>
   <ul>
     <li>
-      A record of each assistant you connected (your sign-in ID and the
-      assistant’s ID, with no content), so its earlier access cannot reach a new
-      account.
+      Records of original account deletions and assistant disconnections,
+      including original account, sign-in and assistant identifiers and
+      connection references, so retries cannot affect a later account or
+      connection. These contain no writing or credentials.
     </li>
     <li>
-      A one-way fingerprint of your sign-in, so a new account does not receive a
-      second free trial.
+      Keyed fingerprints of verified email addresses and stable Google or GitHub
+      account identifiers, with the internal account that first claimed them, to
+      prevent another free trial. This trial-eligibility record does not store
+      raw email addresses or provider identifiers and is not used to merge
+      writing accounts.
     </li>
     <li>
-      Your sign-in record (name, email address and Google or GitHub link), which
-      stays with Neon, our sign-in provider. Email
-      <a href="mailto:support@meetmilton.com">support@meetmilton.com</a> to have
-      it removed.
+      Limited verified records linking earlier sign-in identities to Milton
+      account IDs, to preserve account and deletion history, and a check that
+      trial fingerprints remain consistent.
     </li>
     <li>Stripe keeps past invoices and payment records.</li>
   </ul>
+  <p>
+    These limited identity and security records are kept without a fixed expiry
+    for those purposes. They do not restore deleted writing or authorize access.
+    Expired sign-in sessions, verification and reset records, and expired
+    assistant tokens can remain until periodic cleanup; records still needed for
+    active offline access or unfinished cleanup remain until that work can
+    finish.
+  </p>
   <p>
     Copies in database backups are not erased immediately; they are removed when
     those backups expire or are deleted. You can also email

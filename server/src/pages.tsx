@@ -79,6 +79,9 @@ function accountMenu({ csrf, email, billing }: Account) {
         <p class="small-note" id="signout-note">
           Signing out of this browser does not disconnect your assistants.
         </p>
+        <a class="menu-item" href="/account/security">
+          Sign-in and security
+        </a>
         <a class="menu-item danger" href="/account/delete">
           Delete account
         </a>

@@ -5,13 +5,13 @@ Connected assistants submit changes through `create_memo` and read the
 cover sheet and reports through `get_cover_sheet`, `get_report` and `list_reports`.
 This directory contains the MCP server and current-report web app,
 rendered with Hono JSX and Vite-built theme assets on Node 26 LTS. Neon Postgres stores instruction cards, samples, internal
-history and request receipts; Neon Auth handles sign-in and authorization.
+history and request receipts. The separate self-hosted auth service in `apps/auth` handles sign-in and authorization; this replacement requires the coordinated cutover below.
 
 ## Prerequisites
 
 - Bun, using the version pinned in the repository's root `package.json`, and Node 26 LTS.
-- A Neon project with Auth and its OAuth provider plugin enabled. Create a Postgres database named `milton`. The migration command requires the `neondb_owner` role; the app and MCP connect as a login role in `milton_runtime`, never the owner. Database connections require TLS.
-- A Google OAuth app, a GitHub OAuth app, or both. Configure their credentials in Neon Auth for your branch.
+- A PostgreSQL database named `milton`, with TLS and separate owner/auth/app/MCP roles. Retain the managed auth schema during migration; no managed token or runtime fallback is accepted by this build.
+- Native auth configuration for verified password/email, Google, GitHub and the selected mail sender. The auth service owns those credentials; app and MCP never receive them.
 - A Google Cloud project for Cloud Run, Artifact Registry, Secret Manager and an HTTPS load balancer.
 - An HTTPS origin for the browser app and an HTTPS URL ending in `/mcp` for assistants. They can share one hostname. The public service uses `app.meetmilton.com` and `mcp.meetmilton.com`; use your own addresses for your installation.
 
@@ -42,45 +42,48 @@ The file is the only payload option. Missing or invalid decryption fails closed.
 environment values take precedence. Without a payload file, the runtime
 uses its environment directly, supporting local development and staged migration.
 Keep encrypted release payloads private and versioned, and keep private keys out of
-images, logs and git. The app gets its own cookie-signing key; MCP does not.
-Milton discards the SDK's session-data cache and validates existing session tokens
-with Neon, so a different cache-signing key does not replace the upstream session.
+images, logs and git. The app holds opaque local sessions and one-use login state in an app-only schema. MCP cannot read them. Every app request checks the original native session and immutable binding; no cached positive authority is accepted.
 Nonexportable platform secrets must not be exported through an application route.
 
-## Configure Neon Auth
+## Configure first-party auth
 
-Use the same branch's Auth settings and issuer throughout your installation.
+The exact hosted issuer is `https://auth.meetmilton.com/api/auth`. Auth hosts login,
+consent, password recovery, method linking and session management. App `/login` starts
+a maintained `openid-client` code/S256/state/nonce flow with `openid profile email`,
+no resource and no offline access. The owner-provisioned confidential client uses
+`client_secret_post`, exact `/auth/callback` and `/auth/logged-out` app URLs, no default
+MCP resource, and fixed-client RP logout. App never handles passwords or native cookies.
 
-For each social provider, copy the callback URL from its Neon Auth configuration into the Google or GitHub app. Its form is `{NEON_AUTH_BASE_URL}/callback/google` or `{NEON_AUTH_BASE_URL}/callback/github`. These callbacks belong to Neon, not to Milton's browser app. Save the provider's client ID and secret in Neon Auth.
+App sessions have an absolute one-hour maximum, bounded by the native identity-only
+opaque token. Renewal starts a new flow through native SSO; it does not extend the old
+session. App cookies are Secure, HttpOnly, SameSite=Lax and host-only in HTTPS hosting.
+A real native outage returns 503; invalid proof or a spent callback refuses. A callback
+with an uncertain exchange outcome must be recovered through a new login, not replayed.
 
-Configure the OAuth provider plugin:
-
-| Setting                             | Configuration                                                 |
-| ----------------------------------- | ------------------------------------------------------------- |
-| Login page URL                      | The browser app origin followed by `/login`                   |
-| Consent page URL                    | The browser app origin followed by `/consent`                 |
-| MCP server URL                      | The exact URL represented by `MCP_RESOURCE`, including `/mcp` |
-| Client ID Metadata Documents (CIMD) | Enabled                                                       |
-| Dynamic client registration (DCR)   | Enabled                                                       |
-| Trusted origin                      | The exact browser app origin represented by `APP_ORIGIN`      |
-
-Milton supplies the login and consent pages. Neon supplies authorization, token exchange, client registration, and signing keys. There is no separate MCP plugin to enable in Neon.
+Auth makes an authenticated, bounded `POST /internal/auth/admit` handoff containing exact
+issuer/subject/continuation, verified email and mandatory native `verifiedIdentities`
+(Google/GitHub stable IDs; `[]` for password-only). App owns account/trial/billing admission.
+Native validation precedes this handoff. Ownership is exact issuer+subject, never email
+or those eligibility fingerprints. See [the cutover runbook](deploy/README.md#self-hosted-auth-cutover-preparation).
 
 ## Environment variables
 
 Set these in the runtime's platform configuration or dotenvx payload before deploying. Keep credentials in secret storage or ignored environment files.
 
-| Name                      | Meaning                                                                                                                                                                                                                                                                                                                                                        |
-| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `APP_ORIGIN`              | The browser app's absolute HTTPS origin, without a path, query, or fragment.                                                                                                                                                                                                                                                                                   |
-| `MCP_RESOURCE`            | The exact public MCP resource URL, ending in `/mcp`. Tokens must include this resource in their audience.                                                                                                                                                                                                                                                      |
-| `NEON_AUTH_BASE_URL`      | The exact branch Auth URL copied from Neon, including its database and Auth path, without a trailing slash. It is also the expected token issuer.                                                                                                                                                                                                              |
-| `NEON_AUTH_COOKIE_SECRET` | A fresh random server-only secret of at least 32 characters for browser session cookies.                                                                                                                                                                                                                                                                       |
-| `DATABASE_URL`            | The TLS connection string for the `milton` database. Services use the runtime role's connection; migrations use the owner's.                                                                                                                                                                                                                                   |
-| `MILTON_SUPPORT_EMAIL`    | Optional. The support address the account pages give; `support@meetmilton.com` when unset. The MCP address pages show is `MCP_RESOURCE`.                                                                                                                                                                                                                       |
-| `STRIPE_SECRET_KEY`       | App service only. The restricted Stripe API key for customers, subscriptions, Checkout and the billing portal. All three unset: the billing routes answer 503, sign-in starts no Stripe trial, the gate allows those accounts, and deleting an account with a Stripe customer refuses. Any one set means all three must be valid, or the app fails at startup. |
-| `STRIPE_WEBHOOK_SECRET`   | App service only. The signing secret of the Stripe endpoint for `POST /billing/webhook`.                                                                                                                                                                                                                                                                       |
-| `STRIPE_PRICE_ID`         | App service only. The one recurring price sign-in's trial and Checkout subscribe to.                                                                                                                                                                                                                                                                           |
+| Name                           | Meaning                                                                                                                                                                                                                                                                                                                                                        |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `APP_ORIGIN`                   | The browser app's absolute HTTPS origin, without a path, query, or fragment.                                                                                                                                                                                                                                                                                   |
+| `MCP_RESOURCE`                 | The exact public MCP resource URL, ending in `/mcp`. Tokens must include this resource in their audience.                                                                                                                                                                                                                                                      |
+| `AUTH_ISSUER`                  | The exact native issuer, without a trailing slash; hosted: `https://auth.meetmilton.com/api/auth`. App uses verified discovery and fixed native endpoints; MCP uses `/jwks`.                                                                                                                                                                                   |
+| `AUTH_APP_CLIENT_ID`           | App only. Owner-provisioned fixed OIDC client ID.                                                                                                                                                                                                                                                                                                              |
+| `AUTH_APP_CLIENT_SECRET`       | App only. Native-hashed confidential client secret, at least 32 characters; never a browser value.                                                                                                                                                                                                                                                             |
+| `AUTH_ADMISSION_SECRET`        | App and auth only. At least 32 characters; authenticates native admission, never MCP.                                                                                                                                                                                                                                                                          |
+| `MILTON_TRIAL_FINGERPRINT_KEY` | App only. Dedicated stable key, at least 32 characters, provisioned by the owner and checked against durable eligibility policy; independent of cookies/native encryption.                                                                                                                                                                                     |
+| `DATABASE_URL`                 | The TLS connection string for the `milton` database. App uses `milton_app_runtime`; MCP uses `milton_mcp_runtime`; auth uses its own role and URL. No runtime owns objects or inherits a writing/owner role.                                                                                                                                                   |
+| `MILTON_SUPPORT_EMAIL`         | Optional. The support address the account pages give; `support@meetmilton.com` when unset. The MCP address pages show is `MCP_RESOURCE`.                                                                                                                                                                                                                       |
+| `STRIPE_SECRET_KEY`            | App service only. The restricted Stripe API key for customers, subscriptions, Checkout and the billing portal. All three unset: the billing routes answer 503, sign-in starts no Stripe trial, the gate allows those accounts, and deleting an account with a Stripe customer refuses. Any one set means all three must be valid, or the app fails at startup. |
+| `STRIPE_WEBHOOK_SECRET`        | App service only. The signing secret of the Stripe endpoint for `POST /billing/webhook`.                                                                                                                                                                                                                                                                       |
+| `STRIPE_PRICE_ID`              | App service only. The one recurring price sign-in's trial and Checkout subscribe to.                                                                                                                                                                                                                                                                           |
 
 Saves are model-free: Milton stores the exact text the assistant sends and calls no
 model on any read or save, so it needs no model credential, project or budget. The
@@ -110,8 +113,7 @@ This command explicitly reads `.dev.vars`, unless a release sets `MILTON_OWNER_D
 
 `drizzle/0000_baseline.sql` creates the 14 current tables defined in `src/store/schema.ts`,
 the instruction-position sequence, seven guard functions and triggers, the `milton_runtime`
-role and its grants/default privileges, and the singleton `store_config` seed. Every
-successful sign-in creates or finds its account; a new account reads empty documents.
+role and its grants/default privileges, and the singleton `store_config` seed. Authenticated native admission creates or finds the exact identity's account; a new account reads empty documents.
 Reads assemble cards and samples, take no lock, write nothing and invoke no model.
 
 The baseline requires an empty database. For the one known existing schema through 0033
@@ -361,48 +363,51 @@ It does not prove a particular host includes them in model context or that its
 assistant follows them. Validate a real setup/save/read flow per supported client;
 do not infer adherence from successful MCP discovery alone.
 
-Access tokens require a valid signature, exact issuer/resource audience and expiry.
-Only the verified account supplies tenant identity. MCP calls do not create accounts.
-Browser viewing requires a live session; sign-in/consent/logout retain their CSRF
-protections. Signing out of the browser does not disconnect assistants, and an
-already-issued access token can remain valid until expiry. Disconnecting an
-assistant on `/assistants` records its (identity, client) in
-`assistant_disconnects`; the MCP server then refuses that client's tokens,
-unexpired ones included, with 401 `invalid_token` until the person approves it
-again on the consent page. Neon's own refresh tokens are not revoked.
-`/account/delete` (typed confirmation) records a disconnect for every live
-consent and a one-way `sha256("provider:subject")` in `deleted_identities`
-(no second trial on re-signup), then deletes the `users` row in the same
-transaction; every tenant table cascades. It then removes the Neon
-consents and signs out, best effort; the Neon Auth user record is not deleted.
+MCP accepts only the pinned EdDSA `at+jwt` access profile with exact issuer, required
+MCP audience (plus native's fixed implicit UserInfo audience for `openid`), canonical
+`client_id=azp`, supported scopes and immutable binding/incarnation/generation. It refuses
+ID/session JWTs and unsupported confirmation/DPoP. Every call independently checks live
+native SQL status. Read grants list three tools; write grants list four. All reads require
+`milton:read`; `create_memo` requires read+write even on a direct call. A scope grant never
+approves memo text. Read-only setup explains reconnecting for saves rather than offering
+an unavailable save.
+
+App `/account/security` takes the person to native method/password/session management.
+Disconnect and deletion use durable original-incarnation operations. Refusal commits
+before cleanup; reconnect/recreation cannot change an earlier operation's targets.
+Deletion requires exact confirmation, live authoritative native freshness and current
+verified-identity fingerprint retention. Stripe cancellation commits before writing
+erasure; native bounded cleanup is last. An incomplete operation stays retryable and is
+never presented as deleted. Logout ends this browser's local and native session while
+leaving offline assistants connected.
 
 ## Local development and checks
 
-Use a development Neon branch. Put the runtime environment variables in ignored `server/.env.local`, and configure the app and MCP URLs for your chosen loopback origin and port. The app's `DATABASE_URL` logs in as `milton_app`, since `milton_runtime` is a group role that cannot log in; see [the runtime role](deploy/README.md#runtime-role). Enable loopback access in that branch's Neon Auth settings and set its login, consent, and trusted-origin settings consistently. Apply migrations to that database too.
-
-The local server uses port 3001 unless you override it with `PORT`. Check that the port is unused before starting. From the repository root:
-
-```sh
-bun run --cwd server dev
-```
-
-In another terminal, run the interactive OAuth check:
+Use isolated configuration and disposable data, never inherited production env or secrets.
+The app/MCP dev server defaults to port 3001; check that a port is free before starting.
+Native browser integration requires canonical auth/app origins and TLS; the explicit local
+rehearsal below dispatches those requests in-process without DNS or external requests.
 
 ```sh
-bun run --cwd server test:local
-```
-
-The check uses the default local origin. If you changed the port or origin, supply `--origin` with the origin hosting `/mcp`, without the `/mcp` path. Open the loopback page address it prints and complete sign-in manually. It checks OAuth discovery, DCR, PKCE, callback state, connection instructions, exactly four tools, and a current cover sheet read. It does not save instructions, open a browser automatically, or print tokens.
-
-Run automated checks from the repository root:
-
-```sh
-bun run check-types
-bun test
+bun --no-env-file server/scripts/check-auth-integration.ts
+bun run --cwd server check-types
+bun --no-env-file test server/test
 bun run --cwd server test:client
 ```
 
-The tests use fresh PGlite databases and stubbed Auth responses. `test:client` uses an in-memory SDK connection to an empty stub store. These checks need no live Neon credentials. The interactive `test:local` check does contact your configured Neon Auth service. Embedded tests do not prove contention between independent Neon connections.
+The explicit rehearsal builds actual server/native product modules with Bun, executes
+Node26 and creates its own PostgreSQL18 cluster on 55623 with distinct TLS/SCRAM runtime
+credentials. It checks the dispatched ports 20201–20204 too and refuses occupied ports.
+Set `PG_BIN` to PostgreSQL's bin directory where needed. It removes only its own cluster,
+TLS files and bundle. No external social/mail/Stripe calls occur. Protocol unit tests use
+PGlite/doubles and are not a substitute for this command or real-browser acceptance.
+The combined rehearsal leaves zod external to avoid Bun's combined-bundle initialization
+cycle; installed declared dependencies are required. Production bundle/container closure
+must also be checked independently.
+
+The optional interactive `test:local` uses the configured issuer and can reach a live
+provider; running it is a separate authorized action. Root global checks are types,
+`bun test` and `bun run format:check`. The release coordinator owns actual cutover.
 
 ## Store, history, and limits
 
@@ -569,8 +574,7 @@ the account lock, in the transaction that would publish them. Exact replay still
 recovers an already accepted receipt. Web view/download remains available.
 
 With billing configured, no new approval lands until the account has a subscription:
-`/login`, the consent page and an Allow on the consent form each start the trial first,
-and a Stripe failure stops that step with a 503 saying to try again. An approval Neon
+The authenticated native admission handoff starts the trial first, and a Stripe failure stops it with a retryable 503. An approval the native provider
 already holds refreshes without any Milton page, so existing accounts depend on the
 backfill. The signed Stripe
 webhook keeps `subscription_status` and the dates current; the next request rechecks
@@ -652,39 +656,18 @@ sources without storing a snapshot, and the fingerprint version fences saves.
 
 ### Runtime role
 
-The app and MCP do not connect as the database owner. The baseline creates
-`milton_runtime`, a NOLOGIN group role, and the services connect as `milton_app`, a
-login role created with SQL whose only membership is `milton_runtime` (membership
-inherits, so no `SET ROLE`). Each table gets only the statements the runtime, or a
-trigger it fires, runs on it:
+The writing baseline's historical `milton_runtime` grants remain for rollback history;
+the selected auth replacement uses separate NOINHERIT auth/app/MCP login roles with
+explicit grants, no owner/group membership, DDL or TEMP path. `migrations/005-app-roles.sql`
+is owner-reviewed preparation, not a blanket production revocation. App-only credentials
+live in `milton_app`, outside public writing default grants. App cannot read native
+credentials/keys; MCP cannot read either native secrets or app credentials. Auth cannot
+read writing, billing or app storage. The immutable user-ID column permits the UPDATE
+privilege PostgreSQL requires for row locks without permitting ownership changes.
 
-| Grant                          | Tables and why                                                                                                                                                                                                           |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| SELECT, INSERT, UPDATE, DELETE | `users`: sign-up, the account lock and account deletion (its cascades run as the table owner)                                                                                                                            |
-| SELECT, INSERT, DELETE         | `assistant_disconnects`: disconnect, the refusal check, reconnect on Allow                                                                                                                                               |
-| SELECT, INSERT, UPDATE         | `save_requests` (receipts; the save guard refuses every update), `samples` (active context correction or retirement), `trial_accounts` (notice stage), `usage_daily` (daily call upsert), `stripe_events` (event ledger) |
-| SELECT, INSERT                 | `identities`, `deleted_identities`, `instruction_cards`, `instruction_card_versions`, `sample_kinds`                                                                                                                     |
-| INSERT                         | `accepted_changes`: provenance, written once per save and never read by the runtime                                                                                                                                      |
-| SELECT                         | `store_config`: settings are read without a lock; no setting can be changed                                                                                                                                              |
-| USAGE                          | the `instruction_card_position` sequence (new card positions) and schema `public`; CONNECT on the database                                                                                                               |
+Run `MILTON_SERVICE=app` or `mcp` with the corresponding private `DATABASE_URL` and
+`bun --no-env-file server/scripts/check-runtime-role.ts`. This audits actual role
+membership/ownership, DDL/TEMP, native table and lifecycle privileges. Inspect PUBLIC
+views/functions/default privileges against the real retained schema before cutover too.
 
-The role owns nothing, so it cannot alter, drop or truncate a table, disable a
-trigger, set `session_replication_role`, create objects in `public` or read the
-`drizzle` journal. The triggers guard updates and deletes on the tables the runtime
-may change; where no trigger guards a row, the grant is what protects it. The runtime
-cannot delete from `save_requests` (which would erase receipts and their replay),
-`deleted_identities` or `trial_accounts` (which would let a deleted identity start a
-second trial) or `usage_daily` (which would reset the daily call count), and cannot
-change any `store_config` setting. Default privileges give tables later migrations
-create SELECT, INSERT and UPDATE and sequences USAGE; a migration grants DELETE itself
-where the runtime needs it. Trigger functions run as the caller and need no EXECUTE
-grant; the runtime calls no function directly and runs no statement that needs
-ownership (`SET LOCAL` timeouts, `FOR UPDATE` and `ON CONFLICT` need only these
-grants).
-
-Migrations keep the owner connection and refuse any other role; changing
-`store_config` settings is an owner operation.
-See
-[the hosting runbook](deploy/README.md#runtime-role) for creating `milton_app`
-(with SQL, because Neon puts console and API roles in `neon_superuser`) and switching
-the services' secrets.
+Native auth mail now uses committed encrypted jobs/no-op receipts before generic public acceptance. No provider call occurs during an auth request; the separately selected auth-only `node deliver.js --apply` command drains bounded leased work using the original native target and exact message. App/MCP receive no mail payload/table/function privileges. [Auth operations](../apps/auth/README.md#bounded-mail-delivery-and-retention) describe uncertain503 recovery, retry/retention bounds, key recovery and disabled job preparation. Native migrations run through006. Old inline-send writers remain unsafe for public fallback; select a compatible fixed self-hosted revision/forward fix. Retained disabled managed sign-in schema/data/backups require separately selected cleanup and are disclosed in the candidate privacy/intake wording.

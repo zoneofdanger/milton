@@ -17,11 +17,11 @@ Files: `server/src/cloud-run.ts`, `server/src/environment.ts`, `server/src/confi
 
 - One Docker image runs as two Cloud Run services, and `MILTON_SERVICE` picks `app` or
   `mcp`.
-- Google's load balancer sends `app.meetmilton.com` to the app and everything else to MCP.
+- The prepared auth service has its own canonical host, issuer and database role; app/MCP routing stays separate. Live routing changes require the release runbook.
 - HTTP upgrades to HTTPS with a redirect that keeps the method.
 - Vercel builds the static site from main on every push.
 - Startup decrypts a dotenvx file using a separate platform-held key.
-- Startup fails on bad URLs, a short cookie secret, a bad support email, a bad port, or an
+- Startup fails on bad URLs, a missing/short app client, admission or eligibility secret, a bad support email, a bad port, or an
   unknown service name.
 - Plain HTTP is allowed only on loopback outside production.
 - On SIGTERM the server stops accepting requests and force-exits after 8 seconds.
@@ -56,13 +56,13 @@ Files: `server/src/handler.ts`, `server/src/token.ts`, `server/src/mcp.ts`,
 - Origin is deliberately not checked, so web clients reach auth from any origin. The Host
   check stops DNS rebinding and tokens authenticate every call, but this departs from the
   MCP spec's rule that servers validate Origin.
-- The bearer JWT is checked locally against Neon's public keys, which are cached for 10
-  minutes.
-- The check covers algorithm, issuer, audience, and required claims, with 30 seconds of
-  clock tolerance.
+- JOSE checks EdDSA at+jwt against the exact configured issuer and MCP audience; native's fixed implicit UserInfo audience is allowed only with openid, and JWKS keys cache for 10 minutes.
+- Tokens require matching client_id/azp, supported scopes and original binding/incarnation/generation; ID/session JWTs and confirmation/DPoP are refused.
+- Every call checks live immutable native binding status; invalid/inactive is 401, real status/key outage is 503, with no stale-positive fallback.
+- All three reads require milton:read; create_memo requires read+write, including direct calls. Read grants list three tools; write grants list four.
+- Read-only setup explains reconnecting for saves; scope never establishes approval of memo text.
 - A bad token gets a 401 that points the client to the sign-in metadata.
-- Each request also checks that the account is active and the assistant is not
-  disconnected.
+- Each request looks up the active writing account by exact verified issuer and subject; MCP never provisions an account.
 - Each request builds a fresh stateless MCP server, with no sessions or subscriptions.
 - Global instructions require retrieval before writing or editing for or as the person; only new drafts get the sample/rule conformity check before display. Edits preserve source wording and style outside the request over conflicting samples/rules; guidance never widens scope, and only specific unresolved conflicts are flagged. Requested transformations retain their scope, and changes are briefly listed. These are behavioral instructions, not server enforcement.
 - After draft or edit approval, assistants display an exact placeholder-safe body and useful non-private context, then offer once to retain that proposal; one yes approves the displayed proposal. Every sample save requires that display, without silently redacting after approval or changing the working edit for retention. Change lists are excluded, refusal is final for that text, and only changed text/context requires renewed approval. Edits do not imply standing rules.
@@ -231,59 +231,36 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
 `server/src/billing.tsx`, `server/src/store/index.ts`, `server/src/store/billing.ts`,
 `server/scripts/backfill-subscriptions.ts`.
 
-- Neon Auth handles Google and GitHub sign-in.
-- Live sessions are checked with Neon, ignoring the SDK's cached session cookie.
-- Forms need the same origin, a 43-character CSRF token, and no repeated fields.
-- The CSRF token rotates at sign-in.
-- Upstream auth calls time out after 10 seconds.
-- OAuth queries must name Milton's resource, a client ID, a signature, and a clean
-  redirect.
-- A marker cookie stops an assistant from forcing endless re-logins.
-- The consent page shows the assistant's name and destination, and flags unverified
-  clients.
-- External redirects use a safe meta-refresh page, because the CSP's `form-action 'self'`
-  blocks them otherwise.
-- Every successful sign-in creates or finds its account; sign-ups are always open.
-- One identity has one account: two first sign-ins at once both reach it, because the
-  one that loses the identity insert drops its own new account and uses the winner's.
-- A new account starts empty, with a trial row if trials are on.
-- With billing configured, a trial row with no status gets a Stripe customer and a 30-day
-  Stripe trial with no card, which cancels at the end if no card was added.
-- No new approval lands until then: `/login`, the consent page, and an Allow on the consent
-  form each ensure it first, and denying needs nothing.
-- An approval Neon already holds skips those pages and refreshes without Milton, so existing
-  accounts depend on the backfill.
-- A Stripe failure stops that step with a 503 saying to try again, and charges nothing;
-  repeating the sign-in is the retry.
-- On a plain web sign-in, with no assistant involved, that page also links to Milton home.
-- With billing unset, no row, or a status already set, no step calls Stripe.
-- The row stays locked across customer, list, and create, so a concurrent attempt finds the
-  result rather than making a second customer or trial.
-- What Stripe already has is listed first, so a retry stores it rather than starting again.
-- `server/scripts/backfill-subscriptions.ts` does the same for every active account, paced
-  at about 5 a second: a dry run unless told otherwise, it skips rows with a status, sends
-  no email, prints only counts, and refuses without `trials_enabled` and a live key.
-- The backfill cancels a returning deleted identity left with no status, by 0027's rule,
-  and counts it as skipped, so it never gets a trial.
-- A reply lost after Stripe made a customer can leave an orphan: never charged, may hold an
-  email, removed by hand in Stripe if ever needed.
-- Idempotency keys carry the UTC minute, because Stripe replays a stored error for a day.
-- A returning deleted identity gets a row already marked canceled, trials on or off, found
-  through its hash, so it gets no Stripe trial and reads as expired while trials are on.
-- Disconnecting writes Milton's refusal first, then removes the consent at Neon.
-- If the Neon removal fails, the page offers Retry while the refusal stands.
-- Approving an assistant again clears its refusal, retrying once.
-- Signing out ends the session at Neon and clears Milton's cookies, and it never
-  disconnects assistants.
-- Switch account signs out and lands on `/login`.
-- Deletion requires the exact phrase "delete my account" and a live consent list.
-- Deletion first deletes any Stripe customer, ending its subscription at once with no
-  refund; after any failed delete, only a read that reports the customer deleted counts as
-  done, and any other result deletes nothing.
-- The row then clears the customer and subscription and reads canceled, so if Milton's own
-  delete fails, a retry calls nothing and a later Checkout makes a new customer.
-- Deletion records disconnects and the identity hash, then deletes the user and cascades.
-- Consent removal and sign-out after deletion are best effort.
+- Native auth hosts verified password/email, Google/GitHub, consent and account security; own form destinations and direct native URL-encoded browser form POST redirects (including logout confirmation) share an escaped fresh-document Continue navigation under strict same-origin form policy; direct GET, JSON/fetch and machine calls retain native redirects, and finalized native/static/refusal responses use strict-origin referrers (origin only, no paths/queries/proofs, suppressed on HTTPS downgrade) so same-origin form POSTs retain Origin while missing/null/foreign Origins stay refused; responses retain their security headers and native cookies; app never handles passwords or native cookies.
+- App uses maintained code/S256 OIDC with shared SQL one-use state/nonce/verifier, exact callback, signature/issuer/audience/subject and matching UserInfo/opaque-token proof.
+- Identity-only app sessions last at most one absolute hour and never outlive their native opaque token; renewal starts a new SSO flow with no refresh/offline scope.
+- App cookies are host-only Secure/HttpOnly/SameSite=Lax over HTTPS; every use checks the original nonempty sid, immutable binding, incarnation and generation against native SQL.
+- Invalid proof refuses; actual native5xx/network/timeout is 503; an uncertain spent callback recovers through a new login.
+- New logins reclaim at most16 expired flows/sessions each; admission correlations expire after24 hours with bounded reclaim, while eligibility/key policy/legacy mapping and original operation associations remain indefinitely for their stated purposes.
+- Forms require same origin, an ASCII CSRF token and unique fields; sign-in rotates CSRF.
+- Auth runtime and owner command pools always verify PostgreSQL TLS certificates/hostnames, even with mode omitted; unsafe/libpq/duplicate URL settings refuse.
+- Every native generation advance or deletion atomically retires older reset proofs; issuance takes the original user snapshot under the same parent lock, never the redemption-time generation.
+- Native unlink awaits app eligibility preservation before taking its parent lock; app uses guarded original metadata and stores fingerprints for existing writing accounts only, without billing or admission.
+- Native mail callbacks capture one original message; every generic signup/reset/resend success commits the same encrypted-job or no-op receipt outside native swallowing, with no provider I/O during HTTP; failure is uncertain/retryable503.
+- Auth-only mail functions lease one original message at a time for bounded delivery, stable job-id idempotency, finite retries and shared Retry-After pause capped at24 hours by worker and SQL across passes; native authority never rebinds to a later email owner.
+- Native capture checks its one-hour lifetime on the native clock; SQL accepts only finite future proof expiry and caps mail delivery at native expiry or15 minutes; terminal transitions clear payloads and bounded owner maintenance clears expired/fenced payloads and receipts eligible after24 hours, with physical retention longer if maintenance is delayed.
+- Bootstrap000 validates an explicit complete retained-login CONNECT/audited TEMP inventory before transactional pregrants/PUBLIC revocation; missing or inconsistent inventory refuses without partial privilege loss.
+- Authenticated native admission carries exact issuer/subject/continuation and native-validated verified email and bounded Google/GitHub IDs, including [] for password-only.
+- App admission checks the dedicated eligibility-key policy, then creates/finds one stable internal m_* account and trial and applies existing subscription admission; untrusted/invalid handoffs cause no mapping or billing effects.
+- Ownership uses exact issuer+subject, never email, provider nickname or eligibility fingerprints; native linking never merges writing or restarts a trial.
+- Account creation's unique identity row and billing's row lock converge under retries/concurrency; a new account starts empty.
+- Email and stable social identities get keyed trial-eligibility fingerprints with a dedicated stable key and first claimant, retained after deletion; changed/unprovisioned keys refuse admission.
+- Owner-only verified metadata import/dry-run preserves internal IDs, writing, trial/billing history and old neon:subject deletion markers; ambiguous mappings refuse and managed rows remain intact.
+- A trial row with no status gets the existing 30-day Stripe trial when billing is configured; no row/status or billing disabled calls no Stripe API.
+- Subscription creation locks the trial row across customer/list/create; minute-based idempotency retains the known remote-success/local-timeout ambiguity across a minute boundary.
+- Billing failures stop admission with retryable503; existing Stripe state is listed/reconciled before another create.
+- The subscription backfill remains an owner-selected dry run by default and never gives returning deleted identities another trial.
+- Account security routes to native UI; destructive deletion requires authoritative native freshness, exact typed confirmation and retention of current guarded verified-identity fingerprints.
+- App persists lifecycle UUID, original account/subject/incarnation/client and requester association before first native/remote attempt; retries never select current/recreated targets.
+- Disconnect commits native original-binding refusal before bounded cleanup; reconnect creates a new binding and never revives an old token.
+- Deletion commits refusal, then Stripe cancellation, then writing erasure, and finally bounded native cleanup; unknown inventory/cascade shape leaves a retryable incomplete operation.
+- Writing and original-incarnation app credentials are never erased before Stripe cancellation succeeds; incomplete deletion never claims completion.
+- Browser logout removes local authority and navigates through fixed-client native RP logout with exact return and native confirmation, leaving offline assistant grants independent.
 
 ## Web app
 
@@ -305,7 +282,7 @@ Files: `server/src/pages.tsx`, `server/src/memo-pages.tsx`, `server/src/auth.tsx
 - `/download` returns the complete writing export as `TPS.md`; the web report labels
   its sample count as shown, explains its newest-eight-per-report limit and links to
   the complete download, including when assistant access is paused.
-- `/assistants` lists live consents and looks up at most 20 names per view.
+- `/assistants` lists bounded live native connections grouped by client and read/write access, and original incomplete disconnects; a full native page explicitly reports incomplete listing.
 - The setup prompt changes depending on whether the account is empty.
 - Account opens a native popover; Escape closes it and returns focus to Account, and
   clicking outside closes it.
@@ -394,13 +371,11 @@ Files: `server/drizzle/`, `server/src/store/schema.ts`, `server/src/store/databa
   the unused card-version `legacy` flag are removed by the cleanup.
 - Fresh installs use one Drizzle baseline; the exact 0033 journal has an atomic owner-only
   transition that preserves current data and marks that baseline applied. Other old states refuse.
-- The runtime role has least privilege, owns nothing, and can delete only from `users` and
-  `assistant_disconnects`.
+- Distinct app/MCP roles have explicit writing grants, no inherited owner/group/DDL/TEMP privileges and no native secret reads; app-only session/flow/lifecycle/eligibility storage is denied to MCP/auth.
 - The runtime role can read and lock the `store_config` row but cannot change its settings.
-- Known trigger errors become clean coded responses.
+- PostgreSQL connection, query, transaction-control and close failures become store errors: known triggers and constraints get clean coded responses, unknown failures log only class/code, and callback errors survive rollback/close unchanged.
 - The store opens only a database named `milton`, over TLS.
-- Reads use HTTP queries, and transactions use one WebSocket client each, with lock and
-  statement timeouts.
+- Runtime queries use bounded direct PostgreSQL TLS connections; transactions keep one connection with lock and statement timeouts.
 
 ## Static site
 
@@ -431,13 +406,12 @@ Files: `apps/site/`.
 Files: `packages/theme/`, `server/scripts/`, `.github/workflows/checks.yml`.
 
 - A shared theme supplies fonts, favicons, and tokens, with a WCAG contrast test.
-- `migrate.ts` runs only against the `milton` database as `neondb_owner`.
+- `migrate.ts` applies writing migrations only as neondb_owner; explicit --app-auth applies app-only migration005 after native004 as an approved app migration owner, with no runtime startup migration.
 - It takes the owner connection from `MILTON_OWNER_DATABASE_URL` for a release, otherwise
   from `server/.dev.vars`, and never from an inherited `DATABASE_URL`.
 - `check-mcp` confirms the instructions, exactly four tools, and a read, without saving.
-- `check-local` runs the same check through a real OAuth sign-in against a running server,
-  keeping credentials in memory.
-- `check-runtime-role` confirms a connection has no elevated rights.
+- `check-local` is an explicitly invoked interactive configured-issuer check; the isolated check-auth-integration builds actual product modules under Node26/PG18 and mocks only external boundaries.
+- `check-runtime-role` audits selected NOINHERIT app/MCP roles, ownership, DDL/TEMP and native/app credential/function boundaries.
 - `probe-forms` confirms a signed-out form post passes CSRF.
 - `build.ts` builds the CSS with Vite and bundles the Cloud Run entry with Bun.
 - `dev.ts` serves the app on loopback and rebuilds the CSS on change.

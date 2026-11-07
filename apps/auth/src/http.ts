@@ -1,3 +1,4 @@
+import { isIP } from "node:net";
 import { AUTH_ORIGIN } from "./config.ts";
 const browserPosts = new Set([
   "/sign-up/email",
@@ -155,3 +156,39 @@ export const SECURITY_HEADERS = {
     "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
   "strict-transport-security": "max-age=31536000",
 };
+/**
+ * The client address Google's external Application Load Balancer saw, used
+ * for the network rate limits. The load balancer appends
+ * "<client-ip>,<load-balancer-ip>" to X-Forwarded-For and does not verify
+ * anything before them
+ * (https://docs.cloud.google.com/load-balancing/docs/https#x-forwarded-for_header),
+ * so only the second-to-last entry is trusted; the first is whatever the client
+ * sent. Same rules as the MCP server's keyAttemptSource. This holds only while
+ * auth ingress is internal-and-cloud-load-balancing. IPv6 clients are grouped
+ * by /64, returned as a valid address ("a:b:c:d::") for Better Auth's IP
+ * header. Without a well-formed pair, undefined: the caller keeps the socket
+ * peer (local runs and tests).
+ */
+export function loadBalancerClient(forwarded: string | null) {
+  const hops = (forwarded ?? "").split(",").map((hop) => hop.trim());
+  const client = hops.at(-2) ?? "";
+  if (hops.length < 2 || !isIP(hops.at(-1)!)) return undefined;
+  if (isIP(client) === 4) return client;
+  if (isIP(client) !== 6) return undefined;
+  const groups = (part = "") =>
+    part
+      .split(":")
+      .filter(Boolean)
+      .flatMap((g) => (g.includes(".") ? ["0", "0"] : [g]));
+  const [head, tail] = client.split("%")[0]!.split("::");
+  const left = groups(head),
+    right = groups(tail);
+  const full =
+    tail === undefined
+      ? left
+      : [...left, ...Array(8 - left.length - right.length).fill("0"), ...right];
+  return `${full
+    .slice(0, 4)
+    .map((g) => parseInt(g, 16).toString(16))
+    .join(":")}::`;
+}

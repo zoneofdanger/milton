@@ -250,6 +250,7 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
 - Invalid proof refuses; actual native5xx/network/timeout is 503; an uncertain spent callback recovers through a new login.
 - New logins reclaim at most16 expired flows/sessions each; admission correlations expire after24 hours with bounded reclaim, while eligibility/key policy/legacy mapping and original operation associations remain indefinitely for their stated purposes.
 - Forms require same origin, an ASCII CSRF token and unique fields; sign-in rotates CSRF.
+- Auth rate limits key each network by the client address Google's load balancer appends (second-to-last `X-Forwarded-For` entry, IPv6 by /64, never the first entry; else the socket peer): 120 requests a minute per network, 10 a minute per account email, and Better Auth's per-path 3 sign-in/sign-up attempts per 10 seconds and 3 mail requests a minute.
 - Auth runtime and owner command pools always verify PostgreSQL TLS certificates/hostnames, even with mode omitted; unsafe/libpq/duplicate URL settings refuse.
 - Every native generation advance or deletion atomically retires older reset proofs; issuance takes the original user snapshot under the same parent lock, never the redemption-time generation.
 - Native unlink awaits app eligibility preservation before taking its parent lock; app uses guarded original metadata and stores fingerprints for existing writing accounts only, without billing or admission.

@@ -114,7 +114,8 @@ class KeyAttemptsLimited extends AuthError {
  * that appended pair (https://docs.cloud.google.com/run/docs/securing/ingress).
  * Requests with no well-formed pair (local runs, internal callers) share one
  * "unknown" source. The socket peer is not used: behind Cloud Run it is
- * Google's front end, not the client. IPv6 clients are grouped by /64.
+ * Google's front end, not the client. IPv4-mapped IPv6 clients are their IPv4
+ * address; other IPv6 clients are grouped by /64.
  */
 export function keyAttemptSource(request: Request): string {
   const hops = (request.headers.get("X-Forwarded-For") ?? "")
@@ -128,17 +129,26 @@ export function keyAttemptSource(request: Request): string {
     part
       .split(":")
       .filter(Boolean)
-      .flatMap((g) => (g.includes(".") ? ["0", "0"] : [g]));
+      .flatMap((g) => {
+        if (!g.includes(".")) return [parseInt(g, 16)];
+        const [a, b, c, d] = g.split(".").map(Number);
+        return [a! * 256 + b!, c! * 256 + d!];
+      });
   const [head, tail] = client.split("%")[0]!.split("::");
   const left = groups(head),
     right = groups(tail);
   const full =
     tail === undefined
       ? left
-      : [...left, ...Array(8 - left.length - right.length).fill("0"), ...right];
+      : [...left, ...Array(8 - left.length - right.length).fill(0), ...right];
+  // An IPv4-mapped address (::ffff:a.b.c.d, dotted or hex) is that IPv4 client.
+  if (full.slice(0, 5).every((g) => g === 0) && full[5] === 0xffff)
+    return [full[6]! >> 8, full[6]! & 255, full[7]! >> 8, full[7]! & 255].join(
+      ".",
+    );
   return `${full
     .slice(0, 4)
-    .map((g) => parseInt(g, 16).toString(16))
+    .map((g) => g.toString(16))
     .join(":")}::/64`;
 }
 

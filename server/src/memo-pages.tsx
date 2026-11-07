@@ -416,9 +416,12 @@ export async function memoPages(
         "X-Content-Type-Options": "nosniff",
       },
     });
-  const docs = await store.readDocuments();
-  // Billing information is page chrome, never part of the report/download.
-  const trial = await store.trialStatus?.().catch(() => undefined);
+  // Two independent reads at once, each on its own pooled connection. Billing
+  // information is page chrome, never part of the report/download.
+  const [docs, trial] = await Promise.all([
+    store.readDocuments(),
+    store.trialStatus?.().catch(() => undefined),
+  ]);
   return current(
     {
       docs,

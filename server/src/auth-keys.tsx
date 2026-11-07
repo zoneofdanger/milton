@@ -255,10 +255,14 @@ export const connectionKeyRoutes = async (
   }
   if (request.method === "GET") {
     const user = await signedIn();
-    // By id and owning account, never through the bounded list.
-    const target = await (
-      await accountKeys(ctx, user)
-    ).find(url.searchParams.get("key") ?? "");
+    // By id and owning account, never through the bounded list; the account
+    // menu reads at the same time, on its own pooled connection.
+    const [target, menu] = await Promise.all([
+      accountKeys(ctx, user).then((keys) =>
+        keys.find(url.searchParams.get("key") ?? ""),
+      ),
+      chrome(user),
+    ]);
     if (!target)
       return page(
         "Key not found",
@@ -268,7 +272,7 @@ export const connectionKeyRoutes = async (
         </>,
         404,
         null,
-        await chrome(user),
+        menu,
       );
     return page(
       "Revoke this key?",
@@ -294,7 +298,7 @@ export const connectionKeyRoutes = async (
       </>,
       200,
       null,
-      await chrome(user),
+      menu,
     );
   }
   if (request.method !== "POST") return methodNotAllowed();

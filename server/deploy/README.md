@@ -22,9 +22,9 @@ This runbook keeps only the latest release record. Earlier release records and a
 one-time procedures are in git history; the last full version is at commit 492b96a
 (`git show 492b96a:server/deploy/README.md`).
 
-## Release record: lifecycle, caching, round trips and guards (2026-11-07, PRs #22 #24 #26 #27 #28 #29)
+## Release record: lifecycle, caching, round trips and guards (2026-11-07, PRs #22 #24 #26 #27 #28 #29 #31)
 
-Three deploys, no schema or secret change. First, `9de3099`: #22 (milton-qa, one account
+Four deploys, no schema or secret change. First, `9de3099`: #22 (milton-qa, one account
 lifecycle module) and #27 (milton-perf, content-versioned asset caching). Auth
 `milton-auth-00006-jjz`, app/MCP `milton-*-lca-9de3099` at 20:57Z. Through the load balancer,
 versioned app and auth CSS and fonts answer `immutable` with `content-encoding: br`, and a
@@ -52,6 +52,13 @@ Checks on main: types, 131 tests, format, build, rehearsal 12/12, all 0; health 
 401s, app home 200, signed-out report 403; 0 errors in a 5-minute watch after each deploy.
 Warm `get_cover_sheet` went from 68–70 ms to 29–33 ms (milton-perf). Rollback: app/MCP
 `milton-*-dup-cb5199b`.
+
+Fourth, `c1af8c3`: #31 (milton-qa, a failed assistant disconnect answers a 503 "Finish
+disconnecting" retry page, as deletion does). App/MCP `milton-*-drt-c1af8c3` at 21:20Z (image
+`sha256:a02a1bba7d821b2f6e49bd0f8fd1065ac9d382603cba8aec212fc731586d23e3`). Checks on main:
+types, 131 tests, format, build, rehearsal 12/12, all 0; health 200 ×3, MCP 401, signed-out
+assistants and disconnect 403; 0 errors in a 5-minute watch. Rollback: app/MCP
+`milton-*-rtt-3e128a1`.
 
 ## Runtime role timeouts (applied 2026-11-07, TODO #29)
 
@@ -322,8 +329,8 @@ references. Inspect revision readiness before selecting a recorded revision:
 gcloud run revisions list --service=milton-app --project=milton-510506 --region=us-east4
 ```
 
-Now serving (2026-11-07): app `milton-app-rtt-3e128a1` and MCP
-`milton-mcp-rtt-3e128a1` (source `3e128a1`), and auth `milton-auth-00007-vn2`. The
+Now serving (2026-11-07): app `milton-app-drt-c1af8c3` and MCP
+`milton-mcp-drt-c1af8c3` (source `c1af8c3`), and auth `milton-auth-00007-vn2`. The
 release record above gives the image and rollback revisions.
 
 Roll back only affected services, preserve ingress/IAM, then repeat the canonical

@@ -323,9 +323,6 @@ export function createStoreMemoTools(
         thrown instanceof StoreError && thrown.code === "subscription_required"
           ? subscriptionRequired(store.appOrigin)
           : thrown;
-      // The over-limit refusal carries its limit and reset time, no prose.
-      if (error instanceof StoreError && error.code === "rate_limited")
-        return storeResult({ error: error.code, ...error.details }, true);
       return storeResult(
         {
           ...(error instanceof StoreError ? error.details : {}),

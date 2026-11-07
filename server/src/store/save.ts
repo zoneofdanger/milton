@@ -92,8 +92,8 @@ export async function runSave(
   userId: string,
   actor: Actor,
   input: SaveMemoInput,
-  /** Charges the call inside the save's transaction (see below). */
-  admit?: (session: StoreSession) => Promise<void>,
+  /** Marks the call admitted (see below); makes no query. */
+  admit?: () => void,
 ): Promise<SaveOutcome> {
   const inputHash = hash(input);
   // Every save is exact: the caller sends the bytes, and no model rewrites them.
@@ -143,11 +143,10 @@ export async function runSave(
       // Account gates answer without a receipt, so the same request can
       // succeed once the gate opens.
       await assertTrialAccess(tx, userId);
-      // Charged here, after replay and every gate: the charge commits with the
-      // receipt or rolls back with it, so a save that records an outcome
-      // (saved, unchanged, conflict or failed) counts once, a replay of it
-      // counts nothing, and an over-limit save writes no receipt.
-      await admit?.(tx);
+      // Admitted here, after replay and every gate: a save that records an
+      // outcome (saved, unchanged, conflict or failed) is admitted, a replay
+      // of it is not.
+      admit?.();
       const current = await readSnapshot(tx, userId);
       const decide = async (): Promise<SaveOutcome> => {
         if (input.expected_version !== current.version)

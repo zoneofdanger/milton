@@ -52,8 +52,25 @@ function poolFor(url: string): Pool {
   return pool;
 }
 
-/** Ends every pool once its borrowed connections return. */
+// Work no request awaits (usage records), so shutdown can wait for it.
+const background = new Set<Promise<unknown>>();
+/** Runs `work` without blocking the caller; its failure is the work's own to
+ * handle, and closeDatabasePools waits for it before ending any pool. */
+export function inBackground(work: () => Promise<unknown>): void {
+  const running = work()
+    .catch(() => {})
+    .finally(() => background.delete(running));
+  background.add(running);
+}
+/** Settles once no background work is running. */
+export async function backgroundSettled(): Promise<void> {
+  while (background.size) await Promise.allSettled([...background]);
+}
+
+/** Ends every pool once background work has finished and its borrowed
+ * connections return. */
 export async function closeDatabasePools(): Promise<void> {
+  await backgroundSettled();
   const open = [...pools.values()];
   pools.clear();
   await Promise.allSettled(open.map((pool) => pool.end()));

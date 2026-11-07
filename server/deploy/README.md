@@ -171,7 +171,8 @@ from the live service before replacing it. [auth.service.template.json](auth.ser
 is deliberately non-deployable. Production's writing journal holds `0000_baseline` through
 `0004_connection_keys` (5 entries), the native auth ledger 001–007, and the owner files
 `000-app-owner.sql`, `005-app.up.sql`, `005-app-roles.sql`, `006-connection-keys-roles.sql` and `007-role-timeouts.up.sql` (see [runtime role timeouts](#runtime-role-timeouts-applied-2026-11-07-todo-29)). There is no memo-update
-allowance; the daily call cap bounds saves. Existing positive account safeguards remain
+or daily call allowance (removed by the branch `agent/remove-daily-allowance`; until it
+serves, production still enforces the 10,000-call daily cap). Existing positive account safeguards remain
 in effect. Trials and billing are live (since 2026-11-04).
 Each image includes both roles and browser assets. Validate manifests before applying:
 
@@ -530,8 +531,8 @@ and inside a private temporary directory outside the repository (`umask 077`).
    new versions, validate with `--dry-run`, replace MCP, then app, and record the
    revisions and versions.
 8. Verify as the new role: canonical health, MCP discovery and unauthenticated 401; an
-   authenticated `get_cover_sheet` returns 200 with an unchanged version (a read,
-   which also writes the daily call count); and a save. With Peter's go, a
+   authenticated `get_cover_sheet` returns 200 with an unchanged version (a read; its
+   `usage_calls` row is appended after the response); and a save. With Peter's go, a
    `create_memo` that resends one existing cover rule verbatim returns `unchanged`: it
    claims and stores a receipt as `milton_app` and changes no memo. A save that changes
    memos runs only when Peter directs one. Check the logs for `store_unavailable` or

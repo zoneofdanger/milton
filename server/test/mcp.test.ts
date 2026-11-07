@@ -21,6 +21,12 @@ import {
   resolveIdentityAccount,
 } from "../src/store";
 import { localStore } from "./local-store";
+import { PgDialect } from "drizzle-orm/pg-core";
+import {
+  backgroundSettled,
+  type StoreDatabase,
+  type StoreSession,
+} from "../src/store/database";
 import { z } from "zod";
 import { createMcpApp } from "../src/index";
 import { mcpRuntimeConfig } from "../src/config";
@@ -462,10 +468,6 @@ test("two authenticated clients isolate tenants and save once", async () => {
         })
       ).value.status,
     ).toBe("conflict");
-    await local.db.query(
-      sql`UPDATE store_config SET limits_json=limits_json || '{"daily_calls":1}'::jsonb`,
-    );
-    expect((await call(0, "get_cover_sheet")).value.error).toBe("rate_limited");
   } finally {
     await Promise.all(clients.map((c) => c.close()));
     await local.dispose();
@@ -564,7 +566,7 @@ test("scopes control discovery and direct calls; original binding revocation sur
   }
 }, 30000);
 
-test("a setup request makes one database round trip and a tool call four, by token or connection key", async () => {
+test("a setup request makes one database round trip and a tool call three, by token or connection key", async () => {
   const local = await localStore();
   try {
     await resolveIdentityAccount(local.env, {
@@ -586,12 +588,15 @@ test("a setup request makes one database round trip and a tool call four, by tok
     }).create({ name: "Counted", scope: "read_write", expiry: null });
     const fixture = await tokenFixture(local.pg);
     const token = await fixture.token("counted");
-    // Each statement, BEGIN and COMMIT is one round trip.
+    // Each statement, BEGIN and COMMIT is one round trip. Usage appends run
+    // after the response, off the request (see the next test), so they are
+    // not the request's.
     let trips = 0;
+    const dialect = new PgDialect();
     const counted = {
       ...local.db,
       query: <Row extends Record<string, unknown>>(statement: SQL) => {
-        trips++;
+        if (!/usage_calls/.test(dialect.sqlToQuery(statement).sql)) trips++;
         return local.db.query<Row>(statement);
       },
       transaction: <T>(
@@ -639,7 +644,9 @@ test("a setup request makes one database round trip and a tool call four, by tok
       const text = await response.text();
       expect(response.status).toBeLessThan(300);
       expect(text).not.toContain('"isError":true');
-      return trips;
+      const counted = trips;
+      await backgroundSettled();
+      return counted;
     };
     const cover = { name: "get_cover_sheet", arguments: {} };
     const initialize = {
@@ -653,15 +660,121 @@ test("a setup request makes one database round trip and a tool call four, by tok
       expect(await trips_for(bearer, "initialize", initialize)).toBe(1);
       expect(await trips_for(bearer, "notifications/initialized")).toBe(1);
       expect(await trips_for(bearer, "tools/list", {})).toBe(1);
-      // Access, the trial gate, the charge and the snapshot.
-      expect(await trips_for(bearer, "tools/call", cover)).toBe(4);
+      // Access, the trial gate and the snapshot; usage is recorded after the
+      // response, off the request's path.
+      expect(await trips_for(bearer, "tools/call", cover)).toBe(3);
     }
   } finally {
     await local.dispose();
   }
 }, 30000);
 
-test("invalid store limits refuse a tool call without counting it", async () => {
+test("an admitted tool call takes no account lock and writes its usage only after its response", async () => {
+  const local = await localStore();
+  try {
+    const { miltonUserId } = await resolveIdentityAccount(local.env, {
+      provider: issuer,
+      subject: "usage",
+    });
+    const fixture = await tokenFixture(local.pg);
+    const token = await fixture.token("usage");
+    // Every statement a request runs, and the usage appends, held until
+    // released: a request that waited on one would never answer.
+    const dialect = new PgDialect();
+    const during: string[] = [];
+    const appends: string[] = [];
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const watched = (session: StoreSession): StoreSession => ({
+      async query<Row extends Record<string, unknown>>(statement: SQL) {
+        const text = dialect.sqlToQuery(statement).sql;
+        if (/usage_calls/.test(text)) {
+          appends.push(text);
+          await held;
+        } else during.push(text);
+        return session.query<Row>(statement);
+      },
+    });
+    const db: StoreDatabase = {
+      ...watched(local.db),
+      transaction: (work) => local.db.transaction((tx) => work(watched(tx))),
+      withConnection: (work) => work(db),
+    };
+    const handler = createMiltonHandler(
+      { storeDatabase: db, issuer, resource, appOrigin: origin },
+      fixture.verify,
+      () => {},
+    );
+    const call = async (name: string, args: unknown) => {
+      during.length = 0;
+      const body = await (
+        await handler(
+          new Request(resource, {
+            method: "POST",
+            headers: {
+              Host: "localhost:3001",
+              Authorization: "Bearer " + token,
+              Accept: "application/json, text/event-stream",
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              jsonrpc: "2.0",
+              id: 1,
+              method: "tools/call",
+              params: { name, arguments: args },
+            }),
+          }),
+        )
+      ).text();
+      const result = JSON.parse(
+        body.startsWith("{") ? body : body.split("data: ").at(-1)!,
+      ).result;
+      return {
+        statements: [...during],
+        value: JSON.parse(result.content[0].text),
+      };
+    };
+    const cover = await call("get_cover_sheet", {});
+    expect(cover.value.version).toBeString();
+    // A read locks nothing and touches no usage table.
+    expect(
+      cover.statements.filter((s) => /FOR UPDATE|usage_/i.test(s)),
+    ).toEqual([]);
+    const save = await call("create_memo", {
+      text: "Fictional rule.",
+      rules: [{ report: "cover", text: "Keep fictional dates exact." }],
+      request_id: crypto.randomUUID(),
+      expected_version: cover.value.version,
+    });
+    expect(save.value.status).toBe("saved");
+    // A save's one lock is its own account lock; no usage statement either.
+    expect(save.statements.filter((s) => /FOR UPDATE/i.test(s))).toHaveLength(
+      1,
+    );
+    expect(save.statements.filter((s) => /usage_/i.test(s))).toEqual([]);
+    // Both answered while the first append was still held.
+    expect(appends).toHaveLength(1);
+    const rows = async () =>
+      (
+        await local.pg.query<{ tool: string; outcome: string }>(
+          "SELECT tool,outcome FROM usage_calls WHERE user_id=$1 ORDER BY at",
+          [miltonUserId],
+        )
+      ).rows;
+    expect(await rows()).toEqual([]);
+    release();
+    await backgroundSettled();
+    expect(await rows()).toEqual([
+      { tool: "get_cover_sheet", outcome: "read" },
+      { tool: "create_memo", outcome: "saved" },
+    ]);
+  } finally {
+    await backgroundSettled();
+    await local.dispose();
+  }
+}, 30000);
+
+test("invalid store limits refuse a tool call and record no usage; a stored daily_calls is ignored", async () => {
   const local = await localStore();
   try {
     const { miltonUserId } = await resolveIdentityAccount(local.env, {
@@ -695,37 +808,62 @@ test("invalid store limits refuse a tool call without counting it", async () => 
           }),
         )
       ).text();
-    const used = async () =>
-      (
+    const used = async () => {
+      await backgroundSettled();
+      return (
         await local.db.query<{ n: number }>(
-          sql`SELECT coalesce(sum(tool_calls),0)::int AS n FROM usage_daily WHERE user_id=${miltonUserId}`,
+          sql`SELECT count(*)::int AS n FROM usage_calls WHERE user_id=${miltonUserId}`,
         )
       )[0]!.n;
+    };
+    // Production's stored row still holds the retired daily_calls key; calls
+    // pass whatever its value, and the key is left as stored.
+    const legacy = {
+      body_bytes: 131072,
+      description_bytes: 500,
+      reason_bytes: 500,
+      report_body_bytes: 262144,
+      daily_calls: 10000,
+    };
     const valid = (
       await local.db.query<{ limits: unknown }>(
         sql`SELECT limits_json AS limits FROM store_config`,
       )
     )[0]!.limits;
+    expect(valid).toEqual(legacy);
     expect(await cover()).not.toContain('"isError":true');
     expect(await used()).toBe(1);
-    for (const invalid of ['{"body_bytes":"large"}', '{"daily_calls":1.5}']) {
+    for (const retired of ["1", "0", '"none"']) {
+      await local.db.query(
+        sql`UPDATE store_config SET limits_json=limits_json || ${`{"daily_calls":${retired}}`}::jsonb`,
+      );
+      expect(await cover()).not.toContain('"isError":true');
+    }
+    expect(await used()).toBe(4);
+    await local.db.query(
+      sql`UPDATE store_config SET limits_json=${JSON.stringify(valid)}::jsonb`,
+    );
+    for (const invalid of [
+      '{"body_bytes":"large"}',
+      '{"report_body_bytes":0}',
+    ]) {
       await local.db.query(
         sql`UPDATE store_config SET limits_json=limits_json || ${invalid}::jsonb`,
       );
       expect(await cover()).toContain("configuration");
-      expect(await used()).toBe(1);
+      expect(await used()).toBe(4);
       await local.db.query(
         sql`UPDATE store_config SET limits_json=${JSON.stringify(valid)}::jsonb`,
       );
     }
     expect(await cover()).not.toContain('"isError":true');
-    expect(await used()).toBe(2);
+    expect(await used()).toBe(5);
   } finally {
     await local.dispose();
   }
 }, 30000);
 
-test("refused tool calls count nothing; a call is charged once its work starts", async () => {
+test("refused tool calls record no usage; each admitted call records one row", async () => {
   const local = await localStore();
   try {
     await local.db.query(sql`UPDATE store_config SET trials_enabled=true`);
@@ -769,12 +907,14 @@ test("refused tool calls count nothing; a call is charged once its work starts",
         return { isError: result.isError };
       }
     };
-    const used = async () =>
-      (
+    const used = async () => {
+      await backgroundSettled();
+      return (
         await local.db.query<{ n: number }>(
-          sql`SELECT coalesce(sum(tool_calls),0)::int AS n FROM usage_daily WHERE user_id=${miltonUserId}`,
+          sql`SELECT count(*)::int AS n FROM usage_calls WHERE user_id=${miltonUserId}`,
         )
       )[0]!.n;
+    };
     const version = (await call("get_cover_sheet", {})).version;
     expect(await used()).toBe(1);
     const save = {
@@ -823,7 +963,7 @@ test("refused tool calls count nothing; a call is charged once its work starts",
       ).error,
     ).toBe("invalid_kind");
     expect(await used()).toBe(1);
-    // A save that ran is charged, whether it saved or met a stale version.
+    // A save that ran is recorded, whether it saved or met a stale version.
     expect((await call("create_memo", save)).status).toBe("saved");
     expect(await used()).toBe(2);
     expect(
@@ -835,11 +975,7 @@ test("refused tool calls count nothing; a call is charged once its work starts",
       ).status,
     ).toBe("conflict");
     expect(await used()).toBe(3);
-    // Over the allowance, calls stop; replaying a recorded save stays free.
-    await local.db.query(
-      sql`UPDATE store_config SET limits_json=limits_json || '{"daily_calls":3}'::jsonb`,
-    );
-    expect((await call("get_cover_sheet", {})).error).toBe("rate_limited");
+    // Replaying a recorded save records nothing.
     expect((await call("create_memo", save)).status).toBe("saved");
     expect(await used()).toBe(3);
   } finally {
@@ -1393,10 +1529,6 @@ test("final outcomes include early refusal/read failure and a logging failure ca
     let refuse = true,
       failRead = false,
       throwLog = false;
-    store.chargeToolCall = async () =>
-      refuse
-        ? { allowed: false, retry_at_ms: Date.now() + 1000, limit: "day" }
-        : { allowed: true };
     store.readTpsReport = async () => {
       if (failRead)
         throw new StoreError(
@@ -1407,6 +1539,12 @@ test("final outcomes include early refusal/read failure and a logging failure ca
     };
     const originalDocuments = store.readDocuments.bind(store);
     store.readDocuments = async () => {
+      if (refuse)
+        throw new StoreError(
+          "account_unavailable",
+          "Fictional private error prose.",
+          403,
+        );
       if (failRead)
         throw new StoreError(
           "store_unavailable",
@@ -1461,7 +1599,7 @@ test("final outcomes include early refusal/read failure and a logging failure ca
     expect(
       events.map((e) => [e.tool, e.outcome, e.error_code ?? null]),
     ).toEqual([
-      ["get_cover_sheet", "refused", "rate_limited"],
+      ["get_cover_sheet", "refused", "account_unavailable"],
       ["get_cover_sheet", "failed", "store_unavailable"],
       ["create_memo", "saved", null],
       ["create_memo", "unchanged", null],

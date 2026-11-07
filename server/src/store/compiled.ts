@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { accountUnavailable } from "./accounts";
 import { assembleExport, type Documents, type ReportIntent } from "./reports";
-import type { StoreDatabase, StoreSession } from "./database";
+import type { StoreDatabase } from "./database";
 import { databaseFailure } from "./database";
 import { StoreError } from "./errors";
 import { assertTrialAccess, type TrialStatus } from "./trials";
@@ -27,14 +27,14 @@ export function compiledMemos(
   actor?: { issuer: string; clientId: string },
   /** Sees the trial status each assistant read's gate admitted. */
   gated?: (status: TrialStatus) => void,
-  /** Charges an admitted assistant call, on the given session, or refuses it;
-   * runs after every gate and before the work. */
-  admit?: (session: StoreSession) => Promise<void>,
+  /** Marks an assistant call admitted, after every gate and before the work;
+   * it makes no query. */
+  admit?: () => void,
 ) {
   /** A read assembles the documents from cards and samples. It takes no lock
-   * and writes only its charge: for an assistant the trial gate (whose
-   * statement first checks the account and the intent's kind, so they refuse
-   * before the gate, as on the snapshot), then the charge, then one statement for the snapshot. The size cap
+   * and writes nothing: for an assistant the trial gate (whose statement first
+   * checks the account and the intent's kind, so they refuse before the gate,
+   * as on the snapshot), then one statement for the snapshot. The size cap
    * bounds saves; a read serves what is on file. */
   async function read(intent?: ReportIntent, includeGuides = false) {
     try {
@@ -56,7 +56,7 @@ export function compiledMemos(
         );
         gated?.(status);
       }
-      await admit?.(db);
+      admit?.();
       return await readSnapshot(db, userId, intent, includeGuides);
     } catch (error) {
       throw databaseFailure(error);

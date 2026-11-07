@@ -76,7 +76,20 @@ export function createMiltonServer(
           const call = pending.get(message.id);
           if (call) {
             pending.delete(message.id);
-            safeToolLog(log, finalToolCall(call.tool, call.started, message));
+            const event = finalToolCall(call.tool, call.started, message);
+            safeToolLog(log, event);
+            const sent = send(...args);
+            // Recorded once the response is on its way; never awaited.
+            if (event.tool !== "unknown")
+              try {
+                store.recordUsage?.({
+                  tool: event.tool,
+                  outcome: event.outcome,
+                });
+              } catch {
+                /* Observational only. */
+              }
+            return sent;
           }
         }
         return send(...args);

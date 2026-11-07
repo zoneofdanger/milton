@@ -1,7 +1,12 @@
 import { sql } from "drizzle-orm";
 import { z } from "zod";
 import type { RuntimeConfig } from "./config";
-import { database, lockActiveAccount, lookupIdentityAccount } from "./store";
+import {
+  database,
+  eraseAccountRows,
+  lockActiveAccount,
+  lookupIdentityAccount,
+} from "./store";
 import type { PageContext, SessionUser } from "./auth-session";
 import { endStripeCustomer } from "./billing";
 import { hash } from "./auth-oidc";
@@ -273,7 +278,7 @@ async function advanceOperation(config: RuntimeConfig, original: Operation) {
       await tx.query(
         sql`SELECT id FROM users WHERE id=${current.user_id} FOR UPDATE`,
       );
-      await tx.query(sql`DELETE FROM users WHERE id=${current.user_id}`);
+      await eraseAccountRows(tx, current.user_id);
       await tx.query(
         sql`DELETE FROM milton_app.session WHERE issuer=${current.issuer} AND subject=${current.subject} AND incarnation=${current.incarnation}`,
       );

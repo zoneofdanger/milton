@@ -14,16 +14,12 @@ import { sql } from "drizzle-orm";
 import { createMiltonApp } from "../src/index";
 import { runtimeConfig, type RuntimeConfig } from "../src/config";
 import {
+  backgroundSettled,
   closeDatabasePools,
   POOL_IDLE_MS,
   postgresDatabase,
 } from "../src/store/database";
-import {
-  database,
-  lookupIdentityAccount,
-  StoreError,
-  storeForCurrentRequest,
-} from "../src/store";
+import { database, lookupIdentityAccount, StoreError } from "../src/store";
 import {
   authenticateConnectionKey,
   createConnectionKey,
@@ -101,6 +97,7 @@ try {
     "0003_report_guides",
     "0004_connection_keys",
     "0005_drop_deleted_identities",
+    "0006_usage_calls",
   ])
     await owner.query(
       readFileSync(new URL(`./drizzle/${migration}.sql`, sourceRoot), "utf8"),
@@ -148,6 +145,14 @@ try {
     await owner.query(
       readFileSync(
         new URL("./migrations/006-connection-keys-roles.sql", sourceRoot),
+        "utf8",
+      ),
+    );
+  // 009: rerunning converges too.
+  for (let n = 0; n < 2; n++)
+    await owner.query(
+      readFileSync(
+        new URL("./migrations/009-usage-calls-roles.sql", sourceRoot),
         "utf8",
       ),
     );
@@ -1484,47 +1489,29 @@ try {
     undefined,
     "real-role model-free writing save",
   );
-  stage = "MCP charge against account deletion";
-  {
-    // A deletion that holds the account lock first: the charge waits for it,
-    // then refuses with account_unavailable.
-    const raced = "m_00000000-0000-4000-8000-0000000000c3";
-    await owner.query("INSERT INTO users(id) VALUES($1)", [raced]);
+  stage = "MCP usage after the response";
+  // As the real MCP role: each admitted call appended one row after its
+  // response, and the role can neither read nor change them.
+  await backgroundSettled();
+  const usage = (
     await owner.query(
-      "INSERT INTO identities(provider,subject,user_id) VALUES('fictional-charge','charge-race',$1)",
-      [raced],
-    );
-    const store = await storeForCurrentRequest(
-      mcpConfig,
-      await lookupIdentityAccount(mcpConfig, {
-        provider: "fictional-charge",
-        subject: "charge-race",
-      }),
-    );
-    assert.deepEqual(await store.chargeToolCall(), { allowed: true });
-    const deletion = await owner.connect();
-    let settled = false;
-    let charge: Promise<unknown> = Promise.resolve();
-    try {
-      await deletion.query("BEGIN");
-      await deletion.query("SELECT id FROM users WHERE id=$1 FOR UPDATE", [
-        raced,
-      ]);
-      charge = store.chargeToolCall().finally(() => (settled = true));
-      charge.catch(() => {});
-      await new Promise((resolve) => setTimeout(resolve, 300));
-      assert.equal(settled, false, "the charge waits on the account lock");
-      await deletion.query("DELETE FROM users WHERE id=$1", [raced]);
-      await deletion.query("COMMIT");
-    } finally {
-      deletion.release();
-    }
-    await assert.rejects(
-      charge,
-      (error) =>
-        error instanceof StoreError && error.code === "account_unavailable",
-    );
-  }
+      "SELECT user_id,tool,outcome FROM usage_calls ORDER BY at",
+    )
+  ).rows as { user_id: string; tool: string; outcome: string }[];
+  assert.deepEqual(
+    usage.map((r) => [r.tool, r.outcome]),
+    [
+      ["get_cover_sheet", "read"],
+      ["create_memo", "saved"],
+    ],
+  );
+  const usageUser = usage[0]!.user_id;
+  for (const statement of [
+    "SELECT * FROM usage_calls",
+    "UPDATE usage_calls SET tool=tool",
+    "DELETE FROM usage_calls",
+  ])
+    await assert.rejects(mcpPool.query(statement), /permission denied/);
   stage = "read-only native authorization";
   const readGrant = await authorizeAssistant(
     "openid offline_access milton:read",
@@ -2073,6 +2060,16 @@ try {
     "complete",
   );
   assert(stripe.deleted);
+  assert.equal(
+    (
+      await owner.query(
+        "SELECT count(*)::int n FROM usage_calls WHERE user_id=$1",
+        [usageUser],
+      )
+    ).rows[0].n,
+    0,
+    "account erasure deletes its usage rows",
+  );
   pass(
     "Stripe-first failure/retry preserves writing, then actual native refusal/cleanup keeps the original operation",
   );

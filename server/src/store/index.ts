@@ -39,6 +39,7 @@ import {
 } from "./compiled";
 import type { ReportIntent } from "./reports";
 import { parseLimits, readLimits } from "./limits";
+import { recordToolUsage, type ToolUsage } from "./usage";
 import {
   authenticateConnectionKey,
   createConnectionKey,
@@ -49,6 +50,7 @@ import {
   type KeyScope,
 } from "./connection-keys";
 export { StoreError } from "./errors";
+export { eraseAccountRows } from "./accounts";
 export {
   EXPIRED_KEY_HISTORY,
   keyExpiries,
@@ -313,8 +315,6 @@ export function connectionKeysForAccount(
   };
 }
 
-type CallAllowance =
-  { allowed: true } | { allowed: false; retry_at_ms: number; limit: "day" };
 export interface TenantStore {
   /** The app's origin, for the one link served to assistants. */
   appOrigin: string;
@@ -326,9 +326,9 @@ export interface TenantStore {
     intent?: ReportIntent,
   ): Promise<Documents & { version: string }>;
   saveMemo(input: SaveMemoInput): Promise<SaveOutcome>;
-  /** Counts one admitted call, on `session` (a save's own transaction) or
-   * alone. */
-  chargeToolCall(session?: StoreSession): Promise<CallAllowance>;
+  /** After a tool call's response: records its usage in the background if
+   * the call was admitted, else nothing. Never awaited, never throws. */
+  recordUsage?(usage: ToolUsage): void;
 }
 
 /** An account's store, refused once the account is not active. */
@@ -344,38 +344,27 @@ export async function storeForCurrentRequest(
 }
 
 /** The store for an `auth` this request just looked up, which required an
- * active account; built without a query. Every tool call's charge and every
- * read and save check the account again.
+ * active account; built without a query. Every read and save checks the
+ * account again.
  *
- * A call is charged only once it is admitted: access, scope and limits were
- * checked before the store was built and the SDK validated the input before
- * the tool ran; each read and save then checks its remaining input (a read's
- * kind_id) and the trial gate, and the charge
- * comes next, right before the tool's own work (the snapshot read, or the
- * save's decision under its account lock). Any refusal before it counts
- * nothing. */
+ * A call is admitted once access, scope and limits were checked (before the
+ * store was built), the SDK validated the input, and the read or save checked
+ * its remaining input (a read's kind_id) and the trial gate, right before the
+ * tool's own work (the snapshot read, or the save's decision under its account
+ * lock; a replayed save is not admitted). Admission writes nothing: only an
+ * admitted call's usage is recorded, after its response (see recordToolUsage). */
 export function tenantStore(
   bindings: StoreBindings & { appOrigin: string },
   auth: AssistantAuth,
   assistant?: { issuer: string; clientId: string },
 ): TenantStore {
-  // Refused before any write, so invalid limits never count a call.
-  const limits = parseLimits(auth.limits);
+  // Invalid limits refuse every call before its work.
+  parseLimits(auth.limits);
   const userId = auth.userId;
   const db = database(bindings);
   // The trial status the latest read's gate admitted, for that call's notice.
   let gated: TrialStatus | undefined;
-  // Through the returned store, so a fixture can stand in for the charge.
-  const admit = async (session: StoreSession) => {
-    const allowance = await store.chargeToolCall(session);
-    if (!allowance.allowed)
-      throw new StoreError(
-        "rate_limited",
-        "The daily tool-call allowance is used.",
-        429,
-        { limit: allowance.limit, retry_at_ms: allowance.retry_at_ms },
-      );
-  };
+  let admitted = false;
   const compiled = compiledMemos(
     db,
     userId,
@@ -383,9 +372,11 @@ export function tenantStore(
     (status) => {
       gated = status;
     },
-    admit,
+    () => {
+      admitted = true;
+    },
   );
-  const store: TenantStore = {
+  return {
     appOrigin: bindings.appOrigin,
     trialNotice: async () => {
       const status = gated;
@@ -403,47 +394,25 @@ export function tenantStore(
     readTpsReport: compiled.getTpsReport,
     readDocuments: compiled.readDocuments,
     saveMemo: compiled.saveMemo,
-    /** One statement, so one round trip, in its own implicit transaction or
-     * the save's. It takes the account row lock the deletion and every writer
-     * take, held until that transaction commits: a deletion that holds it
-     * first leaves no active row (the charge refuses and counts nothing); one
-     * that comes second waits and then sees, and cascades, the counted call.
-     * The conditional increment is one row update, so concurrent charges
-     * never both take the last unit. The limit is the one this request's
-     * access statement read and validated. */
-    async chargeToolCall(session = db) {
-      const row = (
-        await session.query<{ day: string; open: boolean; charged: boolean }>(
-          sql`WITH account AS (
-            SELECT id FROM users WHERE id=${userId} AND status='active' FOR UPDATE),
-          today AS (SELECT (clock_timestamp() AT TIME ZONE 'UTC')::date AS day),
-          charged AS (
-            INSERT INTO usage_daily (user_id,day_utc,tool_calls)
-            SELECT account.id, today.day, 1 FROM account, today
-            ON CONFLICT (user_id,day_utc) DO UPDATE SET tool_calls = usage_daily.tool_calls + 1
-            WHERE usage_daily.tool_calls < ${limits.daily_calls}
-            RETURNING tool_calls)
-          SELECT today.day::text AS day,
-            EXISTS(SELECT 1 FROM account) AS open,
-            EXISTS(SELECT 1 FROM charged) AS charged
-          FROM today`,
-        )
-      )[0]!;
-      if (!row.open) throw accountUnavailable();
-      return row.charged
-        ? { allowed: true as const }
-        : {
-            allowed: false as const,
-            limit: "day" as const,
-            retry_at_ms: Date.parse(`${row.day}T00:00:00Z`) + 86400000,
-          };
+    recordUsage(usage) {
+      if (!admitted) return;
+      admitted = false;
+      try {
+        recordToolUsage(
+          bindings.storeDatabase ?? bindings.DATABASE_URL,
+          () => database(bindings),
+          userId,
+          usage,
+        );
+      } catch {
+        /* Usage is observational only. */
+      }
     },
   };
-  return store;
 }
 
 // The web app reads with the person's own session: no assistant, so no saves and
-// no charged calls. It reads no limits (they bound only saves and charges) and
+// no recorded usage. It reads no limits (they bound only saves) and
 // makes no separate account check: the lookup behind `auth` required an active
 // account, and every read's snapshot statement refuses one that is not.
 export function personStoreForCurrentRequest(

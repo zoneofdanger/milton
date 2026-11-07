@@ -458,12 +458,14 @@ save invokes a model.
 | Rule or sample text        | 128 KiB UTF-8 (`body_bytes`)                                  |
 | Cover sheet or report body | 256 KiB UTF-8 each (`report_body_bytes`)                      |
 | Description/reason         | 500 UTF-8 bytes each                                          |
-| Attempted MCP calls        | 10,000 per account per UTC day (`daily_calls`)                |
 | Request body               | 256 KiB before parsing (`MAX_REQUEST_BYTES` in `src/http.ts`) |
 
-The attempted-call limit is the only daily bound on saves; there is no separate save
-allowance.
-Every attempted MCP call still counts, including retries. There are no public archive/restore exemptions or history controls.
+There is no daily call or save allowance. Each admitted tool call appends one
+`usage_calls` row (account, time, tool, outcome) after its response, off the request's
+path: no lock, no read back, failures logged by code only (`src/store/usage.ts`). The table
+grows by one row per admitted call and has no retention yet. `usage_daily` and the stored
+`daily_calls` key are no longer read or written; a later migration removes both.
+There are no public archive/restore exemptions or history controls.
 Retained history has no cap.
 
 The website shows the current cover sheet and reports, escapes their text and serves no browser JavaScript.
@@ -663,12 +665,13 @@ and local fictional rehearsal do not authorize a production migration or deploym
 
 ### Limits and save invariants
 
-The byte and attempted-call caps above apply alongside 1-100 rules and up to 500
+The byte caps above apply alongside 1-100 rules and up to 500
 exact edits, moves and sample removals per save, with a 256 KiB request bound.
 `sample_versions_body` allows 131072 bytes, `accepted_change_shape` allows 1,100 affected cards,
-and `save_request_result` allows 65,536 bytes. The five stored limits are `body_bytes`,
-`description_bytes`, `reason_bytes`, `report_body_bytes` and `daily_calls`.
-There is no card count, daily save allowance or lifetime history cap.
+and `save_request_result` allows 65,536 bytes. The stored limits in use are `body_bytes`,
+`description_bytes`, `reason_bytes` and `report_body_bytes`; the stored row may still hold
+the retired `daily_calls`, which is ignored.
+There is no card count, daily call or save allowance, or lifetime history cap.
 
 A save and its outcome receipt commit in one transaction. Every receipt holds an
 outcome and refuses updates; a crash before commit leaves no receipt. Reads assemble
@@ -696,6 +699,11 @@ app may read every column except `secret_hash`, insert, and set `revoked_at`; MC
 read and set `last_used_at` only. No runtime can change a key's binding columns. Native
 `007-connection-key-status` grants `connection_key_status` EXECUTE to MCP and app only.
 Rerunning 006 converges.
+
+Usage rows (`usage_calls`, Drizzle `0006`) get no legacy-group grants either. The owner
+applies `migrations/009-usage-calls-roles.sql` after `0006` and before code that records
+usage: MCP may only insert; app may read `user_id` and delete, for account erasure.
+Rerunning 009 converges. `drizzle/rollback/0006_usage_calls.sql` drops the table.
 
 Server timeouts live on the runtime logins, because Neon's proxy and pooler drop the
 `statement_timeout`/`lock_timeout` a client passes at connect (the pools still pass them,

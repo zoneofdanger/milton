@@ -211,6 +211,7 @@ test("the runtime has only current grants, its guards hold, and later tables inh
       store_config: "SELECT",
       stripe_events: "INSERT,SELECT,UPDATE",
       trial_accounts: "INSERT,SELECT,UPDATE",
+      usage_calls: "",
       usage_daily: "INSERT,SELECT,UPDATE",
       users: "DELETE,INSERT,SELECT,UPDATE",
     };
@@ -509,6 +510,10 @@ test("0005 drops the unread deleted_identities table and its rollback recreates 
     const after = await schemaCatalog(current.pg);
     expect(await schemaCatalog(pg)).toEqual(after);
     expect(after.tables).not.toContain("deleted_identities");
+    // Rollbacks run newest first.
+    await pg.exec(
+      await Bun.file(folder + "rollback/0006_usage_calls.sql").text(),
+    );
     await pg.exec(
       await Bun.file(
         folder + "rollback/0005_drop_deleted_identities.sql",
@@ -527,10 +532,66 @@ test("0005 drops the unread deleted_identities table and its rollback recreates 
         (await Bun.file(folder + "0005_drop_deleted_identities.sql").text()) +
         "COMMIT;",
     );
+    await pg.exec(
+      "BEGIN;" +
+        (await Bun.file(folder + "0006_usage_calls.sql").text()) +
+        "COMMIT;",
+    );
     expect(await schemaCatalog(pg)).toEqual(after);
     expect((await pg.query("SELECT id FROM users")).rows).toEqual([
       { id: "kept" },
     ]);
+  } finally {
+    await current.dispose();
+    await pg.close();
+    await rm(scratch, { recursive: true, force: true });
+  }
+});
+
+test("0006 adds an empty usage_calls table the legacy group cannot reach, and its rollback restores the 0005 schema", async () => {
+  const folder = new URL("../drizzle/", import.meta.url).pathname;
+  const scratch = await mkdtemp(join(tmpdir(), "milton-0006-"));
+  const pg = new PGlite();
+  const current = await localStore();
+  try {
+    await cp(folder, scratch, { recursive: true });
+    const journal = await Bun.file(join(scratch, "meta/_journal.json")).json();
+    journal.entries = journal.entries.filter((e: { idx: number }) => e.idx < 6);
+    await writeFile(
+      join(scratch, "meta/_journal.json"),
+      JSON.stringify(journal),
+    );
+    await migrate(drizzle(pg), { migrationsFolder: scratch });
+    const before = await schemaCatalog(pg);
+    await seedUsers(pg, "kept");
+    await pg.exec(
+      "INSERT INTO usage_daily(user_id,day_utc,tool_calls) VALUES ('kept','2026-11-07',3)",
+    );
+    await migrate(drizzle(pg), { migrationsFolder: folder });
+    const after = await schemaCatalog(current.pg);
+    expect(await schemaCatalog(pg)).toEqual(after);
+    expect(
+      (
+        await pg.query(
+          "SELECT count(*)::int AS n,has_table_privilege('milton_runtime','public.usage_calls','SELECT,INSERT,UPDATE,DELETE') AS reachable FROM usage_calls",
+        )
+      ).rows,
+    ).toEqual([{ n: 0, reachable: false }]);
+    await pg.exec(
+      await Bun.file(folder + "rollback/0006_usage_calls.sql").text(),
+    );
+    expect(await schemaCatalog(pg)).toEqual(before);
+    // The journal row stays: re-forwarding runs the file by hand, as one
+    // transaction.
+    await pg.exec(
+      "BEGIN;" +
+        (await Bun.file(folder + "0006_usage_calls.sql").text()) +
+        "COMMIT;",
+    );
+    expect(await schemaCatalog(pg)).toEqual(after);
+    expect(
+      (await pg.query("SELECT user_id,tool_calls FROM usage_daily")).rows,
+    ).toEqual([{ user_id: "kept", tool_calls: 3 }]);
   } finally {
     await current.dispose();
     await pg.close();

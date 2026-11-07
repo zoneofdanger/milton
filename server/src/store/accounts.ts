@@ -24,3 +24,14 @@ export async function requireActiveAccount(
   );
   if (!rows.length) throw accountUnavailable();
 }
+
+/** Erases an account whose row the caller's transaction has locked: its usage
+ * rows, which have no foreign key, then the users row every other tenant table
+ * cascades from. */
+export async function eraseAccountRows(
+  tx: StoreSession,
+  userId: string,
+): Promise<void> {
+  await tx.query(sql`DELETE FROM usage_calls WHERE user_id=${userId}`);
+  await tx.query(sql`DELETE FROM users WHERE id=${userId}`);
+}

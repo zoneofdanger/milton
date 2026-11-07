@@ -23,7 +23,9 @@ const tsvector = customType<{ data: string }>({ dataType: () => "tsvector" });
 const createdAt = () =>
   timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
 // Changing this default needs a migration. The card version guard also reads
-// reason_bytes; application code reads the other four limits.
+// reason_bytes; application code reads body_bytes, description_bytes and
+// report_body_bytes. Nothing reads daily_calls (the retired daily allowance);
+// a later migration removes it with usage_daily.
 const limits = {
   body_bytes: 131072,
   description_bytes: 500,
@@ -198,6 +200,8 @@ export const connectionKeys = pgTable(
     ),
   ],
 );
+// Written by no code since the daily allowance was retired; a later migration
+// drops it.
 export const usageDaily = pgTable(
   "usage_daily",
   {
@@ -210,6 +214,29 @@ export const usageDaily = pgTable(
   (t) => [
     primaryKey({ columns: [t.userId, t.dayUtc] }),
     check("usage_nonnegative", sql`${t.toolCalls} >= 0`),
+  ],
+);
+// One row per admitted tool call, appended after its response. No foreign
+// key, so the append takes no lock on the account row; account erasure deletes
+// an account's rows explicitly (eraseAccountRows).
+export const usageCalls = pgTable(
+  "usage_calls",
+  {
+    userId: text("user_id").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    tool: text("tool").notNull(),
+    outcome: text("outcome").notNull(),
+  },
+  (t) => [
+    index("usage_calls_by_user").on(t.userId, t.at),
+    check(
+      "usage_calls_tool",
+      sql`${t.tool} IN ('get_cover_sheet','get_report','list_reports','create_memo')`,
+    ),
+    check(
+      "usage_calls_outcome",
+      sql`${t.outcome} IN ('read','saved','unchanged','conflict','refused','failed')`,
+    ),
   ],
 );
 

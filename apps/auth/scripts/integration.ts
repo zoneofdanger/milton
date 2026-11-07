@@ -98,16 +98,20 @@ try {
       .rows[0].n,
     1,
   );
-  assert.equal(
-    digest(
-      (
-        await p.owner.query(
-          `select (select row_to_json(a) from milton_auth.account a where id='preserved-account') as account,(select row_to_json(s) from milton_auth.session s where id='preserved-session') as session`,
-        )
-      ).rows,
-    ),
-    digest(preservedNative.rows),
-  );
+  // Every pre-upgrade column keeps its value; the upgrade only adds columns.
+  const upgraded = (
+    await p.owner.query(
+      `select (select row_to_json(a) from milton_auth.account a where id='preserved-account') as account,(select row_to_json(s) from milton_auth.session s where id='preserved-session') as session`,
+    )
+  ).rows[0];
+  for (const part of ["account", "session"] as const) {
+    const before: Record<string, unknown> = preservedNative.rows[0][part];
+    assert.equal(
+      digest(Object.keys(before).map((column) => upgraded[part][column])),
+      digest(Object.values(before)),
+      part,
+    );
+  }
   assert.equal(
     (await p.owner.query("select body from fictional_writing.saved")).rows[0]
       .body,

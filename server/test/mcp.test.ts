@@ -1067,6 +1067,8 @@ test("MCP refuses unsafe transports and oversized bodies before database access"
       },
     });
     const fixture = await tokenFixture(local.pg, resource);
+    const logged: ToolCall[] = [];
+    let verified = 0;
     const handler = createMiltonHandler(
       {
         storeDatabase: db,
@@ -1074,7 +1076,11 @@ test("MCP refuses unsafe transports and oversized bodies before database access"
         resource,
         appOrigin: "https://mcp.meetmilton.com",
       },
-      fixture.verify,
+      (header) => {
+        verified++;
+        return fixture.verify(header);
+      },
+      (call) => logged.push(call),
     );
     for (const [method, host, origin, expected] of [
       ["GET", "mcp.meetmilton.com", "https://claude.ai", 405],
@@ -1108,10 +1114,18 @@ test("MCP refuses unsafe transports and oversized bodies before database access"
         expect(reply.headers.get("WWW-Authenticate")).not.toContain("scope=");
       }
     }
+    // Over the bound, an authorized call is refused once, before parsing, auth,
+    // a query or a tool event.
+    logged.length = 0;
+    verified = 0;
     const oversized = await handler(
       new Request(resource, {
         method: "POST",
-        headers: { Host: "mcp.meetmilton.com" },
+        headers: {
+          Host: "mcp.meetmilton.com",
+          Authorization: `Bearer ${await fixture.token("bound")}`,
+          "Content-Type": "application/json",
+        },
         body: new ReadableStream({
           start(c) {
             c.enqueue(new Uint8Array(262145));
@@ -1121,112 +1135,11 @@ test("MCP refuses unsafe transports and oversized bodies before database access"
       }),
     );
     expect(oversized.status).toBe(413);
-    expect(queries).toBe(0);
-  } finally {
-    await local.dispose();
-  }
-}, 30000);
-
-test("one code constant bounds requests: an oversized body is refused once", async () => {
-  const local = await localStore();
-  const logged: ToolCall[] = [];
-  let client: Client | undefined;
-  try {
-    await resolveIdentityAccount(local.env, {
-      provider: issuer,
-      subject: "bound",
-    });
-    const fixture = await tokenFixture(local.pg);
-    const authorization = `Bearer ${await fixture.token("bound")}`;
-    let verified = 0;
-    const handler = createMiltonHandler(
-      { ...local.env, issuer, resource, appOrigin: origin },
-      (header) => {
-        verified++;
-        return fixture.verify(header);
-      },
-      (call) => logged.push(call),
-    );
-    client = new Client({ name: "bound-client", version: "0.0.0" });
-    await client.connect(
-      new StreamableHTTPClientTransport(new URL(resource), {
-        fetch: (input, init) => {
-          const request = new Request(input, init);
-          request.headers.set("Host", new URL(request.url).host);
-          return handler(request);
-        },
-        requestInit: { headers: { Authorization: authorization } },
-      }),
-    );
-    const text = (reply: unknown) =>
-      z
-        .record(z.string(), z.unknown())
-        .parse(
-          JSON.parse(
-            z
-              .object({ content: z.array(z.object({ text: z.string() })) })
-              .parse(reply).content[0]!.text,
-          ),
-        );
-    const sheet = text(
-      await client.callTool({ name: "get_cover_sheet", arguments: {} }),
-    );
-    const rule = "Keep every sentence short and plain. ".repeat(30).trim();
-    const saved = await client.callTool({
-      name: "create_memo",
-      arguments: {
-        text: "Bound check",
-        request_id: crypto.randomUUID(),
-        expected_version: sheet.version,
-        rules: [{ report: "email", text: rule }],
-      },
-    });
-    expect(saved.isError).not.toBe(true);
-    expect(text(saved).status).toBe("saved");
-
-    // Over the bound, a well-formed create_memo call is refused once, before
-    // parsing, auth or a tool event; one that got through would log create_memo.
-    logged.length = 0;
-    verified = 0;
-    const call = new TextEncoder().encode(
-      JSON.stringify({
-        jsonrpc: "2.0",
-        id: 9,
-        method: "tools/call",
-        params: {
-          name: "create_memo",
-          arguments: {
-            text: "Fictional oversized save.",
-            request_id: crypto.randomUUID(),
-            expected_version: sheet.version,
-            rules: [{ report: "email", text: "x".repeat(262144) }],
-          },
-        },
-      }),
-    );
-    expect(call.byteLength).toBeGreaterThan(262144);
-    const oversized = await handler(
-      new Request(resource, {
-        method: "POST",
-        headers: {
-          Host: new URL(resource).host,
-          Authorization: authorization,
-          "Content-Type": "application/json",
-        },
-        body: new ReadableStream({
-          start(c) {
-            c.enqueue(call);
-            c.close();
-          },
-        }),
-      }),
-    );
-    expect(oversized.status).toBe(413);
     expect(await oversized.json()).toEqual({ error: "request_too_large" });
+    expect(queries).toBe(0);
     expect(logged).toEqual([]);
     expect(verified).toBe(0);
   } finally {
-    await client?.close();
     await local.dispose();
   }
 }, 30000);

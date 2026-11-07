@@ -140,7 +140,37 @@ test("rate-limit network is forwardedClient's client, as a valid address", async
   expect(client(null)).toBeUndefined();
 });
 
+// A versioned copy of the theme assets in a temporary directory, as the build
+// writes them; createApp reads it once, so callers remove it after createApp.
+async function versionedAssets() {
+  const { mkdtempSync, mkdirSync, cpSync, writeFileSync } =
+    await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { versionAssets } = await import("@milton/theme/assets");
+  const theme = new URL("../../../packages/theme/public/", import.meta.url)
+    .pathname;
+  const assets = mkdtempSync(join(tmpdir(), "milton-auth-assets-"));
+  mkdirSync(join(assets, "fonts"));
+  cpSync(join(theme, "fonts"), join(assets, "fonts"), { recursive: true });
+  cpSync(join(theme, "favicon.svg"), join(assets, "favicon.svg"));
+  writeFileSync(
+    join(assets, "auth.css"),
+    '@font-face { font-family: "Geist"; src: url("/fonts/geist-latin-variable.woff2") format("woff2"); }\n'.repeat(
+      8,
+    ),
+  );
+  versionAssets(assets, [
+    "/auth.css",
+    "/favicon.svg",
+    "/fonts/geist-latin-variable.woff2",
+    "/fonts/jetbrains-mono-regular.woff2",
+  ]);
+  return assets;
+}
+
 test("the security page's session lookup takes each client's own network bucket", async () => {
+  const { rmSync } = await import("node:fs");
   const { createProvider } = await import("../src/provider.ts");
   const { createApp } = await import("../src/app.tsx");
   const { randomBytes } = await import("node:crypto");
@@ -148,6 +178,7 @@ test("the security page's session lookup takes each client's own network bucket"
   // Each network bucket holds one request; every decision is recorded.
   const taken = new Map<unknown, number>();
   const decisions: boolean[] = [];
+  const assets = await versionedAssets();
   const pool = {
     on: () => pool,
     query: async (text: string, values: unknown[] = []) => {
@@ -180,8 +211,9 @@ test("the security page's session lookup takes each client's own network bucket"
       },
       { pool: pool as unknown as import("pg").Pool },
     ),
-    import.meta.dir,
+    assets,
   );
+  rmSync(assets, { recursive: true, force: true });
   // An admitted lookup then fails on the refused pool and logs; keep it quiet.
   const quiet = spyOn(console, "error").mockImplementation(() => {});
   for (const client of ["203.0.113.7", "203.0.113.7", "198.51.100.9"])
@@ -341,31 +373,10 @@ describe("OAuth profile refusals before database access", () => {
 });
 
 test("static assets cache by content version and keep the other security headers", async () => {
-  const { mkdtempSync, mkdirSync, cpSync, writeFileSync, rmSync } =
-    await import("node:fs");
-  const { tmpdir } = await import("node:os");
-  const { join } = await import("node:path");
-  const { versionAssets } = await import("@milton/theme/assets");
+  const { rmSync } = await import("node:fs");
   const { createApp } = await import("../src/app.tsx");
   const { SECURITY_HEADERS } = await import("../src/http.ts");
-  const theme = new URL("../../../packages/theme/public/", import.meta.url)
-    .pathname;
-  const assets = mkdtempSync(join(tmpdir(), "milton-auth-assets-"));
-  mkdirSync(join(assets, "fonts"));
-  cpSync(join(theme, "fonts"), join(assets, "fonts"), { recursive: true });
-  cpSync(join(theme, "favicon.svg"), join(assets, "favicon.svg"));
-  writeFileSync(
-    join(assets, "auth.css"),
-    '@font-face { font-family: "Geist"; src: url("/fonts/geist-latin-variable.woff2") format("woff2"); }\n'.repeat(
-      8,
-    ),
-  );
-  versionAssets(assets, [
-    "/auth.css",
-    "/favicon.svg",
-    "/fonts/geist-latin-variable.woff2",
-    "/fonts/jetbrains-mono-regular.woff2",
-  ]);
+  const assets = await versionedAssets();
   const app = createApp(
     {
       handler: async () => Response.json({ ok: true }),

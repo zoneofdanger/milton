@@ -18,6 +18,21 @@ The retired combined Vercel `milton-mcp` project, deployments, aliases, project
 secrets and firewall configuration were removed during the authorized hosting
 decommission on 2026-11-01. Hosting rollback now uses Cloud Run revisions.
 
+## Release record: per-client rate limits (2026-11-07)
+
+Source `bc66f6a` (9bd2a4f + bc66f6a, Astra REVISE then fixed). Auth rate limits had keyed on
+the TCP peer, which on Cloud Run is Google's front end, so every user shared one bucket. Auth
+now keys on the second-to-last X-Forwarded-For entry, as MCP does; IPv4-mapped addresses
+count as their IPv4 address in both. Auth ingress was confirmed live as
+`internal-and-cloud-load-balancing`. Auth `milton-auth-00004-69s` at 19:09Z (image
+`sha256:4b24556c2d247fe8cef29ca5e266b4278035e00961ea7abd1c2966466539b6e3`; the mail and
+maintenance jobs use it too). App/MCP `milton-*-rate-bc66f6a` at 19:10Z (image
+`sha256:bc563c46a1ab1205cb61aa1af8e0b2b8520f7c607d13d39fd93c2ef4c328de5e`). Same env
+bundles. Checks: health 200 ×3, Claude Code authorize 302, MCP unauthenticated and fake-key
+401, and a new Better Auth bucket keyed by a real client address (the earlier one was keyed
+on a Google front-end address). Rollback: auth `milton-auth-00003-ggx`, app/MCP
+`milton-*-keys-5b59d19`. No schema change.
+
 ## Release record: schema + self-hosted auth cutover (2026-11-07)
 
 Release agent milton-duo; Peter authorized each gate. Runbook and evidence (local,

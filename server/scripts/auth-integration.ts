@@ -28,7 +28,7 @@ import {
   parseConnectionKey,
   revokeConnectionKey,
 } from "../src/store/connection-keys";
-import { importIdentities } from "./auth-identity-import";
+import { fingerprintKeyCheck } from "../src/auth-admission";
 import { hash } from "../src/auth-oidc";
 import { appActive, bindingActive } from "../src/auth-authority";
 import { checkProductRuntimeRole } from "./check-runtime-role";
@@ -244,74 +244,20 @@ try {
   ownerUrl.searchParams.set("sslmode", "verify-full");
   ownerUrl.searchParams.set("sslrootcert", cert);
   const ownerDb = postgresDatabase(ownerUrl.href);
-  const importData = [
-    {
-      legacySubject: "legacy-person",
-      issuer: ISSUER,
-      subject: "migrated-person",
-      userId: "m_00000000-0000-4000-8000-000000000001",
-      verifiedEmail: "legacy@example.invalid",
-      verifiedIdentities: [{ provider: "google", subject: "legacy-google" }],
-    },
-  ];
-  const deletedHash = createHash("sha256")
-    .update("neon:legacy-deleted")
-    .digest("hex");
-  await owner.query(
-    "INSERT INTO deleted_identities(identity_hash) VALUES($1)",
-    [deletedHash],
-  );
-  const metadata = [
-    ...importData,
-    {
-      legacySubject: "legacy-deleted",
-      issuer: ISSUER,
-      subject: "migrated-deleted",
-      userId: null,
-      verifiedEmail: "deleted@example.invalid",
-      verifiedIdentities: [
-        { provider: "github", subject: "fictional-deleted-github" },
-      ],
-    },
-  ];
+  const personId = "m_00000000-0000-4000-8000-000000000001";
   const fingerprintKey = secret();
-  assert.equal(
-    (await importIdentities(ownerDb, metadata, ISSUER, fingerprintKey)).applied,
-    false,
+  // The trial-eligibility key and one verified mapping, as the cutover left them.
+  await owner.query(
+    "INSERT INTO milton_app.eligibility_policy(singleton,key_check) VALUES(true,$1)",
+    [fingerprintKeyCheck(fingerprintKey)],
   );
-  assert.equal(
-    (
-      await owner.query(
-        "SELECT count(*)::int n FROM identities WHERE provider=$1",
-        [ISSUER],
-      )
-    ).rows[0].n,
-    0,
-  );
-  const missing = await importIdentities(ownerDb, [], ISSUER, fingerprintKey);
-  assert.equal(missing.unmappedActive, 1);
-  assert.equal(missing.unmappedDeleted, 1);
-  await assert.rejects(
-    importIdentities(ownerDb, [], ISSUER, fingerprintKey, true),
-  );
-  await importIdentities(ownerDb, metadata, ISSUER, fingerprintKey, true);
-  assert.equal(
-    (
-      await owner.query(
-        "SELECT user_id FROM identities WHERE provider=$1 AND subject='migrated-person'",
-        [ISSUER],
-      )
-    ).rows[0].user_id,
-    importData[0]!.userId,
-  );
-  await assert.rejects(
-    importIdentities(
-      ownerDb,
-      [...importData, { ...importData[0], subject: "ambiguous" }],
+  await owner.query(
+    "INSERT INTO milton_app.legacy_mapping(legacy_hash,issuer,subject,user_id,deleted) VALUES($1,$2,'migrated-person',$3,false)",
+    [
+      createHash("sha256").update("neon:legacy-person").digest("hex"),
       ISSUER,
-      fingerprintKey,
-      true,
-    ),
+      personId,
+    ],
   );
   await appOwner.query(
     readFileSync(new URL("./migrations/005-app.down.sql", sourceRoot), "utf8"),
@@ -339,7 +285,7 @@ try {
   assert.equal(
     (await owner.query("SELECT count(*)::int n FROM milton_app.legacy_mapping"))
       .rows[0].n,
-    2,
+    1,
   );
   assert.equal(
     (await owner.query("SELECT value FROM neon_auth.retained")).rows[0].value,
@@ -349,7 +295,7 @@ try {
     (
       await owner.query(
         "SELECT subscription_status FROM trial_accounts WHERE user_id=$1",
-        [importData[0]!.userId],
+        [personId],
       )
     ).rows[0].subscription_status,
     "canceled",
@@ -435,7 +381,7 @@ try {
       );
     };
     try {
-      const id = importData[0]!.userId;
+      const id = personId;
       const cases = [
         [
           sql`UPDATE users SET id='fictional_changed_id' WHERE id=${id}`,
@@ -1443,11 +1389,17 @@ try {
     native.handler(new Request(input, init)),
   );
   const mcp = createMiltonHandler(mcpConfig, verifier, () => {});
-  const rpc = (access: string, method: string, params: unknown = {}) =>
+  const rpc = (
+    access: string,
+    method: string,
+    params: unknown = {},
+    extra: Record<string, string> = {},
+  ) =>
     mcp(
       new Request(config.resource, {
         method: "POST",
         headers: {
+          ...extra,
           Host: "mcp.meetmilton.com",
           Authorization: "Bearer " + access,
           "Content-Type": "application/json",
@@ -1563,8 +1515,16 @@ try {
   // Connection keys against real native authority (native 007): created through
   // the app from a fresh session, checked by the real MCP role on every call.
   stage = "connection keys bound to native authority";
+  // Each key call comes from its own client behind the load balancer (TEST-NET
+  // addresses), so failed lookups never drain one shared "unknown" bucket.
+  let keyClients = 0;
   const keyCall = async (key: string) => {
-    const response = await rpc(key, "tools/list");
+    const response = await rpc(
+      key,
+      "tools/list",
+      {},
+      { "X-Forwarded-For": `198.51.100.${++keyClients}, 192.0.2.1` },
+    );
     await response.body?.cancel();
     return response.status;
   };

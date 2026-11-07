@@ -4,7 +4,13 @@ import { getConnInfo } from "@hono/node-server/conninfo";
 import { serveStatic } from "@hono/node-server/serve-static";
 import type { AuthService } from "./provider.ts";
 import { AUTH_ORIGIN } from "./config.ts";
-import { boundedBody, guardRequest, json, SECURITY_HEADERS } from "./http.ts";
+import {
+  boundedBody,
+  guardRequest,
+  json,
+  loadBalancerClient,
+  SECURITY_HEADERS,
+} from "./http.ts";
 import {
   Page,
   SignIn,
@@ -28,6 +34,8 @@ export function createApp(
     for (const [k, v] of Object.entries(SECURITY_HEADERS)) c.header(k, v);
   });
   const peer = (c: Parameters<typeof getConnInfo>[0]) => {
+    const client = loadBalancerClient(c.req.header("x-forwarded-for") ?? null);
+    if (client) return client;
     try {
       return getConnInfo(c).remote.address ?? "127.0.0.1";
     } catch {

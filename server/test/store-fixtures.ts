@@ -1,4 +1,6 @@
+import { createHash } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
+import { sql } from "drizzle-orm";
 import type { SampleContext } from "../src/store/sample-context";
 import type { ReportId } from "../src/store/reports";
 import { compiledMemos } from "../src/store/compiled";
@@ -17,6 +19,26 @@ export const insideTransactions = (
       return work(tx);
     }),
 });
+
+// The erasure step of account deletion (auth-lifecycle.ts) for a sign-in
+// identity: the row lock every writer takes, the identity fingerprint that
+// refuses a second trial, then the delete that every tenant table cascades from.
+export const eraseAccount = (
+  db: StoreDatabase,
+  identity: { provider: string; subject: string },
+) =>
+  db.transaction(async (tx) => {
+    const [account] = await tx.query<{ id: string }>(sql`
+      SELECT u.id FROM identities i JOIN users u ON u.id=i.user_id
+      WHERE i.provider=${identity.provider} AND i.subject=${identity.subject}
+        AND u.status='active' FOR UPDATE OF u`);
+    const hash = createHash("sha256")
+      .update(`${identity.provider}:${identity.subject}`)
+      .digest("hex");
+    await tx.query(sql`INSERT INTO deleted_identities(identity_hash)
+      VALUES(${hash}) ON CONFLICT DO NOTHING`);
+    await tx.query(sql`DELETE FROM users WHERE id=${account!.id}`);
+  });
 
 // The JSON payload of an MCP tool result.
 export const read = (result: { content: [{ text: string }] }) =>

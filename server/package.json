@@ -20,7 +20,6 @@
     "@hono/node-server": "2.1.5",
     "@milton/theme": "workspace:*",
     "@modelcontextprotocol/server": "2.4.0",
-    "@neondatabase/serverless": "1.2.0",
     "drizzle-orm": "0.45.4",
     "hono": "4.13.16",
     "jose": "6.2.15",

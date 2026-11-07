@@ -14,11 +14,10 @@ import {
   type ToolCall,
 } from "../src/mcp";
 import { saveMemoInput } from "../src/mcp-tools";
-import { createMiltonHandler } from "../src/handler";
+import { createMiltonHandler, keyAttemptSource } from "../src/handler";
 import { createAccessTokenVerifier } from "../src/token";
 import {
   connectionKeysForAccount,
-  deleteAccount,
   lookupIdentityAccount,
   resolveIdentityAccount,
 } from "../src/store";
@@ -166,6 +165,16 @@ test("an SDK client receives instructions, discovers the four tools, and reads t
     );
     expect(JSON.stringify(read.inputSchema.properties?.intent)).toContain(
       "get_report.kinds",
+    );
+    // The guide block carries its own precedence; descriptions do not repeat it.
+    const list = tools.find((tool) => tool.name === "list_reports")!;
+    for (const { description } of [read, list])
+      expect(description).not.toMatch(/guide|Eligible opted-in/);
+    expect(read.description).toEndWith(
+      "do not guess at one. Reads make no model call or write.",
+    );
+    expect(list.description).toContain(
+      "and version. For clients that want everything loaded after get_cover_sheet;",
     );
     const text = client.getInstructions();
     expect(text).toContain('"Did you get the memo?"');
@@ -995,6 +1004,21 @@ test("key attempts are limited per load-balancer client before database access: 
     for (const forged of ["192.0.2.1", "192.0.2.2, 192.0.2.3", "unknown"])
       expect((await post(invented(), `${forged}, ${a}`)).status).toBe(429);
     expect(queries).toBe(before);
+    // IPv4-mapped IPv6 clients are their IPv4 address, never one shared /64.
+    const source = (client: string) =>
+      keyAttemptSource(
+        new Request(resource, {
+          headers: { "X-Forwarded-For": `${client}, 203.0.113.1` },
+        }),
+      );
+    for (const mapped of [
+      "::ffff:192.0.2.1",
+      "::FFFF:c000:201",
+      "0:0:0:0:0:ffff:192.0.2.1",
+    ])
+      expect(source(mapped)).toBe("192.0.2.1");
+    expect(source("::ffff:198.51.100.2")).toBe("198.51.100.2");
+    expect(source("2001:db8:1:2::5")).toBe("2001:db8:1:2::/64");
     // Source B's real key keeps working, past the burst and the per-minute rate.
     for (let n = 0; n < 15; n++)
       expect((await post(real.key, b)).status).toBe(200);

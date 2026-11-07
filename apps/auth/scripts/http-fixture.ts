@@ -245,6 +245,28 @@ export async function httpFixture(auth: AuthService) {
     ])
       for (const [name, value] of Object.entries(SECURITY_HEADERS))
         assert.equal(r.headers[name], value, `final response ${name}`);
+    // Clients behind the load balancer get their own network bucket (the same
+    // address keys milton_guard.take_rate); a leading entry cannot pick one.
+    for (const forwarded of [
+      "203.0.113.7, 34.149.0.10",
+      "198.51.100.9, 203.0.113.66, 34.149.0.10",
+    ])
+      assert.equal(
+        (
+          await call("/api/auth/ok", undefined, {
+            "x-forwarded-for": forwarded,
+          })
+        ).status,
+        200,
+      );
+    assert.deepEqual(
+      (
+        await auth.pool.query<{ key: string }>(
+          `select key from milton_auth."rateLimit" where key like '%|/ok' order by key`,
+        )
+      ).rows.map((r) => r.key),
+      ["127.0.0.1|/ok", "203.0.113.66|/ok", "203.0.113.7|/ok"],
+    );
     // F-1: exercise the compiled form/document boundary, including native logout.
     // Controlled destinations are separate from actual native confirmation below.
     // Browser navigation remains a separate gate.

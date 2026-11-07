@@ -32,11 +32,6 @@ reports, memos) and plain text on security screens and anything an assistant rea
       Keep the ordinary folder. If resumed, Friday follows each visitor's local time zone;
       choose new artwork and check its readability at navigation-icon size first.
 
-- [ ] #7 (server, low) **Hash the sign-in subject in assistant_disconnects.** Shipped 2026-11-02
-      in 0019 with the raw provider subject per refused (provider, subject, client_id), so the
-      deletion fingerprint in deleted_identities adds little privacy. Store a one-way hash of
-      provider:subject instead, keep the lookup on every MCP request, and migrate existing rows.
-
 - [ ] #8 (ops, med, founder) **Get end-to-end evidence for the newcomer path.** Never rehearsed:
       sign up, connect an assistant, approve, first setup, save, fresh-chat read, correction,
       download. Also unanswered with evidence: why Milton over the assistant's built-in memory,
@@ -72,9 +67,5 @@ reports, memos) and plain text on security screens and anything an assistant rea
 ## From the audit of 2026-11-02 (`.agents/tmp/audit/report.md`)
 
 - [ ] #19 (server, low) **Document two known limits.** Exact-edit anchors are not Unicode-normalized,
-      so a quote typed with composed accents misses decomposed stored text (A26); the token's scope
-      claim is parsed but never enforced and clock tolerance does not apply to expiry (A27). Both
-      harmless today; write them into server/README.
-
-- [ ] #21 (server, low) **Revisit the auth SDK after GA.** Revisit @neondatabase/auth 0.7.0-beta
-      once GA (A21: React, Radix, Tailwind in the install).
+      so a quote typed with composed accents misses decomposed stored text (A26); the token's clock
+      tolerance does not apply to expiry (A27). Both harmless today; write them into server/README.

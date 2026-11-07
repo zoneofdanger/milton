@@ -69,7 +69,7 @@ Files: `server/src/handler.ts`, `server/src/token.ts`, `server/src/mcp.ts`,
 - A key is bound at creation to the native issuer and subject and the identity incarnation and security generation of the validated fresh session; no runtime can change that binding, and it is never moved to a newer generation.
 - Every key call asks native `milton_guard.connection_key_status` (native 007) whether that binding is still current, the native user verified and no deletion begun; a recovery, credential or method change, or a begun deletion stops the key for good, even while the writing account is still active.
 - A malformed, unknown, wrong, revoked or expired key, one whose account is not active, or one whose native binding is no longer current gets the same 401 and challenge as a bad token, with no reason; a failed status lookup is a 503, never an acceptance.
-- Before any database access, a process remembers an id no key has for 60 seconds in a 10,000-entry LRU, so a repeated invented id never reaches the database (a known id with a wrong secret is never remembered); limits each source (the client address Google's load balancer appends as the second-to-last `X-Forwarded-For` entry, IPv6 by /64, else one shared `unknown` source; never the first entry) to a 5-token bucket refilled at 10 a minute in a 10,000-source LRU, where a lookup reserves a token, a failure keeps it, a success is refunded to 0.1, and an empty bucket gets 429 with `Retry-After` without a slot; lets each source run at most 3 key lookups at once, however far its bucket refills (a 4th gets 429 with `Retry-After: 1` without a slot; these counts sit outside the bucket LRU, so eviction never forgets a running lookup); and runs at most 8 key lookups at once (beyond that a quick 503 with `Retry-After: 1`). Limits are per instance (at most 3).
+- Before any database access, a process remembers an id no key has for 60 seconds in a 10,000-entry LRU, so a repeated invented id never reaches the database (a known id with a wrong secret is never remembered); limits each source (the client address Google's load balancer appends as the second-to-last `X-Forwarded-For` entry, IPv4-mapped IPv6 as IPv4, other IPv6 by /64, else one shared `unknown` source; never the first entry) to a 5-token bucket refilled at 10 a minute in a 10,000-source LRU, where a lookup reserves a token, a failure keeps it, a success is refunded to 0.1, and an empty bucket gets 429 with `Retry-After` without a slot; lets each source run at most 3 key lookups at once, however far its bucket refills (a 4th gets 429 with `Retry-After: 1` without a slot; these counts sit outside the bucket LRU, so eviction never forgets a running lookup); and runs at most 8 key lookups at once (beyond that a quick 503 with `Retry-After: 1`). Limits are per instance (at most 3).
 - A read key lists three tools and is refused `create_memo` (403); a read-and-save key lists four. Key saves are attributed to the key's id.
 - Keys pass the same daily allowance, trial and billing gates as OAuth calls.
 - A key's last use is recorded at most once a minute; failing to record it never fails the call.
@@ -101,8 +101,7 @@ Files: `server/src/mcp.ts`, `server/src/mcp-tools.ts`.
 - `list_reports` returns all five reports, with a one-line setup hint instead of the full
   script, only for reports with no rules or samples.
 - `create_memo` saves rules, edits, moves and sample changes together or not at all; context correction cannot combine with sample insertion or retirement.
-- Replies add the daily update balance if it can be read within 250 ms.
-- Replies also add a trial notice if one is due, and neither extra can fail the call.
+- Replies add a trial notice if one is due, and that notice can never fail the call.
 - Failures return a code and message, and unknown failures say no save outcome is
   confirmed.
 
@@ -181,8 +180,7 @@ not at all.
 - Moves quote a rule once, each rule moves once per save, and a removed rule cannot move.
 - A change cannot leave two identical rules in one report.
 - New rules already on file are skipped silently.
-- A rule starting `Baseline: ` must match the setup catalog exactly for that report.
-- The error for a bad baseline names the closest catalog rule, found by shared words.
+- No save files a rule starting `Baseline: ` or keeps that prefix on a changed or moved rule; an existing one can still be retired or edited to drop the prefix.
 - Rule text cannot contain Markdown headings, because Milton prints those.
 - Each rule and each assembled report has a size cap.
 
@@ -233,7 +231,7 @@ Files: `server/src/store/setup.ts`.
 - Draft or edit approval, approval to send or praise is not retention approval; one yes covers the displayed text and context, and changed text or context, including redaction, requires renewed approval.
 - The sample approval step includes the approved-edit one-time offer and excludes the change list; another writing task is requested only if the person wants one.
 - Rules remain available on request; a sample never implies a standing rule or turns its facts into preferences.
-- The historical `setupCatalog` remains canonical for Baseline validation; setup no longer generates Baseline rules, and a rejected Baseline points to the closest rule and report in the same error.
+- Setup no longer generates Baseline rules; existing ones keep serving with the cover-sheet note.
 - A standing instruction is offered separately and changed only with separate consent; a successful read verifies the connection, not future compliance.
 
 ## Sign-in and accounts
@@ -250,6 +248,7 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
 - Invalid proof refuses; actual native5xx/network/timeout is 503; an uncertain spent callback recovers through a new login.
 - New logins reclaim at most16 expired flows/sessions each; admission correlations expire after24 hours with bounded reclaim, while eligibility/key policy/legacy mapping and original operation associations remain indefinitely for their stated purposes.
 - Forms require same origin, an ASCII CSRF token and unique fields; sign-in rotates CSRF.
+- Auth rate limits key each network by the client address Google's load balancer appends (second-to-last `X-Forwarded-For` entry, IPv4-mapped IPv6 as IPv4, other IPv6 by /64, never the first entry; else the socket peer): 120 requests a minute per network, 10 a minute per account email, and Better Auth's per-path 3 sign-in/sign-up attempts per 10 seconds and 3 mail requests a minute.
 - Auth runtime and owner command pools always verify PostgreSQL TLS certificates/hostnames, even with mode omitted; unsafe/libpq/duplicate URL settings refuse.
 - Every native generation advance or deletion atomically retires older reset proofs; issuance takes the original user snapshot under the same parent lock, never the redemption-time generation.
 - Native unlink awaits app eligibility preservation before taking its parent lock; app uses guarded original metadata and stores fingerprints for existing writing accounts only, without billing or admission.
@@ -262,7 +261,6 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
 - Ownership uses exact issuer+subject, never email, provider nickname or eligibility fingerprints; native linking never merges writing or restarts a trial.
 - Account creation's unique identity row and billing's row lock converge under retries/concurrency; a new account starts empty.
 - Email and stable social identities get keyed trial-eligibility fingerprints with a dedicated stable key and first claimant, retained after deletion; changed/unprovisioned keys refuse admission.
-- Owner-only verified metadata import/dry-run preserves internal IDs, writing, trial/billing history and old neon:subject deletion markers; ambiguous mappings refuse and managed rows remain intact.
 - A trial row with no status gets the existing 30-day Stripe trial when billing is configured; no row/status or billing disabled calls no Stripe API.
 - Subscription creation locks the trial row across customer/list/create; minute-based idempotency retains the known remote-success/local-timeout ambiguity across a minute boundary.
 - Billing failures stop admission with retryable503; existing Stripe state is listed/reconciled before another create.
@@ -290,7 +288,7 @@ Files: `server/src/pages.tsx`, `server/src/memo-pages.tsx`, `server/src/auth.tsx
   native sample disclosures, rules, and a random joke comment.
 - Both empty-app setup paragraphs lead with pasted-writing cleanup and optional older examples beside the shared prompt; populated accounts point to the next email or DM.
 - Empty reports remain optional later uses; sample-only reports never show an unfinished setup state.
-- If the structured read fails, it falls back to plain report text.
+- Each view makes one structured read; a failed read fails the page, with no plain-text fallback.
 - `/download` returns the complete writing export as `TPS.md`; the web report labels
   its sample count as shown, explains its newest-eight-per-report limit and links to
   the complete download, including when assistant access is paused.
@@ -390,8 +388,7 @@ Files: `server/drizzle/`, `server/src/store/schema.ts`, `server/src/store/databa
 - `stripe_events` keeps each event's ID, type, and body hash, never the payload.
 - The database holds cards and their immutable versions; the obsolete memo tables and
   the unused card-version `legacy` flag are removed by the cleanup.
-- Fresh installs use one Drizzle baseline; the exact 0033 journal has an atomic owner-only
-  transition that preserves current data and marks that baseline applied. Other old states refuse.
+- Fresh installs use one Drizzle baseline; a populated older database refuses it.
 - Distinct app/MCP roles have explicit writing grants, no inherited owner/group/DDL/TEMP privileges and no native secret reads; app-only session/flow/lifecycle/eligibility storage is denied to MCP/auth.
 - The runtime role can read and lock the `store_config` row but cannot change its settings.
 - PostgreSQL connection, query, transaction-control and close failures become store errors: known triggers and constraints get clean coded responses, unknown failures log only class/code, and callback errors survive rollback/close unchanged.

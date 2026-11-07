@@ -3,7 +3,7 @@ import { billingItem, page, type BillingItem } from "./pages";
 import type { Child } from "hono/jsx";
 import type { PersonStore } from "./store";
 import type { TrialStatus } from "./store/trials";
-import type { CompiledReport, Documents } from "./store/compiled";
+import type { Documents } from "./store/compiled";
 import { contextDetails } from "./store/sample-context";
 import { ruleText, type Sample } from "./store/reports";
 import type { GuidePresentation } from "./guides/store";
@@ -12,8 +12,8 @@ import { SETUP_PROMPT } from "./store/setup";
 export const isMemoRoute = (path: string) =>
   path === "/" || path === "/download" || path === "/tps-report";
 
-type PageStore = Pick<PersonStore, "readTpsReport" | "exportTpsReport"> &
-  Partial<Pick<PersonStore, "trialStatus" | "readDocuments">>;
+type PageStore = Pick<PersonStore, "readDocuments" | "exportTpsReport"> &
+  Partial<Pick<PersonStore, "trialStatus">>;
 
 // The note above the report, only when paying is pressing: a trial's last 7 days
 // or a pause. The account menu always holds the action. Worded for everyone in the
@@ -207,20 +207,18 @@ function reportGuide(guide: GuidePresentation) {
 }
 
 type SheetView = {
-  report: CompiledReport;
-  documents?: (Documents & { version: string }) | null;
+  docs: Documents & { version: string };
   email?: string;
   date: string;
   comment: string;
 };
 /** The signed-in cover sheet as a T.P.S. report form. Web and MCP reads select
  * eight samples per report; the download includes all active samples. */
-function sheet({ report, documents, email, date, comment }: SheetView) {
-  const docs = documents?.version === report.version ? documents : null;
-  const filed = docs?.reports.filter((r) => !r.is_empty) ?? [];
-  const counts = report.is_empty
+function sheet({ docs, email, date, comment }: SheetView) {
+  const filed = docs.reports.filter((r) => !r.is_empty);
+  const counts = docs.is_empty
     ? { reports: "None", rules: 0, samples: 0 }
-    : docs && {
+    : {
         reports: filed.map((r) => r.title).join(", ") || "None",
         rules:
           docs.cover_rules.length +
@@ -241,22 +239,20 @@ function sheet({ report, documents, email, date, comment }: SheetView) {
           {field("Prepared for", email ?? "", true)}
           {field("Date", `${date} UTC`)}
         </dl>
-        {counts && (
-          <dl class="row">
-            {field("Reports", counts.reports, true)}
-            {field("Rules", counts.rules)}
-            {field("Samples shown", counts.samples)}
-          </dl>
-        )}
+        <dl class="row">
+          {field("Reports", counts.reports, true)}
+          {field("Rules", counts.rules)}
+          {field("Samples shown", counts.samples)}
+        </dl>
         <dl class="row">{field("Filed by", "Milton", true)}</dl>
       </div>
-      {!report.is_empty && (
+      {!docs.is_empty && (
         <p class="small-note view-scope">
           This view shows up to eight samples per report, newest first.{" "}
           <a href="/download">Download all current rules and samples</a>.
         </p>
       )}
-      {report.is_empty ? (
+      {docs.is_empty ? (
         <div class="form-empty">
           <p class="empty-placeholder">No writing samples on file yet.</p>
           <p>
@@ -269,7 +265,7 @@ function sheet({ report, documents, email, date, comment }: SheetView) {
             <p>{SETUP_PROMPT}</p>
           </blockquote>
         </div>
-      ) : docs ? (
+      ) : (
         <>
           {(docs.cover_rules.length > 0 || filed.length > 0) && (
             <nav class="report-index" aria-label="On this report">
@@ -355,8 +351,6 @@ function sheet({ report, documents, email, date, comment }: SheetView) {
             </section>
           )}
         </>
-      ) : (
-        <div class="form-section">{plain(report.text)}</div>
       )}
       <section class="form-section">
         <h2>Comments</h2>
@@ -381,7 +375,7 @@ function current(
     "Cover sheet",
     <>
       {notice}
-      {!view.report.is_empty && !assistantPaused && (
+      {!view.docs.is_empty && !assistantPaused && (
         <p class="small-note sheet-meta">
           Give a connected assistant the facts for your next email or DM and ask
           it to use what’s on file. You can also approve a writing sample.
@@ -406,36 +400,6 @@ export async function memoPages(
    * otherwise uses today (UTC) and a random comment. */
   options: { billing?: boolean; now?: () => Date; comment?: () => string } = {},
 ): Promise<Response> {
-  async function showCurrent(
-    report: CompiledReport,
-    notice: Child = null,
-    status = 200,
-    assistantPaused = false,
-    billing?: BillingItem,
-  ) {
-    let documents: (Documents & { version: string }) | null = null;
-    if (!report.is_empty && store.readDocuments) {
-      try {
-        documents = await store.readDocuments();
-      } catch {
-        // Optional presentation must never prevent canonical report access.
-      }
-    }
-    return current(
-      {
-        report,
-        documents,
-        email,
-        date: (options.now?.() ?? new Date()).toISOString().slice(0, 10),
-        comment: (options.comment ?? randomComment)(),
-      },
-      csrf,
-      notice,
-      status,
-      assistantPaused,
-      billing,
-    );
-  }
   const path = new URL(request.url).pathname;
   if (!["/", "/tps-report", "/download"].includes(path))
     return page("Not found", <p>This page does not exist.</p>, 404);
@@ -452,11 +416,17 @@ export async function memoPages(
         "X-Content-Type-Options": "nosniff",
       },
     });
-  const report = await store.readTpsReport();
+  const docs = await store.readDocuments();
   // Billing information is page chrome, never part of the report/download.
   const trial = await store.trialStatus?.().catch(() => undefined);
-  return showCurrent(
-    report,
+  return current(
+    {
+      docs,
+      email,
+      date: (options.now?.() ?? new Date()).toISOString().slice(0, 10),
+      comment: (options.comment ?? randomComment)(),
+    },
+    csrf,
     billingNote(csrf, options.billing ?? false, trial),
     200,
     trial?.status === "expired",

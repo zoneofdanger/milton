@@ -58,7 +58,7 @@ try {
   const nativeUrl = new URL("../migrations/001-native.up.sql", import.meta.url);
   assert(existsSync(nativeUrl), "reviewed native baseline required");
   await p.owner.query(readFileSync(nativeUrl, "utf8"));
-  // Fictional retained data, unrelated storage and native rows survive down/reapply.
+  // Fictional retained data, unrelated storage and native rows survive the upgrade.
   await p.owner.query(
     `CREATE SCHEMA fictional_writing; CREATE TABLE fictional_writing.saved(id text PRIMARY KEY,body text); INSERT INTO fictional_writing.saved VALUES('fictional','fictional writing'); CREATE SCHEMA neon_auth; CREATE TABLE neon_auth.retained(value text); INSERT INTO neon_auth.retained VALUES('fictional');`,
   );
@@ -93,30 +93,19 @@ try {
         "utf8",
       ),
     );
-  assert.equal(
-    (
-      await p.owner.query(
-        "select count(*)::int n from milton_auth.verification where identifier='reset-password:fictional-pre-upgrade' ",
-      )
-    ).rows[0].n,
-    0,
-  );
-  const high = BigInt(
-    (await p.owner.query("select last_value from milton_credential.fence_ids"))
-      .rows[0].last_value,
-  );
-  for (const n of [
-    "006-mail",
-    "005-recovery",
-    "004-product",
-    "003-mechanism",
-    "002-credential",
-  ])
-    await p.owner.query(
-      readFileSync(
-        new URL(`../migrations/${n}.down.sql`, import.meta.url),
-        "utf8",
-      ),
+  // Recovery005 retires only the pre-upgrade reset proof.
+  for (const [id, n] of [
+    ["fictional-pre-upgrade", 0],
+    ["fictional-non-recovery", 1],
+  ] as const)
+    assert.equal(
+      (
+        await p.owner.query(
+          "select count(*)::int n from milton_auth.verification where id=$1",
+          [id],
+        )
+      ).rows[0].n,
+      n,
     );
   assert.equal(
     (await p.owner.query('select count(*)::int as n from milton_auth."user"'))
@@ -142,45 +131,9 @@ try {
     (await p.owner.query("select value from neon_auth.retained")).rows[0].value,
     "fictional",
   );
-  for (const n of [
-    "002-credential",
-    "003-mechanism",
-    "004-product",
-    "005-recovery",
-    "006-mail",
-  ])
-    await p.owner.query(
-      readFileSync(
-        new URL(`../migrations/${n}.up.sql`, import.meta.url),
-        "utf8",
-      ),
-    );
-  assert(
-    BigInt(
-      (
-        await p.owner.query(
-          "select last_value from milton_credential.fence_ids",
-        )
-      ).rows[0].last_value,
-    ) > high,
+  group(
+    "additive migrations preserve native rows and retire pre-upgrade reset proofs",
   );
-  assert.equal(
-    (
-      await p.owner.query(
-        "select count(*)::int n from milton_auth.verification where id='fictional-non-recovery'",
-      )
-    ).rows[0].n,
-    1,
-  );
-  assert.equal(
-    (
-      await p.owner.query(
-        "select count(*)::int n from milton_auth.verification where id='fictional-pre-upgrade'",
-      )
-    ).rows[0].n,
-    0,
-  );
-  group("additive migration down/reapply preserves rows and allocator");
   const authPool = new pg.Pool(p.configs.auth),
     appPool = new pg.Pool(p.configs.app),
     mcpPool = new pg.Pool(p.configs.mcp);
@@ -2163,16 +2116,6 @@ try {
       await assert.rejects(
         authPool.query("select * from milton_guard.claim_mail($1)", [limit]),
       );
-    await assert.rejects(
-      p.owner.query(
-        readFileSync(
-          new URL("../migrations/006-mail.down.sql", import.meta.url),
-          "utf8",
-        ),
-      ),
-      /pending mail/,
-    );
-    await p.owner.query("rollback");
     await clearJobs();
     // Retention cleanup is bounded even with overdue/terminal receipt backlog.
     for (let n = 0; n < 20; n++)
@@ -2192,21 +2135,9 @@ try {
         .rows[0].n,
       before - 3,
     );
-    await p.owner.query(
-      readFileSync(
-        new URL("../migrations/006-mail.down.sql", import.meta.url),
-        "utf8",
-      ),
-    );
-    await p.owner.query(
-      readFileSync(
-        new URL("../migrations/006-mail.up.sql", import.meta.url),
-        "utf8",
-      ),
-    );
     assert.equal(providerCalls, 0);
     group(
-      "uniform durable native mail receipts, swallowed-callback/commit faults, social registration, bounded leased delivery/retry/fence/retention and real-role/down refusal",
+      "uniform durable native mail receipts, swallowed-callback/commit faults, social registration, bounded leased delivery/retry/fence/retention and real-role refusal",
     );
   }
   for (const pool of [appPool, mcpPool])

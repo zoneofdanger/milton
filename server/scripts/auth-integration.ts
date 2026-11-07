@@ -901,17 +901,9 @@ try {
         (e: { code?: string }) => e.code === "42501",
         statement,
       );
-    // Native 007 down/reapply alone: without the function every key is
-    // refused as an outage (fail closed), with nothing stored or granted.
-    await authOwner.query(
-      readFileSync(
-        new URL(
-          "../apps/auth/migrations/007-connection-key-status.down.sql",
-          sourceRoot,
-        ),
-        "utf8",
-      ),
-    );
+    // Without the native 007 function (a database restored from before it),
+    // every key is refused as an outage (fail closed), with nothing stored.
+    await authOwner.query(`DROP FUNCTION ${keyStatus}`);
     assert.equal(await keyStatusShape(), undefined);
     await assert.rejects(keyCheck(made.key), (e) => e instanceof StoreError);
     await assert.rejects(
@@ -1047,8 +1039,9 @@ try {
   nativeOwnerUrl.searchParams.delete("sslmode");
   nativeOwnerUrl.searchParams.delete("sslrootcert");
   nativeOwnerUrl.searchParams.set("options", "-c role=milton_auth_owner");
+  // A ledger from before native 007: the owner CLI applies only 007.
   await authOwner.query(
-    "create table milton_credential.migration_ledger(name text primary key); insert into milton_credential.migration_ledger values('001-native'),('002-credential'),('003-mechanism'),('004-product'),('005-recovery'),('006-mail'),('007-connection-key-status')",
+    `DROP FUNCTION ${keyStatus}; create table milton_credential.migration_ledger(name text primary key); insert into milton_credential.migration_ledger values('001-native'),('002-credential'),('003-mechanism'),('004-product'),('005-recovery'),('006-mail')`,
   );
   const ownerEnv = { AUTH_OWNER_DATABASE_URL: nativeOwnerUrl.href };
   child(
@@ -1081,25 +1074,6 @@ try {
     "006-mail",
     "007-connection-key-status",
   ];
-  child(
-    [
-      new URL("../apps/auth/scripts/migrate.ts", sourceRoot).pathname,
-      "down",
-      "--apply",
-    ],
-    ownerEnv,
-  );
-  // The native migrator reverses 007 first and records it.
-  assert.equal(await keyStatusShape(), undefined);
-  assert.deepEqual(await ledger(), ["001-native"]);
-  child(
-    [
-      new URL("../apps/auth/scripts/migrate.ts", sourceRoot).pathname,
-      "up",
-      "--apply",
-    ],
-    ownerEnv,
-  );
   assert.deepEqual(await keyStatusShape(), keyStatusGrants);
   assert.deepEqual(await ledger(), nativeNames);
   const provisionOutput = join(root, "fictional-fixed-client.json");

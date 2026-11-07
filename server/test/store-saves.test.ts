@@ -1,4 +1,3 @@
-import { cardHeads } from "../src/store/cards";
 import { compiledMemos, type SaveMemoInput } from "../src/store/compiled";
 import { expect, test } from "bun:test";
 import { sql } from "drizzle-orm";
@@ -8,6 +7,7 @@ import { BASELINE_NOTE } from "../src/store/reports";
 import { baselineRefusal } from "../src/store/save";
 import { localStore } from "./local-store";
 import {
+  cardHeads,
   fixtureStore,
   insideTransactions,
   seedRule,

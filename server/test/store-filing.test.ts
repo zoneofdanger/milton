@@ -1,10 +1,11 @@
-import { cardHeads, cardFingerprint } from "../src/store/cards";
+import { cardFingerprint } from "../src/store/cards";
 import type { ReportIntent } from "../src/store/reports";
 import type { SaveMemoInput } from "../src/store/compiled";
 import { expect, test } from "bun:test";
 import { sql } from "drizzle-orm";
 import { localStore } from "./local-store";
 import {
+  cardHeads,
   fixtureStore,
   seedRule,
   seedUsers,

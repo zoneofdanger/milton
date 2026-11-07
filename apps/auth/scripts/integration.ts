@@ -283,9 +283,9 @@ try {
       ).rows[0].n,
       7,
     );
-    // A file that commits its own transaction is caught after the fact (its
-    // work is committed) and gets no ledger row. A fixture copy of the runner
-    // reads a 007 whose grant line ends in an inline COMMIT.
+    // A file that ends or rewinds the runner's transaction gets no ledger row
+    // (a COMMIT is caught after the fact: its work is committed). A fixture
+    // copy of the runner reads a 007 whose grant line carries the variant.
     const fixture = mkdtempSync(join(tmpdir(), "milton-migrate-fixture-"));
     try {
       mkdirSync(join(fixture, "scripts"));
@@ -316,8 +316,8 @@ try {
         "migrations",
         "007-connection-key-status.up.sql",
       );
-      assert.match(readFileSync(up, "utf8"), grant);
-      writeFileSync(up, readFileSync(up, "utf8").replace(grant, "$1 COMMIT;"));
+      const original = readFileSync(up, "utf8");
+      assert.match(original, grant);
       const down = readFileSync(
         new URL(
           "../migrations/007-connection-key-status.down.sql",
@@ -328,23 +328,33 @@ try {
       await p.owner.query(
         `${down}; delete from milton_credential.migration_ledger where name='007-connection-key-status'`,
       );
-      assert.notEqual(
-        await migrate("up", join(fixture, "scripts", "migrate.ts")),
-        0,
-      );
-      assert.match(
-        stderr,
-        /007-connection-key-status\.up\.sql .*MIGRATION_MUST_NOT_MANAGE_TRANSACTION/,
-      );
-      assert.equal(
-        (
+      for (const [suffix, refused] of [
+        [" COMMIT;", true],
+        // The chained transaction stays open and recreates a guessable name.
+        [" COMMIT AND CHAIN; SAVEPOINT migration_file;", true],
+        // Undoing the file's work in place must not leave its ledger row.
+        [" ROLLBACK TO SAVEPOINT migration_file;", false],
+      ] as const) {
+        writeFileSync(up, original.replace(grant, `$1${suffix}`));
+        assert.notEqual(
+          await migrate("up", join(fixture, "scripts", "migrate.ts")),
+          0,
+          suffix,
+        );
+        if (refused)
+          assert.match(
+            stderr,
+            /007-connection-key-status\.up\.sql .*MIGRATION_MUST_NOT_MANAGE_TRANSACTION/,
+            suffix,
+          );
+        const r = (
           await admin.query(
-            "select count(*)::int n from milton_credential.migration_ledger where name='007-connection-key-status'",
+            "select to_regprocedure('milton_guard.connection_key_status(text,text,text)') is not null as schema, exists(select 1 from milton_credential.migration_ledger where name='007-connection-key-status') as ledger",
           )
-        ).rows[0].n,
-        0,
-      );
-      await p.owner.query(down);
+        ).rows[0];
+        assert.equal(r.ledger, false, suffix);
+        if (r.schema) await p.owner.query(down);
+      }
     } finally {
       rmSync(fixture, { recursive: true });
     }

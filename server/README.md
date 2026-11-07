@@ -374,8 +374,11 @@ MCP audience (plus native's fixed implicit UserInfo audience for `openid`), cano
 ID/session JWTs and unsupported confirmation/DPoP. Every call independently checks live
 native SQL status. Read grants list three tools; write grants list four. All reads require
 `milton:read`; `create_memo` requires read+write even on a direct call. A scope grant never
-approves memo text. Read-only setup explains reconnecting for saves rather than offering
-an unavailable save.
+approves memo text. A Bearer value starting with `mk_` is instead a connection key the
+person created in the app: stored as a SHA-256 of its secret, checked live on every call
+(revoked, expired, closed-account and malformed keys all get the invalid-token 401), with
+read keys listing three tools and read-and-save keys four. Read-only setup explains
+reconnecting for saves rather than offering an unavailable save.
 
 App `/account/security` takes the person to native method/password/session management.
 Disconnect and deletion use durable original-incarnation operations. Refusal commits

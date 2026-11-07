@@ -51,7 +51,8 @@ Files: `server/src/index.ts`, `server/src/cloud-app.ts`, `server/src/http.ts`,
 ## An MCP call
 
 Files: `server/src/handler.ts`, `server/src/token.ts`, `server/src/mcp.ts`,
-`server/src/mcp-outcomes.ts`, `server/src/store/index.ts`.
+`server/src/mcp-outcomes.ts`, `server/src/store/index.ts`,
+`server/src/store/connection-keys.ts`.
 
 - Only POST and OPTIONS pass.
 - Origin is deliberately not checked, so web clients reach auth from any origin. The Host
@@ -63,6 +64,13 @@ Files: `server/src/handler.ts`, `server/src/token.ts`, `server/src/mcp.ts`,
 - All three reads require milton:read; create_memo requires read+write, including direct calls. Read grants list three tools; write grants list four.
 - Read-only setup explains reconnecting for saves; scope never establishes approval of memo text.
 - A bad token gets a 401 that points the client to the sign-in metadata.
+- A Bearer value starting with `mk_` is a connection key; every other value takes the native token path unchanged.
+- A key must be exactly `mk_` + 22-character id + `_` + 43-character secret in canonical base64url; it is looked up by id and its secret's SHA-256 compared in constant time.
+- A malformed, unknown, wrong, revoked or expired key, or one whose account is not active, gets the same 401 and challenge as a bad token, with no reason.
+- A read key lists three tools and is refused `create_memo` (403); a read-and-save key lists four. Key saves are attributed to the key's id.
+- Keys pass the same daily allowance, trial and billing gates as OAuth calls.
+- A key's last use is recorded at most once a minute; failing to record it never fails the call.
+- Tool-call logs for key calls carry the key's public id, never its secret.
 - Each request looks up the active writing account by exact verified issuer and subject; MCP never provisions an account.
 - Each request builds a fresh stateless MCP server, with no sessions or subscriptions.
 - Global instructions require retrieval before writing or editing for or as the person; only new drafts get the sample/rule conformity check before display. Edits preserve source wording and style outside the request over conflicting samples/rules; guidance never widens scope, and only specific unresolved conflicts are flagged. Requested transformations retain their scope, and changes are briefly listed. These are behavioral instructions, not server enforcement.

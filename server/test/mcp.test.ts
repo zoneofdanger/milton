@@ -15,7 +15,12 @@ import {
 import { saveMemoInput } from "../src/mcp-tools";
 import { createMiltonHandler } from "../src/handler";
 import { createAccessTokenVerifier } from "../src/token";
-import { deleteAccount, resolveIdentityAccount } from "../src/store";
+import {
+  connectionKeysForAccount,
+  deleteAccount,
+  lookupIdentityAccount,
+  resolveIdentityAccount,
+} from "../src/store";
 import { localStore } from "./local-store";
 import { z } from "zod";
 import { createMcpApp } from "../src/index";
@@ -632,6 +637,177 @@ test("scopes control discovery and direct calls; original binding revocation sur
       `CREATE OR REPLACE FUNCTION milton_guard.binding_status(text,text,text,text[],text[]) RETURNS jsonb LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fictional status outage'; END $$`,
     );
     expect((await request(readToken)).status).toBe(503);
+  } finally {
+    await Promise.all(clients.map((c) => c.close()));
+    await local.dispose();
+  }
+}, 30000);
+
+test("connection keys get exactly their scope's tools; revoked, expired, malformed and closed-account keys get the invalid-token 401; OAuth is unchanged", async () => {
+  const local = await localStore();
+  const clients: Client[] = [];
+  try {
+    await resolveIdentityAccount(local.env, {
+      provider: issuer,
+      subject: "keyed",
+    });
+    const auth = await lookupIdentityAccount(local.env, {
+      provider: issuer,
+      subject: "keyed",
+    });
+    const keys = connectionKeysForAccount(local.env, auth);
+    const reader = await keys.create({
+      name: "Reader",
+      scope: "read",
+      expiry: 90,
+    });
+    const writer = await keys.create({
+      name: "Writer",
+      scope: "read_write",
+      expiry: null,
+    });
+    const fixture = await tokenFixture(local.pg);
+    const logs: ToolCall[] = [];
+    const handler = createMiltonHandler(
+      { ...local.env, issuer, resource, appOrigin: origin },
+      fixture.verify,
+      (call) => logs.push(call),
+    );
+    const connect = async (key: string) => {
+      const client = new Client({ name: "key-fixture", version: "0" });
+      clients.push(client);
+      await client.connect(
+        new StreamableHTTPClientTransport(new URL(resource), {
+          requestInit: {
+            headers: { Authorization: "Bearer " + key, Host: "localhost:3001" },
+          },
+          fetch: (input, init) => handler(new Request(input, init)),
+        }),
+      );
+      return client;
+    };
+    const read = await connect(reader.key);
+    expect(read.getInstructions()).toBe(readOnlyInstructions);
+    expect((await read.listTools()).tools.map((t) => t.name)).toEqual([
+      "get_cover_sheet",
+      "get_report",
+      "list_reports",
+    ]);
+    await read.callTool({ name: "get_cover_sheet", arguments: {} });
+    const write = await connect(writer.key);
+    expect(write.getInstructions()).toBe(storeInstructions);
+    expect((await write.listTools()).tools).toHaveLength(4);
+    const version = JSON.parse(
+      (
+        (await write.callTool({ name: "get_cover_sheet", arguments: {} }))
+          .content as { text: string }[]
+      )[0]!.text,
+    ).version;
+    const save = {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: {
+        name: "create_memo",
+        arguments: {
+          text: "Add a fictional rule.",
+          rules: [{ report: "cover", text: "Keep fictional notes short." }],
+          expected_version: version,
+          request_id: crypto.randomUUID(),
+        },
+      },
+    };
+    const post = (authorization: string | null, body: unknown) =>
+      handler(
+        new Request(resource, {
+          method: "POST",
+          headers: {
+            Host: "localhost:3001",
+            ...(authorization ? { Authorization: authorization } : {}),
+            Accept: "application/json, text/event-stream",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(body),
+        }),
+      );
+    // A direct save with a read key is refused before the tools run.
+    const refusedSave = await post("Bearer " + reader.key, save);
+    expect(refusedSave.status).toBe(403);
+    expect((await refusedSave.json()).error).toBe("insufficient_scope");
+    expect(await (await post("Bearer " + writer.key, save)).text()).toContain(
+      '\\"status\\":\\"saved\\"',
+    );
+    const actors = await local.db.query<{ actor: string }>(
+      sql`SELECT actor_json AS actor FROM instruction_card_versions`,
+    );
+    expect(actors.map((row) => JSON.parse(row.actor))).toEqual([
+      {
+        kind: "assistant",
+        issuer: "connection_key",
+        client_id: writer.record.id,
+      },
+    ]);
+    // Logs name the key by its public id only.
+    expect(logs.some((call) => call.connection_key === writer.record.id)).toBe(
+      true,
+    );
+    expect(JSON.stringify(logs)).not.toContain(writer.key.slice(26));
+    expect(JSON.stringify(logs)).not.toContain(reader.key.slice(26));
+    // Every refusal answers exactly as an invalid OAuth token does.
+    const list = { jsonrpc: "2.0", id: 2, method: "tools/list" };
+    const shape = async (response: Response) => ({
+      status: response.status,
+      challenge: response.headers.get("WWW-Authenticate"),
+      body: await response.json(),
+    });
+    const invalid = await shape(await post("Bearer not.a.token", list));
+    expect(invalid.status).toBe(401);
+    const expired = await keys.create({
+      name: "Short",
+      scope: "read",
+      expiry: 30,
+    });
+    await local.pg.query(
+      "UPDATE connection_keys SET created_at=now()-interval '31 days',expires_at=now()-interval '1 minute' WHERE id=$1",
+      [expired.record.id],
+    );
+    const revoked = await keys.create({
+      name: "Gone",
+      scope: "read",
+      expiry: 30,
+    });
+    await keys.revoke(revoked.record.id);
+    for (const authorization of [
+      "Bearer " + expired.key,
+      "Bearer " + revoked.key,
+      "Bearer " + reader.key.slice(0, -1),
+      "Bearer " + reader.key + "A",
+      "Bearer mk_",
+      "Bearer mk_" + "A".repeat(22) + "_" + "A".repeat(43),
+    ])
+      expect([
+        authorization,
+        await shape(await post(authorization, list)),
+      ]).toEqual([authorization, invalid]);
+    await local.pg.query("UPDATE users SET status='deleting' WHERE id=$1", [
+      auth.userId,
+    ]);
+    expect(await shape(await post("Bearer " + writer.key, list))).toEqual(
+      invalid,
+    );
+    await local.pg.query("UPDATE users SET status='active' WHERE id=$1", [
+      auth.userId,
+    ]);
+    expect((await post("Bearer " + writer.key, list)).status).toBe(200);
+    // OAuth beside keys: same tools by scope, same challenge without a token.
+    expect(
+      (await post("Bearer " + (await fixture.token("keyed")), list)).status,
+    ).toBe(200);
+    const anonymous = await post(null, list);
+    expect(anonymous.status).toBe(401);
+    expect(anonymous.headers.get("WWW-Authenticate")).toBe(
+      `Bearer resource_metadata="${origin}/.well-known/oauth-protected-resource/mcp"`,
+    );
   } finally {
     await Promise.all(clients.map((c) => c.close()));
     await local.dispose();

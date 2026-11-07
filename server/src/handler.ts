@@ -4,10 +4,12 @@ import {
 } from "@modelcontextprotocol/server";
 import { createMiltonServer } from "./mcp";
 import {
+  connectionKeyAccount,
   lookupIdentityAccount,
   storeForCurrentRequest,
   type StoreBindings,
   StoreError,
+  type VerifiedStoreAuth,
 } from "./store";
 import {
   AuthError,
@@ -101,11 +103,13 @@ export function createMiltonHandler(
     if (refusal) return refusal;
     const started = performance.now();
     let pending: ToolCall["tool"] | undefined,
+      keyId: string | undefined,
       emitted = false;
     const emit = (event: ToolCall) => {
       emitted = true;
       safeToolLog(log, {
         ...event,
+        ...(keyId ? { connection_key: keyId } : {}),
         elapsed_ms: Math.max(
           0,
           Math.min(3_600_000, Math.round(performance.now() - started)),
@@ -132,39 +136,66 @@ export function createMiltonHandler(
           .catch(() => undefined),
       );
       if (call.success) pending = knownTool(call.data.params.name);
-      const identity = await verify(request.headers.get("Authorization"));
-      await bindingActive(config, identity);
-      const scopes = identity.scope.split(" ");
-      if (
-        !scopes.includes("milton:read") ||
-        (call.success &&
-          call.data.params.name === "create_memo" &&
-          !scopes.includes("milton:write"))
-      )
-        throw new AuthError(
-          "insufficient_scope",
-          "Reconnect this assistant with the permission this action needs.",
-          403,
-        );
-      const auth = await lookupIdentityAccount(config, {
-        provider: identity.issuer,
-        subject: identity.subject,
-      });
-      const store = await storeForCurrentRequest(config, auth, {
-        issuer: identity.issuer,
-        clientId: identity.clientId,
-      });
-      const assistant = `${auth.userId}\n${identity.clientId}`;
-      const announce = call.success && !announced.has(assistant);
+      const authorization = request.headers.get("Authorization");
+      let auth: VerifiedStoreAuth,
+        assistant: { issuer: string; clientId: string },
+        write: boolean,
+        announcedAs: string;
+      if (authorization !== null && /^Bearer mk_/i.test(authorization)) {
+        // A connection key. Every refusal, whatever its reason, answers like
+        // an invalid token. Only the key's public id is ever logged.
+        const key = await connectionKeyAccount(config, authorization.slice(7));
+        if (!key)
+          throw new AuthError(
+            "invalid_token",
+            "Reconnect your assistant to Milton.",
+            401,
+          );
+        write = key.scope === "read_write";
+        if (call.success && call.data.params.name === "create_memo" && !write)
+          throw new AuthError(
+            "insufficient_scope",
+            "This connection key is read only. Create a key that can save.",
+            403,
+          );
+        keyId = key.keyId;
+        auth = key.auth;
+        assistant = { issuer: "connection_key", clientId: key.keyId };
+        announcedAs = `${auth.userId}\nconnection_key\n${key.keyId}`;
+      } else {
+        const identity = await verify(authorization);
+        await bindingActive(config, identity);
+        const scopes = identity.scope.split(" ");
+        if (
+          !scopes.includes("milton:read") ||
+          (call.success &&
+            call.data.params.name === "create_memo" &&
+            !scopes.includes("milton:write"))
+        )
+          throw new AuthError(
+            "insufficient_scope",
+            "Reconnect this assistant with the permission this action needs.",
+            403,
+          );
+        auth = await lookupIdentityAccount(config, {
+          provider: identity.issuer,
+          subject: identity.subject,
+        });
+        write = scopes.includes("milton:write");
+        assistant = { issuer: identity.issuer, clientId: identity.clientId };
+        announcedAs = `${auth.userId}\n${identity.clientId}`;
+      }
+      const store = await storeForCurrentRequest(config, auth, assistant);
+      const announce = call.success && !announced.has(announcedAs);
       if (announce) {
         if (announced.size >= 10_000) announced.clear();
-        announced.add(assistant);
+        announced.add(announcedAs);
       }
       const sdk = createMcpHandler(
         () =>
           createMiltonServer(store, emit, {
             announceToolsChanged: announce,
-            readOnly: !scopes.includes("milton:write"),
+            readOnly: !write,
           }),
         {
           legacy: "stateless",

@@ -22,54 +22,29 @@ This runbook keeps only the latest release record. Earlier release records and a
 one-time procedures are in git history; the last full version is at commit 492b96a
 (`git show 492b96a:server/deploy/README.md`).
 
-## Release record: lifecycle, caching, round trips and guards (2026-11-07, PRs #22 #24 #26 #27 #28 #29 #30 #31)
+## Release record: warm instances, trial-table drop, allowance and bundles (2026-11-07, PRs #32–#37)
 
-Five deploys, no schema or secret change. First, `9de3099`: #22 (milton-qa, one account
-lifecycle module) and #27 (milton-perf, content-versioned asset caching). Auth
-`milton-auth-00006-jjz`, app/MCP `milton-*-lca-9de3099` at 20:57Z. Through the load balancer,
-versioned app and auth CSS and fonts answer `immutable` with `content-encoding: br`, and a
-wrong `?v=` answers `no-cache` with an ETag. Watch clean. Second, `cb5199b`: #24
-(milton-perf, fewer round trips on signed-in pages), #26 (milton-qa, duplicate guards: no
-native disabledPaths, keyed fingerprints as the only second-trial block, no connection-key
-unknown-id cache) and #29 (milton-qa, the security page keys its session lookup on the real
-client). Auth `milton-auth-00007-vn2` (image
-`sha256:d71cc448a5a724c2164cc02dee5a063579e083d9b9050d84420ab0b4e427f0b7`; mail and
-maintenance jobs too), app/MCP `milton-*-dup-cb5199b` (image
-`sha256:916e04300660a7d3f35d6bea6cc54c3744a604d14357bdfdc2c930946e78768f`) at 21:04Z. Each
-PR had an Astra PASS and milton-qa review, and each merge was checked on main: types, 129
-tests, format, site and server builds, rehearsal 12/12, auth integration 17/17, all 0.
-Smoke: health 200 ×3, authorize 302, login 200, signed-out security 303, MCP 401s, app home
-200, signed-out report and assistants 403. Not verified live: signed-in pages and a real
-account deletion. Rollback: auth `milton-auth-00006-jjz`, app/MCP `milton-*-lca-9de3099`;
-before #22/#27, auth `milton-auth-00005-jj6` and app/MCP `milton-*-tmo-58a4a59`. Follow-up
-(#26): a later migration may drop `deleted_identities`, released after this code.
+- **Warm instances (Peter):** auth, app and MCP each keep one warm instance via the
+  service-level minimum, set 23:13–23:15Z without new revisions (see Cloud resources).
+- **#33 (milton-qa):** drizzle 0005 and owner file 008 applied at 21:59Z after snapshot
+  `snap-muddy-bonus-b8tjvsii` (Peter's go); see "Drop the unread trial tables".
+- **#32 (milton-qa), with #33's code:** refused tool calls no longer count against the daily
+  allowance. App/MCP `milton-*-fre-64617cc` at 23:17Z (image
+  `sha256:8ee8d8ad459fd2a96769b815a4bac450f10287ee3108d310298b49416ea2f0d4`). 0 errors in a
+  5-minute watch.
+- **#37 (milton-perf):** minified app/MCP and guide-worker bundles (`cloud-run.js` 4.6 → 3.3
+  MB; identifiers kept; no source maps in the image). App/MCP `milton-*-min-06d01e6` at
+  23:23Z (image `sha256:fc9013130006ea87102a3737cf2f7129d90e93096967f680aeeb95d595942dd6`). 0 errors in a 5-minute watch.
+- **No deploy needed:** #35 and #36 (test-trim; #35 retires the auth down migrations, Peter's
+  decision: snapshot restore is the only auth schema rollback) and #34 (milton-qa; the auth
+  migrator runs each file and its ledger row in one transaction under an advisory lock).
+  Auth is unchanged at `milton-auth-00008-967`.
 
-Third, `3e128a1`: #28 (milton-perf, MCP round trips: read tools 16→4, setup 4→1; the daily
-charge is one `FOR UPDATE` statement). milton-qa re-reviewed after two should-fix findings
-and passed the merge resolution with #26. App/MCP `milton-*-rtt-3e128a1` at 21:10Z (image
-`sha256:4c4227cbc113a26cce33631092fb0873762b4f4e0ece162623a8d1340692c937`); auth unchanged.
-Checks on main: types, 131 tests, format, build, rehearsal 12/12, all 0; health 200 ×3, MCP
-401s, app home 200, signed-out report 403; 0 errors in a 5-minute watch after each deploy.
-Warm `get_cover_sheet` went from 68–70 ms to 29–33 ms (milton-perf). Rollback: app/MCP
-`milton-*-dup-cb5199b`.
-
-Fourth, `c1af8c3`: #31 (milton-qa, a failed assistant disconnect answers a 503 "Finish
-disconnecting" retry page, as deletion does). App/MCP `milton-*-drt-c1af8c3` at 21:20Z (image
-`sha256:a02a1bba7d821b2f6e49bd0f8fd1065ac9d382603cba8aec212fc731586d23e3`). Checks on main:
-types, 131 tests, format, build, rehearsal 12/12, all 0; health 200 ×3, MCP 401, signed-out
-assistants and disconnect 403; 0 errors in a 5-minute watch. Rollback: app/MCP
-`milton-*-rtt-3e128a1`.
-
-Fifth, `d3ea1eb`: #30 (milton-perf, milton-designer accepted): app and auth serve the Latin
-JetBrains Mono subset, and the full font only for characters outside it (from U+0300).
-Latin first-view font bytes 122 → 79 KB. Auth `milton-auth-00008-967` (image
-`sha256:deb9608ef263eaca2ada0ed4e591325983511329bdc130e45306a9e2841d7b2a`; mail and
-maintenance jobs too), app/MCP `milton-*-fnt-d3ea1eb` (image
-`sha256:a4d7161d5fb15dcfb13bb7db872c45120f40caf5b5880759a3768c3292eae2c1`) at 21:40Z.
-Checks on main: types, 131 tests, format, site and server builds, rehearsal 12/12, auth
-integration 17/17, all 0; health 200 ×3, authorize 302, MCP 401. App and auth preload only
-the subset, and it is served `immutable`; 0 errors in a 5-minute watch. Rollback: auth `milton-auth-00007-vn2`, app/MCP
-`milton-*-drt-c1af8c3`.
+Checks on each merged main: types, 131 tests, format, site and server builds, server
+rehearsal 13/13, auth integration 17/17 (18/18 with #34), all 0. Smoke: health 200 ×3, MCP
+401s, app home 200, signed-out report 403. Rollback: app/MCP `milton-*-fre-64617cc`, then
+`milton-*-fnt-d3ea1eb`; no further back than `milton-*-dup-cb5199b` unless both trial-table
+downs run first. Auth: `milton-auth-00007-vn2`.
 
 ## Runtime role timeouts (applied 2026-11-07, TODO #29)
 
@@ -376,8 +351,8 @@ references. Inspect revision readiness before selecting a recorded revision:
 gcloud run revisions list --service=milton-app --project=milton-510506 --region=us-east4
 ```
 
-Now serving (2026-11-07): app `milton-app-fnt-d3ea1eb` and MCP
-`milton-mcp-fnt-d3ea1eb` (source `d3ea1eb`), and auth `milton-auth-00008-967`. The
+Now serving (2026-11-07): app `milton-app-min-06d01e6` and MCP
+`milton-mcp-min-06d01e6` (source `06d01e6`), and auth `milton-auth-00008-967`. The
 release record above gives the image and rollback revisions.
 
 Roll back only affected services, preserve ingress/IAM, then repeat the canonical

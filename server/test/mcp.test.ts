@@ -653,7 +653,7 @@ test("a setup request makes one database round trip and a tool call four, by tok
       expect(await trips_for(bearer, "initialize", initialize)).toBe(1);
       expect(await trips_for(bearer, "notifications/initialized")).toBe(1);
       expect(await trips_for(bearer, "tools/list", {})).toBe(1);
-      // Access, the charge, the snapshot and the trial gate.
+      // Access, the trial gate, the charge and the snapshot.
       expect(await trips_for(bearer, "tools/call", cover)).toBe(4);
     }
   } finally {
@@ -720,6 +720,128 @@ test("invalid store limits refuse a tool call without counting it", async () => 
     }
     expect(await cover()).not.toContain('"isError":true');
     expect(await used()).toBe(2);
+  } finally {
+    await local.dispose();
+  }
+}, 30000);
+
+test("refused tool calls count nothing; a call is charged once its work starts", async () => {
+  const local = await localStore();
+  try {
+    await local.db.query(sql`UPDATE store_config SET trials_enabled=true`);
+    const { miltonUserId } = await resolveIdentityAccount(local.env, {
+      provider: issuer,
+      subject: "lapsed",
+    });
+    const fixture = await tokenFixture(local.pg);
+    const token = await fixture.token("lapsed");
+    const handler = createMiltonHandler(
+      { ...local.env, issuer, resource, appOrigin: origin },
+      fixture.verify,
+      () => {},
+    );
+    const call = async (name: string, args: unknown) => {
+      const reply = await handler(
+        new Request(resource, {
+          method: "POST",
+          headers: {
+            Host: "localhost:3001",
+            Authorization: "Bearer " + token,
+            Accept: "application/json, text/event-stream",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "tools/call",
+            params: { name, arguments: args },
+          }),
+        }),
+      );
+      // The first call carries tools/list_changed, so it streams.
+      const body = await reply.text();
+      const result = JSON.parse(
+        body.startsWith("{") ? body : body.split("data: ").at(-1)!,
+      ).result;
+      try {
+        return JSON.parse(result.content[0].text);
+      } catch {
+        return { isError: result.isError };
+      }
+    };
+    const used = async () =>
+      (
+        await local.db.query<{ n: number }>(
+          sql`SELECT coalesce(sum(tool_calls),0)::int AS n FROM usage_daily WHERE user_id=${miltonUserId}`,
+        )
+      )[0]!.n;
+    const version = (await call("get_cover_sheet", {})).version;
+    expect(await used()).toBe(1);
+    const save = {
+      text: "Fictional rule.",
+      rules: [{ report: "cover", text: "Keep fictional dates exact." }],
+      request_id: crypto.randomUUID(),
+      expected_version: version,
+    };
+    // The billing gate, for reads and saves.
+    await local.db.query(
+      sql`UPDATE trial_accounts SET subscription_status='canceled' WHERE user_id=${miltonUserId}`,
+    );
+    expect((await call("get_cover_sheet", {})).error).toBe(
+      "subscription_required",
+    );
+    expect((await call("create_memo", save)).error).toBe(
+      "subscription_required",
+    );
+    // Input is validated before the gate: an unknown kind stays invalid_kind.
+    expect(
+      (
+        await call("get_report", {
+          report_id: "email",
+          intent: { situation: "confirming what is on file", kind_id: "none" },
+        })
+      ).error,
+    ).toBe("invalid_kind");
+    expect(await used()).toBe(1);
+    await local.db.query(
+      sql`UPDATE trial_accounts SET subscription_status='active' WHERE user_id=${miltonUserId}`,
+    );
+    // Input refusals: the SDK's schema check, a get_report without intent and
+    // an unknown kind.
+    expect((await call("get_cover_sheet", { event: "start" })).isError).toBe(
+      true,
+    );
+    expect((await call("get_report", { report_id: "email" })).error).toBe(
+      "invalid_input",
+    );
+    expect(
+      (
+        await call("get_report", {
+          report_id: "email",
+          intent: { situation: "confirming what is on file", kind_id: "none" },
+        })
+      ).error,
+    ).toBe("invalid_kind");
+    expect(await used()).toBe(1);
+    // A save that ran is charged, whether it saved or met a stale version.
+    expect((await call("create_memo", save)).status).toBe("saved");
+    expect(await used()).toBe(2);
+    expect(
+      (
+        await call("create_memo", {
+          ...save,
+          request_id: crypto.randomUUID(),
+        })
+      ).status,
+    ).toBe("conflict");
+    expect(await used()).toBe(3);
+    // Over the allowance, calls stop; replaying a recorded save stays free.
+    await local.db.query(
+      sql`UPDATE store_config SET limits_json=limits_json || '{"daily_calls":3}'::jsonb`,
+    );
+    expect((await call("get_cover_sheet", {})).error).toBe("rate_limited");
+    expect((await call("create_memo", save)).status).toBe("saved");
+    expect(await used()).toBe(3);
   } finally {
     await local.dispose();
   }

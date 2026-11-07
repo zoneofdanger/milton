@@ -22,9 +22,9 @@ This runbook keeps only the latest release record. Earlier release records and a
 one-time procedures are in git history; the last full version is at commit 492b96a
 (`git show 492b96a:server/deploy/README.md`).
 
-## Release record: lifecycle, caching, round trips and guards (2026-11-07, PRs #22 #24 #26 #27 #28 #29 #31)
+## Release record: lifecycle, caching, round trips and guards (2026-11-07, PRs #22 #24 #26 #27 #28 #29 #30 #31)
 
-Four deploys, no schema or secret change. First, `9de3099`: #22 (milton-qa, one account
+Five deploys, no schema or secret change. First, `9de3099`: #22 (milton-qa, one account
 lifecycle module) and #27 (milton-perf, content-versioned asset caching). Auth
 `milton-auth-00006-jjz`, app/MCP `milton-*-lca-9de3099` at 20:57Z. Through the load balancer,
 versioned app and auth CSS and fonts answer `immutable` with `content-encoding: br`, and a
@@ -59,6 +59,17 @@ disconnecting" retry page, as deletion does). App/MCP `milton-*-drt-c1af8c3` at 
 types, 131 tests, format, build, rehearsal 12/12, all 0; health 200 ×3, MCP 401, signed-out
 assistants and disconnect 403; 0 errors in a 5-minute watch. Rollback: app/MCP
 `milton-*-rtt-3e128a1`.
+
+Fifth, `d3ea1eb`: #30 (milton-perf, milton-designer accepted): app and auth serve the Latin
+JetBrains Mono subset, and the full font only for characters outside it (from U+0300).
+Latin first-view font bytes 122 → 79 KB. Auth `milton-auth-00008-967` (image
+`sha256:deb9608ef263eaca2ada0ed4e591325983511329bdc130e45306a9e2841d7b2a`; mail and
+maintenance jobs too), app/MCP `milton-*-fnt-d3ea1eb` (image
+`sha256:a4d7161d5fb15dcfb13bb7db872c45120f40caf5b5880759a3768c3292eae2c1`) at 21:40Z.
+Checks on main: types, 131 tests, format, site and server builds, rehearsal 12/12, auth
+integration 17/17, all 0; health 200 ×3, authorize 302, MCP 401. App and auth preload only
+the subset, and it is served `immutable`; 0 errors in a 5-minute watch. Rollback: auth `milton-auth-00007-vn2`, app/MCP
+`milton-*-drt-c1af8c3`.
 
 ## Runtime role timeouts (applied 2026-11-07, TODO #29)
 
@@ -106,13 +117,51 @@ Rollback: `psql -X -v ON_ERROR_STOP=1 -f server/migrations/007-role-timeouts.dow
 the same owner resets exactly these settings; code whose role audit requires them then
 fails that audit, so roll such code back first.
 
+## Drop the unread trial tables (applied 2026-11-07: Drizzle 0005, owner file 008)
+
+Applied 21:59Z after snapshot `snap-muddy-bonus-b8tjvsii` (Peter's go), while `*-fnt-d3ea1eb`
+served. 0005 ran as `neondb_owner` exactly as the Drizzle migrator does (the file's SQL plus its
+SHA-256 and journal `when` in one transaction, journal now 6); 008 ran as `milton_app_owner`.
+Both `to_regclass` checks are null; `deleted_identities` was empty and `legacy_mapping` held
+2 rows, now only in the snapshot.
+
+Since PR #26 nothing reads or writes `public.deleted_identities` or
+`milton_app.legacy_mapping`: keyed trial-eligibility fingerprints are the only second-trial
+block. App/MCP code before #26 reads both, so apply only while code from #26 or later
+(source `cb5199b` onward, such as `*-drt-c1af8c3`) serves. The recorded app/MCP rollback
+targets `*-lca-9de3099` and `*-tmo-58a4a59` predate #26: after the drop, roll app/MCP back
+no further than `*-dup-cb5199b` unless both downs below run first. Rehearse on a disposable
+branch or database first, then:
+
+1. Snapshot. It is the only copy of the dropped rows.
+2. As `neondb_owner`: `bun run --cwd server db:migrate` applies
+   `0005_drop_deleted_identities` (journal 6 entries).
+3. As the `milton_app` owner, `milton_app_owner` (the role the cutover ran
+   `migrate.ts --app-auth` as):
+   `psql -X -v ON_ERROR_STOP=1 -f server/migrations/008-drop-legacy-mapping.up.sql`.
+4. Check as the owner. Both columns must be null:
+   `SELECT to_regclass('public.deleted_identities') AS d, to_regclass('milton_app.legacy_mapping') AS l;`
+   Then `check-runtime-role.ts` must print `ok` for app and MCP.
+
+Rollback, needed only before traffic returns to app/MCP code older than #26: run
+`server/migrations/008-drop-legacy-mapping.down.sql` as `milton_app_owner` (it refuses any
+other role) and `server/drizzle/rollback/0005_drop_deleted_identities.sql` as `neondb_owner`.
+Each recreates its table empty, with its original definition and grants; rows come back
+only from the snapshot. The 0005 journal row stays, so re-forwarding means
+`psql -1 -X -v ON_ERROR_STOP=1 -f server/drizzle/0005_drop_deleted_identities.sql`, then
+008 up again.
+
 ## Optional guide worker
 
 The default-off private guide pilot has separate [operations and capability instructions](guides.md). No guide job, schedule, provider key or account enrollment is provisioned by its build.
 
 ## Cloud resources
 
-Project `milton-510506`, Cloud Run/Artifact Registry region `us-east4`. Service manifests in this directory pin an immutable image and
+Project `milton-510506`, Cloud Run/Artifact Registry region `us-east4`. **Warm instances (Peter, 2026-11-07):** `milton-auth`, `milton-app` and `milton-mcp` each keep
+one instance warm through the service-level minimum (`gcloud run services update <svc> --min=1`;
+`run.googleapis.com/minScale: 1` on the service, about $10/month each). It applies across
+revisions, so deploys and rollbacks keep it; when replacing a service from a manifest, keep it.
+Check: `gcloud run services describe <svc> --format='value(metadata.annotations."run.googleapis.com/minScale")'` prints 1. Service manifests in this directory pin an immutable image and
 secret versions. They contain configuration and secret references, never values.
 The tracked app and MCP manifests still pin the pre-cutover release: app
 `milton-app-edit-00223ec` and MCP `milton-mcp-edit-00223ec`, both using image index
@@ -327,8 +376,8 @@ references. Inspect revision readiness before selecting a recorded revision:
 gcloud run revisions list --service=milton-app --project=milton-510506 --region=us-east4
 ```
 
-Now serving (2026-11-07): app `milton-app-drt-c1af8c3` and MCP
-`milton-mcp-drt-c1af8c3` (source `c1af8c3`), and auth `milton-auth-00007-vn2`. The
+Now serving (2026-11-07): app `milton-app-fnt-d3ea1eb` and MCP
+`milton-mcp-fnt-d3ea1eb` (source `d3ea1eb`), and auth `milton-auth-00008-967`. The
 release record above gives the image and rollback revisions.
 
 Roll back only affected services, preserve ingress/IAM, then repeat the canonical

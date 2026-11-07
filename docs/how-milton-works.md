@@ -83,11 +83,17 @@ Files: `server/src/handler.ts`, `server/src/token.ts`, `server/src/mcp.ts`,
   carries `notifications/tools/list_changed` ahead of its result, as does every
   `get_report` refused for a missing intent, so clients holding tool schemas from before
   a release refresh them; the announced set is per process and in memory.
-- Each `tools/call` increments a daily counter before running, and a call over the limit
-  returns `rate_limited` with a reset time. The request's access statement reads the
-  store limits, and invalid limits refuse the request before anything is counted; the
-  charge is then one statement under the account lock: a deletion holding it first makes
-  the call refuse as `account_unavailable`; one that comes second sees the counted call.
+- A `tools/call` is charged to a daily counter only once it is admitted: after access,
+  scope and the store limits (the request's access statement), the input schema, the
+  `get_report` intent and `kind_id`, and the trial and billing gate, and right before the
+  tool's own work (the snapshot read, or a save's decision under its account lock). Every
+  refusal before that, `subscription_required` included, counts nothing. A save is
+  charged inside its transaction, so it counts once exactly when it records an outcome
+  (`saved`, `unchanged`, `conflict` or `failed`); replaying that receipt counts nothing
+  and works over the limit. A call over the limit returns `rate_limited` with a reset
+  time. The charge is one conditional increment under the account lock, so two calls
+  never both take the last unit: a deletion holding the lock first makes the call refuse
+  as `account_unavailable`; one that comes second sees the counted call.
 - Each call logs the tool, outcome, time, and an error code from a fixed list, never
   text or identity.
 - The tool name is read early, so calls refused before dispatch are still logged.
@@ -252,7 +258,7 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
 - Identity-only app sessions last at most one absolute hour and never outlive their native opaque token; renewal starts a new SSO flow with no refresh/offline scope.
 - App cookies are host-only Secure/HttpOnly/SameSite=Lax over HTTPS; every use checks the original nonempty sid, immutable binding, incarnation and generation against native SQL, in the statement that reads the session.
 - Invalid proof refuses; actual native5xx/network/timeout is 503; an uncertain spent callback recovers through a new login.
-- New logins reclaim at most16 expired flows/sessions each; admission correlations expire after24 hours with bounded reclaim, while eligibility/key policy and original operation associations remain indefinitely for their stated purposes; legacy mapping and `deleted_identities` rows are kept unread until a later migration drops them.
+- New logins reclaim at most16 expired flows/sessions each; admission correlations expire after24 hours with bounded reclaim, while eligibility/key policy and original operation associations remain indefinitely for their stated purposes. Migrations `0005` and `008` drop the unread `deleted_identities` and legacy mapping tables; their downs recreate them empty.
 - Forms require same origin, an ASCII CSRF token and unique fields; sign-in rotates CSRF.
 - Auth rate limits key each network, for every native request including the account-security page's own session lookups, by the client address Google's load balancer appends (second-to-last `X-Forwarded-For` entry, IPv4-mapped IPv6 as IPv4, other IPv6 by /64, never the first entry; else the socket peer): 120 requests a minute per network, 10 a minute per account email, and Better Auth's per-path 3 sign-in/sign-up attempts per 10 seconds and 3 mail requests a minute.
 - Auth runtime and owner command pools always verify PostgreSQL TLS certificates/hostnames, even with mode omitted; unsafe/libpq/duplicate URL settings refuse.
@@ -390,8 +396,8 @@ Files: `server/drizzle/`, `server/src/store/schema.ts`, `server/src/store/databa
 - User IDs cannot change.
 - Disconnects and identity hashes have no foreign key to users, so they outlive the account.
 - `connection_keys` (0004) cascades from users and from its (issuer, subject) identity, requires the native binding (issuer, subject, incarnation, generation), checks id, hash, name, scope, binding lengths and dates, and grants nothing to the legacy writing group; owner file `006-connection-keys-roles.sql` lets app read every column but the hash (binding included), insert and set `revoked_at`, and MCP read and set `last_used_at` only.
-- Native 007 adds only `milton_guard.connection_key_status(subject, incarnation, generation)`: SECURITY DEFINER, fixed `pg_catalog, pg_temp` path, false on NULL or any mismatch, no PUBLIC/auth/guide EXECUTE and no table grants; MCP and app may execute it. Its down file drops it, so every key is refused.
-- The native auth migrator applies or reverses each migration file and its ledger row in one transaction under an advisory lock, so a crash leaves both or neither; a file that commits or rolls back the transaction itself fails after running and gets no ledger row.
+- Native 007 adds only `milton_guard.connection_key_status(subject, incarnation, generation)`: SECURITY DEFINER, fixed `pg_catalog, pg_temp` path, false on NULL or any mismatch, no PUBLIC/auth/guide EXECUTE and no table grants; MCP and app may execute it. Without it, every key is refused.
+- The native auth migrator applies each migration file and its ledger row in one transaction under an advisory lock, so a crash leaves both or neither; a file that commits or rolls back the transaction itself fails after running and gets no ledger row.
 - `stripe_events` keeps each event's ID, type, and body hash, never the payload.
 - The database holds cards and their immutable versions; the obsolete memo tables and
   the unused card-version `legacy` flag are removed by the cleanup.
@@ -435,8 +441,8 @@ Files: `packages/theme/`, `server/scripts/`, `.github/workflows/checks.yml`.
 - `migrate.ts` applies writing migrations only as neondb_owner; explicit --app-auth applies app-only migration005 after native004 as an approved app migration owner, with no runtime startup migration.
 - It takes the owner connection from `MILTON_OWNER_DATABASE_URL` for a release, otherwise
   from `server/.dev.vars`, and never from an inherited `DATABASE_URL`.
-- `check-mcp` confirms the instructions, exactly four tools, and a read, without saving.
-- `check-local` is an explicitly invoked interactive configured-issuer check; the isolated check-auth-integration builds actual product modules under Node26/PG18 and mocks only external boundaries.
+- `check-mcp` holds the SDK client check `mcp.test.ts` runs: the instructions, exactly four tools, and a read, without saving.
+- The isolated check-auth-integration builds actual product modules under Node26/PG18 and mocks only external boundaries.
 - `check-runtime-role` audits selected NOINHERIT app/MCP roles, ownership, DDL/TEMP, native/app credential/function boundaries and the role's own 20 s statement / 10 s lock timeouts.
 - `probe-forms` confirms a signed-out form post passes CSRF.
 - `build.ts` builds the CSS with Vite, versions the public assets by content hash, and bundles the Cloud Run entry with Bun.

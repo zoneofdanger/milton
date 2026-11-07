@@ -3,20 +3,11 @@ import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import pg from "pg";
 import { safeError } from "../src/config.ts";
-const names = [
-  "001-native",
-  "002-credential",
-  "003-mechanism",
-  "004-product",
-  "005-recovery",
-  "006-mail",
-  "007-connection-key-status",
-];
+import { AUTH_MIGRATIONS } from "./migrations.ts";
 // One fixed key: one migrator at a time, held only inside each transaction.
 const lock = "select pg_advisory_xact_lock(7311470001)";
-const direction = process.argv[2];
 if (
-  !["up", "down"].includes(direction ?? "") ||
+  process.argv[2] !== "up" ||
   process.argv[3] !== "--apply" ||
   !process.env.AUTH_OWNER_DATABASE_URL
 )
@@ -37,10 +28,8 @@ try {
   await client.query(
     `BEGIN; ${lock}; CREATE SCHEMA IF NOT EXISTS milton_credential AUTHORIZATION milton_auth_owner; CREATE TABLE IF NOT EXISTS milton_credential.migration_ledger(name text primary key); REVOKE ALL ON ALL TABLES IN SCHEMA milton_credential FROM PUBLIC,milton_auth_runtime,milton_app_runtime,milton_mcp_runtime; COMMIT;`,
   );
-  for (const name of direction === "up"
-    ? names
-    : [...names].reverse().filter((n) => n !== "001-native")) {
-    file = `${name}.${direction}.sql`;
+  for (const name of AUTH_MIGRATIONS) {
+    file = `${name}.up.sql`;
     // The file's work and its ledger row commit together or not at all.
     await client.query("BEGIN");
     try {
@@ -49,10 +38,7 @@ try {
         "select name from milton_credential.migration_ledger where name=$1",
         [name],
       );
-      if (
-        (direction === "up" && found.rowCount) ||
-        (direction === "down" && !found.rowCount)
-      ) {
+      if (found.rowCount) {
         await client.query("ROLLBACK");
         continue;
       }
@@ -91,22 +77,16 @@ try {
             ? ownTransaction()
             : error;
         });
-      if (direction === "up")
-        await client.query(
-          "insert into milton_credential.migration_ledger values($1)",
-          [name],
-        );
-      else
-        await client.query(
-          "delete from milton_credential.migration_ledger where name=$1",
-          [name],
-        );
+      await client.query(
+        "insert into milton_credential.migration_ledger values($1)",
+        [name],
+      );
       await client.query("COMMIT");
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});
       throw error;
     }
-    console.log(`${name} ${direction} complete`);
+    console.log(`${name} up complete`);
   }
 } catch (error) {
   console.error("auth_migration", file, safeError(error));

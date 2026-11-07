@@ -10,7 +10,7 @@ landed and the item is still open), `blocked: <why or #id>`. A bolded headline o
 or fewer states the task; one item is one landing. **A section heading and its preamble are
 shared context for every item beneath it.**
 
-**next-id: 28.** Ids are never reused, so this counter survives deleting the newest item.
+**next-id: 29.** Ids are never reused, so this counter survives deleting the newest item.
 
 ## MVP
 
@@ -96,6 +96,16 @@ reports, memos) and plain text on security screens and anything an assistant rea
       apart (found in the 2026-11-07 cutover rehearsal). Give each refusal a stable code that
       safeError prints, without secrets. Also make provision.ts's "output outside the
       repository" check resolve the real repository root rather than only its own checkout.
+
+- [ ] #28 (server, low) **Retry the auth service's startup database check.** On
+      2026-11-07 at 08:30:47Z a new `milton-auth` instance exited during startup:
+      `checkRuntimeRole` gave up on its first connection ("Connection terminated due to
+      connection timeout") while the Neon compute was waking from autosuspend. Cloud Run
+      started another, but sign-in returned 503 for a few seconds. Autosuspend on the
+      production endpoint was turned off the same day (`suspend_timeout_seconds: -1`), which
+      removes the trigger. Still make the startup check retry with a bounded backoff (e.g. up
+      to ~15 s) so a database restart or maintenance can't fail a cold start. Same review for
+      app/MCP startup checks.
 
 ## From the audit of 2026-11-02 (`.agents/tmp/audit/report.md`)
 

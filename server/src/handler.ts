@@ -7,7 +7,7 @@ import {
   connectionKeyAccount,
   lookupIdentityAccount,
   parseConnectionKey,
-  storeForCurrentRequest,
+  tenantStore,
   type StoreBindings,
   StoreError,
   type VerifiedStoreAuth,
@@ -332,7 +332,10 @@ export function createMiltonHandler(
         assistant = { issuer: identity.issuer, clientId: identity.clientId };
         announcedAs = `${auth.userId}\n${identity.clientId}`;
       }
-      const store = await storeForCurrentRequest(config, auth, assistant);
+      // `auth` comes from this request's identity or key statement, which
+      // requires an active account, so building the store makes no query;
+      // initialize, tools/list and notifications make no store query at all.
+      const store = tenantStore(config, auth, assistant);
       const announce = call.success && !announced.has(announcedAs);
       if (announce) {
         if (announced.size >= 10_000) announced.clear();

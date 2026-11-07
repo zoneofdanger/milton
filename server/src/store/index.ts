@@ -258,14 +258,26 @@ export interface TenantStore {
   chargeToolCall(): Promise<CallAllowance>;
 }
 
+/** An account's store, refused once the account is not active. */
 export async function storeForCurrentRequest(
   bindings: StoreBindings & { appOrigin: string },
   auth: VerifiedStoreAuth,
   assistant?: { issuer: string; clientId: string },
 ): Promise<TenantStore> {
+  await requireActiveAccount(database(bindings), auth.userId, { lock: false });
+  return tenantStore(bindings, auth, assistant);
+}
+
+/** The store for an `auth` this request just looked up, which required an
+ * active account; built without a query. Every tool call's charge and every
+ * read and save check the account again. */
+export function tenantStore(
+  bindings: StoreBindings & { appOrigin: string },
+  auth: VerifiedStoreAuth,
+  assistant?: { issuer: string; clientId: string },
+): TenantStore {
   const userId = auth.userId;
   const db = database(bindings);
-  await requireActiveAccount(db, userId, { lock: false });
   const compiled = compiledMemos(db, userId, assistant);
   return {
     appOrigin: bindings.appOrigin,

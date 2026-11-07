@@ -1356,11 +1356,17 @@ try {
     native.handler(new Request(input, init)),
   );
   const mcp = createMiltonHandler(mcpConfig, verifier, () => {});
-  const rpc = (access: string, method: string, params: unknown = {}) =>
+  const rpc = (
+    access: string,
+    method: string,
+    params: unknown = {},
+    extra: Record<string, string> = {},
+  ) =>
     mcp(
       new Request(config.resource, {
         method: "POST",
         headers: {
+          ...extra,
           Host: "mcp.meetmilton.com",
           Authorization: "Bearer " + access,
           "Content-Type": "application/json",
@@ -1476,8 +1482,16 @@ try {
   // Connection keys against real native authority (native 007): created through
   // the app from a fresh session, checked by the real MCP role on every call.
   stage = "connection keys bound to native authority";
+  // Each key call comes from its own client behind the load balancer (TEST-NET
+  // addresses), so failed lookups never drain one shared "unknown" bucket.
+  let keyClients = 0;
   const keyCall = async (key: string) => {
-    const response = await rpc(key, "tools/list");
+    const response = await rpc(
+      key,
+      "tools/list",
+      {},
+      { "X-Forwarded-For": `198.51.100.${++keyClients}, 192.0.2.1` },
+    );
     await response.body?.cancel();
     return response.status;
   };

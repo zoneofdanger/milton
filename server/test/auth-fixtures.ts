@@ -30,12 +30,43 @@ export async function appStorage(pg: PGlite) {
       new URL("../migrations/005-app.up.sql", import.meta.url),
     ).text(),
   );
+  // `fail` names one lifecycle function (begin_operation or cleanup_operation)
+  // that raises for this subject, as a native outage would.
   await pg.exec(`CREATE SCHEMA milton_guard;
-    CREATE TABLE milton_guard.fixture_authority(subject text PRIMARY KEY,active boolean DEFAULT true,fresh boolean DEFAULT true);
-    CREATE FUNCTION milton_guard.app_status(text,text,text,text,text,text) RETURNS boolean LANGUAGE SQL AS 'SELECT active FROM milton_guard.fixture_authority WHERE subject=$2';
-    CREATE FUNCTION milton_guard.security_status(text,text,text,text) RETURNS jsonb LANGUAGE SQL AS 'SELECT jsonb_build_object(''fresh'',fresh,''verified'',true,''sessionId'',$4) FROM milton_guard.fixture_authority WHERE subject=$1 AND active';
-    CREATE FUNCTION milton_guard.list_connections(text,text,integer) RETURNS jsonb LANGUAGE SQL AS $$ SELECT '[]'::jsonb $$;
+    CREATE TABLE milton_guard.fixture_authority(subject text PRIMARY KEY,active boolean DEFAULT true,fresh boolean DEFAULT true,fail text);
+    CREATE TABLE milton_guard.fixture_connection(reference text PRIMARY KEY,subject text NOT NULL,client_id text NOT NULL,scopes jsonb NOT NULL DEFAULT '["milton:read"]',active boolean NOT NULL DEFAULT true);
+    CREATE TABLE milton_guard.fixture_operation(operation_id text PRIMARY KEY,subject text NOT NULL,incarnation text NOT NULL,client_id text,kind text NOT NULL,progress text NOT NULL DEFAULT 'refused');
+    CREATE FUNCTION milton_guard.app_status(text,text,text,text,text,text) RETURNS boolean LANGUAGE SQL AS $$ SELECT active AND NOT EXISTS(SELECT 1 FROM milton_guard.fixture_operation WHERE subject=$2 AND kind='delete') FROM milton_guard.fixture_authority WHERE subject=$2 $$;
+    CREATE FUNCTION milton_guard.security_status(text,text,text,text) RETURNS jsonb LANGUAGE SQL AS $$ SELECT jsonb_build_object('fresh',fresh,'verified',true,'sessionId',$4,'verifiedEmail','fixture@example.invalid','verifiedIdentities','[]'::jsonb) FROM milton_guard.fixture_authority WHERE subject=$1 AND active AND NOT EXISTS(SELECT 1 FROM milton_guard.fixture_operation WHERE subject=$1 AND kind='delete') $$;
+    CREATE FUNCTION milton_guard.list_connections(text,text,integer) RETURNS jsonb LANGUAGE SQL AS $$ SELECT coalesce(jsonb_agg(jsonb_build_object('reference',reference,'client_id',client_id,'scopes',scopes,'expires_at',now()+interval '1 day') ORDER BY reference),'[]'::jsonb) FROM (SELECT * FROM milton_guard.fixture_connection WHERE subject=$1 AND active ORDER BY reference LIMIT $3) c $$;
     CREATE FUNCTION milton_guard.connection_key_status(text,text,text) RETURNS boolean LANGUAGE SQL AS $$ SELECT coalesce((SELECT active FROM milton_guard.fixture_authority WHERE subject=$1),false) AND ($2,$3)=('f:1','f:2') $$;
+    -- As native: a retry returns the original operation; a first call revokes the
+    -- client's connections (every one for delete) and records the operation.
+    CREATE FUNCTION milton_guard.begin_operation(text,text,text,text,text) RETURNS text LANGUAGE plpgsql AS $$
+    DECLARE previous milton_guard.fixture_operation;
+    BEGIN
+     IF EXISTS(SELECT 1 FROM milton_guard.fixture_authority WHERE subject=$2 AND fail='begin_operation') THEN RAISE EXCEPTION 'fixture begin_operation outage'; END IF;
+     IF $1 IS NULL OR length($1)<>36 OR $5 NOT IN ('disconnect','delete') OR ($5='disconnect' AND $4 IS NULL) THEN RAISE EXCEPTION 'invalid lifecycle operation'; END IF;
+     SELECT * INTO previous FROM milton_guard.fixture_operation WHERE operation_id=$1;
+     IF FOUND THEN
+      IF (previous.subject,previous.incarnation,previous.client_id,previous.kind) IS DISTINCT FROM ($2,$3,$4,$5) THEN RAISE EXCEPTION 'misbound lifecycle retry'; END IF;
+      RETURN $1;
+     END IF;
+     IF NOT EXISTS(SELECT 1 FROM milton_guard.fixture_authority WHERE subject=$2) OR $3<>'f:1' THEN RAISE EXCEPTION 'missing original identity'; END IF;
+     UPDATE milton_guard.fixture_connection SET active=false WHERE subject=$2 AND ($5='delete' OR client_id=$4);
+     INSERT INTO milton_guard.fixture_operation(operation_id,subject,incarnation,client_id,kind) VALUES($1,$2,$3,$4,$5);
+     RETURN $1;
+    END $$;
+    -- Finishes in one bounded pass (native may answer 'tokens-cleaned' first).
+    CREATE FUNCTION milton_guard.cleanup_operation(text,integer) RETURNS text LANGUAGE plpgsql AS $$
+    DECLARE op milton_guard.fixture_operation;
+    BEGIN
+     IF $2 NOT BETWEEN 1 AND 16 THEN RAISE EXCEPTION 'bounded cleanup required'; END IF;
+     SELECT * INTO STRICT op FROM milton_guard.fixture_operation WHERE operation_id=$1 FOR UPDATE;
+     IF EXISTS(SELECT 1 FROM milton_guard.fixture_authority WHERE subject=op.subject AND fail='cleanup_operation') THEN RAISE EXCEPTION 'fixture cleanup_operation outage'; END IF;
+     UPDATE milton_guard.fixture_operation SET progress='complete' WHERE operation_id=$1;
+     RETURN 'complete';
+    END $$;
   `);
 }
 export async function pageFixture(

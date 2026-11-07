@@ -5,7 +5,7 @@ import { randomUUID, createHash, randomBytes } from "node:crypto";
 import pg from "pg";
 import { bundleFixture } from "./bundle-fixture.ts";
 import { httpFixture } from "./http-fixture.ts";
-import { checkRuntimeRole } from "./check-role.ts";
+import { checkRuntimeRole } from "../src/roles.ts";
 import { disposable } from "./disposable.ts";
 import { provisionFixedApp } from "./provision.ts";
 import { deliverMail, openMail, type MailJob } from "../src/mail.ts";

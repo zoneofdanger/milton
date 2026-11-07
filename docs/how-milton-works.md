@@ -440,8 +440,8 @@ Files: `packages/theme/`, `server/scripts/`, `.github/workflows/checks.yml`.
 - `migrate.ts` applies writing migrations only as neondb_owner; explicit --app-auth applies app-only migration005 after native004 as an approved app migration owner, with no runtime startup migration.
 - It takes the owner connection from `MILTON_OWNER_DATABASE_URL` for a release, otherwise
   from `server/.dev.vars`, and never from an inherited `DATABASE_URL`.
-- `check-mcp` confirms the instructions, exactly four tools, and a read, without saving.
-- `check-local` is an explicitly invoked interactive configured-issuer check; the isolated check-auth-integration builds actual product modules under Node26/PG18 and mocks only external boundaries.
+- `check-mcp` holds the SDK client check `mcp.test.ts` runs: the instructions, exactly four tools, and a read, without saving.
+- The isolated check-auth-integration builds actual product modules under Node26/PG18 and mocks only external boundaries.
 - `check-runtime-role` audits selected NOINHERIT app/MCP roles, ownership, DDL/TEMP, native/app credential/function boundaries and the role's own 20 s statement / 10 s lock timeouts.
 - `probe-forms` confirms a signed-out form post passes CSRF.
 - `build.ts` builds the CSS with Vite, versions the public assets by content hash, and bundles the Cloud Run entry with Bun.

@@ -9,7 +9,12 @@ import {
 } from "./database";
 import { StoreError } from "./errors";
 import { accountUnavailable, requireActiveAccount } from "./accounts";
-import { claimTrialNotice, trialStatus, type TrialNotice } from "./trials";
+import {
+  claimTrialNotice,
+  trialStatus,
+  type TrialNotice,
+  type TrialStatus,
+} from "./trials";
 import {
   backfillAccounts,
   billingAccount,
@@ -278,16 +283,26 @@ export function tenantStore(
 ): TenantStore {
   const userId = auth.userId;
   const db = database(bindings);
-  const compiled = compiledMemos(db, userId, assistant);
+  // The trial status the latest read's gate admitted, for that call's notice.
+  let gated: TrialStatus | undefined;
+  const compiled = compiledMemos(db, userId, assistant, (status) => {
+    gated = status;
+  });
   return {
     appOrigin: bindings.appOrigin,
-    trialNotice: () =>
-      db.transaction(async (tx) => {
+    trialNotice: async () => {
+      const status = gated;
+      gated = undefined;
+      // The claim's conditions are those of a due reminder, so when the
+      // status this call's read just gated on has none, it would find nothing.
+      if (status?.reminder_stage === 0) return undefined;
+      return db.transaction(async (tx) => {
         await tx.query(
           sql`SELECT set_config('lock_timeout','250ms',true), set_config('statement_timeout','500ms',true)`,
         );
         return claimTrialNotice(tx, userId, bindings.appOrigin);
-      }),
+      });
+    },
     readTpsReport: compiled.getTpsReport,
     readDocuments: compiled.readDocuments,
     saveMemo: compiled.saveMemo,

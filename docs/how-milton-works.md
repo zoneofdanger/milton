@@ -103,7 +103,7 @@ Files: `server/src/mcp.ts`, `server/src/mcp-tools.ts`.
 - `list_reports` returns all five reports, with a one-line setup hint instead of the full
   script, only for reports with no rules or samples.
 - `create_memo` saves rules, edits, moves and sample changes together or not at all; context correction cannot combine with sample insertion or retirement.
-- Replies add a trial notice if one is due, and that notice can never fail the call.
+- Replies add a trial notice if one is due, and that notice can never fail the call. A read whose trial gate found no reminder due makes no claim; saves always try one.
 - Failures return a code and message, and unknown failures say no save outcome is
   confirmed.
 

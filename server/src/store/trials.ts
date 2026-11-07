@@ -88,9 +88,14 @@ export function subscriptionRequired(appOrigin?: string) {
 export const trialEndingMessage = (endsAt: string, appOrigin: string) =>
   `Your Milton trial ends ${endsAt.slice(0, 10)} (UTC), then it's $5.01/month. Unless you've already added a card, add one by then to keep using Milton: ${appOrigin}/`;
 
-export async function assertTrialAccess(db: StoreSession, userId: string) {
-  if ((await trialStatus(db, userId)).status === "expired")
-    throw subscriptionRequired();
+/** The account's trial status, or the refusal once it reads as expired. */
+export async function assertTrialAccess(
+  db: StoreSession,
+  userId: string,
+): Promise<TrialStatus> {
+  const status = await trialStatus(db, userId);
+  if (status.status === "expired") throw subscriptionRequired();
+  return status;
 }
 
 export async function claimTrialNotice(

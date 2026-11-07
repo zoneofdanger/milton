@@ -2,7 +2,7 @@ import { assembleExport, type Documents, type ReportIntent } from "./reports";
 import type { StoreDatabase } from "./database";
 import { databaseFailure } from "./database";
 import { StoreError } from "./errors";
-import { assertTrialAccess } from "./trials";
+import { assertTrialAccess, type TrialStatus } from "./trials";
 import { readSnapshot } from "./snapshot";
 import { runSave, type SaveOutcome } from "./save";
 // The save schema is served to assistants, so it lives with the MCP tools.
@@ -23,6 +23,8 @@ export function compiledMemos(
   db: StoreDatabase,
   userId: string,
   actor?: { issuer: string; clientId: string },
+  /** Sees the trial status each assistant read's gate admitted. */
+  gated?: (status: TrialStatus) => void,
 ) {
   /** A read assembles the documents from cards and samples. It takes no lock
    * and writes nothing: one statement for the snapshot, then the trial gate
@@ -30,7 +32,7 @@ export function compiledMemos(
   async function read(intent?: ReportIntent, includeGuides = false) {
     try {
       const current = await readSnapshot(db, userId, intent, includeGuides);
-      if (actor) await assertTrialAccess(db, userId);
+      if (actor) gated?.(await assertTrialAccess(db, userId));
       return current;
     } catch (error) {
       throw databaseFailure(error);

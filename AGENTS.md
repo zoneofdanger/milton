@@ -19,7 +19,7 @@ the [README](README.md) says what is here, and [TODO.md](TODO.md) is the backlog
   there, never from files.
 - **Publishing requires authorization.** Builders may commit/push their assigned task
   branch and open one PR. Only the designated release coordinator, currently
-  `milton-release`, lands/merges and pushes main or deletes landed task branches.
+  `milton-duo`, lands/merges and pushes main or deletes landed task branches.
   Roles, assignments and ready PRs grant no extra product publishing authority.
   Force-pushes and history rewrites require Peter's explicit approval. Cloud Run hosts
   the browser app and the MCP server; Vercel builds and publishes the static site from
@@ -60,7 +60,7 @@ the [README](README.md) says what is here, and [TODO.md](TODO.md) is the backlog
 ## Coordination
 
 Lead owns strategy and priorities. The builder owns implementation, checks and the task
-PR until it is ready. At the ready PR, `milton-release` takes delivery ownership and
+PR until it is ready. At the ready PR, `milton-duo` takes delivery ownership and
 finishes review, integration and authorized deployment without another Lead acceptance
 gate. Designer reviews meaningful UI changes and offers design direction within this
 same process. Preserve specialist work Peter assigns directly. Independent review is

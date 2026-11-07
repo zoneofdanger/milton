@@ -123,18 +123,14 @@ export function keyAttemptSource(request: Request): string {
  * Bounds unauthenticated database work on the connection-key path, per
  * process, before any database access. Anyone can send well-formed keys with
  * invented ids, so:
- * - an id no key has is remembered for 60 seconds in a 10,000-entry LRU, so a
- *   repeated invented id never reaches the database. Only ids with no key at
- *   all are remembered: a wrong secret for a real id is not, so knowing a
- *   key's public id cannot lock its owner out;
  * - each source (see keyAttemptSource) has a token bucket of 5, refilled at 10
  *   a minute, in a 10,000-source LRU. A lookup reserves one token before it
  *   takes a slot; an empty bucket gets 429 with Retry-After, without touching
  *   the database or a slot. A failed lookup keeps its token; a successful one
  *   is refunded to 0.1, so an agent can make about 100 key calls a minute
  *   while one source's invented keys reach the database about 10 times a
- *   minute. Requests that never reach the database (malformed keys,
- *   remembered ids, busy refusals) cost nothing;
+ *   minute. Requests that never reach the database (malformed keys, busy
+ *   refusals) cost nothing;
  * - each source runs at most 3 lookups at once, however far its bucket has
  *   refilled while earlier ones stall (up to the 20-second statement
  *   timeout); a 4th gets 429 with Retry-After: 1, without touching the
@@ -151,7 +147,6 @@ export function keyAttemptSource(request: Request): string {
 function keyLookupGate(
   concurrent = 8,
   entries = 10_000,
-  ttlMs = 60_000,
   burst = 5,
   perMinute = 10,
   successCost = 0.1,
@@ -159,7 +154,6 @@ function keyLookupGate(
 ) {
   let running = 0;
   const active = new Map<string, number>(); // source → lookups running
-  const unknown = new Map<string, number>(); // id → expiry; oldest first
   const buckets = new Map<string, { tokens: number; at: number }>(); // LRU
   const bucket = (source: string) => {
     const now = Date.now();
@@ -184,20 +178,9 @@ function keyLookupGate(
     current.tokens = Math.min(burst, current.tokens + tokens);
   };
   return async <T>(
-    id: string,
     source: string,
-    lookup: () => Promise<
-      { ok: true; value: T } | { ok: false; known: boolean }
-    >,
+    lookup: () => Promise<{ ok: true; value: T } | { ok: false }>,
   ): Promise<T | undefined> => {
-    const until = unknown.get(id);
-    if (until !== undefined) {
-      unknown.delete(id);
-      if (until > Date.now()) {
-        unknown.set(id, until);
-        return undefined;
-      }
-    }
     const reserved = bucket(source);
     if (reserved.tokens < 1)
       throw new KeyAttemptsLimited(
@@ -214,11 +197,6 @@ function keyLookupGate(
       if (result.ok) {
         refund(source, 1 - successCost);
         return result.value;
-      }
-      if (!result.known) {
-        if (unknown.size >= entries)
-          unknown.delete(unknown.keys().next().value!);
-        unknown.set(id, Date.now() + ttlMs);
       }
       return undefined;
     } finally {
@@ -289,14 +267,10 @@ export function createMiltonHandler(
         // an invalid token. Only the key's public id is ever logged.
         const parsed = parseConnectionKey(authorization.slice(7));
         if (!parsed) throw invalidKey();
-        const key = await keyLookup(
-          parsed.id,
-          keyAttemptSource(request),
-          async () => {
-            const found = await connectionKeyAccount(config, parsed);
-            return found.ok ? { ok: true as const, value: found } : found;
-          },
-        );
+        const key = await keyLookup(keyAttemptSource(request), async () => {
+          const found = await connectionKeyAccount(config, parsed);
+          return found.ok ? { ok: true as const, value: found } : found;
+        });
         if (!key) throw invalidKey();
         write = key.scope === "read_write";
         if (call.success && call.data.params.name === "create_memo" && !write)

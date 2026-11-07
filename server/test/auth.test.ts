@@ -1,5 +1,4 @@
 import { expect, test, spyOn } from "bun:test";
-import { createHash } from "node:crypto";
 import { brotliDecompressSync, gunzipSync } from "node:zlib";
 import { sql } from "drizzle-orm";
 import { createMiltonApp } from "../src/index";
@@ -24,7 +23,7 @@ import {
   pageFixture,
   protocolFixture,
 } from "./auth-fixtures";
-import { authAdmission } from "../src/auth-admission";
+import { authAdmission, trialFingerprints } from "../src/auth-admission";
 
 const appFor = (env: Partial<Parameters<typeof createMiltonApp>[0]>) =>
   createMiltonApp({ issuer, resource, appOrigin, ...clientSettings, ...env });
@@ -1065,7 +1064,7 @@ test("account deletion: a Stripe failure keeps the account and its writing; retr
       `CREATE FUNCTION fixture_outage() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fixture erase outage'; END $$`,
     );
     await local.pg.exec(
-      `CREATE TRIGGER fixture_outage BEFORE INSERT ON deleted_identities FOR EACH ROW EXECUTE FUNCTION fixture_outage()`,
+      `CREATE TRIGGER fixture_outage BEFORE DELETE ON users FOR EACH ROW EXECUTE FUNCTION fixture_outage()`,
     );
     const unerased = await send("/account/delete", confirm);
     expect(unerased.status).toBe(503);
@@ -1078,7 +1077,7 @@ test("account deletion: a Stripe failure keeps the account and its writing; retr
     ]);
     // Then native cleanup fails: the writing is erased without asking Stripe
     // again, and the retry page says so.
-    await local.pg.exec(`DROP TRIGGER fixture_outage ON deleted_identities`);
+    await local.pg.exec(`DROP TRIGGER fixture_outage ON users`);
     await local.db.query(
       sql`UPDATE milton_guard.fixture_authority SET fail='cleanup_operation'`,
     );
@@ -1106,21 +1105,17 @@ test("account deletion: a Stripe failure keeps the account and its writing; retr
       expect.stringMatching(/^milton-session=; .*Max-Age=0/),
     );
     expect(jar.get("milton-session")).toBe("");
-    // A later sign-in with the same identity gets a new, empty account whose
-    // trial starts canceled.
-    expect(
-      await local.db.query(sql`SELECT identity_hash FROM deleted_identities`),
-    ).toEqual([
-      {
-        identity_hash: createHash("sha256")
-          .update(issuer + ":account")
-          .digest("hex"),
-      },
-    ]);
-    await resolveIdentityAccount(local.env, {
-      provider: issuer,
-      subject: "account",
-    });
+    // A later sign-in with the same identity and verified email gets a new,
+    // empty account whose trial starts canceled: deletion kept the email's
+    // trial-eligibility fingerprint (the account itself was made without one).
+    await resolveIdentityAccount(
+      local.env,
+      { provider: issuer, subject: "account" },
+      trialFingerprints(local.config.trialFingerprintKey, {
+        verifiedEmail: "fixture@example.invalid",
+        verifiedIdentities: [],
+      }),
+    );
     const returning = await local.db.query<{
       user_id: string;
       subscription_status: string | null;
@@ -1926,6 +1921,12 @@ test("authenticated admission requires verified provider IDs, converges and pres
         subject: "first",
       })
     ).userId;
+    // The first claimant of its fingerprints gets its trial.
+    expect(
+      await local.db.query(
+        sql`SELECT subscription_status FROM trial_accounts WHERE user_id=${first}`,
+      ),
+    ).toEqual([{ subscription_status: null }]);
     expect(
       (
         await post({

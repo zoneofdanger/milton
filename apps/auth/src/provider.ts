@@ -326,17 +326,6 @@ export function createProvider(
       },
     },
     rateLimit: { enabled: true, storage: "database", window: 60, max: 120 },
-    disabledPaths: [
-      "/token",
-      "/delete-user",
-      "/delete-user/callback",
-      "/change-email",
-      "/update-user",
-      "/update-session",
-      "/set-password",
-      "/oauth2/update-consent",
-      "/oauth2/delete-consent",
-    ],
     databaseHooks: {
       account: {
         create: {
@@ -536,10 +525,8 @@ export function createProvider(
     ],
   });
   let inFlight = 0;
-  async function handler(
-    request: Request,
-    peer = "127.0.0.1",
-  ): Promise<Response> {
+  // The peer keys the network rate limits, so every caller names the client.
+  async function handler(request: Request, peer: string): Promise<Response> {
     const denied = guardRequest(request);
     if (denied) return denied;
     const u = new URL(request.url),

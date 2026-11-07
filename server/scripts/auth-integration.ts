@@ -937,7 +937,7 @@ try {
       await revokeConnectionKey(appDb, keyUser, made.record.id),
       true,
     );
-    assert.deepEqual(await keyCheck(made.key), { ok: false, known: true });
+    assert.deepEqual(await keyCheck(made.key), { ok: false });
     // Account deletion by the app runtime removes the account's keys.
     await createConnectionKey(appDb, keyUser, keyBinding, {
       name: "Fictional CI",
@@ -1137,7 +1137,7 @@ try {
   let dropLinkNotification = false;
   let preservationFailure: "none" | "before" | "after" = "none";
   let preservationCalls = 0;
-  const native = createProvider(nativeConfig, {
+  const nativeService = createProvider(nativeConfig, {
     pool: authPool,
     boundaries: {
       fetch: async (input, init) => {
@@ -1185,6 +1185,11 @@ try {
       },
     },
   });
+  // Native requests here come from one fixed client; network buckets key on it.
+  const native = {
+    ...nativeService,
+    handler: (request: Request) => nativeService.handler(request, "127.0.0.1"),
+  };
   const transport: NonNullable<RuntimeConfig["authFetch"]> = async (
     input,
     init,

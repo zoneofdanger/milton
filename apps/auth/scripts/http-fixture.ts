@@ -367,7 +367,7 @@ export async function httpFixture(auth: AuthService) {
                 { headers },
               );
             },
-          } as AuthService,
+          } as unknown as AuthService,
           assets,
         );
         const path =

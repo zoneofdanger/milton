@@ -53,7 +53,7 @@ Password policy is 15–128 Unicode code points in both original and native NFKC
 
 All selected capabilities must be configured at startup:
 
-- `AUTH_DATABASE_URL`: auth-only runtime login, verified certificate/hostname TLS even with mode omitted, pool maximum 8, bounded connect/query/statement timeouts; never the migration owner.
+- `AUTH_DATABASE_URL`: auth-only runtime login, verified certificate/hostname TLS even with mode omitted, pool maximum 8, bounded connect/query/statement timeouts (through Neon the 5-second statement limit is the role setting in [`007-role-timeouts.up.sql`](../../server/migrations/007-role-timeouts.up.sql), since Neon drops connect-time settings); never the migration owner.
 - `AUTH_SECRET`: stable native cookie/token encryption secret shared across auth instances.
 - `AUTH_ADMISSION_SECRET`: separate auth-to-app bearer service credential.
 - `AUTH_RATE_SECRET`: separate stable HMAC key for shared network/account buckets.

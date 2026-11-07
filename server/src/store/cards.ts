@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import { sql } from "drizzle-orm";
-import type { StoreSession } from "./database";
 import type { Filing } from "./reports";
 
 export type CardHead = {
@@ -23,13 +22,6 @@ export const cardHeadsJson = (userId: string) =>
     FROM instruction_cards c
     JOIN LATERAL (SELECT version,description,body,archived,report FROM instruction_card_versions WHERE user_id=c.user_id AND card_id=c.id ORDER BY version DESC LIMIT 1) v ON true
     WHERE c.user_id=${userId}`;
-export async function cardHeads(tx: StoreSession, userId: string) {
-  return (
-    await tx.query<{ heads: CardHead[] }>(
-      sql`SELECT (${cardHeadsJson(userId)}) AS heads`,
-    )
-  )[0]!.heads;
-}
 export const cardFingerprint = (heads: CardHead[]) =>
   createHash("sha256")
     .update(JSON.stringify(heads.map((h) => [h.id, h.version, h.archived])))

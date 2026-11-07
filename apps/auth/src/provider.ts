@@ -73,6 +73,8 @@ export function createProvider(
       max: 8,
       connectionTimeoutMillis: 3000,
       idleTimeoutMillis: 30000,
+      // Plain PostgreSQL only: Neon drops connect-time settings, so production's
+      // limit is the role setting in server/migrations/007-role-timeouts.up.sql.
       statement_timeout: 5000,
       query_timeout: 6000,
     });

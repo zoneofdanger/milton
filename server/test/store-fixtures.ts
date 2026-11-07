@@ -5,6 +5,16 @@ import type { SampleContext } from "../src/store/sample-context";
 import type { ReportId } from "../src/store/reports";
 import { compiledMemos } from "../src/store/compiled";
 import type { StoreDatabase, StoreSession } from "../src/store/database";
+import { cardHeadsJson, type CardHead } from "../src/store/cards";
+
+// Every card's head version, in position order.
+export async function cardHeads(tx: StoreSession, userId: string) {
+  return (
+    await tx.query<{ heads: CardHead[] }>(
+      sql`SELECT (${cardHeadsJson(userId)}) AS heads`,
+    )
+  )[0]!.heads;
+}
 
 // Runs `inside` at the start of every transaction, while it is open. A request
 // started meanwhile waits for it, as on the account lock.

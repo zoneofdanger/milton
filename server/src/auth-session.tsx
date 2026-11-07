@@ -4,7 +4,6 @@ import { z } from "zod";
 import { sql } from "drizzle-orm";
 import { database } from "./store";
 import {
-  appActive,
   authoritySchema,
   securityStatus,
   unavailable,
@@ -66,14 +65,15 @@ export function pageContext(
     try {
       row = (
         await database(config).query(
-          sql`SELECT subject,sid,binding,incarnation,generation,email FROM milton_app.session WHERE token_hash=${hash(token)} AND issuer=${config.issuer} AND expires_at>clock_timestamp()`,
+          // The session row and its native app status in one statement.
+          sql`SELECT subject,sid,binding,incarnation,generation,email,milton_guard.app_status(binding,subject,${config.oidc.clientId},sid,incarnation,generation) AS active FROM milton_app.session WHERE token_hash=${hash(token)} AND issuer=${config.issuer} AND expires_at>clock_timestamp()`,
         )
       )[0];
     } catch {
       throw unavailable();
     }
     const proof = authoritySchema.safeParse(row);
-    if (!proof.success || !(await appActive(config, proof.data))) return null;
+    if (!proof.success || row?.active !== true) return null;
     return {
       ...proof.data,
       id: proof.data.subject,
@@ -149,12 +149,24 @@ export function pageContext(
       );
     return form;
   };
+  // The signed-in person's active account, looked up once per request and
+  // shared by every part of the page that needs it.
+  let found:
+    { subject: string; account: Promise<VerifiedStoreAuth> } | undefined;
+  const account = (user: SessionUser) => {
+    if (found?.subject !== user.id)
+      found = {
+        subject: user.id,
+        account: lookupIdentityAccount(config, {
+          provider: config.issuer,
+          subject: user.id,
+        }),
+      };
+    return found.account;
+  };
   const renderMemos = async (signedInUser?: SessionUser) => {
     const user = signedInUser ?? (await signedIn());
-    const verified: VerifiedStoreAuth = await lookupIdentityAccount(config, {
-      provider: config.issuer,
-      subject: user.id,
-    });
+    const verified = await account(user);
     const store = await personStoreForCurrentRequest(config, verified);
     return memoPages(request, store, csrfField, user.email, {
       billing: !!config.billing,
@@ -165,10 +177,7 @@ export function pageContext(
   const accountBilling = async (user: SessionUser) => {
     if (!config.billing) return undefined;
     try {
-      const { userId } = await lookupIdentityAccount(config, {
-        provider: config.issuer,
-        subject: user.id,
-      });
+      const { userId } = await account(user);
       return billingItem(await accountTrialStatus(config, userId));
     } catch {
       return undefined;
@@ -189,6 +198,7 @@ export function pageContext(
     session,
     signedIn,
     readForm,
+    account,
     renderMemos,
     accountBilling,
   };

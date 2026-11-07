@@ -163,6 +163,21 @@ export async function httpFixture(auth: AuthService) {
     }
     assert.equal((await call("/auth.css")).status, 200);
     assert.equal((await call("/fonts/geist-latin-variable.woff2")).status, 200);
+    {
+      // Versioned assets cache for a year and arrive compressed over HTTP.
+      const css = /href="(\/auth\.css\?v=[\w-]{16})"/.exec(
+        (await call("/login")).body,
+      )?.[1];
+      assert(css, "versioned stylesheet link");
+      const r = await call(css, undefined, { "accept-encoding": "br, gzip" });
+      assert.equal(r.status, 200);
+      assert.equal(
+        r.headers["cache-control"],
+        "public, max-age=31536000, immutable",
+      );
+      assert.equal(r.headers["content-encoding"], "br");
+      assert.equal(r.headers.vary, "Accept-Encoding");
+    }
     assert.equal(
       (
         await call(
@@ -240,11 +255,18 @@ export async function httpFixture(auth: AuthService) {
       signout,
       invalidReset,
       await call("/api/auth/ok"),
-      await call("/auth.css"),
       await call("/health", undefined, { host: "app.meetmilton.com" }),
     ])
       for (const [name, value] of Object.entries(SECURITY_HEADERS))
         assert.equal(r.headers[name], value, `final response ${name}`);
+    // An unversioned asset URL revalidates; its other security headers stay.
+    const legacy = await call("/auth.css");
+    for (const [name, value] of Object.entries(SECURITY_HEADERS))
+      assert.equal(
+        legacy.headers[name],
+        name === "cache-control" ? "no-cache" : value,
+        `legacy asset ${name}`,
+      );
     // Clients behind the load balancer get their own network bucket (the same
     // address keys milton_guard.take_rate); a leading entry cannot pick one.
     for (const forwarded of [
@@ -378,7 +400,7 @@ export async function httpFixture(auth: AuthService) {
             ),
           );
           assert(document.includes(`<a href="${escaped}">Continue</a>`));
-          assert(document.includes('href="/auth.css"'));
+          assert(document.includes('href="/auth.css?v='));
           assert(!document.includes("<next>"));
 
           assert.equal(

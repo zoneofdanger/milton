@@ -1,16 +1,27 @@
 /** @jsxImportSource hono/jsx */
 import type { Child } from "hono/jsx";
+import type { StaticAssets } from "@milton/theme/assets";
 
+// Both faces render on every page; preloading lets them arrive before first
+// paint under font-display: optional.
+const fonts = [
+  "/fonts/geist-latin-variable.woff2",
+  "/fonts/jetbrains-mono-regular.woff2",
+];
+
+/** The page shell; `assets` supplies the content-versioned asset URLs. */
 export function Page({
   title,
   children,
   notice,
   refresh,
+  assets,
 }: {
   title: string;
   children: Child;
   notice?: string;
   refresh?: string;
+  assets: StaticAssets;
 }) {
   return (
     <html lang="en">
@@ -22,8 +33,17 @@ export function Page({
           <meta http-equiv="refresh" content={`0;url=${refresh}`} />
         ) : null}
         <title>{title} · Milton</title>
-        <link rel="icon" href="/favicon.svg" />
-        <link rel="stylesheet" href="/auth.css" />
+        <link rel="icon" href={assets.url("/favicon.svg")} />
+        {fonts.map((font) => (
+          <link
+            rel="preload"
+            href={assets.url(font)}
+            as="font"
+            type="font/woff2"
+            crossorigin="anonymous"
+          />
+        ))}
+        <link rel="stylesheet" href={assets.url("/auth.css")} />
       </head>
       <body>
         <header>

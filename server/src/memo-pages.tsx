@@ -47,24 +47,6 @@ function billingNote(
   );
 }
 
-const reportFonts = (
-  <>
-    <link
-      rel="preload"
-      href="/fonts/geist-latin-variable.woff2"
-      as="font"
-      type="font/woff2"
-      crossorigin="anonymous"
-    />
-    <link
-      rel="preload"
-      href="/fonts/jetbrains-mono-regular.woff2"
-      as="font"
-      type="font/woff2"
-      crossorigin="anonymous"
-    />
-  </>
-);
 // A child span prevents HTML's pre parser from swallowing a leading newline.
 const plain = (text: string) => (
   <pre class="memo-text">
@@ -384,7 +366,7 @@ function current(
       {sheet(view)}
     </>,
     status,
-    reportFonts,
+    null,
     {
       account: { csrf, email: view.email, here: "report", billing },
       sheet: true,
@@ -416,9 +398,12 @@ export async function memoPages(
         "X-Content-Type-Options": "nosniff",
       },
     });
-  const docs = await store.readDocuments();
-  // Billing information is page chrome, never part of the report/download.
-  const trial = await store.trialStatus?.().catch(() => undefined);
+  // Two independent reads at once, each on its own pooled connection. Billing
+  // information is page chrome, never part of the report/download.
+  const [docs, trial] = await Promise.all([
+    store.readDocuments(),
+    store.trialStatus?.().catch(() => undefined),
+  ]);
   return current(
     {
       docs,

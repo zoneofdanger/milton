@@ -1,4 +1,5 @@
 import { mkdir, cp, readFile, writeFile } from "node:fs/promises";
+import { versionAssets } from "@milton/theme/assets";
 const base = new URL("../", import.meta.url);
 await mkdir(new URL("dist/public/fonts/", base), { recursive: true });
 const theme = await readFile(
@@ -25,6 +26,12 @@ await cp(
   new URL("../../../packages/theme/public/favicon.svg", import.meta.url),
   new URL("dist/public/favicon.svg", base),
 );
+versionAssets(new URL("dist/public/", base).pathname, [
+  "/auth.css",
+  "/favicon.svg",
+  "/fonts/geist-latin-variable.woff2",
+  "/fonts/jetbrains-mono-regular.woff2",
+]);
 const r = await Bun.build({
   entrypoints: [
     new URL("src/cloud-run.ts", base).pathname,

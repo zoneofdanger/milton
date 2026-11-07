@@ -688,6 +688,16 @@ read and set `last_used_at` only. No runtime can change a key's binding columns.
 `007-connection-key-status` grants `connection_key_status` EXECUTE to MCP and app only.
 Rerunning 006 converges.
 
+Server timeouts live on the runtime logins, because Neon's proxy and pooler drop the
+`statement_timeout`/`lock_timeout` a client passes at connect (the pools still pass them,
+which plain PostgreSQL applies). As the privileged owner, `migrations/007-role-timeouts.up.sql`
+sets, in database `milton` only, 20 s statement and 10 s lock limits for
+`milton_app_runtime` and `milton_mcp_runtime` (the values in `src/store/database.ts`) and
+a 5 s statement limit for `milton_auth_runtime` (`apps/auth`'s value; it sets no lock
+limit). Owner, delegate, legacy and guide roles get none. `check-runtime-role.ts`
+requires the app/MCP settings; `007-role-timeouts.down.sql` resets exactly these. A
+setting reaches only sessions that start after it.
+
 App and MCP read `sample_versions` and the guide state in `guide_accounts` and
 `report_guides`; MCP appends to `samples` and `sample_versions` but cannot update
 either, because migration `0002` makes every sample change an insert. Neither runtime

@@ -242,6 +242,46 @@ MCP code serves keys unless refusing every key is intended. Rollback is the prev
 app/MCP revisions; the function, table and grants can stay in place, unused. Live key
 creation needs a person's own fresh sign-in.
 
+## Runtime role timeouts (prepared, TODO #29)
+
+Neon's proxy and pooler drop the `statement_timeout`/`lock_timeout` the pools pass at
+connect (measured 2026-11-07: `SHOW` returned 0 for both through either host, while local
+PostgreSQL 18 applied them), so production has no server statement or lock limit and
+billing's waiter does not get its 10 s 503. One owner file sets them on the runtime logins,
+in database `milton`: app and MCP 20 s statement / 10 s lock, auth 5 s statement, the values
+the code already passes. Serving revisions need no change (only a statement or lock wait past
+its limit now fails, as the code intends), so traffic stays open. Apply it before releasing
+code whose `check-runtime-role.ts` requires it. Rehearse on a disposable Neon branch first,
+then:
+
+1. Snapshot.
+2. As `neondb_owner` (ALTER ROLE needs CREATEROLE and ADMIN on each login, which the
+   role that created them holds):
+   `psql -X -v ON_ERROR_STOP=1 -f server/migrations/007-role-timeouts.up.sql`. One
+   transaction; rerunning converges.
+3. Check as the owner. This lists exactly `milton_app_runtime` and `milton_mcp_runtime`
+   with `{statement_timeout=20s,lock_timeout=10s}` and `milton_auth_runtime` with
+   `{statement_timeout=5s}`:
+
+   ```sql
+   SELECT r.rolname, s.setconfig FROM pg_db_role_setting s
+   JOIN pg_roles r ON r.oid = s.setrole JOIN pg_database d ON d.oid = s.setdatabase
+   WHERE d.datname = 'milton' ORDER BY 1;
+   ```
+
+   Then `check-runtime-role.ts` must print `ok` for app and MCP (it now requires these
+   settings).
+
+4. A role setting reaches only sessions that start after it, and the pooler reuses its
+   server connections. After the services' connections have turned over (new revisions,
+   or once pooled server connections recycle), run `SHOW statement_timeout;` and
+   `SHOW lock_timeout;` as each runtime login through the host its payload uses and
+   expect 20s/10s (app, MCP) and 5s/0 (auth).
+
+Rollback: `psql -X -v ON_ERROR_STOP=1 -f server/migrations/007-role-timeouts.down.sql` as
+the same owner resets exactly these settings; code whose role audit requires them then
+fails that audit, so roll such code back first.
+
 ## Optional guide worker
 
 The default-off private guide pilot has separate [operations and capability instructions](guides.md). No guide job, schedule, provider key or account enrollment is provisioned by its build.
@@ -1136,6 +1176,8 @@ snapshot and rollback check. Rehearse against disposable data first:
    Apply once; no service migrates on startup. The new schema has no writing-role default
    grants. Owner-review/apply `005-app-roles.sql` against actual writing ownership.
    Row locks get UPDATE(id) on the immutable-ID column, rather than account-state writes.
+   As the privileged owner, apply `007-role-timeouts.up.sql` once the runtime logins
+   exist (their server timeouts; see [runtime role timeouts](#runtime-role-timeouts-prepared-todo-29)).
 4. Legacy subjects were mapped to native users by verified metadata, never email
    equality, on 2026-11-07 (see the cutover release record). The one-time
    `auth-identity-import.ts` has since been deleted; recover it from git history if needed.

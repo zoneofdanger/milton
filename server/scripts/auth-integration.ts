@@ -213,6 +213,33 @@ try {
         "utf8",
       ),
     );
+  // 007: runtime-login timeouts in this database only, nothing on any other
+  // role. Up twice converges; down removes exactly these; up again restores.
+  const roleTimeouts = async () =>
+    (
+      await owner.query(
+        "SELECT r.rolname role,s.setconfig config FROM pg_db_role_setting s JOIN pg_roles r ON r.oid=s.setrole JOIN pg_database d ON d.oid=s.setdatabase WHERE d.datname='milton' ORDER BY 1",
+      )
+    ).rows;
+  const bounded = ["statement_timeout=20s", "lock_timeout=10s"];
+  const timeouts = [
+    { role: "milton_app_runtime", config: bounded },
+    { role: "milton_auth_runtime", config: ["statement_timeout=5s"] },
+    { role: "milton_mcp_runtime", config: bounded },
+  ];
+  const roleTimeoutFile = (direction: string) =>
+    readFileSync(
+      new URL(`./migrations/007-role-timeouts.${direction}.sql`, sourceRoot),
+      "utf8",
+    );
+  for (const direction of ["up", "up", "down", "down", "up"]) {
+    await owner.query(roleTimeoutFile(direction));
+    assert.deepEqual(
+      await roleTimeouts(),
+      direction === "up" ? timeouts : [],
+      direction,
+    );
+  }
   // The guide job's plain login holds only main's NOLOGIN guide capability.
   await owner.query(
     "GRANT milton_guide_worker TO milton_guide_runtime WITH INHERIT TRUE",
@@ -229,6 +256,21 @@ try {
     appPool = new pg.Pool(poolConfig("app")),
     mcpPool = new pg.Pool(poolConfig("mcp"));
   pools.push(authPool, appPool, mcpPool);
+  // These pools pass no timeouts at connect, like every client through Neon's
+  // proxy: the server limits come from 007's role settings alone.
+  for (const [pool, statement, lock] of [
+    [appPool, "20s", "10s"],
+    [mcpPool, "20s", "10s"],
+    [authPool, "5s", "0"],
+  ] as const)
+    assert.deepEqual(
+      (
+        await pool.query(
+          "SELECT current_setting('statement_timeout') statement, current_setting('lock_timeout') lock",
+        )
+      ).rows[0],
+      { statement, lock },
+    );
   const url = (service: string) => {
     const u = new URL(
       `postgresql://milton_${service}_runtime@127.0.0.1:${port}/milton`,

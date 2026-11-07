@@ -22,9 +22,9 @@ This runbook keeps only the latest release record. Earlier release records and a
 one-time procedures are in git history; the last full version is at commit 492b96a
 (`git show 492b96a:server/deploy/README.md`).
 
-## Release record: lifecycle, caching, round trips and guards (2026-11-07, PRs #22 #24 #26 #27 #28 #29 #31)
+## Release record: lifecycle, caching, round trips and guards (2026-11-07, PRs #22 #24 #26 #27 #28 #29 #30 #31)
 
-Four deploys, no schema or secret change. First, `9de3099`: #22 (milton-qa, one account
+Five deploys, no schema or secret change. First, `9de3099`: #22 (milton-qa, one account
 lifecycle module) and #27 (milton-perf, content-versioned asset caching). Auth
 `milton-auth-00006-jjz`, app/MCP `milton-*-lca-9de3099` at 20:57Z. Through the load balancer,
 versioned app and auth CSS and fonts answer `immutable` with `content-encoding: br`, and a
@@ -59,6 +59,17 @@ disconnecting" retry page, as deletion does). App/MCP `milton-*-drt-c1af8c3` at 
 types, 131 tests, format, build, rehearsal 12/12, all 0; health 200 ×3, MCP 401, signed-out
 assistants and disconnect 403; 0 errors in a 5-minute watch. Rollback: app/MCP
 `milton-*-rtt-3e128a1`.
+
+Fifth, `d3ea1eb`: #30 (milton-perf, milton-designer accepted): app and auth serve the Latin
+JetBrains Mono subset, and the full font only for characters outside it (from U+0300).
+Latin first-view font bytes 122 → 79 KB. Auth `milton-auth-00008-967` (image
+`sha256:deb9608ef263eaca2ada0ed4e591325983511329bdc130e45306a9e2841d7b2a`; mail and
+maintenance jobs too), app/MCP `milton-*-fnt-d3ea1eb` (image
+`sha256:a4d7161d5fb15dcfb13bb7db872c45120f40caf5b5880759a3768c3292eae2c1`) at 21:40Z.
+Checks on main: types, 131 tests, format, site and server builds, rehearsal 12/12, auth
+integration 17/17, all 0; health 200 ×3, authorize 302, MCP 401. App and auth preload only
+the subset, and it is served `immutable`; 0 errors in a 5-minute watch. Rollback: auth `milton-auth-00007-vn2`, app/MCP
+`milton-*-drt-c1af8c3`.
 
 ## Runtime role timeouts (applied 2026-11-07, TODO #29)
 
@@ -329,8 +340,8 @@ references. Inspect revision readiness before selecting a recorded revision:
 gcloud run revisions list --service=milton-app --project=milton-510506 --region=us-east4
 ```
 
-Now serving (2026-11-07): app `milton-app-drt-c1af8c3` and MCP
-`milton-mcp-drt-c1af8c3` (source `c1af8c3`), and auth `milton-auth-00007-vn2`. The
+Now serving (2026-11-07): app `milton-app-fnt-d3ea1eb` and MCP
+`milton-mcp-fnt-d3ea1eb` (source `d3ea1eb`), and auth `milton-auth-00008-967`. The
 release record above gives the image and rollback revisions.
 
 Roll back only affected services, preserve ingress/IAM, then repeat the canonical

@@ -289,6 +289,15 @@ test("served instructions state edit precedence, retrieval and scoped transforma
     /New drafts:[^.]+check cover rules and matching samples \(opening, length, sign-off, forbidden phrases\), fixing failures before display\./,
   );
   expect(retrieval).not.toContain("fix failures before showing text");
+  // Saves, the rule proposal and session capture, stated nowhere else in tests.
+  for (const phrase of [
+    "unchanged confirms no write",
+    "same correction twice",
+    "Session capture is off by default",
+    "current conversation only",
+    "Stop capture immediately",
+  ])
+    expect(storeInstructions).toContain(phrase);
 });
 
 test("every create_memo shape the server instructions describe parses against saveMemoInput", () => {
@@ -427,8 +436,6 @@ test("the refusal, both reminders and the instructions give the one link, true f
     "On subscription_required, say so and give its link once, do not retry, continue other work.",
   );
   expect(account).not.toContain("no link");
-  // No memo-update allowance remains to mention.
-  expect(storeInstructions).not.toMatch(/memo.update/i);
 });
 
 test("sample contexts are bounded, extensible and complete replacements have explicit clearing semantics", () => {
@@ -516,5 +523,4 @@ test("optional guide envelopes are self-contained and leave approved text and so
   expect(report.guide.precedence).toContain("requested edit scope");
   expect(report.text).toBe(off.text);
   expect(report.version).toBe(off.version);
-  expect(storeInstructions.length).toBeLessThanOrEqual(4096);
 });

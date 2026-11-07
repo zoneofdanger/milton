@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { jwtVerify, createLocalJWKSet } from "jose";
 import { randomUUID, createHash, randomBytes } from "node:crypto";
 import pg from "pg";
-import { getMigrations } from "better-auth/db/migration";
 import { bundleFixture } from "./bundle-fixture.ts";
 import { httpFixture } from "./http-fixture.ts";
 import { checkRuntimeRole } from "./check-role.ts";
@@ -54,23 +53,7 @@ const group = (name: string) => {
   console.log(`PASS ${name}`);
 };
 try {
-  const bootstrap = createProvider(config, {
-    pool: p.owner,
-    owner: true,
-    boundaries,
-  });
   const nativeUrl = new URL("../migrations/001-native.up.sql", import.meta.url);
-  if (process.argv.includes("--generate-native")) {
-    if (existsSync(nativeUrl))
-      throw new Error("existing_native_migration_refused");
-    const plan = await getMigrations(bootstrap.provider.options);
-    writeFileSync(
-      nativeUrl,
-      "-- Generated from the pinned public native migration planner; reviewed before application.\nBEGIN;\n" +
-        (await plan.compileMigrations()) +
-        "\nCOMMIT;\n",
-    );
-  }
   assert(existsSync(nativeUrl), "reviewed native baseline required");
   await p.owner.query(readFileSync(nativeUrl, "utf8"));
   // Fictional retained data, unrelated storage and native rows survive down/reapply.

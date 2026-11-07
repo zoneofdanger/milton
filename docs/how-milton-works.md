@@ -433,7 +433,7 @@ Files: `packages/theme/`, `server/scripts/`, `.github/workflows/checks.yml`.
 - `probe-forms` confirms a signed-out form post passes CSRF.
 - `build.ts` builds the CSS with Vite and bundles the Cloud Run entry with Bun.
 - `dev.ts` serves the app on loopback and rebuilds the CSS on change.
-- CI runs types, tests, and formatting, holds no secrets, and does not deploy.
+- CI runs types, tests, formatting, and both integration suites on PostgreSQL 18, holds no secrets, and does not deploy.
 
 ## Optional report guides
 

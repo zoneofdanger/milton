@@ -101,8 +101,7 @@ Files: `server/src/mcp.ts`, `server/src/mcp-tools.ts`.
 - `list_reports` returns all five reports, with a one-line setup hint instead of the full
   script, only for reports with no rules or samples.
 - `create_memo` saves rules, edits, moves and sample changes together or not at all; context correction cannot combine with sample insertion or retirement.
-- Replies add the daily update balance if it can be read within 250 ms.
-- Replies also add a trial notice if one is due, and neither extra can fail the call.
+- Replies add a trial notice if one is due, and that notice can never fail the call.
 - Failures return a code and message, and unknown failures say no save outcome is
   confirmed.
 
@@ -181,8 +180,7 @@ not at all.
 - Moves quote a rule once, each rule moves once per save, and a removed rule cannot move.
 - A change cannot leave two identical rules in one report.
 - New rules already on file are skipped silently.
-- A rule starting `Baseline: ` must match the setup catalog exactly for that report.
-- The error for a bad baseline names the closest catalog rule, found by shared words.
+- No save files a rule starting `Baseline: ` or keeps that prefix on a changed or moved rule; an existing one can still be retired or edited to drop the prefix.
 - Rule text cannot contain Markdown headings, because Milton prints those.
 - Each rule and each assembled report has a size cap.
 
@@ -233,7 +231,7 @@ Files: `server/src/store/setup.ts`.
 - Draft or edit approval, approval to send or praise is not retention approval; one yes covers the displayed text and context, and changed text or context, including redaction, requires renewed approval.
 - The sample approval step includes the approved-edit one-time offer and excludes the change list; another writing task is requested only if the person wants one.
 - Rules remain available on request; a sample never implies a standing rule or turns its facts into preferences.
-- The historical `setupCatalog` remains canonical for Baseline validation; setup no longer generates Baseline rules, and a rejected Baseline points to the closest rule and report in the same error.
+- Setup no longer generates Baseline rules; existing ones keep serving with the cover-sheet note.
 - A standing instruction is offered separately and changed only with separate consent; a successful read verifies the connection, not future compliance.
 
 ## Sign-in and accounts
@@ -263,7 +261,6 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
 - Ownership uses exact issuer+subject, never email, provider nickname or eligibility fingerprints; native linking never merges writing or restarts a trial.
 - Account creation's unique identity row and billing's row lock converge under retries/concurrency; a new account starts empty.
 - Email and stable social identities get keyed trial-eligibility fingerprints with a dedicated stable key and first claimant, retained after deletion; changed/unprovisioned keys refuse admission.
-- Owner-only verified metadata import/dry-run preserves internal IDs, writing, trial/billing history and old neon:subject deletion markers; ambiguous mappings refuse and managed rows remain intact.
 - A trial row with no status gets the existing 30-day Stripe trial when billing is configured; no row/status or billing disabled calls no Stripe API.
 - Subscription creation locks the trial row across customer/list/create; minute-based idempotency retains the known remote-success/local-timeout ambiguity across a minute boundary.
 - Billing failures stop admission with retryable503; existing Stripe state is listed/reconciled before another create.
@@ -291,7 +288,7 @@ Files: `server/src/pages.tsx`, `server/src/memo-pages.tsx`, `server/src/auth.tsx
   native sample disclosures, rules, and a random joke comment.
 - Both empty-app setup paragraphs lead with pasted-writing cleanup and optional older examples beside the shared prompt; populated accounts point to the next email or DM.
 - Empty reports remain optional later uses; sample-only reports never show an unfinished setup state.
-- If the structured read fails, it falls back to plain report text.
+- Each view makes one structured read; a failed read fails the page, with no plain-text fallback.
 - `/download` returns the complete writing export as `TPS.md`; the web report labels
   its sample count as shown, explains its newest-eight-per-report limit and links to
   the complete download, including when assistant access is paused.
@@ -391,8 +388,7 @@ Files: `server/drizzle/`, `server/src/store/schema.ts`, `server/src/store/databa
 - `stripe_events` keeps each event's ID, type, and body hash, never the payload.
 - The database holds cards and their immutable versions; the obsolete memo tables and
   the unused card-version `legacy` flag are removed by the cleanup.
-- Fresh installs use one Drizzle baseline; the exact 0033 journal has an atomic owner-only
-  transition that preserves current data and marks that baseline applied. Other old states refuse.
+- Fresh installs use one Drizzle baseline; a populated older database refuses it.
 - Distinct app/MCP roles have explicit writing grants, no inherited owner/group/DDL/TEMP privileges and no native secret reads; app-only session/flow/lifecycle/eligibility storage is denied to MCP/auth.
 - The runtime role can read and lock the `store_config` row but cannot change its settings.
 - PostgreSQL connection, query, transaction-control and close failures become store errors: known triggers and constraints get clean coded responses, unknown failures log only class/code, and callback errors survive rollback/close unchanged.

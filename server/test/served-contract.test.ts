@@ -6,12 +6,8 @@ import {
   BASELINE_NOTE,
   type Filing,
 } from "../src/store/reports";
-import {
-  setupCatalog,
-  setupHint,
-  knownBaseline,
-  SETUP_PROMPT,
-} from "../src/store/setup";
+import { setupHint, SETUP_PROMPT } from "../src/store/setup";
+import { baselineRefusal } from "../src/store/save";
 import {
   coverSheet,
   missingIntent,
@@ -259,13 +255,11 @@ test("setup helps with pasted writing first, preserves optional guidance and ser
   }
   // Reads and setup text do not save, import or reset anything.
   expect(JSON.stringify([empty, sampled, filed])).toBe(before);
-  // Historical approved Baseline rules remain canonical, even though setup no longer generates them.
-  expect(setupCatalog.length).toBeGreaterThan(0);
-  for (const rule of setupCatalog) {
-    expect(knownBaseline(rule.text, rule.report)).toBe(true);
-    expect(knownBaseline(rule.text + " altered", rule.report)).toBe(false);
-    parses({ ...envelope(), rules: [rule] });
-  }
+  // Setup no longer files Baseline rules; the refusal says nothing changed
+  // and how to proceed.
+  expect(baselineRefusal("Baseline: No emoji in chat.", "chat").message).toBe(
+    '"Baseline: No emoji in chat." in chat starts with "Baseline: ", a prefix only the retired setup picks used. Send the rule in the person\'s own words without "Baseline: "; an existing Baseline rule can still be retired, or edited to drop the prefix. Nothing was changed.',
+  );
 });
 
 test("served instructions state edit precedence, retrieval and scoped transformations", () => {

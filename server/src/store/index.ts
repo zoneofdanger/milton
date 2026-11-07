@@ -80,8 +80,6 @@ const parseIdentity = (identity: VerifiedIdentity): VerifiedIdentity => ({
   provider: z.string().min(1).max(64).parse(identity.provider),
   subject: z.string().min(1).max(512).parse(identity.subject),
 });
-const parseClientId = (clientId: string) =>
-  z.string().min(1).max(2048).parse(clientId);
 
 // One-way fingerprint of a sign-in identity, stored after account deletion.
 const identityHash = (provider: string, subject: string) =>
@@ -183,54 +181,18 @@ export interface VerifiedStoreAuth {
   readonly [verifiedStoreIdentity]: true;
 }
 
-// An assistant is one OAuth client acting for one sign-in identity.
-interface AssistantIdentity {
-  provider: string;
-  subject: string;
-  clientId: string;
-}
-const assistantIdentity = (identity: AssistantIdentity) => ({
-  ...parseIdentity(identity),
-  clientId: parseClientId(identity.clientId),
-});
-
-/**
- * Looks up the active account for a sign-in identity. With a clientId (the MCP
- * path), the same query also refuses an assistant the person disconnected,
- * whatever its token's remaining lifetime.
- */
+/** Looks up the active account for a sign-in identity. */
 export async function lookupIdentityAccount(
   bindings: StoreBindings,
-  identity: Pick<VerifiedIdentity, "provider" | "subject"> & {
-    clientId?: string;
-  },
+  identity: Pick<VerifiedIdentity, "provider" | "subject">,
 ): Promise<VerifiedStoreAuth> {
   const { provider, subject } = parseIdentity(identity);
-  const clientId =
-    identity.clientId === undefined
-      ? undefined
-      : parseClientId(identity.clientId);
   const row = (
-    await database(bindings).query<{
-      id: string | null;
-      disconnected: boolean;
-    }>(sql`
-        SELECT (SELECT u.id FROM identities i JOIN users u ON u.id=i.user_id
-          WHERE i.provider=${provider} AND i.subject=${subject} AND u.status='active') AS id,
-        ${
-          clientId === undefined
-            ? sql`false`
-            : sql`EXISTS(SELECT 1 FROM assistant_disconnects d
-          WHERE d.provider=${provider} AND d.subject=${subject} AND d.client_id=${clientId})`
-        } AS disconnected`)
+    await database(bindings).query<{ id: string }>(sql`
+        SELECT u.id FROM identities i JOIN users u ON u.id=i.user_id
+        WHERE i.provider=${provider} AND i.subject=${subject} AND u.status='active'`)
   )[0];
-  if (row?.disconnected)
-    throw new StoreError(
-      "invalid_token",
-      "This assistant was disconnected from Milton. Reconnect it from your assistant.",
-      401,
-    );
-  if (!row?.id)
+  if (!row)
     throw new StoreError(
       "account_unavailable",
       "Sign in to Milton before connecting your assistant.",
@@ -278,81 +240,6 @@ export function connectionKeysForAccount(
       createConnectionKey(db, auth.userId, binding, input),
     revoke: (id: string) => revokeConnectionKey(db, auth.userId, id),
   };
-}
-
-/** Records a disconnect; Milton refuses the assistant from the next request. */
-export async function recordAssistantDisconnect(
-  bindings: StoreBindings,
-  identity: AssistantIdentity,
-) {
-  const { provider, subject, clientId } = assistantIdentity(identity);
-  await database(bindings).query(sql`
-      INSERT INTO assistant_disconnects (provider,subject,client_id)
-      VALUES (${provider},${subject},${clientId}) ON CONFLICT DO NOTHING`);
-}
-
-/** Removes a disconnect after the person approved the assistant again. */
-export async function clearAssistantDisconnect(
-  bindings: StoreBindings,
-  identity: AssistantIdentity,
-) {
-  const { provider, subject, clientId } = assistantIdentity(identity);
-  await database(bindings).query(sql`
-      DELETE FROM assistant_disconnects
-      WHERE provider=${provider} AND subject=${subject} AND client_id=${clientId}`);
-}
-
-/** Client ids this identity disconnected, for the connected-assistants page. */
-export async function listAssistantDisconnects(
-  bindings: StoreBindings,
-  identity: Pick<VerifiedIdentity, "provider" | "subject">,
-): Promise<Set<string>> {
-  const { provider, subject } = parseIdentity(identity);
-  const rows = await database(bindings).query<{ client_id: string }>(sql`
-      SELECT client_id FROM assistant_disconnects
-      WHERE provider=${provider} AND subject=${subject}`);
-  return new Set(rows.map((row) => row.client_id));
-}
-
-/**
- * Deletes the identity's active account and everything it owns, in one
- * transaction. First records a disconnect for every given assistant (so their
- * unexpired tokens cannot reach a later account for this identity) and the
- * identity fingerprint (so that account gets no second trial). Every tenant
- * table cascades from users.
- */
-export async function deleteAccount(
-  bindings: StoreBindings,
-  identity: Pick<VerifiedIdentity, "provider" | "subject">,
-  clientIds: string[],
-): Promise<void> {
-  const { provider, subject } = parseIdentity(identity);
-  const clients = [...new Set(clientIds.map(parseClientId))];
-  await database(bindings)
-    .transaction(async (tx) => {
-      // The same row lock every writer takes, so in-flight saves finish first
-      // and later ones find no active account.
-      const account = (
-        await tx.query<{ id: string }>(sql`
-        SELECT u.id FROM identities i JOIN users u ON u.id=i.user_id
-        WHERE i.provider=${provider} AND i.subject=${subject} AND u.status='active'
-        FOR UPDATE OF u`)
-      )[0];
-      if (!account) throw accountUnavailable();
-      for (const clientId of clients)
-        await tx.query(sql`
-          INSERT INTO assistant_disconnects (provider,subject,client_id)
-          VALUES (${provider},${subject},${clientId}) ON CONFLICT DO NOTHING`);
-      await tx.query(sql`
-        INSERT INTO deleted_identities (identity_hash)
-        VALUES (${identityHash(provider, subject)}) ON CONFLICT DO NOTHING`);
-      await tx.query(sql`DELETE FROM users WHERE id=${account.id}`);
-    })
-    .catch((error) => {
-      // Any failure inside, including an unexpected one, becomes a logged StoreError,
-      // as before the database layer started mapping errors itself.
-      throw databaseFailure(error);
-    });
 }
 
 type CallAllowance =

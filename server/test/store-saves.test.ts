@@ -5,6 +5,7 @@ import { sql } from "drizzle-orm";
 import { StoreError } from "../src/store/errors";
 import { database } from "../src/store/index";
 import { BASELINE_NOTE } from "../src/store/reports";
+import { baselineRefusal } from "../src/store/save";
 import { localStore } from "./local-store";
 import {
   fixtureStore,
@@ -1099,7 +1100,7 @@ test("a save and its receipt commit together: a lost acknowledgment replays the 
   }
 });
 
-test("a Baseline: rule must be a setup rule byte for byte in its report, filed new, edited or moved", async () => {
+test("no save files or keeps a Baseline: rule, new, edited or moved; retiring one or dropping its prefix still works", async () => {
   const local = await localStore();
   try {
     await seedUsers(local.pg, "baseline");
@@ -1111,60 +1112,62 @@ test("a Baseline: rule must be a setup rule byte for byte in its report, filed n
         expected_version: (await store.getTpsReport()).version,
         ...change,
       });
-    const near = 'Baseline: Sign off with "Cheers," and my first name.';
-    const refused = await save({ rules: [{ report: "email", text: near }] });
+    const rule = 'Baseline: Sign off with "Best," and my first name.';
+    const refused = await save({
+      rules: [
+        { report: "cover", text: "Lead with the answer." },
+        { report: "email", text: rule },
+      ],
+    });
     expect(refused).toMatchObject({
       status: "failed",
       error: "baseline_unknown",
+      message: baselineRefusal(rule, "email").message,
     });
-    expect(refused.message).toContain(
-      "Copy the closest rule and its report shown below exactly",
-    );
-    expect(refused.message).toContain(
-      'Closest setup rule: [email] "Baseline: Sign off with "Thanks," and my first name."',
-    );
     expect((await store.getTpsReport()).text).toBe("");
-    const rule = 'Baseline: Sign off with "Best," and my first name.';
-    // A catalog text counts only in the report it is served for.
-    expect(
-      await save({ rules: [{ report: "chat", text: rule }] }),
-    ).toMatchObject({ error: "baseline_unknown" });
+    // Historical rules filed by the retired setup picks.
+    await seedRule(local.pg, "baseline", "picked", rule, { report: "email" });
+    const chat = "Baseline: No emoji in chat.";
+    await seedRule(local.pg, "baseline", "chat", chat, { report: "chat" });
     expect(
       (
         await save({
-          rules: [
-            { report: "cover", text: "Lead with the answer." },
-            { report: "email", text: rule },
-          ],
+          rules: [{ report: "cover", text: "Lead with the answer." }],
         })
       ).status,
     ).toBe("saved");
-    expect(
-      (await cardHeads(local.db, "baseline")).map((h) => [h.report, h.body]),
-    ).toEqual([
-      ["cover", "Lead with the answer."],
-      ["email", rule],
-    ]);
     // The cover sheet explains the prefix itself; nothing stores the note.
     expect((await store.getTpsReport()).text).toStartWith(
       BASELINE_NOTE + "\n\n- Lead with the answer.",
     );
-    // An edit may not leave a prefixed rule outside the catalog; dropping the
-    // prefix makes it the person's own rule.
     const edit = (after: string) =>
       save({ exact_edits: [{ before: rule, after }] });
     // A refusal leaves the rule as filed.
-    expect(await edit(near)).toMatchObject({
-      status: "failed",
-      error: "baseline_unknown",
-    });
-    expect((await cardHeads(local.db, "baseline")).at(-1)!.body).toBe(rule);
+    expect(
+      await edit('Baseline: Sign off with "Cheers," and my first name.'),
+    ).toMatchObject({ status: "failed", error: "baseline_unknown" });
     expect(
       await save({ moves: [{ before: rule, report: "chat" }] }),
     ).toMatchObject({ error: "baseline_unknown" });
-    const own = 'Sign off with "Cheers," and my first name.';
+    expect(
+      (await cardHeads(local.db, "baseline")).find((h) => h.id === "picked")!
+        .body,
+    ).toBe(rule);
+    // Retiring one still works.
+    expect(
+      (await save({ exact_edits: [{ before: chat, after: "" }] })).status,
+    ).toBe("saved");
+    expect(
+      (await cardHeads(local.db, "baseline")).find((h) => h.id === "chat")!
+        .archived,
+    ).toBe(true);
+    // Dropping the prefix makes it the person's own rule.
+    const own = 'Sign off with "Best," and my first name.';
     expect((await edit(own)).status).toBe("saved");
-    expect((await cardHeads(local.db, "baseline")).at(-1)!.body).toBe(own);
+    expect(
+      (await cardHeads(local.db, "baseline")).map((h) => h.body),
+    ).toContain(own);
+    expect((await store.getTpsReport()).text).not.toContain(BASELINE_NOTE);
   } finally {
     await local.dispose();
   }

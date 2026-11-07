@@ -3,6 +3,7 @@ import { sql } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { localStore } from "./local-store";
 import {
+  eraseAccount,
   insideTransactions,
   read,
   seedRule,
@@ -13,7 +14,6 @@ import { createStoreMemoTools } from "../src/mcp-tools";
 import { createHash } from "node:crypto";
 import type { StoreDatabase } from "../src/store/database";
 import {
-  deleteAccount,
   resolveIdentityAccount,
   lookupIdentityAccount,
   storeForCurrentRequest,
@@ -823,7 +823,7 @@ test("closing an account refuses its reads, saves and replays, fences a pending 
   }
 }, 30000);
 
-test("account deletion removes every tenant row, keeps refusals, waits for an in-flight save and removes it too, and allows no second trial", async () => {
+test("account deletion removes every tenant row, waits for an in-flight save and removes it too, and allows no second trial", async () => {
   const local = await localStore();
   try {
     await local.pg.exec("UPDATE store_config SET trials_enabled=true");
@@ -952,10 +952,7 @@ test("account deletion removes every tenant row, keeps refusals, waits for an in
     });
     await saving;
     hold = undefined;
-    const deleting = deleteAccount(local.env, neon("leaving"), [
-      "client-c",
-      "client-d",
-    ]);
+    const deleting = eraseAccount(local.db, neon("leaving"));
     release();
     expect((await inflight).status).toBe("saved");
     await deleting;
@@ -971,13 +968,6 @@ test("account deletion removes every tenant row, keeps refusals, waits for an in
     ).toBe(0);
     expect(await counts(kept.auth.userId)).toEqual(keptBefore);
     expect((await kept.store.readTpsReport()).is_empty).toBe(false);
-    expect(
-      (
-        await local.pg.query(
-          "SELECT client_id FROM assistant_disconnects WHERE provider='neon' AND subject='leaving' ORDER BY 1",
-        )
-      ).rows,
-    ).toEqual([{ client_id: "client-c" }, { client_id: "client-d" }]);
     const fingerprint = createHash("sha256")
       .update("neon:leaving")
       .digest("hex");
@@ -985,13 +975,6 @@ test("account deletion removes every tenant row, keeps refusals, waits for an in
       (await local.pg.query("SELECT identity_hash FROM deleted_identities"))
         .rows,
     ).toEqual([{ identity_hash: fingerprint }]);
-    // An identity with no active account changes nothing.
-    await expect(
-      deleteAccount(local.env, neon("leaving"), ["client-e"]),
-    ).rejects.toMatchObject({ code: "account_unavailable" });
-    expect(
-      (await local.pg.query("SELECT 1 FROM assistant_disconnects")).rows,
-    ).toHaveLength(2);
     // Re-signup: a fresh, empty account already marked canceled, so assistant
     // reads pause; a never-deleted identity's row still waits for its trial.
     await resolveIdentityAccount(local.env, neon("leaving"));
@@ -1034,7 +1017,7 @@ test("account deletion removes every tenant row, keeps refusals, waits for an in
       ).status,
     ).toBe("early_access");
     // Re-signup while trials are off: no effect until trials are enabled.
-    await deleteAccount(local.env, neon("leaving"), []);
+    await eraseAccount(local.db, neon("leaving"));
     await local.pg.exec("UPDATE store_config SET trials_enabled=false");
     await resolveIdentityAccount(local.env, neon("leaving"));
     const third = await personStoreForCurrentRequest(
@@ -1231,7 +1214,7 @@ test("connection keys store only a hash, list without secrets, expire, revoke, c
       ok: true,
       keyId: last.record.id,
     });
-    await deleteAccount(local.env, neon("keys"), []);
+    await eraseAccount(local.db, neon("keys"));
     expect(
       (await local.pg.query("SELECT 1 FROM connection_keys")).rows,
     ).toEqual([]);

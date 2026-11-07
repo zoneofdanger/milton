@@ -1,5 +1,5 @@
 import { parseArgs } from "node:util";
-import { neonDatabase } from "../src/store/database";
+import { postgresDatabase } from "../src/store/database";
 import { setGuideEnrollment } from "../src/guides/store";
 import { verifyDatabaseTarget } from "./database-config";
 
@@ -19,7 +19,7 @@ try {
     !["enable", "disable"].includes(action!)
   )
     throw new Error("configuration");
-  const db = neonDatabase(url);
+  const db = postgresDatabase(url);
   await verifyDatabaseTarget(db);
   await setGuideEnrollment(db, userId, {
     enabled: action === "enable",

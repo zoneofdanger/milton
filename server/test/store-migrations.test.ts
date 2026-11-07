@@ -432,7 +432,7 @@ test("the runtime has only current grants, its guards hold, and later tables inh
   }
 });
 
-test("sample context upgrade preserves baseline writing and labels; guarded rollback restores it or refuses new metadata", async () => {
+test("sample context upgrade preserves baseline writing and labels and guards the result", async () => {
   const folder = new URL("../drizzle/", import.meta.url).pathname;
   const pg = new PGlite();
   // This historical migration's rollback contract is tested at its own schema.
@@ -456,11 +456,6 @@ test("sample context upgrade preserves baseline writing and labels; guarded roll
     await pg.exec(`INSERT INTO sample_kinds(user_id,id,report,label) VALUES ('upgrade-fixture','k','chat','note');
       INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,audience,purpose,register) VALUES ('upgrade-fixture','a','chat','k','Original summary.','  Original body.\r\n\n😀  ','{}','boss','follow up','casual');
       INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,retired_at,retire_reason) VALUES ('upgrade-fixture','r','chat','k','Retired summary.','Retired body.','{}',now(),'removed');`);
-    const beforeSchema = await schemaCatalog(pg);
-    const before = (await pg.query("SELECT * FROM samples ORDER BY id")).rows;
-    const down = await Bun.file(
-      new URL("../scripts/sample-context-rollback.sql", import.meta.url),
-    ).text();
     await migrate(drizzle(pg), { migrationsFolder: contextFolder });
     expect(
       (
@@ -527,47 +522,6 @@ test("sample context upgrade preserves baseline writing and labels; guarded roll
           [JSON.stringify(context)],
         ),
       ).rejects.toThrow("samples_context");
-    await pg.exec(down);
-    expect((await pg.query("SELECT * FROM samples ORDER BY id")).rows).toEqual(
-      before,
-    );
-    expect(await schemaCatalog(pg)).toEqual(beforeSchema);
-    expect(
-      (
-        await pg.query(
-          "SELECT hash,created_at FROM drizzle.__drizzle_migrations",
-        )
-      ).rows,
-    ).toEqual([{ hash: "fixture-baseline", created_at: 1793815543500 }]);
-    await migrate(drizzle(pg), { migrationsFolder: contextFolder });
-    // Isolate refusal reasons so one unrepresentable row cannot mask another.
-    const rollbackReady = await pg.dumpDataDir("none");
-    for (const mutation of [
-      `INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json)
-        VALUES ('upgrade-fixture','new-value','chat','k','{"version":1,"summary":"New purpose.","purposes":["request_review"]}','A fictional review request.','{}')`,
-      `UPDATE samples SET context=context || '{"medium":"slack"}'::jsonb,context_revision=2 WHERE id='a'`,
-      `INSERT INTO samples(user_id,id,report,kind_id,context,body,client_json,replaces_id)
-        VALUES ('upgrade-fixture','child','chat','k','{"version":1,"summary":"Replacement summary."}','Replacement body.','{}','a');
-        UPDATE samples SET kind_id='k2',context_revision=2 WHERE id='child'`,
-    ]) {
-      const changed = await PGlite.create({ loadDataDir: rollbackReady });
-      try {
-        await changed.exec(mutation);
-        const upgraded = await schemaCatalog(changed);
-        const rows = (await changed.query("SELECT * FROM samples ORDER BY id"))
-          .rows;
-        await expect(changed.exec(down)).rejects.toThrow(
-          "sample_context_rollback_would_lose_metadata",
-        );
-        await changed.exec("ROLLBACK");
-        expect(await schemaCatalog(changed)).toEqual(upgraded);
-        expect(
-          (await changed.query("SELECT * FROM samples ORDER BY id")).rows,
-        ).toEqual(rows);
-      } finally {
-        await changed.close();
-      }
-    }
   } finally {
     await pg.close();
     await rm(contextFolder, { recursive: true, force: true });

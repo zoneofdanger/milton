@@ -14,6 +14,27 @@ describe("auth product boundaries", () => {
   test("missing production capabilities fail startup without secret output", () => {
     expect(() => readConfig({})).toThrow("invalid_auth_configuration");
   });
+  test("client metadata URLs need an https DNS host without credentials", async () => {
+    const { metadataDocumentUrlAllowed: allowed } =
+      await import("../src/provider.ts");
+    expect(allowed("https://claude.ai/oauth/claude-code-client-metadata")).toBe(
+      true,
+    );
+    expect(allowed("https://platform.muse.ai/oauth/client-metadata.json")).toBe(
+      true,
+    );
+    for (const url of [
+      "http://claude.ai/oauth/claude-code-client-metadata",
+      "https://user:pass@claude.ai/oauth/claude-code-client-metadata",
+      "https://claude.ai/oauth/claude-code-client-metadata#x",
+      "https://8.8.8.8/oauth/client-metadata.json",
+      "https://[2606:4700::1]/oauth/client-metadata.json",
+      "https://localhost/oauth/client-metadata.json",
+      "https://app.localhost./oauth/client-metadata.json",
+      "not a url",
+    ])
+      expect(allowed(url)).toBe(false);
+  });
 });
 
 test("canonical auth HTTP boundary rejects alternate host, missing Origin, and deferred mutations", async () => {

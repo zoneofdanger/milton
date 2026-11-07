@@ -44,6 +44,22 @@ export type Boundaries = {
   ) => Promise<Response>;
   beforeMailStash?: (state: RequestState) => void;
 };
+/** Any https client metadata URL on a DNS name. The plugin also refuses
+ * private hosts, and fetchClientMetadataResource pins public addresses. */
+export function metadataDocumentUrlAllowed(clientIdUrl: string): boolean {
+  if (!URL.canParse(clientIdUrl)) return false;
+  const url = new URL(clientIdUrl);
+  const host = url.hostname.replace(/^\[|\]$/g, "").replace(/\.+$/, "");
+  return (
+    url.protocol === "https:" &&
+    !url.username &&
+    !url.password &&
+    !clientIdUrl.includes("#") &&
+    isIP(host) === 0 &&
+    host !== "localhost" &&
+    !host.endsWith(".localhost")
+  );
+}
 const invalid = () => new APIError("BAD_REQUEST", { error: "invalid_grant" });
 const hash = (v: string) => createHash("sha256").update(v).digest("hex");
 export function createProvider(
@@ -513,8 +529,7 @@ export function createProvider(
         fetchClientMetadataResource,
         originBoundFields: ["post_logout_redirect_uris"],
         metadataProfile: "mcp-2026-07-28",
-        isMetadataDocumentUrlAllowed: (url) =>
-          url === "https://platform.muse.ai/oauth/client-metadata.json",
+        isMetadataDocumentUrlAllowed: metadataDocumentUrlAllowed,
       }),
     ],
   });

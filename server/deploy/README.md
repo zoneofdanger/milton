@@ -123,6 +123,22 @@ replaces `sample.replaces`, report metadata uses `revision`, and clients must re
 current IDs and the account version. Check exact active reads/exports and revision,
 retirement, replay, stale-write and account-delete behavior before reopening.
 
+## Connection keys release (prepared, not applied)
+
+Connection keys add one additive table and one owner grant file; old app/MCP code never
+reads the table, so traffic may stay open under the additive procedure in
+[Release verification and rollback](#release-verification-and-rollback). In order:
+snapshot; apply Drizzle `0004_connection_keys` with `bun run --cwd server db:migrate`
+(creates `connection_keys`, its user index and cascade, and revokes the legacy
+`milton_runtime` default grants on it); then, as the owner, apply
+`server/migrations/006-connection-keys-roles.sql` (app: SELECT on every column except
+`secret_hash`, INSERT, UPDATE(`revoked_at`); MCP: SELECT, UPDATE(`last_used_at`); nothing
+else). The file revokes before granting, so rerunning it converges. Only then roll out
+app and MCP: new code without 006 fails the Connected assistants page, key pages and key
+calls with `store_unavailable` but leaves OAuth calls unchanged. Rollback is the previous
+app/MCP revisions; the table and grants can stay in place, unread. Live key creation
+needs a person's own fresh sign-in.
+
 ## Optional guide worker
 
 The default-off private guide pilot has separate [operations and capability instructions](guides.md). No guide job, schedule, provider key or account enrollment is provisioned by its build.

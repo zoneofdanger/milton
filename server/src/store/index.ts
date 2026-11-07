@@ -213,14 +213,13 @@ export async function lookupIdentityAccount(
 }
 
 /** The account a parsed connection key grants and the key's scope, or a
- * refusal alike for every reason (see authenticateConnectionKey); `known` is
- * false only when no key has the id. */
+ * refusal alike for every reason (see authenticateConnectionKey). */
 export async function connectionKeyAccount(
   bindings: StoreBindings & { issuer: string },
   key: { id: string; secret: string },
 ): Promise<
   | { ok: true; auth: VerifiedStoreAuth; keyId: string; scope: KeyScope }
-  | { ok: false; known: boolean }
+  | { ok: false }
 > {
   const checked = await authenticateConnectionKey(
     database(bindings),

@@ -837,7 +837,7 @@ test("connection keys get exactly their scope's tools; revoked, expired, malform
   }
 }, 30000);
 
-test("key lookups are bounded before database access: 8 at once, then a quick 503; an invented id is remembered, a known id never is", async () => {
+test("key lookups are bounded before database access: 8 at once, then a quick 503", async () => {
   const local = await localStore();
   let queries = 0;
   let hold: Promise<void> | undefined;
@@ -904,21 +904,7 @@ test("key lookups are bounded before database access: 8 at once, then a quick 50
     release();
     hold = undefined;
     for (const reply of await Promise.all(held)) expect(reply.status).toBe(401);
-    // A repeated invented id is refused from memory.
-    const repeated = invented(0);
-    expect((await post(repeated)).status).toBe(401);
-    const after = queries;
-    expect((await post(repeated)).status).toBe(401);
-    expect(queries).toBe(after);
-    // A wrong secret for a real id reaches the database every time, so it cannot
-    // lock the key out, and the real key still works.
-    const wrong =
-      real.key.slice(0, 26) +
-      (real.key[26] === "A" ? "B" : "A") +
-      real.key.slice(27);
-    expect((await post(wrong)).status).toBe(401);
-    expect((await post(wrong)).status).toBe(401);
-    expect(queries).toBe(after + 2);
+    // The slots are free again: the real key works.
     expect((await post(real.key)).status).toBe(200);
   } finally {
     await local.dispose();

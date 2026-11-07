@@ -1161,15 +1161,9 @@ test("connection keys store only a hash, list without secrets, expire, revoke, c
         parseConnectionKey(bad) &&
           (await connectionKeyAccount(env, parseConnectionKey(bad)!)).ok,
       ).toBeFalsy();
-    // An unknown id is reported as unknown; a known one with a wrong secret is not.
-    expect(await check(`mk_${flip(id!)}_${secret}`)).toEqual({
-      ok: false,
-      known: false,
-    });
-    expect(await check(`mk_${id}_${flip(secret!)}`)).toEqual({
-      ok: false,
-      known: true,
-    });
+    // An unknown id and a known one with a wrong secret are refused alike.
+    expect(await check(`mk_${flip(id!)}_${secret}`)).toEqual({ ok: false });
+    expect(await check(`mk_${id}_${flip(secret!)}`)).toEqual({ ok: false });
     // Never-expiring keys have no expiry; expired keys stay listed, refused.
     const forever = await keys.create({
       name: "CI",

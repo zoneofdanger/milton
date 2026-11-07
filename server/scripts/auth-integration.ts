@@ -890,7 +890,7 @@ try {
       await revokeConnectionKey(appDb, keyUser, made.record.id),
       true,
     );
-    assert.deepEqual(await keyCheck(made.key), { ok: false, known: true });
+    assert.deepEqual(await keyCheck(made.key), { ok: false });
     // Account deletion by the app runtime removes the account's keys.
     await createConnectionKey(appDb, keyUser, keyBinding, {
       name: "Fictional CI",

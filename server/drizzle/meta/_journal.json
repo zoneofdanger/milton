@@ -29,6 +29,13 @@
       "when": 1793992765899,
       "tag": "0003_report_guides",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1794045415975,
+      "tag": "0004_connection_keys",
+      "breakpoints": true
     }
   ]
 }

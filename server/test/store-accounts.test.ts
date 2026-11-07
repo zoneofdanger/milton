@@ -18,6 +18,8 @@ import {
   lookupIdentityAccount,
   storeForCurrentRequest,
   personStoreForCurrentRequest,
+  connectionKeyAccount,
+  connectionKeysForAccount,
 } from "../src/store";
 
 test("trial transition preserves saves and TPS while notices and access follow the Stripe subscription state", async () => {
@@ -1044,3 +1046,147 @@ test("account deletion removes every tenant row, keeps refusals, waits for an in
     await local.dispose();
   }
 }, 30000);
+
+test("connection keys store only a hash, list without secrets, expire, revoke, cap active keys and leave with the account", async () => {
+  const local = await localStore();
+  const quiet = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    const neon = (subject: string) => ({ provider: "neon", subject });
+    await resolveIdentityAccount(local.env, neon("keys"));
+    await resolveIdentityAccount(local.env, neon("other"));
+    const auth = await lookupIdentityAccount(local.env, neon("keys"));
+    const keys = connectionKeysForAccount(local.env, auth);
+    const others = connectionKeysForAccount(
+      local.env,
+      await lookupIdentityAccount(local.env, neon("other")),
+    );
+    const made = await keys.create({
+      name: "  Nightly job ",
+      scope: "read",
+      expiry: 90,
+    });
+    const [, id, secret] = /^mk_([A-Za-z0-9_-]{22})_([A-Za-z0-9_-]{43})$/.exec(
+      made.key,
+    )!;
+    expect(made.record).toMatchObject({
+      id,
+      name: "Nightly job",
+      scope: "read",
+      lastUsedAt: null,
+      expired: false,
+    });
+    const days = (date: Date | null) =>
+      Math.round((date!.getTime() - made.record.createdAt.getTime()) / 864e5);
+    expect(days(made.record.expiresAt)).toBe(90);
+    // Only the secret's SHA-256 is stored; nothing listed carries it or the hash.
+    const stored = (
+      await local.pg.query<Record<string, unknown>>(
+        "SELECT * FROM connection_keys",
+      )
+    ).rows;
+    expect(stored).toHaveLength(1);
+    expect(JSON.stringify(stored)).not.toContain(secret!);
+    expect(stored[0]!.secret_hash).toBe(
+      createHash("sha256").update(secret!).digest("hex"),
+    );
+    const listed = await keys.list();
+    expect(listed.map((key) => key.id)).toEqual([id!]);
+    expect(JSON.stringify(listed)).not.toContain(
+      String(stored[0]!.secret_hash),
+    );
+    expect(await others.list()).toEqual([]);
+    // A good key grants its account and scope and records use once a minute.
+    expect(await connectionKeyAccount(local.env, made.key)).toMatchObject({
+      auth: { userId: auth.userId },
+      keyId: id,
+      scope: "read",
+    });
+    const used = async () =>
+      (
+        await local.pg.query<{ at: Date | null }>(
+          "SELECT last_used_at AS at FROM connection_keys WHERE id=$1",
+          [id],
+        )
+      ).rows[0]!.at;
+    const first = await used();
+    expect(first).not.toBeNull();
+    await connectionKeyAccount(local.env, made.key);
+    expect(await used()).toEqual(first);
+    await local.pg.query(
+      "UPDATE connection_keys SET last_used_at=now()-interval '2 minutes' WHERE id=$1",
+      [id],
+    );
+    await connectionKeyAccount(local.env, made.key);
+    expect((await used())!.getTime()).toBeGreaterThanOrEqual(first!.getTime());
+    // Failing to record use never refuses the key.
+    await local.pg.exec(`UPDATE connection_keys SET last_used_at=NULL;
+      CREATE FUNCTION fixture_refuse() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fictional write outage'; END $$;
+      CREATE TRIGGER fixture_refuse BEFORE UPDATE OF last_used_at ON connection_keys FOR EACH ROW EXECUTE FUNCTION fixture_refuse()`);
+    expect((await connectionKeyAccount(local.env, made.key))?.keyId).toBe(id);
+    await local.pg.exec("DROP TRIGGER fixture_refuse ON connection_keys");
+    // A wrong, altered, padded or non-canonical key reads as no key at all.
+    const flip = (s: string) => (s[0] === "A" ? "B" : "A") + s.slice(1);
+    for (const bad of [
+      `mk_${id}_${flip(secret!)}`,
+      `mk_${flip(id!)}_${secret}`,
+      made.key + "A",
+      made.key.slice(0, -1),
+      ` ${made.key}`,
+      `mk_${id}_${secret!.slice(0, -1)}${secret!.endsWith("A") ? "B" : "A"}`,
+      `mk_${id}-${secret}`,
+    ])
+      expect(await connectionKeyAccount(local.env, bad)).toBeUndefined();
+    // Never-expiring keys have no expiry; expired keys stay listed, refused.
+    const forever = await keys.create({
+      name: "CI",
+      scope: "read_write",
+      expiry: null,
+    });
+    expect(forever.record.expiresAt).toBeNull();
+    await local.pg.query(
+      "UPDATE connection_keys SET created_at=now()-interval '91 days',expires_at=now()-interval '1 day' WHERE id=$1",
+      [id],
+    );
+    expect(await connectionKeyAccount(local.env, made.key)).toBeUndefined();
+    expect((await keys.list()).map((key) => [key.name, key.expired])).toEqual([
+      ["CI", false],
+      ["Nightly job", true],
+    ]);
+    // Revocation is per key and per account, once.
+    expect(await others.revoke(forever.record.id)).toBe(false);
+    expect(await keys.revoke(forever.record.id)).toBe(true);
+    expect(await keys.revoke(forever.record.id)).toBe(false);
+    expect(await connectionKeyAccount(local.env, forever.key)).toBeUndefined();
+    expect((await keys.list()).map((key) => key.name)).toEqual(["Nightly job"]);
+    for (const name of ["", "   ", "a\nb", "tab\there", "x".repeat(61)])
+      await expect(
+        keys.create({ name, scope: "read", expiry: 30 }),
+      ).rejects.toMatchObject({ code: "invalid_input" });
+    // Twenty active keys at most; expired and revoked ones do not count.
+    for (let n = 0; n < 20; n++)
+      await keys.create({ name: `Agent ${n}`, scope: "read", expiry: 30 });
+    await expect(
+      keys.create({ name: "One more", scope: "read", expiry: 30 }),
+    ).rejects.toMatchObject({ code: "connection_key_limit", status: 409 });
+    // A closing account's keys are refused; deletion removes them.
+    await keys.revoke((await keys.list())[0]!.id);
+    const last = await keys.create({ name: "Last", scope: "read", expiry: 30 });
+    await local.pg.query("UPDATE users SET status='deleting' WHERE id=$1", [
+      auth.userId,
+    ]);
+    expect(await connectionKeyAccount(local.env, last.key)).toBeUndefined();
+    await local.pg.query("UPDATE users SET status='active' WHERE id=$1", [
+      auth.userId,
+    ]);
+    expect((await connectionKeyAccount(local.env, last.key))?.keyId).toBe(
+      last.record.id,
+    );
+    await deleteAccount(local.env, neon("keys"), []);
+    expect(
+      (await local.pg.query("SELECT 1 FROM connection_keys")).rows,
+    ).toEqual([]);
+  } finally {
+    quiet.mockRestore();
+    await local.dispose();
+  }
+});

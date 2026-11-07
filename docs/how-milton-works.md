@@ -368,6 +368,7 @@ Files: `server/drizzle/`, `server/src/store/schema.ts`, `server/src/store/databa
   the `retained_bytes` counter it read.
 - User IDs cannot change.
 - Disconnects and identity hashes have no foreign key to users, so they outlive the account.
+- `connection_keys` (0004) cascades from users, checks id, hash, name, scope and dates, and grants nothing to the legacy writing group; owner file `006-connection-keys-roles.sql` lets app read every column but the hash, insert and set `revoked_at`, and MCP read and set `last_used_at` only.
 - `stripe_events` keeps each event's ID, type, and body hash, never the payload.
 - The database holds cards and their immutable versions; the obsolete memo tables and
   the unused card-version `legacy` flag are removed by the cleanup.

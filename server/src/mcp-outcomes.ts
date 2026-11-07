@@ -11,6 +11,8 @@ export type ToolCall = {
   outcome: "read" | "saved" | "unchanged" | "conflict" | "refused" | "failed";
   elapsed_ms: number;
   error_code?: string;
+  /** The public id of the connection key that made the call, if one did. */
+  connection_key?: string;
 };
 export const knownTool = (name: unknown): ToolCall["tool"] =>
   toolNames.find((tool) => tool === name) ?? "unknown";
@@ -58,6 +60,7 @@ export const loggedErrorCodes = new Set([
   "auth_unavailable",
   "server_unavailable",
   "protocol_error",
+  "connection_key_limit",
 ]);
 const refusals = new Set([
   "rate_limited",

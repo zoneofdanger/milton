@@ -34,7 +34,22 @@ import {
 } from "./compiled";
 import type { ReportIntent } from "./reports";
 import { readLimits } from "./limits";
+import {
+  authenticateConnectionKey,
+  createConnectionKey,
+  listConnectionKeys,
+  revokeConnectionKey,
+  type KeyScope,
+} from "./connection-keys";
 export { StoreError } from "./errors";
+export {
+  keyExpiries,
+  keyName,
+  MAX_ACTIVE_KEYS,
+  type ConnectionKey,
+  type KeyExpiry,
+  type KeyScope,
+} from "./connection-keys";
 export type { StripeSubscriptionState } from "./billing";
 
 export interface StoreBindings {
@@ -217,6 +232,38 @@ export async function lookupIdentityAccount(
       403,
     );
   return { userId: row.id, [verifiedStoreIdentity]: true };
+}
+
+/** The account a presented connection key grants and the key's scope, or
+ * undefined for every refusal alike (see authenticateConnectionKey). */
+export async function connectionKeyAccount(
+  bindings: StoreBindings,
+  presented: string,
+): Promise<
+  { auth: VerifiedStoreAuth; keyId: string; scope: KeyScope } | undefined
+> {
+  const key = await authenticateConnectionKey(database(bindings), presented);
+  return (
+    key && {
+      auth: { userId: key.userId, [verifiedStoreIdentity]: true },
+      keyId: key.keyId,
+      scope: key.scope,
+    }
+  );
+}
+
+/** One signed-in account's connection keys, for the Connected assistants page. */
+export function connectionKeysForAccount(
+  bindings: StoreBindings,
+  auth: VerifiedStoreAuth,
+) {
+  const db = database(bindings);
+  return {
+    list: () => listConnectionKeys(db, auth.userId),
+    create: (input: Parameters<typeof createConnectionKey>[2]) =>
+      createConnectionKey(db, auth.userId, input),
+    revoke: (id: string) => revokeConnectionKey(db, auth.userId, id),
+  };
 }
 
 /** Records a disconnect; Milton refuses the assistant from the next request. */

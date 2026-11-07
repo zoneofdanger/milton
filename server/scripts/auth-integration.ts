@@ -17,6 +17,12 @@ import { createMiltonApp } from "../src/index";
 import { runtimeConfig, type RuntimeConfig } from "../src/config";
 import { postgresDatabase } from "../src/store/database";
 import { database, lookupIdentityAccount, StoreError } from "../src/store";
+import {
+  authenticateConnectionKey,
+  createConnectionKey,
+  listConnectionKeys,
+  revokeConnectionKey,
+} from "../src/store/connection-keys";
 import { importIdentities } from "./auth-identity-import";
 import { hash } from "../src/auth-oidc";
 import { appActive, bindingActive } from "../src/auth-authority";
@@ -143,6 +149,7 @@ try {
     "0001_sample_context",
     "0002_sample_versions",
     "0003_report_guides",
+    "0004_connection_keys",
   ])
     await owner.query(
       readFileSync(new URL(`./drizzle/${migration}.sql`, sourceRoot), "utf8"),
@@ -192,6 +199,14 @@ try {
   await owner.query(
     readFileSync(new URL("./migrations/005-app-roles.sql", sourceRoot), "utf8"),
   );
+  // Applied twice: rerunning the owner grant file converges, never widens.
+  for (let n = 0; n < 2; n++)
+    await owner.query(
+      readFileSync(
+        new URL("./migrations/006-connection-keys-roles.sql", sourceRoot),
+        "utf8",
+      ),
+    );
   // The guide job's plain login holds only main's NOLOGIN guide capability.
   await owner.query(
     "GRANT milton_guide_worker TO milton_guide_runtime WITH INHERIT TRUE",
@@ -656,8 +671,126 @@ try {
   await owner.query("GRANT milton_mcp_runtime TO milton_guide_runtime");
   assert.equal(await guideWorkerRoleAllowed(guideDb), false);
   await owner.query("REVOKE milton_mcp_runtime FROM milton_guide_runtime");
+  // Connection keys (006): app creates, lists and revokes without reading a
+  // hash; MCP reads and records last use only; auth and the guide get nothing.
+  const keyPrivileges = async (role: string) =>
+    (
+      await owner.query<{ p: string }>(
+        `SELECT p FROM (
+          SELECT 'table:'||p p FROM unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']) p
+            WHERE has_table_privilege($1,'public.connection_keys',p)
+          UNION ALL SELECT a.attname||':'||p FROM pg_attribute a CROSS JOIN unnest(ARRAY['SELECT','INSERT','UPDATE']) p
+            WHERE a.attrelid='public.connection_keys'::regclass AND a.attnum>0 AND NOT a.attisdropped
+            AND has_column_privilege($1,'public.connection_keys',a.attname,p)) x ORDER BY 1`,
+        [role],
+      )
+    ).rows.map((r) => r.p);
+  const keyColumns = [
+    "created_at",
+    "expires_at",
+    "id",
+    "last_used_at",
+    "name",
+    "revoked_at",
+    "scope",
+    "user_id",
+  ];
+  assert.deepEqual(
+    await keyPrivileges("milton_app_runtime"),
+    [
+      ...keyColumns.map((c) => c + ":INSERT"),
+      ...keyColumns.map((c) => c + ":SELECT"),
+      "revoked_at:UPDATE",
+      "secret_hash:INSERT",
+      "table:INSERT",
+    ].sort(),
+  );
+  assert.deepEqual(
+    await keyPrivileges("milton_mcp_runtime"),
+    [
+      ...[...keyColumns, "secret_hash"].map((c) => c + ":SELECT"),
+      "last_used_at:UPDATE",
+      "table:SELECT",
+    ].sort(),
+  );
+  for (const role of [
+    "milton_auth_runtime",
+    "milton_guide_runtime",
+    "milton_runtime",
+  ])
+    assert.deepEqual(await keyPrivileges(role), [], role);
+  {
+    const keyUser = "m_00000000-0000-4000-8000-0000000000c0";
+    await owner.query("INSERT INTO users(id) VALUES($1)", [keyUser]);
+    const appDb = postgresDatabase(url("app")),
+      mcpDb = postgresDatabase(url("mcp"));
+    const made = await createConnectionKey(appDb, keyUser, {
+      name: "Fictional nightly job",
+      scope: "read",
+      expiry: 30,
+    });
+    assert.deepEqual(
+      (await listConnectionKeys(appDb, keyUser)).map((k) => k.id),
+      [made.record.id],
+    );
+    assert.deepEqual(await authenticateConnectionKey(mcpDb, made.key), {
+      userId: keyUser,
+      keyId: made.record.id,
+      scope: "read",
+    });
+    assert.equal(
+      (
+        await owner.query(
+          "SELECT last_used_at IS NOT NULL AS used FROM connection_keys WHERE id=$1",
+          [made.record.id],
+        )
+      ).rows[0].used,
+      true,
+    );
+    for (const [pool, statement] of [
+      [
+        mcpPool,
+        `INSERT INTO connection_keys(id,user_id,secret_hash,name,scope) VALUES('${"B".repeat(22)}','${keyUser}','${"0".repeat(64)}','Forged','read_write')`,
+      ],
+      [mcpPool, "UPDATE connection_keys SET revoked_at=NULL"],
+      [mcpPool, "UPDATE connection_keys SET scope='read_write'"],
+      [mcpPool, "DELETE FROM connection_keys"],
+      [appPool, "UPDATE connection_keys SET last_used_at=now()"],
+      [appPool, "UPDATE connection_keys SET scope='read_write'"],
+      [appPool, "SELECT secret_hash FROM connection_keys"],
+      [appPool, "SELECT * FROM connection_keys"],
+      [appPool, "DELETE FROM connection_keys"],
+      [authPool, "SELECT id FROM connection_keys"],
+    ] as const)
+      await assert.rejects(
+        pool.query(statement),
+        (e: { code?: string }) => e.code === "42501",
+        statement,
+      );
+    assert.equal(
+      await revokeConnectionKey(appDb, keyUser, made.record.id),
+      true,
+    );
+    assert.equal(await authenticateConnectionKey(mcpDb, made.key), undefined);
+    // Account deletion by the app runtime removes the account's keys.
+    await createConnectionKey(appDb, keyUser, {
+      name: "Fictional CI",
+      scope: "read_write",
+      expiry: null,
+    });
+    await appPool.query("DELETE FROM users WHERE id=$1", [keyUser]);
+    assert.equal(
+      (
+        await owner.query(
+          "SELECT count(*)::int n FROM connection_keys WHERE user_id=$1",
+          [keyUser],
+        )
+      ).rows[0].n,
+      0,
+    );
+  }
   pass(
-    "real TLS login roles separate native secrets, app credentials and writing with no DDL/TEMP path; production DB errors map safely and preserve callbacks/rollback",
+    "real TLS login roles separate native secrets, app credentials and writing with no DDL/TEMP path; connection-key grants hold on real roles; production DB errors map safely and preserve callbacks/rollback",
   );
   const nativeConfig: Config = {
     AUTH_DATABASE_URL: url("auth"),

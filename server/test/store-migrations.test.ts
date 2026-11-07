@@ -230,6 +230,7 @@ test("the runtime has only current grants, its guards hold, and later tables inh
     const used: Record<string, string> = {
       accepted_changes: "INSERT",
       assistant_disconnects: "DELETE,INSERT,SELECT",
+      connection_keys: "",
       deleted_identities: "INSERT,SELECT",
       guide_accounts: "SELECT",
       guide_budget_lock: "",

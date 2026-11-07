@@ -145,6 +145,40 @@ export const assistantDisconnects = pgTable(
     ),
   ],
 );
+// Bearer keys a person creates for headless agents. Only the SHA-256 of the
+// key's secret is stored; the full key is shown once, at creation. A key is
+// refused once revoked_at is set or expires_at has passed; NULL expires_at
+// never expires. Account deletion removes the account's keys.
+export const connectionKeys = pgTable(
+  "connection_keys",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    secretHash: text("secret_hash").notNull(),
+    name: text("name").notNull(),
+    scope: text("scope").notNull(),
+    createdAt: createdAt(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("connection_keys_by_user").on(t.userId),
+    check("connection_key_id", sql`${t.id} ~ '^[A-Za-z0-9_-]{22}$'`),
+    check("connection_key_hash", sql`${t.secretHash} ~ '^[a-f0-9]{64}$'`),
+    check(
+      "connection_key_name",
+      sql`char_length(${t.name}) BETWEEN 1 AND 60 AND ${t.name} = btrim(${t.name}) AND ${t.name} !~ '[[:cntrl:]]'`,
+    ),
+    check("connection_key_scope", sql`${t.scope} IN ('read','read_write')`),
+    check(
+      "connection_key_dates",
+      sql`isfinite(${t.createdAt}) AND (${t.expiresAt} IS NULL OR (isfinite(${t.expiresAt}) AND ${t.expiresAt} > ${t.createdAt}))`,
+    ),
+  ],
+);
 // One-way sha256("provider:subject") of each deleted sign-in identity, kept only
 // so a re-created account gets no second trial. No foreign key: it outlives the
 // account, and holds no content, email or Milton user id.

@@ -683,6 +683,11 @@ Run `MILTON_SERVICE=app` or `mcp` with the corresponding private `DATABASE_URL` 
 membership/ownership, DDL/TEMP, native table and lifecycle privileges. Inspect PUBLIC
 views/functions/default privileges against the real retained schema before cutover too.
 
+Connection keys (`connection_keys`, Drizzle `0004`) get no legacy-group grants.
+The owner applies `migrations/006-connection-keys-roles.sql` after `005-app-roles.sql`:
+app may read every column except `secret_hash`, insert, and set `revoked_at`; MCP may
+read and set `last_used_at` only. Rerunning it converges.
+
 App and MCP read `sample_versions` and the guide state in `guide_accounts` and
 `report_guides`; MCP appends to `samples` and `sample_versions` but cannot update
 either, because migration `0002` makes every sample change an insert. Neither runtime

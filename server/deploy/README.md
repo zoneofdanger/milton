@@ -37,6 +37,52 @@ app/MCP `milton-*-fwd-c0276d4`.
 
 This release did not change auth. Auth rollback target: `milton-auth-00004-69s`.
 
+## Runtime role timeouts (prepared, TODO #29)
+
+Neon's proxy and pooler drop the `statement_timeout`/`lock_timeout` the pools pass at
+connect (measured 2026-11-07: `SHOW` returned 0 for both through either host, while local
+PostgreSQL 18 applied them), so production has no server statement or lock limit and
+billing's waiter does not get its 10 s 503. One owner file sets them on the runtime logins,
+in database `milton`: app and MCP 20 s statement / 10 s lock, auth 5 s statement, the values
+the code already passes. Serving revisions need no change (only a statement or lock wait past
+its limit now fails, as the code intends), so traffic stays open. Apply it before releasing
+code whose `check-runtime-role.ts` requires it. Rehearse on a disposable Neon branch first,
+then:
+
+1. Snapshot.
+2. As `neondb_owner` (ALTER ROLE needs CREATEROLE and ADMIN on each login, which the
+   role that created them holds):
+   `psql -X -v ON_ERROR_STOP=1 -f server/migrations/007-role-timeouts.up.sql`. One
+   transaction; rerunning converges.
+3. Check as the owner. This lists exactly `milton_app_runtime` and `milton_mcp_runtime`
+   with `{statement_timeout=20s,lock_timeout=10s}` and `milton_auth_runtime` with
+   `{statement_timeout=5s}`:
+
+   ```sql
+   SELECT r.rolname, s.setconfig FROM pg_db_role_setting s
+   JOIN pg_roles r ON r.oid = s.setrole JOIN pg_database d ON d.oid = s.setdatabase
+   WHERE d.datname = 'milton' ORDER BY 1;
+   ```
+
+   Then `check-runtime-role.ts` must print `ok` for app and MCP (it now requires these
+   settings).
+
+4. A role setting reaches only sessions that start after it, and Neon's pooler keeps its
+   own server connections open, independent of ours, so new Cloud Run revisions do not
+   pick it up. In the 2026-11-07 rehearsal on a disposable branch, `SHOW` through the
+   pooler still read 0/0 after the file applied (the direct host read 20s/10s). Only
+   after a compute restart did the pooler read the new values. Then a 7 s sleep as auth
+   was cancelled at 5.8 s (57014) and an MCP read behind an owner's lock was refused at
+   10.7 s (55P03). So restart the production compute
+   (`restart_postgres_endpoint`) in a quiet moment: every open connection drops once,
+   in-flight queries fail as `store_unavailable`, and the pools discard the broken
+   connections. Then run `SHOW statement_timeout;` and `SHOW lock_timeout;` as each
+   runtime login through the pooler host and expect 20s/10s (app, MCP) and 5s/0 (auth).
+
+Rollback: `psql -X -v ON_ERROR_STOP=1 -f server/migrations/007-role-timeouts.down.sql` as
+the same owner resets exactly these settings; code whose role audit requires them then
+fails that audit, so roll such code back first.
+
 ## Optional guide worker
 
 The default-off private guide pilot has separate [operations and capability instructions](guides.md). No guide job, schedule, provider key or account enrollment is provisioned by its build.
@@ -52,7 +98,7 @@ The tracked app and MCP manifests still pin the pre-cutover release: app
 from the live service before replacing it. [auth.service.template.json](auth.service.template.json)
 is deliberately non-deployable. Production's writing journal holds `0000_baseline` through
 `0004_connection_keys` (5 entries), the native auth ledger 001–007, and the owner files
-`000-app-owner.sql`, `005-app.up.sql`, `005-app-roles.sql` and `006-connection-keys-roles.sql`. There is no memo-update
+`000-app-owner.sql`, `005-app.up.sql`, `005-app-roles.sql` and `006-connection-keys-roles.sql` (`007-role-timeouts.up.sql` is prepared, not yet applied; see [runtime role timeouts](#runtime-role-timeouts-prepared-todo-29)). There is no memo-update
 allowance; the daily call cap bounds saves. Existing positive account safeguards remain
 in effect. Trials and billing are live (since 2026-11-04).
 Each image includes both roles and browser assets. Validate manifests before applying:

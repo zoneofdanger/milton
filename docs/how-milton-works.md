@@ -393,7 +393,7 @@ Files: `server/drizzle/`, `server/src/store/schema.ts`, `server/src/store/databa
 - The runtime role can read and lock the `store_config` row but cannot change its settings.
 - PostgreSQL connection, query, transaction-control and close failures become store errors: known triggers and constraints get clean coded responses, unknown failures log only class/code, and callback errors survive rollback/close unchanged.
 - The store opens only a database named `milton`, over TLS.
-- Runtime queries borrow bounded direct PostgreSQL TLS connections from one process pool per URL (at most 40, waiting at most 5 s for one); a connection idle over 30 s by the wall clock, whose last command, BEGIN, COMMIT or ROLLBACK failed, or with a query or transaction unfinished when its operation ends, is closed instead of reused, and that operation's later calls refuse; transactions keep one connection with lock and statement timeouts; app/MCP close the pools on SIGTERM after in-flight requests, and the guide job when it ends.
+- Runtime queries borrow bounded direct PostgreSQL TLS connections from one process pool per URL (at most 40, waiting at most 5 s for one); a connection idle over 30 s by the wall clock, whose last command, BEGIN, COMMIT or ROLLBACK failed, or with a query or transaction unfinished when its operation ends, is closed instead of reused, and that operation's later calls refuse; transactions keep one connection; the server's 20 s statement and 10 s lock limits come from the app/MCP role settings (`007-role-timeouts`), since Neon drops the same options passed at connect; app/MCP close the pools on SIGTERM after in-flight requests, and the guide job when it ends.
 
 ## Static site
 
@@ -429,7 +429,7 @@ Files: `packages/theme/`, `server/scripts/`, `.github/workflows/checks.yml`.
   from `server/.dev.vars`, and never from an inherited `DATABASE_URL`.
 - `check-mcp` confirms the instructions, exactly four tools, and a read, without saving.
 - `check-local` is an explicitly invoked interactive configured-issuer check; the isolated check-auth-integration builds actual product modules under Node26/PG18 and mocks only external boundaries.
-- `check-runtime-role` audits selected NOINHERIT app/MCP roles, ownership, DDL/TEMP and native/app credential/function boundaries.
+- `check-runtime-role` audits selected NOINHERIT app/MCP roles, ownership, DDL/TEMP, native/app credential/function boundaries and the role's own 20 s statement / 10 s lock timeouts.
 - `probe-forms` confirms a signed-out form post passes CSRF.
 - `build.ts` builds the CSS with Vite and bundles the Cloud Run entry with Bun.
 - `dev.ts` serves the app on loopback and rebuilds the CSS on change.

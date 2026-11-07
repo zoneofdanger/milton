@@ -118,17 +118,9 @@ Reads assemble cards and samples, take no lock, write nothing and invoke no mode
 Fresh installs also apply `0001_sample_context` and `0002_sample_versions`; the latter
 adds `sample_versions`, leaving 15 tables defined in `src/store/schema.ts`.
 
-The baseline requires an empty database. For the one known existing schema through 0033
-(34 journal entries, latest timestamp `1793779058436`), use the owner-only
-`scripts/transition-baseline.sql` once, following [the hosting runbook](deploy/README.md#legacy-schema-cleanup).
-It atomically drops `memos`, `memo_versions`, `memo_cards`, their unused functions and
-triggers, the unused `instruction_card_versions.legacy` flag, and obsolete limits keys.
-Every other card-version field and row, current data and configured limit value stays.
-It replaces the old journal with one baseline entry at `1793815543500`, so the normal
-migrator skips the baseline and applies future migrations normally. A repeat transition
-reports `baseline_transition_already_done`; a different journal refuses with a useful error.
-Older revisions are unsupported. Direct baseline use on a populated old database refuses
-and points to the transition.
+The baseline requires an empty database; direct baseline use on a populated old database
+refuses. Older revisions are unsupported. The one-time owner transition production used
+for its 0033 schema has been deleted; see [the hosting runbook](deploy/README.md#legacy-schema-cleanup).
 
 Historical migrations, snapshots, rollback scripts and pre-steps are removed. Use the
 normal `bun run db:generate` for later schema changes; add any required guard SQL to the
@@ -552,16 +544,14 @@ Current retirement uses `removed`; backfilled retired snapshots and old receipts
 can retain `replaced` or `evicted`. Old replacement IDs and retirement dates/reasons
 remain in backfill provenance rather than a current replacement-link column.
 
-### Trial transition groundwork (0012, inactive)
+### Trials and billing (0012 groundwork, now live)
 
-Trial transition groundwork is **off by default** (`store_config.trials_enabled=false`).
-The selected launch price is **USD $5.01/month**, one plan, no per-assistant fees.
-Future Stripe price configuration must use 501 USD cents, replacing the earlier
-$5 proposal. Current early access remains free; no payment price exists in this slice.
-Billing is not launched. Do not enable it until authenticated `/billing` checkout,
-verified provider entitlement synchronization and the remaining launch policies are
-implemented and tested. Stripe's routes and webhook exist (0027) and Stripe owns the
-trial; the rest of this section describes the 0012 groundwork, and where it differs,
+Trials are **off by default** in a new database (`store_config.trials_enabled=false`);
+production has had trials and billing on since 2026-11-04 ([the hosting runbook](deploy/README.md)).
+The price is **USD $5.01/month**, one plan, no per-assistant fees, set in Stripe and
+named by `STRIPE_PRICE_ID`. Signed-in `/billing/checkout` and `/billing/portal`,
+the Stripe webhook (0027) and the trial gate are implemented, and Stripe owns the trial.
+The rest of this section describes the 0012 groundwork; where it differs,
 `docs/how-milton-works.md` is current. The trial notice and the `subscription_required`
 refusal link to the signed-in app home, whose banner holds the button. Existing early
 access must not acquire a payment gate implicitly.
@@ -658,9 +648,8 @@ cutover must close reads/writes, drain old instances, snapshot, apply the owner 
 verify preservation and matching app/MCP code, then reopen ingress and verify canonical
 reads. Follow [the hosting runbook](deploy/README.md#pending-sample-revision-schemaapi-cutover).
 No old runtime may serve the new schema. Reconnect assistants and reread current IDs
-and the account version before saving. No compatibility layer or new rollback artifact
-is supplied; `scripts/sample-context-rollback.sql` applies only to the historical
-context schema before `0002`, and cannot roll back the revision schema. Implementation
+and the account version before saving. No compatibility layer or rollback artifact
+is supplied. Implementation
 and local fictional rehearsal do not authorize a production migration or deployment.
 
 ### Limits and save invariants

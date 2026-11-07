@@ -365,12 +365,10 @@ references. Inspect revision readiness before selecting a recorded revision:
 gcloud run revisions list --service=milton-app --project=milton-510506 --region=us-east4
 ```
 
-Now serving: MCP `milton-mcp-edit-00223ec` and app `milton-app-edit-00223ec`,
-selected by exact revision name at 100% on 2026-11-06 (MCP 11:50:02Z,
-app 11:50:15Z). Both use exact landed main
-`00223ec298e07717d713cfe51b9f523b4e0de567`. Peter selected this app/MCP rollout
-with “Land and deploy those now” in Lead on 2026-11-06; the temporary release
-worker executed that pinned selection. The existing static deployment was preserved.
+Now serving: app `milton-app-keys-5b59d19` and MCP `milton-mcp-keys-5b59d19` (source
+`5b59d19`, 2026-11-07), and auth `milton-auth-00003-ggx` (source `f1656b5`,
+2026-11-07). The connection keys and auth startup retry release records above give
+their images, secret versions and rollback revisions.
 
 Current edit-mode release: image index
 `sha256:2682542b3328c26de20846788798f68bc9efdc14cea2fc8233a920edcbc64e28`, Linux amd64
@@ -921,10 +919,12 @@ and inside a private temporary directory outside the repository (`umask 077`).
      dotenvx run -f <dir>/app-next.env -- bun --no-env-file server/scripts/check-runtime-role.ts
      ```
 
-     It must print `ok`. It runs one HTTP query and one WebSocket transaction that
-     reads `store_config` as requests do. It passes only as `milton_app`, a plain
-     member of `milton_runtime`, and prints only `ok` or `fail`; a driver failure adds
-     the usual one-line error log (class and code, never the URL) on stderr.
+     It must print `ok`. The script no longer checks `milton_app`: it needs
+     `MILTON_SERVICE=app` or `mcp` and audits that service's own
+     `milton_<service>_runtime` login (NOINHERIT, no memberships, ownership, TEMP or
+     CREATE, and only that service's guard functions) in one direct-TLS query. It
+     prints only `ok` or `fail`; a driver failure adds the usual one-line error log
+     (class and code, never the URL) on stderr.
 
    - Refusals with `psql`, with the login in the environment and never a URL on the
      command line: in `PGUSER=milton_app PGPASSWORD="$MILTON_APP_PASSWORD" psql`,
@@ -1036,63 +1036,12 @@ trial-ending reminder.
 
 ## Legacy schema cleanup
 
-**Applied to production on 2026-11-04 at 18:54:45Z.** The current release above records
-the snapshot, exact transition and verified preservation. That cleanup left one baseline
-journal entry at `1793815543500`; the sample-context release above adds `0001`. `server/drizzle/0000_baseline.sql` is for empty
-installations; `server/scripts/transition-baseline.sql` supports the one known old 34-entry
-0033 state (latest timestamp `1793779058436`). No earlier schema state or historical schema
-rollback chain is supported.
-
-The transition drops only the unused `memos`, `memo_versions`, `memo_cards`, their five
-functions and six triggers, the card-version `legacy` flag, and six obsolete limits keys.
-The rewritten card-version guard keeps sequential, immutable, account-scoped history.
-All other fields and rows survive, including card history copied from the retired subsystem,
-samples, accounts, billing and receipts. Current configured limits, including `reason_bytes`,
-stay unchanged. No archive is required.
-
-1. From the landed main commit, rehearse the fresh baseline on an empty disposable database or
-   branch. Separately, build a disposable known-0033 rehearsal database using the historical
-   migrations from immutable commit `b797f1b`, seed it with fictional rows, and rehearse the
-   exact 0033 transition using landed main. Those historical files are rehearsal inputs only;
-   do not restore them to main. Compare catalogs, grants/default privileges, every
-   surviving row, configured limits and served report versions; exercise save/replay,
-   immutability, account isolation, least privilege and account deletion. Repeat the transition
-   and normal migrator. A wrong journal and an injected failure must refuse atomically.
-2. Preserve the current Cloud Run revisions, image digests and numeric secret versions. Release
-   the matching cleanup image to MCP and app from main; confirm both serve it. The cleanup code
-   reads the same current fields on both schemas. No active read depends on a dropped field.
-3. Close ingress and drain writers as above. Confirm the owner connection's database, role and
-   branch without printing its URL. Take and record a Neon snapshot immediately before the
-   transition. Capture current row hashes/counts and report versions privately for comparison;
-   never put content, connection strings or key values in logs or the repository.
-4. With the owner login held only in process `PG*` variables and shell/psql history disabled, run
-   from the repository root:
-
-   ```sh
-   psql -X -v ON_ERROR_STOP=1 -f server/scripts/transition-baseline.sql
-   ```
-
-   The script requires `neondb_owner`, locks the journal and tables, and checks all 34 journal
-   timestamps and hashes against the known 0033 fingerprint. Any other state visibly refuses;
-   do not edit the journal to bypass it. The single statement commits DDL, limits pruning and
-   journal replacement together. A repeat prints `baseline_transition_already_done` and changes
-   nothing. On an uncertain connection outcome, inspect the schema and journal before retrying.
-
-5. Set `MILTON_OWNER_DATABASE_URL` only in the process environment, run the regular
-   `bun run --cwd server db:migrate` twice and unset it. Both runs must be no-ops. The journal
-   now has one baseline entry at `1793815543500`; later generated migrations start at `0001`.
-   Compare every surviving row (excluding only `legacy` and the six removed limit keys), the
-   catalog and configured limits with the rehearsal, and confirm report versions are unchanged.
-6. Restore ingress and repeat canonical TLS/health/discovery/auth/forms checks, a fresh-client
-   report read, and the runtime-role check. Do save/replay and deletion checks in the isolated
-   environment; a write to a real account still needs the person's exact approval. Inspect logs
-   for `does not exist`, permission errors and lock timeouts. Record the release evidence and
-   delete TODO #24 only after this gate passes.
-
-There is no reverse migration that restores the retired memo layer. If schema recovery is
-required, stop writers and use the pre-cleanup snapshot under a separate recovery decision.
-Do not restore a database snapshot merely to change runtime traffic. Never point a fresh
-baseline at a populated old database: it refuses and directs the operator to the transition.
+**Applied to production on 2026-11-04 at 18:54:45Z.** The release record above gives the
+snapshot, transition and preservation checks. The one-time owner script it ran,
+`server/scripts/transition-baseline.sql`, has since been deleted; recover it from git
+history if a known-0033 database ever needs it. `server/drizzle/0000_baseline.sql` is for
+empty installations and refuses a populated older database. No earlier schema state or
+historical schema rollback chain is supported.
 
 ## Self-hosted auth cutover preparation
 
@@ -1129,14 +1078,9 @@ snapshot and rollback check. Rehearse against disposable data first:
    Apply once; no service migrates on startup. The new schema has no writing-role default
    grants. Owner-review/apply `005-app-roles.sql` against actual writing ownership.
    Row locks get UPDATE(id) on the immutable-ID column, rather than account-state writes.
-4. Use verified metadata, not email equality, to map each retained legacy subject to an
-   exact native issuer/subject and retained internal m_* ID. Owner input for
-   `server/scripts/auth-identity-import.ts --dry-run <private-metadata.json>` includes
-   `legacySubject,issuer,subject,userId,verifiedEmail,verifiedIdentities`. Deleted records
-   have `userId:null` and must match an existing hash of `neon:subject`; those hashes
-   cannot be inverted, renamed or silently discarded. Resolve every missing/ambiguous
-   record before cutover. `--apply` is a separate explicit owner action; neither mode
-   scans private writing or accepts legacy tokens. Input and identity metadata stay private.
+4. Legacy subjects were mapped to native users by verified metadata, never email
+   equality, on 2026-11-07 (see the cutover release record). The one-time
+   `auth-identity-import.ts` has since been deleted; recover it from git history if needed.
 5. Provision the dedicated stable `MILTON_TRIAL_FINGERPRINT_KEY` in app secret storage.
    The verified import command (an empty batch for a genuinely fresh database) provisions
    its durable key check. Admission refuses a missing/mismatched policy. Back up this key

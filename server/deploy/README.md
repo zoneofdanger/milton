@@ -87,9 +87,11 @@ fails that audit, so roll such code back first.
 
 Since PR #26 nothing reads or writes `public.deleted_identities` or
 `milton_app.legacy_mapping`: keyed trial-eligibility fingerprints are the only second-trial
-block. App/MCP code before #26 (including `*-tmo-58a4a59`) reads both, so **release code
-from #26 or later first**, and apply only while it serves. Rehearse on a disposable branch
-or database first, then:
+block. App/MCP code before #26 reads both, so apply only while code from #26 or later
+(source `cb5199b` onward, such as `*-drt-c1af8c3`) serves. The recorded app/MCP rollback
+targets `*-lca-9de3099` and `*-tmo-58a4a59` predate #26: after the drop, roll app/MCP back
+no further than `*-dup-cb5199b` unless both downs below run first. Rehearse on a disposable
+branch or database first, then:
 
 1. Snapshot. It is the only copy of the dropped rows.
 2. As `neondb_owner`: `bun run --cwd server db:migrate` applies
@@ -101,7 +103,7 @@ or database first, then:
    `SELECT to_regclass('public.deleted_identities') AS d, to_regclass('milton_app.legacy_mapping') AS l;`
    Then `check-runtime-role.ts` must print `ok` for app and MCP.
 
-Rollback, needed only before traffic returns to code older than #26: run
+Rollback, needed only before traffic returns to app/MCP code older than #26: run
 `server/migrations/008-drop-legacy-mapping.down.sql` as `milton_app_owner` (it refuses any
 other role) and `server/drizzle/rollback/0005_drop_deleted_identities.sql` as `neondb_owner`.
 Each recreates its table empty, with its original definition and grants; rows come back

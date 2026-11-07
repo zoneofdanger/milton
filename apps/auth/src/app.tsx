@@ -1,7 +1,9 @@
+/** @jsxImportSource hono/jsx */
 import { Hono, type Context } from "hono";
 import type { HttpBindings } from "@hono/node-server";
 import { getConnInfo } from "@hono/node-server/conninfo";
 import { serveStatic } from "@hono/node-server/serve-static";
+import { staticAssets } from "@milton/theme/assets";
 import type { AuthService } from "./provider.ts";
 import { AUTH_ORIGIN } from "./config.ts";
 import {
@@ -12,7 +14,7 @@ import {
   SECURITY_HEADERS,
 } from "./http.ts";
 import {
-  Page,
+  Page as Shell,
   SignIn,
   EmailForm,
   ResetForm,
@@ -26,12 +28,21 @@ export function createApp(
   auth: AuthService,
   assets = new URL("../public/", import.meta.url).pathname,
 ) {
-  const app = new Hono<{ Bindings: HttpBindings }>();
+  const statics = staticAssets(assets);
+  const Page = (props: Omit<Parameters<typeof Shell>[0], "assets">) =>
+    Shell({ ...props, assets: statics });
+  const app = new Hono<{
+    Bindings: HttpBindings;
+    Variables: { staticAsset: boolean };
+  }>();
   app.use("*", async (c, next) => {
     const denied = guardRequest(c.req.raw);
     if (denied) c.res = denied;
     else await next();
-    for (const [k, v] of Object.entries(SECURITY_HEADERS)) c.header(k, v);
+    for (const [k, v] of Object.entries(SECURITY_HEADERS))
+      // A served static asset keeps its own Cache-Control (immutable when the
+      // URL's version matches, otherwise no-cache); all else stays no-store.
+      if (k !== "cache-control" || !c.get("staticAsset")) c.header(k, v);
   });
   const peer = (c: Parameters<typeof getConnInfo>[0]) => {
     const client = loadBalancerClient(c.req.header("x-forwarded-for") ?? null);
@@ -43,8 +54,12 @@ export function createApp(
     }
   };
   app.get("/health", (c) => c.json({ service: "milton-auth", status: "ok" }));
-  app.use("/auth.css", serveStatic({ root: assets, path: "auth.css" }));
-  app.use("/favicon.svg", serveStatic({ root: assets, path: "favicon.svg" }));
+  app.get("*", async (c, next) => {
+    const asset = statics.respond(c.req.raw);
+    if (!asset) return next();
+    c.set("staticAsset", true);
+    return asset;
+  });
   app.use("/fonts/*", serveStatic({ root: assets }));
   const navigate = (c: Context, response: Response, target: string) => {
     const url = new URL(target, AUTH_ORIGIN);

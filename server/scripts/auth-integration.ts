@@ -40,11 +40,8 @@ import { checkProductRuntimeRole } from "./check-runtime-role";
 import { guideWorkerRoleAllowed } from "../src/guides/store";
 import { runGuideWorker } from "../src/guides/worker";
 import type { GuideProvider } from "../src/guides/provider";
-import {
-  startOperation,
-  advanceOperation,
-  findOperation,
-} from "../src/auth-lifecycle";
+import { connections, lifecycle } from "../src/auth-lifecycle";
+import type { SessionUser } from "../src/auth-session";
 import { createProvider } from "../../apps/auth/src/provider";
 import { ISSUER, AUTH_ORIGIN, type Config } from "../../apps/auth/src/config";
 
@@ -218,6 +215,33 @@ try {
         "utf8",
       ),
     );
+  // 007: runtime-login timeouts in this database only, nothing on any other
+  // role. Up twice converges; down removes exactly these; up again restores.
+  const roleTimeouts = async () =>
+    (
+      await owner.query(
+        "SELECT r.rolname role,s.setconfig config FROM pg_db_role_setting s JOIN pg_roles r ON r.oid=s.setrole JOIN pg_database d ON d.oid=s.setdatabase WHERE d.datname='milton' ORDER BY 1",
+      )
+    ).rows;
+  const bounded = ["statement_timeout=20s", "lock_timeout=10s"];
+  const timeouts = [
+    { role: "milton_app_runtime", config: bounded },
+    { role: "milton_auth_runtime", config: ["statement_timeout=5s"] },
+    { role: "milton_mcp_runtime", config: bounded },
+  ];
+  const roleTimeoutFile = (direction: string) =>
+    readFileSync(
+      new URL(`./migrations/007-role-timeouts.${direction}.sql`, sourceRoot),
+      "utf8",
+    );
+  for (const direction of ["up", "up", "down", "down", "up"]) {
+    await owner.query(roleTimeoutFile(direction));
+    assert.deepEqual(
+      await roleTimeouts(),
+      direction === "up" ? timeouts : [],
+      direction,
+    );
+  }
   // The guide job's plain login holds only main's NOLOGIN guide capability.
   await owner.query(
     "GRANT milton_guide_worker TO milton_guide_runtime WITH INHERIT TRUE",
@@ -234,6 +258,21 @@ try {
     appPool = new pg.Pool(poolConfig("app")),
     mcpPool = new pg.Pool(poolConfig("mcp"));
   pools.push(authPool, appPool, mcpPool);
+  // These pools pass no timeouts at connect, like every client through Neon's
+  // proxy: the server limits come from 007's role settings alone.
+  for (const [pool, statement, lock] of [
+    [appPool, "20s", "10s"],
+    [mcpPool, "20s", "10s"],
+    [authPool, "5s", "0"],
+  ] as const)
+    assert.deepEqual(
+      (
+        await pool.query(
+          "SELECT current_setting('statement_timeout') statement, current_setting('lock_timeout') lock",
+        )
+      ).rows[0],
+      { statement, lock },
+    );
   const url = (service: string) => {
     const u = new URL(
       `postgresql://milton_${service}_runtime@127.0.0.1:${port}/milton`,
@@ -1172,6 +1211,15 @@ try {
     AUTH_ADMISSION_SECRET: nativeConfig.AUTH_ADMISSION_SECRET,
     MILTON_TRIAL_FINGERPRINT_KEY: fingerprintKey,
   });
+  // Drives an account change for a session the script already holds. As before,
+  // only the native proof at the start of a deletion checks freshness.
+  const lifecycleFor = (user: SessionUser, token: string) =>
+    lifecycle({
+      config,
+      token,
+      signedIn: async () => user,
+      fresh: async () => {},
+    });
   const stripe = {
     customers: 0,
     subscriptions: 0,
@@ -1697,16 +1745,18 @@ try {
   assert(await appActive(config, row));
   let user = { ...row, id: row.subject };
   let token = appCookies.get("__Host-milton-session")!;
-  const disconnect = await startOperation(
-    config,
-    user,
-    token,
-    crypto.randomUUID(),
-    "disconnect",
-    assistant.client_id,
-  );
+  const disconnect = crypto.randomUUID();
+  const disconnects = lifecycleFor(user, token);
   assert.equal(
-    (await advanceOperation(config, disconnect)).progress,
+    (
+      await disconnects.run(
+        "disconnect",
+        disconnect,
+        (await connections(config, user)).items.find(
+          (c) => c.client_id === assistant.client_id,
+        )?.reference,
+      )
+    ).operation.progress,
     "complete",
   );
   assert.equal((await rpc(grant.access_token, "tools/list")).status, 401);
@@ -1716,7 +1766,7 @@ try {
   );
   assert(reconnect.refresh_token);
   assert.equal(
-    (await advanceOperation(config, disconnect)).progress,
+    (await disconnects.run("disconnect", disconnect)).operation.progress,
     "complete",
   );
   assert.equal((await rpc(reconnect.access_token, "tools/list")).status, 200);
@@ -1981,7 +2031,8 @@ try {
   );
   assert.equal(failedDeletion.status, 503);
   await failedDeletion.body?.cancel();
-  const deletion = await findOperation(config, token, operation);
+  const deletions = lifecycleFor(user, token);
+  const [deletion] = await deletions.pending("delete");
   assert(deletion);
   const retry = await request(
     app,
@@ -2063,7 +2114,10 @@ try {
   );
   assert.equal(completedDeletion.status, 200);
   assert((await completedDeletion.text()).includes("Account deleted"));
-  const finished = await advanceOperation(config, deletion);
+  const { operation: finished } = await deletions.run(
+    "delete",
+    deletion.operation_id,
+  );
   assert.equal(finished.progress, "complete");
   assert.equal(await appActive(config, row), false);
   assert.equal(
@@ -2084,7 +2138,10 @@ try {
     ).rows[0].progress,
     "complete",
   );
-  assert.equal((await advanceOperation(config, deletion)).progress, "complete");
+  assert.equal(
+    (await deletions.run("delete", deletion.operation_id)).operation.progress,
+    "complete",
+  );
   assert(stripe.deleted);
   pass(
     "Stripe-first failure/retry preserves writing, then actual native refusal/cleanup keeps the original operation",
@@ -2149,7 +2206,10 @@ try {
   );
   assert.equal(stripe.customers, 1);
   assert.equal(stripe.subscriptions, 1);
-  assert.equal((await advanceOperation(config, deletion)).progress, "complete");
+  assert.equal(
+    (await deletions.run("delete", deletion.operation_id)).operation.progress,
+    "complete",
+  );
   assert.equal(
     (
       await authPool.query(
@@ -2336,15 +2396,13 @@ try {
         "select subject,sid,binding,incarnation,generation from milton_app.session order by created_at desc limit 1",
       )
     ).rows[0];
-    const operation = await startOperation(
-      config,
-      { ...authority, id: authority.subject },
-      appCookies.get("__Host-milton-session")!,
-      randomUUID(),
-      "delete",
-    );
     assert.equal(
-      (await advanceOperation(config, operation)).progress,
+      (
+        await lifecycleFor(
+          { ...authority, id: authority.subject },
+          appCookies.get("__Host-milton-session")!,
+        ).run("delete", randomUUID())
+      ).operation.progress,
       "complete",
     );
     authCookies.clear();

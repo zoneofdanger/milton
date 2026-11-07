@@ -54,23 +54,53 @@ The fonts in `public/fonts` are self-hosted, with their upstream licenses:
 - `jetbrains-mono-regular.woff2`: JetBrains Mono, upright 400; display headings,
   report titles, brand, labels and code. `--font-display` and `--font-mono` share
   this one file. `--font-display-weight` avoids synthesizing a heavier display face.
+- `jetbrains-mono-latin.woff2`: a Latin subset of that file with identical glyphs;
+  see below.
 
 Geist source: https://fonts.gstatic.com/s/geist/v5/gyByhwUxId8gMEwcGFWNOITd.woff2
 Their SIL Open Font Licenses are included beside the files. JetBrains source:
 https://raw.githubusercontent.com/JetBrains/JetBrainsMono/master/fonts/webfonts/JetBrainsMono-Regular.woff2
 
+The app serves this full JetBrains Mono master. `jetbrains-mono-latin.woff2` is a
+Latin subset of it, kept here so every build copies it. Only the site uses it today:
+its Astro config copies it over the site's `/fonts/jetbrains-mono-regular.woff2`,
+so the CSS, the preload and the display behavior are unchanged. The subset keeps Latin-1, Latin Extended-A/B and
+Additional (including Vietnamese), IPA, spacing modifiers and combining marks,
+general punctuation, super/subscripts, currency and letterlike symbols, plus the
+basic arrows `←`–`↙`, `− ∕ ∙ ∞ ≈ ≠ ≤ ≥` and `✓ ✕ ✗`. It keeps every OpenType
+feature and the original hinting, metrics and glyph names; dropping the names
+changes Chromium's small-size rasterization. Other symbols, Greek, Cyrillic, box
+drawing and code-only glyphs fall back to the system monospace font. Its glyphs are
+identical to the master's. It is the same OFL font, so the license above covers it.
+After changing the master, regenerate it with FontTools 4.63 and Brotli
+(`pip install "fonttools[woff]"`), from the repository root:
+
+```sh
+pyftsubset packages/theme/public/fonts/jetbrains-mono-regular.woff2 \
+  --unicodes="U+0000-036F,U+1E00-1EFF,U+2000-206F,U+2070-209F,U+20A0-20CF,U+2100-214F,U+2190-2199,U+2212,U+2215,U+2219,U+221E,U+2248,U+2260,U+2264-2265,U+2713,U+2715,U+2717,U+FEFF,U+FFFD" \
+  --layout-features='*' --name-IDs='*' --name-languages='*' --name-legacy \
+  --notdef-outline --glyph-names --flavor=woff2 \
+  --output-file=packages/theme/public/fonts/jetbrains-mono-latin.woff2
+```
+
 Both active faces use `font-display: optional`: if a font arrives too late,
 keep the first rendered fallback for that visit instead of resizing visible text.
-The landing layout preloads both faces. The server build and Astro config
+The landing layout, app pages and auth pages preload both faces. The server build and Astro config
 copy the same assets into their public directories; no runtime font service is used.
 
 `brand.ts` owns the plain folder navigation SVG and shared favicon links. The
 Office Space-inspired printer favicon lives in `public/favicon.svg`, with an ICO
 fallback containing transparent 16, 32, 48 and 64px renders of that SVG. Both builds
 copy these same masters, so www, app and mcp serve identical icons. When editing
-the SVG, regenerate the ICO frames and update the cache revision in `faviconLinks`.
+the SVG, regenerate the ICO frames and update the site's cache revision in `faviconLinks`;
+the app and auth link content-versioned URLs instead (the app through `faviconLinksFor`).
 App pages allow only same-origin images and fonts (`img-src 'self'`,
 `font-src 'self'`); scripts and external images remain blocked.
+`assets.ts` versions the app and auth assets: at build time it records each file's
+content hash in `assets.json` and points CSS `url()`s at `?v=<hash>` URLs; at startup
+it loads, verifies and brotli/gzip-compresses them. A URL whose version matches the
+bytes is served `immutable` for a year; any other URL revalidates, so changed bytes
+(a new font or theme) reach clients on the next page load.
 `server/src/assets.ts` serves only the listed built asset paths from the server's
 `public` directory. In production the app's Cloud Run service serves them through
 `server/src/cloud-app.ts`; locally `server/scripts/dev.ts` does. Vercel serves only

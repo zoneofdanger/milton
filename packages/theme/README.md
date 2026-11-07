@@ -61,7 +61,7 @@ https://raw.githubusercontent.com/JetBrains/JetBrainsMono/master/fonts/webfonts/
 
 Both active faces use `font-display: optional`: if a font arrives too late,
 keep the first rendered fallback for that visit instead of resizing visible text.
-The landing layout preloads both faces. The server build and Astro config
+The landing layout, app pages and auth pages preload both faces. The server build and Astro config
 copy the same assets into their public directories; no runtime font service is used.
 
 `brand.ts` owns the plain folder navigation SVG and shared favicon links. The

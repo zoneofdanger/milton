@@ -285,3 +285,90 @@ describe("OAuth profile refusals before database access", () => {
     expect(queries).toHaveLength(1);
   });
 });
+
+test("static assets cache by content version and keep the other security headers", async () => {
+  const { mkdtempSync, mkdirSync, cpSync, writeFileSync, rmSync } =
+    await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { versionAssets } = await import("@milton/theme/assets");
+  const { createApp } = await import("../src/app.tsx");
+  const { SECURITY_HEADERS } = await import("../src/http.ts");
+  const theme = new URL("../../../packages/theme/public/", import.meta.url)
+    .pathname;
+  const assets = mkdtempSync(join(tmpdir(), "milton-auth-assets-"));
+  mkdirSync(join(assets, "fonts"));
+  cpSync(join(theme, "fonts"), join(assets, "fonts"), { recursive: true });
+  cpSync(join(theme, "favicon.svg"), join(assets, "favicon.svg"));
+  writeFileSync(
+    join(assets, "auth.css"),
+    '@font-face { font-family: "Geist"; src: url("/fonts/geist-latin-variable.woff2") format("woff2"); }\n'.repeat(
+      8,
+    ),
+  );
+  versionAssets(assets, [
+    "/auth.css",
+    "/favicon.svg",
+    "/fonts/geist-latin-variable.woff2",
+    "/fonts/jetbrains-mono-regular.woff2",
+  ]);
+  const app = createApp(
+    {
+      handler: async () => Response.json({ ok: true }),
+    } as unknown as import("../src/provider.ts").AuthService,
+    assets,
+  );
+  rmSync(assets, { recursive: true, force: true });
+  const call = (path: string, headers: Record<string, string> = {}) =>
+    app.request("https://auth.meetmilton.com" + path, { headers });
+  const login = await call("/login");
+  const html = await login.text();
+  const css = html.match(/href="(\/auth\.css\?v=[\w-]{16})"/)?.[1];
+  const fonts = ["geist-latin-variable", "jetbrains-mono-regular"].map(
+    (font) =>
+      html.match(
+        new RegExp(
+          `<link rel="preload" href="(/fonts/${font}\\.woff2\\?v=[\\w-]{16})" as="font" type="font/woff2" crossorigin="anonymous"`,
+        ),
+      )?.[1],
+  );
+  expect(html).toMatch(/href="\/favicon\.svg\?v=[\w-]{16}"/);
+  expect(css).toBeDefined();
+  expect(await (await call(css!)).text()).toContain(`url("${fonts[0]}")`);
+  const immutable = "public, max-age=31536000, immutable";
+  const others = Object.entries(SECURITY_HEADERS).filter(
+    ([name]) => name !== "cache-control",
+  );
+  const compressed = await call(css!, { "accept-encoding": "br, gzip" });
+  expect(compressed.headers.get("content-encoding")).toBe("br");
+  expect(compressed.headers.get("vary")).toBe("Accept-Encoding");
+  for (const r of [
+    compressed,
+    ...(await Promise.all(fonts.map((f) => call(f!)))),
+  ]) {
+    expect(r.status).toBe(200);
+    expect(r.headers.get("cache-control")).toBe(immutable);
+    for (const [name, value] of others) expect(r.headers.get(name)).toBe(value);
+  }
+  // Legacy URLs revalidate; pages, API, health and refusals stay no-store.
+  for (const path of ["/auth.css", "/fonts/geist-latin-variable.woff2"]) {
+    const r = await call(path);
+    expect(r.headers.get("cache-control")).toBe("no-cache");
+    for (const [name, value] of others) expect(r.headers.get(name)).toBe(value);
+  }
+  const ok = await call("/api/auth/ok");
+  expect(await ok.json()).toEqual({ ok: true });
+  for (const r of [
+    login,
+    ok,
+    await call("/health"),
+    await call("/missing"),
+    await call("/fonts/missing.woff2"),
+    await app.request("https://auth.meetmilton.com/auth.css", {
+      method: "POST",
+      headers: { origin: "https://evil.example" },
+    }),
+  ])
+    for (const [name, value] of Object.entries(SECURITY_HEADERS))
+      expect(r.headers.get(name)).toBe(value);
+});

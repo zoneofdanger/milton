@@ -242,6 +242,7 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
 `server/scripts/backfill-subscriptions.ts`, `packages/forwarded-client/`.
 
 - Native auth hosts verified password/email, Google/GitHub, consent and account security; own form destinations and direct native URL-encoded browser form POST redirects (including logout confirmation) share an escaped fresh-document Continue navigation under strict same-origin form policy; direct GET, JSON/fetch and machine calls retain native redirects, and finalized native/static/refusal responses use strict-origin referrers (origin only, no paths/queries/proofs, suppressed on HTTPS downgrade) so same-origin form POSTs retain Origin while missing/null/foreign Origins stay refused; responses retain their security headers and native cookies; app never handles passwords or native cookies.
+- Auth's CSS, favicon and fonts keep every security header but cache like the app's assets (immutable at the versioned URL, otherwise no-cache); every other auth response stays no-store.
 - App uses maintained code/S256 OIDC with shared SQL one-use state/nonce/verifier, exact callback, signature/issuer/audience/subject and matching UserInfo/opaque-token proof.
 - Identity-only app sessions last at most one absolute hour and never outlive their native opaque token; renewal starts a new SSO flow with no refresh/offline scope.
 - App cookies are host-only Secure/HttpOnly/SameSite=Lax over HTTPS; every use checks the original nonempty sid, immutable binding, incarnation and generation against native SQL.

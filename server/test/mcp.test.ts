@@ -423,15 +423,9 @@ test("two authenticated clients isolate tenants, save once and reject retired to
       name: "get_cover_sheet",
       arguments: { event: "start" },
     });
-    expect(stale).toEqual({
-      isError: true,
-      content: [
-        {
-          type: "text",
-          text: 'Input validation error: Invalid arguments for tool get_cover_sheet: Unrecognized key: "event"',
-        },
-      ],
-    });
+    // The wording is the MCP SDK's; the refusal and the named key are ours to keep.
+    expect(stale.isError).toBe(true);
+    expect((stale.content as { text: string }[])[0]!.text).toContain('"event"');
     // Reports read by id (doc is an alias); an empty one is a heading and a when line.
     const document = (
       await call(0, "get_report", {

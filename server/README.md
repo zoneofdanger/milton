@@ -470,9 +470,7 @@ Retained history has no cap.
 The website shows the current cover sheet and reports, escapes their text and serves no browser JavaScript.
 It displays one bullet per complete active instruction card, preserving internal
 line breaks and conditions and dropping one stored leading `- ` as assembly does,
-only when a second read for the page returns the same version as the
-canonical report; it does not compare the text.
-Unavailable or mismatched layout data keeps the original plain-text view. Report
+from one read per page view. Report
 pages preload the shared Geist and JetBrains Mono fonts; the theme uses
 `font-display: optional` to avoid a late font swap.
 `/download` returns the cover rules and every non-empty report, including all active

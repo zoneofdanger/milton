@@ -720,7 +720,7 @@ test("the account menu offers the way to pay on every signed-in page, and the no
     }
     // A failed status read costs the item, never the page.
     await local.db.query(
-      sql`ALTER TABLE trial_accounts RENAME TO hidden_clock`,
+      sql`ALTER TABLE trial_accounts RENAME COLUMN current_period_start TO hidden_clock`,
     );
     for (const path of ["/", "/assistants", "/account/delete"]) {
       const response = await send(path);
@@ -728,7 +728,7 @@ test("the account menu offers the way to pay on every signed-in page, and the no
       expect(await response.text()).not.toContain('action="/billing');
     }
     await local.db.query(
-      sql`ALTER TABLE hidden_clock RENAME TO trial_accounts`,
+      sql`ALTER TABLE trial_accounts RENAME COLUMN hidden_clock TO current_period_start`,
     );
   } finally {
     quiet.mockRestore();
@@ -1200,7 +1200,7 @@ test("pages stay capped and download includes every active sample, only for the 
   }
 }, 30000);
 
-test("report bullets require exact revision and complete text parity; optional lookup failure keeps canonical access", async () => {
+test("report bullets keep complete text parity and the download needs no layout read", async () => {
   const bodies = [
     "  Keep fictional units explicit.\n\nUnless a condition applies, preserve <tag> & wording.  ",
     "Do the second instruction after the first.\nKeep this exception attached.\n",
@@ -1210,10 +1210,7 @@ test("report bullets require exact revision and complete text parity; optional l
     version: "a".repeat(64),
     is_empty: false,
   };
-  const base = {
-    readTpsReport: async () => report,
-    exportTpsReport: async () => report.text,
-  };
+  const base = { exportTpsReport: async () => report.text };
   const emptyReport = (id: string, title: string) => ({
     id,
     title,
@@ -1238,7 +1235,7 @@ test("report bullets require exact revision and complete text parity; optional l
     comment: () => COVER_COMMENTS[2],
   };
   const render = (
-    readDocuments?: () => Promise<typeof exact | null>,
+    readDocuments: () => Promise<typeof exact>,
     path = "/tps-report",
   ) =>
     memoPages(
@@ -1281,23 +1278,6 @@ test("report bullets require exact revision and complete text parity; optional l
   expect(
     html.indexOf('<h1 aria-label="T.P.S. Report, cover sheet">'),
   ).toBeLessThan(html.indexOf('<ol class="ruled">'));
-  for (const lookup of [
-    undefined,
-    async () => null,
-    async () => ({ ...exact, version: "b".repeat(64) }),
-    async () => {
-      throw new Error("Optional layout unavailable");
-    },
-  ]) {
-    const response = await render(lookup);
-    expect(response.status).toBe(200);
-    const fallback = await response.text();
-    expect(fallback).toContain('<pre class="memo-text"><span>');
-    expect(fallback).not.toContain('<ol class="ruled">');
-    expect(fallback).toContain(
-      "Unless a condition applies, preserve &lt;tag&gt; &amp; wording.",
-    );
-  }
   let lookups = 0;
   const download = await render(async () => {
     lookups++;
@@ -1312,10 +1292,6 @@ test("report bullets require exact revision and complete text parity; optional l
       new Request(appOrigin + "/tps-report"),
       {
         ...base,
-        readTpsReport: async () => ({
-          ...report,
-          text: "# Email\n\nApplies when fictional.\n\n- One.\n\n- Two\nlines.",
-        }),
         readDocuments: (async () => ({
           ...exact,
           cover: "",
@@ -1735,7 +1711,6 @@ test("report guides show readable tendencies and status without internal diagnos
     const response = await memoPages(
       new Request(appOrigin + "/tps-report"),
       {
-        readTpsReport: async () => report,
         readDocuments: async () => documents,
         exportTpsReport: async () => report.text,
       },

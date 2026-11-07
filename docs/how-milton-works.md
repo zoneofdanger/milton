@@ -289,7 +289,7 @@ Files: `server/src/pages.tsx`, `server/src/memo-pages.tsx`, `server/src/auth.tsx
   native sample disclosures, rules, and a random joke comment.
 - Both empty-app setup paragraphs lead with pasted-writing cleanup and optional older examples beside the shared prompt; populated accounts point to the next email or DM.
 - Empty reports remain optional later uses; sample-only reports never show an unfinished setup state.
-- If the structured read fails, it falls back to plain report text.
+- Each view makes one structured read; a failed read fails the page, with no plain-text fallback.
 - `/download` returns the complete writing export as `TPS.md`; the web report labels
   its sample count as shown, explains its newest-eight-per-report limit and links to
   the complete download, including when assistant access is paused.

@@ -71,11 +71,6 @@ reports, memos) and plain text on security screens and anything an assistant rea
 
 ## From the audit of 2026-11-02 (`.agents/tmp/audit/report.md`)
 
-- [ ] #15 (server, med) **Measure, then pool, database connections.** Each transaction opens its own
-      Neon serverless client (A7, database.ts "no global connections", a Workers-era rule); one read
-      is several HTTP queries and WebSocket connects. Measure latency first; if it pays, a process
-      pool closed on SIGTERM.
-
 - [ ] #19 (server, low) **Document two known limits.** Exact-edit anchors are not Unicode-normalized,
       so a quote typed with composed accents misses decomposed stored text (A26); the token's scope
       claim is parsed but never enforced and clock tolerance does not apply to expiry (A27). Both

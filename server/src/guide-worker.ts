@@ -1,5 +1,5 @@
 import { loadEnvironment } from "./environment";
-import { postgresDatabase } from "./store/database";
+import { closeDatabasePools, postgresDatabase } from "./store/database";
 import { guideWorkerRoleAllowed } from "./guides/store";
 import { anthropicGuideProvider } from "./guides/provider";
 import { runGuideWorker } from "./guides/worker";
@@ -21,4 +21,6 @@ try {
 } catch {
   console.error(JSON.stringify({ event: "guide_worker_failed" }));
   process.exitCode = 1;
+} finally {
+  await closeDatabasePools();
 }

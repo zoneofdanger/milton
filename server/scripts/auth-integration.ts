@@ -15,7 +15,11 @@ import { createAccessTokenVerifier } from "../src/token";
 import { sql } from "drizzle-orm";
 import { createMiltonApp } from "../src/index";
 import { runtimeConfig, type RuntimeConfig } from "../src/config";
-import { postgresDatabase } from "../src/store/database";
+import {
+  closeDatabasePools,
+  POOL_IDLE_MS,
+  postgresDatabase,
+} from "../src/store/database";
 import { database, lookupIdentityAccount, StoreError } from "../src/store";
 import {
   authenticateConnectionKey,
@@ -531,9 +535,13 @@ try {
         "callback errors are never remapped or logged",
       );
       const commitMarker = `m_${randomUUID()}`;
-      let reachedCommit = false;
+      let reachedCommit = false,
+        commitPid = 0;
       await assert.rejects(
         ownerDb.transaction(async (tx) => {
+          commitPid = (
+            await tx.query<{ pid: number }>(sql`SELECT pg_backend_pid() pid`)
+          )[0]!.pid;
           await tx.query(sql`INSERT INTO users(id) VALUES(${commitMarker})`);
           await tx.query(sql`CREATE TEMP TABLE fictional_commit_check
           (id int UNIQUE DEFERRABLE INITIALLY DEFERRED) ON COMMIT DROP`);
@@ -551,6 +559,13 @@ try {
         "deferred constraint fails at COMMIT, after callback",
       );
       await absent(commitMarker);
+      assert.notEqual(
+        (
+          await ownerDb.query<{ pid: number }>(sql`SELECT pg_backend_pid() pid`)
+        )[0]!.pid,
+        commitPid,
+        "a connection whose COMMIT failed is not reused",
+      );
       assert.deepEqual(
         logs,
         [],
@@ -618,6 +633,24 @@ try {
           });
         }),
         42,
+      );
+      let clock = Date.now();
+      const timed = postgresDatabase(url("app"), { now: () => clock });
+      const backend = async () =>
+        (
+          await timed.query<{ pid: number }>(sql`SELECT pg_backend_pid() pid`)
+        )[0]!.pid;
+      const pooled = await backend();
+      assert.equal(
+        await backend(),
+        pooled,
+        "sequential operations share a connection",
+      );
+      clock += POOL_IDLE_MS + 1;
+      assert.notEqual(
+        await backend(),
+        pooled,
+        "a connection idle past the bound is not reused",
       );
       assert.deepEqual(logs, []);
     } finally {
@@ -2405,7 +2438,10 @@ try {
   );
   process.exitCode = 1;
 } finally {
-  await Promise.allSettled(pools.map((pool) => pool.end()));
+  await Promise.allSettled([
+    ...pools.map((pool) => pool.end()),
+    closeDatabasePools(),
+  ]);
   if (running)
     run(join(bin, "pg_ctl"), ["-D", data, "-m", "fast", "-w", "stop"]);
   rmSync(root, { recursive: true, force: true });

@@ -4,6 +4,7 @@ import { mcpRuntimeConfig, runtimeConfig } from "./config";
 import { createMcpApp } from "./index";
 import { createCloudApp } from "./cloud-app";
 import { logUnexpected } from "./error-log";
+import { closeDatabasePools } from "./store/database";
 
 try {
   const env = loadEnvironment();
@@ -16,7 +17,8 @@ try {
       : createMcpApp(mcpRuntimeConfig(env));
   const server = serve({ fetch, port, hostname: "0.0.0.0" });
   const shutdown = () => {
-    server.close(() => process.exit(0));
+    // In-flight requests finish first, then pooled connections close.
+    server.close(() => void closeDatabasePools().then(() => process.exit(0)));
     // Cloud Run grants ten seconds. An interrupted save commits whole or not
     // at all; replay then reports the outcome.
     setTimeout(() => process.exit(0), 8000).unref();

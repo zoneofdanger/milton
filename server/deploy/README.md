@@ -117,7 +117,13 @@ Rollback: `psql -X -v ON_ERROR_STOP=1 -f server/migrations/007-role-timeouts.dow
 the same owner resets exactly these settings; code whose role audit requires them then
 fails that audit, so roll such code back first.
 
-## Drop the unread trial tables (pending: Drizzle 0005, owner file 008)
+## Drop the unread trial tables (applied 2026-11-07: Drizzle 0005, owner file 008)
+
+Applied 21:59Z after snapshot `snap-muddy-bonus-b8tjvsii` (Peter's go), while `*-fnt-d3ea1eb`
+served. 0005 ran as `neondb_owner` exactly as the Drizzle migrator does (the file's SQL plus its
+SHA-256 and journal `when` in one transaction, journal now 6); 008 ran as `milton_app_owner`.
+Both `to_regclass` checks are null; `deleted_identities` was empty and `legacy_mapping` held
+2 rows, now only in the snapshot.
 
 Since PR #26 nothing reads or writes `public.deleted_identities` or
 `milton_app.legacy_mapping`: keyed trial-eligibility fingerprints are the only second-trial

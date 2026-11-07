@@ -74,8 +74,9 @@ source `95587e5`, same env 4 / key 2). Structure only: one save module, database
 mapped where the database is chosen, no runtime import cycles. Checks: health 200,
 unauthenticated MCP 401, forms probe PASS, production read version unchanged, 0 errors in
 five minutes (low traffic). Rollback: traffic back to `*-cut-eaf898e`. An auth instance
-failed startup at 08:30:47Z when the Neon compute restarted (08:30:50Z), probably from the
-`neondb_owner` password reset; the service recovered without action.
+failed startup at 08:30:47Z while the Neon compute waking from autosuspend (it had been idle); the service recovered without
+action. Autosuspend on the production endpoint `ep-curly-cherry-b8l7hc8f` is now off
+(`suspend_timeout_seconds: -1`, 2026-11-07); TODO #28 adds a startup retry.
 
 ## Sample revision schema/API cutover (applied 2026-11-07, see above)
 

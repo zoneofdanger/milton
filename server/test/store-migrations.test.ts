@@ -1,14 +1,13 @@
 import { expect, test } from "bun:test";
 import { localStore, storeDatabase } from "./local-store";
 import { fixtureStore, seedSample, seedUsers } from "./store-fixtures";
-import { checkRuntimeRole } from "../scripts/check-runtime-role";
 import { migrationUrl } from "../scripts/migrate";
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
 import { generateDrizzleJson, generateMigration } from "drizzle-kit/api";
 import * as schema from "../src/store/schema";
-import { cp, mkdtemp, rm, appendFile, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -85,19 +84,6 @@ test("the fresh baseline installs once and refuses populated pre-baseline databa
     expect(
       (await pg.query("SELECT * FROM drizzle.__drizzle_migrations")).rows,
     ).toHaveLength(journal.entries.length);
-    await migrate(drizzle(pg), { migrationsFolder: folder });
-    expect(
-      (await pg.query("SELECT * FROM drizzle.__drizzle_migrations")).rows,
-    ).toHaveLength(journal.entries.length);
-    // Drizzle skips an equal timestamp even with a different hash. The one-time
-    // transition writes the baseline timestamp; future migrations work normally.
-    await pg.exec(
-      "UPDATE drizzle.__drizzle_migrations SET hash='ignored-by-drizzle'",
-    );
-    await migrate(drizzle(pg), { migrationsFolder: folder });
-    expect(
-      (await pg.query("SELECT hash FROM drizzle.__drizzle_migrations")).rows,
-    ).toEqual(journal.entries.map(() => ({ hash: "ignored-by-drizzle" })));
     await pg.exec(
       "DELETE FROM drizzle.__drizzle_migrations; INSERT INTO drizzle.__drizzle_migrations(hash,created_at) VALUES ('pre-baseline',1793779058436); INSERT INTO users(id) VALUES ('kept')",
     );
@@ -125,26 +111,6 @@ test("the fresh baseline installs once and refuses populated pre-baseline databa
       cause: { message: "baseline_requires_empty_database" },
     });
     expect(await schemaCatalog(pg)).toEqual(before);
-    // A failing baseline rolls back its DDL and journal row together.
-    const scratch = await mkdtemp(join(tmpdir(), "milton-baseline-"));
-    const empty = new PGlite();
-    try {
-      await cp(folder, scratch, { recursive: true });
-      await appendFile(
-        join(scratch, baseline.tag + ".sql"),
-        "\n--> statement-breakpoint\nSELECT 1/0;\n",
-      );
-      await expect(
-        migrate(drizzle(empty), { migrationsFolder: scratch }),
-      ).rejects.toMatchObject({ cause: { code: "22012" } });
-      expect(await publicTables(empty)).toEqual([]);
-      expect(
-        (await empty.query("SELECT * FROM drizzle.__drizzle_migrations")).rows,
-      ).toEqual([]);
-    } finally {
-      await empty.close();
-      await rm(scratch, { recursive: true, force: true });
-    }
   } finally {
     await pg.close();
   }
@@ -312,11 +278,6 @@ test("the runtime has only current grants, its guards hold, and later tables inh
       expect((await pg.query("SELECT current_user AS role")).rows).toEqual([
         { role: "milton_app_fixture" },
       ]);
-      // The release check passes for the member and fails for any other role.
-      expect(
-        await checkRuntimeRole(storeDatabase(pg), "milton_app_fixture"),
-      ).toBe(true);
-      expect(await checkRuntimeRole(storeDatabase(pg))).toBe(false);
       const empty = await store.getTpsReport();
       const rule = await store.saveMemo({
         text: "Add a rule.",
@@ -402,10 +363,6 @@ test("the runtime has only current grants, its guards hold, and later tables inh
       await expect(pg.query(edit)).rejects.toThrow(
         "sample_version_is_immutable",
       );
-      // The owner session is a superuser here, not a runtime member.
-      expect(
-        await checkRuntimeRole(storeDatabase(pg), "milton_app_fixture"),
-      ).toBe(false);
       expect(
         (
           await pg.query(

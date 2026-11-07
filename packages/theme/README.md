@@ -64,20 +64,20 @@ The app serves this full JetBrains Mono master. The site serves a Latin subset,
 same `/fonts/jetbrains-mono-regular.woff2` path, so the CSS, the preload and the
 display behavior are unchanged. The subset keeps Latin-1, Latin Extended-A/B and
 Additional (including Vietnamese), IPA, spacing modifiers and combining marks,
-general punctuation, super/subscripts, currency, letterlike symbols, arrows,
-mathematical operators, geometric shapes, dingbats and supplemental arrows and math,
-with every OpenType feature and the original hinting, metrics and names. It drops
-Greek, Cyrillic, box drawing, block elements, technical symbols and code-only
-glyphs; those characters fall back to the system monospace font. Its glyphs are
+general punctuation, super/subscripts, currency and letterlike symbols, plus the
+basic arrows `←`–`↙`, `− ∕ ∙ ∞ ≈ ≠ ≤ ≥` and `✓ ✕ ✗`. It keeps every OpenType
+feature and the original hinting, metrics and glyph names; dropping the names
+changes Chromium's small-size rasterization. Other symbols, Greek, Cyrillic, box
+drawing and code-only glyphs fall back to the system monospace font. Its glyphs are
 identical to the master's. It is the same OFL font, so the license above covers it.
 After changing the master, regenerate it with FontTools 4.63 and Brotli
 (`pip install "fonttools[woff]"`), from the repository root:
 
 ```sh
 pyftsubset packages/theme/public/fonts/jetbrains-mono-regular.woff2 \
-  --unicodes="U+0000-036F,U+1E00-1EFF,U+2000-22FF,U+25A0-27FF,U+2900-2BFF,U+FEFF,U+FFFD" \
+  --unicodes="U+0000-036F,U+1E00-1EFF,U+2000-206F,U+2070-209F,U+20A0-20CF,U+2100-214F,U+2190-2199,U+2212,U+2215,U+2219,U+221E,U+2248,U+2260,U+2264-2265,U+2713,U+2715,U+2717,U+FEFF,U+FFFD" \
   --layout-features='*' --name-IDs='*' --name-languages='*' --name-legacy \
-  --notdef-outline --flavor=woff2 \
+  --notdef-outline --glyph-names --flavor=woff2 \
   --output-file=apps/site/fonts/jetbrains-mono-latin.woff2
 ```
 

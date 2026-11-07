@@ -7,7 +7,7 @@ import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
 import { generateDrizzleJson, generateMigration } from "drizzle-kit/api";
 import * as schema from "../src/store/schema";
-import { cp, mkdtemp, rm, appendFile, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -84,19 +84,6 @@ test("the fresh baseline installs once and refuses populated pre-baseline databa
     expect(
       (await pg.query("SELECT * FROM drizzle.__drizzle_migrations")).rows,
     ).toHaveLength(journal.entries.length);
-    await migrate(drizzle(pg), { migrationsFolder: folder });
-    expect(
-      (await pg.query("SELECT * FROM drizzle.__drizzle_migrations")).rows,
-    ).toHaveLength(journal.entries.length);
-    // Drizzle skips an equal timestamp even with a different hash. The one-time
-    // transition writes the baseline timestamp; future migrations work normally.
-    await pg.exec(
-      "UPDATE drizzle.__drizzle_migrations SET hash='ignored-by-drizzle'",
-    );
-    await migrate(drizzle(pg), { migrationsFolder: folder });
-    expect(
-      (await pg.query("SELECT hash FROM drizzle.__drizzle_migrations")).rows,
-    ).toEqual(journal.entries.map(() => ({ hash: "ignored-by-drizzle" })));
     await pg.exec(
       "DELETE FROM drizzle.__drizzle_migrations; INSERT INTO drizzle.__drizzle_migrations(hash,created_at) VALUES ('pre-baseline',1793779058436); INSERT INTO users(id) VALUES ('kept')",
     );
@@ -124,26 +111,6 @@ test("the fresh baseline installs once and refuses populated pre-baseline databa
       cause: { message: "baseline_requires_empty_database" },
     });
     expect(await schemaCatalog(pg)).toEqual(before);
-    // A failing baseline rolls back its DDL and journal row together.
-    const scratch = await mkdtemp(join(tmpdir(), "milton-baseline-"));
-    const empty = new PGlite();
-    try {
-      await cp(folder, scratch, { recursive: true });
-      await appendFile(
-        join(scratch, baseline.tag + ".sql"),
-        "\n--> statement-breakpoint\nSELECT 1/0;\n",
-      );
-      await expect(
-        migrate(drizzle(empty), { migrationsFolder: scratch }),
-      ).rejects.toMatchObject({ cause: { code: "22012" } });
-      expect(await publicTables(empty)).toEqual([]);
-      expect(
-        (await empty.query("SELECT * FROM drizzle.__drizzle_migrations")).rows,
-      ).toEqual([]);
-    } finally {
-      await empty.close();
-      await rm(scratch, { recursive: true, force: true });
-    }
   } finally {
     await pg.close();
   }

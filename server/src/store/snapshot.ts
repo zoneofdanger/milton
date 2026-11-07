@@ -3,6 +3,7 @@ import { sql } from "drizzle-orm";
 import { guidePresentation, type GuidePresentation } from "../guides/store";
 import { cardHeadsJson, cardFingerprint, type CardHead } from "./cards";
 import type { StoreSession } from "./database";
+import { accountUnavailable } from "./accounts";
 import { StoreError } from "./errors";
 import {
   assembleDocuments,
@@ -14,16 +15,9 @@ import {
 import { sampleHeads } from "./samples";
 
 // One account's cards and samples as reads and saves see them: the snapshot
-// statement, the account lock and the hash behind versions and fingerprints.
+// statement and the hash behind versions and fingerprints.
 export const hash = (value: unknown) =>
   createHash("sha256").update(JSON.stringify(value)).digest("hex");
-
-const unavailable = () =>
-  new StoreError(
-    "account_unavailable",
-    "This Milton account is unavailable.",
-    403,
-  );
 
 /** What `readSnapshot` reads in one statement. */
 export type Snapshot = {
@@ -38,18 +32,6 @@ export type Snapshot = {
   /** The fingerprint of the assembled documents; every save fences on it. */
   version: string;
 };
-
-/** The account row lock every writer takes; refuses a closed account. */
-export async function lockAccount(tx: StoreSession, userId: string) {
-  if (
-    !(
-      await tx.query(
-        sql`SELECT id FROM users WHERE id=${userId} AND status='active' FOR UPDATE`,
-      )
-    ).length
-  )
-    throw unavailable();
-}
 
 // Every active sample revision fences writes, including samples outside eight.
 const version = (userId: string, documents: Documents, samples: Sample[]) =>
@@ -101,7 +83,7 @@ export async function readSnapshot(
       (${includeGuides ? guidePresentation(userId) : sql`SELECT '{}'::json`}) AS guides`,
     )
   )[0]!;
-  if (!row.open) throw unavailable();
+  if (!row.open) throw accountUnavailable();
   if (!row.kind_valid)
     throw new StoreError(
       "invalid_kind",

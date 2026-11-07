@@ -6,9 +6,9 @@ import {
   mappedDatabase,
   postgresDatabase,
   type StoreDatabase,
-  type StoreSession,
 } from "./database";
 import { StoreError } from "./errors";
+import { accountUnavailable, requireActiveAccount } from "./accounts";
 import { claimTrialNotice, trialStatus, type TrialNotice } from "./trials";
 import {
   backfillAccounts,
@@ -54,6 +54,14 @@ interface VerifiedIdentity {
   provider: string;
   subject: string;
 }
+/** A sign-in identity's fields, provider first, within the bounds they are
+ * stored under. */
+const parseIdentity = (identity: VerifiedIdentity): VerifiedIdentity => ({
+  provider: z.string().min(1).max(64).parse(identity.provider),
+  subject: z.string().min(1).max(512).parse(identity.subject),
+});
+const parseClientId = (clientId: string) =>
+  z.string().min(1).max(2048).parse(clientId);
 
 // One-way fingerprint of a sign-in identity, stored after account deletion.
 const identityHash = (provider: string, subject: string) =>
@@ -64,8 +72,7 @@ export async function resolveIdentityAccount(
   identity: VerifiedIdentity,
   fingerprints: readonly string[] = [],
 ) {
-  const provider = z.string().min(1).max(64).parse(identity.provider);
-  const subject = z.string().min(1).max(512).parse(identity.subject);
+  const { provider, subject } = parseIdentity(identity);
   const legacyDeleted = fingerprints.length
     ? sql`EXISTS(SELECT 1 FROM milton_app.legacy_mapping l WHERE l.issuer=${provider} AND l.subject=${subject} AND l.deleted)`
     : sql`false`;
@@ -130,12 +137,7 @@ export async function resolveIdentityAccount(
           account = { id, status: "active" };
         }
       }
-      if (account.status !== "active")
-        throw new StoreError(
-          "account_unavailable",
-          "This Milton account is unavailable.",
-          403,
-        );
+      if (account.status !== "active") throw accountUnavailable();
       // Linking records new eligibility proofs but never changes writing owner,
       // starts another trial or rewinds an existing subscription.
       for (const fingerprint of [...new Set(fingerprints)].sort()) {
@@ -168,9 +170,8 @@ interface AssistantIdentity {
   clientId: string;
 }
 const assistantIdentity = (identity: AssistantIdentity) => ({
-  provider: z.string().min(1).max(64).parse(identity.provider),
-  subject: z.string().min(1).max(512).parse(identity.subject),
-  clientId: z.string().min(1).max(2048).parse(identity.clientId),
+  ...parseIdentity(identity),
+  clientId: parseClientId(identity.clientId),
 });
 
 /**
@@ -184,12 +185,11 @@ export async function lookupIdentityAccount(
     clientId?: string;
   },
 ): Promise<VerifiedStoreAuth> {
-  const provider = z.string().min(1).max(64).parse(identity.provider);
-  const subject = z.string().min(1).max(512).parse(identity.subject);
+  const { provider, subject } = parseIdentity(identity);
   const clientId =
     identity.clientId === undefined
       ? undefined
-      : z.string().min(1).max(2048).parse(identity.clientId);
+      : parseClientId(identity.clientId);
   const row = (
     await database(bindings).query<{
       id: string | null;
@@ -246,8 +246,7 @@ export async function listAssistantDisconnects(
   bindings: StoreBindings,
   identity: Pick<VerifiedIdentity, "provider" | "subject">,
 ): Promise<Set<string>> {
-  const provider = z.string().min(1).max(64).parse(identity.provider);
-  const subject = z.string().min(1).max(512).parse(identity.subject);
+  const { provider, subject } = parseIdentity(identity);
   const rows = await database(bindings).query<{ client_id: string }>(sql`
       SELECT client_id FROM assistant_disconnects
       WHERE provider=${provider} AND subject=${subject}`);
@@ -266,11 +265,8 @@ export async function deleteAccount(
   identity: Pick<VerifiedIdentity, "provider" | "subject">,
   clientIds: string[],
 ): Promise<void> {
-  const provider = z.string().min(1).max(64).parse(identity.provider);
-  const subject = z.string().min(1).max(512).parse(identity.subject);
-  const clients = [
-    ...new Set(clientIds.map((id) => z.string().min(1).max(2048).parse(id))),
-  ];
+  const { provider, subject } = parseIdentity(identity);
+  const clients = [...new Set(clientIds.map(parseClientId))];
   await database(bindings)
     .transaction(async (tx) => {
       // The same row lock every writer takes, so in-flight saves finish first
@@ -281,12 +277,7 @@ export async function deleteAccount(
         WHERE i.provider=${provider} AND i.subject=${subject} AND u.status='active'
         FOR UPDATE OF u`)
       )[0];
-      if (!account)
-        throw new StoreError(
-          "account_unavailable",
-          "This Milton account is unavailable.",
-          403,
-        );
+      if (!account) throw accountUnavailable();
       for (const clientId of clients)
         await tx.query(sql`
           INSERT INTO assistant_disconnects (provider,subject,client_id)
@@ -319,21 +310,6 @@ export interface TenantStore {
   chargeToolCall(): Promise<CallAllowance>;
 }
 
-async function resolveActiveUser(db: StoreSession, userId: string) {
-  const account = (
-    await db.query<{ id: string }>(
-      sql`SELECT id FROM users WHERE id = ${userId} AND status = 'active'`,
-    )
-  )[0];
-  if (!account)
-    throw new StoreError(
-      "account_unavailable",
-      "This Milton account is unavailable.",
-      403,
-    );
-  return account.id;
-}
-
 export async function storeForCurrentRequest(
   bindings: StoreBindings & { appOrigin: string },
   auth: VerifiedStoreAuth,
@@ -342,7 +318,7 @@ export async function storeForCurrentRequest(
   const userId = auth.userId;
   const db = database(bindings);
   const limits = await readLimits(db);
-  await resolveActiveUser(db, userId);
+  await requireActiveAccount(db, userId, { lock: false });
   const compiled = compiledMemos(db, userId, assistant);
   return {
     appOrigin: bindings.appOrigin,
@@ -357,18 +333,7 @@ export async function storeForCurrentRequest(
     saveMemo: compiled.saveMemo,
     async chargeToolCall() {
       return db.transaction(async (tx) => {
-        if (
-          !(
-            await tx.query(
-              sql`SELECT id FROM users WHERE id = ${userId} AND status = 'active' FOR UPDATE`,
-            )
-          ).length
-        )
-          throw new StoreError(
-            "account_unavailable",
-            "This Milton account is unavailable.",
-            403,
-          );
+        await requireActiveAccount(tx, userId, { lock: true });
         const { day } = (
           await tx.query<{ day: string }>(
             sql`SELECT (clock_timestamp() AT TIME ZONE 'UTC')::date::text AS day`,

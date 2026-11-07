@@ -9,7 +9,7 @@ import {
   seedSample,
   seedUsers,
 } from "./store-fixtures";
-import { createStoreMemoTools } from "../src/store/tools";
+import { createStoreMemoTools } from "../src/mcp-tools";
 import { createHash } from "node:crypto";
 import type { StoreDatabase } from "../src/store/database";
 import {
@@ -630,9 +630,20 @@ test("identity lookup never admits or seeds an MCP caller", async () => {
         sql`SELECT count(*)::integer AS n FROM users u WHERE NOT EXISTS (SELECT 1 FROM identities i WHERE i.user_id=u.id)`,
       ),
     ).toEqual([{ n: 0 }]);
+    const auth = await lookupIdentityAccount(local.env, identity);
+    const store = await storeForCurrentRequest(local.env, auth);
     await local.db.query(
       sql`UPDATE users SET status='deleting' WHERE id=${admitted.miltonUserId}`,
     );
+    // A closed account gets no store, and a store built before it closed
+    // charges no further calls.
+    await expect(storeForCurrentRequest(local.env, auth)).rejects.toMatchObject(
+      { code: "account_unavailable", status: 403 },
+    );
+    await expect(store.chargeToolCall()).rejects.toMatchObject({
+      code: "account_unavailable",
+      status: 403,
+    });
     await expect(
       lookupIdentityAccount(local.env, identity),
     ).rejects.toMatchObject({ code: "account_unavailable", status: 403 });

@@ -23,7 +23,7 @@ import {
   safeToolLog,
   type ToolCall,
 } from "./mcp-outcomes";
-import { storeResult } from "./store/tools";
+import { storeResult } from "./mcp-tools";
 import { bindingActive } from "./auth-authority";
 
 const incomingTool = z.object({

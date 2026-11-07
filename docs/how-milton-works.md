@@ -79,7 +79,7 @@ Files: `server/src/handler.ts`, `server/src/token.ts`, `server/src/mcp.ts`,
 
 ## The four tools
 
-Files: `server/src/store/tools.ts`, `server/src/mcp.ts`.
+Files: `server/src/mcp.ts`, `server/src/mcp-tools.ts`.
 
 - `get_cover_sheet` returns the cover rules, version, report index, and `is_empty`, plus
   the optional setup script while the whole account has no rules or samples.
@@ -134,8 +134,8 @@ Files: `server/src/store/reports.ts`, `server/src/store/compiled.ts`.
 ## Saves
 
 Files: `server/src/store/compiled.ts`, `server/src/store/save.ts`,
-`server/src/store/snapshot.ts`, `server/src/store/provenance.ts`,
-`server/src/exact-edits.ts`.
+`server/src/store/snapshot.ts`, `server/src/store/accounts.ts`,
+`server/src/store/provenance.ts`, `server/src/exact-edits.ts`.
 
 A save runs in one transaction under the account lock: replay or gates, then
 validation, the writes, publishing and the receipt, which commits with its result or

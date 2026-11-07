@@ -10,7 +10,7 @@ import {
   seedUsers,
   seedSample,
 } from "./store-fixtures";
-import { coverSheet, reportEnvelope } from "../src/store/tools";
+import { coverSheet, reportEnvelope } from "../src/mcp-tools";
 
 test("rules are stored byte for byte, one card each", async () => {
   const local = await localStore();
@@ -1660,7 +1660,7 @@ test("kind and contextual reads prefer concrete situations and fill sparse match
         `Fictional example ${i}.`,
       );
     }
-    const tools = (await import("../src/store/tools")).createStoreMemoTools;
+    const tools = (await import("../src/mcp-tools")).createStoreMemoTools;
     const tenant: import("../src/store").TenantStore = {
       ...store,
       appOrigin: "http://localhost:3001",

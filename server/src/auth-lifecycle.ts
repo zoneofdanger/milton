@@ -1,18 +1,14 @@
 import { sql } from "drizzle-orm";
 import { z } from "zod";
 import type { RuntimeConfig } from "./config";
-import { database, lookupIdentityAccount } from "./store";
-import type { SessionUser } from "./auth-session";
+import { database, lockActiveAccount, lookupIdentityAccount } from "./store";
+import type { PageContext, SessionUser } from "./auth-session";
 import { endStripeCustomer } from "./billing";
 import { hash } from "./auth-oidc";
 import { invalid, unavailable } from "./auth-authority";
 import { AuthError } from "./token";
 import { securityStatus } from "./auth-authority";
-import {
-  eligibilityProof,
-  trialFingerprints,
-  fingerprintKeyCheck,
-} from "./auth-admission";
+import { eligibilityProof, saveEligibility } from "./auth-admission";
 
 const operationSchema = z.object({
   operation_id: z.uuid(),
@@ -64,7 +60,62 @@ export async function connections(config: RuntimeConfig, user: SessionUser) {
     }
   return { items: [...clients.values()], full: parsed.data.length === 64 };
 }
-export async function pendingOperations(
+type Kind = Operation["kind"];
+/** What a lifecycle page provides: the browser's session token and its
+ * sign-in checks. */
+export type LifecycleContext = Pick<
+  PageContext,
+  "config" | "signedIn" | "fresh"
+> & { token: string | undefined };
+/** Account deletion and assistant disconnect, each one operation per UUID that
+ * the browser session which started it can resume without signing in again. */
+export function lifecycle({
+  config,
+  token,
+  signedIn,
+  fresh,
+}: LifecycleContext) {
+  return {
+    /** The incomplete operations this session can retry: its latest deletion,
+     * or every disconnect. */
+    async pending(kind: Kind): Promise<Operation[]> {
+      if (kind === "disconnect") return pendingOperations(config, token);
+      const latest = await findOperation(config, token);
+      return latest && latest.progress !== "complete" ? [latest] : [];
+    },
+    /** Resumes this session's operation `id`, or starts it for the signed-in
+     * person (deletion after a fresh sign-in; disconnect for the listed
+     * `connection`), then advances it as far as it can go. */
+    async run(kind: Kind, id: string, connection?: string | null) {
+      let op = await findOperation(config, token, id, kind);
+      if (!op) {
+        const user = await signedIn();
+        let client = "";
+        if (kind === "delete") await fresh(user);
+        else {
+          const { items } = await connections(config, user);
+          client =
+            items.find((c) => c.reference === connection)?.client_id ?? "";
+          if (!client) throw invalid();
+        }
+        if (!token) throw invalid();
+        op = await startOperation(config, user, token, id, kind, client);
+      }
+      try {
+        return { operation: await advanceOperation(config, op), failed: false };
+      } catch (error) {
+        // A failed deletion step shows its retry page, while a failed disconnect
+        // reaches the error page; this difference is kept as it was.
+        if (kind === "disconnect") throw error;
+        return {
+          operation: (await findOperation(config, token, id)) ?? op,
+          failed: true,
+        };
+      }
+    },
+  };
+}
+async function pendingOperations(
   config: RuntimeConfig,
   token: string | undefined,
 ) {
@@ -82,11 +133,11 @@ export async function pendingOperations(
     throw unavailable();
   }
 }
-export async function findOperation(
+async function findOperation(
   config: RuntimeConfig,
   token: string | undefined,
   id?: string,
-  kind: "delete" | "disconnect" = "delete",
+  kind: Kind = "delete",
 ) {
   if (
     !token ||
@@ -107,12 +158,12 @@ export async function findOperation(
   if (!parsed.success) throw unavailable();
   return parsed.data;
 }
-export async function startOperation(
+async function startOperation(
   config: RuntimeConfig,
   user: SessionUser,
   token: string,
   id: string,
-  kind: "delete" | "disconnect",
+  kind: Kind,
   client = "",
 ) {
   if (!z.uuid().safeParse(id).success || !/^[A-Za-z0-9_-]{43}$/.test(token))
@@ -143,36 +194,9 @@ export async function startOperation(
       );
     const metadata = proof?.data;
     await database(config).transaction(async (tx) => {
-      if (
-        !(
-          await tx.query(
-            sql`SELECT u.id FROM public.users u JOIN public.identities i ON i.user_id=u.id WHERE u.id=${userId} AND u.status='active' AND i.provider=${config.issuer} AND i.subject=${user.id} FOR UPDATE OF u`,
-          )
-        ).length
-      )
+      if (!(await lockActiveAccount(tx, config.issuer, user.id, userId)))
         throw invalid();
-      if (metadata) {
-        const policy = (
-          await tx.query<{ key_check: string }>(
-            sql`SELECT key_check FROM milton_app.eligibility_policy WHERE singleton`,
-          )
-        )[0];
-        if (
-          policy?.key_check !== fingerprintKeyCheck(config.trialFingerprintKey)
-        )
-          throw unavailable();
-        for (const fingerprint of trialFingerprints(
-          config.trialFingerprintKey,
-          metadata,
-        )) {
-          await tx.query(
-            sql`INSERT INTO milton_app.trial_fingerprint(fingerprint,first_user_id) VALUES(${fingerprint},${userId}) ON CONFLICT DO NOTHING`,
-          );
-          await tx.query(
-            sql`INSERT INTO milton_app.account_fingerprint(user_id,fingerprint) VALUES(${userId},${fingerprint}) ON CONFLICT DO NOTHING`,
-          );
-        }
-      }
+      if (metadata) await saveEligibility(tx, config, userId, metadata);
       await tx.query(
         sql`INSERT INTO milton_app.lifecycle(operation_id,issuer,subject,incarnation,user_id,client_id,kind,requester_hash) VALUES(${id}::uuid,${config.issuer},${user.id},${user.incarnation},${userId},${client},${kind},${hash(token)}) ON CONFLICT DO NOTHING`,
       );
@@ -193,10 +217,7 @@ export async function startOperation(
 }
 /** Every phase commits independently. A lost response cannot erase the original
  * association or rewind Stripe/writing progress; native retries keep one UUID. */
-export async function advanceOperation(
-  config: RuntimeConfig,
-  original: Operation,
-) {
+async function advanceOperation(config: RuntimeConfig, original: Operation) {
   const read = async () =>
     operationSchema.parse(
       (

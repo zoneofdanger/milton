@@ -2,13 +2,7 @@
 import { page } from "./pages";
 import { cookieValue, type PageContext } from "./auth-session";
 import { cookieName, removeSession } from "./auth-oidc";
-import {
-  advanceOperation,
-  findOperation,
-  startOperation,
-  type Operation,
-} from "./auth-lifecycle";
-import { invalid } from "./auth-authority";
+import { lifecycle, type Operation } from "./auth-lifecycle";
 import { supportEmail } from "./config";
 
 const phrase = "delete my account";
@@ -21,6 +15,7 @@ export const accountDeletion = async (ctx: PageContext): Promise<Response> => {
       405,
     );
   const token = cookieValue(request, cookieName(config, "session"));
+  const deletion = lifecycle({ ...ctx, token });
   const retryPage = (op: Operation) =>
     page(
       "Finish account deletion",
@@ -49,8 +44,8 @@ export const accountDeletion = async (ctx: PageContext): Promise<Response> => {
       503,
     );
   if (request.method === "GET") {
-    const pending = await findOperation(config, token);
-    if (pending && pending.progress !== "complete") return retryPage(pending);
+    const [pending] = await deletion.pending("delete");
+    if (pending) return retryPage(pending);
     const user = await signedIn();
     return page(
       "Delete your account",
@@ -104,20 +99,11 @@ export const accountDeletion = async (ctx: PageContext): Promise<Response> => {
       <p>Type {phrase} exactly. Nothing was deleted.</p>,
       400,
     );
-  const id = form.get("operation") ?? "";
-  let op = await findOperation(config, token, id);
-  if (!op) {
-    const user = await signedIn();
-    await ctx.fresh(user);
-    if (!token) throw invalid();
-    op = await startOperation(config, user, token, id, "delete");
-  }
-  try {
-    op = await advanceOperation(config, op);
-  } catch {
-    return retryPage((await findOperation(config, token, id)) ?? op);
-  }
-  if (op.progress !== "complete") return retryPage(op);
+  const { operation, failed } = await deletion.run(
+    "delete",
+    form.get("operation") ?? "",
+  );
+  if (failed || operation.progress !== "complete") return retryPage(operation);
   await removeSession(config, token);
   writeCookie(cookieName(config, "session"), "", 0);
   writeCookie(ctx.csrfName, "", 0);

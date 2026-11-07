@@ -157,7 +157,11 @@ The default-off private guide pilot has separate [operations and capability inst
 
 ## Cloud resources
 
-Project `milton-510506`, Cloud Run/Artifact Registry region `us-east4`. Service manifests in this directory pin an immutable image and
+Project `milton-510506`, Cloud Run/Artifact Registry region `us-east4`. **Warm instances (Peter, 2026-11-07):** `milton-auth`, `milton-app` and `milton-mcp` each keep
+one instance warm through the service-level minimum (`gcloud run services update <svc> --min=1`;
+`run.googleapis.com/minScale: 1` on the service, about $10/month each). It applies across
+revisions, so deploys and rollbacks keep it; when replacing a service from a manifest, keep it.
+Check: `gcloud run services describe <svc> --format='value(metadata.annotations."run.googleapis.com/minScale")'` prints 1. Service manifests in this directory pin an immutable image and
 secret versions. They contain configuration and secret references, never values.
 The tracked app and MCP manifests still pin the pre-cutover release: app
 `milton-app-edit-00223ec` and MCP `milton-mcp-edit-00223ec`, both using image index

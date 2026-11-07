@@ -1,3 +1,4 @@
+@import "../../../packages/theme/mono-split.css";
 @import "../../../packages/theme/base.css";
 * {
   box-sizing: border-box;

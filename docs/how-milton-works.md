@@ -278,7 +278,7 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
 Files: `server/src/pages.tsx`, `server/src/memo-pages.tsx`, `server/src/auth.tsx`,
 `server/src/auth-session.tsx`, `server/src/auth-assistants.tsx`.
 
-- Pages run no scripts, under a strict CSP, and are not cached; they link content-versioned assets and preload both theme fonts.
+- Pages run no scripts, under a strict CSP, and are not cached; they link content-versioned assets and preload Geist and the Latin JetBrains Mono subset.
 - A page route that fails shows "Unable to continue" at the error's status, with a link back
   where one applies.
 - An unknown error there reads as a 503 and is logged.
@@ -424,7 +424,7 @@ Files: `apps/site/`.
 
 Files: `packages/theme/`, `server/scripts/`, `.github/workflows/checks.yml`.
 
-- A shared theme supplies fonts, favicons, and tokens, with a WCAG contrast test.
+- A shared theme supplies fonts, favicons, and tokens, with a WCAG contrast test. App and auth text outside the Latin JetBrains Mono subset fetches the full master on demand; the site serves only the subset.
 - `migrate.ts` applies writing migrations only as neondb_owner; explicit --app-auth applies app-only migration005 after native004 as an approved app migration owner, with no runtime startup migration.
 - It takes the owner connection from `MILTON_OWNER_DATABASE_URL` for a release, otherwise
   from `server/.dev.vars`, and never from an inherited `DATABASE_URL`.

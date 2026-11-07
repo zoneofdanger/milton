@@ -165,10 +165,28 @@ export async function httpFixture(auth: AuthService) {
     assert.equal((await call("/fonts/geist-latin-variable.woff2")).status, 200);
     {
       // Versioned assets cache for a year and arrive compressed over HTTP.
-      const css = /href="(\/auth\.css\?v=[\w-]{16})"/.exec(
-        (await call("/login")).body,
-      )?.[1];
+      const login = (await call("/login")).body;
+      const css = /href="(\/auth\.css\?v=[\w-]{16})"/.exec(login)?.[1];
       assert(css, "versioned stylesheet link");
+      // The page preloads only the Latin JetBrains Mono; the built stylesheet
+      // gives it and the master their split unicode-ranges.
+      const latin =
+        /<link rel="preload" href="(\/fonts\/jetbrains-mono-latin\.woff2\?v=[\w-]{16})"/.exec(
+          login,
+        )?.[1];
+      assert(latin, "Latin JetBrains Mono preload");
+      assert(!login.includes("jetbrains-mono-regular"), "master not preloaded");
+      const sheet = (await call(css)).body;
+      assert.match(
+        sheet,
+        new RegExp(
+          `url\\("${latin.replace(/[?.]/g, "\\$&")}"\\)[^}]*unicode-range:\\s*U\\+0000-036F,`,
+        ),
+      );
+      assert.match(
+        sheet,
+        /url\("\/fonts\/jetbrains-mono-regular\.woff2\?v=[\w-]{16}"\)[^}]*unicode-range:\s*U\+0370-1DFF,/,
+      );
       const r = await call(css, undefined, { "accept-encoding": "br, gzip" });
       assert.equal(r.status, 200);
       assert.equal(

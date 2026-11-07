@@ -294,18 +294,52 @@ test("pages link content-versioned assets that cache for a year; legacy URLs rev
     /<link rel="stylesheet" href="(\/milton\.css\?v=[\w-]{16})"/,
   );
   const svg = linked(/href="(\/favicon\.svg\?v=[\w-]{16})"/);
-  const fonts = ["geist-latin-variable", "jetbrains-mono-regular"].map((font) =>
+  const fonts = ["geist-latin-variable", "jetbrains-mono-latin"].map((font) =>
     linked(
       new RegExp(
         `<link rel="preload" href="(/fonts/${font}\\.woff2\\?v=[\\w-]{16})" as="font" type="font/woff2" crossorigin="anonymous"`,
       ),
     ),
   );
+  expect(html).not.toContain("jetbrains-mono-regular");
   const get = (path: string, headers: Record<string, string> = {}) =>
     localAsset(new Request(appOrigin + path, { headers }))!;
   const immutable = "public, max-age=31536000, immutable";
   const stylesheet = await get(css).text();
   for (const font of fonts) expect(stylesheet).toContain(`url(${font})`);
+  // JetBrains Mono is the README's Latin subset plus the master for exactly
+  // the rest of Unicode, so Latin-only text never fetches the master.
+  const ranges = (list: string) =>
+    [...list.matchAll(/U\+([\dA-F?]+)(?:-([\dA-F]+))?/gi)].map(([, lo, hi]) =>
+      [lo!.replaceAll("?", "0"), hi ?? lo!.replaceAll("?", "F")].map((n) =>
+        parseInt(n, 16),
+      ),
+    );
+  const [latin, master] = ["latin", "regular"].map((file) => {
+    const rule = [...stylesheet.matchAll(/@font-face\s*\{([^}]*)\}/g)].find(
+      ([face]) => face.includes(`/fonts/jetbrains-mono-${file}.woff2?v=`),
+    )![1]!;
+    return {
+      url: /url\(([^)]*)\)/.exec(rule)![1]!,
+      ranges: ranges(/unicode-range:([^;]*)/.exec(rule)![1]!),
+    };
+  });
+  const readme = await Bun.file(
+    new URL("../../packages/theme/README.md", import.meta.url),
+  ).text();
+  expect(latin!.url).toBe(fonts[1]!);
+  expect(latin!.ranges).toEqual(
+    ranges(/--unicodes="([^"]*)"/.exec(readme)![1]!),
+  );
+  let next = 0;
+  for (const [lo, hi] of [...latin!.ranges, ...master!.ranges].sort(
+    (a, b) => a[0]! - b[0]!,
+  )) {
+    expect(lo).toBe(next);
+    next = hi! + 1;
+  }
+  expect(next).toBe(0x110000);
+  fonts.push(master!.url);
   for (const [path, type] of [
     [css, "text/css; charset=utf-8"],
     [svg, "image/svg+xml"],
@@ -1283,7 +1317,7 @@ test("web shows only current TPS and rejects all retired history and mutation ro
     const html = await (await fixture.send("/tps-report")).text();
     expect(html).toContain("&lt;script&gt;");
     expect(html).not.toContain("<script>");
-    for (const font of ["geist-latin-variable", "jetbrains-mono-regular"])
+    for (const font of ["geist-latin-variable", "jetbrains-mono-latin"])
       expect(
         html.split(`<link rel="preload" href="/fonts/${font}.woff2?v=`),
       ).toHaveLength(2);

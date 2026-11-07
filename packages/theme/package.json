@@ -6,6 +6,7 @@
   "exports": {
     "./assets": "./assets.ts",
     "./base": "./base.css",
+    "./mono-site": "./mono-site.css",
     "./brand": "./brand.ts",
     "./setup-prompt": "./setup-prompt.ts"
   },

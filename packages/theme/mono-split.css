@@ -1,0 +1,28 @@
+/* The app's and auth's JetBrains Mono: the Latin subset, plus the master for
+   every other character. The ranges must not overlap: Chromium also fetches a
+   face that covers text while an earlier one is still loading. The Latin range
+   is the README's pyftsubset --unicodes list and the master's is its complement,
+   so Latin-only pages fetch only the subset. */
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: optional;
+  src: url("/fonts/jetbrains-mono-latin.woff2") format("woff2");
+  unicode-range:
+    U+0000-036F, U+1E00-1EFF, U+2000-206F, U+2070-209F, U+20A0-20CF,
+    U+2100-214F, U+2190-2199, U+2212, U+2215, U+2219, U+221E, U+2248, U+2260,
+    U+2264-2265, U+2713, U+2715, U+2717, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: optional;
+  src: url("/fonts/jetbrains-mono-regular.woff2") format("woff2");
+  unicode-range:
+    U+0370-1DFF, U+1F00-1FFF, U+20D0-20FF, U+2150-218F, U+219A-2211,
+    U+2213-2214, U+2216-2218, U+221A-221D, U+221F-2247, U+2249-225F,
+    U+2261-2263, U+2266-2712, U+2714, U+2716, U+2718-FEFE, U+FF00-FFFC,
+    U+FFFE-10FFFF;
+}

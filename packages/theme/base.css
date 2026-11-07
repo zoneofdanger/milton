@@ -1,12 +1,6 @@
 /* Shared Carbon Copy theme. The site explicitly chooses light; the app follows
-   the system. Both dark declarations are kept equal by contrast.test.ts. */
-@font-face {
-  font-family: "JetBrains Mono";
-  font-style: normal;
-  font-weight: 400;
-  font-display: optional;
-  src: url("/fonts/jetbrains-mono-regular.woff2") format("woff2");
-}
+   the system. Both dark declarations are kept equal by contrast.test.ts.
+   Each product declares JetBrains Mono itself: mono-site.css or mono-split.css. */
 @font-face {
   font-family: "Geist";
   font-style: normal;

@@ -92,10 +92,11 @@ function accountMenu({ csrf, email, billing }: Account) {
 }
 
 // Every page uses both faces (Geist body, JetBrains Mono headings); preloading
-// them lets them arrive before first paint under font-display: optional.
+// them lets them arrive before first paint under font-display: optional. Only
+// the Latin JetBrains Mono is preloaded; the master loads for other text.
 const pageFonts = [
   "/fonts/geist-latin-variable.woff2",
-  "/fonts/jetbrains-mono-regular.woff2",
+  "/fonts/jetbrains-mono-latin.woff2",
 ];
 
 /**

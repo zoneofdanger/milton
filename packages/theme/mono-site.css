@@ -1,0 +1,9 @@
+/* The site's JetBrains Mono: one face at the master's URL, where the site's
+   build copies the Latin subset. Import it before base.css. */
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: optional;
+  src: url("/fonts/jetbrains-mono-regular.woff2") format("woff2");
+}

@@ -283,8 +283,9 @@ export function tenantStore(
     appOrigin: bindings.appOrigin,
     trialNotice: () =>
       db.transaction(async (tx) => {
-        await tx.query(sql`SET LOCAL lock_timeout='250ms'`);
-        await tx.query(sql`SET LOCAL statement_timeout='500ms'`);
+        await tx.query(
+          sql`SELECT set_config('lock_timeout','250ms',true), set_config('statement_timeout','500ms',true)`,
+        );
         return claimTrialNotice(tx, userId, bindings.appOrigin);
       }),
     readTpsReport: compiled.getTpsReport,

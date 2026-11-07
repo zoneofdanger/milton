@@ -10,7 +10,7 @@ landed and the item is still open), `blocked: <why or #id>`. A bolded headline o
 or fewer states the task; one item is one landing. **A section heading and its preamble are
 shared context for every item beneath it.**
 
-**next-id: 25.** Ids are never reused, so this counter survives deleting the newest item.
+**next-id: 26.** Ids are never reused, so this counter survives deleting the newest item.
 
 ## MVP
 
@@ -66,6 +66,20 @@ reports, memos) and plain text on security screens and anything an assistant rea
       whoever handles billing, and name it on the pricing section, the FAQ "Will I be charged"
       answer, and the subscription_required message. Until then it does not exist; the landing
       page's unread joke address is a different alias.
+
+- [ ] #25 (server, med, blocked: self-hosted auth cutover) **Let headless and background
+      agents connect.** Scheduled or cloud agents (Claude Code routines, Codex cloud tasks, CI
+      jobs, agent servers) have no browser and no one to approve consent, so OAuth sign-in
+      leaves them unable to connect today. Plan (2026-11-07): connection keys created on the
+      Connected assistants page and sent as a bearer header (Claude Code `--header`, Codex
+      `bearer_token_env_var`, Cursor `headers`): read-only by default with saving opt-in,
+      shown once and stored hashed, expiring (e.g. 90 days), listed and revocable one by one,
+      checked live on every call like disconnects. ⚠ The MCP server would then accept a second
+      token type beside the strict native tokens: security review before release. Device
+      sign-in (a code approved at auth.meetmilton.com/device; Better Auth has a plugin,
+      unchecked against this build) keeps the native token model, but MCP clients lack it and
+      it would need a `milton login` helper; consider it after keys. Update /for-agents when
+      this ships.
 
 ## From the audit of 2026-11-02 (`.agents/tmp/audit/report.md`)
 

@@ -272,11 +272,17 @@ then:
    Then `check-runtime-role.ts` must print `ok` for app and MCP (it now requires these
    settings).
 
-4. A role setting reaches only sessions that start after it, and the pooler reuses its
-   server connections. After the services' connections have turned over (new revisions,
-   or once pooled server connections recycle), run `SHOW statement_timeout;` and
-   `SHOW lock_timeout;` as each runtime login through the host its payload uses and
-   expect 20s/10s (app, MCP) and 5s/0 (auth).
+4. A role setting reaches only sessions that start after it, and Neon's pooler keeps its
+   own server connections open, independent of ours, so new Cloud Run revisions do not
+   pick it up. In the 2026-11-07 rehearsal on a disposable branch, `SHOW` through the
+   pooler still read 0/0 after the file applied (the direct host read 20s/10s). Only
+   after a compute restart did the pooler read the new values. Then a 7 s sleep as auth
+   was cancelled at 5.8 s (57014) and an MCP read behind an owner's lock was refused at
+   10.7 s (55P03). So restart the production compute
+   (`restart_postgres_endpoint`) in a quiet moment: every open connection drops once,
+   in-flight queries fail as `store_unavailable`, and the pools discard the broken
+   connections. Then run `SHOW statement_timeout;` and `SHOW lock_timeout;` as each
+   runtime login through the pooler host and expect 20s/10s (app, MCP) and 5s/0 (auth).
 
 Rollback: `psql -X -v ON_ERROR_STOP=1 -f server/migrations/007-role-timeouts.down.sql` as
 the same owner resets exactly these settings; code whose role audit requires them then

@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { sql } from "drizzle-orm";
 import {
+  mappedDatabase,
   postgresDatabase,
-  databaseFailure,
   type StoreDatabase,
   type StoreSession,
 } from "./database";
@@ -41,11 +41,13 @@ export interface StoreBindings {
   // Private dependency injection for the embedded fixture; never populated from a request.
   storeDatabase?: StoreDatabase;
 }
+/** The account database, whichever adapter is configured, with every database
+ * failure mapped to a StoreError (see mappedDatabase). */
 export function database(bindings: StoreBindings): StoreDatabase {
-  if (bindings.storeDatabase) return bindings.storeDatabase;
+  if (bindings.storeDatabase) return mappedDatabase(bindings.storeDatabase);
   if (!bindings.DATABASE_URL)
     throw new StoreError("configuration", "The memo store is unavailable.");
-  return postgresDatabase(bindings.DATABASE_URL);
+  return mappedDatabase(postgresDatabase(bindings.DATABASE_URL));
 }
 interface VerifiedIdentity {
   provider: string;
@@ -66,57 +68,56 @@ export async function resolveIdentityAccount(
   const legacyDeleted = fingerprints.length
     ? sql`EXISTS(SELECT 1 FROM milton_app.legacy_mapping l WHERE l.issuer=${provider} AND l.subject=${subject} AND l.deleted)`
     : sql`false`;
-  return database(bindings)
-    .transaction(async (tx) => {
-      await readLimits(tx);
-      const lookup = () =>
-        tx.query<{
-          id: string;
-          status: string;
-        }>(sql`
+  return database(bindings).transaction(async (tx) => {
+    await readLimits(tx);
+    const lookup = () =>
+      tx.query<{
+        id: string;
+        status: string;
+      }>(sql`
       SELECT u.id, u.status FROM identities i JOIN users u ON u.id = i.user_id
       WHERE i.provider = ${provider} AND i.subject = ${subject} FOR UPDATE OF u`);
-      let account = (await lookup())[0];
-      if (!account) {
-        // Every sign-in creates or finds its account. The identity's primary key
-        // admits one account: a sign-in that loses the race for it drops the
-        // users row it made, before its trial row, and finds the winner's account
-        // with a separate READ COMMITTED statement.
-        const id = `m_${crypto.randomUUID()}`;
-        await tx.query(sql`INSERT INTO users (id) VALUES (${id})`);
-        const linked =
-          await tx.query(sql`INSERT INTO identities (provider,subject,user_id)
+    let account = (await lookup())[0];
+    if (!account) {
+      // Every sign-in creates or finds its account. The identity's primary key
+      // admits one account: a sign-in that loses the race for it drops the
+      // users row it made, before its trial row, and finds the winner's account
+      // with a separate READ COMMITTED statement.
+      const id = `m_${crypto.randomUUID()}`;
+      await tx.query(sql`INSERT INTO users (id) VALUES (${id})`);
+      const linked =
+        await tx.query(sql`INSERT INTO identities (provider,subject,user_id)
           VALUES (${provider},${subject},${id})
           ON CONFLICT (provider,subject) DO NOTHING RETURNING user_id`);
-        if (!linked.length) {
-          await tx.query(sql`DELETE FROM users WHERE id=${id}`);
-          account = (await lookup())[0];
-          if (!account)
-            throw new StoreError(
-              "store_unavailable",
-              "The memo store is unavailable. Try again.",
-            );
-        } else {
-          // A sign-in identity whose account was deleted gets no second trial:
-          // its row starts canceled, so it reads as expired whenever trials are
-          // enabled (now or later), has no effect while they are off, and sign-up
-          // creates no subscription for it.
-          let returning = false;
-          for (const fingerprint of [...new Set(fingerprints)].sort()) {
-            await tx.query(
-              sql`INSERT INTO milton_app.trial_fingerprint(fingerprint,first_user_id) VALUES(${fingerprint},${id}) ON CONFLICT DO NOTHING`,
-            );
-            const row = (
-              await tx.query<{ first_user_id: string }>(
-                sql`SELECT first_user_id FROM milton_app.trial_fingerprint WHERE fingerprint=${fingerprint}`,
-              )
-            )[0];
-            returning ||= row?.first_user_id !== id;
-            await tx.query(
-              sql`INSERT INTO milton_app.account_fingerprint(user_id,fingerprint) VALUES(${id},${fingerprint}) ON CONFLICT DO NOTHING`,
-            );
-          }
-          await tx.query(sql`INSERT INTO trial_accounts(user_id,started_at,subscription_status)
+      if (!linked.length) {
+        await tx.query(sql`DELETE FROM users WHERE id=${id}`);
+        account = (await lookup())[0];
+        if (!account)
+          throw new StoreError(
+            "store_unavailable",
+            "The memo store is unavailable. Try again.",
+          );
+      } else {
+        // A sign-in identity whose account was deleted gets no second trial:
+        // its row starts canceled, so it reads as expired whenever trials are
+        // enabled (now or later), has no effect while they are off, and sign-up
+        // creates no subscription for it.
+        let returning = false;
+        for (const fingerprint of [...new Set(fingerprints)].sort()) {
+          await tx.query(
+            sql`INSERT INTO milton_app.trial_fingerprint(fingerprint,first_user_id) VALUES(${fingerprint},${id}) ON CONFLICT DO NOTHING`,
+          );
+          const row = (
+            await tx.query<{ first_user_id: string }>(
+              sql`SELECT first_user_id FROM milton_app.trial_fingerprint WHERE fingerprint=${fingerprint}`,
+            )
+          )[0];
+          returning ||= row?.first_user_id !== id;
+          await tx.query(
+            sql`INSERT INTO milton_app.account_fingerprint(user_id,fingerprint) VALUES(${id},${fingerprint}) ON CONFLICT DO NOTHING`,
+          );
+        }
+        await tx.query(sql`INSERT INTO trial_accounts(user_id,started_at,subscription_status)
             SELECT u.id,u.created_at,
               CASE WHEN d.identity_hash IS NULL AND NOT ${returning} AND NOT ${legacyDeleted} THEN NULL ELSE 'canceled' END
             FROM users u CROSS JOIN store_config c
@@ -124,30 +125,27 @@ export async function resolveIdentityAccount(
               ON d.identity_hash=${identityHash(provider, subject)}
             WHERE u.id=${id} AND c.singleton=1
             AND (c.trials_enabled OR d.identity_hash IS NOT NULL OR ${returning} OR ${legacyDeleted})`);
-          account = { id, status: "active" };
-        }
+        account = { id, status: "active" };
       }
-      if (account.status !== "active")
-        throw new StoreError(
-          "account_unavailable",
-          "This Milton account is unavailable.",
-          403,
-        );
-      // Linking records new eligibility proofs but never changes writing owner,
-      // starts another trial or rewinds an existing subscription.
-      for (const fingerprint of [...new Set(fingerprints)].sort()) {
-        await tx.query(
-          sql`INSERT INTO milton_app.trial_fingerprint(fingerprint,first_user_id) VALUES(${fingerprint},${account.id}) ON CONFLICT DO NOTHING`,
-        );
-        await tx.query(
-          sql`INSERT INTO milton_app.account_fingerprint(user_id,fingerprint) VALUES(${account.id},${fingerprint}) ON CONFLICT DO NOTHING`,
-        );
-      }
-      return { miltonUserId: account.id };
-    })
-    .catch((error) => {
-      throw databaseFailure(error);
-    });
+    }
+    if (account.status !== "active")
+      throw new StoreError(
+        "account_unavailable",
+        "This Milton account is unavailable.",
+        403,
+      );
+    // Linking records new eligibility proofs but never changes writing owner,
+    // starts another trial or rewinds an existing subscription.
+    for (const fingerprint of [...new Set(fingerprints)].sort()) {
+      await tx.query(
+        sql`INSERT INTO milton_app.trial_fingerprint(fingerprint,first_user_id) VALUES(${fingerprint},${account.id}) ON CONFLICT DO NOTHING`,
+      );
+      await tx.query(
+        sql`INSERT INTO milton_app.account_fingerprint(user_id,fingerprint) VALUES(${account.id},${fingerprint}) ON CONFLICT DO NOTHING`,
+      );
+    }
+    return { miltonUserId: account.id };
+  });
 }
 
 const verifiedStoreIdentity = Symbol("verifiedStoreIdentity");
@@ -185,12 +183,11 @@ export async function lookupIdentityAccount(
     identity.clientId === undefined
       ? undefined
       : z.string().min(1).max(2048).parse(identity.clientId);
-  try {
-    const row = (
-      await database(bindings).query<{
-        id: string | null;
-        disconnected: boolean;
-      }>(sql`
+  const row = (
+    await database(bindings).query<{
+      id: string | null;
+      disconnected: boolean;
+    }>(sql`
         SELECT (SELECT u.id FROM identities i JOIN users u ON u.id=i.user_id
           WHERE i.provider=${provider} AND i.subject=${subject} AND u.status='active') AS id,
         ${
@@ -199,23 +196,20 @@ export async function lookupIdentityAccount(
             : sql`EXISTS(SELECT 1 FROM assistant_disconnects d
           WHERE d.provider=${provider} AND d.subject=${subject} AND d.client_id=${clientId})`
         } AS disconnected`)
-    )[0];
-    if (row?.disconnected)
-      throw new StoreError(
-        "invalid_token",
-        "This assistant was disconnected from Milton. Reconnect it from your assistant.",
-        401,
-      );
-    if (!row?.id)
-      throw new StoreError(
-        "account_unavailable",
-        "Sign in to Milton before connecting your assistant.",
-        403,
-      );
-    return { userId: row.id, [verifiedStoreIdentity]: true };
-  } catch (error) {
-    throw databaseFailure(error);
-  }
+  )[0];
+  if (row?.disconnected)
+    throw new StoreError(
+      "invalid_token",
+      "This assistant was disconnected from Milton. Reconnect it from your assistant.",
+      401,
+    );
+  if (!row?.id)
+    throw new StoreError(
+      "account_unavailable",
+      "Sign in to Milton before connecting your assistant.",
+      403,
+    );
+  return { userId: row.id, [verifiedStoreIdentity]: true };
 }
 
 /** Records a disconnect; Milton refuses the assistant from the next request. */
@@ -224,13 +218,9 @@ export async function recordAssistantDisconnect(
   identity: AssistantIdentity,
 ) {
   const { provider, subject, clientId } = assistantIdentity(identity);
-  try {
-    await database(bindings).query(sql`
+  await database(bindings).query(sql`
       INSERT INTO assistant_disconnects (provider,subject,client_id)
       VALUES (${provider},${subject},${clientId}) ON CONFLICT DO NOTHING`);
-  } catch (error) {
-    throw databaseFailure(error);
-  }
 }
 
 /** Removes a disconnect after the person approved the assistant again. */
@@ -239,13 +229,9 @@ export async function clearAssistantDisconnect(
   identity: AssistantIdentity,
 ) {
   const { provider, subject, clientId } = assistantIdentity(identity);
-  try {
-    await database(bindings).query(sql`
+  await database(bindings).query(sql`
       DELETE FROM assistant_disconnects
       WHERE provider=${provider} AND subject=${subject} AND client_id=${clientId}`);
-  } catch (error) {
-    throw databaseFailure(error);
-  }
 }
 
 /** Client ids this identity disconnected, for the connected-assistants page. */
@@ -255,14 +241,10 @@ export async function listAssistantDisconnects(
 ): Promise<Set<string>> {
   const provider = z.string().min(1).max(64).parse(identity.provider);
   const subject = z.string().min(1).max(512).parse(identity.subject);
-  try {
-    const rows = await database(bindings).query<{ client_id: string }>(sql`
+  const rows = await database(bindings).query<{ client_id: string }>(sql`
       SELECT client_id FROM assistant_disconnects
       WHERE provider=${provider} AND subject=${subject}`);
-    return new Set(rows.map((row) => row.client_id));
-  } catch (error) {
-    throw databaseFailure(error);
-  }
+  return new Set(rows.map((row) => row.client_id));
 }
 
 /**
@@ -282,34 +264,30 @@ export async function deleteAccount(
   const clients = [
     ...new Set(clientIds.map((id) => z.string().min(1).max(2048).parse(id))),
   ];
-  await database(bindings)
-    .transaction(async (tx) => {
-      // The same row lock every writer takes, so in-flight saves finish first
-      // and later ones find no active account.
-      const account = (
-        await tx.query<{ id: string }>(sql`
+  await database(bindings).transaction(async (tx) => {
+    // The same row lock every writer takes, so in-flight saves finish first
+    // and later ones find no active account.
+    const account = (
+      await tx.query<{ id: string }>(sql`
         SELECT u.id FROM identities i JOIN users u ON u.id=i.user_id
         WHERE i.provider=${provider} AND i.subject=${subject} AND u.status='active'
         FOR UPDATE OF u`)
-      )[0];
-      if (!account)
-        throw new StoreError(
-          "account_unavailable",
-          "This Milton account is unavailable.",
-          403,
-        );
-      for (const clientId of clients)
-        await tx.query(sql`
+    )[0];
+    if (!account)
+      throw new StoreError(
+        "account_unavailable",
+        "This Milton account is unavailable.",
+        403,
+      );
+    for (const clientId of clients)
+      await tx.query(sql`
           INSERT INTO assistant_disconnects (provider,subject,client_id)
           VALUES (${provider},${subject},${clientId}) ON CONFLICT DO NOTHING`);
-      await tx.query(sql`
+    await tx.query(sql`
         INSERT INTO deleted_identities (identity_hash)
         VALUES (${identityHash(provider, subject)}) ON CONFLICT DO NOTHING`);
-      await tx.query(sql`DELETE FROM users WHERE id=${account.id}`);
-    })
-    .catch((error) => {
-      throw databaseFailure(error);
-    });
+    await tx.query(sql`DELETE FROM users WHERE id=${account.id}`);
+  });
 }
 
 type CallAllowance =
@@ -422,19 +400,12 @@ export type PersonStore = Awaited<
 /** One account's billing state, for sign-in and the checkout and portal routes. */
 export function billingForAccount(bindings: StoreBindings, userId: string) {
   const db = database(bindings);
-  const wrap = async <T>(work: Promise<T>) => {
-    try {
-      return await work;
-    } catch (error) {
-      throw databaseFailure(error);
-    }
-  };
   return {
     userId,
-    account: () => wrap(billingAccount(db, userId)),
+    account: () => billingAccount(db, userId),
     linkCustomer: (customer: string) =>
-      wrap(linkStripeCustomer(db, userId, customer)),
-    clearCustomer: () => wrap(clearStripeCustomer(db, userId)),
+      linkStripeCustomer(db, userId, customer),
+    clearCustomer: () => clearStripeCustomer(db, userId),
     /** Reads Stripe holding the customer's row, as the webhook does, and stores
      * what the read returns, if anything. */
     syncSubscription: (

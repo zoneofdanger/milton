@@ -2,8 +2,8 @@ import { cardHeads } from "../src/store/cards";
 import { compiledMemos, type SaveMemoInput } from "../src/store/compiled";
 import { expect, test } from "bun:test";
 import { sql } from "drizzle-orm";
-import { databaseFailure } from "../src/store/database";
 import { StoreError } from "../src/store/errors";
+import { database } from "../src/store/index";
 import { BASELINE_NOTE } from "../src/store/reports";
 import { localStore } from "./local-store";
 import {
@@ -730,7 +730,7 @@ test("Postgres enforces separate UTF-8 field caps and no card count", async () =
   }
 });
 
-test("Postgres version conflicts return typed errors", async () => {
+test("Postgres version conflicts return typed errors from the local adapter as from production", async () => {
   const local = await localStore();
   const userId = "m_00000000-0000-4000-8000-000000000001";
   try {
@@ -738,18 +738,33 @@ test("Postgres version conflicts return typed errors", async () => {
     await seedRule(local.pg, userId, "card", "hello", {
       description: "Sample.",
     });
-    const conflict = await local.db
-      .query(
-        sql`INSERT INTO instruction_card_versions (user_id,card_id,version,description,body,reason,report,actor_json)
-      VALUES (${userId},'card',1,'Sample.','changed','edit','cover','{}')`,
-      )
-      .catch(databaseFailure);
-    expect(conflict).toBeInstanceOf(StoreError);
-    expect(conflict).toMatchObject({
-      code: "card_version_conflict",
-      message: "The instruction card changed. Read the current report.",
-      status: 409,
-    });
+    // database() maps every adapter's failures, so callers never re-wrap.
+    const db = database(local.env);
+    const insert = sql`INSERT INTO instruction_card_versions (user_id,card_id,version,description,body,reason,report,actor_json)
+      VALUES (${userId},'card',1,'Sample.','changed','edit','cover','{}')`;
+    const failures = [
+      await db.query(insert).catch((error: unknown) => error),
+      await db
+        .transaction((tx) => tx.query(insert))
+        .catch((error: unknown) => error),
+    ];
+    for (const conflict of failures) {
+      expect(conflict).toBeInstanceOf(StoreError);
+      expect(conflict).toMatchObject({
+        code: "card_version_conflict",
+        message: "The instruction card changed. Read the current report.",
+        status: 409,
+      });
+    }
+    // The transaction's own callback failure keeps its identity.
+    const own = new Error("fixture callback failure");
+    expect(
+      await db
+        .transaction(async () => {
+          throw own;
+        })
+        .catch((error: unknown) => error),
+    ).toBe(own);
     expect(
       await local.db.query(
         sql`SELECT version,body FROM instruction_card_versions WHERE user_id=${userId}`,

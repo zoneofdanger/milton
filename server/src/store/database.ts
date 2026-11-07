@@ -200,6 +200,62 @@ export function databaseFailure(error: unknown): StoreError {
   );
 }
 
+/** `db`, whatever its adapter, with every database failure mapped through
+ * databaseFailure: its own queries, its transactions' and connections' queries,
+ * and their begin, commit and connect. A rejection from the caller's own
+ * callback keeps its identity. The production adapters already map (scripts
+ * use them directly); a StoreError passes through unchanged, so each failure
+ * is mapped and logged once. */
+export function mappedDatabase(db: StoreDatabase): StoreDatabase {
+  return {
+    ...mappedSession(db),
+    transaction: (work) =>
+      keepingCallbackFailures(
+        (inner) => db.transaction((tx) => inner(mappedSession(tx))),
+        work,
+      ),
+    withConnection: (work) =>
+      keepingCallbackFailures(
+        (inner) =>
+          db.withConnection((connection) => inner(mappedDatabase(connection))),
+        work,
+      ),
+  };
+}
+
+function mappedSession(session: StoreSession): StoreSession {
+  return {
+    async query<Row extends Record<string, unknown>>(statement: SQL) {
+      try {
+        return await session.query<Row>(statement);
+      } catch (error) {
+        throw databaseFailure(error);
+      }
+    },
+  };
+}
+
+// `run` calls `work` back; whatever `work` rejects with is the caller's own.
+async function keepingCallbackFailures<S, T>(
+  run: (inner: (session: S) => Promise<T>) => Promise<T>,
+  work: (session: S) => Promise<T>,
+): Promise<T> {
+  let callbackFailure: { error: unknown } | undefined;
+  try {
+    return await run(async (session) => {
+      try {
+        return await work(session);
+      } catch (error) {
+        callbackFailure = { error };
+        throw error;
+      }
+    });
+  } catch (error) {
+    if (callbackFailure && error === callbackFailure.error) throw error;
+    throw databaseFailure(error);
+  }
+}
+
 export function validateDatabaseUrl(value: string): string {
   try {
     const url = new URL(value);

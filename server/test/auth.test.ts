@@ -1,4 +1,5 @@
 import { expect, test, spyOn } from "bun:test";
+import { createHash } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { createMiltonApp } from "../src/index";
 import { navigation, page } from "../src/pages";
@@ -11,7 +12,7 @@ import {
   StoreError,
 } from "../src/store";
 import { localAsset } from "../src/assets";
-import { seedSample } from "./store-fixtures";
+import { seedRule, seedSample } from "./store-fixtures";
 import { localStore } from "./local-store";
 
 import {
@@ -884,6 +885,249 @@ test("connection keys: create shows the key once, the list never shows secrets, 
       "Nightly &lt;job&gt;",
     );
     expect((await send(`/assistants/keys/revoke?key=${id}`)).status).toBe(404);
+  } finally {
+    quiet.mockRestore();
+    await fixture.dispose();
+  }
+}, 30000);
+
+// Deletion and disconnect run against the native lifecycle stand-ins in
+// auth-fixtures.ts; check-auth-integration.ts runs the native functions.
+const operationIn = (html: string) =>
+  /name="operation" value="([^"]+)"/.exec(html)![1]!;
+async function deletionFixture() {
+  const { stripe, billing } = fakeStripe();
+  const fixture = await accountFixture({ billing });
+  const { db, pg } = fixture.local;
+  const { userId } = await lookupIdentityAccount(fixture.local.env, {
+    provider: issuer,
+    subject: "account",
+  });
+  await seedRule(pg, userId, "fictional-rule", "Fictional rule.");
+  await db.query(
+    sql`INSERT INTO trial_accounts(user_id,started_at,stripe_customer_id) VALUES(${userId},now(),'cus_fixture')`,
+  );
+  // What the person, or a later sign-in, would find of the account.
+  const remains = async () => ({
+    account: (await db.query(sql`SELECT 1 FROM users WHERE id=${userId}`))
+      .length,
+    writing: (
+      await db.query(
+        sql`SELECT 1 FROM instruction_cards WHERE user_id=${userId}`,
+      )
+    ).length,
+    sessions: (await db.query(sql`SELECT 1 FROM milton_app.session`)).length,
+    customer: (
+      await db.query<{ customer: string | null }>(
+        sql`SELECT stripe_customer_id AS customer FROM trial_accounts WHERE user_id=${userId}`,
+      )
+    )[0]?.customer,
+  });
+  return { ...fixture, stripe, userId, remains };
+}
+
+test("account deletion needs the exact phrase and a fresh sign-in; either refusal starts nothing and changes nothing", async () => {
+  const fixture = await deletionFixture();
+  const { local, send, stripe } = fixture;
+  try {
+    const form = await send("/account/delete");
+    expect(form.status).toBe(200);
+    const operation = operationIn(await form.text());
+    const before = await fixture.remains();
+    expect(before).toEqual({
+      account: 1,
+      writing: 1,
+      sessions: 1,
+      customer: "cus_fixture",
+    });
+    const wrong = await send("/account/delete", {
+      operation,
+      confirm: "delete my acount",
+    });
+    expect(wrong.status).toBe(400);
+    expect(await wrong.text()).toContain("Nothing was deleted.");
+    await local.db.query(
+      sql`UPDATE milton_guard.fixture_authority SET fresh=false`,
+    );
+    const stale = await send("/account/delete", {
+      operation,
+      confirm: "delete my account",
+    });
+    expect(stale.status).toBe(403);
+    expect(await stale.text()).toContain("Sign in again");
+    expect(await fixture.remains()).toEqual(before);
+    expect(stripe.calls).toEqual([]);
+    // No deletion began: the session still reads, and the page offers a new
+    // deletion rather than a retry.
+    expect((await send("/tps-report")).status).toBe(200);
+    const again = await send("/account/delete");
+    expect(again.status).toBe(200);
+    expect(await again.text()).toContain("Type <code>delete my account</code>");
+  } finally {
+    await fixture.dispose();
+  }
+}, 30000);
+
+test("account deletion: a Stripe failure keeps the account and its writing; retries of the same operation resume where it stopped, end the customer once and finish, and the identity gets no second trial", async () => {
+  const fixture = await deletionFixture();
+  const { local, send, stripe, jar } = fixture;
+  const quiet = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    const operation = operationIn(await (await send("/account/delete")).text());
+    const before = await fixture.remains();
+    const confirm = { operation, confirm: "delete my account" };
+    stripe.down = true;
+    const failed = await send("/account/delete", confirm);
+    expect(failed.status).toBe(503);
+    const failedPage = await failed.text();
+    expect(failedPage).toContain("Account deletion is incomplete.");
+    expect(failedPage).toContain(`name="operation" value="${operation}"`);
+    expect(failedPage).not.toContain("Your writing has been erased.");
+    expect(await fixture.remains()).toEqual(before);
+    expect(stripe.calls.map((call) => call.call)).toEqual([
+      "DELETE /v1/customers/cus_fixture",
+      "GET /v1/customers/cus_fixture",
+    ]);
+    // Reloading offers the same operation's retry, not a new deletion.
+    const reload = await send("/account/delete");
+    expect(reload.status).toBe(503);
+    expect(operationIn(await reload.text())).toBe(operation);
+    // Stripe answers, then erasing the writing fails: the customer has ended,
+    // the account and its writing remain.
+    stripe.down = false;
+    stripe.calls.length = 0;
+    await local.pg.exec(
+      `CREATE FUNCTION fixture_outage() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fixture erase outage'; END $$`,
+    );
+    await local.pg.exec(
+      `CREATE TRIGGER fixture_outage BEFORE INSERT ON deleted_identities FOR EACH ROW EXECUTE FUNCTION fixture_outage()`,
+    );
+    const unerased = await send("/account/delete", confirm);
+    expect(unerased.status).toBe(503);
+    expect(await unerased.text()).not.toContain(
+      "Your writing has been erased.",
+    );
+    expect(await fixture.remains()).toEqual({ ...before, customer: null });
+    expect(stripe.calls.map((call) => call.call)).toEqual([
+      "DELETE /v1/customers/cus_fixture",
+    ]);
+    // Then native cleanup fails: the writing is erased without asking Stripe
+    // again, and the retry page says so.
+    await local.pg.exec(`DROP TRIGGER fixture_outage ON deleted_identities`);
+    await local.db.query(
+      sql`UPDATE milton_guard.fixture_authority SET fail='cleanup_operation'`,
+    );
+    stripe.calls.length = 0;
+    const partial = await send("/account/delete", confirm);
+    expect(partial.status).toBe(503);
+    expect(await partial.text()).toContain("Your writing has been erased.");
+    expect(await fixture.remains()).toEqual({
+      account: 0,
+      writing: 0,
+      sessions: 0,
+      customer: undefined,
+    });
+    expect(stripe.calls).toEqual([]);
+    // The next retry finishes without asking Stripe again, and signs out.
+    await local.db.query(
+      sql`UPDATE milton_guard.fixture_authority SET fail=NULL`,
+    );
+    stripe.calls.length = 0;
+    const done = await send("/account/delete", confirm);
+    expect(done.status).toBe(200);
+    expect(await done.text()).toContain("Account deleted");
+    expect(stripe.calls).toEqual([]);
+    expect(done.headers.getSetCookie()).toContainEqual(
+      expect.stringMatching(/^milton-session=; .*Max-Age=0/),
+    );
+    expect(jar.get("milton-session")).toBe("");
+    // A later sign-in with the same identity gets a new, empty account whose
+    // trial starts canceled.
+    expect(
+      await local.db.query(sql`SELECT identity_hash FROM deleted_identities`),
+    ).toEqual([
+      {
+        identity_hash: createHash("sha256")
+          .update(issuer + ":account")
+          .digest("hex"),
+      },
+    ]);
+    await resolveIdentityAccount(local.env, {
+      provider: issuer,
+      subject: "account",
+    });
+    const returning = await local.db.query<{
+      user_id: string;
+      subscription_status: string | null;
+    }>(sql`SELECT user_id,subscription_status FROM trial_accounts`);
+    expect(returning).toHaveLength(1);
+    expect(returning[0]!.user_id).not.toBe(fixture.userId);
+    expect(returning[0]!.subscription_status).toBe("canceled");
+  } finally {
+    quiet.mockRestore();
+    await fixture.dispose();
+  }
+}, 30000);
+
+test("disconnect ends only a listed connection: another one is refused and starts nothing; an interrupted one is offered for retry and finishes", async () => {
+  const fixture = await accountFixture();
+  const { local, send } = fixture;
+  const quiet = spyOn(console, "error").mockImplementation(() => {});
+  const listing = async () => {
+    const response = await send("/assistants");
+    expect(response.status).toBe(200);
+    return response.text();
+  };
+  try {
+    await local.db.query(
+      sql`INSERT INTO milton_guard.fixture_connection(reference,subject,client_id,scopes) VALUES('listed-ref','account','https://assistant.example/client','["milton:read","milton:write"]'),('elsewhere-ref','another-person','https://elsewhere.example/client','["milton:read"]')`,
+    );
+    const page = await listing();
+    expect(page).toContain("<strong>assistant.example</strong>");
+    expect(page).toContain('name="connection" value="listed-ref"');
+    expect(page).not.toContain("elsewhere");
+    const operation = operationIn(page);
+    // A connection this list does not show is refused before any operation.
+    const refused = await send("/assistants/disconnect", {
+      connection: "elsewhere-ref",
+      operation,
+    });
+    expect(refused.status).toBe(401);
+    const unchanged = await listing();
+    expect(unchanged).toContain('name="connection" value="listed-ref"');
+    expect(unchanged).not.toContain("Disconnect cleanup is incomplete");
+    // When native begin_operation fails, the request stays listed for retry.
+    await local.db.query(
+      sql`UPDATE milton_guard.fixture_authority SET fail='begin_operation'`,
+    );
+    expect(
+      (
+        await send("/assistants/disconnect", {
+          connection: "listed-ref",
+          operation,
+        })
+      ).status,
+    ).toBe(503);
+    await local.db.query(
+      sql`UPDATE milton_guard.fixture_authority SET fail=NULL`,
+    );
+    const pending = await listing();
+    expect(pending).toContain(
+      "Retry to finish disconnecting assistant.example.",
+    );
+    // The retry form carries only the operation.
+    const retry = await send("/assistants/disconnect", { operation });
+    expect(retry.status).toBe(303);
+    expect(retry.headers.get("Location")).toBe(appOrigin + "/assistants");
+    const after = await listing();
+    expect(after).toContain("No assistants are connected.");
+    expect(after).not.toContain("Disconnect cleanup is incomplete");
+    // The other person's connection is untouched.
+    expect(
+      await local.db.query(
+        sql`SELECT reference FROM milton_guard.fixture_connection WHERE active`,
+      ),
+    ).toEqual([{ reference: "elsewhere-ref" }]);
   } finally {
     quiet.mockRestore();
     await fixture.dispose();

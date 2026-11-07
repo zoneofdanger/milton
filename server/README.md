@@ -64,7 +64,8 @@ Auth makes an authenticated, bounded `POST /internal/auth/admit` handoff contain
 issuer/subject/continuation, verified email and mandatory native `verifiedIdentities`
 (Google/GitHub stable IDs; `[]` for password-only). App owns account/trial/billing admission.
 Native validation precedes this handoff. Ownership is exact issuer+subject, never email
-or those eligibility fingerprints. See [the cutover runbook](deploy/README.md#self-hosted-auth-cutover-preparation).
+or those eligibility fingerprints. See [auth operations](../apps/auth/README.md#live-authority-admission-and-lifecycle);
+the applied cutover procedure is in git history (`git show 492b96a:server/deploy/README.md`).
 
 ## Environment variables
 
@@ -120,7 +121,8 @@ adds `sample_versions`, leaving 15 tables defined in `src/store/schema.ts`.
 
 The baseline requires an empty database; direct baseline use on a populated old database
 refuses. Older revisions are unsupported. The one-time owner transition production used
-for its 0033 schema has been deleted; see [the hosting runbook](deploy/README.md#legacy-schema-cleanup).
+for its 0033 schema has been deleted; it is in git history, with the hosting runbook's cleanup
+record (`git show 492b96a:server/deploy/README.md`).
 
 Historical migrations, snapshots, rollback scripts and pre-steps are removed. Use the
 normal `bun run db:generate` for later schema changes; add any required guard SQL to the
@@ -128,7 +130,7 @@ generated migration. Migration timestamps must strictly increase. Run one migrat
 time. DDL and journal writes commit together; for an uncertain command outcome inspect
 the actual schema and journal before retrying. Take the required pre-migration snapshot;
 there is no reverse SQL that recreates the retired subsystem. Production applied this
-cleanup on 2026-11-04; [the hosting runbook](deploy/README.md) records the snapshot,
+cleanup on 2026-11-04; the hosting runbook at commit 492b96a records the snapshot,
 baseline journal and preservation checks.
 
 ## Deploy
@@ -646,7 +648,8 @@ destructive changes. Applied baseline/context migrations remain unchanged.
 The revision schema and API are incompatible with old runtimes. A separately authorized
 cutover must close reads/writes, drain old instances, snapshot, apply the owner migration,
 verify preservation and matching app/MCP code, then reopen ingress and verify canonical
-reads. Follow [the hosting runbook](deploy/README.md#pending-sample-revision-schemaapi-cutover).
+reads. Production applied it on 2026-11-07; the procedure is in the hosting runbook at commit
+492b96a (`git show 492b96a:server/deploy/README.md`).
 No old runtime may serve the new schema. Reconnect assistants and reread current IDs
 and the account version before saving. No compatibility layer or rollback artifact
 is supplied. Implementation

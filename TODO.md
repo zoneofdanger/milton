@@ -10,7 +10,7 @@ landed and the item is still open), `blocked: <why or #id>`. A bolded headline o
 or fewer states the task; one item is one landing. **A section heading and its preamble are
 shared context for every item beneath it.**
 
-**next-id: 27.** Ids are never reused, so this counter survives deleting the newest item.
+**next-id: 28.** Ids are never reused, so this counter survives deleting the newest item.
 
 ## MVP
 
@@ -94,6 +94,13 @@ reports, memos) and plain text on security screens and anything an assistant rea
       enumeration fix). Accept a rare lost email, which "resend" recovers. ⚠ This touches the
       security-reviewed sign-in path: needs an Astra review, and draining the queue and
       retiring the delivery job before switching.
+
+- [ ] #27 (server, low) **Give auth owner-script refusals clear codes.** apps/auth/scripts
+      provision.ts, maintain.ts and migrate.ts throw plain `Error(message)` with no `code`, so
+      `safeError` prints `UNCLASSIFIED` for every refusal and an operator can't tell causes
+      apart (found in the 2026-11-07 cutover rehearsal). Give each refusal a stable code that
+      safeError prints, without secrets. Also make provision.ts's "output outside the
+      repository" check resolve the real repository root rather than only its own checkout.
 
 ## From the audit of 2026-11-02 (`.agents/tmp/audit/report.md`)
 

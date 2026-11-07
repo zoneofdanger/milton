@@ -289,6 +289,15 @@ test("served instructions state edit precedence, retrieval and scoped transforma
     /New drafts:[^.]+check cover rules and matching samples \(opening, length, sign-off, forbidden phrases\), fixing failures before display\./,
   );
   expect(retrieval).not.toContain("fix failures before showing text");
+  // Saves, the rule proposal and session capture, stated nowhere else in tests.
+  for (const phrase of [
+    "unchanged confirms no write",
+    "same correction twice",
+    "Session capture is off by default",
+    "current conversation only",
+    "Stop capture immediately",
+  ])
+    expect(storeInstructions).toContain(phrase);
 });
 
 test("every create_memo shape the server instructions describe parses against saveMemoInput", () => {

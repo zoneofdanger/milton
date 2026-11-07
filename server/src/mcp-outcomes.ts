@@ -61,6 +61,7 @@ export const loggedErrorCodes = new Set([
   "server_unavailable",
   "protocol_error",
   "connection_key_limit",
+  "server_busy",
 ]);
 const refusals = new Set([
   "rate_limited",

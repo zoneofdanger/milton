@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { sql, type SQL } from "drizzle-orm";
 import { expect, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -819,6 +820,91 @@ test("connection keys get exactly their scope's tools; revoked, expired, malform
     );
   } finally {
     await Promise.all(clients.map((c) => c.close()));
+    await local.dispose();
+  }
+}, 30000);
+
+test("key lookups are bounded before database access: 8 at once, then a quick 503; an invented id is remembered, a known id never is", async () => {
+  const local = await localStore();
+  let queries = 0;
+  let hold: Promise<void> | undefined;
+  try {
+    await local.pg.exec(`CREATE SCHEMA IF NOT EXISTS milton_guard;
+      CREATE FUNCTION milton_guard.connection_key_status(text,text,text) RETURNS boolean
+        LANGUAGE sql AS $$ SELECT ($1,$2,$3)=('bounded','f:1','f:2') $$`);
+    await resolveIdentityAccount(local.env, {
+      provider: issuer,
+      subject: "bounded",
+    });
+    const real = await connectionKeysForAccount(
+      local.env,
+      await lookupIdentityAccount(local.env, {
+        provider: issuer,
+        subject: "bounded",
+      }),
+      { issuer, subject: "bounded", incarnation: "f:1", generation: "f:2" },
+    ).create({ name: "Real", scope: "read", expiry: 30 });
+    const db = new Proxy(local.db, {
+      get(target, key) {
+        if (key === "query")
+          return async (statement: SQL) => {
+            queries++;
+            await hold;
+            return target.query(statement);
+          };
+        return Reflect.get(target, key);
+      },
+    });
+    const fixture = await tokenFixture(local.pg);
+    const handler = createMiltonHandler(
+      { storeDatabase: db, issuer, resource, appOrigin: origin },
+      fixture.verify,
+      () => {},
+    );
+    const post = (key: string) =>
+      handler(
+        new Request(resource, {
+          method: "POST",
+          headers: {
+            Host: "localhost:3001",
+            Authorization: "Bearer " + key,
+            Accept: "application/json, text/event-stream",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+        }),
+      );
+    const invented = (n: number) =>
+      `mk_${randomBytes(16).toString("base64url")}_${"A".repeat(42)}${"AQgw"[n % 4]}`;
+    let release!: () => void;
+    hold = new Promise((resolve) => (release = resolve));
+    const held = Array.from({ length: 8 }, (_, n) => post(invented(n)));
+    while (queries < 8) await new Promise((r) => setTimeout(r, 5));
+    const busy = await post(invented(8));
+    expect(busy.status).toBe(503);
+    expect(busy.headers.get("Retry-After")).toBe("1");
+    expect((await busy.json()).error).toBe("server_busy");
+    expect(queries).toBe(8);
+    release();
+    hold = undefined;
+    for (const reply of await Promise.all(held)) expect(reply.status).toBe(401);
+    // A repeated invented id is refused from memory.
+    const repeated = invented(0);
+    expect((await post(repeated)).status).toBe(401);
+    const after = queries;
+    expect((await post(repeated)).status).toBe(401);
+    expect(queries).toBe(after);
+    // A wrong secret for a real id reaches the database every time, so it cannot
+    // lock the key out, and the real key still works.
+    const wrong =
+      real.key.slice(0, 26) +
+      (real.key[26] === "A" ? "B" : "A") +
+      real.key.slice(27);
+    expect((await post(wrong)).status).toBe(401);
+    expect((await post(wrong)).status).toBe(401);
+    expect(queries).toBe(after + 2);
+    expect((await post(real.key)).status).toBe(200);
+  } finally {
     await local.dispose();
   }
 }, 30000);

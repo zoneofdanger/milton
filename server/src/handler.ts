@@ -91,11 +91,59 @@ function validateMcpTransport(
 }
 const invalidKey = () =>
   new AuthError("invalid_token", "Reconnect your assistant to Milton.", 401);
+const keyLookupBusy = () =>
+  new AuthError("server_busy", "Milton is busy. Try again shortly.", 503);
+
+/**
+ * Bounds unauthenticated database work on the connection-key path, per
+ * process, before any database access. Anyone can send well-formed keys with
+ * invented ids, so at most 8 key lookups run at once (beyond that the request
+ * gets a quick 503 with Retry-After, without touching the database), and an id
+ * no key has is remembered for 60 seconds in a 10,000-entry LRU, so a repeated
+ * invented id never reaches the database. Only ids with no key at all are
+ * remembered: a wrong secret for a real id is not, so knowing a key's public
+ * id cannot lock its owner out.
+ */
+function keyLookupGate(concurrent = 8, entries = 10_000, ttlMs = 60_000) {
+  let running = 0;
+  const unknown = new Map<string, number>(); // id → expiry; oldest first
+  return async <T>(
+    id: string,
+    lookup: () => Promise<
+      { ok: true; value: T } | { ok: false; known: boolean }
+    >,
+  ): Promise<T | undefined> => {
+    const until = unknown.get(id);
+    if (until !== undefined) {
+      unknown.delete(id);
+      if (until > Date.now()) {
+        unknown.set(id, until);
+        return undefined;
+      }
+    }
+    if (running >= concurrent) throw keyLookupBusy();
+    running++;
+    try {
+      const result = await lookup();
+      if (result.ok) return result.value;
+      if (!result.known) {
+        if (unknown.size >= entries)
+          unknown.delete(unknown.keys().next().value!);
+        unknown.set(id, Date.now() + ttlMs);
+      }
+      return undefined;
+    } finally {
+      running--;
+    }
+  };
+}
+
 export function createMiltonHandler(
   config: McpConfig,
   verify: AccessTokenVerifier = createAccessTokenVerifier(config),
   log: (call: ToolCall) => void = (call) => console.info(JSON.stringify(call)),
 ) {
+  const keyLookup = keyLookupGate();
   // Assistants (account and OAuth client) this process has served a tool call.
   // Each one's first tool call after startup carries tools/list_changed, so a
   // client still holding the tool schemas from before a release refreshes
@@ -149,8 +197,11 @@ export function createMiltonHandler(
         // an invalid token. Only the key's public id is ever logged.
         const parsed = parseConnectionKey(authorization.slice(7));
         if (!parsed) throw invalidKey();
-        const key = await connectionKeyAccount(config, parsed);
-        if (!key.ok) throw invalidKey();
+        const key = await keyLookup(parsed.id, async () => {
+          const found = await connectionKeyAccount(config, parsed);
+          return found.ok ? { ok: true as const, value: found } : found;
+        });
+        if (!key) throw invalidKey();
         write = key.scope === "read_write";
         if (call.success && call.data.params.name === "create_memo" && !write)
           throw new AuthError(
@@ -227,6 +278,7 @@ export function createMiltonHandler(
             `Bearer resource_metadata="${new URL("/.well-known/oauth-protected-resource/mcp", config.resource).href}"${invalid}`,
           );
         }
+        if (error.code === "server_busy") headers.set("Retry-After", "1");
         if (error.code === "insufficient_scope")
           headers.set(
             "WWW-Authenticate",

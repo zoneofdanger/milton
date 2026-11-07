@@ -251,6 +251,13 @@ To change a policy, edit it in the console or `PATCH` it through the Monitoring 
 them with `GET .../alertPolicies`. Stripe's webhook-failure emails and Neon's compute
 alerts are Dashboard settings, not these policies.
 
+Added 2026-11-07 for the self-hosted auth service, same channel, rate limit 10 minutes:
+
+- `milton-auth-errors-log`: any `milton-auth` Cloud Run log entry with severity ERROR or higher.
+- `milton-auth-jobs-errors-log`: any ERROR from a `milton-auth-*` Cloud Scheduler job or Cloud
+  Run job (mail delivery, maintenance). Its filter matched the 25 scheduler 404s from the
+  malformed-URL incident, which this alert would have caught.
+
 ## Release verification and rollback
 
 For an incompatible coordinated schema release, stage the image with `gcloud run deploy --no-traffic`

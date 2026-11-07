@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { sql } from "drizzle-orm";
 import {
+  databaseFailure,
   mappedDatabase,
   postgresDatabase,
   type StoreDatabase,
@@ -68,56 +69,57 @@ export async function resolveIdentityAccount(
   const legacyDeleted = fingerprints.length
     ? sql`EXISTS(SELECT 1 FROM milton_app.legacy_mapping l WHERE l.issuer=${provider} AND l.subject=${subject} AND l.deleted)`
     : sql`false`;
-  return database(bindings).transaction(async (tx) => {
-    await readLimits(tx);
-    const lookup = () =>
-      tx.query<{
-        id: string;
-        status: string;
-      }>(sql`
+  return database(bindings)
+    .transaction(async (tx) => {
+      await readLimits(tx);
+      const lookup = () =>
+        tx.query<{
+          id: string;
+          status: string;
+        }>(sql`
       SELECT u.id, u.status FROM identities i JOIN users u ON u.id = i.user_id
       WHERE i.provider = ${provider} AND i.subject = ${subject} FOR UPDATE OF u`);
-    let account = (await lookup())[0];
-    if (!account) {
-      // Every sign-in creates or finds its account. The identity's primary key
-      // admits one account: a sign-in that loses the race for it drops the
-      // users row it made, before its trial row, and finds the winner's account
-      // with a separate READ COMMITTED statement.
-      const id = `m_${crypto.randomUUID()}`;
-      await tx.query(sql`INSERT INTO users (id) VALUES (${id})`);
-      const linked =
-        await tx.query(sql`INSERT INTO identities (provider,subject,user_id)
+      let account = (await lookup())[0];
+      if (!account) {
+        // Every sign-in creates or finds its account. The identity's primary key
+        // admits one account: a sign-in that loses the race for it drops the
+        // users row it made, before its trial row, and finds the winner's account
+        // with a separate READ COMMITTED statement.
+        const id = `m_${crypto.randomUUID()}`;
+        await tx.query(sql`INSERT INTO users (id) VALUES (${id})`);
+        const linked =
+          await tx.query(sql`INSERT INTO identities (provider,subject,user_id)
           VALUES (${provider},${subject},${id})
           ON CONFLICT (provider,subject) DO NOTHING RETURNING user_id`);
-      if (!linked.length) {
-        await tx.query(sql`DELETE FROM users WHERE id=${id}`);
-        account = (await lookup())[0];
-        if (!account)
-          throw new StoreError(
-            "store_unavailable",
-            "The memo store is unavailable. Try again.",
-          );
-      } else {
-        // A sign-in identity whose account was deleted gets no second trial:
-        // its row starts canceled, so it reads as expired whenever trials are
-        // enabled (now or later), has no effect while they are off, and sign-up
-        // creates no subscription for it.
-        let returning = false;
-        for (const fingerprint of [...new Set(fingerprints)].sort()) {
-          await tx.query(
-            sql`INSERT INTO milton_app.trial_fingerprint(fingerprint,first_user_id) VALUES(${fingerprint},${id}) ON CONFLICT DO NOTHING`,
-          );
-          const row = (
-            await tx.query<{ first_user_id: string }>(
-              sql`SELECT first_user_id FROM milton_app.trial_fingerprint WHERE fingerprint=${fingerprint}`,
-            )
-          )[0];
-          returning ||= row?.first_user_id !== id;
-          await tx.query(
-            sql`INSERT INTO milton_app.account_fingerprint(user_id,fingerprint) VALUES(${id},${fingerprint}) ON CONFLICT DO NOTHING`,
-          );
-        }
-        await tx.query(sql`INSERT INTO trial_accounts(user_id,started_at,subscription_status)
+        if (!linked.length) {
+          await tx.query(sql`DELETE FROM users WHERE id=${id}`);
+          account = (await lookup())[0];
+          if (!account)
+            throw new StoreError(
+              "store_unavailable",
+              "The memo store is unavailable. Try again.",
+            );
+        } else {
+          // A sign-in identity whose account was deleted gets no second trial:
+          // its row starts canceled, so it reads as expired whenever trials are
+          // enabled (now or later), has no effect while they are off, and sign-up
+          // creates no subscription for it.
+          let returning = false;
+          for (const fingerprint of [...new Set(fingerprints)].sort()) {
+            await tx.query(
+              sql`INSERT INTO milton_app.trial_fingerprint(fingerprint,first_user_id) VALUES(${fingerprint},${id}) ON CONFLICT DO NOTHING`,
+            );
+            const row = (
+              await tx.query<{ first_user_id: string }>(
+                sql`SELECT first_user_id FROM milton_app.trial_fingerprint WHERE fingerprint=${fingerprint}`,
+              )
+            )[0];
+            returning ||= row?.first_user_id !== id;
+            await tx.query(
+              sql`INSERT INTO milton_app.account_fingerprint(user_id,fingerprint) VALUES(${id},${fingerprint}) ON CONFLICT DO NOTHING`,
+            );
+          }
+          await tx.query(sql`INSERT INTO trial_accounts(user_id,started_at,subscription_status)
             SELECT u.id,u.created_at,
               CASE WHEN d.identity_hash IS NULL AND NOT ${returning} AND NOT ${legacyDeleted} THEN NULL ELSE 'canceled' END
             FROM users u CROSS JOIN store_config c
@@ -125,27 +127,32 @@ export async function resolveIdentityAccount(
               ON d.identity_hash=${identityHash(provider, subject)}
             WHERE u.id=${id} AND c.singleton=1
             AND (c.trials_enabled OR d.identity_hash IS NOT NULL OR ${returning} OR ${legacyDeleted})`);
-        account = { id, status: "active" };
+          account = { id, status: "active" };
+        }
       }
-    }
-    if (account.status !== "active")
-      throw new StoreError(
-        "account_unavailable",
-        "This Milton account is unavailable.",
-        403,
-      );
-    // Linking records new eligibility proofs but never changes writing owner,
-    // starts another trial or rewinds an existing subscription.
-    for (const fingerprint of [...new Set(fingerprints)].sort()) {
-      await tx.query(
-        sql`INSERT INTO milton_app.trial_fingerprint(fingerprint,first_user_id) VALUES(${fingerprint},${account.id}) ON CONFLICT DO NOTHING`,
-      );
-      await tx.query(
-        sql`INSERT INTO milton_app.account_fingerprint(user_id,fingerprint) VALUES(${account.id},${fingerprint}) ON CONFLICT DO NOTHING`,
-      );
-    }
-    return { miltonUserId: account.id };
-  });
+      if (account.status !== "active")
+        throw new StoreError(
+          "account_unavailable",
+          "This Milton account is unavailable.",
+          403,
+        );
+      // Linking records new eligibility proofs but never changes writing owner,
+      // starts another trial or rewinds an existing subscription.
+      for (const fingerprint of [...new Set(fingerprints)].sort()) {
+        await tx.query(
+          sql`INSERT INTO milton_app.trial_fingerprint(fingerprint,first_user_id) VALUES(${fingerprint},${account.id}) ON CONFLICT DO NOTHING`,
+        );
+        await tx.query(
+          sql`INSERT INTO milton_app.account_fingerprint(user_id,fingerprint) VALUES(${account.id},${fingerprint}) ON CONFLICT DO NOTHING`,
+        );
+      }
+      return { miltonUserId: account.id };
+    })
+    .catch((error) => {
+      // Any failure inside, including an unexpected one, becomes a logged StoreError,
+      // as before the database layer started mapping errors itself.
+      throw databaseFailure(error);
+    });
 }
 
 const verifiedStoreIdentity = Symbol("verifiedStoreIdentity");
@@ -264,30 +271,36 @@ export async function deleteAccount(
   const clients = [
     ...new Set(clientIds.map((id) => z.string().min(1).max(2048).parse(id))),
   ];
-  await database(bindings).transaction(async (tx) => {
-    // The same row lock every writer takes, so in-flight saves finish first
-    // and later ones find no active account.
-    const account = (
-      await tx.query<{ id: string }>(sql`
+  await database(bindings)
+    .transaction(async (tx) => {
+      // The same row lock every writer takes, so in-flight saves finish first
+      // and later ones find no active account.
+      const account = (
+        await tx.query<{ id: string }>(sql`
         SELECT u.id FROM identities i JOIN users u ON u.id=i.user_id
         WHERE i.provider=${provider} AND i.subject=${subject} AND u.status='active'
         FOR UPDATE OF u`)
-    )[0];
-    if (!account)
-      throw new StoreError(
-        "account_unavailable",
-        "This Milton account is unavailable.",
-        403,
-      );
-    for (const clientId of clients)
-      await tx.query(sql`
+      )[0];
+      if (!account)
+        throw new StoreError(
+          "account_unavailable",
+          "This Milton account is unavailable.",
+          403,
+        );
+      for (const clientId of clients)
+        await tx.query(sql`
           INSERT INTO assistant_disconnects (provider,subject,client_id)
           VALUES (${provider},${subject},${clientId}) ON CONFLICT DO NOTHING`);
-    await tx.query(sql`
+      await tx.query(sql`
         INSERT INTO deleted_identities (identity_hash)
         VALUES (${identityHash(provider, subject)}) ON CONFLICT DO NOTHING`);
-    await tx.query(sql`DELETE FROM users WHERE id=${account.id}`);
-  });
+      await tx.query(sql`DELETE FROM users WHERE id=${account.id}`);
+    })
+    .catch((error) => {
+      // Any failure inside, including an unexpected one, becomes a logged StoreError,
+      // as before the database layer started mapping errors itself.
+      throw databaseFailure(error);
+    });
 }
 
 type CallAllowance =

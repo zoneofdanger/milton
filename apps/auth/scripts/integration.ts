@@ -15,6 +15,8 @@ import { AUTH_ORIGIN, ISSUER, safeError, type Config } from "../src/config.ts";
 
 const p = await disposable();
 const secret = () => randomBytes(32).toString("hex");
+// Direct handler calls come from one fixed client; network buckets key on it.
+const TEST_PEER = "127.0.0.1";
 const config: Config = {
   AUTH_DATABASE_URL: "postgresql://unused.invalid/disposable",
   AUTH_SECRET: secret(),
@@ -238,6 +240,7 @@ try {
         },
         ...(body ? { body: JSON.stringify(body) } : {}),
       }),
+      TEST_PEER,
     );
     await drain();
     for (const update of response.headers.getSetCookie()) {
@@ -255,7 +258,10 @@ try {
     "/.well-known/openid-configuration",
     "/.well-known/oauth-authorization-server",
   ]) {
-    const response = await service.handler(new Request(ISSUER + path));
+    const response = await service.handler(
+      new Request(ISSUER + path),
+      TEST_PEER,
+    );
     assert.equal(response.status, 200);
     const metadata = (await response.json()) as Record<string, unknown>;
     assert.deepEqual(metadata.token_endpoint_auth_methods_supported, [
@@ -296,7 +302,10 @@ try {
   assert.equal(mail.length, 1);
   assert.equal(cookie, "");
   assert.equal((await call("/sign-in/email", { email, password })).status, 403);
-  const verification = await service.handler(new Request(mail[0]!.url));
+  const verification = await service.handler(
+    new Request(mail[0]!.url),
+    TEST_PEER,
+  );
   assert.equal(verification.status, 302);
   assert.equal(verification.headers.getSetCookie().length, 0);
   assert.equal(
@@ -361,7 +370,10 @@ try {
       "select count(*)::int n from milton_auth.verification where identifier like 'reset-password:%'",
     )
   ).rows[0].n;
-  const resetRedirect = await service.handler(new Request(reset.url));
+  const resetRedirect = await service.handler(
+    new Request(reset.url),
+    TEST_PEER,
+  );
   assert.equal(
     resetRedirect.status,
     302,
@@ -383,7 +395,7 @@ try {
   const unsafeReset = new URL(reset.url);
   unsafeReset.searchParams.set("callbackURL", "https://attacker.invalid/steal");
   assert.equal(
-    (await service.handler(new Request(unsafeReset))).status,
+    (await service.handler(new Request(unsafeReset), TEST_PEER)).status,
     403,
     "native reset GET retains callback origin protection",
   );
@@ -583,6 +595,7 @@ try {
             : { client_id: c.client_id, client_secret: c.client_secret }),
         }),
       }),
+      TEST_PEER,
     );
     assert.equal(r.status, 200);
     return (await r.json()) as {
@@ -750,6 +763,7 @@ try {
         resource: "https://mcp.meetmilton.com/mcp",
       }),
     }),
+    TEST_PEER,
   );
   assert(oldRefresh.status >= 400);
   assert.equal((await call("/sign-in/email", { email, password })).status, 200);
@@ -1006,7 +1020,7 @@ try {
     }
     return result;
   };
-  const pending = service.handler(new Request(verificationMail.url));
+  const pending = service.handler(new Request(verificationMail.url), TEST_PEER);
   await atRead;
   const deletion = randomUUID();
   await appPool.query("select milton_guard.begin_operation($1,$2,$3,null,$4)", [
@@ -1038,7 +1052,7 @@ try {
     ).rows[0].verified,
     false,
   );
-  await service.handler(new Request(verificationMail.url));
+  await service.handler(new Request(verificationMail.url), TEST_PEER);
   assert.equal(
     (
       await authPool.query(
@@ -1070,6 +1084,7 @@ try {
           },
           body: JSON.stringify(body),
         }),
+        TEST_PEER,
       );
       await drain();
       return response;
@@ -1115,6 +1130,7 @@ try {
       new Request(
         mail.findLast((m) => m.to === target && m.kind === "verify")!.url,
       ),
+      TEST_PEER,
     );
     const targetId = (
       await authPool.query('select id from milton_auth."user" where email=$1', [
@@ -1438,6 +1454,7 @@ try {
             name: "Fictional mail",
           }),
         }),
+        TEST_PEER,
       );
     };
     let providerCalls = 0;
@@ -1470,7 +1487,10 @@ try {
       .split(": ")
       .slice(1)
       .join(": ");
-    assert.equal((await noNetwork.handler(new Request(knownURL))).status, 302);
+    assert.equal(
+      (await noNetwork.handler(new Request(knownURL), TEST_PEER)).status,
+      302,
+    );
     const states = (suffix: string) =>
       [
         ["reset-known", "/request-password-reset", known, true],
@@ -1944,6 +1964,7 @@ try {
           newPassword: "Fictional changed mail password",
         }),
       }),
+      TEST_PEER,
     );
     assert.equal(redemption.status, 200);
     await worker(async () => {
@@ -2042,6 +2063,7 @@ try {
           callbackURL: AUTH_ORIGIN + "/security",
         }),
       }),
+      TEST_PEER,
     );
     const state = new URL(
       ((await start.json()) as { url: string }).url,
@@ -2060,6 +2082,7 @@ try {
           },
         },
       ),
+      TEST_PEER,
     );
     assert.equal(callback.status, 302);
     const socialJob = await last();

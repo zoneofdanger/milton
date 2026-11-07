@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { validPassword } from "../src/password.ts";
 import { readConfig } from "../src/config.ts";
 describe("auth product boundaries", () => {
@@ -140,6 +140,59 @@ test("rate-limit network is forwardedClient's client, as a valid address", async
   expect(client(null)).toBeUndefined();
 });
 
+test("the security page's session lookup takes each client's own network bucket", async () => {
+  const { createProvider } = await import("../src/provider.ts");
+  const { createApp } = await import("../src/app.tsx");
+  const { randomBytes } = await import("node:crypto");
+  const secret = () => randomBytes(32).toString("hex");
+  // Each network bucket holds one request; every decision is recorded.
+  const taken = new Map<unknown, number>();
+  const decisions: boolean[] = [];
+  const pool = {
+    on: () => pool,
+    query: async (text: string, values: unknown[] = []) => {
+      if (!text.includes("milton_guard.take_rate"))
+        throw new Error("fixture_database_refused");
+      const count = (taken.get(values[0]) ?? 0) + 1;
+      taken.set(values[0], count);
+      decisions.push(count <= 1);
+      return { rows: [{ allowed: count <= 1 }] };
+    },
+    connect: async () => {
+      throw new Error("fixture_database_refused");
+    },
+  };
+  const app = createApp(
+    createProvider(
+      {
+        AUTH_DATABASE_URL: "postgresql://unused.invalid/fixture",
+        AUTH_SECRET: secret(),
+        AUTH_ADMISSION_SECRET: secret(),
+        AUTH_RATE_SECRET: secret(),
+        AUTH_APP_CLIENT_ID: "fixed-app-fixture",
+        AUTH_GOOGLE_CLIENT_ID: "fictional-google",
+        AUTH_GOOGLE_CLIENT_SECRET: secret(),
+        AUTH_GITHUB_CLIENT_ID: "fictional-github",
+        AUTH_GITHUB_CLIENT_SECRET: secret(),
+        AUTH_RESEND_API_KEY: "fictional-not-sent",
+        AUTH_MAIL_FROM: "auth@notifications.meetmilton.com",
+        PORT: 19911,
+      },
+      { pool: pool as unknown as import("pg").Pool },
+    ),
+    import.meta.dir,
+  );
+  // An admitted lookup then fails on the refused pool and logs; keep it quiet.
+  const quiet = spyOn(console, "error").mockImplementation(() => {});
+  for (const client of ["203.0.113.7", "203.0.113.7", "198.51.100.9"])
+    await app.request("https://auth.meetmilton.com/security", {
+      headers: { "x-forwarded-for": `${client}, 34.149.0.10` },
+    });
+  quiet.mockRestore();
+  // Client A's second load is refused; client B's first is still allowed.
+  expect(decisions).toEqual([true, false, true]);
+});
+
 describe("OAuth profile refusals before database access", () => {
   // A pool that never connects: it records the network rate-limit query that
   // every admitted request makes first, and refuses it.
@@ -183,6 +236,7 @@ describe("OAuth profile refusals before database access", () => {
           method: "POST",
           ...init,
         }),
+        "127.0.0.1",
       );
     const json = (body: unknown) => ({
       headers: { "content-type": "application/json" },

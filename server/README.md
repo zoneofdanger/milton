@@ -417,7 +417,8 @@ must also be checked independently.
 
 The optional interactive `test:local` uses the configured issuer and can reach a live
 provider; running it is a separate authorized action. Root global checks are types,
-`bun test` and `bun run format:check`. The release coordinator owns actual cutover.
+`bun test` and `bun run format:check`; CI also runs this rehearsal and the apps/auth
+integration suite on every pull request. The release coordinator owns actual cutover.
 
 ## Store, history, and limits
 

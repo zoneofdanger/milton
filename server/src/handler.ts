@@ -4,13 +4,13 @@ import {
 } from "@modelcontextprotocol/server";
 import { createMiltonServer } from "./mcp";
 import {
+  type AssistantAuth,
   connectionKeyAccount,
   lookupIdentityAccount,
   parseConnectionKey,
-  storeForCurrentRequest,
+  tenantStore,
   type StoreBindings,
   StoreError,
-  type VerifiedStoreAuth,
 } from "./store";
 import {
   AuthError,
@@ -28,7 +28,7 @@ import {
   type ToolCall,
 } from "./mcp-outcomes";
 import { storeResult } from "./mcp-tools";
-import { bindingActive } from "./auth-authority";
+import { bindingStatus, checkBinding, unavailable } from "./auth-authority";
 
 const incomingTool = z.object({
   method: z.literal("tools/call"),
@@ -258,7 +258,7 @@ export function createMiltonHandler(
       );
       if (call.success) pending = knownTool(call.data.params.name);
       const authorization = request.headers.get("Authorization");
-      let auth: VerifiedStoreAuth,
+      let auth: AssistantAuth,
         assistant: { issuer: string; clientId: string },
         write: boolean,
         announcedAs: string;
@@ -285,28 +285,41 @@ export function createMiltonHandler(
         announcedAs = `${auth.userId}\nconnection_key\n${key.keyId}`;
       } else {
         const identity = await verify(authorization);
-        await bindingActive(config, identity);
         const scopes = identity.scope.split(" ");
-        if (
-          !scopes.includes("milton:read") ||
-          (call.success &&
-            call.data.params.name === "create_memo" &&
-            !scopes.includes("milton:write"))
-        )
-          throw new AuthError(
-            "insufficient_scope",
-            "Reconnect this assistant with the permission this action needs.",
-            403,
-          );
-        auth = await lookupIdentityAccount(config, {
-          provider: identity.issuer,
-          subject: identity.subject,
-        });
+        // One statement reads the native binding and the account; refusals
+        // keep their order: binding (401), scope (403), then account (403).
+        // A failed statement is an auth outage (503).
+        auth = await lookupIdentityAccount(
+          config,
+          { provider: identity.issuer, subject: identity.subject },
+          {
+            value: bindingStatus(config, identity),
+            admit(status) {
+              checkBinding(status, identity);
+              if (
+                !scopes.includes("milton:read") ||
+                (call.success &&
+                  call.data.params.name === "create_memo" &&
+                  !scopes.includes("milton:write"))
+              )
+                throw new AuthError(
+                  "insufficient_scope",
+                  "Reconnect this assistant with the permission this action needs.",
+                  403,
+                );
+            },
+            outage: unavailable,
+          },
+        );
         write = scopes.includes("milton:write");
         assistant = { issuer: identity.issuer, clientId: identity.clientId };
         announcedAs = `${auth.userId}\n${identity.clientId}`;
       }
-      const store = await storeForCurrentRequest(config, auth, assistant);
+      // `auth` comes from this request's identity or key statement, which
+      // requires an active account and reads the store limits, so building the
+      // store makes no query (invalid limits refuse here, before any charge);
+      // initialize, tools/list and notifications make no store query at all.
+      const store = tenantStore(config, auth, assistant);
       const announce = call.success && !announced.has(announcedAs);
       if (announce) {
         if (announced.size >= 10_000) announced.clear();

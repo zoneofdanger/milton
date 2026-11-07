@@ -20,7 +20,12 @@ import {
   POOL_IDLE_MS,
   postgresDatabase,
 } from "../src/store/database";
-import { database, lookupIdentityAccount, StoreError } from "../src/store";
+import {
+  database,
+  lookupIdentityAccount,
+  StoreError,
+  storeForCurrentRequest,
+} from "../src/store";
 import {
   authenticateConnectionKey,
   createConnectionKey,
@@ -1554,6 +1559,47 @@ try {
     undefined,
     "real-role model-free writing save",
   );
+  stage = "MCP charge against account deletion";
+  {
+    // A deletion that holds the account lock first: the charge waits for it,
+    // then refuses with account_unavailable.
+    const raced = "m_00000000-0000-4000-8000-0000000000c3";
+    await owner.query("INSERT INTO users(id) VALUES($1)", [raced]);
+    await owner.query(
+      "INSERT INTO identities(provider,subject,user_id) VALUES('fictional-charge','charge-race',$1)",
+      [raced],
+    );
+    const store = await storeForCurrentRequest(
+      mcpConfig,
+      await lookupIdentityAccount(mcpConfig, {
+        provider: "fictional-charge",
+        subject: "charge-race",
+      }),
+    );
+    assert.deepEqual(await store.chargeToolCall(), { allowed: true });
+    const deletion = await owner.connect();
+    let settled = false;
+    let charge: Promise<unknown> = Promise.resolve();
+    try {
+      await deletion.query("BEGIN");
+      await deletion.query("SELECT id FROM users WHERE id=$1 FOR UPDATE", [
+        raced,
+      ]);
+      charge = store.chargeToolCall().finally(() => (settled = true));
+      charge.catch(() => {});
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      assert.equal(settled, false, "the charge waits on the account lock");
+      await deletion.query("DELETE FROM users WHERE id=$1", [raced]);
+      await deletion.query("COMMIT");
+    } finally {
+      deletion.release();
+    }
+    await assert.rejects(
+      charge,
+      (error) =>
+        error instanceof StoreError && error.code === "account_unavailable",
+    );
+  }
   stage = "read-only native authorization";
   const readGrant = await authorizeAssistant(
     "openid offline_access milton:read",

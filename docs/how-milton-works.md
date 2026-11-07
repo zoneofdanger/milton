@@ -60,7 +60,7 @@ Files: `server/src/handler.ts`, `server/src/token.ts`, `server/src/mcp.ts`,
   MCP spec's rule that servers validate Origin.
 - JOSE checks EdDSA at+jwt against the exact configured issuer and MCP audience; native's fixed implicit UserInfo audience is allowed only with openid, and JWKS keys cache for 10 minutes.
 - Tokens require matching client_id/azp, supported scopes and original binding/incarnation/generation; ID/session JWTs and confirmation/DPoP are refused.
-- Every call checks live immutable native binding status; invalid/inactive is 401, real status/key outage is 503, with no stale-positive fallback.
+- Every call checks live immutable native binding status, in the statement that looks up the account; invalid/inactive is 401, real status/key outage is 503, with no stale-positive fallback, and a bad binding refuses before scope and scope before the account.
 - All three reads require milton:read; create_memo requires read+write, including direct calls. Read grants list three tools; write grants list four.
 - Read-only setup explains reconnecting for saves; scope never establishes approval of memo text.
 - A bad token gets a 401 that points the client to the sign-in metadata.
@@ -74,7 +74,7 @@ Files: `server/src/handler.ts`, `server/src/token.ts`, `server/src/mcp.ts`,
 - Keys pass the same daily allowance, trial and billing gates as OAuth calls.
 - A key's last use is recorded at most once a minute; failing to record it never fails the call.
 - Tool-call logs for key calls carry the key's public id, never its secret.
-- Each request looks up the active writing account by exact verified issuer and subject; MCP never provisions an account.
+- Each request looks up the active writing account by exact verified issuer and subject (a key's lookup requires it too); MCP never provisions an account. That lookup is the request's account check, so the store is built without a query and `initialize`, `tools/list` and notifications make no store query; each tool call's charge, read and save check the account again.
 - Each request builds a fresh stateless MCP server, with no sessions or subscriptions.
 - Global instructions require retrieval before writing or editing for or as the person; only new drafts get the sample/rule conformity check before display. Edits preserve source wording and style outside the request over conflicting samples/rules; guidance never widens scope, and only specific unresolved conflicts are flagged. Requested transformations retain their scope, and changes are briefly listed. These are behavioral instructions, not server enforcement.
 - After draft or edit approval, assistants display an exact placeholder-safe body and useful non-private context, then offer once to retain that proposal; one yes approves the displayed proposal. Every sample save requires that display, without silently redacting after approval or changing the working edit for retention. Change lists are excluded, refusal is final for that text, and only changed text/context requires renewed approval. Edits do not imply standing rules.
@@ -84,7 +84,10 @@ Files: `server/src/handler.ts`, `server/src/token.ts`, `server/src/mcp.ts`,
   `get_report` refused for a missing intent, so clients holding tool schemas from before
   a release refresh them; the announced set is per process and in memory.
 - Each `tools/call` increments a daily counter before running, and a call over the limit
-  returns `rate_limited` with a reset time.
+  returns `rate_limited` with a reset time. The request's access statement reads the
+  store limits, and invalid limits refuse the request before anything is counted; the
+  charge is then one statement under the account lock: a deletion holding it first makes
+  the call refuse as `account_unavailable`; one that comes second sees the counted call.
 - Each call logs the tool, outcome, time, and an error code from a fixed list, never
   text or identity.
 - The tool name is read early, so calls refused before dispatch are still logged.
@@ -101,7 +104,7 @@ Files: `server/src/mcp.ts`, `server/src/mcp-tools.ts`.
 - `list_reports` returns all five reports, with a one-line setup hint instead of the full
   script, only for reports with no rules or samples.
 - `create_memo` saves rules, edits, moves and sample changes together or not at all; context correction cannot combine with sample insertion or retirement.
-- Replies add a trial notice if one is due, and that notice can never fail the call.
+- Replies add a trial notice if one is due, and that notice can never fail the call. A read whose trial gate found no reminder due makes no claim; saves always try one.
 - Failures return a code and message, and unknown failures say no save outcome is
   confirmed.
 

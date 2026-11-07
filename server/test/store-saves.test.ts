@@ -1173,7 +1173,7 @@ test("a Baseline: rule must be a setup rule byte for byte in its report, filed n
 test("opt-in report guides fence lifecycle work without changing approved sources", async () => {
   const { setGuideEnrollment } = await import("../src/guides/store");
   const { runGuideWorker } = await import("../src/guides/worker");
-  const { reportEnvelope, reportList } = await import("../src/store/tools");
+  const { reportEnvelope, reportList } = await import("../src/mcp-tools");
   const local = await localStore();
   try {
     await seedUsers(local.pg, "guide-a", "guide-b");

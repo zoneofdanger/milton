@@ -9,7 +9,7 @@ import {
   seedSample,
   seedUsers,
 } from "./store-fixtures";
-import { createStoreMemoTools } from "../src/store/tools";
+import { createStoreMemoTools } from "../src/mcp-tools";
 import { createHash } from "node:crypto";
 import type { StoreDatabase } from "../src/store/database";
 import {

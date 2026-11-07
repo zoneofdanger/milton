@@ -12,7 +12,7 @@ import {
   readOnlyInstructions,
   type ToolCall,
 } from "../src/mcp";
-import { saveMemoInput } from "../src/store/compiled";
+import { saveMemoInput } from "../src/mcp-tools";
 import { createMiltonHandler } from "../src/handler";
 import { createAccessTokenVerifier } from "../src/token";
 import { deleteAccount, resolveIdentityAccount } from "../src/store";

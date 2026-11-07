@@ -79,7 +79,7 @@ Files: `server/src/handler.ts`, `server/src/token.ts`, `server/src/mcp.ts`,
 
 ## The four tools
 
-Files: `server/src/store/tools.ts`, `server/src/mcp.ts`.
+Files: `server/src/mcp.ts`, `server/src/mcp-tools.ts`.
 
 - `get_cover_sheet` returns the cover rules, version, report index, and `is_empty`, plus
   the optional setup script while the whole account has no rules or samples.

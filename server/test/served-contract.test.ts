@@ -1,6 +1,5 @@
 import { expect, test } from "bun:test";
 import { storeInstructions } from "../src/mcp";
-import { saveMemoInput } from "../src/store/compiled";
 import type { CardHead } from "../src/store/cards";
 import {
   assembleDocuments,
@@ -19,7 +18,8 @@ import {
   reportEnvelope,
   reportInput,
   reportList,
-} from "../src/store/tools";
+  saveMemoInput,
+} from "../src/mcp-tools";
 import { subscriptionRequired, trialEndingMessage } from "../src/store/trials";
 
 // Fields every save carries, as the instructions name them.

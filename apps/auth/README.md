@@ -129,7 +129,7 @@ Migration/provision/maintenance commands refuse without their explicit `--apply`
 
 `migrate.ts` applies or reverses each file and its `migration_ledger` row in one transaction under an advisory lock, so a crash or lost connection leaves both or neither; rerun the same command. Prepared (two-phase) transactions are not used.
 
-A file must not begin, commit or roll back a transaction itself. The runner notices only after the file ran and stops with `MIGRATION_MUST_NOT_MANAGE_TRANSACTION`, naming the file and writing no ledger row. Do not simply rerun: the file's work may already be committed. Inspect the schema against the file, then either record its ledger row by hand (the work is complete) or reverse the work, and fix the file before the next run.
+A file must not begin, commit or roll back a transaction itself. The runner notices only after the file ran and stops with `MIGRATION_MUST_NOT_MANAGE_TRANSACTION`, naming the file and writing no ledger row. Do not simply rerun: the file's work may already be committed. Inspect the schema against the file. If an up file's work fully completed, insert its ledger row; if a down file's work fully completed, delete its ledger row; otherwise repair the schema to match the ledger before touching the ledger. Fix the file before the next run.
 
 ## Bounded mail delivery and retention
 

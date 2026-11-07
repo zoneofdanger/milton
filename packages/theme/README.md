@@ -68,9 +68,15 @@ copy the same assets into their public directories; no runtime font service is u
 Office Space-inspired printer favicon lives in `public/favicon.svg`, with an ICO
 fallback containing transparent 16, 32, 48 and 64px renders of that SVG. Both builds
 copy these same masters, so www, app and mcp serve identical icons. When editing
-the SVG, regenerate the ICO frames and update the cache revision in `faviconLinks`.
+the SVG, regenerate the ICO frames and update the site's cache revision in `faviconLinks`;
+the app and auth link content-versioned URLs instead (the app through `faviconLinksFor`).
 App pages allow only same-origin images and fonts (`img-src 'self'`,
 `font-src 'self'`); scripts and external images remain blocked.
+`assets.ts` versions the app and auth assets: at build time it records each file's
+content hash in `assets.json` and points CSS `url()`s at `?v=<hash>` URLs; at startup
+it loads, verifies and brotli/gzip-compresses them. A URL whose version matches the
+bytes is served `immutable` for a year; any other URL revalidates, so changed bytes
+(a new font or theme) reach clients on the next page load.
 `server/src/assets.ts` serves only the listed built asset paths from the server's
 `public` directory. In production the app's Cloud Run service serves them through
 `server/src/cloud-app.ts`; locally `server/scripts/dev.ts` does. Vercel serves only

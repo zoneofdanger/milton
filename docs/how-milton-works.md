@@ -292,6 +292,11 @@ Files: `server/src/pages.tsx`, `server/src/memo-pages.tsx`, `server/src/auth.tsx
   its sample count as shown, explains its newest-eight-per-report limit and links to
   the complete download, including when assistant access is paused.
 - `/assistants` lists bounded live native connections grouped by client and read/write access, and original incomplete disconnects; a full native page explicitly reports incomplete listing.
+- `/assistants` also lists connection keys that are not revoked (name, access, created, last used, expiry; never-expiring keys say "Never expires", expired keys say so), at most 100, never a secret or hash.
+- Creating a key takes a name (1–60 characters, one line), Read only (default) or Read and save, and 30, 90 (default) or 365 days or Never; it needs the form's CSRF/Origin checks and a sign-in within 5 minutes.
+- An account can have 20 active (unrevoked, unexpired) keys; creation takes the account lock so the cap holds.
+- The created key is shown once, with a Claude Code command, on a no-store page; only its hash is stored.
+- Revoking asks on a separate page with a plain form, revokes one key, and the key is refused from its next request.
 - The setup prompt changes depending on whether the account is empty.
 - Account opens a native popover; Escape closes it and returns focus to Account, and
   clicking outside closes it.

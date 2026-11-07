@@ -11,6 +11,7 @@ import {
   pendingOperations,
 } from "./auth-lifecycle";
 import { invalid } from "./auth-authority";
+import { accountKeys, keysSection } from "./auth-keys";
 
 export const clientHost = (clientId: string) => {
   try {
@@ -58,6 +59,7 @@ export const assistants = async (ctx: PageContext): Promise<Response> => {
     config,
     cookieValue(request, cookieName(config, "session")),
   );
+  const keys = await (await accountKeys(ctx, user)).list();
   return page(
     "Connected assistants",
     <>
@@ -118,6 +120,7 @@ export const assistants = async (ctx: PageContext): Promise<Response> => {
           ))}
         </ul>
       )}
+      {keysSection(keys, csrfField)}
     </>,
     200,
     null,

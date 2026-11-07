@@ -7,6 +7,7 @@ import { AuthError } from "./token";
 import { page } from "./pages";
 import { pageContext } from "./auth-session";
 import { assistants } from "./auth-assistants";
+import { connectionKeyRoutes, isKeyRoute } from "./auth-keys";
 import { accountDeletion } from "./auth-account";
 import { signInRoutes } from "./auth-login";
 import { logUnexpected } from "./error-log";
@@ -36,6 +37,7 @@ export function browserPages(config: RuntimeConfig) {
         url.pathname === "/assistants/disconnect"
       )
         return assistants(ctx);
+      if (isKeyRoute(url.pathname)) return connectionKeyRoutes(ctx);
       if (url.pathname === "/account/delete") return accountDeletion(ctx);
       if (
         url.pathname === "/billing/checkout" ||
@@ -90,7 +92,10 @@ export function browserPages(config: RuntimeConfig) {
             </p>
           ) : failure.code === "fresh_sign_in_required" ? (
             <p>
-              <a class="button" href={"/login?fresh=1&next=/account/delete"}>
+              <a
+                class="button"
+                href={`/login?fresh=1&next=${url.pathname.startsWith("/assistants") ? "/assistants" : "/account/delete"}`}
+              >
                 Sign in again
               </a>
             </p>

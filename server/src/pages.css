@@ -145,6 +145,33 @@ blockquote.setup-copy > p {
 .assistant-list form {
   margin: 0 0 var(--space-2);
 }
+.key-form h3 {
+  margin: 0;
+  font-size: var(--text-subtitle);
+}
+.key-form label:not(.choice) {
+  width: min(100%, 28rem);
+}
+fieldset {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+legend {
+  margin-bottom: var(--space-2);
+  padding: 0;
+}
+label.choice {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--touch-target);
+}
+label.choice input {
+  margin: 0;
+  accent-color: var(--accent);
+}
 summary {
   cursor: pointer;
   padding-block: var(--space-2);

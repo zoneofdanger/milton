@@ -736,6 +736,146 @@ test("the account menu offers the way to pay on every signed-in page, and the no
   }
 }, 30000);
 
+test("connection keys: create shows the key once, the list never shows secrets, revoke confirms first, and forms need CSRF and a fresh sign-in", async () => {
+  const fixture = await accountFixture();
+  const { local, send, jar } = fixture;
+  const count = async () =>
+    (await local.db.query(sql`SELECT 1 FROM connection_keys`)).length;
+  const quiet = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    const empty = await (await send("/assistants")).text();
+    expect(empty).toContain("Connection keys");
+    expect(empty).toContain("No connection keys.");
+    expect(empty).toMatch(
+      /<form method="post" action="\/assistants\/keys" class="key-form"><input type="hidden" name="csrf"/,
+    );
+    expect(empty).toContain('value="read" checked=""');
+    expect(empty).toContain('value="90" checked=""');
+    // CSRF and Origin are enforced; nothing is created.
+    for (const headers of [{ Origin: "https://evil.example" }, {}] as Record<
+      string,
+      string
+    >[]) {
+      const refused = await send(
+        "/assistants/keys",
+        new URLSearchParams({
+          csrf: Object.keys(headers).length
+            ? jar.get("milton-csrf")!
+            : "x".repeat(43),
+          name: "Refused",
+          scope: "read",
+          expiry: "90",
+        }),
+        headers,
+      );
+      expect(refused.status).toBe(403);
+      expect(await refused.text()).toContain("Reload the page");
+    }
+    expect(await count()).toBe(0);
+    // Creating a key needs a recent sign-in, and returns to this page after it.
+    await local.db.query(
+      sql`UPDATE milton_guard.fixture_authority SET fresh=false`,
+    );
+    const stale = await send("/assistants/keys", {
+      name: "Stale",
+      scope: "read",
+      expiry: "90",
+    });
+    expect(stale.status).toBe(403);
+    expect(await stale.text()).toContain(
+      'href="/login?fresh=1&amp;next=/assistants"',
+    );
+    await local.db.query(
+      sql`UPDATE milton_guard.fixture_authority SET fresh=true`,
+    );
+    const created = await send("/assistants/keys", {
+      name: "Nightly <job>",
+      scope: "read",
+      expiry: "90",
+    });
+    expect(created.status).toBe(200);
+    expect(created.headers.get("Cache-Control")).toBe("no-store");
+    const html = await created.text();
+    const key = /mk_[A-Za-z0-9_-]{22}_[A-Za-z0-9_-]{43}/.exec(html)![0];
+    expect(html).toContain("You won’t see it again");
+    expect(html).toContain(
+      `claude mcp add --transport http milton ${resource} --header &quot;Authorization: Bearer ${key}&quot;`,
+    );
+    expect(html).toContain("Nightly &lt;job&gt;");
+    const never = await send("/assistants/keys", {
+      name: "CI",
+      scope: "read_write",
+      expiry: "never",
+    });
+    expect(never.status).toBe(200);
+    const neverKey = /mk_[A-Za-z0-9_-]{22}_[A-Za-z0-9_-]{43}/.exec(
+      await never.text(),
+    )![0];
+    for (const bad of [
+      { name: "", scope: "read", expiry: "90" },
+      { name: "Two\nlines", scope: "read", expiry: "90" },
+      { name: "Odd", scope: "admin", expiry: "90" },
+      { name: "Odd", scope: "read", expiry: "7" },
+    ])
+      expect((await send("/assistants/keys", bad)).status).toBe(400);
+    // The list shows each key's details, never a secret or hash.
+    const listed = await (await send("/assistants")).text();
+    const hashes = await local.db.query<{ secret_hash: string }>(
+      sql`SELECT secret_hash FROM connection_keys`,
+    );
+    expect(hashes).toHaveLength(2);
+    for (const secret of [
+      key.slice(26),
+      neverKey.slice(26),
+      ...hashes.map((row) => row.secret_hash),
+    ])
+      expect(listed).not.toContain(secret);
+    expect(listed).toContain("Nightly &lt;job&gt;");
+    expect(listed).toContain("Read only · Created");
+    expect(listed).toContain("Read and save · Created");
+    expect(listed).toContain("Never used");
+    expect(listed).toContain("<strong>Never expires</strong>");
+    expect(listed).toMatch(/Expires <time datetime="/);
+    // Revoking asks first, with a plain form, then refuses the key.
+    const id = key.slice(3, 25);
+    const confirm = await send(`/assistants/keys/revoke?key=${id}`);
+    expect(confirm.status).toBe(200);
+    const confirmHtml = await confirm.text();
+    expect(confirmHtml).toContain("Revoke this key?");
+    expect(confirmHtml).toMatch(
+      /<form method="post" action="\/assistants\/keys\/revoke"><input type="hidden" name="csrf"/,
+    );
+    expect(await count()).toBe(2);
+    expect(
+      (
+        await send(
+          "/assistants/keys/revoke",
+          new URLSearchParams({ csrf: "x".repeat(43), key: id }),
+        )
+      ).status,
+    ).toBe(403);
+    const revoked = await send("/assistants/keys/revoke", { key: id });
+    expect(revoked.status).toBe(303);
+    expect(revoked.headers.get("Location")).toBe(
+      appOrigin + "/assistants#connection-keys",
+    );
+    expect(
+      (
+        await local.db.query<{ revoked: boolean }>(
+          sql`SELECT revoked_at IS NOT NULL AS revoked FROM connection_keys WHERE id=${id}`,
+        )
+      )[0]!.revoked,
+    ).toBe(true);
+    expect(await (await send("/assistants")).text()).not.toContain(
+      "Nightly &lt;job&gt;",
+    );
+    expect((await send(`/assistants/keys/revoke?key=${id}`)).status).toBe(404);
+  } finally {
+    quiet.mockRestore();
+    await fixture.dispose();
+  }
+}, 30000);
+
 test("trial reminders stay outside TPS and expired accounts retain web view and download", async () => {
   const fixture = await memoPageFixture();
   try {

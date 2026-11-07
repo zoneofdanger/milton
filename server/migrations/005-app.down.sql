@@ -1,5 +1,5 @@
 -- Offline rollback only. Ephemeral sessions/flows cannot become managed sessions.
--- Preserve durable eligibility, mappings and original lifecycle associations.
+-- Preserve durable eligibility and original lifecycle associations.
 BEGIN;
 DO $$ BEGIN
  IF EXISTS(SELECT 1 FROM milton_app.lifecycle WHERE progress<>'complete') THEN

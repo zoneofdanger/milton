@@ -12,8 +12,7 @@ GRANT SELECT,INSERT ON public.users TO milton_app_runtime;
 -- trigger forbids changing this column, including for a compromised runtime.
 GRANT UPDATE(id) ON public.users TO milton_app_runtime,milton_mcp_runtime;
 GRANT DELETE ON public.users TO milton_app_runtime;
-GRANT INSERT ON public.identities,public.deleted_identities TO milton_app_runtime;
-GRANT SELECT ON public.deleted_identities TO milton_app_runtime;
+GRANT INSERT ON public.identities TO milton_app_runtime;
 GRANT SELECT,INSERT,UPDATE ON public.trial_accounts,public.stripe_events TO milton_app_runtime;
 GRANT SELECT(user_id,started_at,subscription_status,trial_end,current_period_start,notice_stage),UPDATE(notice_stage)
  ON public.trial_accounts TO milton_mcp_runtime;

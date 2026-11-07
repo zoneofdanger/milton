@@ -22,20 +22,43 @@ This runbook keeps only the latest release record. Earlier release records and a
 one-time procedures are in git history; the last full version is at commit 492b96a
 (`git show 492b96a:server/deploy/README.md`).
 
-## Release record: runtime role timeouts (2026-11-07, PR #20, TODO #29)
+## Release record: lifecycle, caching, round trips and guards (2026-11-07, PRs #22 #24 #26 #27 #28 #29 #31)
 
-Source `58a4a59` (builder milton-perf; rehearsed on a disposable branch). Neon's proxy and
-pooler drop connect-time `statement_timeout`/`lock_timeout`, so production had none. Snapshot
-`snap-plain-breeze-b885l8wv`; `server/migrations/007-role-timeouts.up.sql` applied as the
-database owner at 20:48Z. The catalog holds exactly app/MCP runtime 20 s statement and 10 s
-lock, and auth runtime 5 s statement. The compute restarted at 20:49:00Z (Peter's go; about
-2.5 s), so the pooler's server connections reconnected with the settings. As each runtime
-login afterwards: app and MCP 20s/10s, auth 5s/0. App/MCP `milton-*-tmo-58a4a59` at 20:51Z
-(image `sha256:7dac97768135171d4774a041807410a80897a28e3e7edfa0b01a9e47b30443b2`). Their
-startup role audit now also requires these settings. Auth was not redeployed (comment-only
-change). Checks: types, 130 tests, format, build, rehearsal 12/12 all 0; health 200 ×3; auth
-login 200 and Claude Code authorize 302 throughout the restart; MCP 401s; signed-out report 403; 0 errors in a 5-minute watch spanning the restart. Rollback: app/MCP `milton-*-pool-e4a7dc7` first, then the down file (the new audit
-refuses roles without the settings). Auth rollback target: `milton-auth-00004-69s`.
+Four deploys, no schema or secret change. First, `9de3099`: #22 (milton-qa, one account
+lifecycle module) and #27 (milton-perf, content-versioned asset caching). Auth
+`milton-auth-00006-jjz`, app/MCP `milton-*-lca-9de3099` at 20:57Z. Through the load balancer,
+versioned app and auth CSS and fonts answer `immutable` with `content-encoding: br`, and a
+wrong `?v=` answers `no-cache` with an ETag. Watch clean. Second, `cb5199b`: #24
+(milton-perf, fewer round trips on signed-in pages), #26 (milton-qa, duplicate guards: no
+native disabledPaths, keyed fingerprints as the only second-trial block, no connection-key
+unknown-id cache) and #29 (milton-qa, the security page keys its session lookup on the real
+client). Auth `milton-auth-00007-vn2` (image
+`sha256:d71cc448a5a724c2164cc02dee5a063579e083d9b9050d84420ab0b4e427f0b7`; mail and
+maintenance jobs too), app/MCP `milton-*-dup-cb5199b` (image
+`sha256:916e04300660a7d3f35d6bea6cc54c3744a604d14357bdfdc2c930946e78768f`) at 21:04Z. Each
+PR had an Astra PASS and milton-qa review, and each merge was checked on main: types, 129
+tests, format, site and server builds, rehearsal 12/12, auth integration 17/17, all 0.
+Smoke: health 200 ×3, authorize 302, login 200, signed-out security 303, MCP 401s, app home
+200, signed-out report and assistants 403. Not verified live: signed-in pages and a real
+account deletion. Rollback: auth `milton-auth-00006-jjz`, app/MCP `milton-*-lca-9de3099`;
+before #22/#27, auth `milton-auth-00005-jj6` and app/MCP `milton-*-tmo-58a4a59`. Follow-up
+(#26): a later migration may drop `deleted_identities`, released after this code.
+
+Third, `3e128a1`: #28 (milton-perf, MCP round trips: read tools 16→4, setup 4→1; the daily
+charge is one `FOR UPDATE` statement). milton-qa re-reviewed after two should-fix findings
+and passed the merge resolution with #26. App/MCP `milton-*-rtt-3e128a1` at 21:10Z (image
+`sha256:4c4227cbc113a26cce33631092fb0873762b4f4e0ece162623a8d1340692c937`); auth unchanged.
+Checks on main: types, 131 tests, format, build, rehearsal 12/12, all 0; health 200 ×3, MCP
+401s, app home 200, signed-out report 403; 0 errors in a 5-minute watch after each deploy.
+Warm `get_cover_sheet` went from 68–70 ms to 29–33 ms (milton-perf). Rollback: app/MCP
+`milton-*-dup-cb5199b`.
+
+Fourth, `c1af8c3`: #31 (milton-qa, a failed assistant disconnect answers a 503 "Finish
+disconnecting" retry page, as deletion does). App/MCP `milton-*-drt-c1af8c3` at 21:20Z (image
+`sha256:a02a1bba7d821b2f6e49bd0f8fd1065ac9d382603cba8aec212fc731586d23e3`). Checks on main:
+types, 131 tests, format, build, rehearsal 12/12, all 0; health 200 ×3, MCP 401, signed-out
+assistants and disconnect 403; 0 errors in a 5-minute watch. Rollback: app/MCP
+`milton-*-rtt-3e128a1`.
 
 ## Runtime role timeouts (applied 2026-11-07, TODO #29)
 
@@ -306,8 +329,8 @@ references. Inspect revision readiness before selecting a recorded revision:
 gcloud run revisions list --service=milton-app --project=milton-510506 --region=us-east4
 ```
 
-Now serving (2026-11-07): app `milton-app-tmo-58a4a59` and MCP
-`milton-mcp-tmo-58a4a59` (source `58a4a59`), and auth `milton-auth-00005-jj6`. The
+Now serving (2026-11-07): app `milton-app-drt-c1af8c3` and MCP
+`milton-mcp-drt-c1af8c3` (source `c1af8c3`), and auth `milton-auth-00007-vn2`. The
 release record above gives the image and rollback revisions.
 
 Roll back only affected services, preserve ingress/IAM, then repeat the canonical

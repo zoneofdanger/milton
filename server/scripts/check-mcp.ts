@@ -1,9 +1,7 @@
 import { z } from "zod";
 import { strict as assert } from "node:assert";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { createMiltonServer, storeInstructions } from "../src/mcp";
+import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { storeInstructions } from "../src/mcp";
 import type { TenantStore } from "../src/store";
 import { assembleDocuments } from "../src/store/reports";
 
@@ -48,32 +46,4 @@ export async function checkMcp(client: Client) {
     is_empty: z.boolean(),
   }).parse(JSON.parse(content.content[0]!.text));
   return "initialize: instructions present; tools: exactly four; current cover sheet read answered; no save performed";
-}
-
-if (import.meta.main) {
-  const client = new Client({ name: "milton-check", version: "0.0.0" });
-  const url = process.argv[2];
-  let server: ReturnType<typeof createMiltonServer> | undefined;
-  try {
-    if (url) {
-      const token = process.env.MILTON_ACCESS_TOKEN;
-      await client.connect(
-        new StreamableHTTPClientTransport(new URL(url), {
-          ...(token
-            ? { requestInit: { headers: { Authorization: `Bearer ${token}` } } }
-            : {}),
-        }),
-      );
-    } else {
-      server = createMiltonServer(stubStore());
-      const [clientTransport, serverTransport] =
-        InMemoryTransport.createLinkedPair();
-      await server.connect(serverTransport);
-      await client.connect(clientTransport);
-    }
-    console.log(await checkMcp(client));
-  } finally {
-    await client.close();
-    await server?.close();
-  }
 }

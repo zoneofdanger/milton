@@ -402,7 +402,6 @@ rehearsal below dispatches those requests in-process without DNS or external req
 bun --no-env-file server/scripts/check-auth-integration.ts
 bun run --cwd server check-types
 bun --no-env-file test server/test
-bun run --cwd server test:client
 ```
 
 The explicit rehearsal builds actual server/native product modules with Bun, executes

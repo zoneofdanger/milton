@@ -7,7 +7,6 @@
     "build": "bun scripts/build.ts",
     "check-types": "bun scripts/build.ts && tsc --noEmit",
     "dev": "bun --watch scripts/dev.ts",
-    "test:client": "bun scripts/check-mcp.ts",
     "db:migrate": "bun --no-env-file scripts/migrate.ts",
     "db:generate": "drizzle-kit generate"
   },

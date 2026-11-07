@@ -10,7 +10,7 @@ landed and the item is still open), `blocked: <why or #id>`. A bolded headline o
 or fewer states the task; one item is one landing. **A section heading and its preamble are
 shared context for every item beneath it.**
 
-**next-id: 26.** Ids are never reused, so this counter survives deleting the newest item.
+**next-id: 27.** Ids are never reused, so this counter survives deleting the newest item.
 
 ## MVP
 
@@ -83,6 +83,17 @@ reports, memos) and plain text on security screens and anything an assistant rea
       unchecked against this build) keeps the native token model, but MCP clients lack it and
       it would need a `milton login` helper; consider it after keys. Update /for-agents when
       this ships.
+
+- [ ] #26 (server, low, blocked: self-hosted auth cutover) **Simplify auth email to inline
+      Resend sends.** Auth mail (apps/auth/src/mail.ts, migration 006, deliver.js) is a durable
+      encrypted outbox with leases, fences, throttle pause, receipts, a once-a-minute delivery
+      job and separate cleanup. Decided 2026-11-07 (Peter): keep it for the cutover, revisit
+      after. Simpler target: send inline with a short timeout, one retry and Resend's
+      idempotency key; log failures without addresses or links and alert on them; keep every
+      public response identical whether or not the account exists (the AR-01/PR-04 account
+      enumeration fix). Accept a rare lost email, which "resend" recovers. ⚠ This touches the
+      security-reviewed sign-in path: needs an Astra review, and draining the queue and
+      retiring the delivery job before switching.
 
 ## From the audit of 2026-11-02 (`.agents/tmp/audit/report.md`)
 

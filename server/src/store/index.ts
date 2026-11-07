@@ -195,25 +195,47 @@ export interface IdentityGuard {
   outage(): Error;
 }
 
-/** Looks up the active account for a sign-in identity. */
+/** An assistant's account, with the store limits read in its access
+ * statement, for tenantStore to validate. */
+export interface AssistantAuth extends VerifiedStoreAuth {
+  readonly limits: unknown;
+}
+const storeLimits = sql`(SELECT limits_json FROM store_config WHERE singleton=1)`;
+
+/** Looks up the active account for a sign-in identity; with a guard, also
+ * reads the store limits in the same statement. */
+export async function lookupIdentityAccount(
+  bindings: StoreBindings,
+  identity: Pick<VerifiedIdentity, "provider" | "subject">,
+): Promise<VerifiedStoreAuth>;
+export async function lookupIdentityAccount(
+  bindings: StoreBindings,
+  identity: Pick<VerifiedIdentity, "provider" | "subject">,
+  guard: IdentityGuard,
+): Promise<AssistantAuth>;
 export async function lookupIdentityAccount(
   bindings: StoreBindings,
   identity: Pick<VerifiedIdentity, "provider" | "subject">,
   guard?: IdentityGuard,
-): Promise<VerifiedStoreAuth> {
+): Promise<VerifiedStoreAuth | AssistantAuth> {
   const { provider, subject } = parseIdentity(identity);
   const account = sql`
         SELECT u.id FROM identities i JOIN users u ON u.id=i.user_id
         WHERE i.provider=${provider} AND i.subject=${subject} AND u.status='active'`;
-  let row: { id: string | null } | undefined;
+  let row: { id: string | null; limits?: unknown } | undefined;
   if (!guard)
     row = (await database(bindings).query<{ id: string }>(account))[0];
   else {
-    let guarded: { guard: unknown; id: string | null } | undefined;
+    let guarded:
+      { guard: unknown; id: string | null; limits: unknown } | undefined;
     try {
       guarded = (
-        await database(bindings).query<{ guard: unknown; id: string | null }>(
-          sql`SELECT ${guard.value} AS guard, (${account}) AS id`,
+        await database(bindings).query<{
+          guard: unknown;
+          id: string | null;
+          limits: unknown;
+        }>(
+          sql`SELECT ${guard.value} AS guard, (${account}) AS id, ${storeLimits} AS limits`,
         )
       )[0];
     } catch {
@@ -228,7 +250,11 @@ export async function lookupIdentityAccount(
       "Sign in to Milton before connecting your assistant.",
       403,
     );
-  return { userId: row.id, [verifiedStoreIdentity]: true };
+  return {
+    userId: row.id,
+    [verifiedStoreIdentity]: true,
+    ...(guard ? { limits: row.limits } : {}),
+  };
 }
 
 /** The account a parsed connection key grants and the key's scope, or a
@@ -238,18 +264,23 @@ export async function connectionKeyAccount(
   bindings: StoreBindings & { issuer: string },
   key: { id: string; secret: string },
 ): Promise<
-  | { ok: true; auth: VerifiedStoreAuth; keyId: string; scope: KeyScope }
+  | { ok: true; auth: AssistantAuth; keyId: string; scope: KeyScope }
   | { ok: false; known: boolean }
 > {
   const checked = await authenticateConnectionKey(
     database(bindings),
     bindings.issuer,
     key,
+    storeLimits,
   );
   if (!checked.ok) return checked;
   return {
     ok: true,
-    auth: { userId: checked.userId, [verifiedStoreIdentity]: true },
+    auth: {
+      userId: checked.userId,
+      [verifiedStoreIdentity]: true,
+      limits: checked.alongside,
+    },
     keyId: checked.keyId,
     scope: checked.scope,
   };
@@ -294,8 +325,10 @@ export async function storeForCurrentRequest(
   auth: VerifiedStoreAuth,
   assistant?: { issuer: string; clientId: string },
 ): Promise<TenantStore> {
-  await requireActiveAccount(database(bindings), auth.userId, { lock: false });
-  return tenantStore(bindings, auth, assistant);
+  const db = database(bindings);
+  const limits = await readLimits(db);
+  await requireActiveAccount(db, auth.userId, { lock: false });
+  return tenantStore(bindings, { ...auth, limits }, assistant);
 }
 
 /** The store for an `auth` this request just looked up, which required an
@@ -303,9 +336,11 @@ export async function storeForCurrentRequest(
  * read and save check the account again. */
 export function tenantStore(
   bindings: StoreBindings & { appOrigin: string },
-  auth: VerifiedStoreAuth,
+  auth: AssistantAuth,
   assistant?: { issuer: string; clientId: string },
 ): TenantStore {
+  // Refused before any write, so invalid limits never count a call.
+  const limits = parseLimits(auth.limits);
   const userId = auth.userId;
   const db = database(bindings);
   // The trial status the latest read's gate admitted, for that call's notice.
@@ -335,43 +370,33 @@ export function tenantStore(
      * takes the account row lock the deletion and every writer take, held
      * until the statement commits: a deletion that holds it first leaves no
      * active row (the charge refuses and counts nothing); one that comes
-     * second waits and then sees, and cascades, the counted call. The limits
-     * are read in the same statement, so a change applies to the next call. */
+     * second waits and then sees, and cascades, the counted call. The limit
+     * is the one this request's access statement read and validated. */
     async chargeToolCall() {
       const row = (
-        await db.query<{
-          limits: unknown;
-          day: string;
-          open: boolean;
-          charged: boolean;
-        }>(sql`WITH account AS (
+        await db.query<{ day: string; open: boolean; charged: boolean }>(
+          sql`WITH account AS (
             SELECT id FROM users WHERE id=${userId} AND status='active' FOR UPDATE),
-          config AS (
-            SELECT limits_json AS limits,
-              (clock_timestamp() AT TIME ZONE 'UTC')::date AS day,
-              CASE WHEN jsonb_typeof(limits_json->'daily_calls')='number'
-                THEN (limits_json->>'daily_calls')::numeric END AS daily_calls
-            FROM store_config WHERE singleton=1),
+          today AS (SELECT (clock_timestamp() AT TIME ZONE 'UTC')::date AS day),
           charged AS (
             INSERT INTO usage_daily (user_id,day_utc,tool_calls)
-            SELECT account.id, config.day, 1 FROM account, config
-            WHERE config.daily_calls >= 1
+            SELECT account.id, today.day, 1 FROM account, today
             ON CONFLICT (user_id,day_utc) DO UPDATE SET tool_calls = usage_daily.tool_calls + 1
-            WHERE usage_daily.tool_calls < (SELECT daily_calls FROM config)
+            WHERE usage_daily.tool_calls < ${limits.daily_calls}
             RETURNING tool_calls)
-          SELECT config.limits, config.day::text AS day,
+          SELECT today.day::text AS day,
             EXISTS(SELECT 1 FROM account) AS open,
             EXISTS(SELECT 1 FROM charged) AS charged
-          FROM config`)
-      )[0];
-      parseLimits(row?.limits);
-      if (!row!.open) throw accountUnavailable();
-      return row!.charged
+          FROM today`,
+        )
+      )[0]!;
+      if (!row.open) throw accountUnavailable();
+      return row.charged
         ? { allowed: true as const }
         : {
             allowed: false as const,
             limit: "day" as const,
-            retry_at_ms: Date.parse(`${row!.day}T00:00:00Z`) + 86400000,
+            retry_at_ms: Date.parse(`${row.day}T00:00:00Z`) + 86400000,
           };
     },
   };

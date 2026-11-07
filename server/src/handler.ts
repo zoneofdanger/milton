@@ -4,13 +4,13 @@ import {
 } from "@modelcontextprotocol/server";
 import { createMiltonServer } from "./mcp";
 import {
+  type AssistantAuth,
   connectionKeyAccount,
   lookupIdentityAccount,
   parseConnectionKey,
   tenantStore,
   type StoreBindings,
   StoreError,
-  type VerifiedStoreAuth,
 } from "./store";
 import {
   AuthError,
@@ -280,7 +280,7 @@ export function createMiltonHandler(
       );
       if (call.success) pending = knownTool(call.data.params.name);
       const authorization = request.headers.get("Authorization");
-      let auth: VerifiedStoreAuth,
+      let auth: AssistantAuth,
         assistant: { issuer: string; clientId: string },
         write: boolean,
         announcedAs: string;
@@ -342,7 +342,8 @@ export function createMiltonHandler(
         announcedAs = `${auth.userId}\n${identity.clientId}`;
       }
       // `auth` comes from this request's identity or key statement, which
-      // requires an active account, so building the store makes no query;
+      // requires an active account and reads the store limits, so building the
+      // store makes no query (invalid limits refuse here, before any charge);
       // initialize, tools/list and notifications make no store query at all.
       const store = tenantStore(config, auth, assistant);
       const announce = call.success && !announced.has(announcedAs);

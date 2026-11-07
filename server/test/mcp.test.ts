@@ -750,6 +750,70 @@ test("a setup request makes one database round trip and a tool call four, by tok
   }
 }, 30000);
 
+test("invalid store limits refuse a tool call without counting it", async () => {
+  const local = await localStore();
+  try {
+    const { miltonUserId } = await resolveIdentityAccount(local.env, {
+      provider: issuer,
+      subject: "limited",
+    });
+    const fixture = await tokenFixture(local.pg);
+    const token = await fixture.token("limited");
+    const handler = createMiltonHandler(
+      { ...local.env, issuer, resource, appOrigin: origin },
+      fixture.verify,
+      () => {},
+    );
+    const cover = async () =>
+      (
+        await handler(
+          new Request(resource, {
+            method: "POST",
+            headers: {
+              Host: "localhost:3001",
+              Authorization: "Bearer " + token,
+              Accept: "application/json, text/event-stream",
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              jsonrpc: "2.0",
+              id: 1,
+              method: "tools/call",
+              params: { name: "get_cover_sheet", arguments: {} },
+            }),
+          }),
+        )
+      ).text();
+    const used = async () =>
+      (
+        await local.db.query<{ n: number }>(
+          sql`SELECT coalesce(sum(tool_calls),0)::int AS n FROM usage_daily WHERE user_id=${miltonUserId}`,
+        )
+      )[0]!.n;
+    const valid = (
+      await local.db.query<{ limits: unknown }>(
+        sql`SELECT limits_json AS limits FROM store_config`,
+      )
+    )[0]!.limits;
+    expect(await cover()).not.toContain('"isError":true');
+    expect(await used()).toBe(1);
+    for (const invalid of ['{"body_bytes":"large"}', '{"daily_calls":1.5}']) {
+      await local.db.query(
+        sql`UPDATE store_config SET limits_json=limits_json || ${invalid}::jsonb`,
+      );
+      expect(await cover()).toContain("configuration");
+      expect(await used()).toBe(1);
+      await local.db.query(
+        sql`UPDATE store_config SET limits_json=${JSON.stringify(valid)}::jsonb`,
+      );
+    }
+    expect(await cover()).not.toContain('"isError":true');
+    expect(await used()).toBe(2);
+  } finally {
+    await local.dispose();
+  }
+}, 30000);
+
 test("connection keys get exactly their scope's tools; revoked, expired, malformed and closed-account keys get the invalid-token 401; OAuth is unchanged", async () => {
   const local = await localStore();
   const clients: Client[] = [];

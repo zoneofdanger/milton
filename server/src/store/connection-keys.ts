@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { sql } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
 import type { StoreDatabase } from "./database";
 import { StoreError } from "./errors";
 import { requireActiveAccount } from "./accounts";
@@ -223,7 +223,14 @@ export async function revokeConnectionKey(
 }
 
 export type KeyCheck =
-  | { ok: true; userId: string; keyId: string; scope: KeyScope }
+  | {
+      ok: true;
+      userId: string;
+      keyId: string;
+      scope: KeyScope;
+      /** The value of `alongside`, when the caller passed it. */
+      alongside?: unknown;
+    }
   /** `known` is false only when no key has the id at all. */
   | { ok: false; known: boolean };
 
@@ -233,12 +240,14 @@ export type KeyCheck =
  * `issuer`, or native authority that no longer matches the key's binding
  * (recovery, security change, deletion begun, unverified). Callers tell users
  * nothing about which. Records last use at most once a minute per key;
- * failing to record it never fails the call.
+ * failing to record it never fails the call. `alongside`, an SQL expression,
+ * is read in the same statement and returned with an accepted key.
  */
 export async function authenticateConnectionKey(
   db: StoreDatabase,
   issuer: string,
   { id, secret }: { id: string; secret: string },
+  alongside?: SQL,
 ): Promise<KeyCheck> {
   const row = (
     await db.query<{
@@ -247,7 +256,8 @@ export async function authenticateConnectionKey(
       secret_hash: string;
       usable: boolean;
       stale: boolean;
-    }>(sql`SELECT k.user_id,k.scope,k.secret_hash,
+      alongside: unknown;
+    }>(sql`SELECT k.user_id,k.scope,k.secret_hash,${alongside ?? sql`NULL`} AS alongside,
       (k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at>clock_timestamp())
         AND u.status='active' AND k.issuer=${issuer}
         AND EXISTS(SELECT 1 FROM identities i
@@ -268,5 +278,11 @@ export async function authenticateConnectionKey(
         WHERE id=${id} AND (last_used_at IS NULL OR last_used_at<=clock_timestamp()-interval '1 minute')`,
       )
       .catch(() => {});
-  return { ok: true, userId: row.user_id, keyId: id, scope: row.scope };
+  return {
+    ok: true,
+    userId: row.user_id,
+    keyId: id,
+    scope: row.scope,
+    ...(alongside ? { alongside: row.alongside } : {}),
+  };
 }

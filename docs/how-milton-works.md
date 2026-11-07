@@ -84,9 +84,10 @@ Files: `server/src/handler.ts`, `server/src/token.ts`, `server/src/mcp.ts`,
   `get_report` refused for a missing intent, so clients holding tool schemas from before
   a release refresh them; the announced set is per process and in memory.
 - Each `tools/call` increments a daily counter before running, and a call over the limit
-  returns `rate_limited` with a reset time. The charge is one statement that reads the
-  current limit and holds the account lock: a deletion holding it first makes the call
-  refuse as `account_unavailable`; one that comes second sees the counted call.
+  returns `rate_limited` with a reset time. The request's access statement reads the
+  store limits, and invalid limits refuse the request before anything is counted; the
+  charge is then one statement under the account lock: a deletion holding it first makes
+  the call refuse as `account_unavailable`; one that comes second sees the counted call.
 - Each call logs the tool, outcome, time, and an error code from a fixed list, never
   text or identity.
 - The tool name is read early, so calls refused before dispatch are still logged.

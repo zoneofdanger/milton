@@ -4,10 +4,12 @@ import { readConfig, safeError } from "./config.ts";
 import { createProvider } from "./provider.ts";
 import { createCloudApp } from "./cloud-app.ts";
 import { loadEnvironment } from "./environment.ts";
-import { checkRuntimeRole } from "./roles.ts";
+import { checkRuntimeRole, retryStartupCheck } from "./roles.ts";
 const config = readConfig(loadEnvironment());
 const auth = createProvider(config);
-await checkRuntimeRole(auth.pool, "milton_auth_runtime");
+await retryStartupCheck(() =>
+  checkRuntimeRole(auth.pool, "milton_auth_runtime"),
+);
 const fetch = createCloudApp(
   auth,
   new URL("./public/", import.meta.url).pathname,

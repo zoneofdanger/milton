@@ -97,16 +97,6 @@ reports, memos) and plain text on security screens and anything an assistant rea
       safeError prints, without secrets. Also make provision.ts's "output outside the
       repository" check resolve the real repository root rather than only its own checkout.
 
-- [ ] #28 (server, low) **Retry the auth service's startup database check.** On
-      2026-11-07 at 08:30:47Z a new `milton-auth` instance exited during startup:
-      `checkRuntimeRole` gave up on its first connection ("Connection terminated due to
-      connection timeout") while the Neon compute was waking from autosuspend. Cloud Run
-      started another, but sign-in returned 503 for a few seconds. Autosuspend on the
-      production endpoint was turned off the same day (`suspend_timeout_seconds: -1`), which
-      removes the trigger. Still make the startup check retry with a bounded backoff (e.g. up
-      to ~15 s) so a database restart or maintenance can't fail a cold start. Same review for
-      app/MCP startup checks.
-
 ## From the audit of 2026-11-02 (`.agents/tmp/audit/report.md`)
 
 - [ ] #15 (server, med) **Measure, then pool, database connections.** Each transaction opens its own

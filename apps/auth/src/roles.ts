@@ -1,4 +1,63 @@
 import type pg from "pg";
+import { safeError } from "./config.ts";
+
+// Network and server-availability failures only; a role or privilege refusal
+// is never retried. pg reports connect timeouts and drops by message alone.
+const TRANSIENT_CODES = new Set([
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "ENOTFOUND",
+  "ETIMEDOUT",
+  "57P01", // admin_shutdown
+  "57P03", // cannot_connect_now
+]);
+const TRANSIENT_MESSAGES = new Set([
+  "Connection terminated due to connection timeout",
+  "Connection terminated unexpectedly",
+  "timeout exceeded when trying to connect",
+]);
+function transient(error: unknown, depth = 0): boolean {
+  if (!(error instanceof Error) || depth > 3) return false;
+  const code = "code" in error ? error.code : undefined;
+  if (typeof code === "string" && TRANSIENT_CODES.has(code)) return true;
+  return (
+    TRANSIENT_MESSAGES.has(error.message) || transient(error.cause, depth + 1)
+  );
+}
+
+// Retries a startup check on transient failures with backoff of 0.5, 1, 2,
+// then 4 seconds, while the next wait still ends within about 15 seconds of
+// the first try; then throws the last error as a single try would.
+export async function retryStartupCheck<T>(
+  check: () => Promise<T>,
+  {
+    now = Date.now,
+    sleep = (ms: number) =>
+      new Promise<void>((resolve) => setTimeout(resolve, ms)),
+    log = (fields: object) => console.warn("auth_startup_retry", fields),
+  }: {
+    now?: () => number;
+    sleep?: (ms: number) => Promise<void>;
+    log?: (fields: {
+      attempt: number;
+      delayMs: number;
+      class: string;
+      code: string;
+    }) => void;
+  } = {},
+): Promise<T> {
+  const start = now();
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await check();
+    } catch (error) {
+      const delayMs = Math.min(500 * 2 ** (attempt - 1), 4000);
+      if (!transient(error) || now() - start + delayMs > 15000) throw error;
+      log({ attempt, delayMs, ...safeError(error) });
+      await sleep(delayMs);
+    }
+  }
+}
 export async function checkRuntimeRole(
   pool: pg.Pool,
   expected: "milton_auth_runtime" | "milton_app_runtime" | "milton_mcp_runtime",

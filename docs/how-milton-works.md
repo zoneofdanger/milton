@@ -23,6 +23,7 @@ Files: `server/src/cloud-run.ts`, `server/src/environment.ts`, `server/src/confi
 - Startup decrypts a dotenvx file using a separate platform-held key.
 - Startup fails on bad URLs, a missing/short app client, admission or eligibility secret, a bad support email, a bad port, or an
   unknown service name.
+- Auth startup checks its runtime role before listening; connection failures retry with backoff for about 15 seconds, while a role refusal fails at once. App/MCP startup does no database work.
 - Plain HTTP is allowed only on loopback outside production.
 - On SIGTERM the server stops accepting requests and force-exits after 8 seconds.
 - The image builds with Bun, then ships only the bundle and public assets to a non-root

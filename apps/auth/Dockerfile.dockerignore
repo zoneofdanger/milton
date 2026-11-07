@@ -13,6 +13,7 @@
 !apps/auth/src/**
 !apps/auth/scripts/build.ts
 !apps/auth/scripts/deliver.ts
+!apps/auth/scripts/maintain.ts
 !packages/
 !packages/theme/**
 **/.env*

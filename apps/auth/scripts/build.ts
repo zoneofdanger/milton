@@ -29,6 +29,7 @@ const r = await Bun.build({
   entrypoints: [
     new URL("src/cloud-run.ts", base).pathname,
     new URL("scripts/deliver.ts", base).pathname,
+    new URL("scripts/maintain.ts", base).pathname,
     new URL("src/app.tsx", base).pathname,
   ],
   outdir: new URL("dist", base).pathname,

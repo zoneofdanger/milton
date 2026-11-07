@@ -415,10 +415,9 @@ The combined rehearsal leaves zod external to avoid Bun's combined-bundle initia
 cycle; installed declared dependencies are required. Production bundle/container closure
 must also be checked independently.
 
-The optional interactive `test:local` uses the configured issuer and can reach a live
-provider; running it is a separate authorized action. Root global checks are types,
-`bun test` and `bun run format:check`; CI also runs this rehearsal and the apps/auth
-integration suite on every pull request. The release coordinator owns actual cutover.
+Root global checks are types, `bun test` and `bun run format:check`; CI also runs this
+rehearsal and the apps/auth integration suite on every pull request. The release
+coordinator owns actual cutover.
 
 ## Store, history, and limits
 

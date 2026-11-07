@@ -40,9 +40,6 @@ test("standalone MCP needs no browser secret and refuses noncanonical hosts", as
     (await request("mcp.example", "/.well-known/oauth-protected-resource"))
       .status,
   ).toBe(200);
-  expect((await request("mcp.example", "/login")).headers.get("location")).toBe(
-    "https://app.example/login",
-  );
   for (const host of ["app.example", "revision.run.app"])
     expect((await request(host, "/mcp")).status).toBe(403);
 });

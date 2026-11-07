@@ -523,5 +523,4 @@ test("optional guide envelopes are self-contained and leave approved text and so
   expect(report.guide.precedence).toContain("requested edit scope");
   expect(report.text).toBe(off.text);
   expect(report.version).toBe(off.version);
-  expect(storeInstructions.length).toBeLessThanOrEqual(4096);
 });

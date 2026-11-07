@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { sql, type SQL } from "drizzle-orm";
-import { expect, test } from "bun:test";
+import { expect, setSystemTime, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { ToolListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -916,9 +916,12 @@ test("key lookups are bounded before database access: 8 at once, then a quick 50
   }
 }, 30000);
 
-test("key attempts are limited per load-balancer client before database access: one source's invented keys get 429, another source's real key still works, and a forged first X-Forwarded-For entry changes nothing", async () => {
+test("key attempts are limited per load-balancer client before database access: one source's invented keys get 429, another source's real key still works, a forged first X-Forwarded-For entry changes nothing, and stalled lookups hold at most 3 per source across refills", async () => {
   const local = await localStore();
-  let queries = 0;
+  let queries = 0,
+    hold: Promise<void> | undefined,
+    stalled = 0,
+    peak = 0;
   try {
     await local.pg.exec(`CREATE SCHEMA IF NOT EXISTS milton_guard;
       CREATE FUNCTION milton_guard.connection_key_status(text,text,text) RETURNS boolean
@@ -938,8 +941,13 @@ test("key attempts are limited per load-balancer client before database access: 
     const db = new Proxy(local.db, {
       get(target, key) {
         if (key === "query")
-          return (statement: SQL) => {
+          return async (statement: SQL) => {
             queries++;
+            if (hold) {
+              peak = Math.max(peak, ++stalled);
+              await hold;
+              stalled--;
+            }
             return target.query(statement);
           };
         return Reflect.get(target, key);
@@ -990,7 +998,35 @@ test("key attempts are limited per load-balancer client before database access: 
     // Source B's real key keeps working, past the burst and the per-minute rate.
     for (let n = 0; n < 15; n++)
       expect((await post(real.key, b)).status).toBe(200);
+    // Source C's lookups stall (as up to the 20-second statement timeout).
+    // However far its bucket refills, it holds at most 3 lookups at once; the
+    // rest get 429 without the database, and B's real key still gets a slot.
+    const c = "198.51.100.9, 203.0.113.1";
+    const start = Date.now();
+    let release!: () => void;
+    hold = new Promise((resolve) => (release = resolve));
+    const held = Array.from({ length: 3 }, () => post(invented(), c));
+    while (stalled < 3) await new Promise((r) => setTimeout(r, 5));
+    const stalledQueries = queries;
+    for (const seconds of [0, 6, 12, 18, 60]) {
+      setSystemTime(new Date(start + seconds * 1000));
+      const reply = await Promise.race([
+        post(invented(), c),
+        new Promise<"stalled">((r) => setTimeout(r, 1000, "stalled")),
+      ]);
+      expect(reply === "stalled" ? reply : reply.status).toBe(429);
+      if (reply !== "stalled")
+        expect(Number(reply.headers.get("Retry-After"))).toBeGreaterThan(0);
+    }
+    expect(peak).toBe(3);
+    expect(queries).toBe(stalledQueries);
+    hold = undefined;
+    expect((await post(real.key, b)).status).toBe(200);
+    expect(stalled).toBe(3);
+    release();
+    for (const reply of await Promise.all(held)) expect(reply.status).toBe(401);
   } finally {
+    setSystemTime();
     await local.dispose();
   }
 }, 30000);

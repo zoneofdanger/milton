@@ -156,8 +156,16 @@ export function keyAttemptSource(request: Request): string {
  *   the database or a slot. A failed lookup keeps its token; a successful one
  *   is refunded to 0.1, so an agent can make about 100 key calls a minute
  *   while one source's invented keys reach the database about 10 times a
- *   minute and hold at most 5 slots at once. Requests that never reach the
- *   database (malformed keys, remembered ids, busy refusals) cost nothing;
+ *   minute. Requests that never reach the database (malformed keys,
+ *   remembered ids, busy refusals) cost nothing;
+ * - each source runs at most 3 lookups at once, however far its bucket has
+ *   refilled while earlier ones stall (up to the 20-second statement
+ *   timeout); a 4th gets 429 with Retry-After: 1, without touching the
+ *   database or a slot, so one source can never fill all the slots. These
+ *   counts live outside the bucket LRU, so evicting a bucket never forgets
+ *   a running lookup. An entry exists only while its source has a lookup
+ *   running and every running lookup holds a slot (there is no queue), so
+ *   there are never more than 8 entries;
  * - at most 8 lookups run at once across all sources (beyond that a quick 503
  *   with Retry-After, without touching the database).
  * All of this is per instance; MCP runs at most 3, so the effective limits are
@@ -170,8 +178,10 @@ function keyLookupGate(
   burst = 5,
   perMinute = 10,
   successCost = 0.1,
+  perSource = 3,
 ) {
   let running = 0;
+  const active = new Map<string, number>(); // source → lookups running
   const unknown = new Map<string, number>(); // id → expiry; oldest first
   const buckets = new Map<string, { tokens: number; at: number }>(); // LRU
   const bucket = (source: string) => {
@@ -216,8 +226,11 @@ function keyLookupGate(
       throw new KeyAttemptsLimited(
         Math.ceil(((1 - reserved.tokens) * 60) / perMinute),
       );
+    const mine = active.get(source) ?? 0;
+    if (mine >= perSource) throw new KeyAttemptsLimited(1);
     if (running >= concurrent) throw keyLookupBusy();
     reserved.tokens -= 1;
+    active.set(source, mine + 1);
     running++;
     try {
       const result = await lookup();
@@ -233,6 +246,9 @@ function keyLookupGate(
       return undefined;
     } finally {
       running--;
+      const left = active.get(source)! - 1;
+      if (left > 0) active.set(source, left);
+      else active.delete(source);
     }
   };
 }

@@ -383,8 +383,8 @@ begun deletion) all get the invalid-token 401. Read keys list three tools and re
 keys four. Before any database access a process remembers unknown key ids for 60 seconds,
 limits each source (the client address Google's load balancer appends to `X-Forwarded-For`,
 never the client-supplied first entry) to 5 key lookups, refilled at 10 a minute, with
-successes charged a tenth (then 429 with `Retry-After`), and allows 8 concurrent key
-lookups in all (then 503 with `Retry-After`). Limits are per instance. Read-only setup explains
+successes charged a tenth (then 429 with `Retry-After`), and to 3 concurrent key lookups
+(then 429 with `Retry-After: 1`), and allows 8 concurrent key lookups in all (then 503 with `Retry-After`). Limits are per instance. Read-only setup explains
 reconnecting for saves rather than offering an unavailable save.
 
 App `/account/security` takes the person to native method/password/session management.

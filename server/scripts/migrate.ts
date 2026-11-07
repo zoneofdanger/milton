@@ -82,18 +82,10 @@ if (import.meta.main) {
         : "PASS: milton schema and Drizzle migration journal are current.",
     );
   } catch (error) {
-    let cause: unknown = error;
-    while (
-      cause instanceof Error &&
-      cause.message !== "baseline_requires_empty_database"
-    )
-      cause = cause.cause;
     console.error(
       error instanceof StoreError
         ? error.message
-        : cause instanceof Error
-          ? 'Existing 0033 database: run server/scripts/transition-baseline.sql as the owner first; see server/deploy/README.md "Legacy schema cleanup".'
-          : "Migration failed; database details were not logged.",
+        : "Migration failed; database details were not logged.",
     );
     process.exitCode = 1;
   }

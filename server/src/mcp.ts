@@ -1,6 +1,6 @@
 import { McpServer, type Transport } from "@modelcontextprotocol/server";
 
-import { StoreError, type TenantStore } from "./store";
+import type { TenantStore } from "./store";
 import {
   createStoreMemoTools,
   storeResult,
@@ -104,42 +104,6 @@ export function createMiltonServer(
               tool: knownTool(message.params?.name),
               started: performance.now(),
             });
-          try {
-            const allowance = await store.chargeToolCall();
-            if (!allowance.allowed) {
-              if ("id" in message)
-                await transport.send({
-                  jsonrpc: "2.0",
-                  id: message.id,
-                  result: storeResult(
-                    {
-                      error: "rate_limited",
-                      limit: allowance.limit,
-                      retry_at_ms: allowance.retry_at_ms,
-                    },
-                    true,
-                  ),
-                });
-              return;
-            }
-          } catch (error) {
-            if ("id" in message)
-              await transport.send({
-                jsonrpc: "2.0",
-                id: message.id,
-                result: storeResult(
-                  {
-                    error:
-                      error instanceof StoreError
-                        ? error.code
-                        : "store_unavailable",
-                    message: "The memo store is unavailable. Try again.",
-                  },
-                  true,
-                ),
-              });
-            return;
-          }
         }
         // A get_report without a well-formed intent gets a refusal that says
         // what to send instead of the SDK's validation text. No intent at all

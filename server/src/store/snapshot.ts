@@ -19,6 +19,20 @@ import { sampleHeads } from "./samples";
 export const hash = (value: unknown) =>
   createHash("sha256").update(JSON.stringify(value)).digest("hex");
 
+/** The refusal for an intent whose kind_id is not the account's in that report. */
+export const invalidKind = () =>
+  new StoreError(
+    "invalid_kind",
+    "kind_id must name an existing personal kind in this report. Nothing was read.",
+    400,
+  );
+
+/** Whether an intent's kind_id names one of the account's kinds in its report. */
+export const kindValid = (userId: string, intent: ReportIntent) =>
+  intent.kind_id
+    ? sql`EXISTS(SELECT 1 FROM sample_kinds WHERE user_id=${userId} AND id=${intent.kind_id} AND report=${intent.report})`
+    : sql`true`;
+
 /** What `readSnapshot` reads in one statement. */
 export type Snapshot = {
   /** The account exists and is active. */
@@ -79,17 +93,12 @@ export async function readSnapshot(
         'created_at',to_char(s.original_created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"')) ORDER BY s.created_at,s.id),'[]'::json)
         FROM (${sampleHeads(userId)}) s JOIN sample_kinds k ON k.user_id=s.user_id AND k.id=s.kind_id
         WHERE s.user_id=${userId} AND NOT s.retired) AS samples,
-      ${intent?.kind_id ? sql`EXISTS(SELECT 1 FROM sample_kinds WHERE user_id=${userId} AND id=${intent.kind_id} AND report=${intent.report})` : sql`true`} AS kind_valid,
+      ${intent ? kindValid(userId, intent) : sql`true`} AS kind_valid,
       (${includeGuides ? guidePresentation(userId) : sql`SELECT '{}'::json`}) AS guides`,
     )
   )[0]!;
   if (!row.open) throw accountUnavailable();
-  if (!row.kind_valid)
-    throw new StoreError(
-      "invalid_kind",
-      "kind_id must name an existing personal kind in this report. Nothing was read.",
-      400,
-    );
+  if (!row.kind_valid) throw invalidKind();
   const { heads, samples } = row;
   // Without samples the source fingerprint is the card fingerprint alone.
   const fingerprint = samples.length

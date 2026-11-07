@@ -155,7 +155,13 @@ Auth runs as Cloud Run `milton-auth` with service account `milton-auth@` and ing
 account `milton-auth-maint@`, secret `milton-auth-owner-url` 1). Cloud Scheduler triggers
 both as `milton-auth-cron@`. An auth release moves both jobs to the new image too. Check a
 trigger's URL ends in `:run`: a shell expansion once turned it into `un`, and the jobs
-silently got 404s. For mail throttling, use the
+silently got 404s. Auth decrypts its dotenvx payload without dotenvx and refuses any
+plaintext value or decrypted `$` or `\` (see the
+[auth README](../../apps/auth/README.md)). The first release with that loader deploys
+the revision without traffic and moves traffic only after it becomes ready, and runs one
+mail job execution on the new image before moving the schedule. A refusal logs
+`auth_runtime_secrets_unavailable`; mint a conforming payload version with the dotenvx
+CLI rather than changing the loader. For mail throttling, use the
 [owner-only throttle procedure](../../apps/auth/README.md#throttle-inspection-and-recovery-prepared-not-enabled).
 The production Neon endpoint `ep-curly-cherry-b8l7hc8f` has autosuspend off
 (`suspend_timeout_seconds: -1`, since 2026-11-07).

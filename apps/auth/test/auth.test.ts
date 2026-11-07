@@ -149,6 +149,120 @@ test("startup role check retries connection failures only, within its budget", a
   expect(sleeps).toEqual([500, 1000, 2000, 4000, 4000]);
 });
 
+test("the encrypted payload decrypts as dotenvx does, refusing what dotenvx would rewrite", async () => {
+  const { spawnSync } = await import("node:child_process");
+  const { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } =
+    await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { config } = await import("@dotenvx/dotenvx");
+  const root = mkdtempSync(join(tmpdir(), "milton-auth-env-"));
+  // Mint fictional payloads as the release procedure does: the dotenvx CLI
+  // with an explicit keys file, outside the working directory.
+  const mint = (name: string, lines: string[]) => {
+    const dir = join(root, name);
+    mkdirSync(dir);
+    writeFileSync(join(dir, ".env"), lines.join("\n") + "\n", { mode: 0o600 });
+    const cli = new URL("../node_modules/.bin/dotenvx", import.meta.url);
+    const r = spawnSync(
+      cli.pathname,
+      ["encrypt", "-f", `${name}/.env`, "--env-keys-file", `${name}/keys`],
+      { cwd: root, env: { PATH: process.env.PATH } },
+    );
+    expect(r.status).toBe(0);
+    const keys = readFileSync(join(dir, "keys"), "utf8");
+    return {
+      file: join(dir, ".env"),
+      text: readFileSync(join(dir, ".env"), "utf8"),
+      key: keys.match(/^DOTENV_PRIVATE_KEY="?([0-9a-f]{64})"?$/m)![1]!,
+    };
+  };
+  try {
+    const good = mint("good", [
+      `AUTH_DATABASE_URL="postgresql://fictional:pw@db.example.invalid/milton?sslmode=verify-full&a=1"`,
+      `AUTH_SECRET="${"f".repeat(64)}"`,
+      `AUTH_MAIL_FROM="auth@notifications.meetmilton.com"`,
+      `FICTIONAL_TEXT="ünï # = 'q' spaced"`,
+      `FICTIONAL_LINES="one\\ntwo"`,
+      `FICTIONAL_BARE=bare-value # a comment`,
+      `export FICTIONAL_SPACED = 'spaced'`,
+      `PORT="9999"`,
+    ]);
+    expect(good.text).toMatch(/^DOTENV_PUBLIC_KEY="[0-9a-f]{66}" # -fk /m);
+    expect(good.text).toMatch(/^export FICTIONAL_SPACED='encrypted:/m);
+    const env = {
+      AUTH_ENCRYPTED_ENV_FILE: good.file,
+      DOTENV_PRIVATE_KEY: good.key,
+      PORT: "8080",
+    };
+    const reference: Record<string, string> = { ...env };
+    config({
+      envs: [
+        { type: "env", value: good.text, privateKeyName: "DOTENV_PRIVATE_KEY" },
+      ],
+      processEnv: reference,
+      strict: true,
+      quiet: true,
+      noArmor: true,
+      noNative: true,
+      no1Password: true,
+      noBitwarden: true,
+    });
+    // dotenvx would expand, substitute or unescape these; refuse instead.
+    const rewritten = mint("rewritten", [
+      `A="$(echo substituted)"`,
+      `B="x\${PORT}y"`,
+      `C="pass$word"`,
+      `D="back\\\\slash"`,
+    ]);
+    const header = rewritten.text.split("\n").filter((l) => !/^[A-D]=/.test(l));
+    const variants = [
+      ...rewritten.text.split("\n").filter((l) => /^[A-D]=/.test(l)),
+      `E="plaintext"`,
+      good.text.split("\n").find((l) => l.startsWith("AUTH_SECRET="))!,
+      `F="${rewritten.text.match(/^A="(encrypted:[^"]+)"$/m)![1]!.slice(0, -4)}AAAA"`,
+    ];
+    const cases: Record<string, string>[] = [env];
+    for (const [n, line] of variants.entries()) {
+      const file = join(root, `variant-${n}.env`);
+      writeFileSync(file, [...header, line].join("\n"), { mode: 0o600 });
+      cases.push({
+        AUTH_ENCRYPTED_ENV_FILE: file,
+        DOTENV_PRIVATE_KEY: rewritten.key,
+      });
+    }
+    // Production runs Node; Bun's crypto has no secp256k1.
+    const run = spawnSync(
+      "node",
+      [
+        "--experimental-strip-types",
+        "--input-type=module",
+        "-e",
+        `const { loadEnvironment } = await import(${JSON.stringify(new URL("../src/environment.ts", import.meta.url).href)});
+        const out = JSON.parse(process.argv[1]).map((env) => {
+          try { return loadEnvironment(env); } catch (e) { return e.message; }
+        });
+        process.stdout.write(JSON.stringify(out));`,
+        JSON.stringify(cases),
+      ],
+      { env: { PATH: process.env.PATH }, encoding: "utf8" },
+    );
+    expect(run.status).toBe(0);
+    const [loaded, ...refused] = JSON.parse(run.stdout) as unknown[];
+    expect(loaded).toEqual(reference);
+    expect(loaded).toMatchObject({
+      PORT: "8080",
+      FICTIONAL_TEXT: "ünï # = 'q' spaced",
+      FICTIONAL_LINES: "one\ntwo",
+    });
+    expect(refused).toEqual(
+      variants.map(() => "auth_runtime_secrets_unavailable"),
+    );
+  } finally {
+    rmSync(root, { recursive: true });
+  }
+});
+
 test("rate-limit network is forwardedClient's client, as a valid address", async () => {
   const { loadBalancerClient: client } = await import("../src/http.ts");
   const lb = "34.149.0.10";

@@ -793,6 +793,15 @@ test("refused tool calls count nothing; a call is charged once its work starts",
     expect((await call("create_memo", save)).error).toBe(
       "subscription_required",
     );
+    // Input is validated before the gate: an unknown kind stays invalid_kind.
+    expect(
+      (
+        await call("get_report", {
+          report_id: "email",
+          intent: { situation: "confirming what is on file", kind_id: "none" },
+        })
+      ).error,
+    ).toBe("invalid_kind");
     expect(await used()).toBe(1);
     await local.db.query(
       sql`UPDATE trial_accounts SET subscription_status='active' WHERE user_id=${miltonUserId}`,

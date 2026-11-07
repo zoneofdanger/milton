@@ -27,6 +27,12 @@ export const invalidKind = () =>
     400,
   );
 
+/** Whether an intent's kind_id names one of the account's kinds in its report. */
+export const kindValid = (userId: string, intent: ReportIntent) =>
+  intent.kind_id
+    ? sql`EXISTS(SELECT 1 FROM sample_kinds WHERE user_id=${userId} AND id=${intent.kind_id} AND report=${intent.report})`
+    : sql`true`;
+
 /** What `readSnapshot` reads in one statement. */
 export type Snapshot = {
   /** The account exists and is active. */
@@ -87,7 +93,7 @@ export async function readSnapshot(
         'created_at',to_char(s.original_created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"')) ORDER BY s.created_at,s.id),'[]'::json)
         FROM (${sampleHeads(userId)}) s JOIN sample_kinds k ON k.user_id=s.user_id AND k.id=s.kind_id
         WHERE s.user_id=${userId} AND NOT s.retired) AS samples,
-      ${intent?.kind_id ? sql`EXISTS(SELECT 1 FROM sample_kinds WHERE user_id=${userId} AND id=${intent.kind_id} AND report=${intent.report})` : sql`true`} AS kind_valid,
+      ${intent ? kindValid(userId, intent) : sql`true`} AS kind_valid,
       (${includeGuides ? guidePresentation(userId) : sql`SELECT '{}'::json`}) AS guides`,
     )
   )[0]!;

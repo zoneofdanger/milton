@@ -1,9 +1,11 @@
+import { sql } from "drizzle-orm";
+import { accountUnavailable } from "./accounts";
 import { assembleExport, type Documents, type ReportIntent } from "./reports";
 import type { StoreDatabase, StoreSession } from "./database";
 import { databaseFailure } from "./database";
 import { StoreError } from "./errors";
 import { assertTrialAccess, type TrialStatus } from "./trials";
-import { readSnapshot } from "./snapshot";
+import { invalidKind, kindValid, readSnapshot } from "./snapshot";
 import { runSave, type SaveOutcome } from "./save";
 // The save schema is served to assistants, so it lives with the MCP tools.
 import { oneKind, saveMemoInput, type SaveMemoInput } from "../mcp-tools";
@@ -27,19 +29,34 @@ export function compiledMemos(
   gated?: (status: TrialStatus) => void,
   /** Charges an admitted assistant call, on the given session, or refuses it;
    * runs after every gate and before the work. */
-  admit?: (session: StoreSession, intent?: ReportIntent) => Promise<void>,
+  admit?: (session: StoreSession) => Promise<void>,
 ) {
   /** A read assembles the documents from cards and samples. It takes no lock
-   * and writes only its charge: for an assistant the trial gate, then the
-   * charge, then one statement for the snapshot. The size cap bounds saves; a
-   * read serves what is on file. */
+   * and writes only its charge: for an assistant the trial gate (whose
+   * statement first checks the account and the intent's kind, so they refuse
+   * before the gate, as on the snapshot), then the charge, then one statement for the snapshot. The size cap
+   * bounds saves; a read serves what is on file. */
   async function read(intent?: ReportIntent, includeGuides = false) {
     try {
       if (actor) {
-        const status = await assertTrialAccess(db, userId);
+        // As the snapshot orders them: the account, then the kind.
+        const status = await assertTrialAccess(
+          db,
+          userId,
+          intent?.kind_id
+            ? {
+                value: sql`CASE WHEN NOT EXISTS(SELECT 1 FROM users WHERE id=${userId} AND status='active') THEN 'closed'
+                  WHEN ${kindValid(userId, intent)} THEN 'valid' END`,
+                admit(found) {
+                  if (found === "closed") throw accountUnavailable();
+                  if (found !== "valid") throw invalidKind();
+                },
+              }
+            : undefined,
+        );
         gated?.(status);
       }
-      await admit?.(db, intent);
+      await admit?.(db);
       return await readSnapshot(db, userId, intent, includeGuides);
     } catch (error) {
       throw databaseFailure(error);

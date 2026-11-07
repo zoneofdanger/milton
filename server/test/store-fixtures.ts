@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
 import { sql } from "drizzle-orm";
 import type { SampleContext } from "../src/store/sample-context";
@@ -21,8 +20,8 @@ export const insideTransactions = (
 });
 
 // The erasure step of account deletion (auth-lifecycle.ts) for a sign-in
-// identity: the row lock every writer takes, the identity fingerprint that
-// refuses a second trial, then the delete that every tenant table cascades from.
+// identity: the row lock every writer takes, then the delete that every tenant
+// table cascades from. Trial-eligibility fingerprints outlive it.
 export const eraseAccount = (
   db: StoreDatabase,
   identity: { provider: string; subject: string },
@@ -32,11 +31,6 @@ export const eraseAccount = (
       SELECT u.id FROM identities i JOIN users u ON u.id=i.user_id
       WHERE i.provider=${identity.provider} AND i.subject=${identity.subject}
         AND u.status='active' FOR UPDATE OF u`);
-    const hash = createHash("sha256")
-      .update(`${identity.provider}:${identity.subject}`)
-      .digest("hex");
-    await tx.query(sql`INSERT INTO deleted_identities(identity_hash)
-      VALUES(${hash}) ON CONFLICT DO NOTHING`);
     await tx.query(sql`DELETE FROM users WHERE id=${account!.id}`);
   });
 

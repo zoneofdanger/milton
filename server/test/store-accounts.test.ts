@@ -2,6 +2,7 @@ import { expect, jest, spyOn, test } from "bun:test";
 import { sql } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { localStore } from "./local-store";
+import { appStorage } from "./auth-fixtures";
 import {
   eraseAccount,
   insideTransactions,
@@ -826,8 +827,14 @@ test("closing an account refuses its reads, saves and replays, fences a pending 
 test("account deletion removes every tenant row, waits for an in-flight save and removes it too, and allows no second trial", async () => {
   const local = await localStore();
   try {
+    await appStorage(local.pg);
     await local.pg.exec("UPDATE store_config SET trials_enabled=true");
     const neon = (subject: string) => ({ provider: "neon", subject });
+    // Each subject's trial-eligibility fingerprint, as admission computes one
+    // from a verified email.
+    const print = (subject: string) => [
+      createHash("sha256").update(`fixture email:${subject}`).digest("hex"),
+    ];
     let hold: { entered: () => void; gate: Promise<void> } | undefined;
     const storeDatabase = insideTransactions(local.db, async () => {
       if (hold) {
@@ -836,7 +843,7 @@ test("account deletion removes every tenant row, waits for an in-flight save and
       }
     });
     const open = async (subject: string) => {
-      await resolveIdentityAccount(local.env, neon(subject));
+      await resolveIdentityAccount(local.env, neon(subject), print(subject));
       const auth = await lookupIdentityAccount(local.env, neon(subject));
       const store = await storeForCurrentRequest(
         { ...local.env, storeDatabase },
@@ -968,16 +975,10 @@ test("account deletion removes every tenant row, waits for an in-flight save and
     ).toBe(0);
     expect(await counts(kept.auth.userId)).toEqual(keptBefore);
     expect((await kept.store.readTpsReport()).is_empty).toBe(false);
-    const fingerprint = createHash("sha256")
-      .update("neon:leaving")
-      .digest("hex");
-    expect(
-      (await local.pg.query("SELECT identity_hash FROM deleted_identities"))
-        .rows,
-    ).toEqual([{ identity_hash: fingerprint }]);
-    // Re-signup: a fresh, empty account already marked canceled, so assistant
-    // reads pause; a never-deleted identity's row still waits for its trial.
-    await resolveIdentityAccount(local.env, neon("leaving"));
+    // Re-signup with the same fingerprint: a fresh, empty account already
+    // marked canceled, so assistant reads pause; a never-deleted identity's
+    // row still waits for its trial.
+    await resolveIdentityAccount(local.env, neon("leaving"), print("leaving"));
     const again = await lookupIdentityAccount(local.env, neon("leaving"));
     expect(again.userId).not.toBe(gone.auth.userId);
     const fresh = await personStoreForCurrentRequest(local.env, again);
@@ -1006,7 +1007,11 @@ test("account deletion removes every tenant row, waits for an in-flight save and
         ).trialStatus()
       ).status,
     ).toBe("early_access");
-    await resolveIdentityAccount(local.env, neon("newcomer"));
+    await resolveIdentityAccount(
+      local.env,
+      neon("newcomer"),
+      print("newcomer"),
+    );
     const newcomer = await lookupIdentityAccount(local.env, neon("newcomer"));
     // A newcomer's row waits for Stripe's answer; the gate allows it meanwhile.
     expect(
@@ -1019,7 +1024,7 @@ test("account deletion removes every tenant row, waits for an in-flight save and
     // Re-signup while trials are off: no effect until trials are enabled.
     await eraseAccount(local.db, neon("leaving"));
     await local.pg.exec("UPDATE store_config SET trials_enabled=false");
-    await resolveIdentityAccount(local.env, neon("leaving"));
+    await resolveIdentityAccount(local.env, neon("leaving"), print("leaving"));
     const third = await personStoreForCurrentRequest(
       local.env,
       await lookupIdentityAccount(local.env, neon("leaving")),

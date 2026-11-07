@@ -275,9 +275,6 @@ async function advanceOperation(config: RuntimeConfig, original: Operation) {
       await tx.query(
         sql`SELECT id FROM users WHERE id=${current.user_id} FOR UPDATE`,
       );
-      await tx.query(
-        sql`INSERT INTO deleted_identities(identity_hash) VALUES(${hash(current.issuer + ":" + current.subject)}) ON CONFLICT DO NOTHING`,
-      );
       await tx.query(sql`DELETE FROM users WHERE id=${current.user_id}`);
       await tx.query(
         sql`DELETE FROM milton_app.session WHERE issuer=${current.issuer} AND subject=${current.subject} AND incarnation=${current.incarnation}`,

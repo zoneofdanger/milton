@@ -246,7 +246,7 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
 - Identity-only app sessions last at most one absolute hour and never outlive their native opaque token; renewal starts a new SSO flow with no refresh/offline scope.
 - App cookies are host-only Secure/HttpOnly/SameSite=Lax over HTTPS; every use checks the original nonempty sid, immutable binding, incarnation and generation against native SQL.
 - Invalid proof refuses; actual native5xx/network/timeout is 503; an uncertain spent callback recovers through a new login.
-- New logins reclaim at most16 expired flows/sessions each; admission correlations expire after24 hours with bounded reclaim, while eligibility/key policy/legacy mapping and original operation associations remain indefinitely for their stated purposes.
+- New logins reclaim at most16 expired flows/sessions each; admission correlations expire after24 hours with bounded reclaim, while eligibility/key policy and original operation associations remain indefinitely for their stated purposes; legacy mapping and `deleted_identities` rows are kept unread until a later migration drops them.
 - Forms require same origin, an ASCII CSRF token and unique fields; sign-in rotates CSRF.
 - Auth rate limits key each network by the client address Google's load balancer appends (second-to-last `X-Forwarded-For` entry, IPv4-mapped IPv6 as IPv4, other IPv6 by /64, never the first entry; else the socket peer): 120 requests a minute per network, 10 a minute per account email, and Better Auth's per-path 3 sign-in/sign-up attempts per 10 seconds and 3 mail requests a minute.
 - Auth runtime and owner command pools always verify PostgreSQL TLS certificates/hostnames, even with mode omitted; unsafe/libpq/duplicate URL settings refuse.
@@ -260,7 +260,7 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
 - App admission checks the dedicated eligibility-key policy, then creates/finds one stable internal m_* account and trial and applies existing subscription admission; untrusted/invalid handoffs cause no mapping or billing effects.
 - Ownership uses exact issuer+subject, never email, provider nickname or eligibility fingerprints; native linking never merges writing or restarts a trial.
 - Account creation's unique identity row and billing's row lock converge under retries/concurrency; a new account starts empty.
-- Email and stable social identities get keyed trial-eligibility fingerprints with a dedicated stable key and first claimant, retained after deletion; changed/unprovisioned keys refuse admission.
+- Email and stable social identities get keyed trial-eligibility fingerprints with a dedicated stable key and first claimant, retained after deletion; changed/unprovisioned keys refuse admission. They are the only second-trial block: a new account sharing one with an earlier account starts canceled, whether trials are on or off.
 - A trial row with no status gets the existing 30-day Stripe trial when billing is configured; no row/status or billing disabled calls no Stripe API.
 - Subscription creation locks the trial row across customer/list/create; minute-based idempotency retains the known remote-success/local-timeout ambiguity across a minute boundary.
 - Billing failures stop admission with retryable503; existing Stripe state is listed/reconciled before another create.
@@ -268,7 +268,7 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
 - Account security routes to native UI; destructive deletion requires authoritative native freshness, exact typed confirmation and retention of current guarded verified-identity fingerprints.
 - App persists lifecycle UUID, original account/subject/incarnation/client and requester association before first native/remote attempt; retries never select current/recreated targets.
 - Disconnect commits native original-binding refusal before bounded cleanup; reconnect creates a new binding and never revives an old token.
-- Deletion commits refusal, then Stripe cancellation, then writing erasure, and finally bounded native cleanup; unknown inventory/cascade shape leaves a retryable incomplete operation.
+- Deletion saves the current verified-identity fingerprints as it starts, then commits refusal, then Stripe cancellation, then writing erasure (which records no identity of its own), and finally bounded native cleanup; unknown inventory/cascade shape leaves a retryable incomplete operation.
 - Writing and original-incarnation app credentials are never erased before Stripe cancellation succeeds; incomplete deletion never claims completion.
 - Browser logout removes local authority and navigates through fixed-client native RP logout with exact return and native confirmation, leaving offline assistant grants independent.
 

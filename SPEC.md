@@ -90,8 +90,8 @@ non-blank line, trimmed and cut to the description cap, with no model. An entry 
 text prints like an active card in the same report, or an earlier entry in the same
 request, is skipped; a save that then changes nothing returns `unchanged` and charges
 nothing. `text` is the stated purpose: recorded with the accepted change, never stored
-as a rule. A rule stored starting with `Baseline: ` must match the historical
-setup catalog byte for byte, in its canonical report (`baseline_unknown` otherwise).
+as a rule. No save stores a new or changed rule starting with `Baseline: `
+(`baseline_unknown`); existing ones can be retired or edited to drop the prefix.
 The default setup is now sample-first: empty accounts offer it once, and empty
 reports carry optional help. Rules or samples make guidance usable; no quiz or
 rule count gates drafting. The assistant preserves existing guidance, shows exact

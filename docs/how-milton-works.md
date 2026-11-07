@@ -181,8 +181,7 @@ not at all.
 - Moves quote a rule once, each rule moves once per save, and a removed rule cannot move.
 - A change cannot leave two identical rules in one report.
 - New rules already on file are skipped silently.
-- A rule starting `Baseline: ` must match the setup catalog exactly for that report.
-- The error for a bad baseline names the closest catalog rule, found by shared words.
+- No save files a rule starting `Baseline: ` or keeps that prefix on a changed or moved rule; an existing one can still be retired or edited to drop the prefix.
 - Rule text cannot contain Markdown headings, because Milton prints those.
 - Each rule and each assembled report has a size cap.
 
@@ -233,7 +232,7 @@ Files: `server/src/store/setup.ts`.
 - Draft or edit approval, approval to send or praise is not retention approval; one yes covers the displayed text and context, and changed text or context, including redaction, requires renewed approval.
 - The sample approval step includes the approved-edit one-time offer and excludes the change list; another writing task is requested only if the person wants one.
 - Rules remain available on request; a sample never implies a standing rule or turns its facts into preferences.
-- The historical `setupCatalog` remains canonical for Baseline validation; setup no longer generates Baseline rules, and a rejected Baseline points to the closest rule and report in the same error.
+- Setup no longer generates Baseline rules; existing ones keep serving with the cover-sheet note.
 - A standing instruction is offered separately and changed only with separate consent; a successful read verifies the connection, not future compliance.
 
 ## Sign-in and accounts

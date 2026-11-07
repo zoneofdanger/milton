@@ -13,9 +13,8 @@ import { exactEditsProposal, exactMoves } from "../exact-edits";
 import { MAX_REQUEST_BYTES } from "../http";
 import { readLimits, utf8Bytes, type StoreLimits } from "./limits";
 import { recordAcceptedChange } from "./provenance";
-import { bullet, FILINGS, type Documents } from "./reports";
+import { BASELINE, bullet, FILINGS, ruleText, type Documents } from "./reports";
 import { applySampleChanges } from "./samples";
-import { closestBaseline, knownBaseline } from "./setup";
 import { requireActiveAccount } from "./accounts";
 import { hash, readSnapshot, type Snapshot } from "./snapshot";
 import { assertTrialAccess } from "./trials";
@@ -80,6 +79,14 @@ async function checkSize(tx: StoreSession, documents: Documents) {
  * the version and the size limits, apply and publish every change, and write
  * the receipt with its result. A receipt commits with the changes or not at
  * all, so a stored receipt always holds the outcome. */
+/** The refusal for a rule that would be stored with the retired setup prefix. */
+export const baselineRefusal = (text: string, report: string) =>
+  new StoreError(
+    "baseline_unknown",
+    `"${describe(text, 120)}" in ${report} starts with "Baseline: ", a prefix only the retired setup picks used. Send the rule in the person's own words without "Baseline: "; an existing Baseline rule can still be retired, or edited to drop the prefix. Nothing was changed.`,
+    422,
+  );
+
 export async function runSave(
   db: StoreDatabase,
   userId: string,
@@ -281,23 +288,17 @@ async function applySave(
     onFile.add(printed);
     creates.push({ report, text: rule.text });
   }
-  // A rule stored with the setup prefix must be a setup rule byte for byte,
-  // in the report it is served for, whether filed new or changed by an exact
-  // edit or a move.
-  const unknown = [
+  // Only the retired setup picks filed the "Baseline: " prefix, so no rule
+  // gains or keeps it through this save, whether filed new or changed by an
+  // exact edit or a move. Retiring one, or removing its prefix, still works.
+  const prefixed = [
     ...creates,
     ...after
       .filter((card) => card.changed)
       .map((card) => ({ report: card.report, text: card.body })),
-  ].find((rule) => !knownBaseline(rule.text, rule.report));
-  if (unknown !== undefined) {
-    const closest = closestBaseline(unknown.text);
-    throw new StoreError(
-      "baseline_unknown",
-      `"${describe(unknown.text, 120)}" in ${unknown.report} starts with "Baseline: " but is not a setup rule for that report. Copy the closest rule and its report shown below exactly, or send a rule in the person's own words without "Baseline: ". Closest setup rule: [${closest.report}] "${closest.text}". Nothing was changed.`,
-      422,
-    );
-  }
+  ].find((rule) => ruleText(rule.text).startsWith(BASELINE));
+  if (prefixed !== undefined)
+    throw baselineRefusal(prefixed.text, prefixed.report);
   const attribution = JSON.stringify({
     kind: "assistant",
     issuer: actor.issuer,

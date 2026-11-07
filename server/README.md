@@ -225,9 +225,10 @@ printed, so `Be concise.` matches a stored `- Be concise.`), or to an earlier en
 the request, is skipped; when nothing else changes the save returns
 `unchanged` and charges nothing. Duplicates by meaning are not detected. The assistant
 picks the report and the wording; a wrong report is fixable with `moves`. A rule
-that would be stored starting with `Baseline: `, new or after an exact edit or move, must
-equal a rule of the setup catalog byte for byte in the report it is served for, or the save fails with `baseline_unknown`
-naming the closest catalog rule; rules without the prefix are unaffected.
+that would be stored starting with `Baseline: `, new or after an exact edit or move,
+fails the save with `baseline_unknown`: only the retired setup picks used that prefix.
+An existing Baseline rule can still be retired or edited to drop the prefix; rules
+without the prefix are unaffected.
 
 Corrections and removals of existing rules use `exact_edits`, a nonempty array of
 `{before, after}` (1-500). Copy each nonempty `before` verbatim from a current rule as printed,
@@ -321,9 +322,9 @@ placeholder-safe proposals before exact retention approval.
 Skipping examples never blocks writing, and samples are usable with zero rules.
 The standing instruction is offered separately with consent; an actual successful
 read, not setup completion, verifies the connection. Rules remain supported when
-explicitly requested; one example does not imply a standing rule. The historical
-Baseline catalog stays canonical for stored rules; an active Baseline still adds
-the fixed explanatory note to the cover sheet. Milton cannot inspect another
+explicitly requested; one example does not imply a standing rule. An active
+Baseline rule from the retired setup picks still adds the fixed explanatory note to
+the cover sheet. Milton cannot inspect another
 assistant's memory and does not guarantee assistants follow its instructions.
 
 Two offers follow from writing. When the person approves a draft or edit,

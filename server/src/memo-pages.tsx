@@ -47,24 +47,6 @@ function billingNote(
   );
 }
 
-const reportFonts = (
-  <>
-    <link
-      rel="preload"
-      href="/fonts/geist-latin-variable.woff2"
-      as="font"
-      type="font/woff2"
-      crossorigin="anonymous"
-    />
-    <link
-      rel="preload"
-      href="/fonts/jetbrains-mono-regular.woff2"
-      as="font"
-      type="font/woff2"
-      crossorigin="anonymous"
-    />
-  </>
-);
 // A child span prevents HTML's pre parser from swallowing a leading newline.
 const plain = (text: string) => (
   <pre class="memo-text">
@@ -384,7 +366,7 @@ function current(
       {sheet(view)}
     </>,
     status,
-    reportFonts,
+    null,
     {
       account: { csrf, email: view.email, here: "report", billing },
       sheet: true,

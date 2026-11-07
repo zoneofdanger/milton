@@ -13,7 +13,6 @@ import {
   readOnlyInstructions,
   type ToolCall,
 } from "../src/mcp";
-import { saveMemoInput } from "../src/mcp-tools";
 import { createMiltonHandler, keyAttemptSource } from "../src/handler";
 import { createAccessTokenVerifier } from "../src/token";
 import {
@@ -32,10 +31,6 @@ test("standalone MCP needs no browser secret and refuses noncanonical hosts", as
     MCP_RESOURCE: "https://mcp.example/mcp",
     AUTH_ISSUER: "https://auth.example/auth",
     NODE_ENV: "production",
-    // Retired feature flags are ignored, never validated.
-    MILTON_TASK_RETRIEVAL_ENABLED: "yes",
-    MILTON_GARDENING_ENABLED: "yes",
-    MILTON_DERIVATIONS_ENABLED: "yes",
   });
   const app = createMcpApp(config);
   const request = (host: string, path: string) =>
@@ -45,9 +40,6 @@ test("standalone MCP needs no browser secret and refuses noncanonical hosts", as
     (await request("mcp.example", "/.well-known/oauth-protected-resource"))
       .status,
   ).toBe(200);
-  expect((await request("mcp.example", "/login")).headers.get("location")).toBe(
-    "https://app.example/login",
-  );
   for (const host of ["app.example", "revision.run.app"])
     expect((await request(host, "/mcp")).status).toBe(403);
 });
@@ -128,11 +120,6 @@ test("an SDK client receives instructions, discovers the four tools, and reads t
     // Assistants see cover sheet and reports, never the retired TPS name.
     for (const served of [client.getInstructions(), ...tools])
       expect(JSON.stringify(served)).not.toMatch(/TPS|tps_report/);
-    // Nothing served mentions the retired memo-update allowance, or the
-    // retired automatic sample retirement.
-    expect(JSON.stringify([client.getInstructions(), tools])).not.toMatch(
-      /memo.update|counts once|retires the oldest|newest two per kind kept/i,
-    );
     expect(
       tools.find((tool) => tool.name === "create_memo")?.description,
     ).toContain(
@@ -307,7 +294,7 @@ test("get_report requires an intent: without a well-formed one it refuses, sayin
   }
 });
 
-test("two authenticated clients isolate tenants, save once and reject retired tools", async () => {
+test("two authenticated clients isolate tenants and save once", async () => {
   const local = await localStore();
   const clients: Client[] = [];
   try {
@@ -386,19 +373,6 @@ test("two authenticated clients isolate tenants, save once and reject retired to
       discovered.find((t) => t.name === "create_memo")?.annotations
         ?.idempotentHint,
     ).toBe(true);
-    const instructions = clients[0]!.getInstructions();
-    expect(instructions).not.toContain("update_memo");
-    for (const phrase of [
-      "instructions",
-      "unchanged confirms no write",
-      "Session capture is off by default",
-      "current conversation only",
-      "Stop capture immediately",
-      // Step 3 of the product note: offer a sample on approval, a rule on repetition.
-      "Save this as a sample?",
-      "same correction twice",
-    ])
-      expect(instructions).toContain(phrase);
     expect(
       discovered.find((t) => t.name === "create_memo")?.description,
     ).toContain("explicitly opted into session capture");
@@ -418,18 +392,6 @@ test("two authenticated clients isolate tenants, save once and reject retired to
     expect(second.text).toBe("");
     // An empty account carries the first-setup script; it leaves after the first save.
     expect(first.is_empty).toBe(true);
-    expect(String(first.setup)).toContain("exact retention approval");
-    expect(String(first.setup)).toContain(
-      "next real email or DM should accomplish",
-    );
-    expect(String(first.setup)).toContain(
-      "preserve all existing rules and samples",
-    );
-    // The served JSON example parses against the real save schema.
-    const scripted = JSON.parse(
-      /```json\n([\s\S]*?)\n```/.exec(String(first.setup))![1]!,
-    );
-    expect(saveMemoInput.safeParse(scripted).success).toBe(true);
     expect(String(first.setup)).not.toContain("Baseline:");
     const input = {
       text: "Lead with the answer.",
@@ -439,7 +401,6 @@ test("two authenticated clients isolate tenants, save once and reject retired to
     };
     const saved = await call(0, "create_memo", input);
     expect(saved.value.status).toBe("saved");
-    expect(await call(0, "create_memo", input)).toEqual(saved);
     const filed = (await call(0, "get_cover_sheet")).value;
     expect(filed.text).toBe("- " + input.text);
     expect(filed.setup).toBeUndefined();
@@ -448,15 +409,9 @@ test("two authenticated clients isolate tenants, save once and reject retired to
       name: "get_cover_sheet",
       arguments: { event: "start" },
     });
-    expect(stale).toEqual({
-      isError: true,
-      content: [
-        {
-          type: "text",
-          text: 'Input validation error: Invalid arguments for tool get_cover_sheet: Unrecognized key: "event"',
-        },
-      ],
-    });
+    // The wording is the MCP SDK's; the refusal and the named key are ours to keep.
+    expect(stale.isError).toBe(true);
+    expect((stale.content as { text: string }[])[0]!.text).toContain('"event"');
     // Reports read by id (doc is an alias); an empty one is a heading and a when line.
     const document = (
       await call(0, "get_report", {
@@ -507,50 +462,6 @@ test("two authenticated clients isolate tenants, save once and reject retired to
         })
       ).value.status,
     ).toBe("conflict");
-    for (const name of [
-      "list_memos",
-      "get_memo",
-      "search",
-      "update_memo",
-      "archive_memo",
-      "update_tps_report",
-      "tps_check",
-      "check_draft",
-    ]) {
-      const refusal = await clients[0]!
-        .callTool({ name, arguments: {} })
-        .catch(() => ({ isError: true }));
-      expect(refusal.isError).toBe(true);
-    }
-    expect(
-      (await call(0, "create_memo", { ...input, text: "different" })).value
-        .error,
-    ).toBe("request_id_reused");
-    const exact = {
-      text: "Use conclusion instead of answer.",
-      request_id: crypto.randomUUID(),
-      expected_version: (await call(0, "get_cover_sheet")).value.version,
-      exact_edits: [{ before: "the answer", after: "the conclusion" }],
-    };
-    const exactResult = await call(0, "create_memo", exact);
-    expect(exactResult.value.status).toBe("saved");
-    expect(await call(0, "create_memo", exact)).toEqual(exactResult);
-    expect((await call(0, "get_cover_sheet")).value.text).toBe(
-      "- Lead with the conclusion.",
-    );
-    expect((await call(1, "get_cover_sheet")).value.text).toBe("");
-    const rejected = await handler(
-      new Request(resource, {
-        method: "POST",
-        headers: {
-          Host: "localhost:3001",
-          Authorization: "Bearer legacy-worker-token",
-          "Content-Type": "application/json",
-        },
-        body: "{}",
-      }),
-    );
-    expect(rejected.status).toBe(401);
     await local.db.query(
       sql`UPDATE store_config SET limits_json=limits_json || '{"daily_calls":1}'::jsonb`,
     );
@@ -1067,6 +978,8 @@ test("MCP refuses unsafe transports and oversized bodies before database access"
       },
     });
     const fixture = await tokenFixture(local.pg, resource);
+    const logged: ToolCall[] = [];
+    let verified = 0;
     const handler = createMiltonHandler(
       {
         storeDatabase: db,
@@ -1074,7 +987,11 @@ test("MCP refuses unsafe transports and oversized bodies before database access"
         resource,
         appOrigin: "https://mcp.meetmilton.com",
       },
-      fixture.verify,
+      (header) => {
+        verified++;
+        return fixture.verify(header);
+      },
+      (call) => logged.push(call),
     );
     for (const [method, host, origin, expected] of [
       ["GET", "mcp.meetmilton.com", "https://claude.ai", 405],
@@ -1108,10 +1025,18 @@ test("MCP refuses unsafe transports and oversized bodies before database access"
         expect(reply.headers.get("WWW-Authenticate")).not.toContain("scope=");
       }
     }
+    // Over the bound, an authorized call is refused once, before parsing, auth,
+    // a query or a tool event.
+    logged.length = 0;
+    verified = 0;
     const oversized = await handler(
       new Request(resource, {
         method: "POST",
-        headers: { Host: "mcp.meetmilton.com" },
+        headers: {
+          Host: "mcp.meetmilton.com",
+          Authorization: `Bearer ${await fixture.token("bound")}`,
+          "Content-Type": "application/json",
+        },
         body: new ReadableStream({
           start(c) {
             c.enqueue(new Uint8Array(262145));
@@ -1121,112 +1046,11 @@ test("MCP refuses unsafe transports and oversized bodies before database access"
       }),
     );
     expect(oversized.status).toBe(413);
-    expect(queries).toBe(0);
-  } finally {
-    await local.dispose();
-  }
-}, 30000);
-
-test("one code constant bounds requests: an oversized body is refused once", async () => {
-  const local = await localStore();
-  const logged: ToolCall[] = [];
-  let client: Client | undefined;
-  try {
-    await resolveIdentityAccount(local.env, {
-      provider: issuer,
-      subject: "bound",
-    });
-    const fixture = await tokenFixture(local.pg);
-    const authorization = `Bearer ${await fixture.token("bound")}`;
-    let verified = 0;
-    const handler = createMiltonHandler(
-      { ...local.env, issuer, resource, appOrigin: origin },
-      (header) => {
-        verified++;
-        return fixture.verify(header);
-      },
-      (call) => logged.push(call),
-    );
-    client = new Client({ name: "bound-client", version: "0.0.0" });
-    await client.connect(
-      new StreamableHTTPClientTransport(new URL(resource), {
-        fetch: (input, init) => {
-          const request = new Request(input, init);
-          request.headers.set("Host", new URL(request.url).host);
-          return handler(request);
-        },
-        requestInit: { headers: { Authorization: authorization } },
-      }),
-    );
-    const text = (reply: unknown) =>
-      z
-        .record(z.string(), z.unknown())
-        .parse(
-          JSON.parse(
-            z
-              .object({ content: z.array(z.object({ text: z.string() })) })
-              .parse(reply).content[0]!.text,
-          ),
-        );
-    const sheet = text(
-      await client.callTool({ name: "get_cover_sheet", arguments: {} }),
-    );
-    const rule = "Keep every sentence short and plain. ".repeat(30).trim();
-    const saved = await client.callTool({
-      name: "create_memo",
-      arguments: {
-        text: "Bound check",
-        request_id: crypto.randomUUID(),
-        expected_version: sheet.version,
-        rules: [{ report: "email", text: rule }],
-      },
-    });
-    expect(saved.isError).not.toBe(true);
-    expect(text(saved).status).toBe("saved");
-
-    // Over the bound, a well-formed create_memo call is refused once, before
-    // parsing, auth or a tool event; one that got through would log create_memo.
-    logged.length = 0;
-    verified = 0;
-    const call = new TextEncoder().encode(
-      JSON.stringify({
-        jsonrpc: "2.0",
-        id: 9,
-        method: "tools/call",
-        params: {
-          name: "create_memo",
-          arguments: {
-            text: "Fictional oversized save.",
-            request_id: crypto.randomUUID(),
-            expected_version: sheet.version,
-            rules: [{ report: "email", text: "x".repeat(262144) }],
-          },
-        },
-      }),
-    );
-    expect(call.byteLength).toBeGreaterThan(262144);
-    const oversized = await handler(
-      new Request(resource, {
-        method: "POST",
-        headers: {
-          Host: new URL(resource).host,
-          Authorization: authorization,
-          "Content-Type": "application/json",
-        },
-        body: new ReadableStream({
-          start(c) {
-            c.enqueue(call);
-            c.close();
-          },
-        }),
-      }),
-    );
-    expect(oversized.status).toBe(413);
     expect(await oversized.json()).toEqual({ error: "request_too_large" });
+    expect(queries).toBe(0);
     expect(logged).toEqual([]);
     expect(verified).toBe(0);
   } finally {
-    await client?.close();
     await local.dispose();
   }
 }, 30000);

@@ -33,6 +33,9 @@ function poolFor(url: string): Pool {
       // Bounds both a new connection and a wait for a busy pool's next client.
       connectionTimeoutMillis: 5000,
       query_timeout: 20000,
+      // Applied by plain PostgreSQL only: Neon's proxy drops connect-time
+      // settings, so production's limits are the app/MCP role settings in
+      // migrations/007-role-timeouts.up.sql. Change both together.
       statement_timeout: 20000,
       lock_timeout: 10000,
       // Cloud Run containerConcurrency; each request holds at most one connection.

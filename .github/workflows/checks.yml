@@ -1,4 +1,5 @@
-# Types, tests and formatting on every push and pull request to main.
+# Types, tests, formatting and both integration suites on every push and pull
+# request to main.
 # No secrets and no deploy: deploys run from the command line.
 name: checks
 
@@ -29,3 +30,33 @@ jobs:
       - run: bun run format:check
       # Vercel builds the site from only what .vercelignore keeps; build that same set.
       - run: bun run build:site-upload
+
+  # Both integration suites on a disposable PostgreSQL 18 cluster each, under Node 26.
+  # They open no external network and need no secrets.
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PG_BIN: /usr/lib/postgresql/18/bin
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+      # PostgreSQL 18 binaries from the PGDG apt repository, without a default cluster.
+      - run: |
+          sudo apt-get update -q
+          sudo apt-get install -yq postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          echo 'create_main_cluster = false' | sudo tee -a /etc/postgresql-common/createcluster.conf
+          sudo apt-get install -yq postgresql-18
+      - run: bun install --frozen-lockfile
+      - run: bun --no-env-file server/scripts/check-auth-integration.ts
+      # The auth suite runs the built bundle as well as the source.
+      - run: bun --no-env-file run --cwd apps/auth build
+      - run: bun --no-env-file run --cwd apps/auth test:integration

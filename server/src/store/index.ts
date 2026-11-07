@@ -6,6 +6,7 @@ import {
   mappedDatabase,
   postgresDatabase,
   type StoreDatabase,
+  type StoreSession,
 } from "./database";
 import { StoreError } from "./errors";
 import { accountUnavailable, requireActiveAccount } from "./accounts";
@@ -85,6 +86,37 @@ const parseIdentity = (identity: VerifiedIdentity): VerifiedIdentity => ({
 const identityHash = (provider: string, subject: string) =>
   createHash("sha256").update(`${provider}:${subject}`).digest("hex");
 
+/** Records trial-eligibility fingerprints for an account; each keeps its first
+ * claimant. */
+export async function saveFingerprints(
+  tx: StoreSession,
+  userId: string,
+  fingerprints: readonly string[],
+) {
+  for (const fingerprint of [...new Set(fingerprints)].sort()) {
+    await tx.query(
+      sql`INSERT INTO milton_app.trial_fingerprint(fingerprint,first_user_id) VALUES(${fingerprint},${userId}) ON CONFLICT DO NOTHING`,
+    );
+    await tx.query(
+      sql`INSERT INTO milton_app.account_fingerprint(user_id,fingerprint) VALUES(${userId},${fingerprint}) ON CONFLICT DO NOTHING`,
+    );
+  }
+}
+/** Locks the active account a sign-in identity owns (only that account when
+ * `id` is given) and returns its id. */
+export async function lockActiveAccount(
+  tx: StoreSession,
+  provider: string,
+  subject: string,
+  id?: string,
+) {
+  return (
+    await tx.query<{ id: string }>(
+      sql`SELECT u.id FROM public.users u JOIN public.identities i ON i.user_id=u.id WHERE ${id === undefined ? sql`` : sql`u.id=${id} AND `}u.status='active' AND i.provider=${provider} AND i.subject=${subject} FOR UPDATE OF u`,
+    )
+  )[0]?.id;
+}
+
 export async function resolveIdentityAccount(
   bindings: StoreBindings,
   identity: VerifiedIdentity,
@@ -129,20 +161,15 @@ export async function resolveIdentityAccount(
           // its row starts canceled, so it reads as expired whenever trials are
           // enabled (now or later), has no effect while they are off, and sign-up
           // creates no subscription for it.
+          await saveFingerprints(tx, id, fingerprints);
           let returning = false;
           for (const fingerprint of [...new Set(fingerprints)].sort()) {
-            await tx.query(
-              sql`INSERT INTO milton_app.trial_fingerprint(fingerprint,first_user_id) VALUES(${fingerprint},${id}) ON CONFLICT DO NOTHING`,
-            );
             const row = (
               await tx.query<{ first_user_id: string }>(
                 sql`SELECT first_user_id FROM milton_app.trial_fingerprint WHERE fingerprint=${fingerprint}`,
               )
             )[0];
             returning ||= row?.first_user_id !== id;
-            await tx.query(
-              sql`INSERT INTO milton_app.account_fingerprint(user_id,fingerprint) VALUES(${id},${fingerprint}) ON CONFLICT DO NOTHING`,
-            );
           }
           await tx.query(sql`INSERT INTO trial_accounts(user_id,started_at,subscription_status)
             SELECT u.id,u.created_at,
@@ -158,14 +185,7 @@ export async function resolveIdentityAccount(
       if (account.status !== "active") throw accountUnavailable();
       // Linking records new eligibility proofs but never changes writing owner,
       // starts another trial or rewinds an existing subscription.
-      for (const fingerprint of [...new Set(fingerprints)].sort()) {
-        await tx.query(
-          sql`INSERT INTO milton_app.trial_fingerprint(fingerprint,first_user_id) VALUES(${fingerprint},${account.id}) ON CONFLICT DO NOTHING`,
-        );
-        await tx.query(
-          sql`INSERT INTO milton_app.account_fingerprint(user_id,fingerprint) VALUES(${account.id},${fingerprint}) ON CONFLICT DO NOTHING`,
-        );
-      }
+      await saveFingerprints(tx, account.id, fingerprints);
       return { miltonUserId: account.id };
     })
     .catch((error) => {

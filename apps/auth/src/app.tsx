@@ -173,11 +173,12 @@ export function createApp(
       503,
     ),
   );
-  async function current(request: Request) {
+  async function current(c: Context) {
     const r = await auth.handler(
       new Request(AUTH_ORIGIN + "/api/auth/get-session", {
-        headers: request.headers,
+        headers: c.req.raw.headers,
       }),
+      peer(c),
     );
     if (!r.ok) throw new Error("native_session_unavailable");
     return (await r.json()) as {
@@ -186,7 +187,7 @@ export function createApp(
     } | null;
   }
   app.get("/security", async (c) => {
-    const s = await current(c.req.raw);
+    const s = await current(c);
     if (!s) return c.redirect("/login", 303);
     const methods = await auth.pool.query<MethodSummary>(
       'select id,"providerId" from milton_auth.account where "userId"=$1 order by id limit 8',
@@ -242,7 +243,7 @@ export function createApp(
       body.callbackURL = AUTH_ORIGIN + "/security";
     if (action === "change") body.revokeOtherSessions = true;
     if (action === "revoke") {
-      const s = await current(c.req.raw);
+      const s = await current(c);
       if (!s || Date.now() - new Date(s.session.createdAt).getTime() > 300000)
         return c.redirect("/login", 303);
       const target = await auth.pool.query<{ token: string }>(

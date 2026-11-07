@@ -525,10 +525,8 @@ export function createProvider(
     ],
   });
   let inFlight = 0;
-  async function handler(
-    request: Request,
-    peer = "127.0.0.1",
-  ): Promise<Response> {
+  // The peer keys the network rate limits, so every caller names the client.
+  async function handler(request: Request, peer: string): Promise<Response> {
     const denied = guardRequest(request);
     if (denied) return denied;
     const u = new URL(request.url),

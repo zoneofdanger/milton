@@ -365,10 +365,9 @@ references. Inspect revision readiness before selecting a recorded revision:
 gcloud run revisions list --service=milton-app --project=milton-510506 --region=us-east4
 ```
 
-Now serving: app `milton-app-keys-5b59d19` and MCP `milton-mcp-keys-5b59d19` (source
-`5b59d19`, 2026-11-07), and auth `milton-auth-00003-ggx` (source `f1656b5`,
-2026-11-07). The connection keys and auth startup retry release records above give
-their images, secret versions and rollback revisions.
+Now serving: app `milton-app-rate-bc66f6a` and MCP `milton-mcp-rate-bc66f6a`, and auth
+`milton-auth-00004-69s` (source `bc66f6a`, 2026-11-07). The release records above give
+images, secret versions and rollback revisions.
 
 Current edit-mode release: image index
 `sha256:2682542b3328c26de20846788798f68bc9efdc14cea2fc8233a920edcbc64e28`, Linux amd64

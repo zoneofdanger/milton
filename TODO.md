@@ -62,17 +62,6 @@ reports, memos) and plain text on security screens and anything an assistant rea
       answer, and the subscription_required message. Until then it does not exist; the landing
       page's unread joke address is a different alias.
 
-- [ ] #26 (server, low, blocked: self-hosted auth cutover) **Simplify auth email to inline
-      Resend sends.** Auth mail (apps/auth/src/mail.ts, migration 006, deliver.js) is a durable
-      encrypted outbox with leases, fences, throttle pause, receipts, a once-a-minute delivery
-      job and separate cleanup. Decided 2026-11-07 (Peter): keep it for the cutover, revisit
-      after. Simpler target: send inline with a short timeout, one retry and Resend's
-      idempotency key; log failures without addresses or links and alert on them; keep every
-      public response identical whether or not the account exists (the AR-01/PR-04 account
-      enumeration fix). Accept a rare lost email, which "resend" recovers. ⚠ This touches the
-      security-reviewed sign-in path: needs an Astra review, and draining the queue and
-      retiring the delivery job before switching.
-
 - [ ] #27 (server, low) **Give auth owner-script refusals clear codes.** apps/auth/scripts
       provision.ts, maintain.ts and migrate.ts throw plain `Error(message)` with no `code`, so
       `safeError` prints `UNCLASSIFIED` for every refusal and an operator can't tell causes

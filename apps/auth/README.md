@@ -131,6 +131,8 @@ Migration/provision/maintenance commands refuse without their explicit `--apply`
 
 ## Bounded mail delivery and retention
 
+Why a queue, not inline sends (decided 2026-11-07, dropped TODO #26): sending during the request makes existing accounts answer measurably slower than unknown addresses, which reveals who has an account; sending after the response is unreliable on Cloud Run because CPU is throttled once the response is sent. The outbox gives every address the same database write and the same answer, retries through Resend outages, and cancels a queued reset after a security change.
+
 ```sh
 # Default dry run: no environment, database or provider access.
 node --experimental-strip-types apps/auth/scripts/deliver.ts

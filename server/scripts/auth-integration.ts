@@ -97,6 +97,7 @@ try {
     "0003_report_guides",
     "0004_connection_keys",
     "0005_drop_deleted_identities",
+    "0006_drop_unread_columns",
   ])
     await owner.query(
       readFileSync(new URL(`./drizzle/${migration}.sql`, sourceRoot), "utf8"),

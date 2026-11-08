@@ -369,9 +369,20 @@ bindings it scans, and is unmeasured. Rehearse on a disposable branch or databas
 2. As `milton_auth_delegate` assuming `milton_auth_owner`:
    `node --experimental-strip-types apps/auth/scripts/migrate.ts up --apply` applies
    `008-deletion-links` (native ledger 001–008). On `55P03`, rerun.
-3. Check as the owner: `SELECT count(*) FROM milton_guard.authorization_binding b WHERE
-NOT EXISTS (SELECT 1 FROM milton_auth."user" u WHERE u.id = b.origin_user AND
-u."miltonIdentityIncarnation" = b."miltonIdentityIncarnation")` returns 0,
+3. Check as the owner that no binding the sweep should have removed remains (the same
+   exclusions as 008's sweep: an unfinished operation, or a token, consent or code
+   still referencing it, keeps a binding on purpose); this returns 0:
+
+   ```sql
+   SELECT count(*) FROM milton_guard.authorization_binding b
+    WHERE NOT EXISTS(SELECT 1 FROM milton_auth."user" u WHERE u.id=b.origin_user AND u."miltonIdentityIncarnation"=b."miltonIdentityIncarnation")
+    AND NOT EXISTS(SELECT 1 FROM milton_auth."oauthAccessToken" a WHERE a."referenceId"=b.reference)
+    AND NOT EXISTS(SELECT 1 FROM milton_auth."oauthRefreshToken" r WHERE r."referenceId"=b.reference)
+    AND NOT EXISTS(SELECT 1 FROM milton_auth."oauthConsent" c WHERE c."referenceId"=b.reference)
+    AND NOT EXISTS(SELECT 1 FROM milton_auth.verification v WHERE v.id=b.code_record)
+    AND NOT EXISTS(SELECT 1 FROM milton_guard.security_operation o WHERE o.progress<>'complete' AND b.reference=ANY(o.targets));
+   ```
+
    and `check-runtime-role.ts` prints `ok` for app and MCP.
 
 Untraceable and kept as they are: a registration whose only authorizations before 008,

@@ -7,6 +7,8 @@ import { claimTrialNotice, trialStatus } from "../src/store/trials";
 import {
   backfillExitCode,
   backfillSubscriptions,
+  resyncExitCode,
+  resyncSubscriptions,
 } from "../scripts/backfill-subscriptions";
 import { linkStripeCustomer } from "../src/store/billing";
 import { localStore, openTransactions } from "./local-store";
@@ -105,6 +107,7 @@ async function webhookFixture(configured = true) {
   return {
     local,
     stripe,
+    billing,
     sign,
     post,
     status: async () => (await trialStatus(local.db, userId)).status,
@@ -507,6 +510,70 @@ test("a newer reconciliation that leaves the state unchanged still stops an olde
     const ids = (await ledger()).map(({ id }) => id);
     expect(ids).not.toContain("evt_older");
     expect(ids).toEqual(expect.arrayContaining(["evt_newer1", "evt_newer2"]));
+  } finally {
+    await local.dispose();
+  }
+});
+
+test("the resync repairs a stale managed status an old-style writer left: dry run calls nothing, a conflict counts as failed and exits nonzero", async () => {
+  const { local, stripe, billing, status } = await webhookFixture();
+  const config = { ...local.env, billing };
+  const pause = async () => {};
+  try {
+    // Stripe holds active; an old revision's write (no revision bump) left a
+    // stale past_due, which checkout sends to the portal without reading Stripe.
+    await local.db.query(
+      sql`UPDATE trial_accounts SET subscription_status='past_due',current_period_start=clock_timestamp()-interval '10 days'`,
+    );
+    // Neither a test account's customer nor an account without one is read.
+    await local.db.query(
+      sql`INSERT INTO users(id,test_account) VALUES ('m_test',true),('m_none',false)`,
+    );
+    await local.db.query(
+      sql`INSERT INTO trial_accounts(user_id,started_at,stripe_customer_id) VALUES ('m_test',clock_timestamp(),'cus_testAccount'),('m_none',clock_timestamp(),NULL)`,
+    );
+    // The same refusals as the backfill: a test key needs the flag.
+    await expect(resyncSubscriptions(config, {}, pause)).rejects.toMatchObject({
+      code: "configuration",
+    });
+    const dry = await resyncSubscriptions(
+      config,
+      { allowTestKey: true },
+      pause,
+    );
+    expect(dry).toEqual({ total: 1, reconciled: 0, failed: 0 });
+    expect(resyncExitCode(dry, false)).toBe(0);
+    expect(stripe.calls).toEqual([]);
+    expect(await status()).toBe("expired");
+    // A newer write lands during each read: two conflicts count as failed.
+    stripe.during = async () => {
+      await local.db.query(
+        sql`UPDATE trial_accounts SET stripe_revision=stripe_revision+1 WHERE user_id=${userId}`,
+      );
+    };
+    const conflicted = await resyncSubscriptions(
+      config,
+      { apply: true, allowTestKey: true },
+      pause,
+    );
+    expect(conflicted).toEqual({ total: 1, reconciled: 0, failed: 1 });
+    expect(resyncExitCode(conflicted, true)).toBe(1);
+    expect(await status()).toBe("expired");
+    // The rerun reads Stripe, as the webhook does, and repairs it.
+    stripe.during = async () => {};
+    stripe.calls.length = 0;
+    const repaired = await resyncSubscriptions(
+      config,
+      { apply: true, allowTestKey: true },
+      pause,
+    );
+    expect(repaired).toEqual({ total: 1, reconciled: 1, failed: 0 });
+    expect(resyncExitCode(repaired, true)).toBe(0);
+    expect(await status()).toBe("paid");
+    expect(stripe.calls.map(({ url }) => url)).toEqual([
+      "https://api.stripe.com/v1/subscriptions?customer=cus_fixture&status=all&limit=10",
+    ]);
+    expect(stripe.inTransaction).toEqual([]);
   } finally {
     await local.dispose();
   }

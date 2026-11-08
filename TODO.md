@@ -79,18 +79,26 @@ reports, memos) and plain text on security screens and anything an assistant rea
       in server/test/store-saves.test.ts.
 
 - [ ] #31 (server, low) **Take Stripe off sign-in and deletion after launch.** The
-      narrowed follow-up to PR #67 took checkout's live read and the webhook off the row lock (compare-and-set on
-      `trial_accounts.stripe_revision`, 0010) and deferred the rest: sign-in still waits on
-      Stripe, up to three 5 s calls under `trial_accounts FOR UPDATE` (`whileWaiting`), so a
-      Stripe outage is a sign-in 503; and deletion's Stripe DELETE runs inside its lifecycle
-      transaction. Moving enrolment to the background failed two reviews (Astra): it needs a
-      durable retry, a takeover can duplicate trials (Stripe prunes idempotency keys after 24
-      hours, and a 500 can take effect late, so neither proves a create failed), checkout's
-      customer link bypassed a deletion fence, a retry sweep can starve behind failing
-      accounts, and old and new revisions overlap at cutover. That last one applies to 0010's
-      revision too: old writers don't advance it, so a quiescent cutover is still unenforced.
-      Full argument: PR #67 (closed unmerged) and both of Astra's verdicts, posted on it at
-      https://github.com/zoneofdanger/milton/pull/67#issuecomment-6726908897.
+      narrowed follow-up to PR #67 took checkout's live read and the webhook off the row lock
+      (compare-and-set on `trial_accounts.stripe_revision`, 0010, with a one-off `--resync`
+      after its cutover) and deferred the rest. Sign-in still waits on Stripe, up to three
+      5 s calls under `trial_accounts FOR UPDATE` (`whileWaiting`), so a Stripe outage is a
+      sign-in 503; deletion's Stripe DELETE still runs inside its lifecycle transaction.
+      Moving enrolment to the background failed two reviews (Astra). It needs a durable
+      retry, and a retry sweep can starve behind accounts that keep failing; a sweep whose
+      every account failed still answered HTTP 200, so the maintenance job's failed-execution
+      alert would see nothing. A takeover can duplicate trials: Stripe prunes idempotency
+      keys after 24 hours, and a 500 can take effect late, so neither proves a create failed;
+      duplicate subscriptions can both charge once the customer has a default payment method
+      (the trial's cancel-without-payment-method setting doesn't apply then). An enrolment in
+      flight races deletion: deletion can find no customer, finish, and leave the customer and
+      trial the enrolment then creates (main has a narrower form, since deletion reads the
+      customer without the enrolment's row lock; that trial has no card and cancels at its
+      end); a fence must cover every customer link, checkout's included, which bypassed it. And old and new revisions overlap at cutover, with nothing
+      enforcing a quiescent switch.
+      The stale holder's lease overwrite and the ineffective fence regression test were
+      retired with that design. Full argument: PR #67 (closed unmerged) and its
+      description's Round 2 section.
 
 ## From the audit of 2026-11-02 (`.agents/tmp/audit/report.md`)
 

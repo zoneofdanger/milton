@@ -11,7 +11,7 @@ export type StripeSubscriptionState = {
 };
 export type StripeEvent = { id: string; type: string; payloadSha256: string };
 
-// Every write of the Stripe state columns advances the revision, values unchanged
+// Every write Milton's code makes of the Stripe state columns advances the revision, values unchanged
 // included, so a write after a Stripe read can tell whether any other landed since
 // its snapshot (see stripeCustomerRow).
 const advanced = sql`stripe_revision=stripe_revision+1`;
@@ -112,6 +112,37 @@ export async function clearStripeCustomer(db: StoreSession, userId: string) {
     WHERE user_id=${userId}`);
 }
 
+/** What Stripe answered, as the columns a reconciliation sets. "canceled" keeps
+ * the stored subscription and dates and ends the status: Stripe no longer has it. */
+const reconciledColumns = (state: StripeSubscriptionState | "canceled") =>
+  state === "canceled"
+    ? sql`subscription_status='canceled',${advanced}`
+    : subscriptionColumns(state);
+
+/** Writes what Stripe answered for this customer, with no event: the owner's
+ * resync (scripts/backfill-subscriptions.ts --resync). Callers write only over an
+ * unchanged revision. */
+export async function saveCustomerState(
+  db: StoreSession,
+  customer: string,
+  state: StripeSubscriptionState | "canceled",
+) {
+  await db.query(sql`UPDATE trial_accounts SET ${reconciledColumns(state)}
+    WHERE stripe_customer_id=${customer} AND ${billable}`);
+}
+
+/** Every stored Stripe customer of an account billing serves (not a test
+ * account), for the owner's resync. */
+export async function storedCustomers(db: StoreSession) {
+  return (
+    await db.query<{ customer: string }>(sql`
+    SELECT t.stripe_customer_id AS customer FROM trial_accounts t
+    JOIN users u ON u.id=t.user_id
+    WHERE t.stripe_customer_id IS NOT NULL AND NOT u.test_account
+    ORDER BY t.user_id`)
+  ).map(({ customer }) => customer);
+}
+
 /** Records the event and writes what Stripe answered in one statement: a
  * redelivered event id records nothing and changes nothing. "canceled" keeps the
  * stored subscription and dates and ends the status: Stripe no longer has it. */
@@ -127,11 +158,9 @@ export async function recordStripeEvent(
     await db.query<{ recorded: number }>(
       // A data-modifying WITH runs to completion even though nothing reads it.
       write
-        ? sql`WITH ${recorded}, u AS (UPDATE trial_accounts SET ${
-            write.state === "canceled"
-              ? sql`subscription_status='canceled',${advanced}`
-              : subscriptionColumns(write.state)
-          } WHERE stripe_customer_id=${write.customer} AND ${billable} AND EXISTS (SELECT 1 FROM e))
+        ? sql`WITH ${recorded}, u AS (UPDATE trial_accounts SET ${reconciledColumns(
+            write.state,
+          )} WHERE stripe_customer_id=${write.customer} AND ${billable} AND EXISTS (SELECT 1 FROM e))
           SELECT (SELECT count(*) FROM e)::int AS recorded`
         : sql`WITH ${recorded} SELECT (SELECT count(*) FROM e)::int AS recorded`,
     )

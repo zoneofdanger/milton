@@ -8,6 +8,7 @@ import {
   billingForAccount,
   lookupIdentityAccount,
   StoreError,
+  stripeResync,
   type StoreBindings,
   type StripeSubscriptionState,
 } from "./store";
@@ -465,6 +466,20 @@ async function currentSubscription(
   return (
     decidingSubscription(subscriptions) ?? (stored ? "canceled" : undefined)
   );
+}
+
+/** The owner's resync of one stored customer (scripts/backfill-subscriptions.ts
+ * --resync): the webhook's read and compare-and-set, with no event. Answers whether
+ * a billable row held the customer; a failed read or a second conflict throws. */
+export function resyncCustomer(billing: StripeApiConfig, store: StoreBindings) {
+  const resync = stripeResync(store);
+  return {
+    customers: resync.customers,
+    reconcile: (customer: string) =>
+      resync.reconcile(customer, (found, stored) =>
+        currentSubscription(billing, found, stored),
+      ),
+  };
 }
 
 /** POST /billing/webhook. Unauthenticated: the Stripe signature is the only

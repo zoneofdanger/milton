@@ -814,7 +814,7 @@ Rerunning 011 converges. Rollback is the pre-migration snapshot.
 The Stripe revision (Drizzle `0010`) adds `trial_accounts.stripe_revision bigint NOT NULL
 DEFAULT 0`, a catalog change with no rewrite and no grant file: app's table-wide
 `SELECT, INSERT, UPDATE` on `trial_accounts` (005) covers it and MCP's column list leaves it
-out. Every write of the Stripe state advances it, so checkout's live read and the webhook can
+out. Every write Milton's code makes of the Stripe state advances it, so checkout's live read and the webhook can
 read Stripe with no transaction open and write only over an unchanged revision. Code that
 reads it fails every checkout sync and webhook without the column, so apply `0010` before
 releasing it; older code never names it. Rollback is the pre-migration snapshot.

@@ -258,7 +258,7 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
 - Auth's CSS, favicon and fonts keep every security header but cache like the app's assets (immutable at the versioned URL, otherwise no-cache); every other auth response stays no-store.
 - App uses maintained code/S256 OIDC with shared SQL one-use state/nonce/verifier, exact callback, signature/issuer/audience/subject and matching UserInfo/opaque-token proof.
 - Identity-only app sessions last at most one absolute hour and never outlive their native opaque token; renewal starts a new SSO flow with no refresh/offline scope.
-- App cookies are host-only Secure/HttpOnly/SameSite=Lax over HTTPS; every use checks the original nonempty sid, immutable binding, incarnation and generation against native SQL, in the statement that reads the session.
+- App cookies are host-only Secure/HttpOnly/SameSite=Lax over HTTPS; every use checks the original nonempty sid, immutable binding, incarnation and generation against native SQL, in the statement that reads the session and its identity's active account.
 - Invalid proof refuses; actual native5xx/network/timeout is 503; an uncertain spent callback recovers through a new login.
 - New logins reclaim at most16 expired flows/sessions each; admission correlations expire after24 hours with bounded reclaim, while eligibility/key policy and original operation associations remain indefinitely for their stated purposes. Migrations `0005` and `008` drop the unread `deleted_identities` and legacy mapping tables; their downs recreate them empty.
 - Forms require same origin, an ASCII CSRF token and unique fields; sign-in rotates CSRF.
@@ -374,7 +374,8 @@ Files: `server/src/store/index.ts`, `server/src/store/trials.ts`,
 - Any other status gets Checkout in subscription mode, card required, no trial.
 - `/billing/portal` sends an account with a stored customer to the Stripe portal, and
   answers 409 without one.
-- Before opening Stripe, both routes copy the sign-in email to a stored customer, so a
+- Before sending anyone to Stripe, both routes copy the sign-in email to a stored customer
+  (Checkout before it creates its session, the portal while it creates its own), so a
   backfilled customer gets one before it can add a card; a failed copy is logged and never
   stops anyone paying.
 - Both routes leave through a page that navigates, because `form-action 'self'` blocks an

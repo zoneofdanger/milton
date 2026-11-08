@@ -1,0 +1,88 @@
+{
+  "apiVersion": "serving.knative.dev/v1",
+  "kind": "Service",
+  "metadata": {
+    "name": "milton-admit",
+    "annotations": {
+      "run.googleapis.com/ingress": "all",
+      "run.googleapis.com/maxScale": "3",
+      "run.googleapis.com/minScale": "1"
+    }
+  },
+  "spec": {
+    "template": {
+      "metadata": {
+        "annotations": {
+          "run.googleapis.com/execution-environment": "gen2",
+          "run.googleapis.com/startup-cpu-boost": "true"
+        }
+      },
+      "spec": {
+        "serviceAccountName": "milton-admit@milton-510506.iam.gserviceaccount.com",
+        "containerConcurrency": 40,
+        "timeoutSeconds": 30,
+        "containers": [
+          {
+            "image": "us-east4-docker.pkg.dev/milton-510506/milton/runtime@sha256:e11636a5a5d3e0101c6406c735e021046762636f5fe838fcc3de98836548494b",
+            "ports": [
+              {
+                "containerPort": 8080
+              }
+            ],
+            "resources": {
+              "limits": {
+                "cpu": "1",
+                "memory": "512Mi"
+              }
+            },
+            "env": [
+              {
+                "name": "MILTON_SERVICE",
+                "value": "admit"
+              },
+              {
+                "name": "MILTON_ENCRYPTED_ENV_FILE",
+                "value": "/run/milton/.env"
+              },
+              {
+                "name": "DOTENV_PRIVATE_KEY",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "name": "milton-admit-key",
+                    "key": "2"
+                  }
+                }
+              }
+            ],
+            "volumeMounts": [
+              {
+                "name": "environment",
+                "mountPath": "/run/milton"
+              }
+            ]
+          }
+        ],
+        "volumes": [
+          {
+            "name": "environment",
+            "secret": {
+              "secretName": "milton-admit-env",
+              "items": [
+                {
+                  "key": "2",
+                  "path": ".env"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "traffic": [
+      {
+        "latestRevision": true,
+        "percent": 100
+      }
+    ]
+  }
+}

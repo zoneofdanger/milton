@@ -2,7 +2,7 @@
 import { createHash } from "node:crypto";
 import Stripe from "stripe";
 import { z } from "zod";
-import type { BillingConfig, RuntimeConfig } from "./config";
+import type { RuntimeConfig, StripeApiConfig } from "./config";
 import {
   applyStripeEvent,
   billingForAccount,
@@ -41,7 +41,7 @@ const STRIPE_TIMEOUT_MS = 5000;
 // One call to the Stripe API with the restricted key. A failure is reported
 // without Stripe's status, body or any request value.
 async function stripeCall(
-  billing: BillingConfig,
+  billing: StripeApiConfig,
   method: "GET" | "POST" | "DELETE",
   path: string,
   params?: Record<string, string>,
@@ -87,7 +87,7 @@ async function stripeAnswer<T>(response: Response, shape: z.ZodType<T>) {
 const CHECKOUT_LIFETIME_SECONDS = 1860;
 
 const stripePost = async <T,>(
-  billing: BillingConfig,
+  billing: StripeApiConfig,
   path:
     | "customers"
     | `customers/${string}`
@@ -134,7 +134,7 @@ type StripeSubscription = StripeSubscriptionState & { created: number };
 // Every subscription the customer has, canceled included. Any non-2xx is a failed
 // read, 404 too: an unknown customer proves nothing, and a key from the wrong mode
 // would otherwise mark paying people canceled.
-async function listSubscriptions(billing: BillingConfig, customer: string) {
+async function listSubscriptions(billing: StripeApiConfig, customer: string) {
   return (
     await stripeAnswer(
       await stripeCall(
@@ -178,7 +178,7 @@ const idempotencyKey = (kind: "customer" | "subscription", userId: string) =>
 // Stored before anything else happens with it, so a later failure leaves it
 // findable.
 async function createCustomer(
-  billing: BillingConfig,
+  billing: StripeApiConfig,
   userId: string,
   link: (customer: string) => Promise<string | undefined>,
   email?: string,
@@ -204,7 +204,7 @@ async function createCustomer(
  * trial. A failure throws a 503 that says to try again, and repeating the attempt
  * is the retry. Sign-in runs it in the background; checkout waits for it. */
 export async function ensureSubscription(
-  config: StoreBindings & Pick<RuntimeConfig, "billing">,
+  config: StoreBindings & { billing?: StripeApiConfig },
   userId: string,
   email?: string,
 ) {
@@ -291,7 +291,7 @@ export async function endStripeCustomer(config: RuntimeConfig, userId: string) {
 // add a card or pay comes through here signed in. Never stops them paying. No
 // idempotency key: repeating it is harmless, and a key would refuse a changed email.
 async function copyEmail(
-  billing: BillingConfig,
+  billing: StripeApiConfig,
   customer: string,
   email?: string,
 ) {
@@ -468,7 +468,7 @@ const eventObject = z.object({ customer: customerId.nullable() });
  * subscription that decides access, or "canceled" when a successful read lists
  * none for a stored one, or nothing when neither side has one yet. */
 async function currentSubscription(
-  billing: BillingConfig,
+  billing: StripeApiConfig,
   customer: string,
   stored: string | null,
 ) {

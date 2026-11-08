@@ -25,11 +25,14 @@ export async function appStorage(pg: PGlite) {
   await pg.exec(
     `CREATE ROLE milton_auth_runtime; CREATE ROLE milton_app_runtime; CREATE ROLE milton_mcp_runtime;`,
   );
-  await pg.exec(
-    await Bun.file(
-      new URL("../migrations/005-app.up.sql", import.meta.url),
-    ).text(),
-  );
+  for (const file of [
+    "005-app.up.sql",
+    "012-session-token-nullable.up.sql",
+    "013-drop-session-access-token.up.sql",
+  ])
+    await pg.exec(
+      await Bun.file(new URL(`../migrations/${file}`, import.meta.url)).text(),
+    );
   // `fail` names one lifecycle function (begin_operation or cleanup_operation)
   // that raises for this subject, as a native outage would.
   await pg.exec(`CREATE SCHEMA milton_guard;
@@ -83,7 +86,7 @@ export async function pageFixture(
   );
   const token = randomToken();
   await local.db.query(
-    sql`INSERT INTO milton_app.session(token_hash,issuer,subject,sid,binding,incarnation,generation,email,access_token,expires_at) VALUES(${hash(token)},${issuer},${subject},'sid','binding','f:1','f:2','fixture@example.invalid','fictional-opaque',now()+interval '1 hour')`,
+    sql`INSERT INTO milton_app.session(token_hash,issuer,subject,sid,binding,incarnation,generation,email,expires_at) VALUES(${hash(token)},${issuer},${subject},'sid','binding','f:1','f:2','fixture@example.invalid',now()+interval '1 hour')`,
   );
   return {
     ...local,

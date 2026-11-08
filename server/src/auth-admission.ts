@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
-import type { RuntimeConfig } from "./config";
+import type { AdmitConfig } from "./config";
 import {
   database,
   lockActiveAccount,
@@ -66,7 +66,7 @@ export const fingerprintKeyCheck = (key: string) =>
  * key check does not match the configured fingerprint key. */
 export async function saveEligibility(
   tx: StoreSession,
-  config: RuntimeConfig,
+  config: Pick<AdmitConfig, "trialFingerprintKey">,
   userId: string,
   proof: Pick<Admission, "verifiedEmail" | "verifiedIdentities">,
 ) {
@@ -83,7 +83,11 @@ export async function saveEligibility(
     trialFingerprints(config.trialFingerprintKey, proof),
   );
 }
-export function authAdmission(config: RuntimeConfig) {
+export const ADMISSION_PATHS = [
+  "/internal/auth/admit",
+  "/internal/auth/preserve-eligibility",
+];
+export function authAdmission(config: AdmitConfig) {
   return async (request: Request): Promise<Response> => {
     const headers = { "Cache-Control": "no-store" };
     if (request.method !== "POST")

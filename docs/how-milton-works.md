@@ -15,14 +15,24 @@ here.
 Files: `server/src/cloud-run.ts`, `server/src/environment.ts`, `server/src/config.ts`,
 `server/Dockerfile`, `server/deploy/`, `apps/site/vercel.json`.
 
-- One Docker image runs as two Cloud Run services, and `MILTON_SERVICE` picks `app` or
-  `mcp`.
+- One Docker image runs as three Cloud Run services, and `MILTON_SERVICE` picks `app`,
+  `mcp` or `admit`.
+- `admit` (Cloud Run `milton-admit`) serves only auth's `POST /internal/auth/admit` and
+  `/internal/auth/preserve-eligibility`; everything else is 404, and the app and MCP serve
+  no `/internal/` path. It is not behind the load balancer: Cloud Run's invoker check
+  admits only auth's service account, whose Google ID token auth sends in
+  `X-Serverless-Authorization`, and the admission bearer stays the second check.
+- Auth sends admissions to `AUTH_ADMISSION_URL`: a `run.app` origin gets a metadata-server
+  ID token for that origin, cached until five minutes before expiry; a loopback origin
+  (development and tests) gets none and is refused in production. A failed token fetch
+  sends nothing and fails like a refused admission.
 - The prepared auth service has its own canonical host, issuer and database role; app/MCP routing stays separate. Live routing changes require the release runbook.
 - HTTP upgrades to HTTPS with a redirect that keeps the method.
 - Vercel builds the static site from main on every push.
 - Startup decrypts a dotenvx file using a separate platform-held key.
-- Startup fails on bad URLs, a missing/short app client, admission or eligibility secret, a bad support email, a bad port, or an
-  unknown service name.
+- Startup fails on bad URLs, a missing/short app client or eligibility secret (admit: a
+  missing/short admission or eligibility secret or bad issuer), a bad support email, a bad
+  port, or an unknown service name.
 - Auth startup checks its runtime role before listening; connection failures retry with backoff for about 15 seconds, while a role refusal fails at once. App/MCP startup does no database work.
 - Plain HTTP is allowed only on loopback outside production.
 - On SIGTERM the server stops accepting requests and force-exits after 8 seconds.
@@ -78,6 +88,13 @@ Files: `server/src/handler.ts`, `server/src/token.ts`, `server/src/mcp.ts`,
 - Each request builds a fresh stateless MCP server, with no sessions or subscriptions.
 - Global instructions require retrieval before writing or editing for or as the person; only new drafts get the sample/rule conformity check before display. Edits preserve source wording and style outside the request over conflicting samples/rules; guidance never widens scope, and only specific unresolved conflicts are flagged. Requested transformations retain their scope, and changes are briefly listed. These are behavioral instructions, not server enforcement.
 - After draft or edit approval, assistants display an exact placeholder-safe body and useful non-private context, then offer once to retain that proposal; one yes approves the displayed proposal. Every sample save requires that display, without silently redacting after approval or changing the working edit for retention. Change lists are excluded, refusal is final for that text, and only changed text/context requires renewed approval. Edits do not imply standing rules.
+- Both instruction variants stay under 3,500 characters and hold the workflow and consent
+  rules, including never sending transcripts, secrets or others' private details or filing
+  capture consent; error handling lives in each error result's `next`, and save fields and
+  the other capture exclusions in `create_memo`'s description.
+- Server info carries a description of at most 120 characters for clients that drop
+  instructions: read `get_cover_sheet`, then the matching `get_report`, before writing or
+  editing for the person.
 - Session capture requires explicit opt-in for the current conversation; connection, draft or edit approval, quoted text and another conversation are not consent.
 - Each assistant's (account and OAuth client) first tool call after a server process starts
   carries `notifications/tools/list_changed` ahead of its result, as does every
@@ -136,6 +153,15 @@ Files: `server/src/mcp.ts`, `server/src/mcp-tools.ts`.
   script, only for reports with no rules or samples.
 - `create_memo` saves rules, edits, moves and sample changes together or not at all; context correction cannot combine with sample insertion or retirement.
 - A save is checked against the limits it read at its start; lowering a limit mid-save does not roll that save back.
+- Every error result and every MCP HTTP refusal body keeps `error` and `message` and adds
+  `code` (the `error`, or `version_conflict` for a stale-version conflict) and `next`:
+  `{action, text}`, the action one of `retry`, `reread`, `fix_input`, `ask_user` or
+  `tell_user`, from the one table in `mcp-outcomes.ts`; an unknown code gets the
+  unexpected-failure step. The SDK's plain-text argument refusals become such bodies,
+  `invalid_arguments` with the SDK's text as `message`.
+- A scope refusal also carries `required_permission`, `read` or `read_write`: what the
+  attempted action needed (a save needs `read_write`, anything else `read`), and its
+  `next` names that permission.
 - Replies add a trial notice if one is due, and that notice can never fail the call. A read or save whose trial gate found no reminder due makes no claim; a replayed save, which never reaches the gate, always tries one.
 - Failures return a code and message, and unknown failures say no save outcome is
   confirmed.
@@ -285,6 +311,7 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
 - Auth's CSS, favicon and fonts keep every security header but cache like the app's assets (immutable at the versioned URL, otherwise no-cache); every other auth response stays no-store.
 - App uses maintained code/S256 OIDC with shared SQL one-use state/nonce/verifier, exact callback, signature/issuer/audience/subject and matching UserInfo/opaque-token proof.
 - Identity-only app sessions last at most one absolute hour and never outlive their native opaque token; renewal starts a new SSO flow with no refresh/offline scope.
+- An app session row holds the cookie's SHA-256, the native issuer, subject, sid, binding, incarnation, generation and verified email, and its expiry; the native access token is used only within the sign-in request (UserInfo and introspection) and never stored (owner file `013` drops the old column).
 - App cookies are host-only Secure/HttpOnly/SameSite=Lax over HTTPS; every use checks the original nonempty sid, immutable binding, incarnation and generation against native SQL, in the statement that reads the session and its identity's active account.
 - Invalid proof refuses; actual native5xx/network/timeout is 503; an uncertain spent callback recovers through a new login. Every discovery, token, UserInfo or introspection failure and any discovery metadata mismatch is logged (class and code only); a person declining sign-in (`access_denied`) is not.
 - New logins reclaim at most16 expired flows/sessions each; admission correlations expire after24 hours with bounded reclaim, while eligibility/key policy and original operation associations remain indefinitely for their stated purposes. Migrations `0005` and `008` drop the unread `deleted_identities` and legacy mapping tables; rollback is the pre-migration snapshot.
@@ -292,13 +319,13 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
 - Auth rate limits key each network, for every native request including the account-security page's own session lookups, by the client address Google's load balancer appends (second-to-last `X-Forwarded-For` entry, IPv4-mapped IPv6 as IPv4, other IPv6 by /64, never the first entry; else the socket peer): one statement first takes the 120-a-minute network gate (for a request proven to be the app, by its client secret or its own access token against native's stored hash, the token only while native would accept it and its binding is current, a 1,000-a-minute app ceiling instead) and, only if it admits, 10 a minute per account email and, except for the app, 60 token and 30 revoke requests a minute per client and network and 60 UserInfo requests a minute per bearer token and network, so a refused request creates or charges no other bucket; Better Auth's per-network-and-path 3 sign-in/sign-up/change-password attempts per 10 seconds, 3 mail requests, 30 authorize and 20 registration requests a minute are each one atomic `take_rate` call; every bucket is an HMAC'd key in `milton_guard.rate_bucket`.
 - Auth runtime and owner command pools always verify PostgreSQL TLS certificates/hostnames, even with mode omitted; unsafe/libpq/duplicate URL settings refuse.
 - Every native generation advance or deletion atomically retires older reset proofs; issuance takes the original user snapshot under the same parent lock, never the redemption-time generation.
-- Native unlink awaits app eligibility preservation before taking its parent lock; app uses guarded original metadata and stores fingerprints for existing writing accounts only, without billing or admission.
+- Native unlink awaits `milton-admit`'s eligibility preservation before taking its parent lock; it uses guarded original metadata and stores fingerprints for existing writing accounts only, without billing or admission.
 - Native mail callbacks capture one original message; every generic signup/reset/resend success commits the same encrypted-job or no-op receipt outside native swallowing, with no provider I/O during HTTP; failure is uncertain/retryable503. A message to a reserved `.invalid` address is never queued: it commits the no-op receipt an unknown address gets, so the answer is the same and delivery has nothing to send.
 - Auth-only mail functions lease one original message at a time for bounded delivery, stable job-id idempotency, finite retries and shared Retry-After pause capped at24 hours by worker and SQL across passes; native authority never rebinds to a later email owner.
 - Native capture checks its one-hour lifetime on the native clock; SQL accepts only finite future proof expiry and caps mail delivery at native expiry or15 minutes; terminal transitions clear payloads and bounded owner maintenance clears expired/fenced payloads and receipts eligible after24 hours, with physical retention longer if maintenance is delayed.
 - Bootstrap000 validates an explicit complete retained-login CONNECT/audited TEMP inventory before transactional pregrants/PUBLIC revocation; missing or inconsistent inventory refuses without partial privilege loss.
-- Authenticated native admission carries exact issuer/subject/continuation and native-validated verified email and bounded Google/GitHub IDs, including [] for password-only. Each authorize or consent accept asks the app once, though native asks twice: a second ask with the same admission inputs shares the first's outcome, a refusal included, and still runs its own `bind_flow`, so a session or binding that ends between the two is refused; nothing carries to another request. The auth service waits 5 s for the app's admission, which never waits on Stripe.
-- App admission checks the dedicated eligibility-key policy, then creates/finds one stable internal m_* account and trial and applies existing subscription admission; untrusted/invalid handoffs cause no mapping or billing effects.
+- Authenticated native admission carries exact issuer/subject/continuation and native-validated verified email and bounded Google/GitHub IDs, including [] for password-only. Each authorize or consent accept asks the app once, though native asks twice: a second ask with the same admission inputs shares the first's outcome, a refusal included, and still runs its own `bind_flow`, so a session or binding that ends between the two is refused; nothing carries to another request. The auth service waits 5 s, ID token fetch included, for `milton-admit`'s admission, which never waits on Stripe.
+- Admission (`milton-admit`, on the app's database login) checks the dedicated eligibility-key policy, then creates/finds one stable internal m_* account and trial and applies existing subscription admission; untrusted/invalid handoffs cause no mapping or billing effects.
 - Ownership uses exact issuer+subject, never email, provider nickname or eligibility fingerprints; native linking never merges writing or restarts a trial.
 - Account creation's unique identity row and billing's enrolment lease converge under retries/concurrency; a new account starts empty.
 - Email and stable social identities get keyed trial-eligibility fingerprints with a dedicated stable key and first claimant, retained after deletion; changed/unprovisioned keys refuse admission. They are the only second-trial block: a new account sharing one with an earlier account starts canceled, whether trials are on or off.
@@ -311,6 +338,7 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
 - App persists lifecycle UUID, original account/subject/incarnation/client and requester association before first native/remote attempt; retries never select current/recreated targets.
 - Disconnect commits native original-binding refusal before bounded cleanup; a failed or unfinished step answers 503 with a retry page re-posting the same operation, as deletion does; reconnect creates a new binding and never revives an old token.
 - Deletion saves the current verified-identity fingerprints as it starts, then commits refusal, then Stripe cancellation (called with no transaction open, then recorded under the operation's lock with the ended customer forgotten), then writing erasure (which records no identity of its own), and finally bounded native cleanup; unknown inventory/cascade shape leaves a retryable incomplete operation.
+- Anonymous assistant client registrations belong to no account: their free-text fields (client name, contacts, URIs, metadata) are kept indefinitely, and account deletion does not remove them.
 - Writing and original-incarnation app credentials are never erased before Stripe cancellation succeeds; incomplete deletion never claims completion.
 - Browser logout removes local authority and navigates through fixed-client native RP logout with exact return and native confirmation, leaving offline assistant grants independent; "Switch account" adds the one fixed logout `state` native echoes back, and only that exact single value sends the signed-out return on to a fresh sign-in (`prompt=login`).
 
@@ -439,6 +467,7 @@ Files: `server/drizzle/`, `server/src/store/schema.ts`, `server/src/store/databa
 - `users.test_account` (0009, default false) marks the fictional end-to-end check account; owner file `011-test-account-roles.sql` narrows app's INSERT on `users` to its other columns, so no runtime login can set it, and usage and metric counts exclude it.
 - `trial_accounts.enrol_lease_until` (0011, nullable, no default) holds the enrolment lease; app's table-wide grant on `trial_accounts` (005) covers it, and MCP's column list leaves it out.
 - Disconnects and identity hashes have no foreign key to users, so they outlive the account.
+- `docs/deletion-inventory.txt` classifies every text-bearing column the three migration tracks create as deleted by account deletion, hidden (kept, never served), retained (tied to no account, so deletion cannot remove it) or not personal; a test on a fresh schema fails on any column missing from it.
 - `connection_keys` (0004) cascades from users and from its (issuer, subject) identity, requires the native binding (issuer, subject, incarnation, generation), checks id, hash, name, scope, binding lengths and dates, and grants nothing to the legacy writing group; owner file `006-connection-keys-roles.sql` lets app read every column but the hash (binding included), insert and set `revoked_at`, and MCP read and set `last_used_at` only.
 - Native 007 adds only `milton_guard.connection_key_status(subject, incarnation, generation)`: SECURITY DEFINER, fixed `pg_catalog, pg_temp` path, false on NULL or any mismatch, no PUBLIC/auth/guide EXECUTE and no table grants; MCP and app may execute it. Without it, every key is refused.
 - The native auth migrator applies each migration file and its ledger row in one transaction under an advisory lock, so a crash leaves both or neither; a file that commits or rolls back the transaction itself fails after running and gets no ledger row.
@@ -479,7 +508,8 @@ Files: `apps/site/`.
 
 ## Theme, scripts, and CI
 
-Files: `packages/theme/`, `server/scripts/`, `.github/workflows/checks.yml`.
+Files: `packages/theme/`, `server/scripts/`, `scripts/check-migrations.ts`,
+`.github/workflows/checks.yml`.
 
 - A shared theme supplies fonts, favicons, and tokens, with a WCAG contrast test. App and auth text outside the Latin JetBrains Mono subset fetches the full master on demand, which also renders a non-Latin letter with its combining mark; the site serves only the subset.
 - `migrate.ts` applies writing migrations only as neondb_owner; explicit --app-auth applies app-only migration005 after native004 as an approved app migration owner, with no runtime startup migration.
@@ -489,10 +519,11 @@ Files: `packages/theme/`, `server/scripts/`, `.github/workflows/checks.yml`.
 - The isolated check-auth-integration builds actual product modules with production minification under Node26/PG18 and mocks only external boundaries.
 - `check-runtime-role` audits selected NOINHERIT app/MCP roles, ownership, DDL/TEMP, native/app credential/function boundaries and the role's own 20 s statement / 10 s lock timeouts.
 - `probe-forms` confirms a signed-out form post passes CSRF.
-- `e2e.ts` checks a deployment end to end on the test account only: a browser sign-in that must show the account and list the key's public id before the key is sent anywhere, an MCP connection with that key listing four tools, then a gate before any write (nothing on file but this check's marked leftovers, which it retires first), a marked fictional sample saved, read fresh, revised by `sample_id`, read fresh and retired, and a final read equal to the run's start. One JSON line per step with no secret or sample body; a key under 30 days from expiry warns; exit 0 only when every step passes, and 1 for a refusal, a failed step, a crash or a run past 240 s.
+- `e2e.ts` checks a deployment end to end on the test account only: a browser sign-in (following redirects, Continue pages and native's JSON redirects, which native sends because Node's fetch always says `Sec-Fetch-Mode: cors`, only to the app and auth origins) that must show the account and list the key's public id before the key is sent anywhere, an MCP connection with that key listing four tools, then a gate before any write (nothing on file but this check's marked leftovers, which it retires first), a marked fictional sample saved, read fresh, revised by `sample_id`, read fresh and retired, and a final read equal to the run's start. One JSON line per step with no secret or sample body; a key under 30 days from expiry warns; exit 0 only when every step passes, and 1 for a refusal, a failed step, a crash or a run past 240 s.
 - `build.ts` builds the CSS with Vite, versions the public assets by content hash, and bundles the Cloud Run, guide worker and end-to-end check (`e2e.js`, the `milton-e2e-daily` job) entries with Bun, minified except identifiers, with source maps the image leaves out.
 - `dev.ts` serves the app on loopback and rebuilds the CSS on change.
-- CI runs types, tests, formatting, and both integration suites on PostgreSQL 18, holds no secrets, and does not deploy.
+- CI runs the migration guards, types, tests, formatting, and both integration suites on PostgreSQL 18, holds no secrets, and does not deploy.
+- `check-migrations` compares with main: a new migration is numbered above main's highest in its track with its own number, Drizzle journal entries run in order with strictly increasing `when`, every migration file and snapshot matches its hash in `scripts/released-migrations.sha256` (main's never change), and a new drop, truncate or rename of a table, column, view, schema, type or function names its merged code-stopped-by PR (comments and strings skipped; a `DO` block, `EXECUTE` (top level or in a function body), or a function body that drops, truncates or renames, needs that or a `no-drop-or-rename` reason). Without origin/main it checks only the lock and journal; in CI that fails.
 
 ## Optional report guides
 

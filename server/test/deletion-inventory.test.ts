@@ -6,7 +6,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { AUTH_MIGRATIONS } from "../../apps/auth/scripts/migrations";
 
 const INVENTORY = "docs/deletion-inventory.txt";
-const CLASSES = ["deleted", "hidden", "not-personal"];
+const CLASSES = ["deleted", "hidden", "retained", "not-personal"];
 const root = new URL("../../", import.meta.url);
 const read = (path: string) => readFileSync(new URL(path, root), "utf8");
 
@@ -144,6 +144,22 @@ test(`every text-bearing column in a fresh schema is classified in ${INVENTORY}`
   ).toEqual([]);
 });
 
+test("anonymous client registrations' free-text fields are classed retained, not not-personal", () => {
+  const line = read(INVENTORY)
+    .split("\n")
+    .find((l) => l.startsWith("milton_auth.oauthClient | retained |"));
+  expect(line?.split("|")[2]?.trim().split(/\s+/)).toEqual(
+    expect.arrayContaining([
+      "name",
+      "contacts",
+      "uri",
+      "icon",
+      "tos",
+      "policy",
+    ]),
+  );
+});
+
 test("a domain, enum or composite over text, and a materialized view, count as text-bearing", async () => {
   const pg = await schema;
   await pg.exec(`BEGIN;
@@ -156,11 +172,11 @@ test("a domain, enum or composite over text, and a materialized view, count as t
     CREATE MATERIALIZED VIEW public.fictional_view AS SELECT 'x'::text AS note;`);
   try {
     expect(unclassified(await textColumns(pg), read(INVENTORY))).toEqual([
-      "public.fictional.label (memo_label) is not in docs/deletion-inventory.txt: add it to a public.fictional line as deleted, hidden, not-personal, with the reason",
-      "public.fictional.mood (mood) is not in docs/deletion-inventory.txt: add it to a public.fictional line as deleted, hidden, not-personal, with the reason",
-      "public.fictional.pair (nest[]) is not in docs/deletion-inventory.txt: add it to a public.fictional line as deleted, hidden, not-personal, with the reason",
-      "public.fictional.payload (memo_payload) is not in docs/deletion-inventory.txt: add it to a public.fictional line as deleted, hidden, not-personal, with the reason",
-      "public.fictional_view.note (text) is not in docs/deletion-inventory.txt: add it to a public.fictional_view line as deleted, hidden, not-personal, with the reason",
+      "public.fictional.label (memo_label) is not in docs/deletion-inventory.txt: add it to a public.fictional line as deleted, hidden, retained, not-personal, with the reason",
+      "public.fictional.mood (mood) is not in docs/deletion-inventory.txt: add it to a public.fictional line as deleted, hidden, retained, not-personal, with the reason",
+      "public.fictional.pair (nest[]) is not in docs/deletion-inventory.txt: add it to a public.fictional line as deleted, hidden, retained, not-personal, with the reason",
+      "public.fictional.payload (memo_payload) is not in docs/deletion-inventory.txt: add it to a public.fictional line as deleted, hidden, retained, not-personal, with the reason",
+      "public.fictional_view.note (text) is not in docs/deletion-inventory.txt: add it to a public.fictional_view line as deleted, hidden, retained, not-personal, with the reason",
     ]);
   } finally {
     await pg.exec("ROLLBACK");

@@ -10,6 +10,8 @@
 #   deleted       account deletion removes the row
 #   hidden        kept after deletion (until it expires, or for a stated purpose),
 #                 never served to an assistant or shown on a page
+#   retained      kept with no link to any account, so deletion cannot remove it,
+#                 and may hold personal data someone entered; the reason says how long
 #   not-personal  holds nothing about a person
 #
 # schema.table | class | columns | reason
@@ -48,7 +50,8 @@ milton_auth.oauthConsent | deleted | clientId id referenceId requestedUserInfoCl
 milton_auth.verification | hidden | id identifier value | Native cleanup deletes the account's; the rest expire within an hour and maintenance removes them a day later.
 milton_auth.rateLimit | hidden | id key | Request counters; maintenance removes stale rows.
 milton_auth.jwks | not-personal | alg crv id privateKey publicKey | Signing keys.
-milton_auth.oauthClient | not-personal | applicationType backchannelLogoutUri clientCredentialsScopes clientDiscoveryId clientId clientSecret contacts grantTypes icon id jwks jwksUri metadata name policy postLogoutRedirectUris redirectUris referenceId responseTypes scopes softwareId softwareStatement softwareVersion subjectType tokenEndpointAuthMethod tos uri userId | Assistant registrations; never owned by a person (deletion refuses one that is).
+milton_auth.oauthClient | retained | backchannelLogoutUri clientDiscoveryId contacts icon jwksUri metadata name policy postLogoutRedirectUris redirectUris softwareId softwareStatement softwareVersion tos uri | Free text from anonymous client registration (client_name, contacts, URIs, metadata), which may name a person or hold an address; registrations belong to no account and are kept indefinitely (nothing deletes them).
+milton_auth.oauthClient | not-personal | applicationType clientCredentialsScopes clientId clientSecret grantTypes id jwks referenceId responseTypes scopes subjectType tokenEndpointAuthMethod userId | Client identifiers, secrets, keys and protocol settings; userId and referenceId stay empty for anonymous clients (deletion refuses an owned one).
 milton_auth.oauthClientAssertion | not-personal | id | Client assertion replay IDs.
 milton_auth.oauthClientResource | not-personal | clientId id metadata resourceId | Client-to-resource links.
 milton_auth.oauthResource | not-personal | allowedScopes customClaims id identifier metadata name signingAlgorithm signingKeyId | Protected resources Milton defines.

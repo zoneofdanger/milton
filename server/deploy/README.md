@@ -61,7 +61,11 @@ one-time procedures are in git history; the last full version is at commit 492b9
 
 Auth `milton-auth-00016-kul`, rollback `milton-auth-00014-juv`. App/MCP
 `milton-*-token-0f7d5aa`, rollback `milton-*-guards-1a82fde` (code only; the token column
-exists). Earlier records: git history (`git log -p server/deploy/README.md`).
+exists). Once owner file 013 is applied, the app never rolls back to an image older than #62:
+`milton-app-token-0f7d5aa` is its floor, and `milton-app-guards-1a82fde` is no longer a
+rollback (its sign-in writes the dropped column). MCP never touches sessions; its rollback
+is unchanged. See [Drop the app session's access-token column](#drop-the-app-sessions-access-token-column-owner-file-013).
+Earlier records: git history (`git log -p server/deploy/README.md`).
 
 ## Runtime role timeouts (applied 2026-11-07, TODO #29)
 
@@ -328,10 +332,40 @@ the column in the later drop. Rehearse on a disposable database first
 
 Rolling the app back to the previous image is code only: the column still exists and
 accepts the old code's writes. A failed migration's rollback is the pre-migration
-snapshot; there is no down script. The drop is a later migration, carrying
-`-- code-stopped-by:` this change's PR and applied only after this release serves;
-after it, the app must not roll back to an image older than this change, whose sign-in
-writes the column.
+snapshot; there is no down script. The drop is owner file 013 (next section), carrying
+`-- code-stopped-by: #62` and applied only after this release serves; after it, the app
+must not roll back to an image older than this change, whose sign-in writes the column.
+
+## Drop the app session's access-token column (owner file 013)
+
+Since #62 the app never writes `milton_app.session.access_token` and nothing has ever read
+it; 012 made it nullable, and production has stored no token since `milton-*-token-0f7d5aa`
+began serving (2026-11-08 17:47Z). 013 drops the column, so no SQL can read the tokens
+older rows still hold, each expired within an hour of its sign-in. DROP COLUMN is a
+catalog change with no table rewrite: it does not erase those bytes, which stay in the
+tuples until the expired rows are reclaimed and vacuumed, and in WAL and snapshots until
+they age out (snapshots are kept 14 days); 013 sets a 5 s lock limit in its own transaction because it briefly
+locks `session` exclusively. Apply only while the app serves `milton-app-token-0f7d5aa` or
+later: older app code inserts the column, so every sign-in on it fails after the drop. MCP
+never touches sessions. Rehearse on a disposable database first
+(`server/scripts/check-auth-integration.ts` applies 012 and 013 twice each), then:
+
+1. Snapshot production.
+2. As the `milton_app` owner, `milton_app_owner` (as for 008 and 012), through the direct
+   host: Neon's pooler refuses the `role` startup option:
+   `psql -X -v ON_ERROR_STOP=1 -f server/migrations/013-drop-session-access-token.up.sql`
+   (one transaction; rerunning converges).
+3. Check as the owner; expect no rows:
+   `SELECT column_name FROM information_schema.columns WHERE table_schema='milton_app' AND table_name='session' AND column_name='access_token';`
+   Then `check-runtime-role.ts` must print `ok` for app and MCP, and a fresh sign-in must
+   succeed (the daily check signs in; or watch `milton-app-errors-log` for a
+   `column "access_token"` error).
+
+No code release follows; the serving images already run on either schema. After 013 the
+app never rolls back to an image older than #62 (`milton-app-token-0f7d5aa` is the floor;
+`milton-app-guards-1a82fde` and older write the column). If 013 fails (its lock limit, say),
+its transaction rolls back and changes nothing; rerun it. Otherwise a failed migration's
+rollback is the pre-migration snapshot; there is no down script.
 
 ## Test account and daily check
 
@@ -895,7 +929,9 @@ Revisions from before the 2026-11-07 schema and auth cutover (`*-edit-00223ec` a
 older) cannot read the current schema. Fix forward, or restore Neon snapshot
 `snap-fancy-hat-b8j5ls14` per the cutover runbook's rollback section (local, untracked:
 `.agents/tmp/auth-cutover/runbook.md`). App/MCP revisions before connection keys
-(`*-store2-b64ec6a` and older) can read the schema but serve no keys. For a
+(`*-store2-b64ec6a` and older) can read the schema but serve no keys. After owner file 013,
+app revisions older than `milton-app-token-0f7d5aa` (#62) fail every sign-in, so that is the
+app's rollback floor. For a
 schema-compatible code release, first verify the selected
 runtime supports the current database schema and accounting policy, then send traffic
 to its recorded healthy Cloud Run revision. Do not restore a database snapshot to roll back application code. An

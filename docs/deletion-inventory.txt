@@ -34,7 +34,7 @@ public.assistant_disconnects | hidden | client_id provider subject | No foreign 
 public.guide_spend | hidden | account_key id | Content-free spend entries (account_key is a SHA-256 of the account ID) outlive accounts so deletion cannot reset caps.
 public.store_config | not-personal | limits_json | Service limits.
 public.stripe_events | not-personal | id payload_sha256 type | Event ID, type and body hash, never the payload.
-milton_app.session | deleted | access_token binding email generation incarnation issuer sid subject token_hash | Deleted with the writing (server/src/auth-lifecycle.ts); access_token is no longer written (null in new rows) and a later migration drops it.
+milton_app.session | deleted | binding email generation incarnation issuer sid subject token_hash | Deleted with the writing (server/src/auth-lifecycle.ts).
 milton_app.account_fingerprint | deleted | fingerprint user_id | Cascades from users.
 milton_app.trial_fingerprint | hidden | fingerprint first_user_id | Keyed trial-eligibility fingerprint and first claimant, kept after deletion to block a second trial.
 milton_app.lifecycle | hidden | client_id incarnation issuer kind progress requester_hash subject user_id | The deletion or disconnect operation, kept so a retry resumes it and never starts another.

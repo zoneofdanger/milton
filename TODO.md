@@ -37,6 +37,11 @@ reports, memos) and plain text on security screens and anything an assistant rea
       download. Also unanswered with evidence: why Milton over the assistant's built-in memory,
       and how reliably assistants offer and save what they should across clients. milton-eval's
       email before-and-after is the first piece; needs a fictional test account Peter provides.
+      2026-11-08: the fictional account (`e2e@milton-test.invalid`, owner script
+      `server/scripts/test-account.ts`) and a daily-runnable check (`server/scripts/e2e.ts`:
+      browser sign-in, connection key, save, fresh read, correction, retirement) exist; see
+      the hosting runbook. Still open: the fresh-chat read and download through real
+      assistant clients, and cross-client evidence of what assistants offer and save.
 
 - [ ] #11 (server, low) **Make the spend test independent of UTC midnight.** A store-spend test
       reads the current UTC day twice and fails when a run crosses midnight (seen 2026-11-03

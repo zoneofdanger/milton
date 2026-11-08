@@ -400,6 +400,38 @@ token and binding rows, all removed by expiry, later sign-ins and the maintenanc
 under the 64-per-user cap. The key's `last_used_at` is updated. Nothing is mailed and
 nothing calls Stripe.
 
+### Daily run (proposal, not built)
+
+Follow the maintenance job's pattern (`milton-auth-maint`: a Cloud Run job, a Cloud Scheduler
+trigger, numeric secret versions), with nothing shared with it:
+
+- **Image.** The runtime image runs Node with bundled files and has no `bun` or
+  `server/scripts`, so add `e2e.ts` as a Node bundle (`e2e.js`, the MCP SDK bundled) to
+  `server/scripts/build.ts` and the image, as the auth image carries `deliver.js` and
+  `maintain.js`. Pin the image digest like the services.
+- **Job.** `milton-e2e` in `us-east4`, command `node e2e.js /run/milton-e2e/account.env`, one
+  task, no platform retries (a failure is the signal; the next day's run retires any
+  leftover), task timeout 300 s, service account `milton-e2e@` with no database, project
+  or other secret access.
+- **Secret.** `milton-e2e-account`, version 1 = the provisioned env file, added from the
+  file (`gcloud secrets versions add milton-e2e-account --data-file=...`), mounted at a
+  numeric version as `/run/milton-e2e/account.env`; only `milton-e2e@` may access it. A
+  renewed key is a new version and a job update.
+- **Schedule.** Once a day at a quiet hour (say 14:00 UTC), triggered as `milton-auth-cron@`
+  or a dedicated invoker with `run.invoker` on this job only; check the trigger URL ends in
+  `:run`.
+- **Alerts.** The job prints `severity` in each JSON line, which Cloud Logging reads as the
+  entry's severity, and the failing step's line is `ERROR`. `milton-auth-jobs-errors-log`
+  matches only `milton-auth-*` jobs, so add `milton-e2e-errors-log` the same way (any ERROR
+  from the `milton-e2e` job or its scheduler job, rate limit 10 minutes) to the same
+  `milton-ops-email` channel, Peter's address; and a second log match on
+  `jsonPayload.warning="key_expires_within_30_days"`, at most one notification a day,
+  for the key renewal. A run that never starts (scheduler paused or deleted) raises
+  nothing; a log-absence alert on the `done` line over 26 hours would cover it.
+  **Alert delivery is unverified:** this runbook records the channel and policies but no
+  test notification reaching Peter; send one when the policies are created.
+- **Cost.** About a minute of one vCPU a day, inside Cloud Run's free tier; the writes above.
+
 ## Optional guide worker
 
 The default-off private guide pilot has separate [operations and capability instructions](guides.md). No guide job, schedule, provider key or account enrollment is provisioned by its build.

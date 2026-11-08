@@ -164,12 +164,16 @@ export async function runSave(
             message: "The submitted memo is too large. Nothing was changed.",
           });
         // A refusal or failure while applying undoes every change it made,
-        // and the receipt stores it, so the same request replays it.
+        // and the receipt stores it, so the same request replays it. A
+        // transient or unknown failure (store_unavailable: a timeout, deadlock
+        // or lost connection) instead rolls back the whole save, receipt and
+        // charge included, so the same request can succeed on retry.
         await tx.query(sql`SAVEPOINT apply`);
         try {
           return await applySave(save, tx, current, limits);
         } catch (error) {
           const failure = databaseFailure(error);
+          if (failure.code === "store_unavailable") throw failure;
           await tx.query(sql`ROLLBACK TO SAVEPOINT apply`);
           // databaseFailure yields only StoreErrors, whose messages are
           // written for clients; unknown errors carry its generic message.

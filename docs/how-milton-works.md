@@ -198,7 +198,9 @@ not at all.
 ### Apply
 
 - Validation and writes run after a savepoint; a refusal or failure rolls back to it,
-  so nothing changes and the receipt stores the failure.
+  so nothing changes and the receipt stores the failure. A transient or unknown
+  database error (`store_unavailable`) rolls back the whole save instead, with no
+  receipt or charge, so the same request can succeed on retry.
 - Rule changes append new versions, so nothing is overwritten.
 - An edit plus a move on the same rule produces one version.
 - Moving a rule to the report it is already in changes nothing.

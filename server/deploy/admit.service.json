@@ -5,7 +5,8 @@
     "name": "milton-admit",
     "annotations": {
       "run.googleapis.com/ingress": "all",
-      "run.googleapis.com/maxScale": "3"
+      "run.googleapis.com/maxScale": "3",
+      "run.googleapis.com/minScale": "1"
     }
   },
   "spec": {
@@ -22,7 +23,7 @@
         "timeoutSeconds": 30,
         "containers": [
           {
-            "image": "us-east4-docker.pkg.dev/milton-510506/milton/runtime@sha256:REQUIRES_RELEASE_DIGEST",
+            "image": "us-east4-docker.pkg.dev/milton-510506/milton/runtime@sha256:e11636a5a5d3e0101c6406c735e021046762636f5fe838fcc3de98836548494b",
             "ports": [
               {
                 "containerPort": 8080
@@ -48,7 +49,7 @@
                 "valueFrom": {
                   "secretKeyRef": {
                     "name": "milton-admit-key",
-                    "key": "1"
+                    "key": "2"
                   }
                 }
               }
@@ -68,7 +69,7 @@
               "secretName": "milton-admit-env",
               "items": [
                 {
-                  "key": "1",
+                  "key": "2",
                   "path": ".env"
                 }
               ]

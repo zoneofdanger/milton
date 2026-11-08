@@ -716,8 +716,8 @@ sets, in database `milton` only, 20 s statement and 10 s lock limits for
 `milton_app_runtime` and `milton_mcp_runtime` (the values in `src/store/database.ts`) and
 a 5 s statement limit for `milton_auth_runtime` (`apps/auth`'s value; it sets no lock
 limit). Owner, delegate, legacy and guide roles get none. `check-runtime-role.ts`
-requires the app/MCP settings; `007-role-timeouts.down.sql` resets exactly these. A
-setting reaches only sessions that start after it.
+requires the app/MCP settings. A setting reaches only sessions that start after it.
+Rollback is the pre-migration snapshot.
 
 App and MCP read `sample_versions` and the guide state in `guide_accounts` and
 `report_guides`; MCP appends to `samples` and `sample_versions` but cannot update

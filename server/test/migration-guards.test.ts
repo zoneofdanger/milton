@@ -183,6 +183,23 @@ test("a migration that drops or renames needs a merged code-stopped-by PR", () =
       "ALTER TABLE t ALTER COLUMN id DROP NOT NULL; ALTER TABLE t DROP CONSTRAINT c;",
     ),
   ).toEqual([]);
+  // Renames of what code names need the header; index, constraint and sequence
+  // renames do not.
+  for (const statement of [
+    "ALTER TABLE t RENAME TO u;",
+    "ALTER VIEW v RENAME TO w;",
+    "ALTER SCHEMA s RENAME TO z;",
+    "ALTER TYPE mood RENAME VALUE 'sad' TO 'blue';",
+    "ALTER TYPE pair RENAME ATTRIBUTE label TO name;",
+    "ALTER FUNCTION f() RENAME TO g;",
+  ])
+    expect(drop("", statement)).toHaveLength(1);
+  expect(
+    drop(
+      "",
+      "ALTER INDEX t_idx RENAME TO t_idx2; ALTER TABLE t RENAME CONSTRAINT t_pkey TO t_pk; ALTER SEQUENCE s RENAME TO s2;",
+    ),
+  ).toEqual([]);
   // Comments and strings neither hide a statement nor fake one.
   for (const statement of [
     "DROP/**/TABLE t;",

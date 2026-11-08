@@ -53,7 +53,10 @@ const DESTRUCTIVE = [
   /\bDROP\s+COLUMN\b/i,
   /^ALTER\s+TABLE\b.*?\bDROP\s+(?!CONSTRAINT\b|DEFAULT\b|NOT\b|EXPRESSION\b|IDENTITY\b)[A-Za-z_"]/i,
   /^ALTER\s+TYPE\b.*\bDROP\s+(?:ATTRIBUTE|VALUE)\b/i,
-  /\bRENAME\b/i,
+  // Renames of what code names: tables, columns, views, schemas, types (their
+  // attributes and enum values) and functions. Index, sequence, trigger and
+  // constraint renames pass.
+  /^ALTER\s+(?:TABLE|VIEW|MATERIALIZED\s+VIEW|FOREIGN\s+TABLE|SCHEMA|TYPE|DOMAIN|FUNCTION|PROCEDURE|ROUTINE)\b.*\bRENAME\b(?!\s+CONSTRAINT\b)/i,
 ];
 // Dynamic SQL this check cannot read: a DO block, or EXECUTE other than a
 // trigger's EXECUTE FUNCTION or the EXECUTE privilege.

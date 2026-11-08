@@ -151,7 +151,9 @@ the lock and journal and says so):
   `bun scripts/check-migrations.ts --update` and commit the manifest with it.
 - A new migration that drops, truncates or renames a table or column (or drops a
   type's attribute) carries a line `-- code-stopped-by: #NN` naming the merged PR that
-  stopped all code using it, and ships only after that code is released. Comments and
+  stopped all code using it, and ships only after that code is released. Renaming a
+  view, schema, type, enum value or function needs it too; index, sequence, trigger
+  and constraint renames do not. Comments and
   string literals are skipped. Dynamic SQL (a `DO` block or `EXECUTE`) cannot be read,
   so it needs that line or `-- no-drop-or-rename: <reason>`.
 

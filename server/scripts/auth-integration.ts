@@ -1970,12 +1970,13 @@ try {
   );
   stage = "fixed-client app/native RP logout";
   // Ordinary native logout must leave offline assistants independent of sid.
+  // "Switch account" is that logout carrying native's echoed fixed state.
   await request(app, config.appOrigin + "/tps-report", appCookies);
   const logout = await request(
     app,
     config.appOrigin + "/logout",
     appCookies,
-    { csrf: appCookies.get("__Host-milton-csrf")! },
+    { csrf: appCookies.get("__Host-milton-csrf")!, next: "login" },
     true,
   );
   assert.equal(logout.status, 200);
@@ -1999,12 +2000,40 @@ try {
   assert.equal(completed.status, 302);
   assert.equal(
     completed.headers.get("Location"),
-    config.appOrigin + "/auth/logged-out",
+    config.appOrigin + "/auth/logged-out?state=switch-account",
   );
   assert.equal(await appActive(config, row), false);
   assert.equal(
     (await request(app, config.appOrigin + "/tps-report", appCookies)).status,
     403,
+  );
+  const switched = await request(
+    app,
+    completed.headers.get("Location")!,
+    appCookies,
+  );
+  assert.equal(switched.status, 303);
+  assert.equal(
+    switched.headers.get("Location"),
+    config.appOrigin + "/login?fresh=1",
+  );
+  const chooser = await request(
+    app,
+    switched.headers.get("Location")!,
+    appCookies,
+  );
+  assert.equal(chooser.status, 303);
+  const chooserAuthorize = new URL(chooser.headers.get("Location")!);
+  assert.equal(chooserAuthorize.searchParams.get("prompt"), "login");
+  const chooserPage = await request(
+    native.handler,
+    chooserAuthorize.href,
+    authCookies,
+  );
+  assert.equal(
+    new URL(chooserPage.headers.get("Location")!, ISSUER).pathname,
+    "/login",
+    "switch account reaches the native sign-in page",
   );
   const refreshed = await oidc.refreshTokenGrant(
     assistantClient,
@@ -2044,7 +2073,7 @@ try {
   assert.equal(await keyCall(beforeRecoveryKey), 401);
   assert.equal(await keyCall(unrelatedKey), 200);
   pass(
-    "actual offline refresh survives ordinary browser logout; native recovery fences access and refresh",
+    "actual offline refresh survives browser logout (Switch account reaches native sign-in); native recovery fences access and refresh",
   );
   assert.equal(
     (

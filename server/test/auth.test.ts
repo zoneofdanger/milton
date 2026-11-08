@@ -1905,6 +1905,34 @@ test("OIDC callback is correlated once, checks native proof on every use, and cl
       appOrigin + "/auth/logged-out",
     );
     expect((await send("/tps-report")).status).toBe(403);
+    // "Switch account" ends the session the same way and carries one fixed
+    // logout state back; only that exact value turns into a fresh sign-in.
+    callback = await start();
+    expect((await send(callback)).status).toBe(303);
+    await send("/tps-report");
+    const switched = new URL(
+      /content="0;url=([^"]+)"/
+        .exec(await (await send("/logout", { next: "login" })).text())![1]!
+        .replaceAll("&amp;", "&"),
+    );
+    expect(switched.pathname).toBe("/api/auth/oauth2/end-session");
+    expect(switched.searchParams.get("post_logout_redirect_uri")).toBe(
+      appOrigin + "/auth/logged-out",
+    );
+    const state = switched.searchParams.get("state");
+    expect((await send("/tps-report")).status).toBe(403);
+    const back = await send("/auth/logged-out?state=" + state);
+    expect(back.status).toBe(303);
+    expect(back.headers.get("Location")).toBe(appOrigin + "/login?fresh=1");
+    for (const forged of [
+      "state=login",
+      "state=" + encodeURIComponent("https://foreign.example/"),
+      `state=${state}&state=${state}`,
+    ]) {
+      const signedOut = await send("/auth/logged-out?" + forged);
+      expect(signedOut.status).toBe(200);
+      expect(await signedOut.text()).toContain("Signed out");
+    }
   } finally {
     logged.mockRestore();
     await local.dispose();

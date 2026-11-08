@@ -10,8 +10,8 @@ import type { TrialStatus } from "./store/trials";
 /**
  * The signed-in account chrome: the header's account menu and the links row.
  * The email shows only here, never on public pages or in downloads. "Switch
- * account" signs out to the sign-in page; signing out never disconnects
- * assistants.
+ * account" signs out of Milton and the auth service, then returns to a fresh
+ * sign-in; signing out never disconnects assistants.
  */
 export type Account = {
   csrf: () => Child;

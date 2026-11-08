@@ -8,6 +8,7 @@ import { decodeJwt } from "jose";
 import type pg from "pg";
 import { AUTH_ORIGIN, type Config } from "./config.ts";
 import type { RequestState } from "./adapter.ts";
+import { reservedRecipient } from "./recipient.ts";
 
 // Native getCryptoKey (used by makeSignature) imports an HMAC signing key.
 // Symmetric utilities instead accept a versioned SecretConfig. No bare-hex fallback.
@@ -93,8 +94,10 @@ export async function acceptMail(
 ) {
   if (s.mailFault || (s.mailExpected && !s.mail))
     throw new Error("native_mail_capture_failed");
+  // A reserved recipient's message commits the same no-op receipt an unknown
+  // address does, so the public answer is the same and nothing is queued.
   const id = randomUUID(),
-    m = s.mail;
+    m = s.mail && !reservedRecipient(s.mail.to) ? s.mail : undefined;
   const payload = m
     ? await symmetricEncrypt({
         key: await key(config.AUTH_SECRET),

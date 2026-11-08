@@ -152,6 +152,8 @@ A file must not begin, commit or roll back a transaction itself. The runner noti
 
 ## Bounded mail delivery and retention
 
+No mail is ever queued for an address on the reserved `.invalid` top-level domain (`reservedRecipient` in [src/mail.ts](src/mail.ts)), such as the fictional end-to-end test account: a reset, verification or any other message for one commits the same no-op receipt an unknown address does, so the public answer is unchanged and the delivery job has nothing to send. Fixtures that need real queued mail use `example.com`.
+
 Why a queue, not inline sends (decided 2026-11-07, dropped TODO #26): sending during the request makes existing accounts answer measurably slower than unknown addresses, which reveals who has an account; sending after the response is unreliable on Cloud Run because CPU is throttled once the response is sent. The outbox gives every address the same database write and the same answer, retries through Resend outages, and cancels a queued reset after a security change.
 
 ```sh

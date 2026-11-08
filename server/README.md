@@ -467,6 +467,30 @@ foreign key cascades from `users`. Rows are kept 90 days: the auth maintenance j
 deletes older ones in bounded batches through `public.prune_usage_calls` (Drizzle `0008`),
 never a request. `0008` also dropped `usage_daily` and the stored `daily_calls` key, the
 retired daily allowance's leftovers.
+
+`users.test_account` (Drizzle `0009`, default false) marks the fictional account the
+daily end-to-end check uses (`e2e@milton-test.invalid`; see the hosting runbook). Only
+the owner sets it. Usage numbers and every metric or count of accounts, calls, saves or
+samples exclude test accounts: join `users` and filter `NOT u.test_account`. The
+canonical usage count:
+
+```sql
+SELECT c.tool, count(*) AS calls
+FROM usage_calls c JOIN users u ON u.id = c.user_id
+WHERE NOT u.test_account AND c.at >= now() - interval '30 days'
+GROUP BY c.tool ORDER BY c.tool;
+```
+
+Accounts: `SELECT count(*) FROM users WHERE status = 'active' AND NOT test_account;`.
+Test accounts are permanently exempt from trials and billing, while trials stay on for
+everyone else: their access never depends on a Stripe trial or customer. Each path checks
+`test_account` explicitly, not only the absent trial row: the gate reads a test account as
+early access whatever row it holds, so an ended status never closes it; sign-in's
+`ensureSubscription` starts nothing for it; checkout and the portal answer 409; account
+creation, the backfill and the returning-identity cancellation never give it a row or a
+status; the webhook never writes its row; and no trial notice is offered. So no path
+creates a Stripe customer for one. Operational checks that size a table
+for a migration (such as `0008`'s size gate) count every row, test rows included.
 There are no public archive/restore exemptions or history controls.
 Retained history has no cap.
 
@@ -716,6 +740,15 @@ EXECUTE revoked from PUBLIC. The owner applies `migrations/010-usage-retention-r
 after `0008`: only `milton_auth_owner`, the auth maintenance job's role, may execute it,
 with USAGE on `public` to resolve its name and no privilege on any writing table. No
 runtime may run it. Rerunning 010 converges. Rollback is the pre-migration snapshot.
+
+Test accounts (Drizzle `0009`) add `users.test_account`. The owner applies
+`migrations/011-test-account-roles.sql` right after `0009`: app's table-wide INSERT on
+`users` becomes INSERT on `id`, `status` and `created_at`, what it could insert before,
+so with app and MCP UPDATE on `id` only (005) and nothing for auth or the guide, no
+runtime login can set the column; the owner alone marks an account. Rerun 011 after any
+rerun of 005, which restores table-wide INSERT. The legacy `milton_runtime` group's
+table-wide grants (baseline) still cover the column; its `milton_app` login is unused.
+Rerunning 011 converges. Rollback is the pre-migration snapshot.
 
 Server timeouts live on the runtime logins, because Neon's proxy and pooler drop the
 `statement_timeout`/`lock_timeout` a client passes at connect (the pools still pass them,

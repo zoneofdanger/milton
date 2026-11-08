@@ -293,7 +293,7 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
 - Auth runtime and owner command pools always verify PostgreSQL TLS certificates/hostnames, even with mode omitted; unsafe/libpq/duplicate URL settings refuse.
 - Every native generation advance or deletion atomically retires older reset proofs; issuance takes the original user snapshot under the same parent lock, never the redemption-time generation.
 - Native unlink awaits app eligibility preservation before taking its parent lock; app uses guarded original metadata and stores fingerprints for existing writing accounts only, without billing or admission.
-- Native mail callbacks capture one original message; every generic signup/reset/resend success commits the same encrypted-job or no-op receipt outside native swallowing, with no provider I/O during HTTP; failure is uncertain/retryable503.
+- Native mail callbacks capture one original message; every generic signup/reset/resend success commits the same encrypted-job or no-op receipt outside native swallowing, with no provider I/O during HTTP; failure is uncertain/retryable503. A message to a reserved `.invalid` address is never queued: it commits the no-op receipt an unknown address gets, so the answer is the same and delivery has nothing to send.
 - Auth-only mail functions lease one original message at a time for bounded delivery, stable job-id idempotency, finite retries and shared Retry-After pause capped at24 hours by worker and SQL across passes; native authority never rebinds to a later email owner.
 - Native capture checks its one-hour lifetime on the native clock; SQL accepts only finite future proof expiry and caps mail delivery at native expiry or15 minutes; terminal transitions clear payloads and bounded owner maintenance clears expired/fenced payloads and receipts eligible after24 hours, with physical retention longer if maintenance is delayed.
 - Bootstrap000 validates an explicit complete retained-login CONNECT/audited TEMP inventory before transactional pregrants/PUBLIC revocation; missing or inconsistent inventory refuses without partial privilege loss.
@@ -305,7 +305,8 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
 - A trial row with no status gets the existing 30-day Stripe trial when billing is configured; no row/status or billing disabled calls no Stripe API.
 - Subscription creation locks the trial row across customer/list/create; minute-based idempotency retains the known remote-success/local-timeout ambiguity across a minute boundary.
 - Billing failures stop admission with retryable503; existing Stripe state is listed/reconciled before another create.
-- The subscription backfill remains an owner-selected dry run by default and never gives returning deleted identities another trial.
+- Owner-only `server/scripts/test-account.ts` provisions the fictional end-to-end account (`e2e@milton-test.invalid`): its Milton account, created first by the owner marked `test_account` and with no trial row and bound to a pre-chosen native id, so sign-in, checkout and the backfill never call Stripe for it; then the native user with a verified `.invalid` email and a random password, created last and without queuing any mail, so nobody can sign in to an unmarked account; a browser sign-in; and a 365-day read-and-save key minted through the app's form. It writes the three values to a new mode-0600 env file and refuses an existing email or file and any address outside `.invalid`, before any write; after a failure, `--resume` with the same file converges on the marked account, verifying it before signing in.
+- The subscription backfill remains an owner-selected dry run by default and never gives returning deleted identities another trial; it skips test accounts entirely (not counted, no Stripe call).
 - Account security routes to native UI; destructive deletion requires authoritative native freshness, exact typed confirmation and retention of current guarded verified-identity fingerprints.
 - App persists lifecycle UUID, original account/subject/incarnation/client and requester association before first native/remote attempt; retries never select current/recreated targets.
 - Disconnect commits native original-binding refusal before bounded cleanup; a failed or unfinished step answers 503 with a retry page re-posting the same operation, as deletion does; reconnect creates a new binding and never revives an old token.
@@ -366,6 +367,10 @@ Files: `server/src/store/index.ts`, `server/src/store/trials.ts`,
   expired.
 - No row, no status, or a status Milton does not know reads as early access, so a Stripe
   outage never cuts off a connected assistant, and reads never call Stripe.
+- A test account (`users.test_account`) is permanently exempt from trials and billing,
+  checked explicitly on each path: it always reads as early access, sign-in starts no
+  subscription for it, checkout and the portal answer 409, no path gives it a trial row or
+  status, the webhook never writes its row and no trial notice is offered.
 - A trial notice is claimed once per stage, 7 days and 1 day before `trial_end`, only
   while trialing, and carries the one link, the signed-in app home.
 - Expired accounts are blocked for assistants with a refusal carrying that link, while the
@@ -426,6 +431,7 @@ Files: `server/drizzle/`, `server/src/store/schema.ts`, `server/src/store/databa
   the `retained_bytes` counter it read; 0006 drops the generated `payload_bytes` columns
   it summed.
 - User IDs cannot change.
+- `users.test_account` (0009, default false) marks the fictional end-to-end check account; owner file `011-test-account-roles.sql` narrows app's INSERT on `users` to its other columns, so no runtime login can set it, and usage and metric counts exclude it.
 - Disconnects and identity hashes have no foreign key to users, so they outlive the account.
 - `connection_keys` (0004) cascades from users and from its (issuer, subject) identity, requires the native binding (issuer, subject, incarnation, generation), checks id, hash, name, scope, binding lengths and dates, and grants nothing to the legacy writing group; owner file `006-connection-keys-roles.sql` lets app read every column but the hash (binding included), insert and set `revoked_at`, and MCP read and set `last_used_at` only.
 - Native 007 adds only `milton_guard.connection_key_status(subject, incarnation, generation)`: SECURITY DEFINER, fixed `pg_catalog, pg_temp` path, false on NULL or any mismatch, no PUBLIC/auth/guide EXECUTE and no table grants; MCP and app may execute it. Without it, every key is refused.
@@ -477,7 +483,8 @@ Files: `packages/theme/`, `server/scripts/`, `.github/workflows/checks.yml`.
 - The isolated check-auth-integration builds actual product modules with production minification under Node26/PG18 and mocks only external boundaries.
 - `check-runtime-role` audits selected NOINHERIT app/MCP roles, ownership, DDL/TEMP, native/app credential/function boundaries and the role's own 20 s statement / 10 s lock timeouts.
 - `probe-forms` confirms a signed-out form post passes CSRF.
-- `build.ts` builds the CSS with Vite, versions the public assets by content hash, and bundles the Cloud Run and guide worker entries with Bun, minified except identifiers, with source maps the image leaves out.
+- `e2e.ts` checks a deployment end to end on the test account only: a browser sign-in that must show the account and list the key's public id before the key is sent anywhere, an MCP connection with that key listing four tools, then a gate before any write (nothing on file but this check's marked leftovers, which it retires first), a marked fictional sample saved, read fresh, revised by `sample_id`, read fresh and retired, and a final read equal to the run's start. One JSON line per step with no secret or sample body; a key under 30 days from expiry warns; exit 0 only when every step passes, and 1 for a refusal, a failed step, a crash or a run past 240 s.
+- `build.ts` builds the CSS with Vite, versions the public assets by content hash, and bundles the Cloud Run, guide worker and end-to-end check (`e2e.js`, the `milton-e2e-daily` job) entries with Bun, minified except identifiers, with source maps the image leaves out.
 - `dev.ts` serves the app on loopback and rebuilds the CSS on change.
 - CI runs types, tests, formatting, and both integration suites on PostgreSQL 18, holds no secrets, and does not deploy.
 

@@ -181,7 +181,7 @@ export async function httpFixture(
         await call(
           "/form/signin",
           {
-            email: "social-only@example.invalid",
+            email: "social-only@example.com",
             password: "First fictional social password 321",
           },
           { origin: "https://app.meetmilton.com" },
@@ -193,7 +193,7 @@ export async function httpFixture(
     const query =
       /name="oauth_query" value="([^"]*)"/.exec(loginPage.body)?.[1] ?? "";
     const signin = await call("/form/signin", {
-      email: "social-only@example.invalid",
+      email: "social-only@example.com",
       password: "First fictional social password 321",
       oauth_query: query,
     });
@@ -460,7 +460,7 @@ export async function httpFixture(
         "vbscript:unsafe",
         "file:///unsafe",
         "blob:https://example.invalid/unsafe",
-        "https://user:password@example.invalid/callback",
+        "https://user:password@example.com/callback",
         "https://example.invalid/callback\nunsafe",
         "http://example.invalid/callback",
       ]) {
@@ -484,7 +484,7 @@ export async function httpFixture(
       // Real native signed confirmation and session retirement, through the
       // compiled app and TLS listener; no controlled native authority here.
       const login = await call("/form/signin", {
-        email: "social-only@example.invalid",
+        email: "social-only@example.com",
         password: "First fictional social password 321",
       });
       assert.equal(login.status, 200);

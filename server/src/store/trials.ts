@@ -41,21 +41,26 @@ export async function trialStatus(
     await db.query<{
       guard: unknown;
       enabled: boolean;
+      test: boolean;
       status: string | null;
       trial_end: Date | string | null;
       now: Date | string;
       in_grace: boolean;
-    }>(sql`SELECT ${guard?.value ?? sql`NULL`} AS guard, c.trials_enabled AS enabled, t.subscription_status AS status,
+    }>(sql`SELECT ${guard?.value ?? sql`NULL`} AS guard, c.trials_enabled AS enabled,
+    coalesce(u.test_account,false) AS test, t.subscription_status AS status,
     t.trial_end, clock_timestamp() AS now,
     coalesce(clock_timestamp() < t.current_period_start + interval '3 days',true) AS in_grace
     FROM store_config c LEFT JOIN trial_accounts t ON t.user_id=${userId}
+    LEFT JOIN users u ON u.id=${userId}
     WHERE c.singleton=1`)
   )[0];
   if (!row)
     throw new StoreError("configuration", "Account access is unavailable.");
   guard?.admit(row.guard);
   const { status } = row;
-  if (!row.enabled || !status)
+  // A test account is permanently outside trials and billing: always early
+  // access, whatever trial row it may hold.
+  if (!row.enabled || !status || row.test)
     return { status: "early_access", reminder_stage: 0 };
   // A failed renewal's period end is already a month ahead, so past_due's grace
   // runs from the renewal, the start of the unpaid period.
@@ -121,7 +126,7 @@ export async function claimTrialNotice(
     UPDATE trial_accounts t SET notice_stage=CASE
       WHEN t.trial_end <= clock_timestamp()+interval '24 hours' THEN 2 ELSE 1 END
     WHERE t.user_id=${userId}
-      AND EXISTS (SELECT 1 FROM users u WHERE u.id=t.user_id AND u.status='active')
+      AND EXISTS (SELECT 1 FROM users u WHERE u.id=t.user_id AND u.status='active' AND NOT u.test_account)
       AND EXISTS (SELECT 1 FROM store_config WHERE singleton=1 AND trials_enabled)
       AND t.subscription_status='trialing'
       AND t.trial_end > clock_timestamp()

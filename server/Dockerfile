@@ -9,6 +9,9 @@ COPY apps/auth/package.json apps/auth/package.json
 RUN bun install --frozen-lockfile --filter @milton/server
 COPY server/src server/src
 COPY server/scripts/build.ts server/scripts/build.ts
+COPY server/scripts/e2e.ts server/scripts/e2e.ts
+COPY server/scripts/e2e-http.ts server/scripts/e2e-http.ts
+COPY apps/auth/src/recipient.ts apps/auth/src/recipient.ts
 COPY server/vite.config.ts server/vite.config.ts
 COPY server/tsconfig.json server/tsconfig.json
 COPY packages/theme packages/theme
@@ -21,6 +24,7 @@ WORKDIR /repo
 COPY server/package.json ./server/package.json
 COPY --from=build /repo/server/dist/cloud-run.js ./server/dist/cloud-run.js
 COPY --from=build /repo/server/dist/guide-worker.js ./server/dist/guide-worker.js
+COPY --from=build /repo/server/dist/e2e.js ./server/dist/e2e.js
 COPY --from=build /repo/server/public ./server/public
 USER node
 EXPOSE 8080

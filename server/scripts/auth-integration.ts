@@ -2,7 +2,14 @@
  * files, inherited database credentials, external requests or live operations. */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { randomBytes, createHash, randomUUID } from "node:crypto";
@@ -49,6 +56,17 @@ import { ISSUER, AUTH_ORIGIN } from "../../apps/auth/src/config";
 import { assertPortFree, startCluster } from "../../apps/auth/scripts/cluster";
 import { fixtureConfig } from "../../apps/auth/test/fixture-config";
 import { AUTH_MIGRATIONS } from "../../apps/auth/scripts/migrations";
+import { createApp as createAuthPages } from "../../apps/auth/src/app";
+import { versionAssets } from "@milton/theme/assets";
+import { ownerPools, provisionTestAccount, TEST_EMAIL } from "./test-account";
+import {
+  browser,
+  CheckError,
+  PRODUCTION,
+  signIn,
+  type Fetch,
+} from "./e2e-http";
+import { runE2E, type Line } from "./e2e";
 
 const port = 55623;
 const sourceRoot = pathToFileURL(process.cwd() + "/");
@@ -110,6 +128,7 @@ try {
     "0006_drop_unread_columns",
     "0007_usage_calls",
     "0008_usage_retention",
+    "0009_test_account",
   ])
     await owner.query(
       readFileSync(new URL(`./drizzle/${migration}.sql`, sourceRoot), "utf8"),
@@ -179,10 +198,11 @@ try {
         "utf8",
       ),
     );
-  // 009 and 010: rerunning converges too.
+  // 009, 010 and 011: rerunning converges too.
   for (const file of [
     "009-usage-calls-roles.sql",
     "010-usage-retention-roles.sql",
+    "011-test-account-roles.sql",
   ])
     for (let n = 0; n < 2; n++)
       await owner.query(
@@ -720,6 +740,50 @@ try {
     "milton_runtime",
   ])
     assert.deepEqual(await keyPrivileges(role), [], role);
+  // 0009 and 011: only the owner marks a test account. No runtime login can
+  // set users.test_account, by UPDATE or at INSERT; app still creates accounts.
+  for (const role of [
+    "milton_app_runtime",
+    "milton_mcp_runtime",
+    "milton_auth_runtime",
+    "milton_guide_runtime",
+  ])
+    assert.deepEqual(
+      (
+        await owner.query(
+          "SELECT has_column_privilege($1,'public.users','test_account','INSERT') i,has_column_privilege($1,'public.users','test_account','UPDATE') u",
+          [role],
+        )
+      ).rows[0],
+      { i: false, u: false },
+      role,
+    );
+  for (const [pool, statement] of [
+    [appPool, "UPDATE users SET test_account=true WHERE false"],
+    [mcpPool, "UPDATE users SET test_account=true WHERE false"],
+    [
+      appPool,
+      "INSERT INTO users(id,test_account) VALUES('m_fictional_flagged',true)",
+    ],
+  ] as const)
+    await assert.rejects(
+      pool.query(statement),
+      (e) => (e as { code?: string }).code === "42501",
+      statement,
+    );
+  {
+    const created = `m_${randomUUID()}`;
+    await appPool.query("INSERT INTO users(id) VALUES($1)", [created]);
+    assert.equal(
+      (
+        await owner.query("SELECT test_account FROM users WHERE id=$1", [
+          created,
+        ])
+      ).rows[0].test_account,
+      false,
+    );
+    await appPool.query("DELETE FROM users WHERE id=$1", [created]);
+  }
   // Native 007: one narrow SECURITY DEFINER status function with a fixed path,
   // EXECUTE for MCP and app only, never PUBLIC, auth or the guide.
   const keyStatus = "milton_guard.connection_key_status(text,text,text)";
@@ -764,7 +828,7 @@ try {
         incarnation: string;
         generation: string;
       }>(
-        `INSERT INTO milton_auth."user"(id,name,email,"emailVerified") VALUES('fictional-key-subject','Fictional','keys@example.invalid',true) RETURNING id,"miltonIdentityIncarnation" incarnation,"miltonSecurityGeneration" generation`,
+        `INSERT INTO milton_auth."user"(id,name,email,"emailVerified") VALUES('fictional-key-subject','Fictional','keys@example.com',true) RETURNING id,"miltonIdentityIncarnation" incarnation,"miltonSecurityGeneration" generation`,
       )
     ).rows[0]!;
     await owner.query(
@@ -1135,12 +1199,15 @@ try {
     subscriptions: 0,
     deleteDown: false,
     deleted: false,
+    // Every Stripe request of any kind.
+    requests: 0,
   };
   config.billing = {
     secretKey: "rk_test_fixtureNotAKey",
     webhookSecret: "whsec_fixtureNotASecret",
     priceId: "price_fixture",
     fetch: async (input, init) => {
+      stripe.requests++;
       const path = new URL(input).pathname;
       if (path === "/v1/customers" && init.method === "POST") {
         stripe.customers++;
@@ -1232,7 +1299,7 @@ try {
     (
       await request(native.handler, ISSUER + "/sign-up/email", authCookies, {
         name: "Fictional Person",
-        email: "person@example.invalid",
+        email: "person@example.com",
         password,
       })
     ).status,
@@ -1243,7 +1310,7 @@ try {
   assert.equal(
     (
       await request(native.handler, ISSUER + "/sign-in/email", authCookies, {
-        email: "person@example.invalid",
+        email: "person@example.com",
         password,
       })
     ).status,
@@ -1871,7 +1938,7 @@ try {
       incarnation: string;
       generation: string;
     }>(
-      `INSERT INTO milton_auth."user"(id,name,email,"emailVerified") VALUES('fictional-unrelated-subject','Fictional','unrelated@example.invalid',true) RETURNING id,"miltonIdentityIncarnation" incarnation,"miltonSecurityGeneration" generation`,
+      `INSERT INTO milton_auth."user"(id,name,email,"emailVerified") VALUES('fictional-unrelated-subject','Fictional','unrelated@example.com',true) RETURNING id,"miltonIdentityIncarnation" incarnation,"miltonSecurityGeneration" generation`,
     )
   ).rows[0]!;
   const unrelatedUser = "m_00000000-0000-4000-8000-0000000000c1";
@@ -2009,7 +2076,7 @@ try {
     native.handler,
     ISSUER + "/request-password-reset",
     authCookies,
-    { email: "person@example.invalid" },
+    { email: "person@example.com" },
   );
   const reset = mail.findLast((m) => m.kind === "reset");
   assert(reset);
@@ -2042,7 +2109,7 @@ try {
   assert.equal(
     (
       await request(native.handler, ISSUER + "/sign-in/email", authCookies, {
-        email: "person@example.invalid",
+        email: "person@example.com",
         password: nextPassword,
       })
     ).status,
@@ -2146,7 +2213,7 @@ try {
   assert.equal(
     (
       await request(native.handler, ISSUER + "/sign-in/email", authCookies, {
-        email: "person@example.invalid",
+        email: "person@example.com",
         password: nextPassword,
       })
     ).status,
@@ -2336,7 +2403,7 @@ try {
     (
       await request(native.handler, ISSUER + "/sign-up/email", authCookies, {
         name: "Fictional replacement",
-        email: "person@example.invalid",
+        email: "person@example.com",
         password,
       })
     ).status,
@@ -2348,7 +2415,7 @@ try {
   assert.equal(
     (
       await request(native.handler, ISSUER + "/sign-in/email", authCookies, {
-        email: "person@example.invalid",
+        email: "person@example.com",
         password,
       })
     ).status,
@@ -2413,7 +2480,7 @@ try {
       owner.query(
         'delete from milton_auth."rateLimit"; delete from milton_guard.rate_bucket',
       );
-    const freshEmail = "unlink-preserve@example.invalid";
+    const freshEmail = "unlink-preserve@example.com";
     const identity = "fictional-unlink-stable-google";
     const freshPassword = "Fictional unlink preservation password";
     authCookies.clear();
@@ -2590,7 +2657,7 @@ try {
     );
     authCookies.clear();
     appCookies.clear();
-    socialEmail = "unlink-changed@example.invalid";
+    socialEmail = "unlink-changed@example.com";
     await clearRates();
     assert.equal((await social(false)).status, 302);
     await appLogin();
@@ -2624,7 +2691,7 @@ try {
     await clearRates();
     authCookies.clear();
     appCookies.clear();
-    const nativeOnly = "unlink-native-only@example.invalid";
+    const nativeOnly = "unlink-native-only@example.com";
     await request(native.handler, ISSUER + "/sign-up/email", authCookies, {
       email: nativeOnly,
       password: freshPassword,
@@ -2700,6 +2767,541 @@ try {
       "lost native link notification -> unlink -> delete -> changed-email recreation preserves trial eligibility; callback uncertainty is safe and native-only unlink admits nobody",
     );
   }
+  // The test account and its check, through the real auth pages, app and MCP,
+  // with billing configured (the Stripe fixture counts every call) and the
+  // native mail queue watched.
+  stage = "test account provisioning";
+  const authAssets = join(root, "auth-assets");
+  mkdirSync(join(authAssets, "fonts"), { recursive: true });
+  const theme = new URL("../packages/theme/public/", sourceRoot).pathname;
+  cpSync(join(theme, "fonts"), join(authAssets, "fonts"), { recursive: true });
+  cpSync(join(theme, "favicon.svg"), join(authAssets, "favicon.svg"));
+  writeFileSync(join(authAssets, "auth.css"), "body{}\n");
+  versionAssets(authAssets, [
+    "/auth.css",
+    "/favicon.svg",
+    "/fonts/geist-latin-variable.woff2",
+    "/fonts/jetbrains-mono-latin.woff2",
+    "/fonts/jetbrains-mono-regular.woff2",
+  ]);
+  const authPages = createAuthPages(nativeService, authAssets);
+  // Each run is its own client behind the load balancer, as daily runs are
+  // for the key-lookup limits.
+  let checkClient = 200,
+    mcpRequests = 0;
+  const dispatch: Fetch = async (target, init) => {
+    const u = new URL(target);
+    const headers = new Headers(init.headers);
+    headers.set("Host", u.host);
+    if (u.host === "mcp.meetmilton.com") {
+      mcpRequests++;
+      headers.set("X-Forwarded-For", `198.51.100.${checkClient}, 192.0.2.1`);
+    }
+    const forwarded = new Request(u, {
+      method: init.method,
+      headers,
+      body: init.body as BodyInit | undefined,
+      signal: init.signal,
+    });
+    if (u.origin === AUTH_ORIGIN) return authPages.fetch(forwarded);
+    if (u.origin === config.appOrigin) return app(forwarded);
+    if (u.host === "mcp.meetmilton.com") return mcp(forwarded);
+    throw new Error("external_network_refused");
+  };
+  const testOwnerNative = new URL(ownerUrl);
+  testOwnerNative.searchParams.set("options", "-c role=milton_auth_owner");
+  const owners = ownerPools(testOwnerNative.href, ownerUrl.href);
+  pools.push(owners.native, owners.writing);
+  await owner.query(
+    'delete from milton_auth."rateLimit"; delete from milton_guard.rate_bucket',
+  );
+  const quiet = async () =>
+    JSON.stringify(
+      (
+        await owner.query(
+          "select (select count(*) from milton_guard.mail_job) mail,(select count(*) from users where test_account) marked",
+        )
+      ).rows[0],
+    ) + JSON.stringify([stripe.customers, stripe.subscriptions, mail.length]);
+  const before = await quiet();
+  const secrets = join(root, "test-account.env");
+  const lines: string[] = [];
+  const provisioned = await provisionTestAccount({
+    email: TEST_EMAIL,
+    output: secrets,
+    owners,
+    fetch: dispatch,
+    report: (...step) => lines.push(JSON.stringify(step)),
+  });
+  // No mail queued or sent and no Stripe call; exactly one marked account.
+  assert.equal(
+    await quiet(),
+    before.replace('"marked":"0"', '"marked":"1"'),
+    "provisioning queues no mail and calls no Stripe API",
+  );
+  assert.equal(statSync(secrets).mode & 0o777, 0o600);
+  const values = Object.fromEntries(
+    readFileSync(secrets, "utf8")
+      .trim()
+      .split("\n")
+      .map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)]),
+  );
+  assert.deepEqual(Object.keys(values), [
+    "E2E_EMAIL",
+    "E2E_PASSWORD",
+    "E2E_CONNECTION_KEY",
+  ]);
+  assert.equal(values.E2E_EMAIL, TEST_EMAIL);
+  assert.match(values.E2E_CONNECTION_KEY!, /^mk_/);
+  assert(
+    !lines.some(
+      (l) =>
+        l.includes(values.E2E_PASSWORD!) ||
+        l.includes(values.E2E_CONNECTION_KEY!.slice(26)),
+    ),
+    "steps print no password or key",
+  );
+  assert.deepEqual(
+    (
+      await owner.query(
+        `select n."emailVerified" verified,u.status,u.test_account marked,t.subscription_status status_value,t.user_id is null no_trial
+         from milton_auth."user" n join identities i on i.provider=$1 and i.subject=n.id
+         join users u on u.id=i.user_id left join trial_accounts t on t.user_id=u.id
+         where n.email=$2`,
+        [ISSUER, TEST_EMAIL],
+      )
+    ).rows,
+    [
+      {
+        verified: true,
+        status: "active",
+        marked: true,
+        status_value: null,
+        no_trial: true,
+      },
+    ],
+  );
+  assert.equal(provisioned.subject.length, 32);
+  // Refusals, each before any write: an existing email, an existing file and
+  // an address outside .invalid.
+  const unchanged = await quiet();
+  for (const [email, output, code] of [
+    [TEST_EMAIL, join(root, "again.env"), "test_email_exists"],
+    ["other@milton-test.invalid", secrets, "output_exists"],
+    [
+      "person@example.com",
+      join(root, "real.env"),
+      "test_email_must_end_invalid",
+    ],
+  ] as const) {
+    await assert.rejects(
+      provisionTestAccount({
+        email,
+        output,
+        owners,
+        fetch: dispatch,
+        report: () => {},
+      }),
+      (e) => e instanceof CheckError && e.code === code,
+      code,
+    );
+    assert.equal(await quiet(), unchanged);
+  }
+  assert(
+    !existsSync(join(root, "again.env")) && !existsSync(join(root, "real.env")),
+  );
+  pass(
+    "test account provisioning: verified .invalid user, no mail, no Stripe call, marked active account with no trial, 0600 file; refuses existing email, existing file and real addresses",
+  );
+  stage = "test account partial provisioning";
+  // A failure at either commit leaves nothing anyone can sign in to, so no
+  // unmarked account, trial or Stripe call can follow; --resume converges.
+  {
+    const refused = new Error("fictional_connection_lost");
+    const broken = (pool: pg.Pool) =>
+      ({
+        query: pool.query.bind(pool),
+        connect: async () => {
+          throw refused;
+        },
+      }) as unknown as pg.Pool;
+    const counts = async () =>
+      JSON.stringify(
+        (
+          await owner.query(
+            "select (select count(*) from users where not test_account) unmarked,(select count(*) from trial_accounts t join users u on u.id=t.user_id where u.test_account) trials",
+          )
+        ).rows[0],
+      ) + JSON.stringify([stripe.customers, stripe.subscriptions]);
+    const held = await counts();
+    for (const side of ["writing", "native"] as const) {
+      const email = `e2e-partial-${side}@milton-test.invalid`;
+      const file = join(root, `partial-${side}.env`);
+      await assert.rejects(
+        provisionTestAccount({
+          email,
+          output: file,
+          owners: { ...owners, [side]: broken(owners[side]) },
+          fetch: dispatch,
+          report: () => {},
+        }),
+        (e) => e === refused,
+      );
+      await owner.query(
+        'delete from milton_auth."rateLimit"; delete from milton_guard.rate_bucket',
+      );
+      const password = /^E2E_PASSWORD=(.+)$/m.exec(
+        readFileSync(file, "utf8"),
+      )![1]!;
+      await assert.rejects(
+        signIn(browser(PRODUCTION, dispatch), PRODUCTION, email, password),
+        (e) => e instanceof CheckError && e.code === "sign_in_refused",
+        `${side}: nobody can sign in after a partial run`,
+      );
+      assert.equal(await counts(), held, `${side}: no unmarked account`);
+      await provisionTestAccount({
+        email,
+        output: file,
+        owners,
+        fetch: dispatch,
+        report: () => {},
+        resume: true,
+      });
+      assert.match(readFileSync(file, "utf8"), /^E2E_CONNECTION_KEY=mk_/m);
+    }
+    // The native COMMIT succeeds but its acknowledgment is lost: the native
+    // user exists, already bound to the marked account, and --resume takes the
+    // existing-user branch without creating another.
+    const ackLost = {
+      query: owners.native.query.bind(owners.native),
+      connect: async () => {
+        const client = await owners.native.connect();
+        const query = client.query.bind(client) as (
+          ...args: unknown[]
+        ) => Promise<unknown>;
+        return Object.assign(client, {
+          query: async (...args: unknown[]) => {
+            const done = await query(...args);
+            if (args[0] === "commit") throw refused;
+            return done;
+          },
+        });
+      },
+    } as unknown as pg.Pool;
+    const lostEmail = "e2e-partial-ack@milton-test.invalid";
+    const lostFile = join(root, "partial-ack.env");
+    await assert.rejects(
+      provisionTestAccount({
+        email: lostEmail,
+        output: lostFile,
+        owners: { ...owners, native: ackLost },
+        fetch: dispatch,
+        report: () => {},
+      }),
+      (e) => e === refused,
+    );
+    const nativeRows = async () =>
+      (
+        await owner.query(
+          `select u.test_account marked,exists(select 1 from trial_accounts t where t.user_id=u.id) trial
+           from milton_auth."user" n join identities i on i.provider=$1 and i.subject=n.id
+           join users u on u.id=i.user_id where n.email=$2`,
+          [ISSUER, lostEmail],
+        )
+      ).rows;
+    assert.deepEqual(await nativeRows(), [{ marked: true, trial: false }]);
+    assert.equal(await counts(), held, "ack lost: no unmarked account");
+    await owner.query(
+      'delete from milton_auth."rateLimit"; delete from milton_guard.rate_bucket',
+    );
+    const steps: [string, boolean, object?][] = [];
+    await provisionTestAccount({
+      email: lostEmail,
+      output: lostFile,
+      owners,
+      fetch: dispatch,
+      report: (step, ok, _ms, extra) => steps.push([step, ok, extra]),
+      resume: true,
+    });
+    assert.deepEqual(
+      steps.find(([step]) => step === "native_user"),
+      ["native_user", true, { created: false }],
+    );
+    assert.deepEqual(await nativeRows(), [{ marked: true, trial: false }]);
+    assert.match(readFileSync(lostFile, "utf8"), /^E2E_CONNECTION_KEY=mk_/m);
+    assert.equal(await counts(), held, "resumed accounts stay marked");
+    assert.equal(
+      (
+        await owner.query(
+          `select count(*)::int n from users u join identities i on i.user_id=u.id
+           where u.test_account and not exists(select 1 from milton_auth."user" n where n.id=i.subject)`,
+        )
+      ).rows[0].n,
+      0,
+      "no marked account is left without its native user",
+    );
+  }
+  pass(
+    "partial provisioning before or between the commits leaves no account anyone can sign in to, a lost native commit acknowledgment leaves it marked; --resume converges on the marked, trial-free account",
+  );
+  stage = "e2e check";
+  // What one run adds to the account, by table: the runbook's daily footprint.
+  const footprint = async () =>
+    (
+      await owner.query(
+        `select (select count(*) from samples where user_id=$1)::int samples,
+          (select count(*) from sample_versions where user_id=$1)::int versions,
+          (select count(*) from sample_kinds where user_id=$1)::int kinds,
+          (select count(*) from save_requests where user_id=$1)::int receipts,
+          (select count(*) from accepted_changes where user_id=$1)::int changes,
+          (select count(*) from instruction_cards where user_id=$1)::int cards,
+          (select count(*) from usage_calls where user_id=$1)::int usage`,
+        [provisioned.userId],
+      )
+    ).rows[0] as Record<string, number>;
+  const grew = (a: Record<string, number>, b: Record<string, number>) =>
+    Object.fromEntries(Object.keys(a).map((k) => [k, b[k]! - a[k]!]));
+  const checkLines: Line[] = [];
+  const check = async () => {
+    await owner.query(
+      'delete from milton_auth."rateLimit"; delete from milton_guard.rate_bucket',
+    );
+    checkClient++;
+    checkLines.length = 0;
+    const counted = await footprint();
+    try {
+      await runE2E({
+        secrets,
+        fetch: dispatch,
+        report: (l) => checkLines.push(l),
+      });
+    } finally {
+      await backgroundSettled();
+    }
+    return grew(counted, await footprint());
+  };
+  const perRun = {
+    samples: 1,
+    versions: 3,
+    kinds: 0,
+    receipts: 3,
+    changes: 3,
+    cards: 0,
+    usage: 11,
+  };
+  // First run: the kind is made once; every later run reuses it.
+  assert.deepEqual(await check(), { ...perRun, kinds: 1 });
+  assert.deepEqual(
+    checkLines.map((l) => [l.step, l.ok]),
+    [
+      "secrets",
+      "sign_in",
+      "key_owner",
+      "mcp_connect",
+      "safety_gate",
+      "retire_leftovers",
+      "baseline",
+      "save_sample",
+      "fresh_read",
+      "revise_sample",
+      "fresh_read_revision",
+      "retire_sample",
+      "cleanup",
+      "done",
+    ].map((step) => [step, true]),
+  );
+  assert.deepEqual(await check(), perRun);
+  const printed = JSON.stringify(checkLines);
+  assert(
+    !printed.includes(values.E2E_PASSWORD!) &&
+      !printed.includes(values.E2E_CONNECTION_KEY!.slice(26)) &&
+      !printed.includes("tide table"),
+    "lines carry no password, key or sample body",
+  );
+  // A crashed run's marked leftover is retired first and reported, and a key
+  // under 30 days from expiry warns without failing.
+  const testKeyCall = async (name: string, args: object) =>
+    JSON.parse(
+      (
+        await result(
+          await rpc(
+            values.E2E_CONNECTION_KEY!,
+            "tools/call",
+            { name, arguments: args },
+            { "X-Forwarded-For": "198.51.100.199, 192.0.2.1" },
+          ),
+        )
+      ).result.content![0]!.text,
+    );
+  const testSave = async (args: object) =>
+    assert.equal(
+      (
+        await testKeyCall("create_memo", {
+          request_id: randomUUID(),
+          expected_version: (await testKeyCall("get_cover_sheet", {})).version,
+          ...args,
+        })
+      ).status,
+      "saved",
+    );
+  await testSave({
+    text: "Fictional crashed-run leftover.",
+    sample: {
+      report: "document",
+      new_kind: "e2e check",
+      context: { version: 1, summary: "Milton e2e check, run crashed0" },
+      text: "Fictional leftover the crashed run filed.",
+    },
+  });
+  await owner.query(
+    "update connection_keys set expires_at=now()+interval '20 days' where user_id=$1",
+    [provisioned.userId],
+  );
+  assert.equal((await check()).versions, 4, "leftover retired, then the run");
+  const owned = checkLines.find((l) => l.step === "key_owner")!;
+  assert.deepEqual(
+    [owned.severity, owned.warning, owned.key_days_left],
+    ["WARNING", "key_expires_within_30_days", 19],
+  );
+  assert.equal(checkLines.find((l) => l.step === "safety_gate")!.leftovers, 1);
+  assert.equal(
+    checkLines.find((l) => l.step === "retire_leftovers")!.retired,
+    1,
+  );
+  assert.equal(checkLines.at(-1)!.step, "done");
+  // Another account's key, supplied by mistake with the test account's
+  // password, is refused before any MCP request, so that key is never used.
+  const foreignSecrets = join(root, "foreign-key.env");
+  writeFileSync(
+    foreignSecrets,
+    `E2E_EMAIL=${values.E2E_EMAIL}\nE2E_PASSWORD=${values.E2E_PASSWORD}\nE2E_CONNECTION_KEY=${unrelatedKey}\n`,
+    { mode: 0o600 },
+  );
+  await owner.query(
+    "update connection_keys set last_used_at=now()-interval '1 day' where id=$1",
+    [unrelatedKey.slice(3, 25)],
+  );
+  const foreignUse = async () =>
+    (
+      await owner.query(
+        "select last_used_at from connection_keys where id=$1",
+        [unrelatedKey.slice(3, 25)],
+      )
+    ).rows[0].last_used_at.getTime();
+  const foreignBefore = await foreignUse();
+  const mcpBefore = mcpRequests;
+  await owner.query(
+    'delete from milton_auth."rateLimit"; delete from milton_guard.rate_bucket',
+  );
+  checkLines.length = 0;
+  await assert.rejects(
+    runE2E({
+      secrets: foreignSecrets,
+      fetch: dispatch,
+      report: (l) => checkLines.push(l),
+    }),
+    (e) => e instanceof CheckError && e.code === "key_not_on_account",
+  );
+  assert.deepEqual(
+    [mcpRequests - mcpBefore, await foreignUse()],
+    [0, foreignBefore],
+    "a foreign key makes no MCP request and is never touched",
+  );
+  // Foreign data (a rule nobody marked) refuses before any write.
+  await testSave({
+    text: "Fictional foreign rule.",
+    rules: [{ report: "cover", text: "Fictional foreign rule." }],
+  });
+  const held = await footprint();
+  await assert.rejects(
+    check(),
+    (e) => e instanceof CheckError && e.code === "account_holds_foreign_data",
+  );
+  assert.deepEqual(
+    { ...grew(held, await footprint()), usage: 0 },
+    { ...perRun, samples: 0, versions: 0, receipts: 0, changes: 0, usage: 0 },
+    "refused without writing",
+  );
+  assert.deepEqual(checkLines.at(-1), {
+    ...checkLines.at(-1),
+    step: "safety_gate",
+    ok: false,
+    severity: "ERROR",
+    error: "account_holds_foreign_data",
+  });
+  pass(
+    "e2e check: browser sign-in, MCP key, safety gate, save, fresh reads, revision, retirement and restored baseline; bounded per-run footprint; leftovers retired; expiring key warns; foreign data refused without writing",
+  );
+  stage = "test account exempt from trials and billing";
+  // Trials stay on. The test account's access never depends on a trial: repeated
+  // sign-ins, one with the account 31 days old, create no trial row and make no
+  // Stripe request, and saves stay allowed. Even a trial row put on it by
+  // mistake changes nothing: no subscription starts, an ended status does not
+  // close it, no trial notice is offered and checkout refuses without Stripe.
+  {
+    const testUser = provisioned.userId;
+    const signedIn = async () => {
+      await owner.query(
+        'delete from milton_auth."rateLimit"; delete from milton_guard.rate_bucket',
+      );
+      const b = browser(PRODUCTION, dispatch);
+      await signIn(b, PRODUCTION, TEST_EMAIL, values.E2E_PASSWORD!);
+      return b;
+    };
+    const trialRow = async () =>
+      (
+        await owner.query(
+          "select subscription_status status from trial_accounts where user_id=$1",
+          [testUser],
+        )
+      ).rows;
+    const requests = stripe.requests;
+    await owner.query(
+      "update users set created_at=now()-interval '31 days' where id=$1",
+      [testUser],
+    );
+    for (let n = 0; n < 3; n++) await signedIn();
+    assert.deepEqual(await trialRow(), []);
+    await testSave({
+      text: "Fictional rule after 31 days.",
+      rules: [{ report: "cover", text: "Fictional rule after 31 days." }],
+    });
+    await owner.query(
+      "insert into trial_accounts(user_id,started_at) values($1,now()-interval '31 days')",
+      [testUser],
+    );
+    const b = await signedIn();
+    assert.deepEqual(await trialRow(), [{ status: null }], "no trial started");
+    await owner.query(
+      "update trial_accounts set subscription_status='canceled' where user_id=$1",
+      [testUser],
+    );
+    await testSave({
+      text: "Fictional rule after an ended status.",
+      rules: [
+        { report: "cover", text: "Fictional rule after an ended status." },
+      ],
+    });
+    await owner.query(
+      "update trial_accounts set subscription_status='trialing',trial_end=now()+interval '12 hours' where user_id=$1",
+      [testUser],
+    );
+    assert.equal(
+      (await testKeyCall("get_cover_sheet", {})).notice,
+      undefined,
+      "no trial notice",
+    );
+    const page = await b.follow(PRODUCTION.app + "/assistants");
+    const checkout = await b.go(PRODUCTION.app + "/billing/checkout", {
+      csrf: /name="csrf" value="([A-Za-z0-9_-]{43})"/.exec(page.html)![1]!,
+    });
+    await checkout.body?.cancel();
+    assert.equal(checkout.status, 409, "checkout refuses a test account");
+    assert.equal(stripe.requests, requests, "no Stripe request at all");
+  }
+  pass(
+    "test accounts are exempt from trials and billing: repeated sign-ins past 30 days make no trial or Stripe request; a stray trial row neither starts a subscription, closes access, offers a notice nor opens checkout",
+  );
   console.log(
     `PASS ${groups} product integration groups (Node26/PostgreSQL18 TLS, no external network)`,
   );

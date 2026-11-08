@@ -261,6 +261,294 @@ Rollback is the pre-migration Neon snapshot `snap-snowy-haze-b8dl4hvc`; there is
 script. Older auth images run on either schema (they never prune). Before restoring the snapshot, move the auth jobs back
 to an image without the prune, or each run fails on the missing function.
 
+## Test accounts (pending: Drizzle 0009, owner file 011)
+
+0009 adds `users.test_account boolean NOT NULL DEFAULT false`, the owner-only mark on the
+fictional end-to-end check account (see [Test account and daily check](#test-account-and-daily-check)).
+It is additive: one column with a constant default is a catalog change with no rewrite,
+every existing account reads false, and serving app/MCP code never names the column, so
+traffic stays open. App/MCP code from this change on reads it (the test-account exemption
+from trials and billing), so release that code only after 0009. Roll that code back like
+any schema-compatible release, code only, keeping 0009 and 011 (see [Rolling back past the
+test-account release](#rolling-back-past-the-test-account-release)); never restore the
+snapshot for it, which would discard every later save. 011 narrows app's INSERT on `users` to `id`, `status` and `created_at` (the
+only columns it could insert before) so no runtime login can set the mark. 0009 sets a 5 s
+lock limit in its own transaction: the ADD COLUMN briefly locks `users` exclusively. Rehearse
+on a disposable branch or database first (`server/scripts/check-auth-integration.ts` applies
+both), then:
+
+1. Snapshot production.
+2. As `neondb_owner`: `bun run --cwd server db:migrate` applies `0009_test_account`
+   (journal 10 entries).
+3. As `neondb_owner`, at once:
+   `psql -X -v ON_ERROR_STOP=1 -f server/migrations/011-test-account-roles.sql` (one
+   transaction; rerunning converges).
+4. Check as the owner. The first row is `boolean`, `false`, `NO` and 0; the next two list
+   `f` for every runtime login:
+
+   ```sql
+   SELECT data_type, column_default, is_nullable,
+     (SELECT count(*) FROM users WHERE test_account) AS marked
+   FROM information_schema.columns
+   WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'test_account';
+   SELECT r, has_column_privilege(r, 'public.users', 'test_account', 'INSERT') AS can_insert,
+     has_column_privilege(r, 'public.users', 'test_account', 'UPDATE') AS can_update
+   FROM unnest(ARRAY['milton_app_runtime','milton_mcp_runtime','milton_auth_runtime']) r;
+   ```
+
+   Then `check-runtime-role.ts` must print `ok` for app and MCP. Account creation's
+   `INSERT INTO users (id)` under the narrowed grant is covered by the rehearsal; in
+   production the next new sign-up exercises it, so watch `milton-app-errors-log` for a
+   `permission denied` after applying 011.
+
+A failed migration's rollback is the pre-migration snapshot, used only before any code that
+reads the column serves; there is no down script. Every recorded app/MCP revision runs on
+either schema, so rolling code back never needs it.
+
+## Test account and daily check
+
+`e2e@milton-test.invalid` is a fictional account that holds nothing but what the daily
+end-to-end check writes and retires. `.invalid` is a reserved top-level domain no mail
+system delivers to; the account is created verified, and auth never queues any mail (reset,
+verification or other) for a `.invalid` address, answering such a request exactly as any
+other, so nothing for it reaches the mail queue or Resend. Usage and metric counts exclude it
+(`users.test_account`, server README).
+
+Trials stay on, and the account is permanently exempt from them and from billing, so its
+access never depends on a trial or a Stripe customer. With billing configured, a trial row
+with no status gets a Stripe customer and a 30-day trial at sign-in (`ensureSubscription`),
+which would put a fictional customer in live Stripe and lock the account out when that
+trial ended without a card. So provisioning creates the Milton account itself, marked and
+without a trial row, before the native user exists, and every billing path checks
+`test_account` explicitly (server README, "Test accounts"): the gate reads it as early
+access, sign-in starts nothing, checkout and the portal answer 409, and no path gives it a
+row, status, customer or notice.
+
+### Production order
+
+Each step needs Peter's go; the release coordinator runs it.
+
+1. Release auth (`d2a7e78`: no mail to `.invalid` addresses), service and both jobs, and
+   check health and a password sign-in.
+2. Snapshot production.
+3. Apply 0009, then 011, with their checks (the section above).
+4. Release app and MCP (the explicit test-account exemption, which reads 0009's column).
+5. Provision the account; confirm the snapshot gate (Run the check); run the check once by
+   hand.
+6. Create `milton-e2e-daily` (below; milton-duo).
+
+### Rolling back past the test-account release
+
+Roll back code only; keep 0009 and 011 and never restore a snapshot for it, which would
+discard every save made since.
+
+- **App/MCP** to a revision before `6fbd8af`: the older code never names `test_account`,
+  and its account creation inserts only `id`, which 011 still allows, so it serves
+  normally. The test account keeps working too, since it has no trial row (older sign-in
+  starts nothing for an account without one and checkout answers 409), but its exemption is
+  no longer structural: older code would start a trial for a stray empty trial row and
+  close access on an ended one. Pause the daily check while that code serves
+  (`gcloud scheduler jobs pause milton-e2e-daily --project=milton-510506 --location=us-east4`;
+  resume it after rolling forward). The job pins its own image, so a service rollback does
+  not move it.
+- **Backfill:** never run a checkout older than `1694b1b` while the test account exists.
+  That backfill counts the test account as waiting (no trial row) and with `--apply` gives
+  it a trial row and a live Stripe customer and 30-day trial for `e2e@milton-test.invalid`;
+  its dry run only counts it.
+- **Auth** to a revision before `d2a7e78`: auth again queues mail to `.invalid` addresses.
+  The check never asks for mail, but anyone's password-reset request for the test address
+  would then queue a message the delivery job sends to Resend, where it cannot be
+  delivered. Keep auth at or after `d2a7e78` while the test account exists, or accept that
+  for the rollback's duration.
+
+### Provision the account (once, after steps 1–4)
+
+Owner-only, from a checkout of the released commit after `bun install --frozen-lockfile`,
+in a shell that keeps no history (zsh: `HISTFILE=/dev/null zsh`), with the owner URLs read
+into the environment, never typed on a command line:
+
+```sh
+umask 077 && mkdir -p ~/keys
+# AUTH_OWNER_DATABASE_URL: milton_auth_delegate assuming milton_auth_owner, as for
+#   native migrations (options=-c%20role%3Dmilton_auth_owner).
+# MILTON_OWNER_DATABASE_URL: neondb_owner, as for db:migrate.
+bun --no-env-file server/scripts/test-account.ts --apply ~/keys/milton.test-account.env
+unset AUTH_OWNER_DATABASE_URL MILTON_OWNER_DATABASE_URL
+```
+
+Before any write it refuses an existing file, an email native already holds, an address
+outside `.invalid`, a wrong owner role on either connection and a database without 0009.
+Then, printing one JSON line per step (`step`, `ok`, `ms`; never a password, key, cookie
+or URL): it writes `E2E_EMAIL` and a random `E2E_PASSWORD` to the new mode-0600 file;
+chooses the native user id and, in one owner transaction, creates the marked Milton
+account without a trial row and its identity bound to that id; only then creates the native
+user and its password credential in one owner transaction (native's own scrypt hash), the
+step that makes sign-in possible, so no one can ever sign in to an account that is not
+already marked and trial-free; checks that binding again; signs in over HTTPS exactly as a
+browser does (app `/login`, the auth sign-in page and form, the app's code flow) and checks
+the app shows this account; mints a read-and-save key expiring in 365 days through the
+app's key form; checks as the owner that exactly this account is marked, active, without a
+trial row and holds that key; and appends `E2E_CONNECTION_KEY`. Exit 0 only when every
+step passed.
+
+If any step fails, never sign in by hand. Fix the cause and run the same command with
+`--resume` added and the same file: it reads the file's password, refuses a file that
+already holds a key, binds or finds the marked, trial-free account (adopting the one marked
+account a failed run left without its native user, refusing an unmarked one), creates the
+native user only if it is missing, verifies the binding and only then signs in and mints the
+key. The rehearsal fails a run before the Milton account's commit and between the two
+commits (nobody can sign in afterwards), and after a native commit that succeeded but whose
+acknowledgment was lost (the native user exists, bound to the marked account); `--resume`
+finishes each. A
+plain env file, not dotenvx: dotenvx would keep its private
+key next to the file in the same 0600 directory and protect nothing more, and `~/keys`
+already holds plain owner files.
+
+### Run the check
+
+**Snapshot gate.** Each run writes to production (only to the test account, but writes all
+the same). Before the first production run, by hand or by the job, confirm a Neon snapshot
+taken since 0009 was applied exists and record its name; if none does, take one first.
+Later daily runs need no new snapshot.
+
+From a checkout, with no owner or service credential in the environment:
+
+```sh
+bun --no-env-file server/scripts/e2e.ts ~/keys/milton.test-account.env
+```
+
+It uses only the file's three values and production's public HTTPS endpoints. Steps, each
+one JSON line (`step`, `ok`, `ms`, `severity`; never a password, key, cookie or sample
+body), each request bounded at 15 s:
+
+1. `secrets`: the email must end `.invalid` and the key be well formed.
+2. `sign_in`: app `/login`, the auth sign-in page and form, the code flow; the app must show
+   "Signed in as" this email.
+3. `key_owner`, before any MCP request: Connected assistants must show this email and list
+   this key's public id, or the run stops with `key_not_on_account` and the key is never
+   sent, so another account's key supplied by mistake is never authenticated or marked
+   used. It reports `key_days_left` and, under 30, `warning: key_expires_within_30_days` at
+   severity `WARNING` without failing.
+4. `mcp_connect`: initialize with the key; `tools/list` must list exactly the four tools.
+   `safety_gate`, before any write: the cover sheet must hold no rule, no report a rule,
+   and every served sample must carry the check's marker (kind `e2e check`, summary
+   `Milton e2e check, run …`), fewer than eight per report. Anything else stops the run
+   with `account_holds_foreign_data`, having written nothing.
+5. `retire_leftovers`: retires marked samples a crashed run left, reporting the count.
+6. `baseline`: the account must now be empty; its version and reports are the baseline.
+7. `save_sample`, `fresh_read`: `create_memo` files a fictional sample marked with this run;
+   a new MCP session's `get_report` must serve exactly that text and context.
+8. `revise_sample`, `fresh_read_revision`: a revision through `sample_id`; a new session
+   must serve revision 2 and not the old text.
+9. `retire_sample`, `cleanup`: `retire_samples` removes it; a new session must read an
+   empty account with the baseline's version and reports.
+
+Exit 0 only when every step passed; otherwise the last line names the failing step and a
+fixed error code, and the exit is 1. Renew the key before it expires: sign in to the app as
+the test account with the file's password, create a new 365-day read-and-save key, replace
+`E2E_CONNECTION_KEY` and revoke the old one.
+
+**Footprint per run**, measured on the rehearsal (`check-auth-integration.ts` asserts it).
+Immutable rows that stay as long as the account: 1 `samples`, 3 `sample_versions` (save,
+revision, retirement), 3 `save_requests` receipts and 3 `accepted_changes` records, about
+10 small rows a day, some 3,700 a year; one `sample_kinds` row on the first run only; no
+rule cards. A crashed run's retirement adds one more of each receipt and record. Pruned:
+11 `usage_calls` rows (deleted after 90 days). Short-lived auth rows: one native session
+(7 days), one app session (1 hour), one admission correlation (1 day), the app's code-flow
+token and binding rows, all removed by expiry, later sign-ins and the maintenance job; at most about eight native sessions are live at once,
+under the 64-per-user cap. The key's `last_used_at` is updated. Nothing is mailed and
+nothing calls Stripe.
+
+### Daily job: `milton-e2e-daily` (defined here; milton-duo applies it)
+
+Production order step 6, after the snapshot gate above and one passing manual run. The same
+pattern as `milton-auth-mail` and `milton-auth-maint` (explicit `gcloud` commands, a pinned
+image digest, numeric secret versions, a scheduler job created paused), sharing nothing
+with them but the scheduler's invoker. Project `milton-510506`, region `us-east4`.
+
+- **Image.** The runtime image (`server/Dockerfile`) carries `server/dist/e2e.js`, the check
+  bundled for Node with the MCP SDK and no database driver. Use the digest of the app/MCP
+  release from step 4.
+- **Exit.** 0 only when every step passed; 1 for a refused gate, a failed step, a crash or a
+  run past 240 s; one task, `--max-retries=0` and a 300 s task timeout, so one failure is
+  one failed execution. Each stdout line is JSON with `severity`, which Cloud Logging reads
+  as the entry's severity: the failing step's line is `ERROR`, an expiring key `WARNING`.
+- **Identity.** Its own service account, `milton-e2e@`, with `secretAccessor` on its own
+  secret only: no database URL, no other secret, no project role. The check uses only the
+  public HTTPS endpoints.
+- **Schedule.** Daily at 14:07 UTC (`7 14 * * *`): off the maintenance job's quarter-hour
+  starts (`*/15`) and inside a quiet hour.
+
+Each command touches production; run them only with Peter's go. Create the identity and the
+secret from the provisioned file, which is never printed (`--data-file` reads it):
+
+```sh
+P=--project=milton-510506
+SA=milton-e2e@milton-510506.iam.gserviceaccount.com
+gcloud iam service-accounts create milton-e2e $P --display-name='Milton daily e2e check'
+# Match the replication of the existing secrets (gcloud secrets describe milton-auth-owner-url).
+gcloud secrets create milton-e2e-account $P --replication-policy=automatic
+gcloud secrets versions add milton-e2e-account $P --data-file="$HOME/keys/milton.test-account.env"
+# Expect version 1.
+gcloud secrets versions list milton-e2e-account $P --format='value(name,state)'
+gcloud secrets add-iam-policy-binding milton-e2e-account $P \
+  --member=serviceAccount:$SA --role=roles/secretmanager.secretAccessor
+```
+
+The job (`gcloud run jobs create` does not execute it; do not add `--execute-now`):
+
+```sh
+gcloud run jobs create milton-e2e-daily \
+  --project=milton-510506 --region=us-east4 \
+  --image=us-east4-docker.pkg.dev/milton-510506/milton/runtime@sha256:<STEP_4_DIGEST> \
+  --service-account=milton-e2e@milton-510506.iam.gserviceaccount.com \
+  --command=node \
+  --args=server/dist/e2e.js,/run/milton-e2e/account.env \
+  --set-secrets=/run/milton-e2e/account.env=milton-e2e-account:1 \
+  --tasks=1 --parallelism=1 --max-retries=0 --task-timeout=300s \
+  --cpu=1 --memory=512Mi \
+  --labels=app=milton,component=e2e
+gcloud run jobs add-iam-policy-binding milton-e2e-daily \
+  --project=milton-510506 --region=us-east4 \
+  --member=serviceAccount:milton-auth-cron@milton-510506.iam.gserviceaccount.com \
+  --role=roles/run.invoker
+gcloud run jobs execute milton-e2e-daily --project=milton-510506 --region=us-east4 --wait
+```
+
+The first execution must succeed, its last log line `{"step":"done","ok":true,…}`. Then the
+trigger, created with a schedule that cannot fire soon, paused, then given its real schedule
+while paused (`gcloud scheduler jobs create http` has no `--paused` flag):
+
+```sh
+gcloud scheduler jobs create http milton-e2e-daily \
+  --project=milton-510506 --location=us-east4 \
+  --schedule='0 0 1 1 *' --time-zone=Etc/UTC \
+  --uri=https://run.googleapis.com/v2/projects/milton-510506/locations/us-east4/jobs/milton-e2e-daily:run \
+  --http-method=POST \
+  --oauth-service-account-email=milton-auth-cron@milton-510506.iam.gserviceaccount.com \
+  --max-retry-attempts=0 --attempt-deadline=30s \
+  --description='Milton daily end-to-end check on the fictional test account'
+gcloud scheduler jobs pause milton-e2e-daily --project=milton-510506 --location=us-east4
+gcloud scheduler jobs update http milton-e2e-daily --project=milton-510506 --location=us-east4 --schedule='7 14 * * *'
+gcloud scheduler jobs describe milton-e2e-daily --project=milton-510506 --location=us-east4 \
+  --format='value(state,schedule,httpTarget.uri)'
+# required: PAUSED  7 14 * * *  …/jobs/milton-e2e-daily:run   (the URL must end in :run)
+gcloud scheduler jobs resume milton-e2e-daily --project=milton-510506 --location=us-east4
+```
+
+A renewed key is a new secret version: `gcloud secrets versions add` from the updated file,
+then `gcloud run jobs update milton-e2e-daily --set-secrets=/run/milton-e2e/account.env=milton-e2e-account:<n>`
+(region and project as above), then disable the old version. A new runtime image moves the
+job with `gcloud run jobs update milton-e2e-daily --image=…@sha256:<digest>` at each app/MCP
+release.
+
+**Alerts** are milton-duo's (spec item 5): at least one failed execution of
+`milton-e2e-daily` in 24 hours, or no execution for 26 hours. The `WARNING` line
+(`jsonPayload.warning="key_expires_within_30_days"`) is there for a renewal alert if one is
+wanted. Alert delivery to Peter is unverified until milton-duo sends a test notification.
+
+**Cost.** About a minute of one vCPU a day, inside Cloud Run's free tier; the writes above.
+
 ## Optional guide worker
 
 The default-off private guide pilot has separate [operations and capability instructions](guides.md). No guide job, schedule, provider key or account enrollment is provisioned by its build.
@@ -769,7 +1057,8 @@ rm -rf "$dir"
 ```
 
 It prints only counts (total, created, skipped, failed, still NULL), at about 5 accounts a second,
-and refuses without `trials_enabled` and a live key. `--allow-test-key` is for disposable
+over active accounts other than test accounts (it reads `users.test_account`, so a checkout from
+this change on needs Drizzle 0009 applied), and refuses without `trials_enabled` and a live key. `--allow-test-key` is for disposable
 databases only. With `--apply` it exits nonzero if any account still has no status; rerun it, since
 rows with a status are skipped. A returning deleted
 identity's row is canceled and counted as skipped. A row left at NULL is free until a browser sign-in: an approval

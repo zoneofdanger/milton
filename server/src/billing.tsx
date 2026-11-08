@@ -212,7 +212,8 @@ export async function ensureSubscription(
   try {
     const store = billingForAccount(config, userId);
     const account = await store.account();
-    if (!account.enrolled || account.status !== null) return;
+    // A test account never gets a trial, customer or subscription.
+    if (account.test || !account.enrolled || account.status !== null) return;
     // The row stays locked across customer, list and create. Two attempts across
     // a minute boundary have different keys, so only the lock stops each making a
     // customer, or each listing nothing and starting a trial, which could charge
@@ -357,6 +358,12 @@ async function billingRoute(ctx: PageContext): Promise<Response> {
     );
     return navigation(session.url);
   };
+  if (account.test)
+    throw new AuthError(
+      "test_account",
+      "This test account has no subscription.",
+      409,
+    );
   if (url.pathname === "/billing/portal") {
     if (!account.customer)
       throw new AuthError(

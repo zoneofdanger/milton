@@ -48,6 +48,9 @@ export const users = pgTable(
     id: text("id").primaryKey(),
     status: text("status").notNull().default("active"),
     createdAt: createdAt(),
+    // Set only by the owner (migrations/011-test-account-roles.sql): marks the
+    // fictional end-to-end check account, which usage and metric counts exclude.
+    testAccount: boolean("test_account").notNull().default(false),
   },
   (t) => [
     check("users_status", sql`${t.status} IN ('active','deleting')`),

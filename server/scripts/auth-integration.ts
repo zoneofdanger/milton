@@ -3062,7 +3062,7 @@ try {
   const grew = (a: Record<string, number>, b: Record<string, number>) =>
     Object.fromEntries(Object.keys(a).map((k) => [k, b[k]! - a[k]!]));
   const checkLines: Line[] = [];
-  const check = async () => {
+  const check = async (fetcher = dispatch) => {
     await owner.query(
       'delete from milton_auth."rateLimit"; delete from milton_guard.rate_bucket',
     );
@@ -3072,7 +3072,7 @@ try {
     try {
       await runE2E({
         secrets,
-        fetch: dispatch,
+        fetch: fetcher,
         report: (l) => checkLines.push(l),
       });
     } finally {
@@ -3111,6 +3111,17 @@ try {
     ].map((step) => [step, true]),
   );
   assert.deepEqual(await check(), perRun);
+  // Node's fetch (production's runtime) sends Sec-Fetch-Mode: cors whatever the
+  // caller sets, so native answers some hops with JSON instead of a redirect.
+  assert.deepEqual(
+    await check((target, init) => {
+      const headers = new Headers(init.headers);
+      headers.set("Sec-Fetch-Mode", "cors");
+      return dispatch(target, { ...init, headers });
+    }),
+    perRun,
+    "the check passes when every request says Sec-Fetch-Mode: cors, as Node's fetch does",
+  );
   const printed = JSON.stringify(checkLines);
   assert(
     !printed.includes(values.E2E_PASSWORD!) &&

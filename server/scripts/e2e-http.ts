@@ -37,6 +37,25 @@ const entities: Record<string, string> = {
 export const unescape = (value: string) =>
   value.replace(/&(amp|quot|#39|#x27|lt|gt);/g, (e) => entities[e]!);
 
+/** The URL of native's JSON redirect, `{"redirect": true, "url": "..."}`. */
+function jsonRedirect(response: Response, body: string) {
+  if (!/^application\/json\b/i.test(response.headers.get("Content-Type") ?? ""))
+    return undefined;
+  try {
+    const parsed: unknown = JSON.parse(body);
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      "redirect" in parsed &&
+      parsed.redirect === true &&
+      "url" in parsed &&
+      typeof parsed.url === "string"
+    )
+      return parsed.url;
+  } catch {}
+  return undefined;
+}
+
 /** A cookie jar per host and manual redirects, as a browser keeps host-only
  * Secure cookies. Only the given origins are ever requested. */
 export function browser(origins: Origins, fetcher: Fetch = fetch) {
@@ -76,7 +95,11 @@ export function browser(origins: Origins, fetcher: Fetch = fetch) {
     }
     return response;
   }
-  /** Follows redirects and native's Continue pages (meta refresh) to a page. */
+  /** Follows redirects, native's Continue pages (meta refresh) and native's
+   * JSON redirects to a page. Node's fetch sends `Sec-Fetch-Mode: cors` whatever
+   * go() sets (Bun keeps `navigate`), and native then answers a redirect as
+   * 200 `{"redirect": true, "url": ...}` instead of a 302. Every hop still goes
+   * through go(), so only the given origins are requested. */
   async function follow(url: string, form?: Record<string, string>) {
     let current = url;
     let response = await go(current, form);
@@ -94,6 +117,12 @@ export function browser(origins: Origins, fetcher: Fetch = fetch) {
       );
       if (response.status === 200 && refresh) {
         current = new URL(unescape(refresh[1]!), current).href;
+        response = await go(current);
+        continue;
+      }
+      const redirect = response.status === 200 && jsonRedirect(response, html);
+      if (redirect) {
+        current = new URL(redirect, current).href;
         response = await go(current);
         continue;
       }

@@ -27,6 +27,8 @@ the [README](README.md) says what is here, and [TODO.md](TODO.md) is the backlog
   release coordinator (`milton-duo`) from [the hosting runbook](server/deploy/README.md): preserve rollback
   revisions, pinned images and numeric secret versions; snapshot before every migration;
   when a migration drops something the running code reads, release the code first.
+  Never drop or migrate the retained `neon_auth` schema.
+- **Paid model or provider calls need Peter's approval.**
 - **Secrets stay out of git.** One dotenvx payload and one platform-held key per service.
   Local environment and key files are ignored and never enter images, logs, prompts or
   commits.
@@ -48,6 +50,10 @@ the [README](README.md) says what is here, and [TODO.md](TODO.md) is the backlog
   to served text comes with the contract test that parses it.
 - Keep Milton's look: build pages and screens from `packages/theme`, and keep the
   contrast test passing.
+- Until Milton officially launches, add no backwards-compatibility shims or rollback
+  scripts; the snapshot before every migration still applies.
+- The operator is Zone of Danger, LLC (comma included) in the footer, privacy policy,
+  terms and license.
 - [docs/how-milton-works.md](docs/how-milton-works.md) lists Milton's logic, one line
   each. A change to behavior updates its line in the same commit.
 - One branch per task in its own worktree under `.worktrees/`; one change per commit, by
@@ -64,7 +70,8 @@ PR until it is ready. At the ready PR, `milton-duo` takes delivery ownership and
 finishes review, integration and authorized deployment without another Lead acceptance
 gate. Designer reviews meaningful UI changes and offers design direction within this
 same process. Preserve specialist work Peter assigns directly. Independent review is
-proportional to consequential behavior, security or data risk.
+proportional to consequential behavior, security or data risk. Builders and release
+workers run Claude Code on Opus 5.5 at high effort; reviewers run Codex on GPT-6 Astra.
 
 The PR is the authoritative task record: owner, scope, latest commit, checks and exit
 codes, findings, observed and unverified behavior, next action, and publishing

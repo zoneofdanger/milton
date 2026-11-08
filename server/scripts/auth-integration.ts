@@ -4490,6 +4490,26 @@ try {
         [{ clientId: shared.clientId, name: null, contacts: null }],
         "a cleared registration stays cleared",
       );
+      // So does a deleted one stored again under its client ID, as a client
+      // metadata document's rediscovery would.
+      await owner.query(
+        `INSERT INTO milton_auth."oauthClient"(id,"clientId","redirectUris",name,contacts) VALUES($1,$1,'[]','Fictional restored name','["restored@example.invalid"]')`,
+        [solo.clientId],
+      );
+      assert.deepEqual(
+        (
+          await owner.query(
+            `SELECT name,contacts FROM milton_auth."oauthClient" WHERE "clientId"=$1`,
+            [solo.clientId],
+          )
+        ).rows,
+        [{ name: null, contacts: null }],
+        "a deleted registration stored again gets no name or contacts",
+      );
+      await owner.query(
+        `DELETE FROM milton_auth."oauthClient" WHERE "clientId"=$1`,
+        [solo.clientId],
+      );
       assert.deepEqual(
         await soloDependents(),
         { resources: 0, consents: 0, refresh: 0, bindings: 0 },

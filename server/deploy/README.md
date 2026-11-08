@@ -302,22 +302,29 @@ either schema, so rolling code back never needs it.
 
 Native 008 adds `milton_guard.client_link` (account, registration), written by
 `consent_gate` whenever an account consents to an assistant registration, and
-`milton_guard.cleared_client` with the `keep_cleared` trigger, and replaces
+`milton_guard.cleared_client` (SHA-256 of each cleared or deleted registration's client
+ID, no foreign key) with the `keep_cleared` insert-and-update trigger, and replaces
 `consent_gate` and `cleanup_operation`: a deletion's cleanup now also takes the account's
 links (deleting a registration no other account links, otherwise clearing its `name` and
-`contacts` for good) and, in the same step as the native user, its sign-in grant
-bindings. It backfills links from existing consents, consented bindings and native's
-disconnect records (`milton_guard.security_operation`), applies the rule to registrations
-named by a consented binding or disconnect record of an account already deleted, and
-then deletes bindings whose native user is gone and that nothing references. No app, MCP or
-auth code changes, so any recorded revision runs on either schema.
+`contacts`, and marking it either way) and, in the same step as the native user, its
+sign-in grant bindings. It backfills links from existing consents, consented bindings and
+native's disconnect records (`milton_guard.security_operation`), each matched to the
+user's recorded identity incarnation, applies the rule to registrations named by a
+consented binding or disconnect record of a deleted identity, and then deletes bindings
+of deleted identities that nothing references. App and MCP code do not change. The same
+release's auth image adds the UserInfo binding check (live `binding_status` before native
+answers); it uses only 003's functions, so the image and 008 can go in either order, and
+any recorded revision runs on either schema.
 
 Its first statement locks `milton_auth."user"`, `"oauthClient"`, `"oauthClientResource"`,
 `"oauthConsent"`, `"oauthAccessToken"`, `"oauthRefreshToken"` and
 `milton_guard.authorization_binding` in EXCLUSIVE mode with NOWAIT. If any sign-in,
 consent, token, registration, disconnect or deletion is writing them, 008 fails at once
 with `55P03` (lock not available), applies nothing and records no ledger row: run step 2
-again. Once it holds them it never waits, so it cannot deadlock. Until it commits, reads
+again. Once it holds them, no service transaction or cleanup can hold or take a lock it
+needs, so none can deadlock with it. It can still wait on another owner session (one
+holding the migration ledger, or running owner DDL): open no other owner session while
+it runs (the migrator's advisory lock already keeps a second migrator out). Until it commits, reads
 continue (MCP, app sessions, pages) and every write to those tables waits: sign-in,
 consent, token issue and refresh, registration, disconnect and deletion. The rehearsal
 took 25 ms on empty tables; production time scales with the clients, consents and
@@ -329,7 +336,8 @@ bindings it scans, and is unmeasured. Rehearse on a disposable branch or databas
    `node --experimental-strip-types apps/auth/scripts/migrate.ts up --apply` applies
    `008-deletion-links` (native ledger 001–008). On `55P03`, rerun.
 3. Check as the owner: `SELECT count(*) FROM milton_guard.authorization_binding b WHERE
-NOT EXISTS (SELECT 1 FROM milton_auth."user" u WHERE u.id = b.origin_user)` returns 0,
+NOT EXISTS (SELECT 1 FROM milton_auth."user" u WHERE u.id = b.origin_user AND
+u."miltonIdentityIncarnation" = b."miltonIdentityIncarnation")` returns 0,
    and `check-runtime-role.ts` prints `ok` for app and MCP.
 
 Untraceable and kept as they are: a registration whose only authorizations before 008,

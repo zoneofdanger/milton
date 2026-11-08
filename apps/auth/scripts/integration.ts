@@ -886,11 +886,20 @@ try {
     true,
   );
   await call("/sign-out", {});
-  await token({
+  // Refreshed after sign-out, the JWT names no live session (native's own
+  // check), so UserInfo's answer rests on the binding alone.
+  const offline = await token({
     grant_type: "refresh_token",
     refresh_token: grants.refresh_token!,
     resource: "https://mcp.meetmilton.com/mcp",
   });
+  const userInfo = async () =>
+    (
+      await call("/oauth2/userinfo", undefined, {
+        authorization: "Bearer " + offline.access_token,
+      })
+    ).status;
+  assert.equal(await userInfo(), 200, "UserInfo answers a live binding");
   assert((await status()).rows[0].binding);
   const operation = randomUUID();
   await appPool.query("select milton_guard.begin_operation($1,$2,$3,$4,$5)", [
@@ -901,6 +910,7 @@ try {
     "disconnect",
   ]);
   assert.equal((await status()).rows[0].binding, null);
+  assert.equal(await userInfo(), 401, "UserInfo refuses a revoked binding");
   for (let n = 0; n < 64; n++) {
     const r = await appPool.query(
       "select milton_guard.cleanup_operation($1,2) as progress",

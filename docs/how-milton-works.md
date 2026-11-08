@@ -247,7 +247,7 @@ not at all.
 ### Publish
 
 - Publishing checks the assembled documents against their size limits and answers with
-  their new approved-source fingerprint; sample changes durably invalidate guides in the same transaction.
+  their new approved-source fingerprint; while the guide trigger is installed (not while parked, 0010), sample changes durably invalidate guides in the same transaction.
 - An audit row records the request, assistant, before and after versions, and affected
   cards.
 - The receipt is written last, once, with the outcome.
@@ -490,11 +490,13 @@ Files: `packages/theme/`, `server/scripts/`, `.github/workflows/checks.yml`.
 
 ## Optional report guides
 
-Files: `server/src/guides/`, `server/src/guide-worker.ts`, `server/scripts/guide-enrollment.ts`, `server/drizzle/0003_report_guides.sql`.
+Files: `server/src/guides/`, `server/src/guide-worker.ts`, `server/scripts/guide-enrollment.ts`, `server/drizzle/0003_report_guides.sql`, `server/drizzle/0010_park_guides.sql`.
+
+- Parked (2026-11-07): reads include guide state only when the process sets `MILTON_GUIDES=on`; off, no read sends guide SQL. 0010 drops the sample-version trigger and keeps the function, tables, rows and grants; the owner-only `guide-enrollment.ts resume` (`resumeGuides`) recreates the trigger and re-queues every report with active samples (clearing the rest).
 
 - Operator-only enrollment defaults off and records explicit processing consent plus an epoch that advances on every off/on transition; app/MCP have no enrollment or consent write privilege.
 - Guide eligibility requires enrollment, an active account and an active subscription or an unexpired trial; missing/unknown billing is ineligible.
-- A sample-revision trigger advances report source versions and marks durable work in the sample transaction, including while disabled; classification moves invalidate both reports; rules and unchanged saves do not.
+- When installed, a sample-revision trigger advances report source versions and marks durable work in the sample transaction, including while disabled; classification moves invalidate both reports; rules and unchanged saves do not.
 - Zero active samples immediately clears the guide and fences old work; nonempty changes retain the last successful stale guide with source/current versions and a reason.
 - A finite sequential worker claims at most five reports per run with a 150-second lease, checks eligibility before provider processing/spend/activation and permits two attempts per source/epoch.
 - All active originals and complete approved classification/context go in one generation; rules, prior guides and retired revisions are excluded; input is never sampled, truncated or batched.

@@ -2,6 +2,36 @@
 
 **Parked 2026-11-07 (Peter): no further work; guides stay default-off.** Nothing is scheduled, keyed or enrolled. Resume only on his decision.
 
+## Parked state and resume
+
+A parked pilot costs nothing per request. Reads include guide state only when the
+process sets `MILTON_GUIDES=on` (unset or any other value is off; app and MCP each read
+it at startup): off, a cover-sheet, report or web-page read sends no statement naming
+`report_guides` or `guide_accounts`, and envelopes and pages carry no guide. Drizzle
+`0010_park_guides` drops the sample-version trigger `report_guide_source`, so saves no
+longer touch `report_guides`. The function, the guide tables and their rows, the grants
+and `milton_guide_worker` stay, and nothing is enrolled. 0010 changes no row and no code
+needs the trigger, so apply it with the normal runbook (snapshot first,
+`bun run --cwd server db:migrate` as `neondb_owner`) in either order with this code.
+
+To resume, after Peter's decision:
+
+1. Snapshot production.
+2. From `server/`, with the owner URL already supplied securely in
+   `MILTON_OWNER_DATABASE_URL` (no env-file fallback; it refuses any role but
+   `neondb_owner`): `bun --no-env-file scripts/guide-enrollment.ts resume`. One
+   transaction (`resumeGuides`, `src/guides/resume.ts`): it recreates the trigger and resyncs every account's guide rows. While
+   parked nothing recorded which reports changed, so every report with an active sample
+   queues on a new source version (its last guide kept as stale text) and every other
+   guide row is cleared to `empty`/`no_samples`.
+3. Check: `SELECT tgname FROM pg_trigger WHERE tgname='report_guide_source'` returns one
+   row.
+4. Set `MILTON_GUIDES=on` in the app and MCP payloads and deploy new revisions. Then the
+   job, schedule and enrollment below, each separately authorized.
+
+To park again, set `MILTON_GUIDES` off first, then run 0010 by hand:
+`psql -1 -X -v ON_ERROR_STOP=1 -f server/drizzle/0010_park_guides.sql`.
+
 This source build does not authorize deployment, provider calls or enrollment. Guides
 default off. Apply the additive `0003_report_guides` migration only through the normal
 hosting runbook, from the selected landed commit, with a database snapshot first.
@@ -15,7 +45,7 @@ App/MCP keep their approved-source responsibilities. Their `milton_runtime` role
 SELECT only on `guide_accounts`/`report_guides`, no spend or enrollment/consent write privileges.
 Only the owner-operated enrollment script can enable guides or update consent.
 A scoped SECURITY DEFINER trigger updates report source/work state in sample transactions;
-it has a fixed search path and no public executable grant.
+it has a fixed search path and no public executable grant. 0010 drops it while parked.
 
 `milton_guide_worker` is a NOLOGIN capability role, separate from `milton_runtime`.
 A future release may provision a plain NOINHERIT login whose only membership is that
@@ -69,7 +99,7 @@ expired trials and other statuses are not. Eligibility is checked before countin
 generation, spend reservation, activation and serving. An active subscription does not
 enroll anyone. Existing nonempty reports are scheduled on enablement.
 
-Work is recorded in the sample transaction even while disabled; rules do not invalidate
+While the trigger is installed, work is recorded in the sample transaction even while disabled; rules do not invalidate
 it. One report lease lasts 150 seconds, with a 90-second provider deadline and two attempts
 per source/epoch. Failures retry no sooner than five minutes; expiry recovers durably.
 Completion first locks the report row enrollment also updates, then evaluates its

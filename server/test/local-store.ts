@@ -3,6 +3,7 @@ import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
 import type { SQL } from "drizzle-orm";
 import type { StoreDatabase } from "../src/store/database";
+import { resumeGuides } from "../src/guides/resume";
 
 const migrationsFolder = new URL("../drizzle/", import.meta.url).pathname;
 let dump: Promise<Blob | File> | undefined;
@@ -42,6 +43,10 @@ export function storeDatabase(pg: PGlite) {
   };
   return db;
 }
+
+// The parked guide pilot restored, as server/deploy/guides.md resumes it:
+// resumeGuides recreates the trigger 0010 dropped and resyncs every guide row.
+export const restoreGuides = (pg: PGlite) => resumeGuides(storeDatabase(pg));
 
 // Same PostgreSQL schema and transaction rules, no network or environment secrets.
 export async function localStore() {

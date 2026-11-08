@@ -31,6 +31,8 @@ export function compiledMemos(
   /** Admits the assistant call `call` names, after every gate and before the
    * work; it never waits on the database. */
   admit?: (call?: CallUsage) => void,
+  /** The parked guide pilot (deploy/guides.md): off, a read sends no guide SQL. */
+  guides = false,
 ) {
   /** A read assembles the documents from cards and samples. It takes no lock
    * and writes only its usage row, on its own connection: for an assistant
@@ -77,7 +79,7 @@ export function compiledMemos(
       intent?: ReportIntent,
       call?: CallUsage,
     ): Promise<Documents & { version: string }> {
-      const current = await read(intent, true, call);
+      const current = await read(intent, guides, call);
       return {
         ...(current.served ?? current.documents),
         reports: (current.served ?? current.documents).reports.map((r) => ({

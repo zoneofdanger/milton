@@ -94,6 +94,8 @@ export function mcpRuntimeConfig(
       resource: resource.href,
       appOrigin: app.origin,
       DATABASE_URL: env.DATABASE_URL,
+      // The parked guide pilot's reads (deploy/guides.md); unset or any other value is off.
+      ...(env.MILTON_GUIDES === "on" ? { guides: true } : {}),
     };
   } catch {
     throw new StoreError(

@@ -153,6 +153,11 @@ the lock and journal and says so):
   `-- code-stopped-by: #NN` naming the merged PR that stopped all code using it, and
   ships only after that code is released.
 
+`test/deletion-inventory.test.ts` applies all three tracks to an empty PGlite and fails
+on any text, character, JSON, bytea, tsvector or XML column (or array of one) not
+classified in [docs/deletion-inventory.txt](../docs/deletion-inventory.txt) as deleted
+by account deletion, hidden (kept, never served) or not personal, with a reason.
+
 ## Deploy
 
 For Cloud Run, build and publish the container, then use separate app and MCP

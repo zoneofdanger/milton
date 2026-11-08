@@ -4,15 +4,37 @@
 -- consents to a registration and removed only by its deletion, records which
 -- registrations each account authorized; disconnects, token and consent purges
 -- and binding expiry never remove it.
+--
+-- Every table this file writes, or reaches by cascade or foreign key, is locked
+-- first, in one statement that never waits: if any is in use (a sign-in, consent,
+-- token, registration, disconnect or deletion in flight) the file fails with
+-- 55P03 before doing anything and is simply run again. Holding EXCLUSIVE, no
+-- other transaction can hold or take a row lock on these tables, so nothing
+-- below waits, and this file can never be part of a deadlock. Until it commits,
+-- reads continue and every write to these tables waits.
+LOCK TABLE milton_auth."user",milton_auth."oauthClient",milton_auth."oauthClientResource",milton_auth."oauthConsent",milton_auth."oauthAccessToken",milton_auth."oauthRefreshToken",milton_guard.authorization_binding IN EXCLUSIVE MODE NOWAIT;
 CREATE TABLE milton_guard.client_link (
  origin_user text NOT NULL REFERENCES milton_auth."user"(id),
  client_id text NOT NULL REFERENCES milton_auth."oauthClient"("clientId") ON DELETE CASCADE,
  PRIMARY KEY (origin_user,client_id)
 );
 CREATE INDEX client_link_client ON milton_guard.client_link(client_id);
-REVOKE ALL ON milton_guard.client_link FROM PUBLIC,milton_auth_runtime,milton_app_runtime,milton_mcp_runtime;
--- No consent commits between the backfill below and the gate that now writes links.
-LOCK TABLE milton_auth."oauthConsent" IN SHARE MODE;
+-- A shared registration whose name and contacts a deletion cleared. They stay
+-- cleared through any later update, a metadata-document refresh included.
+CREATE TABLE milton_guard.cleared_client (
+ client_id text PRIMARY KEY REFERENCES milton_auth."oauthClient"("clientId") ON DELETE CASCADE
+);
+REVOKE ALL ON milton_guard.client_link,milton_guard.cleared_client FROM PUBLIC,milton_auth_runtime,milton_app_runtime,milton_mcp_runtime;
+CREATE FUNCTION milton_guard.keep_cleared() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER
+ SET search_path=pg_catalog,pg_temp AS $$
+BEGIN
+ IF EXISTS(SELECT 1 FROM milton_guard.cleared_client WHERE client_id IN (OLD."clientId",NEW."clientId")) THEN
+  NEW.name:=NULL; NEW.contacts:=NULL;
+ END IF;
+ RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION milton_guard.keep_cleared() FROM PUBLIC,milton_auth_runtime,milton_app_runtime,milton_mcp_runtime;
+CREATE TRIGGER keep_cleared BEFORE UPDATE ON milton_auth."oauthClient" FOR EACH ROW EXECUTE FUNCTION milton_guard.keep_cleared();
 -- As 003, and the consenting account's link to the registration.
 CREATE OR REPLACE FUNCTION milton_guard.consent_gate() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER
  SET search_path=pg_catalog,pg_temp AS $$
@@ -33,20 +55,45 @@ BEGIN
  INSERT INTO milton_guard.client_link(origin_user,client_id) VALUES(b.origin_user,b.client_id) ON CONFLICT DO NOTHING;
  RETURN NEW;
 END $$;
--- Every registration an existing account has authorized: its consents, and its
--- consented bindings (Milton's own app never consents and is never linked).
+-- Every registration an existing account has authorized, from what survives of
+-- it: its consents, its consented bindings and native's record of each app
+-- disconnect (kept indefinitely). Milton's own app never consents and is never
+-- linked. An authorization whose consent and binding were already pruned with no
+-- app disconnect (revoked by the assistant, or left to expire) left nothing.
 INSERT INTO milton_guard.client_link(origin_user,client_id)
-SELECT c."userId",c."clientId" FROM milton_auth."oauthConsent" c WHERE c."userId" IS NOT NULL
-UNION
-SELECT b.origin_user,b.client_id FROM milton_guard.authorization_binding b
- WHERE b.final_scopes IS NOT NULL
- AND EXISTS(SELECT 1 FROM milton_auth."user" u WHERE u.id=b.origin_user)
- AND EXISTS(SELECT 1 FROM milton_auth."oauthClient" c WHERE c."clientId"=b.client_id)
- AND NOT EXISTS(SELECT 1 FROM milton_guard.first_party_policy f WHERE f.client_id=b.client_id)
+SELECT t.origin_user,t.client_id FROM (
+ SELECT c."userId" AS origin_user,c."clientId" AS client_id FROM milton_auth."oauthConsent" c WHERE c."userId" IS NOT NULL
+ UNION SELECT b.origin_user,b.client_id FROM milton_guard.authorization_binding b WHERE b.final_scopes IS NOT NULL
+ UNION SELECT o.origin_user,o.client_id FROM milton_guard.security_operation o WHERE o.kind='disconnect' AND o.client_id IS NOT NULL) t
+ WHERE EXISTS(SELECT 1 FROM milton_auth."user" u WHERE u.id=t.origin_user)
+ AND EXISTS(SELECT 1 FROM milton_auth."oauthClient" c WHERE c."clientId"=t.client_id)
+ AND NOT EXISTS(SELECT 1 FROM milton_guard.first_party_policy f WHERE f.client_id=t.client_id)
 ON CONFLICT DO NOTHING;
+-- The same rule for accounts deleted before this release, wherever a consented
+-- binding or a disconnect record of theirs still names a registration: cleared
+-- (and kept cleared) when a remaining account is linked, otherwise deleted.
+INSERT INTO milton_guard.cleared_client(client_id)
+SELECT c."clientId" FROM milton_auth."oauthClient" c
+ WHERE c."userId" IS NULL AND c."referenceId" IS NULL
+ AND NOT EXISTS(SELECT 1 FROM milton_guard.first_party_policy f WHERE f.client_id=c."clientId")
+ AND EXISTS(SELECT 1 FROM (SELECT b.origin_user FROM milton_guard.authorization_binding b WHERE b.client_id=c."clientId" AND b.final_scopes IS NOT NULL
+  UNION SELECT o.origin_user FROM milton_guard.security_operation o WHERE o.kind='disconnect' AND o.client_id=c."clientId") t
+  WHERE NOT EXISTS(SELECT 1 FROM milton_auth."user" u WHERE u.id=t.origin_user))
+ AND EXISTS(SELECT 1 FROM milton_guard.client_link l WHERE l.client_id=c."clientId");
+UPDATE milton_auth."oauthClient" SET name=NULL,contacts=NULL
+ WHERE "clientId" IN (SELECT client_id FROM milton_guard.cleared_client);
+DELETE FROM milton_auth."oauthClient" c
+ WHERE c."userId" IS NULL AND c."referenceId" IS NULL
+ AND NOT EXISTS(SELECT 1 FROM milton_guard.first_party_policy f WHERE f.client_id=c."clientId")
+ AND EXISTS(SELECT 1 FROM (SELECT b.origin_user FROM milton_guard.authorization_binding b WHERE b.client_id=c."clientId" AND b.final_scopes IS NOT NULL
+  UNION SELECT o.origin_user FROM milton_guard.security_operation o WHERE o.kind='disconnect' AND o.client_id=c."clientId") t
+  WHERE NOT EXISTS(SELECT 1 FROM milton_auth."user" u WHERE u.id=t.origin_user))
+ AND NOT EXISTS(SELECT 1 FROM milton_guard.client_link l WHERE l.client_id=c."clientId");
 -- As 003, and for a deletion, after the account's codes, tokens and consents:
 -- each registration it authorized (deleted, or cleared when another account also
--- authorized it), then its bindings, sessions and sign-in methods, the user last.
+-- authorized it), then its sessions and sign-in methods, and last, in one step,
+-- its bindings with the user, so no partial run leaves a native credential or
+-- user without its binding.
 CREATE OR REPLACE FUNCTION milton_guard.cleanup_operation(p_operation text,p_limit integer) RETURNS text
  LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
 DECLARE op milton_guard.security_operation; rows_done integer:=0; n integer; remaining boolean; link record;
@@ -82,8 +129,8 @@ BEGIN
   -- Each registration this account authorized, under the registration's lock so
   -- a concurrent deletion or consent sees the other's link. An anonymous one no
   -- other account authorized goes with its dependents; one another account
-  -- authorized keeps working for it, without its name or contacts. Milton's own
-  -- app and any owned client only lose the link.
+  -- authorized keeps working for it, its name and contacts cleared for good.
+  -- Milton's own app and any owned client only lose the link.
   FOR link IN SELECT l.client_id FROM milton_guard.client_link l WHERE l.origin_user=op.origin_user ORDER BY l.client_id LIMIT p_limit LOOP
    PERFORM 1 FROM milton_auth."oauthClient" WHERE "clientId"=link.client_id FOR UPDATE;
    DELETE FROM milton_guard.client_link WHERE origin_user=op.origin_user AND client_id=link.client_id;
@@ -91,17 +138,13 @@ BEGIN
    IF EXISTS(SELECT 1 FROM milton_auth."oauthClient" c WHERE c."clientId"=link.client_id AND c."userId" IS NULL AND c."referenceId" IS NULL)
    AND NOT EXISTS(SELECT 1 FROM milton_guard.first_party_policy f WHERE f.client_id=link.client_id) THEN
     IF EXISTS(SELECT 1 FROM milton_guard.client_link l WHERE l.client_id=link.client_id) THEN
+     INSERT INTO milton_guard.cleared_client(client_id) VALUES(link.client_id) ON CONFLICT DO NOTHING;
      UPDATE milton_auth."oauthClient" SET name=NULL,contacts=NULL WHERE "clientId"=link.client_id;
     ELSE
      DELETE FROM milton_auth."oauthClient" WHERE "clientId"=link.client_id;
     END IF;
    END IF;
   END LOOP;
-  -- Every reference to a binding is gone above and none can be added (bind_flow
-  -- refuses while the deletion exists, and the user row goes last).
-  DELETE FROM milton_guard.authorization_binding WHERE reference IN
-  (SELECT reference FROM milton_guard.authorization_binding WHERE origin_user=op.origin_user ORDER BY reference LIMIT p_limit);
-  GET DIAGNOSTICS n=ROW_COUNT; rows_done:=rows_done+n;
   DELETE FROM milton_auth.session WHERE id IN
   (SELECT id FROM milton_auth.session WHERE "userId"=op.origin_user AND "miltonIdentityIncarnation"=op.incarnation ORDER BY id LIMIT p_limit);
   GET DIAGNOSTICS n=ROW_COUNT; rows_done:=rows_done+n;
@@ -110,9 +153,12 @@ BEGIN
   GET DIAGNOSTICS n=ROW_COUNT; rows_done:=rows_done+n;
   SELECT EXISTS(SELECT 1 FROM milton_auth.session WHERE "userId"=op.origin_user) OR
   EXISTS(SELECT 1 FROM milton_auth.account WHERE "userId"=op.origin_user) OR
-  EXISTS(SELECT 1 FROM milton_guard.client_link WHERE origin_user=op.origin_user) OR
-  EXISTS(SELECT 1 FROM milton_guard.authorization_binding WHERE origin_user=op.origin_user) INTO remaining;
+  EXISTS(SELECT 1 FROM milton_guard.client_link WHERE origin_user=op.origin_user) INTO remaining;
   IF NOT remaining THEN
+   -- Every reference to a binding is gone above, and bind_flow refuses while the
+   -- deletion exists. At most 256 rows: bind_flow refuses a user's 257th binding.
+   DELETE FROM milton_guard.authorization_binding WHERE origin_user=op.origin_user;
+   GET DIAGNOSTICS n=ROW_COUNT; rows_done:=rows_done+n;
    DELETE FROM milton_auth."user" WHERE id=op.origin_user AND "miltonIdentityIncarnation"=op.incarnation;
    GET DIAGNOSTICS n=ROW_COUNT; rows_done:=rows_done+n;
   END IF;
@@ -123,21 +169,6 @@ BEGIN
  WHERE operation_id=p_operation RETURNING progress INTO op.progress;
  RETURN op.progress;
 END $$;
--- The same rule for accounts deleted before this release, whose consented bindings
--- still name the registrations they authorized: cleared when a remaining account is
--- linked, otherwise deleted.
-UPDATE milton_auth."oauthClient" c SET name=NULL,contacts=NULL
- WHERE c."userId" IS NULL AND c."referenceId" IS NULL
- AND NOT EXISTS(SELECT 1 FROM milton_guard.first_party_policy f WHERE f.client_id=c."clientId")
- AND EXISTS(SELECT 1 FROM milton_guard.authorization_binding b WHERE b.client_id=c."clientId" AND b.final_scopes IS NOT NULL
-  AND NOT EXISTS(SELECT 1 FROM milton_auth."user" u WHERE u.id=b.origin_user))
- AND EXISTS(SELECT 1 FROM milton_guard.client_link l WHERE l.client_id=c."clientId");
-DELETE FROM milton_auth."oauthClient" c
- WHERE c."userId" IS NULL AND c."referenceId" IS NULL
- AND NOT EXISTS(SELECT 1 FROM milton_guard.first_party_policy f WHERE f.client_id=c."clientId")
- AND EXISTS(SELECT 1 FROM milton_guard.authorization_binding b WHERE b.client_id=c."clientId" AND b.final_scopes IS NOT NULL
-  AND NOT EXISTS(SELECT 1 FROM milton_auth."user" u WHERE u.id=b.origin_user))
- AND NOT EXISTS(SELECT 1 FROM milton_guard.client_link l WHERE l.client_id=c."clientId");
 -- Bindings of accounts deleted before this release: nothing references them.
 DELETE FROM milton_guard.authorization_binding b
  WHERE NOT EXISTS(SELECT 1 FROM milton_auth."user" u WHERE u.id=b.origin_user)

@@ -4480,6 +4480,16 @@ try {
         [{ clientId: shared.clientId, name: null, contacts: null }],
         "the solo and disconnected registrations are deleted and the shared one cleared",
       );
+      // A metadata-document refresh writing them back keeps them cleared.
+      await owner.query(
+        `UPDATE milton_auth."oauthClient" SET name='Fictional restored name',contacts='["restored@example.invalid"]' WHERE "clientId"=$1`,
+        [shared.clientId],
+      );
+      assert.deepEqual(
+        await registrations(),
+        [{ clientId: shared.clientId, name: null, contacts: null }],
+        "a cleared registration stays cleared",
+      );
       assert.deepEqual(
         await soloDependents(),
         { resources: 0, consents: 0, refresh: 0, bindings: 0 },

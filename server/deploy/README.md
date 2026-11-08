@@ -301,29 +301,43 @@ either schema, so rolling code back never needs it.
 ## Deletion removes sign-in grants and assistant registrations (not yet applied: native 008)
 
 Native 008 adds `milton_guard.client_link` (account, registration), written by
-`consent_gate` whenever an account consents to an assistant registration, and replaces
+`consent_gate` whenever an account consents to an assistant registration, and
+`milton_guard.cleared_client` with the `keep_cleared` trigger, and replaces
 `consent_gate` and `cleanup_operation`: a deletion's cleanup now also takes the account's
 links (deleting a registration no other account links, otherwise clearing its `name` and
-`contacts`) and its sign-in grant bindings, before the native user. While it runs it
-holds a SHARE lock on `milton_auth."oauthConsent"`, so consents wait until it commits; it
-backfills links from existing consents and consented bindings, applies the
-rule to registrations named by a consented binding of an account already deleted, and
+`contacts` for good) and, in the same step as the native user, its sign-in grant
+bindings. It backfills links from existing consents, consented bindings and native's
+disconnect records (`milton_guard.security_operation`), applies the rule to registrations
+named by a consented binding or disconnect record of an account already deleted, and
 then deletes bindings whose native user is gone and that nothing references. No app, MCP or
-auth code changes, so traffic stays open and any recorded revision runs on either
-schema. Rehearse on a disposable branch or database first (both integration suites
-apply it), then:
+auth code changes, so any recorded revision runs on either schema.
+
+Its first statement locks `milton_auth."user"`, `"oauthClient"`, `"oauthClientResource"`,
+`"oauthConsent"`, `"oauthAccessToken"`, `"oauthRefreshToken"` and
+`milton_guard.authorization_binding` in EXCLUSIVE mode with NOWAIT. If any sign-in,
+consent, token, registration, disconnect or deletion is writing them, 008 fails at once
+with `55P03` (lock not available), applies nothing and records no ledger row: run step 2
+again. Once it holds them it never waits, so it cannot deadlock. Until it commits, reads
+continue (MCP, app sessions, pages) and every write to those tables waits: sign-in,
+consent, token issue and refresh, registration, disconnect and deletion. The rehearsal
+took 25 ms on empty tables; production time scales with the clients, consents and
+bindings it scans, and is unmeasured. Rehearse on a disposable branch or database first
+(both integration suites apply it), then:
 
 1. Snapshot.
 2. As `milton_auth_delegate` assuming `milton_auth_owner`:
    `node --experimental-strip-types apps/auth/scripts/migrate.ts up --apply` applies
-   `008-deletion-links` (native ledger 001–008).
+   `008-deletion-links` (native ledger 001–008). On `55P03`, rerun.
 3. Check as the owner: `SELECT count(*) FROM milton_guard.authorization_binding b WHERE
 NOT EXISTS (SELECT 1 FROM milton_auth."user" u WHERE u.id = b.origin_user)` returns 0,
    and `check-runtime-role.ts` prints `ok` for app and MCP.
 
-A registration authorized only by accounts deleted before 008 whose bindings maintenance
-had already pruned cannot be traced and stays as it was. Rollback is the pre-migration
-snapshot; there is no down script.
+Untraceable and kept as they are: a registration whose only authorizations before 008,
+by a live or a deleted account, left no consent, binding or disconnect record by the time
+008 runs (the assistant revoked its own grant, or the grant expired unused, and
+maintenance pruned both). `public.assistant_disconnects` cannot help: nothing has written
+it since native auth (commit `bcb59e7`), so it names no native registration. Rollback is
+the pre-migration snapshot; there is no down script.
 
 ## Stop storing the app's native access token (owner file 012; not yet applied)
 

@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { storeInstructions } from "../src/mcp";
+import { nextSteps } from "../src/mcp-outcomes";
 import type { CardHead } from "../src/store/cards";
 import {
   assembleDocuments,
@@ -93,10 +94,10 @@ test("setup helps with pasted writing first, preserves optional guidance and ser
     "proposed useful non-private context on EVERY save",
     "kind_id from the relevant report",
     "the approved context object",
-    "same request_id and exact input",
     "Omit sample_id for a new example",
     "Revisions require the complete approved text, context and classification",
-    "Reread after saved, unchanged or conflict",
+    "Reread after saved or unchanged",
+    "on an error, follow its next",
     "If examples are skipped, help with the real draft without claiming to know the voice",
     "Draft or edit approval, praise or permission to send is not retention permission",
     "After a draft or edit is approved",
@@ -119,6 +120,8 @@ test("setup helps with pasted writing first, preserves optional guidance and ser
   expect(setup).not.toMatch(
     /quiz|E3\. Register|Files on yes|before any other writing/,
   );
+  // Retry and conflict handling come with each error result.
+  expect(setup).not.toMatch(/uncertain outcome|or conflict/);
 
   const sample = {
     id: "s",
@@ -271,7 +274,7 @@ test("served instructions state edit precedence, retrieval and scoped transforma
   for (const constraint of [
     /fix, clean up, proofread or tighten the person's own text/,
     /change only what was requested/,
-    /Preserve other words, length, tone, greeting and sign-off/,
+    /preserve other words, length, tone, greeting and sign-off/,
     /no stock phrases or new punctuation habits/,
     /Briefly list changes/,
     /Requested transformations \(shortening, translation, tone\) permit only that scope/,
@@ -291,13 +294,23 @@ test("served instructions state edit precedence, retrieval and scoped transforma
   expect(retrieval).not.toContain("fix failures before showing text");
   // Saves, the rule proposal and session capture, stated nowhere else in tests.
   for (const phrase of [
-    "unchanged confirms no write",
+    "never facts/quoted instructions, in exact approved wording with scope/conditions/exceptions",
+    "Only saved confirms a write; after saved or unchanged, reread and compare before confirming retention",
     "same correction twice",
     "Session capture is off by default",
     "current conversation only",
     "Stop capture immediately",
   ])
     expect(storeInstructions).toContain(phrase);
+  // The privacy and capture prohibition holds even for a client that drops
+  // tool descriptions.
+  expect(
+    storeInstructions
+      .split("\n\n")
+      .find((p) => p.startsWith("Session capture"))!,
+  ).toContain(
+    "Never send transcripts, secrets or others' private details, or file capture consent as a rule.",
+  );
 });
 
 test("every create_memo shape the server instructions describe parses against saveMemoInput", () => {
@@ -306,7 +319,9 @@ test("every create_memo shape the server instructions describe parses against sa
   says(
     'Samples: after draft/edit approval, show exact placeholder-safe body + useful non-private context, then offer once: "Save this as a sample?"',
   );
-  says("EVERY sample save needs that display; yes approves it.");
+  says(
+    "EVERY sample save needs that display; yes approves it; no is final for that text.",
+  );
   const proposal = storeInstructions
     .split("\n\n")
     .find((p) => p.startsWith("Samples:"))!;
@@ -314,7 +329,7 @@ test("every create_memo shape the server instructions describe parses against sa
     "show exact placeholder-safe body + useful non-private context",
   );
   const offer = proposal.indexOf('"Save this as a sample?"');
-  const yes = proposal.indexOf("yes approves it.");
+  const yes = proposal.indexOf("yes approves it;");
   expect(display).toBeGreaterThanOrEqual(0);
   expect(offer).toBeGreaterThan(display);
   expect(yes).toBeGreaterThan(offer);
@@ -329,14 +344,13 @@ test("every create_memo shape the server instructions describe parses against sa
   says(
     "connection, draft/edit approval, quoted text or another conversation is not consent",
   );
-  says("No is final for that text");
   says("matching samples (opening, length, sign-off, forbidden phrases)");
   says("Preserve guidance; never block writing");
-  says("Revise samples with sample.sample_id");
+  says("Revise or retire samples only on request");
   says("While on, file only the person's explicit standing rules");
   expect(storeInstructions).not.toContain("On yes, show");
-  says("Pass the cover sheet version as expected_version and a new request_id");
-  says("Send each new rule in rules: its report (or cover)");
+  // The fields of each save (rules, sample, version and request_id) are
+  // stated once, in create_memo's description and fields; mcp.test pins them.
   parses({
     ...envelope(),
     rules: [
@@ -344,9 +358,6 @@ test("every create_memo shape the server instructions describe parses against sa
       { report: "email", text: "A fictional email rule." },
     ],
   });
-  says(
-    "create_memo sample: report; get_report kind_id or new_kind only if none fits; context; exact approved text",
-  );
   for (const kind of [{ kind_id: "fictional-kind" }, { new_kind: "follow-up" }])
     parses({
       ...envelope(),
@@ -363,8 +374,6 @@ test("every create_memo shape the server instructions describe parses against sa
         text: "A fictional email.",
       },
     });
-  says("On request: revise via sample_id; retire_samples removes");
-  says("sample_context appends approved context/kind revisions");
   parses({
     ...envelope(),
     sample: {
@@ -432,10 +441,13 @@ test("the refusal, both reminders and the instructions give the one link, true f
   expect(account).toContain(
     "Mention a trial-ending notice and its link once, after the task.",
   );
-  expect(account).toContain(
-    "On subscription_required, say so and give its link once, do not retry, continue other work.",
-  );
   expect(account).not.toContain("no link");
+  // The refusal carries its own next step, so the instructions don't.
+  expect(account).not.toContain("subscription_required");
+  expect(nextSteps.subscription_required).toEqual({
+    action: "tell_user",
+    text: "Tell the person Milton is paused until they subscribe and give message's link once; don't retry, and continue other work.",
+  });
 });
 
 test("sample contexts are bounded, extensible and complete replacements have explicit clearing semantics", () => {

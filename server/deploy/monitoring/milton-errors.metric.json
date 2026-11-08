@@ -1,7 +1,7 @@
 {
   "name": "milton-errors",
-  "description": "Log entries at severity ERROR or higher from the milton-app, milton-mcp and milton-auth Cloud Run services (request, application, system and audit logs). Read by the milton-<service> page policies and the release gate.",
-  "filter": "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=(\"milton-app\" OR \"milton-mcp\" OR \"milton-auth\") AND severity>=ERROR",
+  "description": "Log entries at severity ERROR or higher from the milton-app, milton-mcp, milton-auth and milton-admit Cloud Run services (request, application, system and audit logs). Read by the milton-<service> page policies and the release gate.",
+  "filter": "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=(\"milton-app\" OR \"milton-mcp\" OR \"milton-auth\" OR \"milton-admit\") AND severity>=ERROR",
   "metricDescriptor": {
     "metricKind": "DELTA",
     "valueType": "INT64",

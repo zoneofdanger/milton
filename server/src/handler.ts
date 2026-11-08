@@ -26,6 +26,7 @@ import {
   knownTool,
   safeToolLog,
   type ToolCall,
+  withNext,
 } from "./mcp-outcomes";
 import { storeResult } from "./mcp-tools";
 import { bindingStatus, checkBinding, unavailable } from "./auth-authority";
@@ -247,7 +248,13 @@ export function createMiltonHandler(
     };
     try {
       const bounded = await boundRequest(request);
-      if (bounded instanceof Response) return withMcpCors(bounded);
+      // boundRequest's only refusal; MCP's body adds the code and next step.
+      if (bounded instanceof Response)
+        return withMcpCors(
+          Response.json(withNext({ error: "request_too_large" }), {
+            status: bounded.status,
+          }),
+        );
       // Parse only an already bounded clone. Retain a whitelisted name, never
       // the input/task, so access/DB refusals before SDK dispatch are observed.
       const call = incomingTool.safeParse(
@@ -371,17 +378,27 @@ export function createMiltonHandler(
           );
         return withMcpCors(
           Response.json(
-            { error: error.code, message: error.message },
+            withNext({
+              error: error.code,
+              message: error.message,
+              // What the attempted action needed, as the challenge says.
+              ...(error.code === "insufficient_scope"
+                ? {
+                    required_permission:
+                      pending === "create_memo" ? "read_write" : "read",
+                  }
+                : {}),
+            }),
             { status: error.status, headers },
           ),
         );
       }
       return withMcpCors(
         Response.json(
-          {
+          withNext({
             error: "server_unavailable",
             message: "Milton is unavailable. Try again.",
-          },
+          }),
           { status: 503 },
         ),
       );

@@ -23,9 +23,13 @@ browser scripts. Forms work with the existing strict CSP. Bun installs dependenc
 
 Hosted services use the role-specific Cloud Run entrypoint:
 `src/cloud-run.ts` serves browser pages and an exact list of public assets with
-`MILTON_SERVICE=app` or the protocol/store code with `MILTON_SERVICE=mcp`; any other
-value fails startup. Each role rejects the other hostname and direct `run.app`
-requests. The MCP role needs no browser cookie secret.
+`MILTON_SERVICE=app`, the protocol/store code with `MILTON_SERVICE=mcp`, or only auth's
+two admission calls with `MILTON_SERVICE=admit`; any other value fails startup. The app and
+MCP roles reject the other hostname and direct `run.app` requests and serve no
+`/internal/` path. The MCP role needs no browser cookie secret. The admit role reads only
+`AUTH_ISSUER`, `DATABASE_URL`, `AUTH_ADMISSION_SECRET`, `MILTON_TRIAL_FINGERPRINT_KEY` and
+the Stripe settings; it is reached only through Cloud Run's invoker check (see the
+[hosting runbook](deploy/README.md#admission-service-milton-admit)).
 
 Build the container from the repository root:
 
@@ -66,7 +70,8 @@ session. App cookies are Secure, HttpOnly, SameSite=Lax and host-only in HTTPS h
 A real native outage returns 503; invalid proof or a spent callback refuses. A callback
 with an uncertain exchange outcome must be recovered through a new login, not replayed.
 
-Auth makes an authenticated, bounded `POST /internal/auth/admit` handoff containing exact
+Auth makes an authenticated, bounded `POST /internal/auth/admit` handoff to the
+`milton-admit` service containing exact
 issuer/subject/continuation, verified email and mandatory native `verifiedIdentities`
 (Google/GitHub stable IDs; `[]` for password-only). App owns account/trial/billing admission.
 Native validation precedes this handoff. Ownership is exact issuer+subject, never email
@@ -77,20 +82,20 @@ the applied cutover procedure is in git history (`git show 492b96a:server/deploy
 
 Set these in the runtime's platform configuration or dotenvx payload before deploying. Keep credentials in secret storage or ignored environment files.
 
-| Name                           | Meaning                                                                                                                                                                                                                                                                                                                                                        |
-| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `APP_ORIGIN`                   | The browser app's absolute HTTPS origin, without a path, query, or fragment.                                                                                                                                                                                                                                                                                   |
-| `MCP_RESOURCE`                 | The exact public MCP resource URL, ending in `/mcp`. Tokens must include this resource in their audience.                                                                                                                                                                                                                                                      |
-| `AUTH_ISSUER`                  | The exact native issuer, without a trailing slash; hosted: `https://auth.meetmilton.com/api/auth`. App uses verified discovery and fixed native endpoints; MCP uses `/jwks`.                                                                                                                                                                                   |
-| `AUTH_APP_CLIENT_ID`           | App only. Owner-provisioned fixed OIDC client ID.                                                                                                                                                                                                                                                                                                              |
-| `AUTH_APP_CLIENT_SECRET`       | App only. Native-hashed confidential client secret, at least 32 characters; never a browser value.                                                                                                                                                                                                                                                             |
-| `AUTH_ADMISSION_SECRET`        | App and auth only. At least 32 characters; authenticates native admission, never MCP.                                                                                                                                                                                                                                                                          |
-| `MILTON_TRIAL_FINGERPRINT_KEY` | App only. Dedicated stable key, at least 32 characters, provisioned by the owner and checked against durable eligibility policy; independent of cookies/native encryption.                                                                                                                                                                                     |
-| `DATABASE_URL`                 | The TLS connection string for the `milton` database. App uses `milton_app_runtime`; MCP uses `milton_mcp_runtime`; auth uses its own role and URL. No runtime owns objects or inherits a writing/owner role.                                                                                                                                                   |
-| `MILTON_SUPPORT_EMAIL`         | Optional. The support address the account pages give; `support@meetmilton.com` when unset. The MCP address pages show is `MCP_RESOURCE`.                                                                                                                                                                                                                       |
-| `STRIPE_SECRET_KEY`            | App service only. The restricted Stripe API key for customers, subscriptions, Checkout and the billing portal. All three unset: the billing routes answer 503, sign-in starts no Stripe trial, the gate allows those accounts, and deleting an account with a Stripe customer refuses. Any one set means all three must be valid, or the app fails at startup. |
-| `STRIPE_WEBHOOK_SECRET`        | App service only. The signing secret of the Stripe endpoint for `POST /billing/webhook`.                                                                                                                                                                                                                                                                       |
-| `STRIPE_PRICE_ID`              | App service only. The one recurring price sign-in's trial and Checkout subscribe to.                                                                                                                                                                                                                                                                           |
+| Name                           | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `APP_ORIGIN`                   | The browser app's absolute HTTPS origin, without a path, query, or fragment.                                                                                                                                                                                                                                                                                                                                                                               |
+| `MCP_RESOURCE`                 | The exact public MCP resource URL, ending in `/mcp`. Tokens must include this resource in their audience.                                                                                                                                                                                                                                                                                                                                                  |
+| `AUTH_ISSUER`                  | The exact native issuer, without a trailing slash; hosted: `https://auth.meetmilton.com/api/auth`. App uses verified discovery and fixed native endpoints; MCP uses `/jwks`.                                                                                                                                                                                                                                                                               |
+| `AUTH_APP_CLIENT_ID`           | App only. Owner-provisioned fixed OIDC client ID.                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `AUTH_APP_CLIENT_SECRET`       | App only. Native-hashed confidential client secret, at least 32 characters; never a browser value.                                                                                                                                                                                                                                                                                                                                                         |
+| `AUTH_ADMISSION_SECRET`        | Admit and auth only. At least 32 characters; authenticates native admission, never MCP. The app no longer reads it.                                                                                                                                                                                                                                                                                                                                        |
+| `MILTON_TRIAL_FINGERPRINT_KEY` | App and admit only. Dedicated stable key, at least 32 characters, provisioned by the owner and checked against durable eligibility policy; independent of cookies/native encryption.                                                                                                                                                                                                                                                                       |
+| `DATABASE_URL`                 | The TLS connection string for the `milton` database. App uses `milton_app_runtime`; MCP uses `milton_mcp_runtime`; auth uses its own role and URL. No runtime owns objects or inherits a writing/owner role.                                                                                                                                                                                                                                               |
+| `MILTON_SUPPORT_EMAIL`         | Optional. The support address the account pages give; `support@meetmilton.com` when unset. The MCP address pages show is `MCP_RESOURCE`.                                                                                                                                                                                                                                                                                                                   |
+| `STRIPE_SECRET_KEY`            | App and admit services only (admit starts sign-in's trial). The restricted Stripe API key for customers, subscriptions, Checkout and the billing portal. All three unset: the billing routes answer 503, sign-in starts no Stripe trial, the gate allows those accounts, and deleting an account with a Stripe customer refuses. Any one set means all three must be valid, or the app fails at startup; on admit, key and price come together or neither. |
+| `STRIPE_WEBHOOK_SECRET`        | App service only; admit never reads it. The signing secret of the Stripe endpoint for `POST /billing/webhook`.                                                                                                                                                                                                                                                                                                                                             |
+| `STRIPE_PRICE_ID`              | App and admit services only. The one recurring price sign-in's trial and Checkout subscribe to.                                                                                                                                                                                                                                                                                                                                                            |
 
 Saves are model-free: Milton stores the exact text the assistant sends and calls no
 model on any read or save, so it needs no model credential, project or budget. The
@@ -138,6 +143,33 @@ the actual schema and journal before retrying. Take the required pre-migration s
 there is no reverse SQL that recreates the retired subsystem. Production applied this
 cleanup on 2026-11-04; the hosting runbook at commit 492b96a records the snapshot,
 baseline journal and preservation checks.
+
+CI runs `bun scripts/check-migrations.ts` on every pull request, against the merge base
+with `origin/main` (without it, as in a clone that never fetched main, it checks only
+the lock and journal and says so):
+
+- A new migration in `drizzle/`, `migrations/` or `apps/auth/migrations/` is numbered
+  above main's highest in its track, with a number of its own; the Drizzle journal's
+  idx and tag run without gaps and its `when` values strictly increase.
+- `scripts/released-migrations.sha256` locks every migration file and Drizzle snapshot.
+  Never edit, rename or remove one on main; add a new migration. Lock a new one with
+  `bun scripts/check-migrations.ts --update` and commit the manifest with it.
+- A new migration that drops, truncates or renames a table, column, view, schema, type
+  (attribute or enum value) or function carries a line `-- code-stopped-by: #NN`
+  naming the merged PR that stopped all code using it, and ships only after that code
+  is released. Index, sequence, trigger and constraint drops and renames do not need
+  it. Comments and string literals are skipped. Dynamic SQL (a `DO` block or
+  `EXECUTE`, also inside a function or procedure body) cannot be read, so it needs that
+  line or `-- no-drop-or-rename: <reason>`, as does a function, procedure, `DO` or
+  `EXECUTE` body that itself drops, truncates or renames one of those; a plain function
+  body, a trigger's `EXECUTE FUNCTION` and `GRANT EXECUTE` pass.
+
+`test/deletion-inventory.test.ts` applies all three tracks to an empty PGlite and fails
+on any text, character, JSON, bytea, tsvector, XML or enum column (or array, domain or
+composite holding one), in a table or materialized view, not classified in
+[docs/deletion-inventory.txt](../docs/deletion-inventory.txt) as deleted by account
+deletion, hidden (kept, never served), retained (tied to no account, so deletion cannot
+remove it, such as anonymous client registrations) or not personal, with a reason.
 
 ## Deploy
 
@@ -197,6 +229,22 @@ arguments to recover an uncertain request; its receipt returns the original
 outcome. That receipt's version may be
 older than the current report. Reusing an ID with different arguments is rejected.
 For a conflict, reread the cover sheet and reconsider a new request. No blind retry.
+
+Every error says what to do next in the result itself, so error handling never depends
+on the server instructions reaching the model. Each error result (and each MCP HTTP
+refusal body: invalid token, scope, rate and busy limits, oversized request, outage)
+keeps its `error` and `message` and adds `code`, the same stable code (`version_conflict`
+for a stale-version `conflict`, which has no `error`), and `next: {action, text}`. A
+scope refusal also carries `required_permission` (`read`, or `read_write` for a save):
+what the attempted action needed, which its `next` names.
+`action` is one of `retry` (repeat the identical call, a save with its request ID),
+`reread` (read the cover sheet or report again, then save with a new request ID),
+`fix_input` (correct the arguments), `ask_user` (the fix needs the person's approval or
+choice) and `tell_user` (stop and tell the person); `text` is the one-line step, such as
+giving the subscription link once without retrying. The mapping is one table,
+`nextSteps` in `src/mcp-outcomes.ts`, and a test checks that every code in the source has
+an entry. The SDK's plain-text argument refusals become the same JSON body with
+`invalid_arguments` and the SDK's text as `message`.
 
 A save runs in one transaction under the account lock, so a concurrent save of the
 same request waits and then replays; there is no pending state. Account gates (trial
@@ -337,12 +385,20 @@ send is not retention approval. When the person makes the same correction twice,
 assistant proposes one short rule and files it only on approval; a single
 correction is a one-off. Both run through `create_memo` with ordinary approval.
 
-Usage guidance travels in three places: server `instructions` during MCP
-initialization, descriptions in `tools/list`, and descriptions on the save input
-fields. Connection instructions explain the shared read/setup/save workflow;
-tool metadata explains when to use each tool, and field descriptions explain the
-opaque version and same-request retry rules. Server instructions stay at or under
-4,096 characters, because Claude Code truncates longer ones; a test enforces this.
+For clients that drop instructions, server info (`serverInfo.description`, MCP's
+`Implementation.description`) carries one line of at most 120 characters, tested: Milton
+holds the person's writing voice, and before writing or editing for them the assistant
+reads `get_cover_sheet`, then the matching `get_report`.
+
+Usage guidance travels in four places: server `instructions` during MCP
+initialization, descriptions in `tools/list`, descriptions on the save input
+fields, and the `next` step on every error result. Connection instructions explain
+the shared read/setup/save workflow and consent rules and point to `next` for errors;
+tool metadata explains when to use each tool and the save fields (rules, samples,
+version, request ID and what capture excludes), field descriptions explain the opaque
+version and same-request retry rules, and error results say how to recover. Both
+instruction variants stay under 3,500 characters, well inside the 4,096 at which Claude
+Code truncates; a test enforces this and that no error handling is left in them.
 The empty web page also provides a user-invoked setup prompt. No extra setup tool or
 prompt capability is required.
 
@@ -423,6 +479,11 @@ must also be checked independently.
 Root global checks are types, `bun test` and `bun run format:check`; CI also runs this
 rehearsal and the apps/auth integration suite on every pull request. The release
 coordinator owns actual cutover.
+
+`test/served-budget.test.ts` reads the tool descriptions an SDK client is served, in
+both connection modes, and keeps each one and their total under a stated character
+budget (the 2026-11-08 sizes plus 10–15%); growing past it means raising the budget
+in that file, deliberately.
 
 ## Store, history, and limits
 

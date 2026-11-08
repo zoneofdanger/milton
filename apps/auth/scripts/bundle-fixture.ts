@@ -20,6 +20,9 @@ export async function bundleFixture(
   );
   dsn.username = database.user!;
   dsn.password = String(database.password);
+  // Production refuses a loopback admission origin. Nothing here admits, so this
+  // run.app origin is never fetched.
+  const admission = "https://milton-admit-419545871671.us-east4.run.app";
   const workerEnv = {
     PATH: process.env.PATH,
     LC_ALL: "C",
@@ -29,6 +32,7 @@ export async function bundleFixture(
       Object.entries(config).map(([k, v]) => [k, String(v)]),
     ),
     AUTH_DATABASE_URL: dsn.href,
+    AUTH_ADMISSION_URL: admission,
   };
   for (const args of [[], ["--apply"]]) {
     const delivery = spawnSync(
@@ -61,6 +65,7 @@ export async function bundleFixture(
           Object.entries(config).map(([k, v]) => [k, String(v)]),
         ),
         AUTH_DATABASE_URL: dsn.href,
+        AUTH_ADMISSION_URL: admission,
         PORT: String(port),
       },
       stdio: ["ignore", "pipe", "pipe"],

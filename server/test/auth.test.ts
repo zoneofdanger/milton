@@ -237,6 +237,65 @@ test("Cloud Run app serves only canonical browser routes and public assets", asy
   for (const path of ["/.env", "/src/config.ts", "/fonts/%2e%2e/.env"])
     expect((await request(path)).status).toBe(404);
   expect((await request("/health", "mcp.example")).status).toBe(403);
+  // Admission is the separate milton-admit service, never the public app.
+  for (const path of [
+    "/internal/auth/admit",
+    "/internal/auth/preserve-eligibility",
+  ])
+    expect((await request(path, "app.example", "POST")).status).toBe(404);
+});
+
+test("the admission role serves auth's two calls and nothing else", async () => {
+  const { createAdmitApp } = await import("../src/index");
+  const { admitRuntimeConfig } = await import("../src/config");
+  const env = {
+    NODE_ENV: "production",
+    AUTH_ISSUER: issuer,
+    AUTH_ADMISSION_SECRET: clientSettings.admissionSecret,
+    MILTON_TRIAL_FINGERPRINT_KEY: clientSettings.trialFingerprintKey,
+  };
+  // It needs no browser, OIDC client or MCP setting, and refuses without its own.
+  const app = createAdmitApp(admitRuntimeConfig(env));
+  for (const missing of ["AUTH_ADMISSION_SECRET", "AUTH_ISSUER"])
+    expect(() => admitRuntimeConfig({ ...env, [missing]: undefined })).toThrow(
+      StoreError,
+    );
+  // Stripe for trials, but never the webhook secret; key and price come together.
+  const stripe = {
+    STRIPE_SECRET_KEY: "rk_test_fixtureNotAKey",
+    STRIPE_PRICE_ID: "price_fixture",
+    STRIPE_WEBHOOK_SECRET: "whsec_fixtureNotASecret",
+  };
+  expect(admitRuntimeConfig({ ...env, ...stripe }).billing).toEqual({
+    secretKey: stripe.STRIPE_SECRET_KEY,
+    priceId: stripe.STRIPE_PRICE_ID,
+  });
+  expect(() =>
+    admitRuntimeConfig({ ...env, STRIPE_SECRET_KEY: stripe.STRIPE_SECRET_KEY }),
+  ).toThrow(StoreError);
+  const request = (path: string, method = "POST") =>
+    app(new Request(`https://milton-admit.example.run.app${path}`, { method }));
+  for (const path of [
+    "/internal/auth/admit",
+    "/internal/auth/preserve-eligibility",
+  ]) {
+    // Routed to admission, which refuses a missing bearer before anything else.
+    expect((await request(path)).status).toBe(401);
+    expect((await request(path, "GET")).status).toBe(405);
+  }
+  for (const path of [
+    "/",
+    "/health",
+    "/mcp",
+    "/login",
+    "/billing/webhook",
+    "/internal/auth",
+    "/internal/auth/admit/",
+    "/milton.css",
+  ]) {
+    expect((await request(path)).status).toBe(404);
+    expect((await request(path, "GET")).status).toBe(404);
+  }
 });
 
 test("page fonts and favicons are local while other browser restrictions stay closed", async () => {
@@ -1813,6 +1872,15 @@ test("OIDC callback is correlated once, checks native proof on every use, and cl
   try {
     let callback = await start();
     expect((await send(callback)).status).toBe(303);
+    // The native access token proves the sign-in and is never stored: no field
+    // of the fixture's session or the new one holds it.
+    const stored = await local.db.query<{ row: string }>(
+      sql`SELECT row_to_json(s)::text AS row FROM milton_app.session s`,
+    );
+    expect(stored).toHaveLength(2);
+    expect(stored.filter((s) => s.row.includes("fictional-opaque"))).toEqual(
+      [],
+    );
     expect((await send("/tps-report")).status).toBe(403); // verified identity has not been admitted in this protocol unit fixture
     await resolveIdentityAccount(config, {
       provider: issuer,

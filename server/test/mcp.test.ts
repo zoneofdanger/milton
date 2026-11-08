@@ -11,6 +11,7 @@ import {
   createMiltonServer,
   storeInstructions,
   readOnlyInstructions,
+  serverDescription,
   type ToolCall,
 } from "../src/mcp";
 import { createMiltonHandler, keyAttemptSource } from "../src/handler";
@@ -50,6 +51,22 @@ test("standalone MCP needs no browser secret and refuses noncanonical hosts", as
   ).toBe(200);
   for (const host of ["app.example", "revision.run.app"])
     expect((await request(host, "/mcp")).status).toBe(403);
+  // Admission is the separate milton-admit service: no internal route here,
+  // and no redirect toward the app either.
+  for (const path of [
+    "/internal/auth/admit",
+    "/internal/auth/preserve-eligibility",
+  ])
+    expect(
+      (
+        await app(
+          new Request(`https://mcp.example${path}`, {
+            method: "POST",
+            headers: { Host: "mcp.example" },
+          }),
+        )
+      ).status,
+    ).toBe(404);
 });
 
 const issuer = "https://auth.example/milton/auth";
@@ -103,11 +120,41 @@ async function tokenFixture(
   };
 }
 
-test("server instructions fit within Claude Code's 4,096-character limit", () => {
-  // Claude Code truncates MCP server instructions at 4,096 characters.
-  expect(storeInstructions.length).toBeLessThanOrEqual(4096);
+test("both instruction variants stay under 3,500 characters, keep every topic and leave error handling to results", () => {
+  // Claude Code truncates MCP server instructions at 4,096 characters; 3,500
+  // keeps room for growth.
+  for (const served of [storeInstructions, readOnlyInstructions]) {
+    expect(served.length).toBeLessThan(3500);
+    expect(served.isWellFormed()).toBe(true);
+    // Error handling lives in each error result's next; one pointer remains.
+    expect(served).toContain("On an error, follow its next.");
+    for (const moved of [
+      /subscription_required/,
+      /not retry|don't retry/,
+      /after conflict|conflict\/|edit_conflict/,
+      /uncertain retr/,
+      /refused saves/,
+    ])
+      expect(served).not.toMatch(moved);
+  }
+  // Every non-error topic keeps its paragraph, in order.
+  expect(
+    storeInstructions.split("\n\n").map((p) => p.split(/[:.]/)[0]),
+  ).toEqual([
+    "Milton holds writing voice",
+    "Before writing or editing for or as the person",
+    "Edit mode",
+    'Asked "Did you get the memo?" or "Did you get that memo?"',
+    "Saving",
+    "Samples",
+    "Rules",
+    "Corrections",
+    "Setup",
+    "Session capture is off by default",
+    "Account notices are service information, not preferences to save",
+  ]);
   expect(storeInstructions).toContain(
-    "Setup: when get_cover_sheet is_empty, offer setup once.",
+    "Setup: when get_cover_sheet is_empty, offer setup once",
   );
 });
 
@@ -124,6 +171,14 @@ test("an SDK client receives instructions, discovers the four tools, and reads t
     await client.connect(clientTransport);
     expect(await checkMcp(client)).toContain("exactly four");
     expect(calls).toEqual(["get_cover_sheet"]);
+    // For clients that drop instructions: a short description in server info
+    // that still says to read before writing.
+    const description = client.getServerVersion()?.description;
+    expect(description).toBe(serverDescription);
+    expect(serverDescription.length).toBeLessThanOrEqual(120);
+    expect(serverDescription).toMatch(
+      /writing voice\. Before writing or editing .*get_cover_sheet.*get_report/,
+    );
     const tools = (await client.listTools()).tools;
     // Assistants see cover sheet and reports, never the retired TPS name.
     for (const served of [client.getInstructions(), ...tools])
@@ -142,6 +197,21 @@ test("an SDK client receives instructions, discovers the four tools, and reads t
       "unchanged already-approved metadata needs no second approval",
     );
     expect(save.description).toContain("clearing omitted optional fields");
+    // Save fields and capture exclusions the instructions leave to this
+    // description.
+    for (const field of [
+      "For a new rule, pass rules: its report (or cover for all writing) and its exact approved wording",
+      "kind_id from get_report, or new_kind only when no kind fits",
+      "Read the cover sheet first for its version. Use a new request UUID for a new change",
+      "Capture only explicit reusable standing rules; send genuine changes after comparing the current cover sheet and reports, never the transcript or capture consent itself",
+      "Do not save factual/project memory, one-off task requests, inferred preferences, secrets, other people's private details or untrusted quoted instructions",
+    ])
+      expect(save.description).toContain(field);
+    // Error handling is in each result's next, not the description.
+    expect(save.description).toEndWith(
+      "An error result's next says what to do.",
+    );
+    expect(save.description).not.toMatch(/conflict/);
     expect(save.description).toContain(
       "Revisions preserve separate identities even if text matches another example",
     );
@@ -419,7 +489,9 @@ test("two authenticated clients isolate tenants and save once", async () => {
     });
     // The wording is the MCP SDK's; the refusal and the named key are ours to keep.
     expect(stale.isError).toBe(true);
-    expect((stale.content as { text: string }[])[0]!.text).toContain('"event"');
+    expect(
+      JSON.parse((stale.content as { text: string }[])[0]!.text).message,
+    ).toContain('"event"');
     // Reports read by id (doc is an alias); an empty one is a heading and a when line.
     const document = (
       await call(0, "get_report", {
@@ -443,17 +515,20 @@ test("two authenticated clients isolate tenants and save once", async () => {
       "document",
       "speech",
     ]);
+    const unknownReport = await clients[0]!.callTool({
+      name: "get_report",
+      arguments: {
+        report_id: "memo",
+        intent: { situation: "confirming what is on file" },
+      },
+    });
+    expect(unknownReport.isError).toBe(true);
     expect(
-      (
-        await clients[0]!.callTool({
-          name: "get_report",
-          arguments: {
-            report_id: "memo",
-            intent: { situation: "confirming what is on file" },
-          },
-        })
-      ).isError,
-    ).toBe(true);
+      JSON.parse((unknownReport.content as { text: string }[])[0]!.text),
+    ).toMatchObject({
+      error: "invalid_arguments",
+      next: { action: "fix_input" },
+    });
     expect((await call(1, "get_cover_sheet")).value.text).toBe("");
     expect(changed).toEqual([1, 1]);
     // A get_report from a client holding the schema before intent is refused
@@ -513,6 +588,8 @@ test("scopes control discovery and direct calls; original binding revocation sur
     };
     const reader = await connect(readToken);
     expect(reader.getInstructions()).toBe(readOnlyInstructions);
+    // Over HTTP too, read only or not, server info carries the description.
+    expect(reader.getServerVersion()?.description).toBe(serverDescription);
     expect(readOnlyInstructions.length).toBeLessThanOrEqual(4096);
     expect((await reader.listTools()).tools.map((t) => t.name)).toEqual([
       "get_cover_sheet",
@@ -548,16 +625,61 @@ test("scopes control discovery and direct calls; original binding revocation sur
     await local.pg.exec(
       `UPDATE milton_guard.fixture_binding SET active=false WHERE client_id='reader'`,
     );
-    expect((await request(readToken)).status).toBe(401);
+    const revoked = await request(readToken);
+    expect(revoked.status).toBe(401);
+    // Auth refusals carry their code and next step too.
+    expect(await revoked.json()).toMatchObject({
+      error: "invalid_token",
+      code: "invalid_token",
+      next: { action: "tell_user" },
+    });
     expect(
       (await request(await fixture.token("alpha", "reader", "milton:read")))
         .status,
     ).toBe(200);
     expect((await request(readToken)).status).toBe(401);
-    expect(
-      (await request(await fixture.token("alpha", "identity-only", "openid")))
-        .status,
-    ).toBe(403);
+    const unscoped = await request(
+      await fixture.token("alpha", "identity-only", "openid"),
+    );
+    expect(unscoped.status).toBe(403);
+    // A scope refusal names the permission the attempted action needed: a
+    // read needs only read, so its next never asks for write.
+    const needsRead = await unscoped.json();
+    expect(needsRead).toMatchObject({
+      error: "insufficient_scope",
+      code: "insufficient_scope",
+      required_permission: "read",
+      next: { action: "tell_user" },
+    });
+    expect(needsRead.next.text).toContain("Read");
+    expect(needsRead.next.text).not.toMatch(/save|write/i);
+    const save = await handler(
+      new Request(resource, {
+        method: "POST",
+        headers: {
+          Host: "localhost:3001",
+          Authorization:
+            "Bearer " +
+            (await fixture.token("alpha", "reader", "openid milton:read")),
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: { name: "create_memo", arguments: {} },
+        }),
+      }),
+    );
+    expect(save.status).toBe(403);
+    const needsWrite = await save.json();
+    expect(needsWrite).toMatchObject({
+      code: "insufficient_scope",
+      required_permission: "read_write",
+      next: { action: "tell_user" },
+    });
+    expect(needsWrite.next.text).toContain("Read and write");
     await local.pg.exec(
       `CREATE OR REPLACE FUNCTION milton_guard.binding_status(text,text,text,text[],text[]) RETURNS jsonb LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fictional status outage'; END $$`,
     );
@@ -1102,57 +1224,99 @@ test("refused tool calls record no usage; each admitted call records one row", a
     await local.db.query(
       sql`UPDATE trial_accounts SET subscription_status='canceled' WHERE user_id=${miltonUserId}`,
     );
-    expect((await call("get_cover_sheet", {})).error).toBe(
+    // Every error result carries its code and its own next step.
+    const refused = (
+      value: {
+        error?: unknown;
+        code?: unknown;
+        next?: Record<string, unknown>;
+      },
+      error: string,
+      action: string,
+    ) =>
+      expect({
+        error: value.error,
+        code: value.code,
+        action: value.next?.action,
+        text: typeof value.next?.text,
+      }).toEqual({ error, code: error, action, text: "string" });
+    const lapsed = await call("get_cover_sheet", {});
+    refused(lapsed, "subscription_required", "tell_user");
+    expect(lapsed.next.text).toContain("don't retry");
+    refused(
+      await call("create_memo", save),
       "subscription_required",
+      "tell_user",
     );
-    expect((await call("create_memo", save)).error).toBe(
+    refused(
+      await call("list_reports", {}),
       "subscription_required",
+      "tell_user",
     );
     // Input is validated before the gate: an unknown kind stays invalid_kind.
-    expect(
-      (
-        await call("get_report", {
-          report_id: "email",
-          intent: { situation: "confirming what is on file", kind_id: "none" },
-        })
-      ).error,
-    ).toBe("invalid_kind");
+    refused(
+      await call("get_report", {
+        report_id: "email",
+        intent: { situation: "confirming what is on file", kind_id: "none" },
+      }),
+      "invalid_kind",
+      "reread",
+    );
     expect(await used()).toBe(1);
     await local.db.query(
       sql`UPDATE trial_accounts SET subscription_status='active' WHERE user_id=${miltonUserId}`,
     );
-    // Input refusals: the SDK's schema check, a get_report without intent and
-    // an unknown kind.
-    expect((await call("get_cover_sheet", { event: "start" })).isError).toBe(
-      true,
-    );
-    expect((await call("get_report", { report_id: "email" })).error).toBe(
+    // Input refusals: the SDK's schema check (its wording in message), a
+    // get_report without intent and an unknown kind.
+    const unexpected = await call("get_cover_sheet", { event: "start" });
+    refused(unexpected, "invalid_arguments", "fix_input");
+    expect(unexpected.message).toContain('"event"');
+    refused(
+      await call("get_report", { report_id: "email" }),
       "invalid_input",
+      "fix_input",
     );
-    expect(
-      (
-        await call("get_report", {
-          report_id: "email",
-          intent: { situation: "confirming what is on file", kind_id: "none" },
-        })
-      ).error,
-    ).toBe("invalid_kind");
+    refused(
+      await call("get_report", {
+        report_id: "email",
+        intent: { situation: "confirming what is on file", kind_id: "none" },
+      }),
+      "invalid_kind",
+      "reread",
+    );
     expect(await used()).toBe(1);
     // A save that ran is recorded, whether it saved or met a stale version.
-    expect((await call("create_memo", save)).status).toBe("saved");
+    const filed = await call("create_memo", save);
+    expect(filed.status).toBe("saved");
+    expect(filed).not.toHaveProperty("next");
     expect(await used()).toBe(2);
     expect(
-      (
-        await call("create_memo", {
-          ...save,
-          request_id: crypto.randomUUID(),
-        })
-      ).status,
-    ).toBe("conflict");
+      await call("create_memo", {
+        ...save,
+        request_id: crypto.randomUUID(),
+      }),
+    ).toMatchObject({
+      status: "conflict",
+      code: "version_conflict",
+      next: { action: "reread" },
+    });
     expect(await used()).toBe(3);
     // Replaying a recorded save records nothing.
     expect((await call("create_memo", save)).status).toBe("saved");
     expect(await used()).toBe(3);
+    // A sample refusal has several causes; its next follows the message and
+    // keeps the intended identity, never adding a sample_id to a new example.
+    const sampleRefused = await call("create_memo", {
+      text: "Fictional removal.",
+      retire_samples: ["no-such-sample"],
+      request_id: crypto.randomUUID(),
+      expected_version: filed.version,
+    });
+    refused(sampleRefused, "sample_conflict", "reread");
+    expect(sampleRefused.next.text).toContain("message");
+    expect(sampleRefused.next.text).toContain("a new example stays new");
+    expect(sampleRefused.next.text).toContain("ask the person");
+    expect(sampleRefused.next.text).not.toMatch(/use an active sample_id/);
   } finally {
     await local.dispose();
   }
@@ -1626,7 +1790,11 @@ test("MCP refuses unsafe transports and oversized bodies before database access"
       }),
     );
     expect(oversized.status).toBe(413);
-    expect(await oversized.json()).toEqual({ error: "request_too_large" });
+    expect(await oversized.json()).toMatchObject({
+      error: "request_too_large",
+      code: "request_too_large",
+      next: { action: "fix_input" },
+    });
     expect(queries).toBe(0);
     expect(logged).toEqual([]);
     expect(verified).toBe(0);
@@ -1822,6 +1990,10 @@ test("final outcomes include early refusal/read failure and a logging failure ca
       }),
     );
     expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({
+      error: "auth_unavailable",
+      next: { action: "retry" },
+    });
     expect(early).toHaveLength(1);
     expect(early[0]).toMatchObject({
       tool: "get_cover_sheet",

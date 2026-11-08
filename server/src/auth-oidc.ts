@@ -262,9 +262,10 @@ export async function finishLogin(
         p.exp * 1000,
       ),
     );
+    // The native access token stays in this request: it is never stored.
     try {
       await database(config).query(
-        sql`INSERT INTO milton_app.session(token_hash,issuer,subject,sid,binding,incarnation,generation,email,access_token,expires_at) VALUES(${hash(token)},${config.issuer},${authority.subject},${authority.sid},${authority.binding},${authority.incarnation},${authority.generation},${info.email as string},${tokens.access_token},${expires})`,
+        sql`INSERT INTO milton_app.session(token_hash,issuer,subject,sid,binding,incarnation,generation,email,expires_at) VALUES(${hash(token)},${config.issuer},${authority.subject},${authority.sid},${authority.binding},${authority.incarnation},${authority.generation},${info.email as string},${expires})`,
       );
     } catch {
       throw unavailable();

@@ -1,13 +1,7 @@
 import { generateRandomString, hashPassword } from "better-auth/crypto";
 import type pg from "pg";
 import { validPassword } from "../src/password.ts";
-import { reservedRecipient } from "../src/mail.ts";
-
-/** A fictional address auth never mails (reservedRecipient: the `.invalid`
- * top-level domain), lowercase as native stores emails. */
-export const fictionalEmail = (email: string) =>
-  reservedRecipient(email) &&
-  /^[a-z0-9._+-]{1,64}@([a-z0-9-]{1,63}\.)+invalid$/.test(email);
+import { fictionalEmail } from "../src/recipient.ts";
 
 /** A new native user id, in native's own shape: the account's OIDC subject. */
 export const newNativeId = () => generateRandomString(32, "a-z", "A-Z", "0-9");

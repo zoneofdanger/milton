@@ -9,7 +9,7 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { fictionalEmail } from "../../apps/auth/scripts/test-user.ts";
+import { fictionalEmail } from "../../apps/auth/src/recipient.ts";
 import {
   browser,
   CheckError,
@@ -20,7 +20,7 @@ import {
   signIn,
   type Fetch,
   type Origins,
-} from "./test-account";
+} from "./e2e-http";
 
 /** Every sample this check writes carries the marker in its context summary and
  * files under this kind, so a crashed run's leftovers are recognized. */
@@ -28,6 +28,8 @@ export const MARKER = "Milton e2e check";
 export const KIND = "e2e check";
 const REPORT = "document";
 const INTENT = { situation: "confirming what is on file" };
+/** The whole run's bound: past it the process exits 1. */
+export const RUN_MS = 240_000;
 /** The check warns, without failing, when the key has fewer days left. */
 export const KEY_WARN_DAYS = 30;
 /** A report serves eight samples; at eight the rest cannot be seen. */
@@ -363,9 +365,21 @@ Runs the end-to-end check against production on the fictional test account only.
 The file holds E2E_EMAIL, E2E_PASSWORD and E2E_CONNECTION_KEY (test-account.ts).`);
     process.exit(2);
   }
+  // Every failure is a non-zero exit, one failed job execution: a refusal or a
+  // failed step (runE2E's own ERROR line), a crash outside it, or a run past
+  // RUN_MS, well inside the job's 300 s task timeout.
+  const crash = (step: string, error: string) => {
+    print({ step, ok: false, ms: 0, severity: "ERROR", error });
+    process.exit(1);
+  };
+  process.on("uncaughtException", () => crash("process", "unexpected"));
+  process.on("unhandledRejection", () => crash("process", "unexpected"));
+  setTimeout(() => crash("deadline", "run_timeout"), RUN_MS).unref();
+  let code = 0;
   try {
     await runE2E({ secrets });
   } catch {
-    process.exitCode = 1;
+    code = 1;
   }
+  process.exit(code);
 }

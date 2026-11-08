@@ -8,6 +8,7 @@ import { decodeJwt } from "jose";
 import type pg from "pg";
 import { AUTH_ORIGIN, type Config } from "./config.ts";
 import type { RequestState } from "./adapter.ts";
+import { reservedRecipient } from "./recipient.ts";
 
 // Native getCryptoKey (used by makeSignature) imports an HMAC signing key.
 // Symmetric utilities instead accept a versioned SecretConfig. No bare-hex fallback.
@@ -17,11 +18,6 @@ async function key(secret: string) {
     keys: new Map([[1, await makeSignature("milton auth mail v1", secret)]]),
   };
 }
-/** An address on the reserved `.invalid` top-level domain (RFC 2606), which no
- * mail system delivers to, such as the end-to-end test account's. Milton never
- * queues mail to one, so the delivery job never sends it either. */
-export const reservedRecipient = (email: string) =>
-  /(^|\.)invalid\.?$/i.test(email.slice(email.lastIndexOf("@") + 1));
 export type NativeMail = {
   kind: "verify" | "reset";
   to: string;

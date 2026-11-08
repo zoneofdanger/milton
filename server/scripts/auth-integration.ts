@@ -58,16 +58,14 @@ import { fixtureConfig } from "../../apps/auth/test/fixture-config";
 import { AUTH_MIGRATIONS } from "../../apps/auth/scripts/migrations";
 import { createApp as createAuthPages } from "../../apps/auth/src/app";
 import { versionAssets } from "@milton/theme/assets";
+import { ownerPools, provisionTestAccount, TEST_EMAIL } from "./test-account";
 import {
   browser,
   CheckError,
-  ownerPools,
   PRODUCTION,
-  provisionTestAccount,
   signIn,
-  TEST_EMAIL,
   type Fetch,
-} from "./test-account";
+} from "./e2e-http";
 import { runE2E, type Line } from "./e2e";
 
 const port = 55623;

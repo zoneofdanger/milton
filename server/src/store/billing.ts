@@ -11,11 +11,16 @@ export type StripeSubscriptionState = {
 };
 export type StripeEvent = { id: string; type: string; payloadSha256: string };
 
+// Every write Milton's code makes of the Stripe state columns advances the revision, values unchanged
+// included, so a write after a Stripe read can tell whether any other landed since
+// its snapshot (see stripeCustomerRow).
+const advanced = sql`stripe_revision=stripe_revision+1`;
 const subscriptionColumns = (state: StripeSubscriptionState) =>
   sql`stripe_subscription_id=${state.id},subscription_status=${state.status},
     trial_end=to_timestamp(${state.trialEnd}::double precision),
     current_period_start=to_timestamp(${state.periodStart}::double precision),
-    current_period_end=to_timestamp(${state.periodEnd}::double precision)`;
+    current_period_end=to_timestamp(${state.periodEnd}::double precision),
+    ${advanced}`;
 
 /** The account's billing row, if any. A test account (users.test_account) is
  * permanently outside trials and billing, whatever row it holds: `test` tells
@@ -64,8 +69,9 @@ export async function lockWaitingSubscription(
   )[0];
 }
 
-/** Writes what Stripe answered. Callers hold the row, so an older read cannot
- * land after a newer one. */
+/** Writes what Stripe answered. Enrolment holds the row across its Stripe calls;
+ * checkout writes only while the row's revision is what it was before its read
+ * (see stripeCustomerRow). */
 export async function saveStripeSubscription(
   db: StoreSession,
   userId: string,
@@ -75,14 +81,20 @@ export async function saveStripeSubscription(
     WHERE user_id=${userId}`);
 }
 
-/** Locks the row holding this customer, if any, for the rest of the transaction.
- * Reads of Stripe for one customer run one at a time, so a slower, older read
- * cannot land after a newer one. */
-export async function lockStripeCustomer(db: StoreSession, customer: string) {
+/** The row holding this customer, if any: its subscription and the revision of
+ * its stored Stripe state (as text, exact). With `lock`, the row is held for the
+ * rest of the transaction, which only compares and writes: Stripe is read before
+ * it opens. */
+export async function stripeCustomerRow(
+  db: StoreSession,
+  customer: string,
+  lock = false,
+) {
   return (
-    await db.query<{ subscription: string | null }>(sql`
-    SELECT stripe_subscription_id AS subscription FROM trial_accounts
-    WHERE stripe_customer_id=${customer} AND ${billable} FOR UPDATE`)
+    await db.query<{ subscription: string | null; revision: string }>(sql`
+    SELECT stripe_subscription_id AS subscription, stripe_revision::text AS revision
+    FROM trial_accounts WHERE stripe_customer_id=${customer} AND ${billable}
+    ${lock ? sql`FOR UPDATE` : sql``}`)
   )[0];
 }
 
@@ -96,8 +108,39 @@ export async function stripeEventRecorded(db: StoreSession, id: string) {
  * id, so keeping it would block a retry and any later subscription. */
 export async function clearStripeCustomer(db: StoreSession, userId: string) {
   await db.query(sql`UPDATE trial_accounts SET stripe_customer_id=NULL,
-    stripe_subscription_id=NULL,subscription_status='canceled'
+    stripe_subscription_id=NULL,subscription_status='canceled',${advanced}
     WHERE user_id=${userId}`);
+}
+
+/** What Stripe answered, as the columns a reconciliation sets. "canceled" keeps
+ * the stored subscription and dates and ends the status: Stripe no longer has it. */
+const reconciledColumns = (state: StripeSubscriptionState | "canceled") =>
+  state === "canceled"
+    ? sql`subscription_status='canceled',${advanced}`
+    : subscriptionColumns(state);
+
+/** Writes what Stripe answered for this customer, with no event: the owner's
+ * resync (scripts/backfill-subscriptions.ts --resync). Callers write only over an
+ * unchanged revision. */
+export async function saveCustomerState(
+  db: StoreSession,
+  customer: string,
+  state: StripeSubscriptionState | "canceled",
+) {
+  await db.query(sql`UPDATE trial_accounts SET ${reconciledColumns(state)}
+    WHERE stripe_customer_id=${customer} AND ${billable}`);
+}
+
+/** Every stored Stripe customer of an account billing serves (not a test
+ * account), for the owner's resync. */
+export async function storedCustomers(db: StoreSession) {
+  return (
+    await db.query<{ customer: string }>(sql`
+    SELECT t.stripe_customer_id AS customer FROM trial_accounts t
+    JOIN users u ON u.id=t.user_id
+    WHERE t.stripe_customer_id IS NOT NULL AND NOT u.test_account
+    ORDER BY t.user_id`)
+  ).map(({ customer }) => customer);
 }
 
 /** Records the event and writes what Stripe answered in one statement: a
@@ -115,11 +158,9 @@ export async function recordStripeEvent(
     await db.query<{ recorded: number }>(
       // A data-modifying WITH runs to completion even though nothing reads it.
       write
-        ? sql`WITH ${recorded}, u AS (UPDATE trial_accounts SET ${
-            write.state === "canceled"
-              ? sql`subscription_status='canceled'`
-              : subscriptionColumns(write.state)
-          } WHERE stripe_customer_id=${write.customer} AND ${billable} AND EXISTS (SELECT 1 FROM e))
+        ? sql`WITH ${recorded}, u AS (UPDATE trial_accounts SET ${reconciledColumns(
+            write.state,
+          )} WHERE stripe_customer_id=${write.customer} AND ${billable} AND EXISTS (SELECT 1 FROM e))
           SELECT (SELECT count(*) FROM e)::int AS recorded`
         : sql`WITH ${recorded} SELECT (SELECT count(*) FROM e)::int AS recorded`,
     )
@@ -130,7 +171,7 @@ export async function recordStripeEvent(
 /** 0027's data statement: a returning deleted identity an older image wrote, with
  * no status and a start before its account, is canceled, never given a trial. */
 export async function cancelReturningIdentities(db: StoreSession) {
-  await db.query(sql`UPDATE trial_accounts t SET subscription_status='canceled'
+  await db.query(sql`UPDATE trial_accounts t SET subscription_status='canceled',${advanced}
     FROM users u WHERE u.id=t.user_id AND t.started_at < u.created_at
     AND t.subscription_status IS NULL AND NOT u.test_account`);
 }

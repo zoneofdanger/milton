@@ -24,6 +24,11 @@ const checkpoint = () =>
     }
   })());
 
+// How many transactions are open on any local store in this process, so a fake
+// Stripe can record a call made inside one.
+let open = 0;
+export const openTransactions = () => open;
+
 // Milton's database interface over a local PGlite.
 export function storeDatabase(pg: PGlite) {
   const orm = drizzle(pg);
@@ -31,14 +36,20 @@ export function storeDatabase(pg: PGlite) {
     async query<Row extends Record<string, unknown>>(statement: SQL) {
       return (await orm.execute<Row>(statement)).rows as Row[];
     },
-    transaction: (work) =>
-      orm.transaction((tx) =>
-        work({
-          async query<Row extends Record<string, unknown>>(statement: SQL) {
-            return (await tx.execute<Row>(statement)).rows as Row[];
-          },
-        }),
-      ),
+    transaction: async (work) => {
+      open++;
+      try {
+        return await orm.transaction((tx) =>
+          work({
+            async query<Row extends Record<string, unknown>>(statement: SQL) {
+              return (await tx.execute<Row>(statement)).rows as Row[];
+            },
+          }),
+        );
+      } finally {
+        open--;
+      }
+    },
     withConnection: (work) => work(db),
   };
   return db;

@@ -489,6 +489,37 @@ app never rolls back to an image older than #62 (`milton-app-token-0f7d5aa` is t
 its transaction rolls back and changes nothing; rerun it. Otherwise a failed migration's
 rollback is the pre-migration snapshot; there is no down script.
 
+## Stripe reads off the row lock (Drizzle 0011, PR #70; prepared, not applied)
+
+Checkout's live read and the webhook now read Stripe with no transaction open and write by
+compare-and-set on `trial_accounts.stripe_revision` (server README). Sign-in enrolment and
+account deletion are unchanged: they still call Stripe under their locks (TODO.md). 0011 is
+additive; older code never names the column. Older revisions' writes of the Stripe state (the
+webhook, checkout, and sign-in enrolment on admit) do not advance the revision, so while both
+versions serve, a new read in flight could land over one of them, where the old row lock kept
+them apart, and record its event, so a redelivery is deduplicated and repairs nothing. A
+stale state would last until that customer's next Stripe event. Checkout does not repair it:
+it sends a stored trialing, active, past_due, unpaid or paused status to the portal without
+reading Stripe. So the release ends with a one-off resync that re-reads every stored
+customer:
+
+1. Rehearse (`check-auth-integration.ts` applies 0011), then snapshot production.
+2. As `neondb_owner`: `bun run --cwd server db:migrate` applies `0011_stripe_revision`
+   (journal 12 entries). Old code runs on it unchanged.
+3. In a quiet window (no webhook delivery, checkout or admission in milton-app's and
+   milton-admit's request logs for the last 2 minutes), release the image to `milton-app`
+   and `milton-admit` back to back, so the mixed window stays short, then wait until neither
+   previous revision serves a request (app timeout 60 s, admit 30 s).
+4. Once both services run the new image and the old revisions have drained, run the resync
+   from a checkout of the released commit, set up as for the backfill below:
+   `bun --no-env-file scripts/backfill-subscriptions.ts --resync` (dry run: the count of
+   stored customers), then the same with `--apply`. It re-reads each from Stripe as a webhook
+   does and writes through the same compare-and-set, at about 5 a second. A nonzero exit
+   means a read failed or a write conflicted twice: rerun it until it exits 0.
+
+Rollback: code to the previous revision, which runs on 0011; the pre-migration snapshot is
+0011's rollback, and there is no down script.
+
 ## Test account and daily check
 
 `e2e@milton-test.invalid` is a fictional account that holds nothing but what the daily
@@ -1478,7 +1509,10 @@ It prints only counts (total, created, skipped, failed, still NULL), at about 5 
 over active accounts other than test accounts (it reads `users.test_account`, so a checkout from
 this change on needs Drizzle 0009 applied), and refuses without `trials_enabled` and a live key. `--allow-test-key` is for disposable
 databases only. With `--apply` it exits nonzero if any account still has no status; rerun it, since
-rows with a status are skipped. A returning deleted
+rows with a status are skipped. `--resync` (same setup, guards and pacing) instead re-reads every
+stored customer of a non-test account from Stripe and writes what it finds through the webhook's
+compare-and-set, with no event; it prints total, reconciled and failed, calls Stripe for nothing
+without `--apply`, and exits nonzero when any failed. A returning deleted
 identity's row is canceled and counted as skipped. A row left at NULL is free until a browser sign-in: an approval
 Neon already holds refreshes without any Milton page. A customer it creates has no email
 until its person first opens billing, when Milton copies their sign-in email to Stripe. Everyone

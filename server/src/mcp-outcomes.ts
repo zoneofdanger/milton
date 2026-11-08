@@ -62,6 +62,7 @@ export const loggedErrorCodes = new Set([
   "protocol_error",
   "connection_key_limit",
   "server_busy",
+  "billing_unavailable",
 ]);
 const refusals = new Set([
   "rate_limited",
@@ -225,6 +226,8 @@ export const nextSteps: Record<string, NextStep> = {
     "tell_user",
     "Tell the person to revoke an unused connection key in Milton first; don't retry.",
   ),
+  // Billing's own refusal, met only in checkout.
+  billing_unavailable: retryOnce,
   // Store invariants and configuration a correct call never meets (Milton
   // derives descriptions and reasons itself).
   configuration: unavailableNow,

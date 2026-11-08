@@ -534,14 +534,32 @@ export function createProvider(
     let acquired = false;
     let source = "";
     let body: Record<string, unknown> = {};
+    // Native lowercases the type and parses by it, so every body guard below
+    // reads this one value, and native is sent only this value. Any other POST
+    // type is refused before native, as is a combined (comma-joined) header,
+    // whose later types some runtimes' formData() honours.
+    const contentType = request.headers.get("content-type") ?? "";
+    const mediaType = contentType.split(";")[0]!.trim().toLowerCase();
+    if (
+      request.method === "POST" &&
+      (contentType.includes(",") ||
+        (mediaType !== "application/json" &&
+          mediaType !== "application/x-www-form-urlencoded"))
+    )
+      return json({ error: "unsupported_media_type" }, 415);
     try {
       source = await boundedBody(request);
-      if (source)
-        body = request.headers
-          .get("content-type")
-          ?.startsWith("application/json")
-          ? JSON.parse(source)
-          : Object.fromEntries(new URLSearchParams(source));
+      // Native is sent the body re-serialised from what the guards read, so
+      // no later decode (a BOM strip, another parser) can find a field the
+      // guards did not see.
+      if (source && mediaType === "application/json") {
+        body = JSON.parse(source);
+        source = JSON.stringify(body);
+      } else if (source) {
+        const fields = new URLSearchParams(source);
+        body = Object.fromEntries(fields);
+        source = fields.toString();
+      }
       if (!body || typeof body !== "object" || Array.isArray(body))
         return json({ error: "invalid_body" }, 400);
     } catch {
@@ -592,9 +610,7 @@ export function createProvider(
       (request.method !== "POST" ||
         request.headers.has("authorization") ||
         body.client_id !== config.AUTH_APP_CLIENT_ID ||
-        !request.headers
-          .get("content-type")
-          ?.startsWith("application/x-www-form-urlencoded") ||
+        mediaType !== "application/x-www-form-urlencoded" ||
         [
           "client_id",
           "client_secret",
@@ -604,16 +620,22 @@ export function createProvider(
         body.client_assertion)
     )
       return json({ error: "introspection_caller_refused" }, 403);
-    if (
-      source &&
-      request.headers
-        .get("content-type")
-        ?.startsWith("application/x-www-form-urlencoded")
-    ) {
+    if (source && mediaType === "application/x-www-form-urlencoded") {
       const f = new URLSearchParams(source);
       if ([...new Set(f.keys())].some((k) => f.getAll(k).length > 1))
         return json({ error: "ambiguous_form" }, 400);
     }
+    if (path === "/request-password-reset") {
+      body.redirectTo = AUTH_ORIGIN + "/reset-password";
+      source =
+        mediaType === "application/json"
+          ? JSON.stringify(body)
+          : new URLSearchParams(body as Record<string, string>).toString();
+    }
+    // Re-encoding can grow the body, so the rebuilt body meets the incoming
+    // limit too, before any database work.
+    if (Buffer.byteLength(source) > 16384)
+      return json({ error: "request_too_large" }, 413);
     if (inFlight >= 4) return json({ error: "busy_retry" }, 429);
     inFlight++;
     acquired = true;
@@ -645,13 +667,19 @@ export function createProvider(
       ])
         headers.delete(k);
       headers.set("x-milton-transport-ip", ip);
+      if (request.method === "POST") headers.set("content-type", mediaType);
       if (path === "/oauth2/register") headers.delete("cookie");
-      if (path === "/request-password-reset") {
-        body.redirectTo = AUTH_ORIGIN + "/reset-password";
-        source = headers.get("content-type")?.startsWith("application/json")
-          ? JSON.stringify(body)
-          : new URLSearchParams(body as Record<string, string>).toString();
-      }
+      // The rebuilt body has its own length, and no client header may
+      // describe the original bytes.
+      for (const k of [
+        "content-length",
+        "content-encoding",
+        "transfer-encoding",
+        "content-md5",
+        "digest",
+        "content-digest",
+      ])
+        headers.delete(k);
       const native = new Request(request.url, {
         method: request.method,
         headers,

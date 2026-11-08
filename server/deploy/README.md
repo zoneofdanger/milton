@@ -23,7 +23,32 @@ This runbook keeps only the latest release record. Earlier release records and a
 one-time procedures are in git history; the last full version is at commit 492b96a
 (`git show 492b96a:server/deploy/README.md`).
 
-## Release record: UserInfo binding, private admission service, session token drop, e2e fix, MCP next steps, guards (2026-11-08, PRs #58–#65, #69)
+## Release record: guide pilot parked, deletion links, UserInfo binding, private admission service, session token drop, e2e fix, MCP next steps, guards (2026-11-08, PRs #58–#66, #68, #69)
+
+- **#66 (Peter's go; milton-perf, milton-qa PASS), `f735701`:** the parked guide pilot is off
+  every read unless `MILTON_GUIDES=on` (unset in both payloads and services), and Drizzle 0010
+  drops the sample-version trigger. Step 1: app/MCP `milton-*-park-f735701` at 21:19:23Z
+  (image `sha256:7318c5c418d9f78a723b28a7a4c0d2f9af57ed0db022c7bf539b45836923eaa8`; the daily
+  job too); no request reached an older app or MCP revision after 21:19:30Z. Step 2: snapshot
+  `snap-purple-rain-b8ahc51q` at 21:21:39Z. Step 3: `0010_park_guides` at 21:21:46Z (journal 11
+  entries; `report_guide_source` gone, its function, both guide rows and the tables kept;
+  no guide account, no `ready` guide). Live: health 200 ×3, app home 200, MCP 401
+  unauthenticated, forms probe PASS, MCP reads with no guide, e2e passed before and after
+  0010 (`milton-e2e-daily-zznm9`, `-46mf5`). Checks on the merge (`5b14877`, same tree): CI
+  green. Gate at 21:32Z (from 21:19Z, covering 0010): clean.
+- **#68 (Peter's go and wording; milton-qa), `6fd0330`:** deletion removes the account's
+  sign-in grant bindings and the assistant registrations only it approved (native 008, see
+  [its section](#deletion-removes-sign-in-grants-and-assistant-registrations-applied-2026-11-08-native-008-pr-68)).
+  No auth image: #68 changes no runtime code. Snapshot `snap-morning-frog-b8rqnt3c` at
+  21:12:28Z; 008 at 21:12:52Z on the first attempt (ledger 001–008); the leftover-binding
+  check returned 0; one link backfilled, for the one assistant registration (the other
+  registration is the app's own sign-in client, which nobody consents to and deletion never
+  touches), nothing cleared; runtime audits `ok` for app and MCP; an e2e sign-in passed
+  (`milton-e2e-daily-zfq9v`). The privacy page (dated November 8, 2026, Peter's sentence on
+  registrations that can no longer be linked) is live on www.meetmilton.com. Checks: PR CI
+  green on `370cce0` (same tree); on main the integration job failed once in "usage rows
+  skipped behind short FOR UPDATEs" (timing; #68 does not touch it) and passed on rerun.
+  Gate at 21:23Z (from 21:12Z): clean.
 
 - **#69 (milton-qa; Astra's must-fix, the Bearer challenge, fixed), `f464237`:** native
   UserInfo answers only while the token's grant binding is live (`binding_status` after the
@@ -97,8 +122,8 @@ one-time procedures are in git history; the last full version is at commit 492b9
 
 Auth `milton-auth-00020-hef`, rollback `milton-auth-00018-heq` (code only); floor `00018-heq` (older auth calls the
 app's removed admission routes: roll auth back only together with app/MCP to
-`milton-*-token-0f7d5aa`, then auth to `00016-kul`). App/MCP `milton-*-admit-20b0f27`,
-rollback `milton-*-token-0f7d5aa` (code only; never before #62). Once owner file 013 is applied, the app never rolls back to an image older than #62:
+`milton-*-token-0f7d5aa`, then auth to `00016-kul`). App/MCP `milton-*-park-f735701`,
+rollback `milton-*-admit-20b0f27` (code only; with no guide account it serves no stale guide), then `milton-*-token-0f7d5aa` (never before #62). Once owner file 013 is applied, the app never rolls back to an image older than #62:
 `milton-app-token-0f7d5aa` is its floor, and `milton-app-guards-1a82fde` is no longer a
 rollback (its sign-in writes the dropped column). MCP never touches sessions; its rollback
 is unchanged. See [Drop the app session's access-token column](#drop-the-app-sessions-access-token-column-owner-file-013).
@@ -343,7 +368,7 @@ A failed migration's rollback is the pre-migration snapshot, used only before an
 reads the column serves; there is no down script. Every recorded app/MCP revision runs on
 either schema, so rolling code back never needs it.
 
-## Deletion removes sign-in grants and assistant registrations (not yet applied: native 008)
+## Deletion removes sign-in grants and assistant registrations (applied 2026-11-08: native 008, PR #68)
 
 Native 008 adds `milton_guard.client_link` (account, registration), written by
 `consent_gate` whenever an account consents to an assistant registration, and
@@ -741,7 +766,7 @@ wanted. Alert delivery to Peter is unverified until milton-duo sends a test noti
 
 ## Optional guide worker
 
-The default-off private guide pilot has separate [operations and capability instructions](guides.md). No guide job, schedule, provider key or account enrollment is provisioned by its build. It is parked: Drizzle 0010 drops its sample-version trigger and keeps every guide row; apply it as any migration (snapshot first). [Parked state and resume](guides.md#parked-state-and-resume) gives the steps.
+The default-off private guide pilot has separate [operations and capability instructions](guides.md). No guide job, schedule, provider key or account enrollment is provisioned by its build. It is parked: Drizzle 0010 drops its sample-version trigger and keeps every guide row (applied 2026-11-08, PR #66). [Parked state and resume](guides.md#parked-state-and-resume) gives the steps.
 
 ## Cloud resources
 
@@ -758,7 +783,7 @@ The tracked app and MCP manifests still pin the pre-cutover release: app
 [Release verification and rollback](#release-verification-and-rollback); derive a manifest
 from the live service before replacing it. [auth.service.template.json](auth.service.template.json)
 is deliberately non-deployable. Production's writing journal holds `0000_baseline` through
-`0009_test_account` (10 entries), the native auth ledger 001–007, and the owner files
+`0010_park_guides` (11 entries), the native auth ledger 001–008, and the owner files
 `000-app-owner.sql`, `005-app.up.sql`, `005-app-roles.sql`, `006-connection-keys-roles.sql`,
 `007-role-timeouts.up.sql`, `008-drop-legacy-mapping.up.sql`, `009-usage-calls-roles.sql`,
 `010-usage-retention-roles.sql`, `011-test-account-roles.sql`, `012-session-token-nullable.up.sql` and `013-drop-session-access-token.up.sql` (see [runtime role timeouts](#runtime-role-timeouts-applied-2026-11-07-todo-29)). There is no memo-update
@@ -1252,8 +1277,8 @@ references. Inspect revision readiness before selecting a recorded revision:
 gcloud run revisions list --service=milton-app --project=milton-510506 --region=us-east4
 ```
 
-Now serving (2026-11-08): app `milton-app-admit-20b0f27`, MCP `milton-mcp-admit-20b0f27`
-and admission `milton-admit` (source `20b0f27`), and auth `milton-auth-00020-hef` (source `f464237`). The
+Now serving (2026-11-08): app `milton-app-park-f735701`, MCP `milton-mcp-park-f735701`
+(source `f735701`), admission `milton-admit` (source `20b0f27`), and auth `milton-auth-00020-hef` (source `f464237`). The
 release record above gives the image and rollback revisions.
 
 Roll back only affected services, preserve ingress/IAM, then repeat the canonical

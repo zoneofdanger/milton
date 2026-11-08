@@ -822,15 +822,20 @@ gcloud secrets versions access <N> --secret=milton-app-env $P > app-current.env
 export DOTENV_PRIVATE_KEY="$(gcloud secrets versions access <K> --secret=milton-app-key $P)"
 dotenvx decrypt -f app-current.env --stdout \
   | grep -E '^(DATABASE_URL|AUTH_ISSUER|AUTH_ADMISSION_SECRET|MILTON_TRIAL_FINGERPRINT_KEY|STRIPE_SECRET_KEY|STRIPE_PRICE_ID)=' \
-  > admit.env
+  > .env
 # The app's key must not encrypt the new payload: its own keypair, generated now.
+# Encrypt it as `.env`: dotenvx names the keypair after the file (admit.env gave
+# DOTENV_*_KEY_ADMITDEVELOPMENT), and the service reads plain DOTENV_PRIVATE_KEY.
 unset DOTENV_PRIVATE_KEY
-dotenvx encrypt -f admit.env --env-keys-file admit.keys
+dotenvx encrypt -f .env --env-keys-file admit.keys
+mv .env admit.env
 grep -c '="encrypted:' admit.env   # must print 6
-# Public keys differ (they are not secret):
-grep '^DOTENV_PUBLIC_KEY' app-current.env admit.env
+# Unsuffixed, and the public keys differ (they are not secret):
+grep '^DOTENV_PUBLIC_KEY=' app-current.env admit.env
+grep -c '^DOTENV_PRIVATE_KEY=' admit.keys   # must print 1
 gcloud secrets create milton-admit-env $P --replication-policy=automatic --data-file=admit.env
-grep '^DOTENV_PRIVATE_KEY=' admit.keys | cut -d= -f2- | tr -d '"' \
+# printf '%s' so the stored key has no trailing newline (grep's would be kept).
+printf '%s' "$(grep '^DOTENV_PRIVATE_KEY=' admit.keys | cut -d= -f2- | tr -d '"')" \
   | gcloud secrets create milton-admit-key $P --replication-policy=automatic --data-file=-
 for s in milton-admit-env milton-admit-key; do
   gcloud secrets add-iam-policy-binding $s $P --member=serviceAccount:$SA --role=roles/secretmanager.secretAccessor
@@ -839,7 +844,8 @@ done
 
 Match the replication of the existing secrets (`gcloud secrets describe milton-app-env`).
 From the repository checkout, audit the login through the payload (`<dir>` is the
-temporary directory): `MILTON_SERVICE=app dotenvx run -f <dir>/admit.env --env-keys-file <dir>/admit.keys -- bun --no-env-file server/scripts/check-runtime-role.ts`
+temporary directory), with the key the service will read, as it reads it:
+`DOTENV_PRIVATE_KEY="$(gcloud secrets versions access latest --secret=milton-admit-key $P)" MILTON_SERVICE=app dotenvx run -f <dir>/admit.env -- bun --no-env-file server/scripts/check-runtime-role.ts`
 prints `ok`. Then copy the encrypted payload to private release storage, delete the
 directory, set the image digest in [admit.service.json](admit.service.json),
 and create the service and its one invoker:

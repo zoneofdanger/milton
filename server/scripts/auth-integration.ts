@@ -145,9 +145,28 @@ try {
   await owner.query(
     "CREATE SCHEMA neon_auth; CREATE TABLE neon_auth.retained(value text); INSERT INTO neon_auth.retained VALUES('fictional retained metadata'); INSERT INTO users(id) VALUES('m_00000000-0000-4000-8000-000000000001'); INSERT INTO identities(provider,subject,user_id) VALUES('neon','legacy-person','m_00000000-0000-4000-8000-000000000001'); INSERT INTO trial_accounts(user_id,started_at,subscription_status) VALUES('m_00000000-0000-4000-8000-000000000001',now()-interval '40 days','canceled');",
   );
-  await appOwner.query(
-    readFileSync(new URL("./migrations/005-app.up.sql", sourceRoot), "utf8"),
+  const ownerUrl = new URL(
+    `postgresql://disposable_cluster@127.0.0.1:${port}/milton`,
   );
+  ownerUrl.searchParams.set("sslmode", "verify-full");
+  ownerUrl.searchParams.set("sslrootcert", cert);
+  // The real owner-only CLI installs 005 once, after native 004 above.
+  const appMigrationUrl = new URL(ownerUrl);
+  appMigrationUrl.searchParams.set("options", "-c role=milton_app_owner");
+  const applied = spawnSync(
+    "bun",
+    ["--no-env-file", "scripts/migrate.ts", "--app-auth"],
+    {
+      cwd: process.cwd(),
+      env: {
+        PATH: process.env.PATH,
+        LC_ALL: "C",
+        MILTON_OWNER_DATABASE_URL: appMigrationUrl.href,
+      },
+      encoding: "utf8",
+    },
+  );
+  assert.equal(applied.status, 0, "actual owner-only app migration CLI");
   await owner.query(
     readFileSync(new URL("./migrations/005-app-roles.sql", sourceRoot), "utf8"),
   );
@@ -230,11 +249,6 @@ try {
     u.searchParams.set("sslrootcert", cert);
     return u.href;
   };
-  const ownerUrl = new URL(
-    `postgresql://disposable_cluster@127.0.0.1:${port}/milton`,
-  );
-  ownerUrl.searchParams.set("sslmode", "verify-full");
-  ownerUrl.searchParams.set("sslrootcert", cert);
   const ownerDb = postgresDatabase(ownerUrl.href);
   const personId = "m_00000000-0000-4000-8000-000000000001";
   const fingerprintKey = secret();

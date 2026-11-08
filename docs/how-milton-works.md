@@ -473,7 +473,8 @@ Files: `apps/site/`.
 
 ## Theme, scripts, and CI
 
-Files: `packages/theme/`, `server/scripts/`, `.github/workflows/checks.yml`.
+Files: `packages/theme/`, `server/scripts/`, `scripts/check-migrations.ts`,
+`.github/workflows/checks.yml`.
 
 - A shared theme supplies fonts, favicons, and tokens, with a WCAG contrast test. App and auth text outside the Latin JetBrains Mono subset fetches the full master on demand, which also renders a non-Latin letter with its combining mark; the site serves only the subset.
 - `migrate.ts` applies writing migrations only as neondb_owner; explicit --app-auth applies app-only migration005 after native004 as an approved app migration owner, with no runtime startup migration.
@@ -486,7 +487,8 @@ Files: `packages/theme/`, `server/scripts/`, `.github/workflows/checks.yml`.
 - `e2e.ts` checks a deployment end to end on the test account only: a browser sign-in that must show the account and list the key's public id before the key is sent anywhere, an MCP connection with that key listing four tools, then a gate before any write (nothing on file but this check's marked leftovers, which it retires first), a marked fictional sample saved, read fresh, revised by `sample_id`, read fresh and retired, and a final read equal to the run's start. One JSON line per step with no secret or sample body; a key under 30 days from expiry warns; exit 0 only when every step passes, and 1 for a refusal, a failed step, a crash or a run past 240 s.
 - `build.ts` builds the CSS with Vite, versions the public assets by content hash, and bundles the Cloud Run, guide worker and end-to-end check (`e2e.js`, the `milton-e2e-daily` job) entries with Bun, minified except identifiers, with source maps the image leaves out.
 - `dev.ts` serves the app on loopback and rebuilds the CSS on change.
-- CI runs types, tests, formatting, and both integration suites on PostgreSQL 18, holds no secrets, and does not deploy.
+- CI runs the migration guards, types, tests, formatting, and both integration suites on PostgreSQL 18, holds no secrets, and does not deploy.
+- `check-migrations` compares with main: a new migration is numbered above main's highest in its track with its own number, Drizzle journal entries run in order with strictly increasing `when`, every migration file and snapshot matches its hash in `scripts/released-migrations.sha256` (main's never change), and a new drop or rename names its merged code-stopped-by PR. Without origin/main it checks only the lock and journal; in CI that fails.
 
 ## Optional report guides
 

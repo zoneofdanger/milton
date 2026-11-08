@@ -67,6 +67,13 @@ export function metadataDocumentUrlAllowed(clientIdUrl: string): boolean {
   );
 }
 const invalid = () => new APIError("BAD_REQUEST", { error: "invalid_grant" });
+// Final, not a retry: the app answered an admission 410, the account's
+// deletion having begun. Whichever path admits, the person reads this.
+const ACCOUNT_DELETING = {
+  error: "account_deleting",
+  message: "This Milton account is being deleted.",
+};
+const accountDeleting = () => new APIError("FORBIDDEN", ACCOUNT_DELETING);
 const hash = (v: string) => createHash("sha256").update(v).digest("hex");
 export function createProvider(
   config: Config,
@@ -296,11 +303,7 @@ export function createProvider(
       ...identity,
     });
     // A deletion that began after the identity read above: final, not a retry.
-    if (admitted === "deleting")
-      throw new APIError("FORBIDDEN", {
-        error: "account_deleting",
-        message: "This Milton account is being deleted.",
-      });
+    if (admitted === "deleting") throw accountDeleting();
     if (admitted !== true)
       throw new APIError("SERVICE_UNAVAILABLE", {
         error: "admission_retry_required",
@@ -999,6 +1002,14 @@ export function createProvider(
         return json({ error: "retryable_dependency_failure" }, 503);
       return response;
     } catch (error) {
+      // The link handoff's admission runs after native answers, outside its
+      // error handling, so its final refusal is answered here.
+      if (
+        error instanceof APIError &&
+        (error.body as { error?: unknown } | undefined)?.error ===
+          ACCOUNT_DELETING.error
+      )
+        return json(ACCOUNT_DELETING, 403);
       console.error("auth_request", safeError(error));
       return json({ error: "retryable_dependency_failure" }, 503);
     } finally {

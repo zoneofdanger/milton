@@ -685,7 +685,7 @@ the account lock, in the transaction that would publish them. Exact replay still
 recovers an already accepted receipt. Web view/download remains available.
 
 With billing configured, no new approval lands until the account has a subscription:
-The authenticated native admission handoff starts the trial first, and a Stripe failure stops it with a retryable 503; an account whose deletion has begun gets a 410, which native turns into a final 403 `account_deleting`. An approval the native provider
+The authenticated native admission handoff starts the trial first, and a Stripe failure stops it with a retryable 503; an account whose deletion has begun gets a 410, which native turns into a final 403 `account_deleting` on sign-in, consent and explicit linking alike. An approval the native provider
 already holds refreshes without any Milton page, so existing accounts depend on the
 backfill. The signed Stripe
 webhook keeps `subscription_status` and the dates current; the next request rechecks

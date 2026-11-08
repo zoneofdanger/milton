@@ -38,7 +38,8 @@ function poolFor(url: string): Pool {
       // migrations/007-role-timeouts.up.sql. Change both together.
       statement_timeout: 20000,
       lock_timeout: 10000,
-      // Cloud Run containerConcurrency; each request holds at most one connection.
+      // Cloud Run containerConcurrency. A request holds up to four connections at
+      // once (/assistants) and none borrows while holding one, so a full pool waits.
       max: 40,
       idleTimeoutMillis: POOL_IDLE_MS,
       // Scripts exit once their work is done; services close pools on SIGTERM.

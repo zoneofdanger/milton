@@ -22,36 +22,34 @@ This runbook keeps only the latest release record. Earlier release records and a
 one-time procedures are in git history; the last full version is at commit 492b96a
 (`git show 492b96a:server/deploy/README.md`).
 
-## Release record: save round trips, rollback scripts retired, auth rate limits (2026-11-08, PRs #49 #51 #52)
+## Release record: admit once, owner password retired, down scripts deleted (2026-11-08, PRs #53 #54)
 
-- **#51 (milton-perf; Astra should-fix fixed in `ace5e74`, milton-qa passed):** saves take a
-  fixed 15 round trips at any size (local: a one-rule save 96 → 71 ms, a 100-rule setup save
-  1.03 s → 75 ms); the trial gate is always awaited. App/MCP `milton-*-save-b85f428` at 02:00Z
-  (image `sha256:a1b9298b1679e24221c0fd08922b4932271b7a9fcc884bdb52e959e2194c3961`). Checks on
-  main: types, 137 tests, format, build, rehearsal 13/13, all 0; health 200 ×3, MCP 401, app
-  home 200, signed-out report 403; no 5xx, application or audit errors in a 5-minute watch.
-  Sample retirement's true/NULL array elements were tested on
-  PGlite only. Rollback: app/MCP `milton-*-rnd3-64435ee`.
-- **#52 (Peter's decision, AGENTS.md rule):** deleted the pre-launch rollback scripts for
-  0005, 0006, 0007 and 008; each migration's rollback is its pre-migration snapshot. The
-  applied migration files are byte-identical (their hashes match the production journal). No
-  deploy.
+- **Owner credential retired (Peter, 2026-11-08):** `neondb_owner`'s password was reset
+  through the Neon API at 03:36Z (the old one is rejected); the owner connection kept for
+  migrations was updated in place and connects. `milton-app-env:1`, `milton-mcp-env:1` and
+  `milton-mcp-env:2` are disabled. No service connected as the owner; the maintenance job's
+  `milton-auth-owner-url` is `milton_auth_delegate` and kept running. Any tagged revision that
+  mounts those versions can no longer start. In a 5-minute watch: no 5xx, no application,
+  permission, `store_unavailable` or audit errors; health 200 ×3; an MCP read succeeded. The
+  cutover rehearsal branch `rehearsal-auth-cutover-20261107` was deleted (Peter); the
+  role-timeouts rehearsal branch was already gone.
+- **#54 (Peter's decision, AGENTS.md rule):** deleted `005-app.down.sql` and
+  `007-role-timeouts.down.sql`; rollback is the pre-migration snapshot. The auth integration
+  now installs 005 through `migrate.ts --app-auth`. Checks: types, 137 tests, format,
+  rehearsal 13/13, all 0. No deploy.
+- **#53 (milton-qa; Astra passed the admit-once part), `06868cc`:** an OAuth flow is admitted
+  once per authorize or consent request (keyed on every admission input, request-local); each
+  ask still runs its own `bind_flow`. Harness: authorize 75.6 → 51.2 ms, consent accept
+  134.0 → 105.4 ms. The admit wait stays 5 s (revisit when billing is turned on). Auth
+  `milton-auth-00012-qod` at 03:44Z (image
+  `sha256:0899b179ebf1a89896cfc2e1b04f6d505000ac7fdded3b9e31c67de9d7fef957`; mail and
+  maintenance jobs too). Checks on the merge: types, 137 tests, format, auth build, auth
+  integration 20/20, rehearsal 13/13, all 0. Live: health, OIDC metadata and JWKS 200; an MCP
+  read with an auth-issued token succeeded. In a 5-minute watch: no 5xx, 429, application,
+  job or audit errors; mail runs succeeded. Not verified live: a real browser sign-in.
 
-- **#49 (milton-qa; two Astra rounds), `b73d9f5`:** native auth rate limits run on
-  `take_rate` (HMAC'd keys, one atomic round trip); per-client and per-token buckets are charged
-  only after the network gate; token, revoke and UserInfo are keyed per client or token plus
-  network; the app gets 1000/min only with its secret or a valid token of its own; register is
-  20/min/network (limits and reasons in `apps/auth/README.md`). Auth `milton-auth-00010-g64` at
-  02:09Z (image `sha256:2f84db72a1c6497cf6a1b396a66913a5b5cb7b0e7dfa5f37b70318c0cf2d7a0e`;
-  mail and maintenance jobs too). Checks on main: types, 137 tests, format, site, rehearsal
-  13/13, auth integration 19/19, all 0. Live: health, login, OIDC and OAuth metadata (under
-  `/api/auth/.well-known/`), JWKS 200; Claude Code authorize 302; sign-in JSON 401 for a
-  fictional address, `text/plain` 415; token without a client 400; app login hands off 303.
-  No 5xx, 429, application or audit errors in a 5-minute watch. The native `rateLimit` table
-  is now unused (a later drop is possible). Not verified live: a
-  real browser sign-in and the app's token exchange under the new limits.
-
-Auth `milton-auth-00010-g64`, rollback `milton-auth-00009-mrk`. Earlier records: git history
+Auth `milton-auth-00012-qod`, rollback `milton-auth-00010-g64`. App/MCP unchanged
+(`milton-*-save-b85f428`, rollback `milton-*-rnd3-64435ee`). Earlier records: git history
 (`git log -p server/deploy/README.md`).
 
 ## Runtime role timeouts (applied 2026-11-07, TODO #29)
@@ -307,9 +305,8 @@ and logs. Never add an application endpoint to extract nonexportable secrets.
 - The runtime fails closed on missing or invalid decryption. Platform variables
   take precedence, so audit duplicate names during rotation. Restart/redeploy after
   configuration changes; configuration is loaded once per process.
-- Payload versions still enabled but not mounted: `milton-app-env:1`, `milton-mcp-env:1`
-  and `milton-mcp-env:2` (all three hold the owner connection; `milton-mcp-env:1` also
-  holds the retired `MILTON_GEMINI_*` and `MILTON_MODEL_*` keys). The MCP payloads still
+- `milton-app-env:1`, `milton-mcp-env:1` and `milton-mcp-env:2` held the owner connection
+  (now a dead password) and are disabled (2026-11-08), not destroyed. The MCP payloads still
   carry the unread `MILTON_GARDENING_ENABLED`; drop it in a later version.
   `milton-worker-env` versions 1 to 4 and `milton-worker-key:1` are disabled, not
   destroyed.
@@ -418,7 +415,7 @@ gcloud run revisions list --service=milton-app --project=milton-510506 --region=
 ```
 
 Now serving (2026-11-08): app `milton-app-save-b85f428` and MCP
-`milton-mcp-save-b85f428` (source `b85f428`), and auth `milton-auth-00010-g64` (source `b73d9f5`). The
+`milton-mcp-save-b85f428` (source `b85f428`), and auth `milton-auth-00012-qod` (source `06868cc`). The
 release record above gives the image and rollback revisions.
 
 Roll back only affected services, preserve ingress/IAM, then repeat the canonical
@@ -578,15 +575,9 @@ and inside a private temporary directory outside the repository (`umask 077`).
    memos runs only when Peter directs one. Check the logs for `store_unavailable` or
    `permission denied`.
 
-**Still pending: retire the owner credential from the old payload versions.** Each
-service account can read every version of its own secret, so `milton-app-env:1`,
-`milton-mcp-env:1` and `milton-mcp-env:2` still give the running services the owner
-connection. To retire it, reset `neondb_owner`'s password in Neon, update the owner
-connection kept for migrations, and disable the old versions
-(`gcloud secrets versions disable 1 --secret=milton-app-env --project=milton-510506`,
-`gcloud secrets versions disable 2 --secret=milton-mcp-env --project=milton-510506`).
-After that, moving a service back to the owner connection means minting a fresh owner
-payload first.
+**Owner credential retired (2026-11-08).** `neondb_owner`'s password was reset in Neon and
+the payload versions that held it are disabled. Moving a service back to the owner
+connection means minting a fresh owner payload first.
 
 ## Stripe billing
 

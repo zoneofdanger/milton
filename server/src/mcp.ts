@@ -42,6 +42,33 @@ export const readOnlyInstructions = [
   "An empty account may be read now; explain the Read and write connection only if the person wants setup or saving. Never offer a save this connection cannot perform. Do not send secrets or other people's private details. Account notices are service information; mention their link once after the task. On subscription_required, give its link once and continue other work.",
 ].join("\n\n");
 
+/** A tool error result the SDK wrote as plain text. */
+const sdkToolError = z.object({
+  result: z.object({
+    isError: z.literal(true),
+    content: z.tuple([z.object({ type: z.literal("text"), text: z.string() })]),
+  }),
+});
+/** The SDK's plain-text tool errors (argument validation, an unknown tool)
+ * become error bodies like every other: its text as message, the code the call
+ * was logged with, and that code's next step. */
+function structuredToolError<T>(message: T, code = "tool_error"): T {
+  const parsed = sdkToolError.safeParse(message);
+  if (!parsed.success) return message;
+  const text = parsed.data.result.content[0].text;
+  try {
+    const value: unknown = JSON.parse(text);
+    if (typeof value === "object" && value !== null) return message;
+  } catch {
+    /* Plain text: structure it below. */
+  }
+  const result = (message as { result: object }).result;
+  return {
+    ...message,
+    result: { ...result, ...storeResult({ error: code, message: text }, true) },
+  };
+}
+
 /** A get_report call whose intent is missing or does not parse. */
 const staleReportCall = z.object({
   name: z.literal("get_report"),
@@ -76,7 +103,9 @@ export function createMiltonServer(
           const call = pending.get(message.id);
           if (call) {
             pending.delete(message.id);
-            safeToolLog(log, finalToolCall(call.tool, call.started, message));
+            const event = finalToolCall(call.tool, call.started, message);
+            safeToolLog(log, event);
+            args[0] = structuredToolError(message, event.error_code);
           }
         }
         return send(...args);

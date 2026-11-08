@@ -418,7 +418,9 @@ test("two authenticated clients isolate tenants and save once", async () => {
     });
     // The wording is the MCP SDK's; the refusal and the named key are ours to keep.
     expect(stale.isError).toBe(true);
-    expect((stale.content as { text: string }[])[0]!.text).toContain('"event"');
+    expect(
+      JSON.parse((stale.content as { text: string }[])[0]!.text).message,
+    ).toContain('"event"');
     // Reports read by id (doc is an alias); an empty one is a heading and a when line.
     const document = (
       await call(0, "get_report", {
@@ -442,17 +444,20 @@ test("two authenticated clients isolate tenants and save once", async () => {
       "document",
       "speech",
     ]);
+    const unknownReport = await clients[0]!.callTool({
+      name: "get_report",
+      arguments: {
+        report_id: "memo",
+        intent: { situation: "confirming what is on file" },
+      },
+    });
+    expect(unknownReport.isError).toBe(true);
     expect(
-      (
-        await clients[0]!.callTool({
-          name: "get_report",
-          arguments: {
-            report_id: "memo",
-            intent: { situation: "confirming what is on file" },
-          },
-        })
-      ).isError,
-    ).toBe(true);
+      JSON.parse((unknownReport.content as { text: string }[])[0]!.text),
+    ).toMatchObject({
+      error: "invalid_arguments",
+      next: { action: "fix_input" },
+    });
     expect((await call(1, "get_cover_sheet")).value.text).toBe("");
     expect(changed).toEqual([1, 1]);
     // A get_report from a client holding the schema before intent is refused
@@ -547,16 +552,28 @@ test("scopes control discovery and direct calls; original binding revocation sur
     await local.pg.exec(
       `UPDATE milton_guard.fixture_binding SET active=false WHERE client_id='reader'`,
     );
-    expect((await request(readToken)).status).toBe(401);
+    const revoked = await request(readToken);
+    expect(revoked.status).toBe(401);
+    // Auth refusals carry their code and next step too.
+    expect(await revoked.json()).toMatchObject({
+      error: "invalid_token",
+      code: "invalid_token",
+      next: { action: "tell_user" },
+    });
     expect(
       (await request(await fixture.token("alpha", "reader", "milton:read")))
         .status,
     ).toBe(200);
     expect((await request(readToken)).status).toBe(401);
-    expect(
-      (await request(await fixture.token("alpha", "identity-only", "openid")))
-        .status,
-    ).toBe(403);
+    const unscoped = await request(
+      await fixture.token("alpha", "identity-only", "openid"),
+    );
+    expect(unscoped.status).toBe(403);
+    expect(await unscoped.json()).toMatchObject({
+      error: "insufficient_scope",
+      code: "insufficient_scope",
+      next: { action: "tell_user" },
+    });
     await local.pg.exec(
       `CREATE OR REPLACE FUNCTION milton_guard.binding_status(text,text,text,text[],text[]) RETURNS jsonb LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fictional status outage'; END $$`,
     );
@@ -1014,53 +1031,77 @@ test("refused tool calls record no usage; each admitted call records one row", a
     await local.db.query(
       sql`UPDATE trial_accounts SET subscription_status='canceled' WHERE user_id=${miltonUserId}`,
     );
-    expect((await call("get_cover_sheet", {})).error).toBe(
+    // Every error result carries its code and its own next step.
+    const refused = (
+      value: {
+        error?: unknown;
+        code?: unknown;
+        next?: Record<string, unknown>;
+      },
+      error: string,
+      action: string,
+    ) =>
+      expect({
+        error: value.error,
+        code: value.code,
+        action: value.next?.action,
+        text: typeof value.next?.text,
+      }).toEqual({ error, code: error, action, text: "string" });
+    const lapsed = await call("get_cover_sheet", {});
+    refused(lapsed, "subscription_required", "tell_user");
+    expect(lapsed.next.text).toContain("don't retry");
+    refused(
+      await call("create_memo", save),
       "subscription_required",
-    );
-    expect((await call("create_memo", save)).error).toBe(
-      "subscription_required",
+      "tell_user",
     );
     // Input is validated before the gate: an unknown kind stays invalid_kind.
-    expect(
-      (
-        await call("get_report", {
-          report_id: "email",
-          intent: { situation: "confirming what is on file", kind_id: "none" },
-        })
-      ).error,
-    ).toBe("invalid_kind");
+    refused(
+      await call("get_report", {
+        report_id: "email",
+        intent: { situation: "confirming what is on file", kind_id: "none" },
+      }),
+      "invalid_kind",
+      "reread",
+    );
     expect(await used()).toBe(1);
     await local.db.query(
       sql`UPDATE trial_accounts SET subscription_status='active' WHERE user_id=${miltonUserId}`,
     );
-    // Input refusals: the SDK's schema check, a get_report without intent and
-    // an unknown kind.
-    expect((await call("get_cover_sheet", { event: "start" })).isError).toBe(
-      true,
-    );
-    expect((await call("get_report", { report_id: "email" })).error).toBe(
+    // Input refusals: the SDK's schema check (its wording in message), a
+    // get_report without intent and an unknown kind.
+    const unexpected = await call("get_cover_sheet", { event: "start" });
+    refused(unexpected, "invalid_arguments", "fix_input");
+    expect(unexpected.message).toContain('"event"');
+    refused(
+      await call("get_report", { report_id: "email" }),
       "invalid_input",
+      "fix_input",
     );
-    expect(
-      (
-        await call("get_report", {
-          report_id: "email",
-          intent: { situation: "confirming what is on file", kind_id: "none" },
-        })
-      ).error,
-    ).toBe("invalid_kind");
+    refused(
+      await call("get_report", {
+        report_id: "email",
+        intent: { situation: "confirming what is on file", kind_id: "none" },
+      }),
+      "invalid_kind",
+      "reread",
+    );
     expect(await used()).toBe(1);
     // A save that ran is recorded, whether it saved or met a stale version.
-    expect((await call("create_memo", save)).status).toBe("saved");
+    const filed = await call("create_memo", save);
+    expect(filed.status).toBe("saved");
+    expect(filed).not.toHaveProperty("next");
     expect(await used()).toBe(2);
     expect(
-      (
-        await call("create_memo", {
-          ...save,
-          request_id: crypto.randomUUID(),
-        })
-      ).status,
-    ).toBe("conflict");
+      await call("create_memo", {
+        ...save,
+        request_id: crypto.randomUUID(),
+      }),
+    ).toMatchObject({
+      status: "conflict",
+      code: "version_conflict",
+      next: { action: "reread" },
+    });
     expect(await used()).toBe(3);
     // Replaying a recorded save records nothing.
     expect((await call("create_memo", save)).status).toBe("saved");
@@ -1538,7 +1579,11 @@ test("MCP refuses unsafe transports and oversized bodies before database access"
       }),
     );
     expect(oversized.status).toBe(413);
-    expect(await oversized.json()).toEqual({ error: "request_too_large" });
+    expect(await oversized.json()).toMatchObject({
+      error: "request_too_large",
+      code: "request_too_large",
+      next: { action: "fix_input" },
+    });
     expect(queries).toBe(0);
     expect(logged).toEqual([]);
     expect(verified).toBe(0);
@@ -1734,6 +1779,10 @@ test("final outcomes include early refusal/read failure and a logging failure ca
       }),
     );
     expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({
+      error: "auth_unavailable",
+      next: { action: "retry" },
+    });
     expect(early).toHaveLength(1);
     expect(early[0]).toMatchObject({
       tool: "get_cover_sheet",

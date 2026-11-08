@@ -75,6 +75,178 @@ const refusals = new Set([
   "invalid_token",
   "session_required",
 ]);
+
+/** What an assistant does after an error result, from a closed set:
+ * retry - repeat the identical call, a save with its request_id;
+ * reread - read the cover sheet or report again, then rebuild the call;
+ * fix_input - correct the arguments, a changed save with a new request_id;
+ * ask_user - the fix needs the person's approval or choice;
+ * tell_user - stop and tell the person; retrying will not help. */
+export const nextActions = [
+  "retry",
+  "reread",
+  "fix_input",
+  "ask_user",
+  "tell_user",
+] as const;
+export type NextStep = { action: (typeof nextActions)[number]; text: string };
+const step = (action: NextStep["action"], text: string): NextStep => ({
+  action,
+  text,
+});
+const retryOnce = step(
+  "retry",
+  "Retry once with exactly the same arguments (a save keeps its request_id). If it fails again, tell the person Milton is unavailable and nothing is confirmed.",
+);
+const waitThenRetry = step(
+  "retry",
+  "Wait as long as Retry-After says, or a few seconds, then retry once with the same arguments.",
+);
+const unavailableNow = step(
+  "tell_user",
+  "Tell the person Milton can't do this right now and nothing changed; don't retry.",
+);
+const fixArguments = step(
+  "fix_input",
+  "Correct the arguments as message says and call again; a changed save needs a new request_id.",
+);
+const rereadAll = step(
+  "reread",
+  "Reread get_cover_sheet and the report, recheck the change, then save on the new version with a new request_id.",
+);
+/** The one table: every code an MCP error result or refusal carries, and its
+ * next step. withNext adds both to every error body, so nothing else states
+ * error handling; a test asserts every code in the source is here. */
+export const nextSteps: Record<string, NextStep> = {
+  // Saves that met changed guidance.
+  version_conflict: rereadAll,
+  card_version_conflict: rereadAll,
+  unique_violation: rereadAll,
+  edit_conflict: step(
+    "reread",
+    "Reread the report and copy each before verbatim so it occurs once, within one rule, without overlaps; save with a new request_id.",
+  ),
+  move_conflict: step(
+    "reread",
+    "Reread the report and copy each move's before verbatim from one rule this save keeps; save with a new request_id.",
+  ),
+  sample_conflict: step(
+    "reread",
+    "Reread get_report and use an active sample_id from its samples; save with a new request_id.",
+  ),
+  sample_version_conflict: step(
+    "reread",
+    "Reread get_report for the sample's current revision, then save with a new request_id.",
+  ),
+  invalid_kind: step(
+    "reread",
+    "Reread get_report and use a kind_id from its kinds, or omit it (a save may use new_kind); a save needs a new request_id.",
+  ),
+  // Arguments to correct.
+  invalid_input: fixArguments,
+  invalid_arguments: fixArguments,
+  check_violation: fixArguments,
+  unknown_tool: step(
+    "fix_input",
+    "Call one of the tools Milton lists: get_cover_sheet, get_report, list_reports or create_memo.",
+  ),
+  request_id_reused: step(
+    "fix_input",
+    "This changed save needs a new request_id; reuse an id only with its exact original arguments.",
+  ),
+  request_too_large: step(
+    "fix_input",
+    "Split the change into smaller saves, each with its own request_id; never cut approved wording.",
+  ),
+  memo_body_limit: step(
+    "fix_input",
+    "Shorten text, the save's purpose, and save with a new request_id; if an approved rule or sample is too long, tell the person.",
+  ),
+  // Fixes that change approved text or need the person's choice.
+  card_heading: step(
+    "ask_user",
+    "Rules can't contain Markdown heading lines. Ask the person to approve wording without one, then save with a new request_id.",
+  ),
+  baseline_unknown: step(
+    "ask_user",
+    'Ask the person to approve the rule without the "Baseline: " prefix, then save with a new request_id.',
+  ),
+  tps_body_limit: step(
+    "ask_user",
+    "The report is full and nothing changed. Ask the person which rules or samples to remove or shorten.",
+  ),
+  // Transient failures.
+  store_unavailable: retryOnce,
+  server_unavailable: retryOnce,
+  auth_unavailable: retryOnce,
+  tool_error: retryOnce,
+  save_outcome_unknown: step(
+    "retry",
+    "Repeat exactly the same arguments and request_id to learn the outcome; don't send a new request or say it saved.",
+  ),
+  server_busy: waitThenRetry,
+  rate_limited: waitThenRetry,
+  // Account and access: tell the person.
+  subscription_required: step(
+    "tell_user",
+    "Tell the person Milton is paused until they subscribe and give message's link once; don't retry, and continue other work.",
+  ),
+  account_unavailable: step(
+    "tell_user",
+    "Tell the person their Milton account is unavailable; don't retry.",
+  ),
+  insufficient_scope: step(
+    "tell_user",
+    "Tell the person this connection can't save; they can reconnect Milton with Read and write. Don't retry.",
+  ),
+  invalid_token: step(
+    "tell_user",
+    "Tell the person to reconnect Milton and sign in again; don't retry with this connection.",
+  ),
+  // Codes only the web app meets; listed so no code goes without a step.
+  session_required: step(
+    "tell_user",
+    "Tell the person to sign in to Milton again; don't retry.",
+  ),
+  assistant_required: step(
+    "tell_user",
+    "Only a connected assistant can save; tell the person and don't retry.",
+  ),
+  connection_key_limit: step(
+    "tell_user",
+    "Tell the person to revoke an unused connection key in Milton first; don't retry.",
+  ),
+  // Store invariants and configuration a correct call never meets (Milton
+  // derives descriptions and reasons itself).
+  configuration: unavailableNow,
+  memo_description_limit: unavailableNow,
+  memo_reason_limit: unavailableNow,
+  card_version_is_immutable: unavailableNow,
+  card_identity_is_immutable: unavailableNow,
+  user_id_is_immutable: unavailableNow,
+  sample_identity_is_immutable: unavailableNow,
+  sample_version_is_immutable: unavailableNow,
+  sample_kind_is_immutable: unavailableNow,
+  save_receipt_is_immutable: unavailableNow,
+};
+
+/** An error body with its stable code and next step added; existing fields
+ * stay. A stale-version conflict, which has no error field, is
+ * version_conflict; an unknown code gets the unexpected-failure step. */
+export function withNext<T extends Record<string, unknown>>(value: T) {
+  const code =
+    typeof value.error === "string"
+      ? value.error
+      : value.status === "conflict"
+        ? "version_conflict"
+        : "tool_error";
+  return {
+    ...value,
+    code,
+    next: Object.hasOwn(nextSteps, code) ? nextSteps[code]! : retryOnce,
+  };
+}
+
 export function safeToolLog(log: (call: ToolCall) => void, event: ToolCall) {
   try {
     void Promise.resolve(log(event)).catch(() => {});

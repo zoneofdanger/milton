@@ -198,6 +198,20 @@ outcome. That receipt's version may be
 older than the current report. Reusing an ID with different arguments is rejected.
 For a conflict, reread the cover sheet and reconsider a new request. No blind retry.
 
+Every error says what to do next in the result itself, so error handling never depends
+on the server instructions reaching the model. Each error result (and each MCP HTTP
+refusal body: invalid token, scope, rate and busy limits, oversized request, outage)
+keeps its `error` and `message` and adds `code`, the same stable code (`version_conflict`
+for a stale-version `conflict`, which has no `error`), and `next: {action, text}`.
+`action` is one of `retry` (repeat the identical call, a save with its request ID),
+`reread` (read the cover sheet or report again, then save with a new request ID),
+`fix_input` (correct the arguments), `ask_user` (the fix needs the person's approval or
+choice) and `tell_user` (stop and tell the person); `text` is the one-line step, such as
+giving the subscription link once without retrying. The mapping is one table,
+`nextSteps` in `src/mcp-outcomes.ts`, and a test checks that every code in the source has
+an entry. The SDK's plain-text argument refusals become the same JSON body with
+`invalid_arguments` and the SDK's text as `message`.
+
 A save runs in one transaction under the account lock, so a concurrent save of the
 same request waits and then replays; there is no pending state. Account gates (trial
 access) answer without a receipt, so the same request can succeed once the gate

@@ -1,10 +1,85 @@
 import { expect, test } from "bun:test";
 import { Glob } from "bun";
-import { loggedErrorCodes } from "../src/mcp-outcomes";
+import {
+  loggedErrorCodes,
+  nextActions,
+  nextSteps,
+  withNext,
+} from "../src/mcp-outcomes";
 import { triggerRefusals } from "../src/store/database";
 import { localStore } from "./local-store";
 
 const src = new URL("../src/", import.meta.url).pathname;
+
+// Every code an MCP error result or refusal can carry has its own next step in
+// the one table, from the closed set, as one short line.
+test("every MCP error code has its own next step from the closed set", async () => {
+  const codes = new Set<string>([
+    ...triggerRefusals.keys(),
+    // Codes the MCP layer names itself: a stale version, the SDK's argument
+    // refusals, and anything else unstructured.
+    "version_conflict",
+    "invalid_arguments",
+    "unknown_tool",
+    "tool_error",
+  ]);
+  for (const file of new Glob("**/*.{ts,tsx}").scanSync(src)) {
+    const text = await Bun.file(src + file).text();
+    const patterns = [
+      /new StoreError\(\s*"([a-z_]+)"/g,
+      /result\(\s*"failed",\s*\{\s*error:\s*"([a-z_]+)"/g,
+    ];
+    // The MCP request path: its auth refusals and literal error bodies.
+    if (/^(mcp[-.]|handler\.|http\.|token\.|auth-authority\.)/.test(file))
+      patterns.push(
+        /AuthError\(\s*"([a-z_]+)"/g,
+        /super\(\s*"([a-z_]+)"/g,
+        /error: "([a-z_]+)"/g,
+      );
+    for (const pattern of patterns)
+      for (const match of text.matchAll(pattern)) codes.add(match[1]!);
+  }
+  expect(codes.size).toBeGreaterThan(30);
+  for (const code of [
+    "insufficient_scope",
+    "invalid_token",
+    "rate_limited",
+    "server_busy",
+    "request_too_large",
+    "subscription_required",
+    "edit_conflict",
+  ])
+    expect(codes).toContain(code);
+  expect([...codes].filter((code) => !Object.hasOwn(nextSteps, code))).toEqual(
+    [],
+  );
+  for (const [code, next] of Object.entries(nextSteps)) {
+    expect({ code, known: nextActions.includes(next.action) }).toEqual({
+      code,
+      known: true,
+    });
+    expect({ code, text: next.text }).toEqual({
+      code,
+      text: expect.stringMatching(/^[^\n]{20,160}$/),
+    });
+  }
+  // A result carries its code and next; a conflict names its code; an unknown
+  // code still gets a next step.
+  expect(withNext({ error: "edit_conflict", message: "m" })).toEqual({
+    error: "edit_conflict",
+    message: "m",
+    code: "edit_conflict",
+    next: nextSteps.edit_conflict!,
+  });
+  expect(withNext({ status: "conflict", request_id: "r" })).toMatchObject({
+    code: "version_conflict",
+    next: { action: "reread" },
+  });
+  expect(withNext({ error: "never_seen" })).toMatchObject({
+    code: "never_seen",
+    next: nextSteps.tool_error!,
+  });
+});
 
 // Every StoreError code in src is logged by name or mapped from a trigger, and
 // every installed trigger refusal is one or the other, so none surfaces as

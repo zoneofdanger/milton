@@ -2,6 +2,7 @@
 // the read envelopes and refusals, and the tool runner over a TenantStore.
 import { z } from "zod";
 import type { TenantStore } from "./store";
+import { withNext } from "./mcp-outcomes";
 import { StoreError } from "./store/errors";
 import { utf8Bytes } from "./store/limits";
 import { subscriptionRequired } from "./store/trials";
@@ -224,9 +225,18 @@ type ToolResult = {
   isError?: boolean;
 };
 
-export function storeResult(value: unknown, isError = false): ToolResult {
+/** Every tool result. An error result carries its code and next step from the
+ * one table in mcp-outcomes. */
+export function storeResult(value: object, isError = false): ToolResult {
   return {
-    content: [{ type: "text", text: JSON.stringify(value) }],
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify(
+          isError ? withNext(value as Record<string, unknown>) : value,
+        ),
+      },
+    ],
     ...(isError ? { isError } : {}),
   };
 }

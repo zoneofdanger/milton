@@ -1,7 +1,7 @@
 {
   "displayName": "milton-jobs",
   "documentation": {
-    "content": "**An auth job is failing or not running.** `milton-auth-mail` sends sign-in mail every minute; `milton-auth-maint` runs maintenance every 15 minutes. One email per incident; it closes 30 minutes after the condition clears.\n\nCheck first:\n1. Executions: `gcloud run jobs executions list --job=<job> --project=milton-510506 --region=us-east4 --limit=5`\n2. Triggers: `gcloud scheduler jobs list --project=milton-510506 --location=us-east4 --format='table(name,schedule,state,httpTarget.uri)'`. Each URI must end in `:run`; on 2026-11-07 a shell expansion turned it into `un` and the jobs got 404s for two hours.\n3. Job logs: `gcloud logging read 'resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"<job>\" AND severity>=ERROR' --project=milton-510506 --freshness=1h`\n\nThresholds (7-day baseline: mail 1,262 succeeded and 0 failed; maint 84 succeeded and 0 failed):\n- Mail failed 5 or more times in a rolling 15 minutes. Reason: a third of a quarter-hour's runs failing is not a blip; one failed run is retried by the next minute's.\n- Maintenance failed 2 or more times in a rolling 45 minutes (two consecutive runs). Reason: one failure can be a transient database timeout; two in a row is not.\n- No mail execution completed for 20 minutes. Reason: catches a broken scheduler trigger, which produces no failed executions. Backtest: it would have fired once in 7 days, at 07:43Z on 11-07, during the real two-hour `un` incident.\n",
+    "content": "**An auth job is failing or not running.** `milton-auth-mail` sends sign-in mail every minute; `milton-auth-maint` runs maintenance every 15 minutes. One email per incident; it closes 30 minutes after the condition clears.\n\nCheck first:\n1. Executions: `gcloud run jobs executions list --job=<job> --project=milton-510506 --region=us-east4 --limit=5`\n2. Triggers: `gcloud scheduler jobs list --project=milton-510506 --location=us-east4 --format='table(name,schedule,state,httpTarget.uri)'`. Each URI must end in `:run`; on 2026-11-07 a shell expansion turned it into `un` and the jobs got 404s for two hours.\n3. Job logs: `gcloud logging read 'resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"<job>\" AND severity>=ERROR' --project=milton-510506 --freshness=1h`\n\nThresholds (7-day baseline: mail 1,262 succeeded and 0 failed; maint 84 succeeded and 0 failed):\n- Mail failed 5 or more times in a rolling 15 minutes. Reason: a third of a quarter-hour's runs failing is not a blip; one failed run is retried by the next minute's.\n- Maintenance failed 2 or more times in a rolling 45 minutes (two consecutive runs). Reason: one failure can be a transient database timeout; two in a row is not.\n- No mail execution completed for 20 minutes. Reason: catches a broken scheduler trigger, which produces no failed executions. Backtest: it would have fired once in 7 days, at 07:43Z on 11-07, during the real two-hour `un` incident.\n- No maintenance execution completed for 45 minutes (three missed 15-minute runs). Reason: the same broken-trigger case for maintenance; the 7-day longest gap outside that incident was 31 minutes. Backtest: it would have fired once in 7 days, at 08:09Z on 11-07, during the same `un` incident.\n",
     "mimeType": "text/markdown"
   },
   "userLabels": {
@@ -61,6 +61,24 @@
           }
         ],
         "duration": "1200s",
+        "trigger": {
+          "count": 1
+        }
+      }
+    },
+    {
+      "displayName": "milton-auth-maint: no execution for 45 min",
+      "conditionAbsent": {
+        "filter": "metric.type = \"run.googleapis.com/job/completed_execution_count\" AND resource.type = \"cloud_run_job\" AND resource.labels.job_name = \"milton-auth-maint\"",
+        "aggregations": [
+          {
+            "alignmentPeriod": "300s",
+            "perSeriesAligner": "ALIGN_DELTA",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "groupByFields": ["resource.label.job_name"]
+          }
+        ],
+        "duration": "2700s",
         "trigger": {
           "count": 1
         }

@@ -414,7 +414,7 @@ conditions, and none remain) and close 30 minutes after the condition clears. **
 Traffic is about 8 to 25 requests an hour, far too low for ratios (one 5xx in five requests
 is 20%), so conditions count over a window. Baselines and backtests: 7 days to
 2026-11-08 06:30Z, Monitoring and Logging APIs; no page condition would have fired except
-the mail-absence one, during the real incident noted below.
+the two no-execution ones, during the real incident noted below.
 
 | Policy (tier)                                    | Condition                                                                                                                         | Reason                                                                                                                                                                                                                                                                |
 | ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -426,6 +426,7 @@ the mail-absence one, during the real incident noted below.
 | `milton-jobs` (page)                             | `milton-auth-mail` ≥ 5 failed executions in 15 min                                                                                | 1,262 succeeded and 0 failed in 7 days; one failure is retried by the next minute's run.                                                                                                                                                                              |
 | same                                             | `milton-auth-maint` ≥ 2 failed executions in 45 min                                                                               | Two consecutive 15-minute runs; 84 succeeded and 0 failed in 7 days.                                                                                                                                                                                                  |
 | same                                             | no `milton-auth-mail` execution for 20 min                                                                                        | Catches a broken trigger, which fails no execution. Would have fired once, 11-07 07:43Z, during the real two-hour `:run` → `un` incident.                                                                                                                             |
+| same                                             | no `milton-auth-maint` execution for 45 min                                                                                       | Three missed 15-minute runs: a broken maintenance trigger, which fails no execution. 7-day longest gap otherwise 31 min. Would have fired once, 11-07 08:09Z, in the same incident. With this, deleting `milton-auth-jobs-errors-log` loses no coverage.              |
 | `milton-instance-start` (page)                   | `milton-startup-failures` ≥ 3 in a rolling 15 min, per service                                                                    | Cloud Run system log lines `Default STARTUP TCP probe failed …` and `Container called exit(N).` (N ≠ 0); a failed start writes both. 30-day worst: 2 (auth, 11-07 08:30Z, one failed start that recovered in 8 s).                                                    |
 | `milton-release-gate` (gate)                     | per service or job, rolling 5 min: any 5xx; any ERROR entry; any failed `milton-auth-*` execution; any startup failure; ≥ 10 429s | Fast and loud by design; emails no one. 429 needs 10: MCP had a 48-request 429 burst on 11-07 10:55Z.                                                                                                                                                                 |
 
@@ -442,7 +443,7 @@ pages on ≥ 1 failed execution of the Cloud Run job `milton-e2e-daily` in 24 h,
 job exits non-zero on failure), then plan and apply.
 
 Cost: free until no sooner than 2027-09-01, then $0.35 per non-uptime condition per month
-(21 applied, about $7.35; $8.05 with the end-to-end policy) plus $0.50 per million points.
+(22 applied, about $7.70; $8.40 with the end-to-end policy) plus $0.50 per million points.
 Uptime checks run about 78k times a month against a free million. Stripe's webhook-failure
 emails and Neon's compute alerts are Dashboard settings, not these policies.
 

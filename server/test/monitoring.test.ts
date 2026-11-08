@@ -54,6 +54,10 @@ const MINIMUMS: [RegExp, { duration: number; window: number }][] = [
   [/^milton-auth-mail: ≥ 5 failed/, { duration: 0, window: 900 }],
   [/^milton-auth-maint: ≥ 2 failed/, { duration: 0, window: 2700 }],
   [/^milton-auth-mail: no execution for 20 min/, { duration: 1200, window: 0 }],
+  [
+    /^milton-auth-maint: no execution for 45 min/,
+    { duration: 2700, window: 0 },
+  ],
   [/^startup failures/, { duration: 0, window: 900 }],
   [/^gate: /, { duration: 0, window: 300 }],
   [/^milton-e2e-daily: ≥ 1 failed/, { duration: 0, window: 86400 }],

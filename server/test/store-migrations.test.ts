@@ -7,6 +7,13 @@ import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
 import { generateDrizzleJson, generateMigration } from "drizzle-kit/api";
 import * as schema from "../src/store/schema";
+import {
+  pruneUsage,
+  USAGE_PRUNE_BATCH,
+  USAGE_PRUNE_BATCHES,
+  USAGE_PRUNE_LOCK_TIMEOUT,
+  USAGE_PRUNE_STATEMENT_TIMEOUT,
+} from "../../apps/auth/scripts/prune-usage";
 import { cp, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -212,7 +219,6 @@ test("the runtime has only current grants, its guards hold, and later tables inh
       stripe_events: "INSERT,SELECT,UPDATE",
       trial_accounts: "INSERT,SELECT,UPDATE",
       usage_calls: "",
-      usage_daily: "INSERT,SELECT,UPDATE",
       users: "DELETE,INSERT,SELECT,UPDATE",
     };
     expect(await roles(pg)).toEqual([
@@ -344,7 +350,7 @@ test("the runtime has only current grants, its guards hold, and later tables inh
         "GRANT milton_runtime TO milton_app_fixture",
         // Deletes and updates no trigger guards, outside the runtime's grants.
         "DELETE FROM save_requests",
-        "DELETE FROM usage_daily",
+        "DELETE FROM usage_calls",
         "DELETE FROM trial_accounts",
         "DELETE FROM identities",
         "UPDATE identities SET user_id=user_id",
@@ -651,4 +657,205 @@ test("0007 adds an empty usage_calls table the legacy group cannot reach and mov
     await pg.close();
     await rm(scratch, { recursive: true, force: true });
   }
+});
+
+test("0008 drops usage_daily and the stored daily_calls; the maintenance job deletes usage rows past 90 days in bounded batches", async () => {
+  const folder = new URL("../drizzle/", import.meta.url).pathname;
+  const scratch = await mkdtemp(join(tmpdir(), "milton-0008-"));
+  const pg = new PGlite();
+  // A fresh install through 0008, so later migrations leave this test alone.
+  const current = new PGlite();
+  try {
+    await cp(folder, scratch, { recursive: true });
+    const journal = await Bun.file(join(scratch, "meta/_journal.json")).json();
+    const through = async (idx: number) =>
+      writeFile(
+        join(scratch, "meta/_journal.json"),
+        JSON.stringify({
+          ...journal,
+          entries: journal.entries.filter((e: { idx: number }) => e.idx <= idx),
+        }),
+      );
+    await through(7);
+    await migrate(drizzle(pg), { migrationsFolder: scratch });
+    // Production's shape before 0008: a usage_daily row, the stored
+    // daily_calls key and usage rows on both sides of 90 days.
+    await seedUsers(pg, "kept", "other");
+    await pg.exec(
+      "INSERT INTO usage_daily(user_id,day_utc,tool_calls) VALUES ('kept','2026-11-07',3)",
+    );
+    const limits = async () =>
+      (await pg.query<{ l: unknown }>("SELECT limits_json l FROM store_config"))
+        .rows;
+    expect(await limits()).toEqual([
+      {
+        l: {
+          body_bytes: 131072,
+          description_bytes: 500,
+          reason_bytes: 500,
+          report_body_bytes: 262144,
+          daily_calls: 10000,
+        },
+      },
+    ]);
+    const old = 20005;
+    await pg.query(
+      `INSERT INTO usage_calls(user_id,at,tool)
+       SELECT CASE WHEN n%2=0 THEN 'kept' ELSE 'other' END,now()-interval '91 days'-n*interval '1 second','get_report'
+       FROM generate_series(1,$1) n`,
+      [old],
+    );
+    await pg.exec(
+      "INSERT INTO usage_calls(user_id,at,tool) VALUES ('kept',now()-interval '89 days','get_cover_sheet'),('other',now(),'create_memo')",
+    );
+    await through(8);
+    await migrate(drizzle(pg), { migrationsFolder: scratch });
+    await migrate(drizzle(current), { migrationsFolder: scratch });
+    const after = await schemaCatalog(current);
+    expect(await schemaCatalog(pg)).toEqual(after);
+    expect(after.tables).not.toContain("usage_daily");
+    expect(await limits()).toEqual([
+      {
+        l: {
+          body_bytes: 131072,
+          description_bytes: 500,
+          reason_bytes: 500,
+          report_body_bytes: 262144,
+        },
+      },
+    ]);
+    expect(
+      (await current.query("SELECT limits_json l FROM store_config")).rows,
+    ).toEqual(await limits());
+    expect(
+      (await pg.query("SELECT count(*)::int n FROM usage_calls")).rows,
+    ).toEqual([{ n: old + 2 }]);
+    // The owner grant file, twice: rerunning converges. Only the
+    // maintenance job's role may run the prune, and nothing else on the table.
+    await pg.exec(
+      "CREATE ROLE milton_auth_owner NOLOGIN NOINHERIT; CREATE ROLE milton_app_runtime NOLOGIN NOINHERIT; CREATE ROLE milton_mcp_runtime NOLOGIN NOINHERIT",
+    );
+    const grantFile = await Bun.file(
+      new URL("../migrations/010-usage-retention-roles.sql", import.meta.url),
+    ).text();
+    await pg.exec(grantFile);
+    await pg.exec(grantFile);
+    const prune = "public.prune_usage_calls(integer)";
+    expect(
+      (
+        await pg.query(
+          `SELECT r.rolname,has_function_privilege(r.rolname,'${prune}','EXECUTE') AS run FROM pg_roles r WHERE r.rolname IN ('milton_auth_owner','milton_app_runtime','milton_mcp_runtime','milton_runtime','milton_guide_worker') ORDER BY 1`,
+        )
+      ).rows,
+    ).toEqual([
+      { rolname: "milton_app_runtime", run: false },
+      { rolname: "milton_auth_owner", run: true },
+      { rolname: "milton_guide_worker", run: false },
+      { rolname: "milton_mcp_runtime", run: false },
+      { rolname: "milton_runtime", run: false },
+    ]);
+    expect(
+      (
+        await pg.query(
+          `SELECT prosecdef,proconfig::text config FROM pg_proc WHERE oid='${prune}'::regprocedure`,
+        )
+      ).rows,
+    ).toEqual([
+      { prosecdef: true, config: '{"search_path=pg_catalog, pg_temp"}' },
+    ]);
+    await pg.exec("SET ROLE milton_mcp_runtime");
+    await expect(
+      pg.query("SELECT public.prune_usage_calls(1)"),
+    ).rejects.toThrow("permission denied");
+    await pg.exec("RESET ROLE; SET ROLE milton_auth_owner");
+    for (const statement of [
+      "SELECT * FROM usage_calls",
+      "DELETE FROM usage_calls",
+    ])
+      await expect(pg.query(statement)).rejects.toThrow("permission denied");
+    for (const batch of [0, -1, 10001])
+      await expect(
+        pg.query("SELECT public.prune_usage_calls($1)", [batch]),
+      ).rejects.toThrow("usage_prune_batch_invalid");
+    // The maintenance job's prune, as its role: one run stops at its bound,
+    // the next finishes; rows from the last 90 days stay.
+    // Each batch's server-side limits, read inside its transaction right
+    // before its delete.
+    const seen: Record<string, unknown>[] = [];
+    const run = () =>
+      pruneUsage(async (text, values) => {
+        const result = await pg.query<Record<string, unknown>>(text, values);
+        if (text.startsWith("select public.prune_usage_calls"))
+          seen.push(
+            (
+              await pg.query<Record<string, unknown>>(
+                "SELECT current_setting('statement_timeout') s,current_setting('lock_timeout') l",
+              )
+            ).rows[0]!,
+          );
+        return result;
+      });
+    // A connection that drops the settings (as Neon drops connect-time ones)
+    // refuses before deleting anything.
+    await expect(
+      pruneUsage((text, values) =>
+        pg.query<Record<string, unknown>>(
+          text.startsWith("set local") ? "SELECT 1" : text,
+          text.startsWith("set local") ? [] : values,
+        ),
+      ),
+    ).rejects.toThrow("usage_prune_timeouts_unset");
+    expect(await run()).toBe(USAGE_PRUNE_BATCH * USAGE_PRUNE_BATCHES);
+    expect(seen).toEqual(
+      Array.from({ length: USAGE_PRUNE_BATCHES }, () => ({
+        s: USAGE_PRUNE_STATEMENT_TIMEOUT,
+        l: USAGE_PRUNE_LOCK_TIMEOUT,
+      })),
+    );
+    // Session settings are untouched between batches.
+    expect(
+      (await pg.query("SELECT current_setting('lock_timeout') l")).rows,
+    ).toEqual([{ l: "0" }]);
+    expect(await run()).toBe(old - USAGE_PRUNE_BATCH * USAGE_PRUNE_BATCHES);
+    expect(await run()).toBe(0);
+    await pg.exec("RESET ROLE");
+    expect(
+      (await pg.query("SELECT user_id,tool FROM usage_calls ORDER BY at")).rows,
+    ).toEqual([
+      { user_id: "kept", tool: "get_cover_sheet" },
+      { user_id: "other", tool: "create_memo" },
+    ]);
+  } finally {
+    await pg.exec("RESET ROLE").catch(() => {});
+    await current.close();
+    await pg.close();
+    await rm(scratch, { recursive: true, force: true });
+  }
+}, 60000);
+
+test("no request path deletes usage rows: only the maintenance job's prune does", async () => {
+  // Request-serving code (server/src, apps/auth/src) never deletes from
+  // usage_calls and never calls the prune; account erasure removes rows only
+  // through the foreign key's cascade.
+  const roots = ["../src/", "../../apps/auth/src/"].map(
+    (path) => new URL(path, import.meta.url).pathname,
+  );
+  const deletes =
+    /\bDELETE\s+FROM\s+(?:ONLY\s+)?(?:"?public"?\.)?"?usage_calls\b|prune_usage_calls|prune-usage/i;
+  const offenders: string[] = [];
+  let scanned = 0;
+  for (const root of roots)
+    for await (const file of new Bun.Glob("**/*.{ts,tsx}").scan(root)) {
+      scanned++;
+      if (deletes.test(await Bun.file(root + file).text()))
+        offenders.push(root + file);
+    }
+  expect(scanned).toBeGreaterThan(20);
+  expect(offenders).toEqual([]);
+  // The one caller is the maintenance entry point.
+  expect(
+    await Bun.file(
+      new URL("../../apps/auth/scripts/maintain.ts", import.meta.url),
+    ).text(),
+  ).toContain("pruneUsage(");
 });

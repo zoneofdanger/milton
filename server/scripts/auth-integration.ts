@@ -109,6 +109,7 @@ try {
     "0005_drop_deleted_identities",
     "0006_drop_unread_columns",
     "0007_usage_calls",
+    "0008_usage_retention",
   ])
     await owner.query(
       readFileSync(new URL(`./drizzle/${migration}.sql`, sourceRoot), "utf8"),
@@ -178,14 +179,15 @@ try {
         "utf8",
       ),
     );
-  // 009: rerunning converges too.
-  for (let n = 0; n < 2; n++)
-    await owner.query(
-      readFileSync(
-        new URL("./migrations/009-usage-calls-roles.sql", sourceRoot),
-        "utf8",
-      ),
-    );
+  // 009 and 010: rerunning converges too.
+  for (const file of [
+    "009-usage-calls-roles.sql",
+    "010-usage-retention-roles.sql",
+  ])
+    for (let n = 0; n < 2; n++)
+      await owner.query(
+        readFileSync(new URL(`./migrations/${file}`, sourceRoot), "utf8"),
+      );
   // 007: runtime-login timeouts in this database only, nothing on any other
   // role. Up twice converges.
   const roleTimeouts = async () =>
@@ -949,12 +951,53 @@ try {
     ],
     ownerEnv,
   );
+  // Usage retention through the real maintenance job and role: rows past 90
+  // days go, newer ones stay. The prune skips a row an erasure has locked
+  // instead of waiting on it, and no runtime may run it.
+  const retainedUser = "m_00000000-0000-4000-8000-000000000001";
+  await owner.query(
+    "INSERT INTO usage_calls(user_id,at,tool) VALUES ($1,now()-interval '91 days','get_report'),($1,now()-interval '90 days 1 minute','list_reports'),($1,now()-interval '89 days','get_cover_sheet')",
+    [retainedUser],
+  );
+  for (const pool of [authPool, appPool, mcpPool])
+    await assert.rejects(
+      pool.query("SELECT public.prune_usage_calls(1)"),
+      (e) => (e as { code?: string }).code === "42501",
+    );
+  {
+    const erasure = await owner.connect();
+    try {
+      await erasure.query("BEGIN");
+      await erasure.query(
+        "SELECT 1 FROM usage_calls WHERE tool='list_reports' FOR UPDATE",
+      );
+      const skipped = await Promise.race([
+        authOwner.query("SELECT public.prune_usage_calls(10) AS removed"),
+        new Promise<"waited">((resolve) =>
+          setTimeout(() => resolve("waited"), 2000),
+        ),
+      ]);
+      assert.notEqual(skipped, "waited", "prune never waits on a row lock");
+      assert.equal((skipped as pg.QueryResult).rows[0].removed, 1);
+    } finally {
+      await erasure.query("ROLLBACK");
+      erasure.release();
+    }
+  }
   child(
     [
       new URL("../apps/auth/scripts/maintain.ts", sourceRoot).pathname,
       "--apply",
     ],
     ownerEnv,
+  );
+  assert.deepEqual(
+    (await owner.query("SELECT tool FROM usage_calls ORDER BY at")).rows,
+    [{ tool: "get_cover_sheet" }],
+  );
+  await owner.query("DELETE FROM usage_calls");
+  pass(
+    "the maintenance job, as milton_auth_owner, prunes usage rows past 90 days and skips locked rows; no runtime may prune",
   );
   const ledger = async () =>
     (

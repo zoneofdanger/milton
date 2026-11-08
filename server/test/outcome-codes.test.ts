@@ -23,13 +23,14 @@ test("every StoreError code and every live trigger refusal is logged or mapped",
   }
   expect(codes.size).toBeGreaterThan(10);
   expect([...codes].filter((code) => !known(code))).toEqual([]);
-  // The trigger functions the migrations leave installed, as Postgres holds them.
+  // The trigger functions the migrations leave installed, as Postgres holds them
+  // (not the maintenance job's prune, which no request runs).
   const local = await localStore();
   try {
     const messages = new Set<string>();
     for (const { definition } of (
       await local.pg.query<{ definition: string }>(
-        "SELECT pg_get_functiondef(oid) AS definition FROM pg_proc WHERE pronamespace='public'::regnamespace",
+        "SELECT pg_get_functiondef(oid) AS definition FROM pg_proc WHERE pronamespace='public'::regnamespace AND prorettype='trigger'::regtype",
       )
     ).rows)
       for (const match of definition.matchAll(/MESSAGE\s*=\s*'([a-z_]+)'/g))

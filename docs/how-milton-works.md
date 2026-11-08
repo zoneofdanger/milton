@@ -114,6 +114,11 @@ LOCKED`) and inserts only those accounts' rows, so it holds key shares only on a
   `FOR NO KEY UPDATE`, which the row's key-share check does not wait on; sign-in,
   eligibility, lifecycle and deletion lock `FOR UPDATE`, so a row for an account being
   deleted is skipped, then dropped, and never outlives the account.
+- Usage rows are kept 90 days. Only the auth maintenance job (every 15 minutes, as
+  `milton_auth_owner`) deletes older ones, through `public.prune_usage_calls` (`0008`):
+  oldest first by the `at` index, at most 1,000 per batch and 20,000 per run, skipping
+  rows an erasure has locked. Each batch is one transaction with one DELETE under
+  server-side 10 s statement and 2 s lock limits, read back first; unset, it refuses. No request path deletes usage rows.
 - Each call logs the tool, outcome, time, and an error code from a fixed list, never
   text or identity.
 - The tool name is read early, so calls refused before dispatch are still logged.

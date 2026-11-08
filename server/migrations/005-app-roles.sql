@@ -16,7 +16,8 @@ GRANT INSERT ON public.identities TO milton_app_runtime;
 GRANT SELECT,INSERT,UPDATE ON public.trial_accounts,public.stripe_events TO milton_app_runtime;
 GRANT SELECT(user_id,started_at,subscription_status,trial_end,current_period_start,notice_stage),UPDATE(notice_stage)
  ON public.trial_accounts TO milton_mcp_runtime;
-GRANT SELECT,INSERT,UPDATE ON public.save_requests,public.usage_daily TO milton_mcp_runtime;
+-- usage_daily's grant went with the table (Drizzle 0008).
+GRANT SELECT,INSERT,UPDATE ON public.save_requests TO milton_mcp_runtime;
 -- 0002: every sample change appends; neither table is updatable by a runtime.
 -- The revoke converges a rehearsal that applied the earlier candidate grant.
 REVOKE UPDATE ON public.samples FROM milton_mcp_runtime;

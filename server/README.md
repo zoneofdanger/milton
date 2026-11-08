@@ -463,9 +463,10 @@ save invokes a model.
 There is no daily call or save allowance. Each admitted tool call appends one
 `usage_calls` row (account, time, tool) alongside its work; the reply waits for it at
 most 250 ms, and failures are logged by code only (`src/store/usage.ts`). The row's
-foreign key cascades from `users`. The table grows by one row per admitted call and
-has no retention yet. `usage_daily` and the stored
-`daily_calls` key are no longer read or written; a later migration removes both.
+foreign key cascades from `users`. Rows are kept 90 days: the auth maintenance job
+deletes older ones in bounded batches through `public.prune_usage_calls` (Drizzle `0008`),
+never a request. `0008` also dropped `usage_daily` and the stored `daily_calls` key, the
+retired daily allowance's leftovers.
 There are no public archive/restore exemptions or history controls.
 Retained history has no cap.
 
@@ -670,8 +671,8 @@ The byte caps above apply alongside 1-100 rules and up to 500
 exact edits, moves and sample removals per save, with a 256 KiB request bound.
 `sample_versions_body` allows 131072 bytes, `accepted_change_shape` allows 1,100 affected cards,
 and `save_request_result` allows 65,536 bytes. The stored limits in use are `body_bytes`,
-`description_bytes`, `reason_bytes` and `report_body_bytes`; the stored row may still hold
-the retired `daily_calls`, which is ignored.
+`description_bytes`, `reason_bytes` and `report_body_bytes`; any other stored key is
+ignored.
 There is no card count, daily call or save allowance, or lifetime history cap.
 
 A save and its outcome receipt commit in one transaction. Every receipt holds an
@@ -708,6 +709,13 @@ usage: MCP may only insert; app gets nothing (erasure cascades as the table owne
 `FOR NO KEY UPDATE` (each otherwise unchanged), so no save waits on a usage row's
 foreign-key check.
 Rerunning 009 converges. Rollback is the pre-migration snapshot.
+
+Usage retention (Drizzle `0008`) adds `public.prune_usage_calls(batch)`, a SECURITY
+DEFINER function owned by the table owner with a fixed `pg_catalog, pg_temp` search path,
+EXECUTE revoked from PUBLIC. The owner applies `migrations/010-usage-retention-roles.sql`
+after `0008`: only `milton_auth_owner`, the auth maintenance job's role, may execute it,
+with USAGE on `public` to resolve its name and no privilege on any writing table. No
+runtime may run it. Rerunning 010 converges. Rollback is the pre-migration snapshot.
 
 Server timeouts live on the runtime logins, because Neon's proxy and pooler drop the
 `statement_timeout`/`lock_timeout` a client passes at connect (the pools still pass them,

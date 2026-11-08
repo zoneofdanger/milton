@@ -8,7 +8,6 @@ import {
   boolean,
   jsonb,
   timestamp,
-  date,
   primaryKey,
   unique,
   uniqueIndex,
@@ -24,14 +23,12 @@ const createdAt = () =>
   timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
 // Changing this default needs a migration. The card version guard also reads
 // reason_bytes; application code reads body_bytes, description_bytes and
-// report_body_bytes. Nothing reads daily_calls (the retired daily allowance);
-// a later migration removes it with usage_daily.
+// report_body_bytes.
 const limits = {
   body_bytes: 131072,
   description_bytes: 500,
   reason_bytes: 500,
   report_body_bytes: 262144,
-  daily_calls: 10000,
 };
 export const storeConfig = pgTable(
   "store_config",
@@ -200,27 +197,13 @@ export const connectionKeys = pgTable(
     ),
   ],
 );
-// Written by no code since the daily allowance was retired; a later migration
-// drops it.
-export const usageDaily = pgTable(
-  "usage_daily",
-  {
-    userId: text("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    dayUtc: date("day_utc").notNull(),
-    toolCalls: integer("tool_calls").notNull().default(0),
-  },
-  (t) => [
-    primaryKey({ columns: [t.userId, t.dayUtc] }),
-    check("usage_nonnegative", sql`${t.toolCalls} >= 0`),
-  ],
-);
 // One row per admitted tool call, appended alongside its work. The append
 // skips an account under a sign-in's, lifecycle's or deletion's FOR UPDATE
 // rather than wait (writers and their guard triggers lock FOR NO KEY UPDATE,
 // since 0007), and erasure cascades here, so a row can
-// never outlive its account. Outcomes stay in the identity-free logs.
+// never outlive its account. Outcomes stay in the identity-free logs. Rows
+// are kept 90 days: only the auth maintenance job deletes older ones, through
+// 0008's prune function, oldest first by usage_calls_by_at.
 export const usageCalls = pgTable(
   "usage_calls",
   {
@@ -232,6 +215,7 @@ export const usageCalls = pgTable(
   },
   (t) => [
     index("usage_calls_by_user").on(t.userId, t.at),
+    index("usage_calls_by_at").on(t.at),
     check(
       "usage_calls_tool",
       sql`${t.tool} IN ('get_cover_sheet','get_report','list_reports','create_memo')`,

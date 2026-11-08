@@ -391,33 +391,60 @@ revision's image and numeric secret versions together with its configuration.
 
 ## Alerts
 
-Cloud Monitoring in `milton-510506` holds eight alert policies, four per service, created
-2026-11-04. Every policy notifies one email channel, `milton-ops-email`
-(`notificationChannels/9917162819460717518`, Peter's address), and closes an incident
-30 minutes after its condition clears. Each condition reads `cloud_run_revision`
-resources filtered to its service and sums across revisions.
+Alerts are code: [monitoring/](monitoring/) holds one JSON file per resource in the
+Monitoring and Logging APIs' own shapes (`*.metric.json`, `*.uptime.json`,
+`*.policy.json`), and each policy's `documentation` says what to check first and why each
+threshold is what it is. [`server/scripts/monitoring.ts`](../scripts/monitoring.ts) plans
+by default and changes nothing; `--apply` upserts by display name (log metrics by name),
+then deletes only the ten hand-made policies it names (`milton-*-5xx-ratio`,
+`-latency-p95`, `-instances`, `-errors-log` and `milton-auth-jobs-errors-log`), which stay
+live until the first apply. A second `--apply` changes nothing. It refuses any
+notification channel other than `milton-ops-email` (email, Peter's address), which it looks
+up by display name. Only the release coordinator applies, after review:
 
-| Policy                                             | Condition                                                                                                      |
-| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `milton-app-5xx-ratio`, `milton-mcp-5xx-ratio`     | `run.googleapis.com/request_count` with `response_code_class = "5xx"` over all requests > 0.02 for 5 min       |
-| `milton-app-latency-p95`, `milton-mcp-latency-p95` | `run.googleapis.com/request_latencies`, 95th percentile across revisions > 2000 ms for 10 min                  |
-| `milton-app-instances`, `milton-mcp-instances`     | `run.googleapis.com/container/instance_count`, max per minute summed across revisions and states > 8 for 5 min |
-| `milton-app-errors-log`, `milton-mcp-errors-log`   | Log match: the service's entries with `severity >= ERROR`; at most one notification per 10 min                 |
+```sh
+bun server/scripts/monitoring.ts            # plan: create/update/unchanged/delete per resource
+bun server/scripts/monitoring.ts --apply    # release coordinator only
+```
 
-The instance alert is a traffic-spike signal, not a failure. The 5xx ratio fires only
-when there are 5xx responses: with none there is no numerator series. Cloud Run's own
-request log writes a 5xx at ERROR, so a burst of 5xx also triggers the log alert.
+Two tiers. **Page** policies email `milton-ops-email` once per incident (`notificationPrompts:
+[OPENED]`, no renotify; the API implements `notificationRateLimit` only for log-match
+conditions, and none remain) and close 30 minutes after the condition clears. **Gate**
+(`milton-release-gate`) has no channel and emails no one; the release gate below reads it.
+Traffic is about 8 to 25 requests an hour, far too low for ratios (one 5xx in five requests
+is 20%), so conditions count over a window. Baselines and backtests: 7 days to
+2026-11-08 06:30Z, Monitoring and Logging APIs; no page condition would have fired except
+the mail-absence one, during the real incident noted below.
 
-To change a policy, edit it in the console or `PATCH` it through the Monitoring API
-(`https://monitoring.googleapis.com/v3/projects/milton-510506/alertPolicies/<id>`); list
-them with `GET .../alertPolicies`. Stripe's webhook-failure emails and Neon's compute
-alerts are Dashboard settings, not these policies.
+| Policy (tier)                                    | Condition                                                                                                                         | Reason                                                                                                                                                                                                                                                                |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `milton-uptime` (page)                           | `/health` (app, MCP) and `/api/auth/ok` (auth), every 5 min from 3 US regions, 10 s timeout; failing from ≥ 2 regions for 10 min  | One region can fail alone; two consecutive rounds rule out a dropped probe. Not backtested: the checks are new. Uptime conditions are never charged.                                                                                                                  |
+| `milton-app`, `milton-mcp`, `milton-auth` (page) | 5xx ≥ 10 in a rolling 15 min, held 5 min                                                                                          | 7-day worst: 6 (app, a release's 503s, 11-04), 0 (MCP), 1 (auth).                                                                                                                                                                                                     |
+| same                                             | p95 over a rolling 5 min > 5 s, held 30 min; no data, no alert                                                                    | 40 to 70× the median 5-min p95 (116 / 72 / 81 ms); the longest 7-day run above 5 s was 5 min. The specified 30-min window was rejected: one 7.8 s scanner request (`GET /?p=1`, app, 11-04 16:00Z) held it above 5 s for 30 min at this traffic and would have paged. |
+| same                                             | `milton-errors` (ERROR log entries) ≥ 10 in a rolling 15 min, held 5 min                                                          | 7-day worst: 6 (app), 3 (MCP), 3 (auth). Each 5xx is also an ERROR request-log line, and deploy errors are ERROR audit lines.                                                                                                                                         |
+| same                                             | instances > 8 for 15 min                                                                                                          | 7-day max 3 / 4 / 3 (one kept warm). A traffic spike, not a failure.                                                                                                                                                                                                  |
+| `milton-jobs` (page)                             | `milton-auth-mail` ≥ 5 failed executions in 15 min                                                                                | 1,262 succeeded and 0 failed in 7 days; one failure is retried by the next minute's run.                                                                                                                                                                              |
+| same                                             | `milton-auth-maint` ≥ 2 failed executions in 45 min                                                                               | Two consecutive 15-minute runs; 84 succeeded and 0 failed in 7 days.                                                                                                                                                                                                  |
+| same                                             | no `milton-auth-mail` execution for 20 min                                                                                        | Catches a broken trigger, which fails no execution. Would have fired once, 11-07 07:43Z, during the real two-hour `:run` → `un` incident.                                                                                                                             |
+| `milton-instance-start` (page)                   | `milton-startup-failures` ≥ 3 in a rolling 15 min, per service                                                                    | Cloud Run system log lines `Default STARTUP TCP probe failed …` and `Container called exit(N).` (N ≠ 0); a failed start writes both. 30-day worst: 2 (auth, 11-07 08:30Z, one failed start that recovered in 8 s).                                                    |
+| `milton-release-gate` (gate)                     | per service or job, rolling 5 min: any 5xx; any ERROR entry; any failed `milton-auth-*` execution; any startup failure; ≥ 10 429s | Fast and loud by design; emails no one. 429 needs 10: MCP had a 48-request 429 burst on 11-07 10:55Z.                                                                                                                                                                 |
 
-Added 2026-11-07 for the self-hosted auth service, same channel, rate limit 10 minutes:
+The startup signal is the log-based metric, not `run.googleapis.com/container/completed_probe_count`:
+that metric did not record the one real failed start in 30 days, because the container exited
+(`Error: Connection terminated due to connection timeout`) before the probe completed.
+The deploy errors of 2026-11-08 01:00Z (`traffic[21].tag: must be at least 3 characters`,
+`Revision 'milton-*-r3-64435ee' does not exist`) and 11-07 23:23Z (`Deadline expired`) are
+ERROR audit entries on the service, so they count in `milton-errors` and open the gate.
 
-- `milton-auth-errors-log`: any `milton-auth` Cloud Run log entry with severity ERROR or higher.
-- `milton-auth-jobs-errors-log`: any ERROR from a `milton-auth-*` Cloud Scheduler job or Cloud
-  Run job (mail delivery, maintenance), including a malformed trigger URL's 404s.
+**Pending:** [monitoring/pending/milton-e2e-daily.policy.json](monitoring/pending/milton-e2e-daily.policy.json)
+pages on ≥ 1 failed execution of the Cloud Run job `milton-e2e-daily` in 24 h, or none for
+26 h. The script ignores `pending/`; move the file up a directory once the job exists (the
+job exits non-zero on failure), then plan and apply.
+
+Cost: free until no sooner than 2027-09-01, then $0.35 per non-uptime condition per month
+(21 applied, about $7.35; $8.05 with the end-to-end policy) plus $0.50 per million points.
+Uptime checks run about 78k times a month against a free million. Stripe's webhook-failure
+emails and Neon's compute alerts are Dashboard settings, not these policies.
 
 ## Release verification and rollback
 
@@ -453,6 +480,20 @@ revision and its imported image, then verify startup again when assigning traffi
    from `server/`. It posts a signed-out form the way Chrome does (`Origin: null`).
    `PASS` (exit 0) means the form reached the sign-in check; `FAIL` means
    `csrf_refused`, so roll back the app.
+6. **Release gate.** Note the UTC time traffic moved, wait 10 minutes (the gate's 5-minute
+   windows plus metric and log ingestion delay), then run one query:
+
+   ```sh
+   DEPLOYED=2026-11-08T04:26:00Z   # when traffic moved, UTC
+   gcloud monitoring alerts list --project=milton-510506 --verbosity=error \
+     --filter="state=\"OPEN\" OR open_time>=\"$DEPLOYED\"" \
+     --format='table(state,openTime,policy.displayName,resource.labels)'
+   ```
+
+   No output passes. Any row (gate or page, open or opened since the deploy) means
+   investigate before calling the release done; a gate row names its condition's service or
+   job. The filter runs on the server (`state`, `open_time`, `policy.display_name`). This
+   replaces the manual 5-minute watch.
 
 **Migrations.** Snapshot first (a Neon snapshot, plus a private `pg_dump` checkpoint
 before each step), and rehearse on a throwaway Neon branch or disposable database. Run

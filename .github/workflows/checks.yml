@@ -1,5 +1,5 @@
-# Types, tests, formatting and both integration suites on every push and pull
-# request to main.
+# Migration guards, types, tests, formatting and both integration suites on every
+# push and pull request to main.
 # No secrets and no deploy: deploys run from the command line.
 name: checks
 
@@ -20,9 +20,14 @@ jobs:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
+          # Full history: the migration guards compare with origin/main and look
+          # up merged PRs in its log.
+          fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.4
+      # Numbering, the released-migration lock and drop order (scripts/check-migrations.ts).
+      - run: bun scripts/check-migrations.ts
       # The auth tests run one regression under Node, as production does.
       - uses: actions/setup-node@v7
         with:

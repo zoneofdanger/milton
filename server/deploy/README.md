@@ -22,32 +22,38 @@ This runbook keeps only the latest release record. Earlier release records and a
 one-time procedures are in git history; the last full version is at commit 492b96a
 (`git show 492b96a:server/deploy/README.md`).
 
-## Release record: warm instances, trial-table drop, allowance and bundles (2026-11-07, PRs #32–#37)
+## Release record: saves, report cap, round trips, unread columns and auth media types (2026-11-08, PRs #39 #41 #42 #43 #44 #45)
 
-- **Warm instances (Peter):** auth, app and MCP each keep one warm instance via the
-  service-level minimum, set 23:13–23:15Z without new revisions (see Cloud resources).
-- **#33 (milton-qa):** drizzle 0005 and owner file 008 applied at 21:59Z after snapshot
-  `snap-muddy-bonus-b8tjvsii` (Peter's go); see "Drop the unread trial tables".
-- **#32 (milton-qa), with #33's code:** refused tool calls no longer count against the daily
-  allowance. App/MCP `milton-*-fre-64617cc` at 23:17Z (image
-  `sha256:8ee8d8ad459fd2a96769b815a4bac450f10287ee3108d310298b49416ea2f0d4`). 0 errors in a
+- **#41 + #43 (milton-perf), `effac76`:** a transient database error rolls back the whole
+  save (no receipt, no charge); intent reads serve only the ranked samples that fit the
+  256 KiB cap. App/MCP `milton-*-cap-effac76` at 00:08Z (image
+  `sha256:5a71cf62d1f3a6cfbb8ef1adb436785c0243684324f2f90d47eb3f8e71f5793f`).
+- **#44 (milton-perf; milton-qa Astra PASS), `59d1227`:** one fewer serial round trip per
+  signed-in page; the OIDC callback's two auth calls and billing's email copy run in
+  parallel. App/MCP `milton-*-rt3-59d1227` at 00:15Z (image
+  `sha256:951fa78b832677deeaa9829e40f447e1f9fbe72050b92d8ce316a6e91f7c458b`).
+- **#45 (test-trim; Astra PASS), `da46ee8`:** Drizzle 0006 applied at 00:20Z after snapshot
+  `snap-winter-mountain-b8iphgdz` (see "Drop the unread payload columns"); then app/MCP
+  `milton-*-lean-da46ee8` at 00:21Z (image
+  `sha256:1f0a36eddebf22c95012d05b199189eb0cdca5568ad600ee1c8c18be64f1e78a`), which no
+  longer writes `save_requests.source_hash`.
+- **#39 (test-trim):** test-only, no deploy.
+- **#42 (milton-qa; three Astra rounds), `e770c15`:** the auth wrapper normalizes the media
+  type, refuses anything but plain JSON or a standard form (and comma-joined or duplicate
+  Content-Type) with 415, and forwards only a body rebuilt from its own parse. Auth
+  `milton-auth-00009-mrk` at 00:26Z (image
+  `sha256:495876dae0a2418f1758e881792f6073ff98dd2d3e63631988da7e8ded514bc5`; mail and
+  maintenance jobs too). Live through the load balancer: `text/plain`, comma-joined and
+  duplicate Content-Type got 415; `Application/JSON` and `application/json` reached sign-in
+  (401 for a fictional address). Health 200, login 200, Claude Code authorize 302. 0 errors in a
   5-minute watch.
-- **#37 (milton-perf):** minified app/MCP and guide-worker bundles (`cloud-run.js` 4.6 → 3.3
-  MB; identifiers kept; no source maps in the image). App/MCP `milton-*-min-06d01e6` at
-  23:23Z (image `sha256:fc9013130006ea87102a3737cf2f7129d90e93096967f680aeeb95d595942dd6`). In the
-  5-minute watch: no 5xx or application errors; one audit-log ERROR at 23:23:08Z, a
-  `ReplaceService` call from the deploy that hit "Deadline expired" while the revision
-  still went Ready and took 100% of traffic.
-- **No deploy needed:** #35 and #36 (test-trim; #35 retires the auth down migrations, Peter's
-  decision: snapshot restore is the only auth schema rollback) and #34 (milton-qa; the auth
-  migrator runs each file and its ledger row in one transaction under an advisory lock).
-  Auth is unchanged at `milton-auth-00008-967`.
 
-Checks on each merged main: types, 131 tests, format, site and server builds, server
-rehearsal 13/13, auth integration 17/17 (18/18 with #34), all 0. Smoke: health 200 ×3, MCP
-401s, app home 200, signed-out report 403. Rollback: app/MCP `milton-*-fre-64617cc`, then
-`milton-*-fnt-d3ea1eb`; no further back than `milton-*-dup-cb5199b` unless both trial-table
-downs run first. Auth: `milton-auth-00007-vn2`.
+Each merge checked on main: types, 129–131 tests, format, build, rehearsal 13/13, all 0.
+Watches after #41/#43, #44 and #45: no 5xx, application or audit errors. Smoke after each: health
+200 ×3, MCP 401, app home 200, signed-out pages 403. Rollback: app/MCP `milton-*-rt3-59d1227`
+(compatible with 0006: it writes `source_hash` and never reads `payload_bytes`), then
+`milton-*-cap-effac76`; never further back than `milton-*-dup-cb5199b` without the trial-table
+downs. Auth rollback: `milton-auth-00008-967`.
 
 ## Runtime role timeouts (applied 2026-11-07, TODO #29)
 
@@ -129,7 +135,13 @@ only from the snapshot. The 0005 journal row stays, so re-forwarding means
 `psql -1 -X -v ON_ERROR_STOP=1 -f server/drizzle/0005_drop_deleted_identities.sql`, then
 008 up again.
 
-## Drop the unread payload columns (pending: Drizzle 0006)
+## Drop the unread payload columns (applied 2026-11-08: Drizzle 0006)
+
+Applied 00:20Z after snapshot `snap-winter-mountain-b8iphgdz`, while `*-rt3-59d1227` served, as
+`neondb_owner` exactly as the Drizzle migrator does (the four statements plus the file's
+SHA-256 and journal `when` in one transaction; journal now 7). No `payload_bytes` column
+remains and `save_requests.source_hash` is nullable; 16 samples, 2 users and 46 receipts
+unchanged. The new code was released after it.
 
 Nothing reads `payload_bytes` (the generated sizes the retired history cap summed) on
 `accepted_changes`, `instruction_card_versions` and `save_requests`, or
@@ -388,8 +400,8 @@ references. Inspect revision readiness before selecting a recorded revision:
 gcloud run revisions list --service=milton-app --project=milton-510506 --region=us-east4
 ```
 
-Now serving (2026-11-07): app `milton-app-min-06d01e6` and MCP
-`milton-mcp-min-06d01e6` (source `06d01e6`), and auth `milton-auth-00008-967`. The
+Now serving (2026-11-08): app `milton-app-lean-da46ee8` and MCP
+`milton-mcp-lean-da46ee8` (source `da46ee8`), and auth `milton-auth-00009-mrk` (source `e770c15`). The
 release record above gives the image and rollback revisions.
 
 Roll back only affected services, preserve ingress/IAM, then repeat the canonical

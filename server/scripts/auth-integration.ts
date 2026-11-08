@@ -68,6 +68,7 @@ import {
 import { runGuideWorker } from "../src/guides/worker";
 import type { GuideProvider } from "../src/guides/provider";
 import { connections, lifecycle } from "../src/auth-lifecycle";
+import { ensureSubscription } from "../src/billing";
 import type { SessionUser } from "../src/auth-session";
 import { createProvider } from "../../apps/auth/src/provider";
 import { ISSUER, AUTH_ORIGIN } from "../../apps/auth/src/config";
@@ -2869,6 +2870,157 @@ try {
     assert.equal(identityCalls, 1);
     pass(
       "lost native link notification -> unlink -> delete -> changed-email recreation preserves trial eligibility; callback uncertainty is safe and native-only unlink admits nobody",
+    );
+  }
+  // A deletion that begins while an enrolment holds the account's billing row,
+  // on real PostgreSQL row locks: the enrolment has linked its customer and is
+  // starting the trial, uncommitted, when the deletion reads the customer.
+  {
+    stage = "deletion during an enrolment";
+    await owner.query(
+      'delete from milton_auth."rateLimit"; delete from milton_guard.rate_bucket',
+    );
+    authCookies.clear();
+    appCookies.clear();
+    const raceEmail = "deletion-race@example.com";
+    const racePassword = "Fictional deletion race password";
+    await request(native.handler, ISSUER + "/sign-up/email", authCookies, {
+      email: raceEmail,
+      password: racePassword,
+      name: "Fictional race",
+    });
+    await native.handler(
+      new Request(mail.findLast((m) => m.kind === "verify")!.url),
+    );
+    assert.equal(
+      (
+        await request(native.handler, ISSUER + "/sign-in/email", authCookies, {
+          email: raceEmail,
+          password: racePassword,
+        })
+      ).status,
+      200,
+    );
+    const start = await request(app, config.appOrigin + "/login", appCookies);
+    const authorized = await request(
+      native.handler,
+      start.headers.get("Location")!,
+      authCookies,
+    );
+    assert.equal(
+      (await request(app, authorized.headers.get("Location")!, appCookies))
+        .status,
+      303,
+    );
+    const authority = (
+      await appPool.query(
+        "select subject,sid,binding,incarnation,generation from milton_app.session order by created_at desc limit 1",
+      )
+    ).rows[0];
+    const { userId: raceUser } = await lookupIdentityAccount(config, {
+      provider: ISSUER,
+      subject: authority.subject,
+    });
+    // Waiting for its trial, as the subscription backfill finds an account.
+    await owner.query(
+      "update trial_accounts set stripe_customer_id=null,stripe_subscription_id=null,subscription_status=null where user_id=$1",
+      [raceUser],
+    );
+    const billing = config.billing!;
+    const shared = billing.fetch;
+    const calls: string[] = [];
+    let release = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let subscribing = () => {};
+    const linked = new Promise<void>((resolve) => (subscribing = resolve));
+    billing.fetch = async (input, init) => {
+      const path = new URL(input).pathname;
+      calls.push(`${init.method} ${path}`);
+      if (path === "/v1/customers" && init.method === "POST")
+        return Response.json({ id: "cus_race" });
+      if (path === "/v1/subscriptions" && init.method === "GET")
+        return Response.json({ data: [] });
+      if (path === "/v1/subscriptions" && init.method === "POST") {
+        subscribing();
+        await held;
+        const now = Math.floor(Date.now() / 1000);
+        return Response.json({
+          id: "sub_race",
+          status: "trialing",
+          created: now,
+          trial_end: now + 30 * 86400,
+          items: {
+            data: [
+              {
+                current_period_start: now,
+                current_period_end: now + 30 * 86400,
+              },
+            ],
+          },
+        });
+      }
+      if (path === "/v1/customers/cus_race" && init.method === "DELETE")
+        return Response.json({ id: "cus_race", deleted: true });
+      throw new Error("unexpected_fictional_stripe_request");
+    };
+    try {
+      const enrolment = ensureSubscription(config, raceUser, raceEmail).then(
+        () => true,
+        () => false,
+      );
+      await linked;
+      const deletions = lifecycleFor(
+        { ...authority, id: authority.subject },
+        appCookies.get("__Host-milton-session")!,
+      );
+      const id = randomUUID();
+      const deletion = deletions.run("delete", id);
+      // The deletion reaches a row the enrolment holds, then the trial starts.
+      for (let waited = 0; ; waited += 20) {
+        const waiting = (
+          await owner.query<{ n: number }>(
+            "select count(*)::int n from pg_locks where not granted",
+          )
+        ).rows[0]!.n;
+        if (waiting > 0) break;
+        assert(waited < 5000, "the deletion waits on a row lock");
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      release();
+      const enrolled = await enrolment;
+      const first = await deletion;
+      // A failed deletion gets the retry its page offers.
+      const { operation } = first.failed
+        ? await deletions.run("delete", id)
+        : first;
+      assert.equal(operation.progress, "complete");
+      assert.deepEqual(
+        calls,
+        [
+          "POST /v1/customers",
+          "GET /v1/subscriptions",
+          "POST /v1/subscriptions",
+          "DELETE /v1/customers/cus_race",
+        ],
+        "the deletion deletes the customer the enrolment linked",
+      );
+      // Neither side deadlocks: the deletion waits for the enrolment's row.
+      assert.equal(enrolled, true, "the enrolment commits");
+      assert.equal(first.failed, false, "the deletion finishes first time");
+      assert.equal(
+        (
+          await owner.query("select count(*)::int n from users where id=$1", [
+            raceUser,
+          ])
+        ).rows[0].n,
+        0,
+      );
+    } finally {
+      release();
+      billing.fetch = shared;
+    }
+    pass(
+      "a deletion that begins while an enrolment holds the account's billing row waits for it, then deletes the customer it linked before erasing the account",
     );
   }
   // The test account and its check, through the real auth pages, app and MCP,

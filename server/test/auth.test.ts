@@ -23,6 +23,7 @@ import {
   protocolFixture,
 } from "./auth-fixtures";
 import { authAdmission, trialFingerprints } from "../src/auth-admission";
+import { ensureSubscription } from "../src/billing";
 
 const appFor = (env: Partial<Parameters<typeof createMiltonApp>[0]>) =>
   createMiltonApp({ issuer, resource, appOrigin, ...clientSettings, ...env });
@@ -141,6 +142,8 @@ function fakeStripe() {
     subscriptions: [] as Record<string, unknown>[],
     calls: [] as Record<string, unknown>[],
     onDelete: async () => {},
+    // Runs as Stripe creates a customer, before it answers.
+    onCustomer: async () => {},
   };
   const billing = {
     secretKey: "rk_test_fixtureNotAKey",
@@ -166,7 +169,10 @@ function fakeStripe() {
         await stripe.onDelete();
         return Response.json({}, { status: stripe.deleteStatus });
       }
-      if (path === "/v1/customers") return Response.json({ id: "cus_fixture" });
+      if (path === "/v1/customers") {
+        await stripe.onCustomer();
+        return Response.json({ id: "cus_fixture" });
+      }
       if (path === "/v1/customers/cus_fixture" && method === "POST")
         return Response.json({ id: "cus_fixture" });
       if (path === "/v1/customers/cus_fixture")
@@ -1172,6 +1178,75 @@ test("account deletion: a Stripe failure keeps the account and its writing; retr
     expect(returning).toHaveLength(1);
     expect(returning[0]!.user_id).not.toBe(fixture.userId);
     expect(returning[0]!.subscription_status).toBe("canceled");
+  } finally {
+    quiet.mockRestore();
+    await fixture.dispose();
+  }
+}, 30000);
+
+test("account deletion: a checkout in flight as it begins links no customer and opens no session, nothing enrols the account, and the erase first ends a customer linked late", async () => {
+  const fixture = await deletionFixture();
+  const { local, send, stripe, userId } = fixture;
+  const quiet = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    // A returning deleted identity: no customer, so checkout makes one.
+    await local.db.query(
+      sql`UPDATE trial_accounts SET stripe_customer_id=NULL,subscription_status='canceled'`,
+    );
+    const operation = operationIn(await (await send("/account/delete")).text());
+    const confirm = { operation, confirm: "delete my account" };
+    // Erasing fails, so the deletion stops once its Stripe step is done.
+    await local.pg.exec(
+      `CREATE FUNCTION fixture_outage() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fixture erase outage'; END $$`,
+    );
+    await local.pg.exec(
+      `CREATE TRIGGER fixture_outage BEFORE DELETE ON users FOR EACH ROW EXECUTE FUNCTION fixture_outage()`,
+    );
+    // The checkout is past its sign-in check when the deletion begins, while
+    // Stripe creates its customer.
+    let deletion: Response | undefined;
+    stripe.onCustomer = async () => {
+      stripe.onCustomer = async () => {};
+      deletion = await send("/account/delete", confirm);
+    };
+    const checkout = await send("/billing/checkout", {});
+    expect(deletion?.status).toBe(503);
+    expect(checkout.status).toBe(409);
+    expect(await checkout.text()).toContain("This account is being deleted");
+    // The customer Stripe made holds the email, so it is deleted at once.
+    expect(stripe.calls.map((call) => call.call)).toEqual([
+      "POST /v1/customers",
+      "DELETE /v1/customers/cus_fixture",
+    ]);
+    expect(await fixture.remains()).toMatchObject({
+      account: 1,
+      customer: null,
+    });
+    // Nothing enrols the account either, the subscription backfill included.
+    await local.db.query(
+      sql`UPDATE trial_accounts SET subscription_status=NULL`,
+    );
+    stripe.calls.length = 0;
+    await ensureSubscription(local.config, userId);
+    expect(stripe.calls).toEqual([]);
+    // A customer linked anyway, as an image without that refusal could while a
+    // release rolls out, is ended before the erase.
+    await local.db.query(
+      sql`UPDATE trial_accounts SET stripe_customer_id='cus_fixture'`,
+    );
+    await local.pg.exec(`DROP TRIGGER fixture_outage ON users`);
+    stripe.calls.length = 0;
+    const done = await send("/account/delete", confirm);
+    expect(done.status).toBe(200);
+    expect(stripe.calls.map((call) => call.call)).toEqual([
+      "DELETE /v1/customers/cus_fixture",
+    ]);
+    expect(await fixture.remains()).toEqual({
+      account: 0,
+      writing: 0,
+      sessions: 0,
+      customer: undefined,
+    });
   } finally {
     quiet.mockRestore();
     await fixture.dispose();

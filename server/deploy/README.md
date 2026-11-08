@@ -22,38 +22,23 @@ This runbook keeps only the latest release record. Earlier release records and a
 one-time procedures are in git history; the last full version is at commit 492b96a
 (`git show 492b96a:server/deploy/README.md`).
 
-## Release record: saves, report cap, round trips, unread columns and auth media types (2026-11-08, PRs #39 #41 #42 #43 #44 #45)
+## Release record: save round trips; rollback scripts retired (2026-11-08, PRs #51 #52)
 
-- **#41 + #43 (milton-perf), `effac76`:** a transient database error rolls back the whole
-  save (no receipt, no charge); intent reads serve only the ranked samples that fit the
-  256 KiB cap. App/MCP `milton-*-cap-effac76` at 00:08Z (image
-  `sha256:5a71cf62d1f3a6cfbb8ef1adb436785c0243684324f2f90d47eb3f8e71f5793f`).
-- **#44 (milton-perf; milton-qa Astra PASS), `59d1227`:** one fewer serial round trip per
-  signed-in page; the OIDC callback's two auth calls and billing's email copy run in
-  parallel. App/MCP `milton-*-rt3-59d1227` at 00:15Z (image
-  `sha256:951fa78b832677deeaa9829e40f447e1f9fbe72050b92d8ce316a6e91f7c458b`).
-- **#45 (test-trim; Astra PASS), `da46ee8`:** Drizzle 0006 applied at 00:20Z after snapshot
-  `snap-winter-mountain-b8iphgdz` (see "Drop the unread payload columns"); then app/MCP
-  `milton-*-lean-da46ee8` at 00:21Z (image
-  `sha256:1f0a36eddebf22c95012d05b199189eb0cdca5568ad600ee1c8c18be64f1e78a`), which no
-  longer writes `save_requests.source_hash`.
-- **#39 (test-trim):** test-only, no deploy.
-- **#42 (milton-qa; three Astra rounds), `e770c15`:** the auth wrapper normalizes the media
-  type, refuses anything but plain JSON or a standard form (and comma-joined or duplicate
-  Content-Type) with 415, and forwards only a body rebuilt from its own parse. Auth
-  `milton-auth-00009-mrk` at 00:26Z (image
-  `sha256:495876dae0a2418f1758e881792f6073ff98dd2d3e63631988da7e8ded514bc5`; mail and
-  maintenance jobs too). Live through the load balancer: `text/plain`, comma-joined and
-  duplicate Content-Type got 415; `Application/JSON` and `application/json` reached sign-in
-  (401 for a fictional address). Health 200, login 200, Claude Code authorize 302. 0 errors in a
-  5-minute watch.
+- **#51 (milton-perf; Astra should-fix fixed in `ace5e74`, milton-qa passed):** saves take a
+  fixed 15 round trips at any size (local: a one-rule save 96 → 71 ms, a 100-rule setup save
+  1.03 s → 75 ms); the trial gate is always awaited. App/MCP `milton-*-save-b85f428` at 02:00Z
+  (image `sha256:a1b9298b1679e24221c0fd08922b4932271b7a9fcc884bdb52e959e2194c3961`). Checks on
+  main: types, 137 tests, format, build, rehearsal 13/13, all 0; health 200 ×3, MCP 401, app
+  home 200, signed-out report 403; no 5xx, application or audit errors in a 5-minute watch.
+  Sample retirement's true/NULL array elements were tested on
+  PGlite only. Rollback: app/MCP `milton-*-rnd3-64435ee`.
+- **#52 (Peter's decision, AGENTS.md rule):** deleted the pre-launch rollback scripts for
+  0005, 0006, 0007 and 008; each migration's rollback is its pre-migration snapshot. The
+  applied migration files are byte-identical (their hashes match the production journal). No
+  deploy.
 
-Each merge checked on main: types, 129–131 tests, format, build, rehearsal 13/13, all 0.
-Watches after #41/#43, #44 and #45: no 5xx, application or audit errors. Smoke after each: health
-200 ×3, MCP 401, app home 200, signed-out pages 403. Rollback: app/MCP `milton-*-rt3-59d1227`
-(compatible with 0006: it writes `source_hash` and never reads `payload_bytes`), then
-`milton-*-cap-effac76`; never further back than `milton-*-dup-cb5199b` without the trial-table
-downs. Auth rollback: `milton-auth-00008-967`.
+Auth `milton-auth-00009-mrk`, rollback `milton-auth-00008-967`. Earlier records: git history
+(`git log -p server/deploy/README.md`).
 
 ## Runtime role timeouts (applied 2026-11-07, TODO #29)
 
@@ -114,7 +99,7 @@ Since PR #26 nothing reads or writes `public.deleted_identities` or
 block. App/MCP code before #26 reads both, so apply only while code from #26 or later
 (source `cb5199b` onward, such as `*-drt-c1af8c3`) serves. The recorded app/MCP rollback
 targets `*-lca-9de3099` and `*-tmo-58a4a59` predate #26: after the drop, roll app/MCP back
-no further than `*-dup-cb5199b` unless both downs below run first. Rehearse on a disposable
+no further than `*-dup-cb5199b` unless the snapshot below is restored first. Rehearse on a disposable
 branch or database first, then:
 
 1. Snapshot. It is the only copy of the dropped rows.
@@ -127,13 +112,11 @@ branch or database first, then:
    `SELECT to_regclass('public.deleted_identities') AS d, to_regclass('milton_app.legacy_mapping') AS l;`
    Then `check-runtime-role.ts` must print `ok` for app and MCP.
 
-Rollback, needed only before traffic returns to app/MCP code older than #26: run
-`server/migrations/008-drop-legacy-mapping.down.sql` as `milton_app_owner` (it refuses any
-other role) and `server/drizzle/rollback/0005_drop_deleted_identities.sql` as `neondb_owner`.
-Each recreates its table empty, with its original definition and grants; rows come back
-only from the snapshot. The 0005 journal row stays, so re-forwarding means
-`psql -1 -X -v ON_ERROR_STOP=1 -f server/drizzle/0005_drop_deleted_identities.sql`, then
-008 up again.
+Rollback, needed only before traffic returns to app/MCP code older than #26, is the
+pre-migration Neon snapshot `snap-muddy-bonus-b8tjvsii`. There is no down script.
+Comments inside the applied 0005, 0006, 0007 and 008 files still name rollback files deleted
+on 2026-11-08 under the AGENTS.md rule; applied files are never edited, and the
+pre-migration snapshot is the rollback.
 
 ## Drop the unread payload columns (applied 2026-11-08: Drizzle 0006)
 
@@ -167,13 +150,32 @@ branch or database first, then:
 
    Then `check-runtime-role.ts` must print `ok` for app and MCP.
 
-Rollback, never needed to roll app/MCP back (older code runs on either schema): roll
-app/MCP back to code that writes `source_hash` first, then run
-`server/drizzle/rollback/0006_drop_unread_columns.sql` as `neondb_owner`. It restores the
-NOT NULL and re-adds the three columns with their baseline definitions (each re-add
-rewrites its table). It refuses, changing nothing, once a save from the new code left a
-receipt without `source_hash`. The 0006 journal row stays, so re-forwarding means
-`psql -1 -X -v ON_ERROR_STOP=1 -f server/drizzle/0006_drop_unread_columns.sql`.
+Rollback, never needed to roll app/MCP back (older code runs on either schema), is the
+pre-migration Neon snapshot `snap-winter-mountain-b8iphgdz`; roll app/MCP back to code that
+writes `source_hash` before restoring it. There is no down script.
+
+## Usage rows and the writer guards (applied 2026-11-08: Drizzle 0007, PR #40)
+
+Applied 00:51Z after snapshot `snap-crimson-field-b87qk777`; see the release record above.
+
+0007 adds the empty `usage_calls` table (account, time, tool; foreign key cascading from
+`users`). It also re-creates the six writer guard triggers (cards, card versions, accepted
+changes, sample kinds, samples, sample versions) with their account lock moved from
+`FOR UPDATE` to `FOR NO KEY UPDATE`, each otherwise unchanged. Every recorded app/MCP
+revision runs on either schema, so traffic stays open. Code from #40 writes the table;
+before 0007 and 009 its appends fail, are logged by code and change no response. Apply
+after 0006. Rehearse on a disposable branch or database first, then:
+
+1. Snapshot.
+2. As `neondb_owner`: `bun run --cwd server db:migrate` applies `0007_usage_calls`
+   (journal 8 entries), then run `server/migrations/009-usage-calls-roles.sql` (MCP gets
+   `INSERT` only; rerunning converges).
+3. Check as the owner: `SELECT count(*) FROM pg_proc WHERE prosrc LIKE '%FOR UPDATE%' AND
+pronamespace='public'::regnamespace` returns 0, and `check-runtime-role.ts` prints
+   `ok` for app and MCP. Then release #40's code.
+
+Rollback, never needed to roll app/MCP back (older code runs on either schema), is the
+pre-migration Neon snapshot `snap-crimson-field-b87qk777`. There is no down script.
 
 ## Optional guide worker
 
@@ -195,7 +197,8 @@ from the live service before replacing it. [auth.service.template.json](auth.ser
 is deliberately non-deployable. Production's writing journal holds `0000_baseline` through
 `0004_connection_keys` (5 entries), the native auth ledger 001–007, and the owner files
 `000-app-owner.sql`, `005-app.up.sql`, `005-app-roles.sql`, `006-connection-keys-roles.sql` and `007-role-timeouts.up.sql` (see [runtime role timeouts](#runtime-role-timeouts-applied-2026-11-07-todo-29)). There is no memo-update
-allowance; the daily call cap bounds saves. Existing positive account safeguards remain
+or daily call allowance (removed by the branch `agent/remove-daily-allowance`; until it
+serves, production still enforces the 10,000-call daily cap). Existing positive account safeguards remain
 in effect. Trials and billing are live (since 2026-11-04).
 Each image includes both roles and browser assets. Validate manifests before applying:
 
@@ -400,8 +403,8 @@ references. Inspect revision readiness before selecting a recorded revision:
 gcloud run revisions list --service=milton-app --project=milton-510506 --region=us-east4
 ```
 
-Now serving (2026-11-08): app `milton-app-lean-da46ee8` and MCP
-`milton-mcp-lean-da46ee8` (source `da46ee8`), and auth `milton-auth-00009-mrk` (source `e770c15`). The
+Now serving (2026-11-08): app `milton-app-save-b85f428` and MCP
+`milton-mcp-save-b85f428` (source `b85f428`), and auth `milton-auth-00009-mrk` (source `e770c15`). The
 release record above gives the image and rollback revisions.
 
 Roll back only affected services, preserve ingress/IAM, then repeat the canonical
@@ -554,8 +557,8 @@ and inside a private temporary directory outside the repository (`umask 077`).
    new versions, validate with `--dry-run`, replace MCP, then app, and record the
    revisions and versions.
 8. Verify as the new role: canonical health, MCP discovery and unauthenticated 401; an
-   authenticated `get_cover_sheet` returns 200 with an unchanged version (a read,
-   which also writes the daily call count); and a save. With Peter's go, a
+   authenticated `get_cover_sheet` returns 200 with an unchanged version (a read; it
+   also appends one `usage_calls` row); and a save. With Peter's go, a
    `create_memo` that resends one existing cover rule verbatim returns `unchanged`: it
    claims and stores a receipt as `milton_app` and changes no memo. A save that changes
    memos runs only when Peter directs one. Check the logs for `store_unavailable` or

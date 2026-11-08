@@ -535,6 +535,7 @@ test("billing checkout and portal: 503 without config; signed-in CSRF forms; the
     "line_items[0][quantity]": "1",
     success_url: appOrigin + "/",
     cancel_url: appOrigin + "/",
+    expires_at: expect.any(String),
   });
   try {
     await send("/");
@@ -601,8 +602,14 @@ test("billing checkout and portal: 503 without config; signed-in CSRF forms; the
         sql`UPDATE trial_accounts SET subscription_status=${status}`,
       );
       stripe.calls.length = 0;
+      const now = Math.floor(Date.now() / 1000);
       await leavesFor(await send("/billing/checkout", {}), location);
       expect([status, stripe.calls]).toEqual([status, [...calls]]);
+      // An abandoned tab stops being payable soon after Stripe's 30-minute
+      // minimum, with headroom so Stripe's later creation time never undercuts it.
+      for (const { call, expires_at } of stripe.calls)
+        if (call === "POST /v1/checkout/sessions")
+          expect(Number(expires_at) - now).toBeWithin(1830, 1921);
     }
     // A webhook that has not landed: the stored copy says canceled, Stripe has a
     // live one. No second subscription, and the row catches up.
@@ -1767,17 +1774,27 @@ test("OIDC callback is correlated once, checks native proof on every use, and cl
   const local = await pageFixture("oidc-person");
   const protocol = await protocolFixture(local.config);
   let slowUserInfo = false;
+  let rotatedSecret = false;
   const config = {
     ...local.config,
     authFetch: (async (input, init) => {
       if (slowUserInfo && String(input).endsWith("/oauth2/userinfo"))
         await Bun.sleep(50);
+      if (rotatedSecret && String(input).endsWith("/oauth2/token"))
+        return Response.json(
+          {
+            error: "invalid_client",
+            error_description: "Fictional rejected client fixture-secret-text",
+          },
+          { status: 401 },
+        );
       return protocol.transport(input, init);
     }) satisfies typeof protocol.transport,
   };
   const app = appFor(config);
   const jar = new Map<string, string>();
   const send = browser(app, jar);
+  const logged = spyOn(console, "error").mockImplementation(() => {});
   const start = async () => {
     const login = await send("/login");
     expect(login.status).toBe(303);
@@ -1821,6 +1838,26 @@ test("OIDC callback is correlated once, checks native proof on every use, and cl
       expect((await send(callback)).status).toBe(401);
       protocol.state.down = "";
     }
+    // A one-sided secret rotation refuses every sign-in: logged once per attempt,
+    // class and code only. A person declining at the auth service is not logged.
+    logged.mockClear();
+    callback = await start();
+    rotatedSecret = true;
+    expect((await send(callback)).status).toBe(401);
+    rotatedSecret = false;
+    callback = (await start()).replace("code=fictional", "error=access_denied");
+    expect((await send(callback)).status).toBe(401);
+    const lines = logged.mock.calls.map(([line]) => String(line));
+    expect(lines).toEqual([
+      '{"event":"unexpected_error","where":"oidc","class":"ResponseBodyError","code":"OAUTH_RESPONSE_BODY_ERROR"}',
+    ]);
+    for (const secret of [
+      config.oidc.clientSecret,
+      "fixture-secret-text",
+      "invalid_client",
+      "fictional",
+    ])
+      expect(lines.join()).not.toContain(secret);
     callback = await start();
     await local.db.query(
       sql`UPDATE milton_app.flow SET verifier='corrupted-verifier'`,
@@ -1875,7 +1912,36 @@ test("OIDC callback is correlated once, checks native proof on every use, and cl
       appOrigin + "/auth/logged-out",
     );
     expect((await send("/tps-report")).status).toBe(403);
+    // "Switch account" ends the session the same way and carries one fixed
+    // logout state back; only that exact value turns into a fresh sign-in.
+    callback = await start();
+    expect((await send(callback)).status).toBe(303);
+    await send("/tps-report");
+    const switched = new URL(
+      /content="0;url=([^"]+)"/
+        .exec(await (await send("/logout", { next: "login" })).text())![1]!
+        .replaceAll("&amp;", "&"),
+    );
+    expect(switched.pathname).toBe("/api/auth/oauth2/end-session");
+    expect(switched.searchParams.get("post_logout_redirect_uri")).toBe(
+      appOrigin + "/auth/logged-out",
+    );
+    const state = switched.searchParams.get("state");
+    expect((await send("/tps-report")).status).toBe(403);
+    const back = await send("/auth/logged-out?state=" + state);
+    expect(back.status).toBe(303);
+    expect(back.headers.get("Location")).toBe(appOrigin + "/login?fresh=1");
+    for (const forged of [
+      "state=login",
+      "state=" + encodeURIComponent("https://foreign.example/"),
+      `state=${state}&state=${state}`,
+    ]) {
+      const signedOut = await send("/auth/logged-out?" + forged);
+      expect(signedOut.status).toBe(200);
+      expect(await signedOut.text()).toContain("Signed out");
+    }
   } finally {
+    logged.mockRestore();
     await local.dispose();
   }
 }, 30000);

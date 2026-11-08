@@ -7,6 +7,7 @@ import {
   endSessionUrl,
   finishLogin,
   removeSession,
+  switchAccountState,
 } from "./auth-oidc";
 
 /** Native auth hosts login, consent, passwords and security management. The app
@@ -42,6 +43,11 @@ export const signInRoutes = async (ctx: PageContext): Promise<Response> => {
     // Local authority ended on the CSRF-protected POST. A delayed or foreign
     // GET callback must never sign out a newer app session.
     if (await session()) return Response.redirect(config.appOrigin + "/", 303);
+    // "Switch account": only the exact fixed logout state, never a URL, leads
+    // on to Milton's own sign-in, which always asks the auth service to show it.
+    const state = url.searchParams.getAll("state");
+    if (state.length === 1 && state[0] === switchAccountState)
+      return Response.redirect(config.appOrigin + "/login?fresh=1", 303);
     return page(
       "Signed out",
       <>
@@ -56,9 +62,10 @@ export const signInRoutes = async (ctx: PageContext): Promise<Response> => {
     );
   }
   if (url.pathname === "/logout") {
-    await readForm();
+    const switching = (await readForm()).get("next") === "login";
     // Local authority is removed before the outbound logout request. Fixed
-    // client/callback only: no ID token, secret or untrusted metadata in its URL.
+    // client/callback/state only: no ID token, secret or untrusted metadata in
+    // its URL.
     await removeSession(
       config,
       cookieValue(request, cookieName(config, "session")),
@@ -66,7 +73,7 @@ export const signInRoutes = async (ctx: PageContext): Promise<Response> => {
     writeCookie(cookieName(config, "session"), "", 0);
     writeCookie(ctx.csrfName, "", 0);
     writeCookie(cookieName(config, "login"), "", 0);
-    return navigation((await endSessionUrl(config)).href);
+    return navigation((await endSessionUrl(config, switching)).href);
   }
   if (url.pathname === "/account/security") {
     await ctx.signedIn();

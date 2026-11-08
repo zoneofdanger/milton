@@ -4,11 +4,12 @@ import type { StoreSession } from "./database";
 import { StoreError } from "./errors";
 
 const positiveLimit = z.number().int().positive();
+// Other keys are ignored: production's row still holds the retired
+// daily_calls until a later migration removes it.
 const limitsSchema = z.object({
   body_bytes: positiveLimit,
   description_bytes: positiveLimit,
   report_body_bytes: positiveLimit,
-  daily_calls: positiveLimit,
 });
 export type StoreLimits = z.infer<typeof limitsSchema>;
 

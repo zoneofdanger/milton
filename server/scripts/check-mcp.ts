@@ -15,7 +15,6 @@ export function stubStore(): TenantStore {
     saveMemo: async () => {
       throw new Error("The stub store saves nothing.");
     },
-    chargeToolCall: async () => ({ allowed: true }),
   };
 }
 

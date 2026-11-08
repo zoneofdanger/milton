@@ -317,7 +317,7 @@ export function createMiltonHandler(
       }
       // `auth` comes from this request's identity or key statement, which
       // requires an active account and reads the store limits, so building the
-      // store makes no query (invalid limits refuse here, before any charge);
+      // store makes no query (invalid limits refuse here, before any work);
       // initialize, tools/list and notifications make no store query at all.
       const store = tenantStore(config, auth, assistant);
       const announce = call.success && !announced.has(announcedAs);

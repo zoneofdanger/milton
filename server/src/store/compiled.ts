@@ -1,12 +1,13 @@
 import { sql } from "drizzle-orm";
 import { accountUnavailable } from "./accounts";
 import { assembleExport, type Documents, type ReportIntent } from "./reports";
-import type { StoreDatabase, StoreSession } from "./database";
+import type { StoreDatabase } from "./database";
 import { databaseFailure } from "./database";
 import { StoreError } from "./errors";
 import { assertTrialAccess, type TrialStatus } from "./trials";
 import { invalidKind, kindValid, readSnapshot } from "./snapshot";
 import { runSave, type SaveOutcome } from "./save";
+import type { CallUsage } from "./usage";
 // The save schema is served to assistants, so it lives with the MCP tools.
 import { oneKind, saveMemoInput, type SaveMemoInput } from "../mcp-tools";
 export type { SaveMemoInput } from "../mcp-tools";
@@ -25,19 +26,24 @@ export function compiledMemos(
   db: StoreDatabase,
   userId: string,
   actor?: { issuer: string; clientId: string },
-  /** Sees the trial status each assistant read's gate admitted. */
+  /** Sees the trial status each assistant read's or save's gate admitted. */
   gated?: (status: TrialStatus) => void,
-  /** Charges an admitted assistant call, on the given session, or refuses it;
-   * runs after every gate and before the work. */
-  admit?: (session: StoreSession) => Promise<void>,
+  /** Admits the assistant call `call` names, after every gate and before the
+   * work; it never waits on the database. */
+  admit?: (call?: CallUsage) => void,
 ) {
   /** A read assembles the documents from cards and samples. It takes no lock
-   * and writes only its charge: for an assistant the trial gate (whose
-   * statement first checks the account and the intent's kind, so they refuse
-   * before the gate, as on the snapshot), then the charge, then one statement for the snapshot. The size cap
-   * bounds saves; a read serves what is on file, except that an intent's
-   * report serves only the ranked samples that fit the cap. */
-  async function read(intent?: ReportIntent, includeGuides = false) {
+   * and writes only its usage row, on its own connection: for an assistant
+   * the trial gate (whose statement first checks the account and the intent's
+   * kind, so they refuse before the gate, as on the snapshot), then one
+   * statement for the snapshot. The size cap bounds saves; a read serves what
+   * is on file, except that an intent's report serves only the ranked samples
+   * that fit the cap. */
+  async function read(
+    intent?: ReportIntent,
+    includeGuides = false,
+    call?: CallUsage,
+  ) {
     try {
       if (actor) {
         // As the snapshot orders them: the account, then the kind.
@@ -57,7 +63,7 @@ export function compiledMemos(
         );
         gated?.(status);
       }
-      await admit?.(db);
+      admit?.(call);
       return await readSnapshot(db, userId, intent, includeGuides);
     } catch (error) {
       throw databaseFailure(error);
@@ -69,8 +75,9 @@ export function compiledMemos(
      * the same for every intent. */
     async readDocuments(
       intent?: ReportIntent,
+      call?: CallUsage,
     ): Promise<Documents & { version: string }> {
-      const current = await read(intent, true);
+      const current = await read(intent, true, call);
       return {
         ...(current.served ?? current.documents),
         reports: (current.served ?? current.documents).reports.map((r) => ({
@@ -92,7 +99,7 @@ export function compiledMemos(
       const current = await read();
       return assembleExport(current.active, current.samples);
     },
-    async saveMemo(raw: SaveMemoInput): Promise<SaveOutcome> {
+    async saveMemo(raw: SaveMemoInput, call?: CallUsage): Promise<SaveOutcome> {
       const parsed = saveMemoInput.safeParse(raw);
       if (!parsed.success)
         throw new StoreError(
@@ -110,7 +117,14 @@ export function compiledMemos(
           "Save memos through your connected assistant.",
           403,
         );
-      return runSave(db, userId, actor, parsed.data, admit);
+      return runSave(
+        db,
+        userId,
+        actor,
+        parsed.data,
+        () => admit?.(call),
+        gated,
+      );
     },
   };
 }

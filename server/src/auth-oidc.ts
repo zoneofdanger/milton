@@ -4,6 +4,7 @@ import { sql } from "drizzle-orm";
 import { z } from "zod";
 import type { RuntimeConfig } from "./config";
 import { isLoopback } from "./config";
+import { logUnexpected } from "./error-log";
 import { inOrder } from "./http";
 import { database } from "./store";
 import { AuthError } from "./token";
@@ -23,9 +24,17 @@ export const cookieName = (config: RuntimeConfig, name: string) =>
   name;
 
 /** Source-supported errors: ClientError's Response cause carries real HTTP 5xx.
- * A spent callback is never automatically retried after an uncertain exchange. */
+ * A spent callback is never automatically retried after an uncertain exchange.
+ * Each library failure is logged before mapping (class and code only): a wrong
+ * client secret or a moved endpoint would otherwise loop sign-in silently. A
+ * person declining at the auth service is their choice, so it is not logged. */
 export function protocolError(error: unknown): AuthError {
   if (error instanceof AuthError) return error;
+  if (!(
+    error instanceof oidc.AuthorizationResponseError &&
+    error.error === "access_denied"
+  ))
+    logUnexpected("oidc", error);
   if (
     (error instanceof oidc.ClientError &&
       error.cause instanceof Response &&
@@ -84,8 +93,11 @@ export async function oidcClient(config: RuntimeConfig) {
         Object.entries(endpoints).some(
           ([key, path]) => metadata[key] !== config.issuer + path,
         )
-      )
-        throw invalid();
+      ) {
+        const refused = invalid();
+        logUnexpected("oidc", refused);
+        throw refused;
+      }
       return client;
     })();
     clients.set(config, pending);
@@ -285,9 +297,13 @@ export async function removeSession(
     throw unavailable();
   }
 }
-export async function endSessionUrl(config: RuntimeConfig) {
+/** The one RP-initiated logout `state` Milton sends: native echoes it onto the
+ * exact registered return, where it means only "start a fresh sign-in". */
+export const switchAccountState = "switch-account";
+export async function endSessionUrl(config: RuntimeConfig, switching = false) {
   return oidc.buildEndSessionUrl(await oidcClient(config), {
     client_id: config.oidc.clientId,
     post_logout_redirect_uri: config.appOrigin + "/auth/logged-out",
+    ...(switching ? { state: switchAccountState } : {}),
   });
 }

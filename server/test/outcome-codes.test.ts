@@ -81,6 +81,27 @@ test("every MCP error code has its own next step from the closed set", async () 
   });
 });
 
+// Safety-critical steps, stated independently of the table.
+test("recovery steps that protect a save's identity or the person say so", () => {
+  const unknown = nextSteps.save_outcome_unknown!;
+  expect(unknown.action).toBe("retry");
+  expect(unknown.text).toContain("exactly the same arguments and request_id");
+  expect(unknown.text).not.toMatch(/new (request_id|request ID|UUID)/);
+  const paused = nextSteps.subscription_required!;
+  expect(paused.action).toBe("tell_user");
+  expect(paused.text).toContain("don't retry");
+  expect(paused.text).toContain("link once");
+  // An unknown code, or an error with no code at all, retries at most once
+  // with identical arguments and never changes a save's identity.
+  for (const body of [{ error: "never_seen" }, {}]) {
+    const { next } = withNext(body);
+    expect(next.action).toBe("retry");
+    expect(next.text).toContain("Retry once with exactly the same arguments");
+    expect(next.text).toContain("a save keeps its request_id");
+    expect(next.text).not.toMatch(/new request_id/);
+  }
+});
+
 // Every StoreError code in src is logged by name or mapped from a trigger, and
 // every installed trigger refusal is one or the other, so none surfaces as
 // store_unavailable. A code that is only mapped still logs as tool_error.

@@ -1144,6 +1144,11 @@ test("refused tool calls record no usage; each admitted call records one row", a
       "subscription_required",
       "tell_user",
     );
+    refused(
+      await call("list_reports", {}),
+      "subscription_required",
+      "tell_user",
+    );
     // Input is validated before the gate: an unknown kind stays invalid_kind.
     refused(
       await call("get_report", {

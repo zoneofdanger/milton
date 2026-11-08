@@ -32,6 +32,8 @@ export type RequestState = {
   clientId?: string;
   users: Map<string, Snapshot>;
   credentials: Map<string, Credential>;
+  /** This request's admitted and bound OAuth flows, by correlate's inputs. */
+  flows: Map<string, Promise<string>>;
   subject?: string;
   noCredentialObserved?: string;
   originalRefresh?: OriginalToken;

@@ -149,32 +149,59 @@ export function createProvider(
     )
       throw invalid();
     const continuation = hash(JSON.stringify(tuple));
-    await admit(context.user.id, context.session.id, continuation);
-    try {
-      const r = await pool.query<{ reference: string }>(
-        "SELECT * FROM milton_guard.bind_flow($1,$2,$3,$4,$5,$6,$7)",
-        [
-          continuation,
-          context.user.id,
-          context.session.id,
-          tuple[0],
-          tuple[4],
-          context.scopes,
-          create,
-        ],
-      );
-      if (!r.rows[0]) throw invalid();
-      return r.rows[0].reference;
-    } catch (e) {
-      if (
-        e &&
-        typeof e === "object" &&
-        "code" in e &&
-        ["23514", "P0002"].includes(String(e.code))
-      )
-        throw invalid();
-      throw e;
+    const state = transport.getStore();
+    if (!state) throw invalid();
+    const user = context.user.id,
+      sid = context.session.id;
+    const original = state.users.get(user);
+    // Native asks twice in one request: authorize calls shouldRedirect then
+    // consentReferenceId, and a consent accept calls consentReferenceId then
+    // authorize's, each with the same session, scopes and stored query. So a
+    // request admits and binds a flow once: a later call with every input
+    // the same shares the first call's outcome, a refusal included, and any
+    // differing input admits afresh. create is not an input: bind_flow checks
+    // a found binding the same either way. Nothing outlives the request.
+    const key = JSON.stringify([
+      user,
+      sid,
+      original?.miltonIdentityIncarnation,
+      original?.miltonSecurityGeneration,
+      continuation,
+      context.scopes,
+    ]);
+    let flow = state.flows.get(key);
+    if (!flow) {
+      flow = (async () => {
+        await admit(user, sid, continuation);
+        try {
+          const r = await pool.query<{ reference: string }>(
+            "SELECT * FROM milton_guard.bind_flow($1,$2,$3,$4,$5,$6,$7)",
+            [
+              continuation,
+              user,
+              sid,
+              tuple[0],
+              tuple[4],
+              context.scopes,
+              create,
+            ],
+          );
+          if (!r.rows[0]) throw invalid();
+          return r.rows[0].reference;
+        } catch (e) {
+          if (
+            e &&
+            typeof e === "object" &&
+            "code" in e &&
+            ["23514", "P0002"].includes(String(e.code))
+          )
+            throw invalid();
+          throw e;
+        }
+      })();
+      state.flows.set(key, flow);
     }
+    return flow;
   }
   async function claims(input: {
     referenceId?: string;
@@ -205,6 +232,11 @@ export function createProvider(
     verifiedEmail: string;
     verifiedIdentities: { provider: "google" | "github"; subject: string }[];
   };
+  // The app's admission can make three Stripe calls, 15 s at worst
+  // (ensureSubscription in server/src/billing.tsx), so the wait is as long as
+  // a request allows: 12 s still answers inside the auth service's 15 s Cloud
+  // Run request timeout (server/deploy/auth.service.template.json).
+  const ADMIT_TIMEOUT_MS = 12000;
   async function admit(subject: string, sid: string, continuation: string) {
     const original = transport.getStore()?.users.get(subject);
     if (!original) throw invalid();
@@ -222,7 +254,7 @@ export function createProvider(
     const response = await networkFetch(APP_ORIGIN + "/internal/auth/admit", {
       method: "POST",
       redirect: "error",
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(ADMIT_TIMEOUT_MS),
       headers: {
         authorization: `Bearer ${config.AUTH_ADMISSION_SECRET}`,
         "content-type": "application/json",
@@ -817,6 +849,7 @@ export function createProvider(
           typeof body.client_id === "string" ? body.client_id : undefined,
         users: new Map(),
         credentials: new Map(),
+        flows: new Map(),
       };
       const response = await transport.run(requestState, async () => {
         const response = await provider.handler(native);

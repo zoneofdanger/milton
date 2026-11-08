@@ -540,8 +540,7 @@ export async function applyStripeEvent(
   return db.transaction(async (tx) => {
     const row = await lockStripeCustomer(tx, customer);
     if (!row) return recordStripeEvent(tx, event);
-    if (await stripeEventRecorded(tx, event.id))
-      return { recorded: false, updated: 0 };
+    if (await stripeEventRecorded(tx, event.id)) return { recorded: false };
     const state = await read(customer, row.subscription);
     return recordStripeEvent(
       tx,

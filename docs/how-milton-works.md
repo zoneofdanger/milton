@@ -489,7 +489,7 @@ Files: `packages/theme/`, `server/scripts/`, `scripts/check-migrations.ts`,
 - `build.ts` builds the CSS with Vite, versions the public assets by content hash, and bundles the Cloud Run, guide worker and end-to-end check (`e2e.js`, the `milton-e2e-daily` job) entries with Bun, minified except identifiers, with source maps the image leaves out.
 - `dev.ts` serves the app on loopback and rebuilds the CSS on change.
 - CI runs the migration guards, types, tests, formatting, and both integration suites on PostgreSQL 18, holds no secrets, and does not deploy.
-- `check-migrations` compares with main: a new migration is numbered above main's highest in its track with its own number, Drizzle journal entries run in order with strictly increasing `when`, every migration file and snapshot matches its hash in `scripts/released-migrations.sha256` (main's never change), and a new drop or rename names its merged code-stopped-by PR. Without origin/main it checks only the lock and journal; in CI that fails.
+- `check-migrations` compares with main: a new migration is numbered above main's highest in its track with its own number, Drizzle journal entries run in order with strictly increasing `when`, every migration file and snapshot matches its hash in `scripts/released-migrations.sha256` (main's never change), and a new drop, truncate or rename names its merged code-stopped-by PR (comments and strings skipped; a `DO` block or `EXECUTE` needs that or a `no-drop-or-rename` reason). Without origin/main it checks only the lock and journal; in CI that fails.
 
 ## Optional report guides
 

@@ -45,14 +45,81 @@ export const TRACKS = [
     form: "NNN-name.up.sql",
   },
 ];
-// Statements that remove or rename something running code may still read. Comments
-// are stripped first; DROP CONSTRAINT/DEFAULT/NOT NULL and the like stay allowed.
+// Statements that remove or rename something running code may still read, matched
+// per statement after sqlCode; DROP CONSTRAINT/DEFAULT/NOT NULL and the like pass.
 const DESTRUCTIVE = [
-  /\bDROP\s+(?:TABLE|SCHEMA|COLUMN)\b/i,
-  /\bALTER\s+TABLE\b[^;]*?\bDROP\s+(?!CONSTRAINT\b|DEFAULT\b|NOT\b|EXPRESSION\b|IDENTITY\b)[A-Za-z_"]/i,
+  /^DROP\s+(?:TABLE|SCHEMA)\b/i,
+  /^TRUNCATE\b/i,
+  /\bDROP\s+COLUMN\b/i,
+  /^ALTER\s+TABLE\b.*?\bDROP\s+(?!CONSTRAINT\b|DEFAULT\b|NOT\b|EXPRESSION\b|IDENTITY\b)[A-Za-z_"]/i,
+  /^ALTER\s+TYPE\b.*\bDROP\s+(?:ATTRIBUTE|VALUE)\b/i,
   /\bRENAME\b/i,
 ];
+// Dynamic SQL this check cannot read: a DO block, or EXECUTE other than a
+// trigger's EXECUTE FUNCTION or the EXECUTE privilege.
+const DYNAMIC = [/^DO\b/i, /\bEXECUTE\b(?!\s+(?:FUNCTION|PROCEDURE|ON)\b)/i];
 const STOPPED_BY = /^--\s*code-stopped-by:\s*(#\d+(?:\s*,\s*#\d+)*)\s*$/m;
+const NO_DROP = /^--\s*no-drop-or-rename:\s*\S/m;
+const DOLLAR = /^\$(?:[A-Za-z_]\w*)?\$/;
+
+/** The statements of `text` with every comment as a space, every string literal
+ * (quoted, E'', dollar-quoted) as '' and every quoted identifier as "q", so only
+ * real SQL is matched; and its line comments, where the headers live. */
+export function sqlCode(text: string) {
+  let code = "",
+    comments = "",
+    i = 0;
+  const skipTo = (close: string, from: number) => {
+    const end = text.indexOf(close, from);
+    return end < 0 ? text.length : end + close.length;
+  };
+  while (i < text.length) {
+    const c = text[i]!;
+    const word = /\w/.test(text[i - 1] ?? "");
+    if (text.startsWith("--", i)) {
+      const end = skipTo("\n", i);
+      comments += text.slice(i, end).trimEnd() + "\n";
+      code += " ";
+      i = end;
+    } else if (text.startsWith("/*", i)) {
+      // Block comments nest in PostgreSQL.
+      let depth = 0;
+      do {
+        if (text.startsWith("/*", i)) (depth++, (i += 2));
+        else if (text.startsWith("*/", i)) (depth--, (i += 2));
+        else i++;
+      } while (depth > 0 && i < text.length);
+      code += " ";
+    } else if (c === "'") {
+      const escapes =
+        /[eE]/.test(text[i - 1] ?? "") && !/\w/.test(text[i - 2] ?? "");
+      for (i++; i < text.length; i++)
+        if (escapes && text[i] === "\\") i++;
+        else if (text[i] === "'" && text[i + 1] === "'") i++;
+        else if (text[i] === "'") break;
+      i++;
+      code += "''";
+    } else if (c === '"') {
+      for (i++; i < text.length; i++)
+        if (text[i] === '"' && text[i + 1] === '"') i++;
+        else if (text[i] === '"') break;
+      i++;
+      code += '"q"';
+    } else if (c === "$" && !word && DOLLAR.test(text.slice(i))) {
+      const tag = DOLLAR.exec(text.slice(i))![0];
+      i = skipTo(tag, i + tag.length);
+      code += "''";
+    } else {
+      code += c;
+      i++;
+    }
+  }
+  const statements = code
+    .split(";")
+    .map((s) => s.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  return { statements, comments };
+}
 
 /** path → file text, for every file under the three track directories. */
 export type Files = Map<string, string>;
@@ -250,15 +317,24 @@ export function checkMigrations({
     );
   for (const [path, text] of files) {
     if (!trackOf(path) || !path.endsWith(".sql") || !isNew(path)) continue;
-    const sql = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/--.*$/gm, "");
-    const found = DESTRUCTIVE.map((re) => re.exec(sql)?.[0]).find(Boolean);
-    if (!found) continue;
-    const prs = STOPPED_BY.exec(text)?.[1]?.split(/\s*,\s*/);
-    if (!prs)
+    const { statements, comments } = sqlCode(text);
+    const first = (patterns: RegExp[]) =>
+      statements
+        .flatMap((s) => patterns.map((re) => re.exec(s)?.[0]))
+        .find(Boolean);
+    const found = first(DESTRUCTIVE);
+    const dynamic = first(DYNAMIC);
+    if (!found && !dynamic) continue;
+    const prs = STOPPED_BY.exec(comments)?.[1]?.split(/\s*,\s*/);
+    if (!prs && found)
       fail(
-        `${path} drops or renames a table or column ("${found.replace(/\s+/g, " ").slice(0, 60)}"); add a line "-- code-stopped-by: #NN" naming the merged PR that stopped all code using it, and release that code first`,
+        `${path} drops or renames a table or column ("${found.slice(0, 60)}"); add a line "-- code-stopped-by: #NN" naming the merged PR that stopped all code using it, and release that code first`,
       );
-    else if (base)
+    else if (!prs && !NO_DROP.test(comments))
+      fail(
+        `${path} runs dynamic SQL ("${dynamic}"), which this check cannot read; add "-- code-stopped-by: #NN" if it drops or renames a table or column, or "-- no-drop-or-rename: <reason>" if it does not`,
+      );
+    else if (prs && base)
       for (const pr of prs.filter((pr) => !merged(pr)))
         fail(
           `${path} names ${pr} in code-stopped-by, but no commit on main merges ${pr}; merge and release that PR before this migration`,

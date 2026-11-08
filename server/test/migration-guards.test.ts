@@ -183,6 +183,34 @@ test("a migration that drops or renames needs a merged code-stopped-by PR", () =
       "ALTER TABLE t ALTER COLUMN id DROP NOT NULL; ALTER TABLE t DROP CONSTRAINT c;",
     ),
   ).toEqual([]);
+  // Comments and strings neither hide a statement nor fake one.
+  for (const statement of [
+    "DROP/**/TABLE t;",
+    "SELECT '--'; DROP TABLE t;",
+    "SELECT E'\\'--'; DROP TABLE t;",
+    "TRUNCATE t;",
+    "ALTER TYPE pair DROP ATTRIBUTE label;",
+  ])
+    expect(drop("", statement)).toHaveLength(1);
+  expect(
+    drop(
+      "",
+      `SELECT 'DROP TABLE t', $x$ DROP TABLE t $x$, "drop table"; CREATE TRIGGER g BEFORE INSERT ON t FOR EACH ROW EXECUTE FUNCTION f(); GRANT EXECUTE ON FUNCTION f() TO r;`,
+    ),
+  ).toEqual([]);
+  expect(
+    drop("", "SELECT $$ -- code-stopped-by: #40\n$$; DROP TABLE t;"),
+  ).toHaveLength(1);
+  // Dynamic SQL is unreadable here, so it fails closed until a line says what it does.
+  const dynamic = "DO $$ BEGIN EXECUTE 'DR' || 'OP TABLE t'; END $$;";
+  expect(drop("", dynamic)).toEqual([
+    'server/migrations/002-drop.sql runs dynamic SQL ("DO"), which this check cannot read; add "-- code-stopped-by: #NN" if it drops or renames a table or column, or "-- no-drop-or-rename: <reason>" if it does not',
+  ]);
+  expect(drop("-- no-drop-or-rename: grants only", dynamic)).toEqual([]);
+  expect(drop("-- code-stopped-by: #40", dynamic)).toEqual([]);
+  expect(
+    drop("-- no-drop-or-rename: says so, but drops", "DROP TABLE t;"),
+  ).toHaveLength(1);
   expect(drop("-- code-stopped-by: #41")).toEqual([
     "server/migrations/002-drop.sql names #41 in code-stopped-by, but no commit on main merges #41; merge and release that PR before this migration",
   ]);

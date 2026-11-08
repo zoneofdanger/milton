@@ -14,6 +14,7 @@ import {
   USAGE_PRUNE_LOCK_TIMEOUT,
   USAGE_PRUNE_STATEMENT_TIMEOUT,
 } from "../../apps/auth/scripts/prune-usage";
+import { AUTH_MIGRATIONS } from "../../apps/auth/scripts/migrations";
 import { cp, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -858,4 +859,99 @@ test("no request path deletes usage rows: only the maintenance job's prune does"
       new URL("../../apps/auth/scripts/maintain.ts", import.meta.url),
     ).text(),
   ).toContain("pruneUsage(");
+});
+
+test("native 008 links each authorized registration from what survives, by identity incarnation, and applies deletion's rule to deleted identities' registrations", async () => {
+  const native = (name: string) =>
+    Bun.file(
+      new URL(`../../apps/auth/migrations/${name}`, import.meta.url),
+    ).text();
+  const pg = new PGlite();
+  try {
+    await migrate(drizzle(pg), {
+      migrationsFolder: new URL("../drizzle/", import.meta.url).pathname,
+    });
+    await pg.query("SELECT set_config('milton.retained_logins','[]',false)");
+    await pg.exec(await native("000-owner-prerequisites.sql"));
+    for (const name of AUTH_MIGRATIONS.filter((n) => n < "008"))
+      await pg.exec(await native(`${name}.up.sql`));
+    // Rows 001-007 left behind, written directly (the gates are bypassed): two
+    // live accounts; one deleted before 008, whose consents and tokens went
+    // with it; and an earlier identity under u1's ID (incarnation "old"),
+    // deleted before u1 was made. Each client's name says what 008 should do.
+    await pg.exec(`SET session_replication_role=replica;
+      INSERT INTO milton_auth."user"(id,name,email,"emailVerified","createdAt","updatedAt","miltonIdentityIncarnation") VALUES
+        ('u1','A','a@example.invalid',true,now(),now(),'i1'),('u2','B','b@example.invalid',true,now(),now(),'i2');
+      INSERT INTO milton_auth."oauthClient"(id,"clientId","redirectUris",name,contacts) VALUES
+        ('c1','consented','[]','keep','["c@example.invalid"]'),('c2','bound','[]','keep',NULL),
+        ('c3','disconnected','[]','keep',NULL),('c4','app','[]','keep',NULL),('c5','pending','[]','keep',NULL),
+        ('c6','gone-bound','[]','delete',NULL),('c7','gone-disconnected','[]','delete',NULL),
+        ('c8','gone-shared','[]','clear','["s@example.invalid"]'),('c9','earlier-identity','[]','delete',NULL);
+      INSERT INTO milton_guard.first_party_policy VALUES('app');
+      INSERT INTO milton_auth."oauthConsent"(id,"clientId","userId",scopes,"createdAt","updatedAt") VALUES('k1','consented','u1','[]',now(),now());
+      INSERT INTO milton_guard.authorization_binding(reference,flow_key,origin_user,origin_session,"miltonIdentityIncarnation","miltonSecurityGeneration",client_id,resources,requested_scopes,final_scopes,state) VALUES
+        ('r1','f1','u2','s','i2','g','bound','{}','{}','{milton:read}','revoked'),
+        ('r2','f2','u1','s','i1','g','app','{}','{}','{openid}','active'),
+        ('r3','f3','u1','s','i1','g','pending','{}','{}',NULL,'pending'),
+        ('r4','f4','gone','s','i','g','gone-bound','{}','{}','{milton:read}','revoked'),
+        ('r5','f5','gone','s','i','g','pending','{}','{}',NULL,'revoked'),
+        ('r6','f6','u1','s','old','g','pending','{}','{}',NULL,'revoked');
+      INSERT INTO milton_guard.security_operation(operation_id,origin_user,incarnation,client_id,kind,targets,progress) VALUES
+        ('o1','u1','i1','disconnected','disconnect','{}','complete'),
+        ('o2','gone','i','gone-disconnected','disconnect','{}','complete'),
+        ('o3','gone','i','gone-shared','disconnect','{}','complete'),
+        ('o4','u2','i2','gone-shared','disconnect','{}','complete'),
+        ('o5','gone','i',NULL,'delete','{r5}','tokens-cleaned'),
+        ('o6','u1','old','earlier-identity','disconnect','{}','complete');
+      SET session_replication_role=origin;`);
+    await pg.exec(await native("008-deletion-links.up.sql"));
+    // Even a disconnected registration whose binding and consent are gone is
+    // linked; Milton's app, an unconsented flow and an earlier identity's
+    // registration are not.
+    expect(
+      (
+        await pg.query(
+          "SELECT origin_user,client_id FROM milton_guard.client_link ORDER BY 1,2",
+        )
+      ).rows,
+    ).toEqual([
+      { origin_user: "u1", client_id: "consented" },
+      { origin_user: "u1", client_id: "disconnected" },
+      { origin_user: "u2", client_id: "bound" },
+      { origin_user: "u2", client_id: "gone-shared" },
+    ]);
+    // A refresh cannot restore what was cleared.
+    await pg.exec(
+      `UPDATE milton_auth."oauthClient" SET name='restored',contacts='["r@example.invalid"]' WHERE "clientId"='gone-shared'`,
+    );
+    expect(
+      (
+        await pg.query(
+          `SELECT "clientId",name,contacts FROM milton_auth."oauthClient" ORDER BY 1`,
+        )
+      ).rows,
+    ).toEqual([
+      { clientId: "app", name: "keep", contacts: null },
+      { clientId: "bound", name: "keep", contacts: null },
+      { clientId: "consented", name: "keep", contacts: ["c@example.invalid"] },
+      { clientId: "disconnected", name: "keep", contacts: null },
+      { clientId: "gone-shared", name: null, contacts: null },
+      { clientId: "pending", name: "keep", contacts: null },
+    ]);
+    // The deleted account's bindings go, except one an unfinished operation names.
+    expect(
+      (
+        await pg.query(
+          "SELECT reference FROM milton_guard.authorization_binding ORDER BY 1",
+        )
+      ).rows,
+    ).toEqual([
+      { reference: "r1" },
+      { reference: "r2" },
+      { reference: "r3" },
+      { reference: "r5" },
+    ]);
+  } finally {
+    await pg.close();
+  }
 });

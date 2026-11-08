@@ -343,6 +343,66 @@ A failed migration's rollback is the pre-migration snapshot, used only before an
 reads the column serves; there is no down script. Every recorded app/MCP revision runs on
 either schema, so rolling code back never needs it.
 
+## Deletion removes sign-in grants and assistant registrations (not yet applied: native 008)
+
+Native 008 adds `milton_guard.client_link` (account, registration), written by
+`consent_gate` whenever an account consents to an assistant registration, and
+`milton_guard.cleared_client` (SHA-256 of each cleared or deleted registration's client
+ID, no foreign key) with the `keep_cleared` insert-and-update trigger, and replaces
+`consent_gate` and `cleanup_operation`: a deletion's cleanup now also takes the account's
+links (deleting a registration no other account links, otherwise clearing its `name` and
+`contacts`, and marking it either way) and, in the same step as the native user, its
+sign-in grant bindings. It backfills links from existing consents, consented bindings and
+native's disconnect records (`milton_guard.security_operation`), each matched to the
+user's recorded identity incarnation, applies the rule to registrations named by a
+consented binding or disconnect record of a deleted identity, and then deletes bindings
+of deleted identities that nothing references. App and MCP code do not change. The same
+release's auth image adds the UserInfo binding check (live `binding_status` before native
+answers); it uses only 003's functions, so the image and 008 can go in either order, and
+any recorded revision runs on either schema.
+
+Its first statement locks `milton_auth."user"`, `"oauthClient"`, `"oauthClientResource"`,
+`"oauthConsent"`, `"oauthAccessToken"`, `"oauthRefreshToken"` and
+`milton_guard.authorization_binding` in EXCLUSIVE mode with NOWAIT. If any sign-in,
+consent, token, registration, disconnect or deletion is writing them, 008 fails at once
+with `55P03` (lock not available), applies nothing and records no ledger row: run step 2
+again. Once it holds them, no service transaction or cleanup can hold or take a lock it
+needs, so none can deadlock with it. It can still wait on another owner session (one
+holding the migration ledger, or running owner DDL): open no other owner session while
+it runs (the migrator's advisory lock already keeps a second migrator out). Until it commits, reads
+continue (MCP, app sessions, pages) and every write to those tables waits: sign-in,
+consent, token issue and refresh, registration, disconnect and deletion. The rehearsal
+took 25 ms on empty tables; production time scales with the clients, consents and
+bindings it scans, and is unmeasured. Rehearse on a disposable branch or database first
+(both integration suites apply it), then:
+
+1. Snapshot.
+2. As `milton_auth_delegate` assuming `milton_auth_owner`:
+   `node --experimental-strip-types apps/auth/scripts/migrate.ts up --apply` applies
+   `008-deletion-links` (native ledger 001–008). On `55P03`, rerun.
+3. Check as the owner that no binding the sweep should have removed remains (the same
+   exclusions as 008's sweep: an unfinished operation, or a token, consent or code
+   still referencing it, keeps a binding on purpose); this returns 0:
+
+   ```sql
+   SELECT count(*) FROM milton_guard.authorization_binding b
+    WHERE NOT EXISTS(SELECT 1 FROM milton_auth."user" u WHERE u.id=b.origin_user AND u."miltonIdentityIncarnation"=b."miltonIdentityIncarnation")
+    AND NOT EXISTS(SELECT 1 FROM milton_auth."oauthAccessToken" a WHERE a."referenceId"=b.reference)
+    AND NOT EXISTS(SELECT 1 FROM milton_auth."oauthRefreshToken" r WHERE r."referenceId"=b.reference)
+    AND NOT EXISTS(SELECT 1 FROM milton_auth."oauthConsent" c WHERE c."referenceId"=b.reference)
+    AND NOT EXISTS(SELECT 1 FROM milton_auth.verification v WHERE v.id=b.code_record)
+    AND NOT EXISTS(SELECT 1 FROM milton_guard.security_operation o WHERE o.progress<>'complete' AND b.reference=ANY(o.targets));
+   ```
+
+   and `check-runtime-role.ts` prints `ok` for app and MCP.
+
+Untraceable and kept as they are: a registration whose only authorizations before 008,
+by a live or a deleted account, left no consent, binding or disconnect record by the time
+008 runs (the assistant revoked its own grant, or the grant expired unused, and
+maintenance pruned both). `public.assistant_disconnects` cannot help: nothing has written
+it since native auth (commit `bcb59e7`), so it names no native registration. Rollback is
+the pre-migration snapshot; there is no down script.
+
 ## Stop storing the app's native access token (applied 2026-11-08: owner file 012, PR #62)
 
 Until this change the app wrote the native access token it receives at sign-in into

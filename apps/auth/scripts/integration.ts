@@ -2145,21 +2145,56 @@ try {
         [targetId],
       )
     ).rows[0].i;
+    // Seventeen sessions and a grant binding, so bounded cleanup takes more
+    // than one call: no call may leave the user without its binding.
+    const fixture = await p.owner.connect();
+    try {
+      await fixture.query("begin");
+      await fixture.query("select set_config('credential.locked',$1,true)", [
+        targetId,
+      ]);
+      await fixture.query(
+        `insert into milton_auth.session(id,"expiresAt",token,"createdAt","updatedAt","userId","miltonIdentityIncarnation","miltonSecurityGeneration") select 'fictional-cleanup-'||g,now()+interval '1 day','fictional-cleanup-'||g,now(),now(),u.id,u."miltonIdentityIncarnation",u."miltonSecurityGeneration" from milton_auth."user" u,generate_series(1,17) g where u.id=$1`,
+        [targetId],
+      );
+      await fixture.query(
+        `insert into milton_guard.authorization_binding(flow_key,origin_user,origin_session,"miltonIdentityIncarnation","miltonSecurityGeneration",client_id,resources,requested_scopes,state) select 'fictional-cleanup-flow',id,'fictional-cleanup-1',"miltonIdentityIncarnation","miltonSecurityGeneration",'fictional-cleanup-client','{}','{}','active' from milton_auth."user" where id=$1`,
+        [targetId],
+      );
+      await fixture.query("commit");
+    } finally {
+      fixture.release();
+    }
     const operation = randomUUID();
     await appPool.query(
       "select milton_guard.begin_operation($1,$2,$3,null,'delete')",
       [operation, targetId, inc],
     );
-    for (let n = 0; n < 8; n++)
-      if (
+    const left = async () =>
+      (
+        await p.owner.query(
+          `select exists(select 1 from milton_auth."user" where id=$1) as "user",(select count(*)::int from milton_guard.authorization_binding where origin_user=$1) as bindings`,
+          [targetId],
+        )
+      ).rows[0] as { user: boolean; bindings: number };
+    let calls = 0;
+    for (let n = 0; n < 8; n++) {
+      calls++;
+      const done =
         (
           await appPool.query(
             "select milton_guard.cleanup_operation($1,16) as p",
             [operation],
           )
-        ).rows[0].p === "complete"
-      )
-        break;
+        ).rows[0].p === "complete";
+      const state = await left();
+      assert(
+        state.user ? state.bindings >= 1 : state.bindings === 0,
+        "bindings go only with the user",
+      );
+      if (done) break;
+    }
+    assert(calls > 1, "the cleanup ran in parts");
     assert.equal(
       (
         await authPool.query(
@@ -2988,6 +3023,7 @@ try {
       "select * from milton_auth.verification",
       "select * from neon_auth.retained",
       "select * from milton_guard.authorization_binding",
+      "select * from milton_guard.client_link",
       "select nextval('milton_credential.fence_ids')",
       "set role milton_auth_owner",
       "create temp table credential_bypass(id int)",

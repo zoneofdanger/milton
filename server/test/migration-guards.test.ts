@@ -251,6 +251,18 @@ test("a migration that drops or renames needs a merged code-stopped-by PR", () =
     "DO $$ BEGIN ALTER TABLE t DROP COLUMN id; END $$;",
   ])
     expect(drop("", statement)).toHaveLength(1);
+  // Dynamic SQL in a function or procedure body fails closed, as DO does.
+  const run = (create: string) =>
+    `${create} LANGUAGE plpgsql AS $$ BEGIN EXECUTE 'DR' || 'OP TABLE t'; END $$;`;
+  expect(
+    drop("", `${run("CREATE FUNCTION f() RETURNS void")} SELECT f();`),
+  ).toEqual([
+    'server/migrations/002-drop.sql has a function or procedure body that runs dynamic SQL ("EXECUTE"), which this check cannot read; add "-- code-stopped-by: #NN" if it drops, truncates or renames something code may use, or "-- no-drop-or-rename: <reason>" if it does not',
+  ]);
+  expect(drop("", `${run("CREATE PROCEDURE p()")} CALL p();`)).toHaveLength(1);
+  expect(
+    drop("-- no-drop-or-rename: grants only", run("CREATE PROCEDURE p()")),
+  ).toEqual([]);
   expect(drop("-- no-drop-or-rename: an owner-only repair", body)).toEqual([]);
   expect(drop("-- code-stopped-by: #40", body)).toEqual([]);
   expect(

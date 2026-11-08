@@ -66,7 +66,8 @@ const DESTRUCTIVE = [
 ];
 // Dynamic SQL this check cannot read: a DO block, or EXECUTE other than a
 // trigger's EXECUTE FUNCTION or the EXECUTE privilege.
-const DYNAMIC = [/^DO\b/i, /\bEXECUTE\b(?!\s+(?:FUNCTION|PROCEDURE|ON)\b)/i];
+const EXECUTES = /\bEXECUTE\b(?!\s+(?:FUNCTION|PROCEDURE|ON)\b)/i;
+const DYNAMIC = [/^DO\b/i, EXECUTES];
 const STOPPED_BY = /^--\s*code-stopped-by:\s*(#\d+(?:\s*,\s*#\d+)*)\s*$/m;
 const NO_DROP = /^--\s*no-drop-or-rename:\s*\S/m;
 const DOLLAR = /^\$(?:[A-Za-z_]\w*)?\$/;
@@ -153,9 +154,11 @@ const IN_BODY = DESTRUCTIVE.map(
   (re) => new RegExp(re.source.replace(/^\^/, "\\b"), "i"),
 );
 
-/** The first drop, truncate or rename inside those bodies, read the same way. */
+/** The first match of `patterns` inside those bodies, read the same way:
+ * a drop, truncate or rename, or (with DYNAMIC) an executable EXECUTE. */
 export function bodyFinding(
   statements: { code: string; bodies: string[] }[],
+  patterns: RegExp[] = IN_BODY,
 ): string | undefined {
   for (const { code, bodies } of statements)
     if (BODIES.test(code))
@@ -163,8 +166,8 @@ export function bodyFinding(
         const inner = sqlCode(body).statements;
         const found =
           inner
-            .flatMap((s) => IN_BODY.map((re) => re.exec(s.code)?.[0]))
-            .find(Boolean) ?? bodyFinding(inner);
+            .flatMap((s) => patterns.map((re) => re.exec(s.code)?.[0]))
+            .find(Boolean) ?? bodyFinding(inner, patterns);
         if (found) return found;
       }
   return undefined;
@@ -374,7 +377,8 @@ export function checkMigrations({
     const found = first(DESTRUCTIVE);
     const inBody = bodyFinding(statements);
     const dynamic = first(DYNAMIC);
-    if (!found && !inBody && !dynamic) continue;
+    const bodyDynamic = bodyFinding(statements, [EXECUTES]);
+    if (!found && !inBody && !dynamic && !bodyDynamic) continue;
     const prs = STOPPED_BY.exec(comments)?.[1]?.split(/\s*,\s*/);
     if (!prs && found)
       fail(
@@ -386,7 +390,7 @@ export function checkMigrations({
       );
     else if (!prs && !NO_DROP.test(comments))
       fail(
-        `${path} runs dynamic SQL ("${dynamic}"), which this check cannot read; add "-- code-stopped-by: #NN" if it drops, truncates or renames something code may use, or "-- no-drop-or-rename: <reason>" if it does not`,
+        `${path} ${dynamic ? "runs" : "has a function or procedure body that runs"} dynamic SQL ("${dynamic ?? bodyDynamic}"), which this check cannot read; add "-- code-stopped-by: #NN" if it drops, truncates or renames something code may use, or "-- no-drop-or-rename: <reason>" if it does not`,
       );
     else if (prs && base)
       for (const pr of prs.filter((pr) => !merged(pr)))

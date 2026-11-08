@@ -154,9 +154,10 @@ the lock and journal and says so):
   naming the merged PR that stopped all code using it, and ships only after that code
   is released. Index, sequence, trigger and constraint drops and renames do not need
   it. Comments and string literals are skipped. Dynamic SQL (a `DO` block or
-  `EXECUTE`) cannot be read, so it needs that line or `-- no-drop-or-rename: <reason>`,
-  as does a function, procedure, `DO` or `EXECUTE` body that itself drops, truncates or
-  renames one of those; a plain function body passes.
+  `EXECUTE`, also inside a function or procedure body) cannot be read, so it needs that
+  line or `-- no-drop-or-rename: <reason>`, as does a function, procedure, `DO` or
+  `EXECUTE` body that itself drops, truncates or renames one of those; a plain function
+  body, a trigger's `EXECUTE FUNCTION` and `GRANT EXECUTE` pass.
 
 `test/deletion-inventory.test.ts` applies all three tracks to an empty PGlite and fails
 on any text, character, JSON, bytea, tsvector, XML or enum column (or array, domain or

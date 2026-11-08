@@ -8,11 +8,10 @@ import {
   resolveIdentityAccount,
   lookupIdentityAccount,
   personStoreForCurrentRequest,
-  storeForCurrentRequest,
   StoreError,
 } from "../src/store";
 import { localAsset } from "../src/assets";
-import { seedRule, seedSample } from "./store-fixtures";
+import { seedRule, seedSample, storeForCurrentRequest } from "./store-fixtures";
 import { localStore } from "./local-store";
 
 import {

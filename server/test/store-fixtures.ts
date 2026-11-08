@@ -5,6 +5,15 @@ import type { ReportId } from "../src/store/reports";
 import { compiledMemos } from "../src/store/compiled";
 import type { StoreDatabase, StoreSession } from "../src/store/database";
 import { cardHeadsJson, type CardHead } from "../src/store/cards";
+import { requireActiveAccount } from "../src/store/accounts";
+import { readLimits } from "../src/store/limits";
+import {
+  database,
+  tenantStore,
+  type StoreBindings,
+  type TenantStore,
+  type VerifiedStoreAuth,
+} from "../src/store";
 
 // Every card's head version, in position order.
 export async function cardHeads(tx: StoreSession, userId: string) {
@@ -127,4 +136,17 @@ export async function seedSample(
       SELECT user_id,sample_id,2,report,kind_id,context,body,true,'removed','{}',$3 FROM sample_versions WHERE user_id=$1 AND sample_id=$2`,
       [userId, id, crypto.randomUUID()],
     );
+}
+
+// An account's store, refused once the account is not active: the limits and
+// account checks a request makes before building it with tenantStore.
+export async function storeForCurrentRequest(
+  bindings: StoreBindings & { appOrigin: string },
+  auth: VerifiedStoreAuth,
+  assistant?: { issuer: string; clientId: string },
+): Promise<TenantStore> {
+  const db = database(bindings);
+  const limits = await readLimits(db);
+  await requireActiveAccount(db, auth.userId, { lock: false });
+  return tenantStore(bindings, { ...auth, limits }, assistant);
 }

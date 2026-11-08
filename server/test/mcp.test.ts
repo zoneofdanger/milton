@@ -1368,8 +1368,8 @@ test("tool dispatch logs bounded final outcomes, invalid arguments, and unknown 
 });
 
 test("final outcomes include early refusal/read failure and a logging failure cannot reverse a save", async () => {
-  const { StoreError, lookupIdentityAccount, storeForCurrentRequest } =
-    await import("../src/store");
+  const { StoreError, lookupIdentityAccount } = await import("../src/store");
+  const { storeForCurrentRequest } = await import("./store-fixtures");
   const local = await localStore(),
     events: import("../src/mcp").ToolCall[] = [];
   let server: ReturnType<typeof createMiltonServer> | undefined,

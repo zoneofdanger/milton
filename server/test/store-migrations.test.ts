@@ -483,15 +483,20 @@ test("0005 drops the unread deleted_identities table and its rollback recreates 
   const folder = new URL("../drizzle/", import.meta.url).pathname;
   const scratch = await mkdtemp(join(tmpdir(), "milton-0005-"));
   const pg = new PGlite();
-  const current = await localStore();
+  // A fresh install through 0005, so later migrations leave this test alone.
+  const current = new PGlite();
   try {
     await cp(folder, scratch, { recursive: true });
     const journal = await Bun.file(join(scratch, "meta/_journal.json")).json();
-    journal.entries = journal.entries.filter((e: { idx: number }) => e.idx < 5);
-    await writeFile(
-      join(scratch, "meta/_journal.json"),
-      JSON.stringify(journal),
-    );
+    const through = async (idx: number) =>
+      writeFile(
+        join(scratch, "meta/_journal.json"),
+        JSON.stringify({
+          ...journal,
+          entries: journal.entries.filter((e: { idx: number }) => e.idx <= idx),
+        }),
+      );
+    await through(4);
     await migrate(drizzle(pg), { migrationsFolder: scratch });
     const acl = async () =>
       (
@@ -505,8 +510,10 @@ test("0005 drops the unread deleted_identities table and its rollback recreates 
     await pg.exec(
       `INSERT INTO deleted_identities(identity_hash) VALUES ('${"a".repeat(64)}')`,
     );
-    await migrate(drizzle(pg), { migrationsFolder: folder });
-    const after = await schemaCatalog(current.pg);
+    await through(5);
+    await migrate(drizzle(pg), { migrationsFolder: scratch });
+    await migrate(drizzle(current), { migrationsFolder: scratch });
+    const after = await schemaCatalog(current);
     expect(await schemaCatalog(pg)).toEqual(after);
     expect(after.tables).not.toContain("deleted_identities");
     await pg.exec(
@@ -531,6 +538,78 @@ test("0005 drops the unread deleted_identities table and its rollback recreates 
     expect((await pg.query("SELECT id FROM users")).rows).toEqual([
       { id: "kept" },
     ]);
+  } finally {
+    await current.close();
+    await pg.close();
+    await rm(scratch, { recursive: true, force: true });
+  }
+});
+
+test("0006 drops payload_bytes and source_hash's NOT NULL; its rollback restores both and refuses once a receipt lacks source_hash", async () => {
+  const folder = new URL("../drizzle/", import.meta.url).pathname;
+  const scratch = await mkdtemp(join(tmpdir(), "milton-0006-"));
+  const pg = new PGlite();
+  const current = await localStore();
+  try {
+    await cp(folder, scratch, { recursive: true });
+    const journal = await Bun.file(join(scratch, "meta/_journal.json")).json();
+    journal.entries = journal.entries.filter((e: { idx: number }) => e.idx < 6);
+    await writeFile(
+      join(scratch, "meta/_journal.json"),
+      JSON.stringify(journal),
+    );
+    await migrate(drizzle(pg), { migrationsFolder: scratch });
+    const before = await schemaCatalog(pg);
+    // A receipt as every recorded revision writes it.
+    await seedUsers(pg, "kept");
+    await pg.query(
+      "INSERT INTO save_requests(user_id,request_id,input_hash,source_hash,result_json) VALUES ('kept',$1,repeat('a',64),repeat('b',64),'{\"status\":\"saved\"}')",
+      [crypto.randomUUID()],
+    );
+    await migrate(drizzle(pg), { migrationsFolder: folder });
+    const after = await schemaCatalog(current.pg);
+    expect(await schemaCatalog(pg)).toEqual(after);
+    expect(
+      after.columns.filter((c) => c.column_name === "payload_bytes"),
+    ).toEqual([]);
+    expect(
+      after.columns.find(
+        (c) =>
+          c.table_name === "save_requests" && c.column_name === "source_hash",
+      ),
+    ).toMatchObject({ is_nullable: "YES" });
+    await pg.exec(
+      await Bun.file(folder + "rollback/0006_drop_unread_columns.sql").text(),
+    );
+    expect(await schemaCatalog(pg)).toEqual(before);
+    // Recomputed for the existing row: 36 + 64 + 64 + 2048 + 128.
+    expect(
+      (await pg.query("SELECT payload_bytes FROM save_requests")).rows,
+    ).toEqual([{ payload_bytes: 2340 }]);
+    // The journal row stays: re-forwarding runs the file by hand, as one
+    // transaction.
+    await pg.exec(
+      "BEGIN;" +
+        (await Bun.file(folder + "0006_drop_unread_columns.sql").text()) +
+        "COMMIT;",
+    );
+    expect(await schemaCatalog(pg)).toEqual(after);
+    // A receipt without source_hash, as code from this release writes it:
+    // the rollback refuses and changes nothing.
+    await pg.query(
+      "INSERT INTO save_requests(user_id,request_id,input_hash,result_json) VALUES ('kept',$1,repeat('a',64),'{\"status\":\"saved\"}')",
+      [crypto.randomUUID()],
+    );
+    await expect(
+      pg.exec(
+        await Bun.file(folder + "rollback/0006_drop_unread_columns.sql").text(),
+      ),
+    ).rejects.toThrow("rollback_0006_refused");
+    await pg.exec("ROLLBACK");
+    expect(await schemaCatalog(pg)).toEqual(after);
+    expect(
+      (await pg.query("SELECT count(*)::int AS n FROM save_requests")).rows,
+    ).toEqual([{ n: 2 }]);
   } finally {
     await current.dispose();
     await pg.close();

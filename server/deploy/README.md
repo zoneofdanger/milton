@@ -129,6 +129,40 @@ only from the snapshot. The 0005 journal row stays, so re-forwarding means
 `psql -1 -X -v ON_ERROR_STOP=1 -f server/drizzle/0005_drop_deleted_identities.sql`, then
 008 up again.
 
+## Drop the unread payload columns (pending: Drizzle 0006)
+
+Nothing reads `payload_bytes` (the generated sizes the retired history cap summed) on
+`accepted_changes`, `instruction_card_versions` and `save_requests`, or
+`save_requests.source_hash`. 0006 drops the three generated columns and `source_hash`'s NOT
+NULL; each statement is a catalog change, no table rewrite. Every recorded app/MCP revision
+writes `source_hash` and reads neither, so traffic stays open and rollback targets are
+unchanged. App/MCP code released with 0006 stops writing `source_hash` and fails every save
+without it, so apply 0006 first, then release that code. The column itself and its
+`save_request_hashes` check go in a later migration (TODO.md). Rehearse on a disposable
+branch or database first, then:
+
+1. Snapshot.
+2. As `neondb_owner`: `bun run --cwd server db:migrate` applies
+   `0006_drop_unread_columns` (journal 7 entries).
+3. Check as the owner. The first query returns no rows; the second returns `YES`:
+
+   ```sql
+   SELECT table_name FROM information_schema.columns
+   WHERE table_schema='public' AND column_name='payload_bytes';
+   SELECT is_nullable FROM information_schema.columns
+   WHERE table_schema='public' AND table_name='save_requests' AND column_name='source_hash';
+   ```
+
+   Then `check-runtime-role.ts` must print `ok` for app and MCP.
+
+Rollback, never needed to roll app/MCP back (older code runs on either schema): roll
+app/MCP back to code that writes `source_hash` first, then run
+`server/drizzle/rollback/0006_drop_unread_columns.sql` as `neondb_owner`. It restores the
+NOT NULL and re-adds the three columns with their baseline definitions (each re-add
+rewrites its table). It refuses, changing nothing, once a save from the new code left a
+receipt without `source_hash`. The 0006 journal row stays, so re-forwarding means
+`psql -1 -X -v ON_ERROR_STOP=1 -f server/drizzle/0006_drop_unread_columns.sql`.
+
 ## Optional guide worker
 
 The default-off private guide pilot has separate [operations and capability instructions](guides.md). No guide job, schedule, provider key or account enrollment is provisioned by its build.

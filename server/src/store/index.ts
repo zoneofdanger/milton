@@ -8,7 +8,7 @@ import {
   type StoreSession,
 } from "./database";
 import { StoreError } from "./errors";
-import { accountUnavailable, requireActiveAccount } from "./accounts";
+import { accountUnavailable } from "./accounts";
 import {
   claimTrialNotice,
   trialStatus,
@@ -373,18 +373,6 @@ export interface TenantStore {
   chargeToolCall(session?: StoreSession): Promise<CallAllowance>;
 }
 
-/** An account's store, refused once the account is not active. */
-export async function storeForCurrentRequest(
-  bindings: StoreBindings & { appOrigin: string },
-  auth: VerifiedStoreAuth,
-  assistant?: { issuer: string; clientId: string },
-): Promise<TenantStore> {
-  const db = database(bindings);
-  const limits = await readLimits(db);
-  await requireActiveAccount(db, auth.userId, { lock: false });
-  return tenantStore(bindings, { ...auth, limits }, assistant);
-}
-
 /** The store for an `auth` this request just looked up, which required an
  * active account; built without a query. Every tool call's charge and every
  * read and save check the account again.
@@ -594,8 +582,7 @@ export async function applyStripeEvent(
   return db.transaction(async (tx) => {
     const row = await lockStripeCustomer(tx, customer);
     if (!row) return recordStripeEvent(tx, event);
-    if (await stripeEventRecorded(tx, event.id))
-      return { recorded: false, updated: 0 };
+    if (await stripeEventRecorded(tx, event.id)) return { recorded: false };
     const state = await read(customer, row.subscription);
     return recordStripeEvent(
       tx,

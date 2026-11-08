@@ -103,18 +103,19 @@ export async function recordStripeEvent(
     VALUES (${event.id},${event.type},${event.payloadSha256})
     ON CONFLICT (id) DO NOTHING RETURNING id)`;
   const row = (
-    await db.query<{ recorded: number; updated: number }>(
+    await db.query<{ recorded: number }>(
+      // A data-modifying WITH runs to completion even though nothing reads it.
       write
         ? sql`WITH ${recorded}, u AS (UPDATE trial_accounts SET ${
             write.state === "canceled"
               ? sql`subscription_status='canceled'`
               : subscriptionColumns(write.state)
-          } WHERE stripe_customer_id=${write.customer} AND EXISTS (SELECT 1 FROM e) RETURNING 1)
-          SELECT (SELECT count(*) FROM e)::int AS recorded, (SELECT count(*) FROM u)::int AS updated`
-        : sql`WITH ${recorded} SELECT (SELECT count(*) FROM e)::int AS recorded, 0 AS updated`,
+          } WHERE stripe_customer_id=${write.customer} AND EXISTS (SELECT 1 FROM e))
+          SELECT (SELECT count(*) FROM e)::int AS recorded`
+        : sql`WITH ${recorded} SELECT (SELECT count(*) FROM e)::int AS recorded`,
     )
   )[0]!;
-  return { recorded: row.recorded === 1, updated: row.updated };
+  return { recorded: row.recorded === 1 };
 }
 
 /** 0027's data statement: a returning deleted identity an older image wrote, with

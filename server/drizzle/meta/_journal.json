@@ -43,6 +43,13 @@
       "when": 1794086310439,
       "tag": "0005_drop_deleted_identities",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794096338675,
+      "tag": "0006_drop_unread_columns",
+      "breakpoints": true
     }
   ]
 }

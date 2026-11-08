@@ -10,7 +10,7 @@ landed and the item is still open), `blocked: <why or #id>`. A bolded headline o
 or fewer states the task; one item is one landing. **A section heading and its preamble are
 shared context for every item beneath it.**
 
-**next-id: 30.** Ids are never reused, so this counter survives deleting the newest item.
+**next-id: 31.** Ids are never reused, so this counter survives deleting the newest item.
 
 ## MVP
 
@@ -63,6 +63,15 @@ reports, memos) and plain text on security screens and anything an assistant rea
       apart (found in the 2026-11-07 cutover rehearsal). Give each refusal a stable code that
       safeError prints, without secrets. Also make provision.ts's "output outside the
       repository" check resolve the real repository root rather than only its own checkout.
+
+- [ ] #30 (server, low, blocked: rollback targets still write it) **Drop save_requests.source_hash
+      and its check.** Since Drizzle 0006 the column is nullable and saves no longer write it
+      (audit 2026-11-07b, finding 12); nothing reads it. Every app/MCP revision recorded as a
+      rollback target before that release still INSERTs it, so dropping it now would fail their
+      saves. Once no serving or rollback revision writes it, generate a migration that drops the
+      column and rewrites `save_request_hashes` to check `input_hash` alone (no CASCADE, with a
+      rollback file and a runbook section), and remove the two raw test INSERTs' `source_hash`
+      in server/test/store-saves.test.ts.
 
 ## From the audit of 2026-11-02 (`.agents/tmp/audit/report.md`)
 

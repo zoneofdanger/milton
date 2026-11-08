@@ -22,7 +22,7 @@ This runbook keeps only the latest release record. Earlier release records and a
 one-time procedures are in git history; the last full version is at commit 492b96a
 (`git show 492b96a:server/deploy/README.md`).
 
-## Release record: save round trips; rollback scripts retired (2026-11-08, PRs #51 #52)
+## Release record: save round trips, rollback scripts retired, auth rate limits (2026-11-08, PRs #49 #51 #52)
 
 - **#51 (milton-perf; Astra should-fix fixed in `ace5e74`, milton-qa passed):** saves take a
   fixed 15 round trips at any size (local: a one-rule save 96 → 71 ms, a 100-rule setup save
@@ -37,7 +37,21 @@ one-time procedures are in git history; the last full version is at commit 492b9
   applied migration files are byte-identical (their hashes match the production journal). No
   deploy.
 
-Auth `milton-auth-00009-mrk`, rollback `milton-auth-00008-967`. Earlier records: git history
+- **#49 (milton-qa; two Astra rounds), `b73d9f5`:** native auth rate limits run on
+  `take_rate` (HMAC'd keys, one atomic round trip); per-client and per-token buckets are charged
+  only after the network gate; token, revoke and UserInfo are keyed per client or token plus
+  network; the app gets 1000/min only with its secret or a valid token of its own; register is
+  20/min/network (limits and reasons in `apps/auth/README.md`). Auth `milton-auth-00010-g64` at
+  02:09Z (image `sha256:2f84db72a1c6497cf6a1b396a66913a5b5cb7b0e7dfa5f37b70318c0cf2d7a0e`;
+  mail and maintenance jobs too). Checks on main: types, 137 tests, format, site, rehearsal
+  13/13, auth integration 19/19, all 0. Live: health, login, OIDC and OAuth metadata (under
+  `/api/auth/.well-known/`), JWKS 200; Claude Code authorize 302; sign-in JSON 401 for a
+  fictional address, `text/plain` 415; token without a client 400; app login hands off 303.
+  No 5xx, 429, application or audit errors in a 5-minute watch. The native `rateLimit` table
+  is now unused (a later drop is possible). Not verified live: a
+  real browser sign-in and the app's token exchange under the new limits.
+
+Auth `milton-auth-00010-g64`, rollback `milton-auth-00009-mrk`. Earlier records: git history
 (`git log -p server/deploy/README.md`).
 
 ## Runtime role timeouts (applied 2026-11-07, TODO #29)
@@ -404,7 +418,7 @@ gcloud run revisions list --service=milton-app --project=milton-510506 --region=
 ```
 
 Now serving (2026-11-08): app `milton-app-save-b85f428` and MCP
-`milton-mcp-save-b85f428` (source `b85f428`), and auth `milton-auth-00009-mrk` (source `e770c15`). The
+`milton-mcp-save-b85f428` (source `b85f428`), and auth `milton-auth-00010-g64` (source `b73d9f5`). The
 release record above gives the image and rollback revisions.
 
 Roll back only affected services, preserve ingress/IAM, then repeat the canonical

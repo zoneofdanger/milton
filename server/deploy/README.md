@@ -8,6 +8,7 @@ Milton uses Bun for installs, builds and tests, and Node 26 LTS in production.
 | `app.meetmilton.com`                   | Hono JSX, Vite theme assets, Cloud Run `milton-app`                   |
 | `mcp.meetmilton.com`                   | Hono MCP, Cloud Run `milton-mcp`, Google external HTTPS load balancer |
 | `auth.meetmilton.com`                  | Self-hosted Better Auth, Cloud Run `milton-auth`, same load balancer  |
+| none (`run.app`, invoker-only)         | Auth's admission calls, Cloud Run `milton-admit`, no load balancer    |
 
 Neon PostgreSQL is the source of truth. Sign-in is the self-hosted auth service at
 `https://auth.meetmilton.com/api/auth` (since 2026-11-07). Managed Neon Auth is disabled,
@@ -22,41 +23,74 @@ This runbook keeps only the latest release record. Earlier release records and a
 one-time procedures are in git history; the last full version is at commit 492b96a
 (`git show 492b96a:server/deploy/README.md`).
 
-## Release record: alerts as code, test account (2026-11-08, PRs #56 #57)
+## Release record: private admission service, session token drop, e2e fix, MCP next steps, guards (2026-11-08, PRs #58–#64)
 
-- **#56 (Peter's request; builder, milton-duo review), `9a3c74f`:** production alerts as code
-  (`server/deploy/monitoring/`, `server/scripts/monitoring.ts`; see [Alerts](#alerts)).
-  `--apply` at 06:47Z created 2 log metrics, 3 uptime checks and 7 policies and deleted the
-  10 hand-made policies; a second dry run reported 12 unchanged. Delivery test: a temporary
-  always-true policy opened one alert at 06:55:08Z, Peter confirmed the one email arrived,
-  and the policy was deleted. Checks: types, 144 tests, format, all 0.
-- **#57 (Peter; milton-qa, Astra PASS at `c93bfdc`), `7938dd5`:** the fictional test account
-  and the daily end-to-end check. Auth `milton-auth-00016-kul` at 06:54Z (no mail to
-  `.invalid`; mail and maintenance jobs too; image
-  `sha256:7ee6dc3d2416077c03667e84135a59c04c1dd2f5507a662b7e6dfe7866f38610`). Snapshot
-  `snap-royal-math-b8fd06v5`; Drizzle 0009 (journal 10, hash `2c9d8429…`) and owner file 011
-  (app INSERT on `users` is now `id`, `status`, `created_at`); runtime audits `ok`. App/MCP
-  `milton-*-e2e-7938dd5` at 06:55:30Z (image
-  `sha256:ec5df5a67e36ef6937e5223750a912ca11216116556a004c82eb121bff5fd0f5`; the pinned server
-  Dockerfile was regenerated to copy the e2e files). Checks on the merge: types, 144 tests,
-  format, site, auth and server builds, auth integration 20/20, rehearsal 18/18, all 0. Live:
-  health 200 ×3, app home 200, MCP 401 unauthenticated, an MCP read succeeded. Release gate
-  from 06:54:08Z at 07:10Z: only the deleted test policy's alert. Afterwards (Peter's
-  go): milton-qa provisioned `e2e@milton-test.invalid` (snapshot gate
-  `snap-dawn-grass-b8zqz03n`) and its manual run passed; milton-duo provisioned the two Muse
-  reviewer accounts (`.agents/tmp/muse-connector/reviewer-accounts.md`; their connection keys
-  revoked) and created `milton-e2e`, secret `milton-e2e-account:1` and the job
-  `milton-e2e-daily`. Its first execution (`milton-e2e-daily-t4b4p`) failed at `sign_in`:
-  Node's fetch sends `sec-fetch-mode: cors`, so authorize answers JSON instead of a redirect
-  (milton-qa is fixing the check). The scheduler trigger and the e2e alert are not created
-  until a fixed image passes.
-- Earlier today: #53 admit once (auth `00012-qod`), #54 down scripts deleted, #55 usage
-  retention (auth `00014-juv`, snapshot `snap-snowy-haze-b8dl4hvc`), the owner password reset,
-  Neon autoscaling to 4 CU and the budget. App/MCP must not roll back past #40 without
-  restoring the 0008 snapshot.
+- **#64 (Peter's go; milton-qa, Astra's must-fix fixed in comments), `252fbf7`:** snapshot
+  `snap-rapid-wind-b8xon9wq` at 17:58:11Z; owner file 013 as `milton_app_owner` through the
+  direct host dropped `milton_app.session.access_token` (column absent; runtime audits `ok`
+  for app and MCP; an e2e sign-in passed, `milton-e2e-daily-rbdc4`). No code release. The app
+  must not roll back before #62 (`milton-app-token-0f7d5aa`) without that snapshot.
+- **#63 (Peter's go, min 1; milton-qa, Astra PASS), `20b0f27`:** admission moved to the
+  private Cloud Run service `milton-admit` (see [Admission service](#admission-service-milton-admit)).
+  Step 1: `milton-admit@`, payload `milton-admit-env:2` (six values; version 1 disabled
+  because dotenvx named its keypair after the file) and `milton-admit-key:2` (version 1
+  disabled for a trailing newline), runtime audit through the payload `ok`, the service
+  from [admit.service.json](admit.service.json) (image
+  `sha256:e11636a5a5d3e0101c6406c735e021046762636f5fe838fcc3de98836548494b`, one warm
+  instance), the one invoker `milton-auth@`; `run.app` answered 403 without a token, 401 with
+  an owner token and no bearer, 404 off its routes; the alerts now include `milton-admit`.
+  Step 2: auth `milton-auth-00018-heq` at 18:03:52Z with `AUTH_ADMISSION_URL` (mail job too,
+  maintenance on the same image; image
+  `sha256:e1b9476dcbd99aaab3939010bc97b0ba40913bef569b0112e80e990c768131ff`); an e2e sign-in
+  admitted through `milton-admit` (204, 175 ms), no `auth_admission_identity`. Step 3: app/MCP
+  `milton-*-admit-20b0f27` at 18:05:23Z (the daily job too); `/internal/auth/*` answers 404
+  on app and MCP through the load balancer; health 200 ×3, forms probe PASS, an MCP read, a
+  second e2e sign-in admitted (204, 120 ms). Checks on the merge: types, 156 tests, format,
+  migration guard, server and auth builds, auth integration 20/20, rehearsal 21/21, CI green.
+  Release gate from 17:58:11Z (covering #64 and all three #63 steps) at 18:15Z: clean.
 
-Auth `milton-auth-00016-kul`, rollback `milton-auth-00014-juv`. App/MCP
-`milton-*-e2e-7938dd5`, rollback `milton-*-save-b85f428` (code only; keep 0009 and 011).
+- **#58 + #59 (milton-qa; #59 Astra PASS at `65fbf86`), `8d3d4df`:** the daily check follows
+  native's JSON redirects under Node; MCP error results carry a code and `next`, the
+  instructions are 3,420 characters and the server has a 117-character description. App/MCP
+  `milton-*-next-8d3d4df` at 17:25:10Z (image
+  `sha256:c6c2f02c88a7d17ae1f0499e636069313112adb65d4c995727f0c52ab5d83283`). Checks on the
+  merge: types, 146 tests, format, site, server build, rehearsal 18/18, all 0; the merged
+  bundle passed 14/14 under Node against production. Live: health 200 ×3, app home 200, MCP
+  401 unauthenticated, an MCP read, forms probe PASS. Gate at 17:35Z: clean.
+- **Daily check (Peter's go):** `milton-e2e-daily` on that image passed 14/14
+  (`milton-e2e-daily-qzn4p`); scheduler `milton-e2e-daily` created paused, URL checked
+  (`…/jobs/milton-e2e-daily:run`), resumed at `7 14 * * *` UTC (first run 2026-11-09 14:07Z).
+  The job moves with each app/MCP image. Its alert (`pending/milton-e2e-daily.policy.json`)
+  is applied after 2026-11-09 07:16Z, when the 07:15Z failure of the first run leaves its
+  24-hour window; applying it earlier would email a stale failure.
+- **#60 + #61 (milton-qa; Astra's last findings fixed, deltas read by milton-qa), `1a82fde`:**
+  propagation, isolation and deletion integration groups (served change: the
+  behavior-preserving `cloudRequests` extraction), and the migration guards in CI (numbering,
+  released-file hash lock, deletion inventory, `-- code-stopped-by: #NN` drop order, tool
+  description budget). App/MCP `milton-*-guards-1a82fde` at 17:36:00Z (image
+  `sha256:81a1bd5fd23b5f19e0aaf3b064bc931e0c725f80f7d25da699e88d42e6ca78c1`). Checks: types,
+  153 tests, format, migration guard (37 files locked; hashes match the production journal),
+  server build, rehearsal 21/21, CI green. Gate at 17:46Z: clean.
+- **#62 (Peter's go; milton-qa, Astra PASS), `0f7d5aa`:** the app no longer stores the native
+  access token. Snapshot `snap-sparkling-firefly-b8p4mpum` at 17:46:16Z; owner file 012 as
+  `milton_app_owner` through the direct host (the pooler refuses the `role` startup option),
+  `is_nullable` now `YES`. App/MCP `milton-*-token-0f7d5aa` at 17:47:15Z (image
+  `sha256:9ee5fb568baa1bad42014646996227983079c9c32207a11a4fc613e2810e0d06`; the daily job
+  too). An e2e run signed in and passed; sessions storing a token since the release: 0.
+  Checks: types, 153 tests, format, migration guard, server build, rehearsal 21/21, CI green.
+  The column drop (step 2) is milton-qa's next PR; after it, the app must not roll back
+  before #62.
+- Earlier today: #56 alerts as code, #57 test account (auth `00016-kul`, 0009/011), #53–#55,
+  the owner password reset, Neon autoscaling and the budget, daily snapshots
+  (11:00 UTC, 14 days; first `snap-silent-feather-b84f2kwj`).
+
+Auth `milton-auth-00018-heq`, rollback floor `milton-auth-00018-heq` (older auth calls the
+app's removed admission routes: roll auth back only together with app/MCP to
+`milton-*-token-0f7d5aa`, then auth to `00016-kul`). App/MCP `milton-*-admit-20b0f27`,
+rollback `milton-*-token-0f7d5aa` (code only; never before #62). Once owner file 013 is applied, the app never rolls back to an image older than #62:
+`milton-app-token-0f7d5aa` is its floor, and `milton-app-guards-1a82fde` is no longer a
+rollback (its sign-in writes the dropped column). MCP never touches sessions; its rollback
+is unchanged. See [Drop the app session's access-token column](#drop-the-app-sessions-access-token-column-owner-file-013).
 Earlier records: git history (`git log -p server/deploy/README.md`).
 
 ## Runtime role timeouts (applied 2026-11-07, TODO #29)
@@ -347,7 +381,7 @@ maintenance pruned both). `public.assistant_disconnects` cannot help: nothing ha
 it since native auth (commit `bcb59e7`), so it names no native registration. Rollback is
 the pre-migration snapshot; there is no down script.
 
-## Stop storing the app's native access token (owner file 012; not yet applied)
+## Stop storing the app's native access token (applied 2026-11-08: owner file 012, PR #62)
 
 Until this change the app wrote the native access token it receives at sign-in into
 `milton_app.session.access_token` (`NOT NULL`, plaintext) and nothing read it. App code
@@ -361,7 +395,8 @@ the column in the later drop. Rehearse on a disposable database first
 (`server/scripts/check-auth-integration.ts` applies it twice), then:
 
 1. Snapshot production.
-2. As the `milton_app` owner, `milton_app_owner` (as for 008):
+2. As the `milton_app` owner, `milton_app_owner` (as for 008), through the direct host: Neon's
+   pooler refuses the `role` startup option:
    `psql -X -v ON_ERROR_STOP=1 -f server/migrations/012-session-token-nullable.up.sql`
    (one transaction; rerunning converges).
 3. Check as the owner; expect `YES`:
@@ -372,10 +407,40 @@ the column in the later drop. Rehearse on a disposable database first
 
 Rolling the app back to the previous image is code only: the column still exists and
 accepts the old code's writes. A failed migration's rollback is the pre-migration
-snapshot; there is no down script. The drop is a later migration, carrying
-`-- code-stopped-by:` this change's PR and applied only after this release serves;
-after it, the app must not roll back to an image older than this change, whose sign-in
-writes the column.
+snapshot; there is no down script. The drop is owner file 013 (next section), carrying
+`-- code-stopped-by: #62` and applied only after this release serves; after it, the app
+must not roll back to an image older than this change, whose sign-in writes the column.
+
+## Drop the app session's access-token column (owner file 013)
+
+Since #62 the app never writes `milton_app.session.access_token` and nothing has ever read
+it; 012 made it nullable, and production has stored no token since `milton-*-token-0f7d5aa`
+began serving (2026-11-08 17:47Z). 013 drops the column, so no SQL can read the tokens
+older rows still hold, each expired within an hour of its sign-in. DROP COLUMN is a
+catalog change with no table rewrite: it does not erase those bytes, which stay in the
+tuples until the expired rows are reclaimed and vacuumed, and in WAL and snapshots until
+they age out (snapshots are kept 14 days); 013 sets a 5 s lock limit in its own transaction because it briefly
+locks `session` exclusively. Apply only while the app serves `milton-app-token-0f7d5aa` or
+later: older app code inserts the column, so every sign-in on it fails after the drop. MCP
+never touches sessions. Rehearse on a disposable database first
+(`server/scripts/check-auth-integration.ts` applies 012 and 013 twice each), then:
+
+1. Snapshot production.
+2. As the `milton_app` owner, `milton_app_owner` (as for 008 and 012), through the direct
+   host: Neon's pooler refuses the `role` startup option:
+   `psql -X -v ON_ERROR_STOP=1 -f server/migrations/013-drop-session-access-token.up.sql`
+   (one transaction; rerunning converges).
+3. Check as the owner; expect no rows:
+   `SELECT column_name FROM information_schema.columns WHERE table_schema='milton_app' AND table_name='session' AND column_name='access_token';`
+   Then `check-runtime-role.ts` must print `ok` for app and MCP, and a fresh sign-in must
+   succeed (the daily check signs in; or watch `milton-app-errors-log` for a
+   `column "access_token"` error).
+
+No code release follows; the serving images already run on either schema. After 013 the
+app never rolls back to an image older than #62 (`milton-app-token-0f7d5aa` is the floor;
+`milton-app-guards-1a82fde` and older write the column). If 013 fails (its lock limit, say),
+its transaction rolls back and changes nothing; rerun it. Otherwise a failed migration's
+rollback is the pre-migration snapshot; there is no down script.
 
 ## Test account and daily check
 
@@ -627,11 +692,12 @@ The default-off private guide pilot has separate [operations and capability inst
 
 ## Cloud resources
 
-Project `milton-510506`, Cloud Run/Artifact Registry region `us-east4`. **Warm instances (Peter, 2026-11-07):** `milton-auth`, `milton-app` and `milton-mcp` each keep
+Project `milton-510506`, Cloud Run/Artifact Registry region `us-east4`. **Warm instances (Peter, 2026-11-07):** `milton-auth`, `milton-app`, `milton-mcp` and (since 2026-11-08) `milton-admit` each keep
 one instance warm through the service-level minimum (`gcloud run services update <svc> --min=1`;
 `run.googleapis.com/minScale: 1` on the service, about $10/month each). It applies across
 revisions, so deploys and rollbacks keep it; when replacing a service from a manifest, keep it.
-Check: `gcloud run services describe <svc> --format='value(metadata.annotations."run.googleapis.com/minScale")'` prints 1. Service manifests in this directory pin an immutable image and
+Check: `gcloud run services describe <svc> --format='value(metadata.annotations."run.googleapis.com/minScale")'` prints 1.
+`milton-admit` has no minimum until Peter decides (see [its section](#admission-service-milton-admit)). Service manifests in this directory pin an immutable image and
 secret versions. They contain configuration and secret references, never values.
 The tracked app and MCP manifests still pin the pre-cutover release: app
 `milton-app-edit-00223ec` and MCP `milton-mcp-edit-00223ec`, both using image index
@@ -642,7 +708,7 @@ is deliberately non-deployable. Production's writing journal holds `0000_baselin
 `0009_test_account` (10 entries), the native auth ledger 001–007, and the owner files
 `000-app-owner.sql`, `005-app.up.sql`, `005-app-roles.sql`, `006-connection-keys-roles.sql`,
 `007-role-timeouts.up.sql`, `008-drop-legacy-mapping.up.sql`, `009-usage-calls-roles.sql`,
-`010-usage-retention-roles.sql` and `011-test-account-roles.sql` (see [runtime role timeouts](#runtime-role-timeouts-applied-2026-11-07-todo-29)). There is no memo-update
+`010-usage-retention-roles.sql`, `011-test-account-roles.sql`, `012-session-token-nullable.up.sql` and `013-drop-session-access-token.up.sql` (see [runtime role timeouts](#runtime-role-timeouts-applied-2026-11-07-todo-29)). There is no memo-update
 or daily call allowance (removed by PR #40, serving since 2026-11-08). Existing positive account safeguards remain
 in effect. Trials and billing are live (since 2026-11-04).
 Each image includes both roles and browser assets. Validate manifests before applying:
@@ -724,6 +790,181 @@ After propagation, verify TLS 1.0/1.1 refusal and trusted TLS 1.2/1.3 connection
 CNAMEs for app, MCP and auth. Apex, www and mail records stay unchanged. Validate URL maps with
 `gcloud compute url-maps validate --global --load-balancing-scheme=EXTERNAL_MANAGED --source=<file>`
 before importing them.
+
+## Admission service (`milton-admit`)
+
+Auth's two internal calls, `POST /internal/auth/admit` (every authorize and consent accept)
+and `POST /internal/auth/preserve-eligibility` (unlink), go to their own Cloud Run service,
+`milton-admit`, running the runtime image with `MILTON_SERVICE=admit`. It serves those two
+paths and answers 404 to everything else; app and MCP answer 404 on `/internal/*`. Before
+this, the routes were on the app, reachable by anyone through the load balancer, and the
+admission bearer was the only check (critique finding 8).
+
+- **Reachability.** Not attached to the load balancer or URL map. Ingress `all`, because
+  auth has no VPC egress and reaches `run.app` over Google's network; Cloud Run's invoker
+  check is on and only `milton-auth@` holds `roles/run.invoker` on the service (no
+  `allUsers`). Google's front end refuses a request without a Google-signed ID token from a
+  principal holding `run.routes.invoke` (403, "The request was not authenticated"), before
+  the container sees it.
+- **Two checks.** Auth gets an ID token for the audience `AUTH_ADMISSION_URL` from the
+  metadata server (`…/instance/service-accounts/default/identity?audience=…`,
+  `Metadata-Flavor: Google`), caches it until five minutes before its `exp` (Google's
+  tokens last about an hour), and sends it as `X-Serverless-Authorization: Bearer <token>`.
+  [Google's service-to-service guide](https://docs.cloud.google.com/run/docs/authenticating/service-to-service):
+  that header exists for applications that already use `Authorization` for their own
+  check; with both present "only the `X-Serverless-Authorization` header is checked", and
+  Cloud Run "removes the signature before passing the token to the user container". The
+  audience must be the service URL (custom domains are not supported). So
+  `Authorization: Bearer <AUTH_ADMISSION_SECRET>` reaches the container unchanged, and the
+  container checks it as before. A failed or malformed token fetch sends nothing and fails
+  sign-in with `admission_retry_required`, like a refused admission, and logs
+  `auth_admission_identity` (class and code only).
+- **Configuration.** Auth reads `AUTH_ADMISSION_URL`, a plain environment variable (not a
+  secret) on `milton-auth` and on the `milton-auth-mail` job, which reads the same config:
+  `https://milton-admit-419545871671.us-east4.run.app` (the deterministic URL; token
+  audience and target are the same string). Auth refuses to start in production with
+  anything but an `https://…run.app` origin; a loopback origin (no token) is for
+  development and the integration checks only.
+- **Identity and secrets (least privilege).** Its own service account `milton-admit@`
+  with `secretAccessor` on `milton-admit-env` and `milton-admit-key` only, and its own
+  dotenvx keypair. The payload holds exactly what admission reads: `DATABASE_URL` (the
+  app's `milton_app_runtime` login, which already holds the admission grants), `AUTH_ISSUER`,
+  `AUTH_ADMISSION_SECRET`, `MILTON_TRIAL_FINGERPRINT_KEY`, `STRIPE_SECRET_KEY` and
+  `STRIPE_PRICE_ID`; never the app's cookie or OIDC client secrets, nor the Stripe webhook
+  secret (`admitRuntimeConfig` does not read it). Reusing `milton-app@` would have meant no
+  new secrets but would give a second, differently exposed service everything the app
+  holds. A separate database login was not created: it would need a new owner grant file
+  and role audit for the same privileges; the audit runs as the app's
+  (`MILTON_SERVICE=app server/scripts/check-runtime-role.ts` with the admit payload). The
+  trade-off: a change to any of those six values (the database password, the Stripe key)
+  is now minted into both payloads.
+- **Settings** ([admit.service.json](admit.service.json)): concurrency 40 (the database
+  pool's maximum, so each request can hold a connection; auth can have at most 24 calls in
+  flight, 3 instances × 8); timeout 30 s (auth gives up at 5 s, but an admission with
+  Stripe can take about 15 s, and finishing lets auth's retry find it done); max 3
+  instances, as app and MCP; startup CPU boost on.
+- **Cold start and minimum instances.** The built bundle (`server/dist/cloud-run.js`,
+  3.3 MB) answered its first request 143–151 ms after `node` started (median 145 ms over 10
+  runs, Node 26.13.0, Apple silicon laptop; app 163 ms, MCP 150 ms), so the code adds
+  little to the 5 s wait; Cloud Run's own instance start and the first Neon TLS connection
+  are not measured. With about 8 to 25 requests an hour across the services, most
+  admissions after a quiet spell would start an instance. The manifest has no minimum (0).
+  One warm instance, as the other three services keep, costs about $10 a month: Peter's
+  call. Check after release: the first admission after 15 idle minutes, in
+  `httpRequest.latency` of milton-admit's request log.
+
+### Release order (no compatibility shims)
+
+Each step touches production: milton-duo runs them with Peter's go. Record the current
+revisions, images and secret versions first.
+
+**1. Create `milton-admit` and its IAM.** Build and push the runtime image as for an
+app/MCP release, but do not move app or MCP yet. In a no-history shell inside a private
+temporary directory (`umask 077`), as in [Runtime role](#runtime-role) step 4:
+
+```sh
+P=--project=milton-510506
+SA=milton-admit@milton-510506.iam.gserviceaccount.com
+gcloud iam service-accounts create milton-admit $P --display-name='Milton admission'
+# The app's current payload: the version milton-app's serving revision mounts.
+gcloud secrets versions access <N> --secret=milton-app-env $P > app-current.env
+export DOTENV_PRIVATE_KEY="$(gcloud secrets versions access <K> --secret=milton-app-key $P)"
+dotenvx decrypt -f app-current.env --stdout \
+  | grep -E '^(DATABASE_URL|AUTH_ISSUER|AUTH_ADMISSION_SECRET|MILTON_TRIAL_FINGERPRINT_KEY|STRIPE_SECRET_KEY|STRIPE_PRICE_ID)=' \
+  > .env
+# The app's key must not encrypt the new payload: its own keypair, generated now.
+# Encrypt it as `.env`: dotenvx names the keypair after the file (admit.env gave
+# DOTENV_*_KEY_ADMITDEVELOPMENT), and the service reads plain DOTENV_PRIVATE_KEY.
+unset DOTENV_PRIVATE_KEY
+dotenvx encrypt -f .env --env-keys-file admit.keys
+mv .env admit.env
+grep -c '="encrypted:' admit.env   # must print 6
+# Unsuffixed, and the public keys differ (they are not secret):
+grep '^DOTENV_PUBLIC_KEY=' app-current.env admit.env
+grep -c '^DOTENV_PRIVATE_KEY=' admit.keys   # must print 1
+gcloud secrets create milton-admit-env $P --replication-policy=automatic --data-file=admit.env
+# printf '%s' so the stored key has no trailing newline (grep's would be kept).
+printf '%s' "$(grep '^DOTENV_PRIVATE_KEY=' admit.keys | cut -d= -f2- | tr -d '"')" \
+  | gcloud secrets create milton-admit-key $P --replication-policy=automatic --data-file=-
+for s in milton-admit-env milton-admit-key; do
+  gcloud secrets add-iam-policy-binding $s $P --member=serviceAccount:$SA --role=roles/secretmanager.secretAccessor
+done
+```
+
+Match the replication of the existing secrets (`gcloud secrets describe milton-app-env`).
+From the repository checkout, audit the login through the payload (`<dir>` is the
+temporary directory), with the key the service will read, as it reads it:
+`DOTENV_PRIVATE_KEY="$(gcloud secrets versions access latest --secret=milton-admit-key $P)" MILTON_SERVICE=app dotenvx run -f <dir>/admit.env -- bun --no-env-file server/scripts/check-runtime-role.ts`
+prints `ok`. Then copy the encrypted payload to private release storage, delete the
+directory, set the image digest in [admit.service.json](admit.service.json),
+and create the service and its one invoker:
+
+```sh
+R="--project=milton-510506 --region=us-east4"
+gcloud run services replace server/deploy/admit.service.json --dry-run $R
+gcloud run services replace server/deploy/admit.service.json $R
+gcloud run services add-iam-policy-binding milton-admit $R \
+  --member=serviceAccount:milton-auth@milton-510506.iam.gserviceaccount.com --role=roles/run.invoker
+gcloud run services get-iam-policy milton-admit $R   # exactly that one binding
+gcloud run services describe milton-admit $R \
+  --format='value(metadata.annotations."run.googleapis.com/invoker-iam-disabled")'   # empty
+```
+
+Verify (the service URL is `https://milton-admit-419545871671.us-east4.run.app`; check it
+with `--format='value(metadata.annotations."run.googleapis.com/urls")'`):
+
+```sh
+U=https://milton-admit-419545871671.us-east4.run.app
+curl -s -o /dev/null -w '%{http_code}\n' -X POST $U/internal/auth/admit   # 403: no ID token
+# With your own identity (project Owner): reaches the container, which refuses without its bearer.
+T="$(gcloud auth print-identity-token)"
+curl -s -o /dev/null -w '%{http_code}\n' -X POST -H "Authorization: Bearer $T" $U/internal/auth/admit   # 401
+curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $T" $U/health   # 404: the admit role
+unset T
+```
+
+Plan and apply the alerts (`bun server/scripts/monitoring.ts`, then `--apply`): the shared
+metrics, the release gate and milton-instance-start now include `milton-admit`.
+
+**2. Release auth pointing at it.** Deploy the auth image from this change with the URL in
+the same revision (the image refuses to start without it), and move `milton-auth-mail` with
+the same variable:
+
+```sh
+gcloud run deploy milton-auth $R --image=<AUTH_IMAGE@sha256> \
+  --update-env-vars=AUTH_ADMISSION_URL=https://milton-admit-419545871671.us-east4.run.app
+gcloud run jobs update milton-auth-mail $R --image=<AUTH_IMAGE@sha256> \
+  --update-env-vars=AUTH_ADMISSION_URL=https://milton-admit-419545871671.us-east4.run.app
+gcloud run jobs update milton-auth-maint $R --image=<AUTH_IMAGE@sha256>
+```
+
+Verify a sign-in admits: run `milton-e2e-daily` once (it signs in through auth), or sign
+in to the app, then
+`gcloud logging read 'resource.labels.service_name="milton-admit" AND httpRequest.requestUrl:"/internal/auth/admit"' --project=milton-510506 --freshness=15m --limit=5 --format='value(httpRequest.status,httpRequest.latency)'`
+shows 204, and auth's log has no `auth_admission_identity`.
+
+**3. Release app and MCP without the routes** (the image from step 1), then verify through
+the load balancer:
+
+```sh
+for h in app mcp; do for p in admit preserve-eligibility; do
+  curl -s -o /dev/null -w "$h $p %{http_code}\n" -X POST https://$h.meetmilton.com/internal/auth/$p
+done; done   # 404 each
+```
+
+**Afterwards (optional, recommended):** mint the next `milton-app-env` version without
+`AUTH_ADMISSION_SECRET`, which the app no longer reads, so the app's account no longer
+holds it. Older app revisions keep their pinned version.
+
+**Rollback.** `milton-admit` rolls back by revision like any service. App or MCP may roll
+back to a pre-change revision: that only reopens the old public route, which nothing calls.
+**After step 3, rolling auth back to an image from before this change breaks sign-in:** it
+calls `https://app.meetmilton.com/internal/auth/admit`, which now answers 404, so every
+authorize and consent accept fails with `admission_retry_required` and unlink with
+`eligibility_preservation_retry_required`. Treat the step 2 auth revision as auth's rollback
+floor. If an older auth must run, first roll the app back to a revision that still serves
+the routes (for example `milton-app-e2e-7938dd5`; code only, schema compatible), and move
+it forward again once auth is current.
 
 ## Secrets
 
@@ -807,6 +1048,12 @@ that metric did not record the one real failed start in 30 days, because the con
 The deploy errors of 2026-11-08 01:00Z (`traffic[21].tag: must be at least 3 characters`,
 `Revision 'milton-*-r3-64435ee' does not exist`) and 11-07 23:23Z (`Deadline expired`) are
 ERROR audit entries on the service, so they count in `milton-errors` and open the gate.
+
+`milton-admit` is in `milton-errors`, `milton-startup-failures`, milton-instance-start and
+the release gate, but has no page policy or uptime check of its own: it has no health
+route and refuses unauthenticated probes, and a failing admission is a failing sign-in,
+which auth answers with 503 and milton-auth's 5xx condition pages (its documentation
+points at milton-admit). No new condition, so no added cost.
 
 **Pending:** [monitoring/pending/milton-e2e-daily.policy.json](monitoring/pending/milton-e2e-daily.policy.json)
 pages on ≥ 1 failed execution of the Cloud Run job `milton-e2e-daily` in 24 h, or none for
@@ -939,7 +1186,9 @@ Revisions from before the 2026-11-07 schema and auth cutover (`*-edit-00223ec` a
 older) cannot read the current schema. Fix forward, or restore Neon snapshot
 `snap-fancy-hat-b8j5ls14` per the cutover runbook's rollback section (local, untracked:
 `.agents/tmp/auth-cutover/runbook.md`). App/MCP revisions before connection keys
-(`*-store2-b64ec6a` and older) can read the schema but serve no keys. For a
+(`*-store2-b64ec6a` and older) can read the schema but serve no keys. After owner file 013,
+app revisions older than `milton-app-token-0f7d5aa` (#62) fail every sign-in, so that is the
+app's rollback floor. For a
 schema-compatible code release, first verify the selected
 runtime supports the current database schema and accounting policy, then send traffic
 to its recorded healthy Cloud Run revision. Do not restore a database snapshot to roll back application code. An
@@ -950,8 +1199,8 @@ references. Inspect revision readiness before selecting a recorded revision:
 gcloud run revisions list --service=milton-app --project=milton-510506 --region=us-east4
 ```
 
-Now serving (2026-11-08): app `milton-app-e2e-7938dd5` and MCP
-`milton-mcp-e2e-7938dd5`, and auth `milton-auth-00016-kul` (all source `7938dd5`). The
+Now serving (2026-11-08): app `milton-app-admit-20b0f27`, MCP `milton-mcp-admit-20b0f27`
+and admission `milton-admit` (source `20b0f27`), and auth `milton-auth-00018-heq` (source `20b0f27`). The
 release record above gives the image and rollback revisions.
 
 Roll back only affected services, preserve ingress/IAM, then repeat the canonical

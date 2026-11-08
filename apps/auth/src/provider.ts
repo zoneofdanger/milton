@@ -34,6 +34,7 @@ import {
 } from "./config.ts";
 import { credentialAdapter, transport, type RequestState } from "./adapter.ts";
 import { acceptMail, stashMail } from "./mail.ts";
+import { admissionClient } from "./admission.ts";
 import { validPassword } from "./password.ts";
 import {
   boundedBody,
@@ -88,7 +89,7 @@ export function createProvider(
   // milton_guard.take_rate: one atomic statement, no plain address stored.
   const rate = (v: string) =>
     createHmac("sha256", config.AUTH_RATE_SECRET).update(v).digest("hex");
-  const networkFetch = options.boundaries?.fetch ?? fetch;
+  const admission = admissionClient(config, options.boundaries?.fetch ?? fetch);
   const field: DBFieldAttribute = {
     type: "string",
     input: false,
@@ -287,23 +288,14 @@ export function createProvider(
     );
     const identity = result.rows[0]?.identity;
     if (!identity) throw invalid();
-    const response = await networkFetch(APP_ORIGIN + "/internal/auth/admit", {
-      method: "POST",
-      redirect: "error",
-      signal: AbortSignal.timeout(5000),
-      headers: {
-        authorization: `Bearer ${config.AUTH_ADMISSION_SECRET}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
+    if (
+      !(await admission("/internal/auth/admit", {
         issuer: ISSUER,
         subject,
         continuation,
         ...identity,
-      }),
-    });
-    await response.body?.cancel();
-    if (!response.ok)
+      }))
+    )
       throw new APIError("SERVICE_UNAVAILABLE", {
         error: "admission_retry_required",
       });
@@ -536,27 +528,15 @@ export function createProvider(
           if (!original || !s?.securitySession) throw invalid();
           // This happens before native enters the removal transaction. The app
           // reads native status and persists metadata without a parent-lock cycle.
-          const response = await networkFetch(
-            APP_ORIGIN + "/internal/auth/preserve-eligibility",
-            {
-              method: "POST",
-              redirect: "error",
-              signal: AbortSignal.timeout(5000),
-              headers: {
-                authorization: `Bearer ${config.AUTH_ADMISSION_SECRET}`,
-                "content-type": "application/json",
-              },
-              body: JSON.stringify({
-                issuer: ISSUER,
-                subject: original.id,
-                sid: s.securitySession.id,
-                incarnation: original.miltonIdentityIncarnation,
-                generation: original.miltonSecurityGeneration,
-              }),
-            },
-          );
-          await response.body?.cancel();
-          if (!response.ok)
+          if (
+            !(await admission("/internal/auth/preserve-eligibility", {
+              issuer: ISSUER,
+              subject: original.id,
+              sid: s.securitySession.id,
+              incarnation: original.miltonIdentityIncarnation,
+              generation: original.miltonSecurityGeneration,
+            }))
+          )
             throw new APIError("SERVICE_UNAVAILABLE", {
               error: "eligibility_preservation_retry_required",
             });

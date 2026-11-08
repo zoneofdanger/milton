@@ -22,7 +22,7 @@ import * as oidc from "openid-client";
 import { createMiltonHandler } from "../src/handler";
 import { createAccessTokenVerifier } from "../src/token";
 import { sql, type SQL } from "drizzle-orm";
-import { createMcpApp, createMiltonApp } from "../src/index";
+import { createAdmitApp, createMcpApp, createMiltonApp } from "../src/index";
 import { cloudRequests } from "../src/cloud-app";
 import {
   serve,
@@ -30,7 +30,11 @@ import {
   type HttpBindings,
   type ServerType,
 } from "@hono/node-server";
-import { runtimeConfig, type RuntimeConfig } from "../src/config";
+import {
+  admitRuntimeConfig,
+  runtimeConfig,
+  type RuntimeConfig,
+} from "../src/config";
 import {
   backgroundSettled,
   closeDatabasePools,
@@ -89,6 +93,8 @@ import {
 import { readSecrets, runE2E, type Line } from "./e2e";
 
 const port = 55623;
+// The milton-admit service's deterministic run.app URL; never fetched here.
+const ADMIT_ORIGIN = "https://milton-admit-419545871671.us-east4.run.app";
 const sourceRoot = pathToFileURL(process.cwd() + "/");
 for (const port of [20201, 20202, 20203, 20204])
   await assertPortFree(port, "owned_fixture_port_in_use");
@@ -333,19 +339,24 @@ try {
   );
   assert.deepEqual(await trialTableGrants(), []);
   pass("0005 and 008 drop the unread trial tables, leaving no grants behind");
-  // 012: sessions no longer store the native access token. Rerunning converges.
-  for (let n = 0; n < 2; n++)
-    await appOwner.query(
-      sourceFile("./migrations/012-session-token-nullable.up.sql"),
-    );
-  assert.equal(
+  // 012 then 013: sessions no longer store the native access token, and the
+  // column is gone. Rerunning each converges.
+  const tokenColumn = async () =>
     (
       await owner.query(
         "SELECT is_nullable FROM information_schema.columns WHERE table_schema='milton_app' AND table_name='session' AND column_name='access_token'",
       )
-    ).rows[0].is_nullable,
-    "YES",
-  );
+    ).rows;
+  for (let n = 0; n < 2; n++)
+    await appOwner.query(
+      sourceFile("./migrations/012-session-token-nullable.up.sql"),
+    );
+  assert.deepEqual(await tokenColumn(), [{ is_nullable: "YES" }]);
+  for (let n = 0; n < 2; n++)
+    await appOwner.query(
+      sourceFile("./migrations/013-drop-session-access-token.up.sql"),
+    );
+  assert.deepEqual(await tokenColumn(), []);
   for (const [pool, statement] of [
     [authPool, "SELECT * FROM public.users"],
     [authPool, "SELECT * FROM milton_app.session"],
@@ -958,6 +969,8 @@ try {
   const nativeConfig = fixtureConfig({
     AUTH_DATABASE_URL: url("auth"),
     AUTH_APP_CLIENT_ID: "before-provision",
+    // Production's shape: auth fetches a Google ID token for this audience.
+    AUTH_ADMISSION_URL: ADMIT_ORIGIN,
     PORT: 20203,
   });
   // TLS regression uses production defaults, never the injected fixture pool.
@@ -1126,6 +1139,7 @@ try {
   );
   nativeConfig.AUTH_APP_CLIENT_ID = fixed.AUTH_APP_CLIENT_ID;
   let app: ReturnType<typeof createMiltonApp>;
+  let admit: ReturnType<typeof createAdmitApp>;
   const mail: { url: string; kind: string }[] = [];
   const { deliverMail } = await import("../../apps/auth/src/mail.ts");
   const drainMail = () =>
@@ -1143,45 +1157,65 @@ try {
   let dropLinkNotification = false;
   let preservationFailure: "none" | "before" | "after" = "none";
   let preservationCalls = 0;
+  let identityCalls = 0;
+  // A fictional Google ID token for the admission service, as the metadata
+  // server would mint for auth's service account; nothing verifies its signature
+  // here, since Cloud Run's front end does that in production.
+  const idToken = [
+    { alg: "RS256" },
+    { aud: ADMIT_ORIGIN, exp: Math.floor(Date.now() / 1000) + 3600 },
+    "fictional-signature",
+  ]
+    .map((p) =>
+      Buffer.from(typeof p === "string" ? p : JSON.stringify(p)).toString(
+        "base64url",
+      ),
+    )
+    .join(".");
+  // Stands in for Cloud Run's invoker check: no token for this audience, 403.
+  const invoke = (request: Request) =>
+    request.headers.get("x-serverless-authorization") === `Bearer ${idToken}`
+      ? admit(request)
+      : Promise.resolve(new Response(null, { status: 403 }));
+  // How auth's admission calls reach `invoke`: in process here; the loopback
+  // propagation groups below send them over HTTP to the admit role's own
+  // listener, which runs the same stand-in.
+  let admitVia: (request: Request) => Promise<Response> = invoke;
   const nativeService = createProvider(nativeConfig, {
     pool: authPool,
     boundaries: {
       fetch: async (input, init) => {
         if (
           String(input) ===
-          "https://app.meetmilton.com/internal/auth/preserve-eligibility"
+          "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=" +
+            encodeURIComponent(ADMIT_ORIGIN)
+        ) {
+          assert.equal(
+            new Headers(init?.headers).get("metadata-flavor"),
+            "Google",
+          );
+          identityCalls++;
+          return new Response(idToken);
+        }
+        if (
+          String(input) ===
+          ADMIT_ORIGIN + "/internal/auth/preserve-eligibility"
         ) {
           preservationCalls++;
           if (preservationFailure === "before")
             throw new Error("fictional_before_callback");
-          const response = await app(
-            new Request(String(input), {
-              ...init,
-              headers: {
-                ...Object.fromEntries(new Headers(init?.headers)),
-                Host: "app.meetmilton.com",
-              },
-            }),
-          );
+          const response = await admitVia(new Request(String(input), init));
           if (preservationFailure === "after")
             throw new Error("fictional_after_callback");
           return response;
         }
-        if (
-          String(input) === "https://app.meetmilton.com/internal/auth/admit"
-        ) {
+        if (String(input) === ADMIT_ORIGIN + "/internal/auth/admit") {
           if (dropLinkNotification)
             throw new Error("fictional_link_notification_lost");
-          const handoff = new Request(String(input), {
-            ...init,
-            headers: {
-              ...Object.fromEntries(new Headers(init?.headers)),
-              Host: "app.meetmilton.com",
-            },
-          });
+          const handoff = new Request(String(input), init);
           const [first, second] = await Promise.all([
-            app(handoff.clone()),
-            app(handoff.clone()),
+            admitVia(handoff.clone()),
+            admitVia(handoff.clone()),
           ]);
           assert.equal(first.status, 204, "native admission contract");
           assert.equal(second.status, 204, "concurrent native admission");
@@ -1219,7 +1253,6 @@ try {
     DATABASE_URL: url("app"),
     AUTH_APP_CLIENT_ID: fixed.AUTH_APP_CLIENT_ID,
     AUTH_APP_CLIENT_SECRET: fixed.AUTH_APP_CLIENT_SECRET,
-    AUTH_ADMISSION_SECRET: nativeConfig.AUTH_ADMISSION_SECRET,
     MILTON_TRIAL_FINGERPRINT_KEY: fingerprintKey,
   });
   // Drives an account change for a session the script already holds. As before,
@@ -1283,6 +1316,38 @@ try {
   await owner.query("UPDATE public.store_config SET trials_enabled=true");
   config.authFetch = transport;
   app = createMiltonApp(config, true);
+  // The admission service, on the app's database login, sharing the Stripe stub.
+  const admitConfig = admitRuntimeConfig({
+    NODE_ENV: "production",
+    AUTH_ISSUER: ISSUER,
+    DATABASE_URL: url("app"),
+    AUTH_ADMISSION_SECRET: nativeConfig.AUTH_ADMISSION_SECRET,
+    MILTON_TRIAL_FINGERPRINT_KEY: fingerprintKey,
+  });
+  admitConfig.billing = config.billing;
+  admit = createAdmitApp(admitConfig);
+  // The public app no longer answers admission, even with the right bearer.
+  for (const path of [
+    "/internal/auth/admit",
+    "/internal/auth/preserve-eligibility",
+  ])
+    assert.equal(
+      (
+        await app(
+          new Request("https://app.meetmilton.com" + path, {
+            method: "POST",
+            headers: {
+              Host: "app.meetmilton.com",
+              Authorization: `Bearer ${nativeConfig.AUTH_ADMISSION_SECRET}`,
+              "Content-Type": "application/json",
+            },
+            body: "{}",
+          }),
+        )
+      ).status,
+      404,
+      "public app serves no admission route",
+    );
   const authCookies = new Map<string, string>(),
     appCookies = new Map<string, string>();
   const request = async (
@@ -2800,6 +2865,8 @@ try {
     );
     assert.equal(await counts(), unchanged);
     assert(preservationCalls >= 4);
+    // One cached ID token served every admission and preservation call.
+    assert.equal(identityCalls, 1);
     pass(
       "lost native link notification -> unlink -> delete -> changed-email recreation preserves trial eligibility; callback uncertainty is safe and native-only unlink admits nobody",
     );
@@ -3367,8 +3434,9 @@ try {
   // them, and each request carries the canonical Host and X-Forwarded-For that
   // Google's load balancer forwards. The client is node:http rather than
   // fetch, since Node's fetch replaces Host and forces Sec-Fetch-Mode: cors,
-  // which no browser navigation sends. (Native's admission callback to the
-  // app stays in process, as the fixture's native service was built with it.)
+  // which no browser navigation sends. Native's admission calls go over loopback
+  // to the admit role's own listener; only the metadata server's ID token stays
+  // a stub in the fixture's native service.
   {
     const clearRates = () =>
       owner.query(
@@ -3478,6 +3546,32 @@ try {
       new URL(config.resource).origin,
       await listen(createMcpApp(mcpConfig)),
     );
+    // The admit role on its own listener, behind the invoker stand-in (403
+    // without the stub metadata token), as milton-admit sits behind Cloud Run's
+    // front end; auth's admission calls now reach it over loopback HTTP.
+    ports.set(ADMIT_ORIGIN, await listen(invoke));
+    let admittedOverLoopback = 0;
+    admitVia = async (request) => {
+      admittedOverLoopback++;
+      return loopback("203.0.113.252")(request.url, {
+        method: request.method,
+        headers: request.headers,
+        body: await request.text(),
+        signal: request.signal,
+      });
+    };
+    const refused = await loopback("203.0.113.253")(
+      ADMIT_ORIGIN + "/internal/auth/admit",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${nativeConfig.AUTH_ADMISSION_SECRET}`,
+          "Content-Type": "application/json",
+        },
+        body: "{}",
+      },
+    );
+    assert.equal(refused.status, 403, "no ID token, no admission");
     // Nothing these groups run may leave the machine. Global fetch and
     // node:http/https requests to anything but loopback are refused and
     // recorded (a caller may swallow the error: the MCP verifier turns a failed
@@ -4551,6 +4645,10 @@ try {
         "Birch reconnects the cleared registration",
       );
       assert.deepEqual(outbound, [], "no request left the machine");
+      assert(
+        admittedOverLoopback > 0,
+        "sign-ins admitted through milton-admit",
+      );
     }
     pass(
       "account deletion through the app leaves no row referencing the account or its native user (catalog-derived, every one populated first, one listed exclusion), no sign-in grant binding, only pinned id-only leftovers (table, column, rows) and none of its email or text; its key, assistant grant, unredeemed code, app session, native session and password stop working; the assistant registration only it authorized is deleted and a shared one keeps working for the other account without its name or contacts; the other account is untouched",

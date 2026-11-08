@@ -8,7 +8,6 @@ export interface RuntimeConfig extends StoreBindings {
   resource: string;
   appOrigin: string;
   oidc: { clientId: string; clientSecret: string };
-  admissionSecret: string;
   trialFingerprintKey: string;
   /** Private protocol transport injection; never populated from env/requests. */
   authFetch?: Configuration[typeof customFetch];
@@ -17,14 +16,48 @@ export interface RuntimeConfig extends StoreBindings {
   /** Stripe, for the app service only; unset means billing answers 503. */
   billing?: BillingConfig;
 }
-/** Stripe settings for the app service, from STRIPE_SECRET_KEY,
- * STRIPE_WEBHOOK_SECRET and STRIPE_PRICE_ID. The MCP service never reads them. */
-export interface BillingConfig {
+/** The admission service's settings (MILTON_SERVICE=admit): the database, the
+ * issuer whose accounts it admits, the bearer auth sends, the trial-eligibility
+ * key and Stripe. No browser, OIDC client or MCP setting. */
+export interface AdmitConfig extends StoreBindings {
+  issuer: string;
+  admissionSecret: string;
+  trialFingerprintKey: string;
+  /** Stripe without the webhook secret: admission only starts trials. */
+  billing?: StripeApiConfig;
+}
+/** Stripe API settings, from STRIPE_SECRET_KEY and STRIPE_PRICE_ID. */
+export interface StripeApiConfig {
   secretKey: string;
-  webhookSecret: string;
   priceId: string;
   /** Private dependency injection for tests; never populated from env. */
   fetch?: (url: string, init: RequestInit) => Promise<Response>;
+}
+/** Stripe settings for the app service: the API settings and
+ * STRIPE_WEBHOOK_SECRET. The MCP service never reads them. */
+export interface BillingConfig extends StripeApiConfig {
+  webhookSecret: string;
+}
+
+// Both unset leaves Stripe off; either set means both must be valid, or startup
+// fails. Values are never logged or echoed.
+export function stripeApiConfig(
+  env: NodeJS.ProcessEnv,
+): StripeApiConfig | undefined {
+  const secretKey = env.STRIPE_SECRET_KEY;
+  const priceId = env.STRIPE_PRICE_ID;
+  if (secretKey === undefined && priceId === undefined) return undefined;
+  if (
+    !secretKey ||
+    !priceId ||
+    !/^(sk|rk)_(test|live)_[A-Za-z0-9]{8,247}$/.test(secretKey) ||
+    !/^price_[A-Za-z0-9]{1,250}$/.test(priceId)
+  )
+    throw new StoreError(
+      "configuration",
+      "Milton's server configuration is unavailable.",
+    );
+  return { secretKey, priceId };
 }
 
 // All unset leaves billing off: the billing routes answer 503 and the rest of the
@@ -34,28 +67,19 @@ export interface BillingConfig {
 export function billingConfig(
   env: NodeJS.ProcessEnv,
 ): BillingConfig | undefined {
-  const secretKey = env.STRIPE_SECRET_KEY;
   const webhookSecret = env.STRIPE_WEBHOOK_SECRET;
-  const priceId = env.STRIPE_PRICE_ID;
+  const api = stripeApiConfig(env);
+  if (!api && webhookSecret === undefined) return undefined;
   if (
-    secretKey === undefined &&
-    webhookSecret === undefined &&
-    priceId === undefined
-  )
-    return undefined;
-  if (
-    !secretKey ||
+    !api ||
     !webhookSecret ||
-    !priceId ||
-    !/^(sk|rk)_(test|live)_[A-Za-z0-9]{8,247}$/.test(secretKey) ||
-    !/^whsec_[A-Za-z0-9+/=]{8,250}$/.test(webhookSecret) ||
-    !/^price_[A-Za-z0-9]{1,250}$/.test(priceId)
+    !/^whsec_[A-Za-z0-9+/=]{8,250}$/.test(webhookSecret)
   )
     throw new StoreError(
       "configuration",
       "Milton's server configuration is unavailable.",
     );
-  return { secretKey, webhookSecret, priceId };
+  return { ...api, webhookSecret };
 }
 
 const HOSTED_SUPPORT_EMAIL = "support@meetmilton.com";
@@ -64,6 +88,16 @@ export const supportEmail = (config: Pick<RuntimeConfig, "supportEmail">) =>
 export const isLoopback = (hostname: string) =>
   ["localhost", "127.0.0.1", "[::1]"].includes(hostname);
 
+const validUrl = (env: NodeJS.ProcessEnv, url: URL) =>
+  !url.username &&
+  !url.password &&
+  !url.search &&
+  !url.hash &&
+  (url.protocol === "https:" ||
+    (env.NODE_ENV !== "production" &&
+      url.protocol === "http:" &&
+      isLoopback(url.hostname)));
+
 export function mcpRuntimeConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): McpConfig {
@@ -71,15 +105,7 @@ export function mcpRuntimeConfig(
     const app = new URL(env.APP_ORIGIN!);
     const issuer = new URL(env.AUTH_ISSUER!);
     const resource = new URL(env.MCP_RESOURCE!);
-    const valid = (url: URL) =>
-      !url.username &&
-      !url.password &&
-      !url.search &&
-      !url.hash &&
-      (url.protocol === "https:" ||
-        (env.NODE_ENV !== "production" &&
-          url.protocol === "http:" &&
-          isLoopback(url.hostname)));
+    const valid = (url: URL) => validUrl(env, url);
     if (
       !valid(app) ||
       !valid(issuer) ||
@@ -112,8 +138,6 @@ export function runtimeConfig(
     env.AUTH_APP_CLIENT_ID.length > 2048 ||
     !env.AUTH_APP_CLIENT_SECRET ||
     env.AUTH_APP_CLIENT_SECRET.length < 32 ||
-    !env.AUTH_ADMISSION_SECRET ||
-    env.AUTH_ADMISSION_SECRET.length < 32 ||
     !env.MILTON_TRIAL_FINGERPRINT_KEY ||
     env.MILTON_TRIAL_FINGERPRINT_KEY.length < 32
   )
@@ -139,9 +163,38 @@ export function runtimeConfig(
       clientId: env.AUTH_APP_CLIENT_ID,
       clientSecret: env.AUTH_APP_CLIENT_SECRET,
     },
-    admissionSecret: env.AUTH_ADMISSION_SECRET,
     trialFingerprintKey: env.MILTON_TRIAL_FINGERPRINT_KEY,
     ...(support === undefined ? {} : { supportEmail: support }),
+    ...(billing ? { billing } : {}),
+  };
+}
+
+export function admitRuntimeConfig(
+  env: NodeJS.ProcessEnv = process.env,
+): AdmitConfig {
+  const issuer = URL.canParse(env.AUTH_ISSUER ?? "")
+    ? new URL(env.AUTH_ISSUER!)
+    : undefined;
+  if (
+    !issuer ||
+    !validUrl(env, issuer) ||
+    issuer.href.endsWith("/") ||
+    !env.AUTH_ADMISSION_SECRET ||
+    env.AUTH_ADMISSION_SECRET.length < 32 ||
+    !env.MILTON_TRIAL_FINGERPRINT_KEY ||
+    env.MILTON_TRIAL_FINGERPRINT_KEY.length < 32
+  )
+    throw new StoreError(
+      "configuration",
+      "Milton's server configuration is unavailable.",
+    );
+  // Admission starts trials but never verifies webhooks: no webhook secret.
+  const billing = stripeApiConfig(env);
+  return {
+    issuer: issuer.href,
+    admissionSecret: env.AUTH_ADMISSION_SECRET,
+    trialFingerprintKey: env.MILTON_TRIAL_FINGERPRINT_KEY,
+    DATABASE_URL: env.DATABASE_URL,
     ...(billing ? { billing } : {}),
   };
 }

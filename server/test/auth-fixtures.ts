@@ -25,7 +25,11 @@ export async function appStorage(pg: PGlite) {
   await pg.exec(
     `CREATE ROLE milton_auth_runtime; CREATE ROLE milton_app_runtime; CREATE ROLE milton_mcp_runtime;`,
   );
-  for (const file of ["005-app.up.sql", "012-session-token-nullable.up.sql"])
+  for (const file of [
+    "005-app.up.sql",
+    "012-session-token-nullable.up.sql",
+    "013-drop-session-access-token.up.sql",
+  ])
     await pg.exec(
       await Bun.file(new URL(`../migrations/${file}`, import.meta.url)).text(),
     );

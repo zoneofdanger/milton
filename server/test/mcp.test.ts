@@ -50,6 +50,22 @@ test("standalone MCP needs no browser secret and refuses noncanonical hosts", as
   ).toBe(200);
   for (const host of ["app.example", "revision.run.app"])
     expect((await request(host, "/mcp")).status).toBe(403);
+  // Admission is the separate milton-admit service: no internal route here,
+  // and no redirect toward the app either.
+  for (const path of [
+    "/internal/auth/admit",
+    "/internal/auth/preserve-eligibility",
+  ])
+    expect(
+      (
+        await app(
+          new Request(`https://mcp.example${path}`, {
+            method: "POST",
+            headers: { Host: "mcp.example" },
+          }),
+        )
+      ).status,
+    ).toBe(404);
 });
 
 const issuer = "https://auth.example/milton/auth";

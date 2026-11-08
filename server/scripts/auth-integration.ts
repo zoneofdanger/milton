@@ -27,7 +27,7 @@ import {
 } from "../src/store/connection-keys";
 import { fingerprintKeyCheck } from "../src/auth-admission";
 import { hash } from "../src/auth-oidc";
-import { appActive, bindingActive } from "../src/auth-authority";
+import { appActive } from "../src/auth-authority";
 import { checkProductRuntimeRole } from "./check-runtime-role";
 import { guideWorkerRoleAllowed } from "../src/guides/store";
 import { runGuideWorker } from "../src/guides/worker";

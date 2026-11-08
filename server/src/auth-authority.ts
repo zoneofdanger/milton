@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { z } from "zod";
 import type { RuntimeConfig } from "./config";
-import { database, type StoreBindings } from "./store";
+import { database } from "./store";
 import { AuthError } from "./token";
 
 export const unavailable = () =>
@@ -61,22 +61,6 @@ export function checkBinding(status: unknown, a: BindingClaims) {
     parsed.data.miltonSecurityGeneration !== a.generation
   )
     throw invalid();
-}
-export async function bindingActive(
-  config: StoreBindings & { resource: string },
-  a: BindingClaims,
-) {
-  let status: unknown;
-  try {
-    status = (
-      await database(config).query<{ status: unknown }>(
-        sql`SELECT ${bindingStatus(config, a)} AS status`,
-      )
-    )[0]?.status;
-  } catch {
-    throw unavailable();
-  }
-  checkBinding(status, a);
 }
 export async function securityStatus(
   config: RuntimeConfig,

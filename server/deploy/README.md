@@ -300,6 +300,58 @@ both), then:
 Rollback is the pre-migration snapshot; there is no down script. Every recorded app/MCP
 revision runs on either schema.
 
+## Test account and daily check
+
+`e2e@milton-test.invalid` is a fictional account that holds nothing but what the daily
+end-to-end check writes and retires. `.invalid` is a reserved top-level domain no mail
+system delivers to, and the account is created verified, so nothing is ever mailed for it
+(no verification, welcome or reset message reaches the auth mail queue or Resend).
+Usage and metric counts exclude it (`users.test_account`, server README).
+
+It has no trial row, unlike a normal new account. With billing configured, a trial row with
+no status gets a Stripe customer and a 30-day trial at the first sign-in
+(`ensureSubscription`), which would put a fictional customer in live Stripe and lock the
+account out when that trial ends without a card. So provisioning creates the Milton
+account itself, marked, before the first sign-in: admission finds it, the gate reads it as
+early access (the same working access), `/billing/checkout` answers 409 with no trial row,
+and the backfill skips test accounts, so nothing calls Stripe for it.
+
+### Provision the account (once, after 0009 and 011)
+
+Owner-only, from a checkout of the released commit after `bun install --frozen-lockfile`,
+in a shell that keeps no history (zsh: `HISTFILE=/dev/null zsh`), with the owner URLs read
+into the environment, never typed on a command line:
+
+```sh
+umask 077 && mkdir -p ~/keys
+# AUTH_OWNER_DATABASE_URL: milton_auth_delegate assuming milton_auth_owner, as for
+#   native migrations (options=-c%20role%3Dmilton_auth_owner).
+# MILTON_OWNER_DATABASE_URL: neondb_owner, as for db:migrate.
+bun --no-env-file server/scripts/test-account.ts --apply ~/keys/milton.test-account.env
+unset AUTH_OWNER_DATABASE_URL MILTON_OWNER_DATABASE_URL
+```
+
+Before any write it refuses an existing file, an email native already holds, an address
+outside `.invalid`, a wrong owner role on either connection and a database without 0009.
+Then, printing one JSON line per step (`step`, `ok`, `ms`; never a password, key, cookie
+or URL): it writes `E2E_EMAIL` and a random `E2E_PASSWORD` to the new mode-0600 file;
+creates the native user and its password credential in one owner transaction (native's
+own id shape and scrypt hash); creates the marked Milton account and its identity in one
+owner transaction; signs in over HTTPS exactly as a browser does (app `/login`, the auth
+sign-in page and form, the app's code flow) and checks the app shows this account; mints a
+read-and-save key expiring in 365 days through the app's key form; checks as the owner that
+exactly this account is marked, active, without a trial row and holds that key; and
+appends `E2E_CONNECTION_KEY`. Exit 0 only when every step passed.
+
+If a step after `secrets_file` fails, the file holds the password, so nothing is stranded:
+read the failing step, then either finish by hand (sign in at the app with the file's
+password, create the key on Connected assistants, append it as `E2E_CONNECTION_KEY`) or,
+with Peter's go, delete the half-made account as the owners (the native user by email,
+which cascades its credential and sessions; the Milton account through its identity) and
+the file, and run it again. A plain env file, not dotenvx: dotenvx would keep its private
+key next to the file in the same 0600 directory and protect nothing more, and `~/keys`
+already holds plain owner files.
+
 ## Optional guide worker
 
 The default-off private guide pilot has separate [operations and capability instructions](guides.md). No guide job, schedule, provider key or account enrollment is provisioned by its build.

@@ -2,7 +2,14 @@
  * files, inherited database credentials, external requests or live operations. */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { randomBytes, createHash, randomUUID } from "node:crypto";
@@ -49,6 +56,15 @@ import { ISSUER, AUTH_ORIGIN } from "../../apps/auth/src/config";
 import { assertPortFree, startCluster } from "../../apps/auth/scripts/cluster";
 import { fixtureConfig } from "../../apps/auth/test/fixture-config";
 import { AUTH_MIGRATIONS } from "../../apps/auth/scripts/migrations";
+import { createApp as createAuthPages } from "../../apps/auth/src/app";
+import { versionAssets } from "@milton/theme/assets";
+import {
+  CheckError,
+  ownerPools,
+  provisionTestAccount,
+  TEST_EMAIL,
+  type Fetch,
+} from "./test-account";
 
 const port = 55623;
 const sourceRoot = pathToFileURL(process.cwd() + "/");
@@ -2746,6 +2762,147 @@ try {
       "lost native link notification -> unlink -> delete -> changed-email recreation preserves trial eligibility; callback uncertainty is safe and native-only unlink admits nobody",
     );
   }
+  // The test account and its check, through the real auth pages, app and MCP,
+  // with billing configured (the Stripe fixture counts every call) and the
+  // native mail queue watched.
+  stage = "test account provisioning";
+  const authAssets = join(root, "auth-assets");
+  mkdirSync(join(authAssets, "fonts"), { recursive: true });
+  const theme = new URL("../packages/theme/public/", sourceRoot).pathname;
+  cpSync(join(theme, "fonts"), join(authAssets, "fonts"), { recursive: true });
+  cpSync(join(theme, "favicon.svg"), join(authAssets, "favicon.svg"));
+  writeFileSync(join(authAssets, "auth.css"), "body{}\n");
+  versionAssets(authAssets, [
+    "/auth.css",
+    "/favicon.svg",
+    "/fonts/geist-latin-variable.woff2",
+    "/fonts/jetbrains-mono-latin.woff2",
+    "/fonts/jetbrains-mono-regular.woff2",
+  ]);
+  const authPages = createAuthPages(nativeService, authAssets);
+  const dispatch: Fetch = async (target, init) => {
+    const u = new URL(target);
+    const headers = new Headers(init.headers);
+    headers.set("Host", u.host);
+    // The check's own client behind the load balancer, for key-lookup limits.
+    if (u.host === "mcp.meetmilton.com")
+      headers.set("X-Forwarded-For", "198.51.100.250, 192.0.2.1");
+    const forwarded = new Request(u, {
+      method: init.method,
+      headers,
+      body: init.body as BodyInit | undefined,
+      signal: init.signal,
+    });
+    if (u.origin === AUTH_ORIGIN) return authPages.fetch(forwarded);
+    if (u.origin === config.appOrigin) return app(forwarded);
+    if (u.host === "mcp.meetmilton.com") return mcp(forwarded);
+    throw new Error("external_network_refused");
+  };
+  const testOwnerNative = new URL(ownerUrl);
+  testOwnerNative.searchParams.set("options", "-c role=milton_auth_owner");
+  const owners = ownerPools(testOwnerNative.href, ownerUrl.href);
+  pools.push(owners.native, owners.writing);
+  await owner.query(
+    'delete from milton_auth."rateLimit"; delete from milton_guard.rate_bucket',
+  );
+  const quiet = async () =>
+    JSON.stringify(
+      (
+        await owner.query(
+          "select (select count(*) from milton_guard.mail_job) mail,(select count(*) from users where test_account) marked",
+        )
+      ).rows[0],
+    ) + JSON.stringify([stripe.customers, stripe.subscriptions, mail.length]);
+  const before = await quiet();
+  const secrets = join(root, "test-account.env");
+  const lines: string[] = [];
+  const provisioned = await provisionTestAccount({
+    email: TEST_EMAIL,
+    output: secrets,
+    owners,
+    fetch: dispatch,
+    report: (...step) => lines.push(JSON.stringify(step)),
+  });
+  // No mail queued or sent and no Stripe call; exactly one marked account.
+  assert.equal(
+    await quiet(),
+    before.replace('"marked":"0"', '"marked":"1"'),
+    "provisioning queues no mail and calls no Stripe API",
+  );
+  assert.equal(statSync(secrets).mode & 0o777, 0o600);
+  const values = Object.fromEntries(
+    readFileSync(secrets, "utf8")
+      .trim()
+      .split("\n")
+      .map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)]),
+  );
+  assert.deepEqual(Object.keys(values), [
+    "E2E_EMAIL",
+    "E2E_PASSWORD",
+    "E2E_CONNECTION_KEY",
+  ]);
+  assert.equal(values.E2E_EMAIL, TEST_EMAIL);
+  assert.match(values.E2E_CONNECTION_KEY!, /^mk_/);
+  assert(
+    !lines.some(
+      (l) =>
+        l.includes(values.E2E_PASSWORD!) ||
+        l.includes(values.E2E_CONNECTION_KEY!.slice(26)),
+    ),
+    "steps print no password or key",
+  );
+  assert.deepEqual(
+    (
+      await owner.query(
+        `select n."emailVerified" verified,u.status,u.test_account marked,t.subscription_status status_value,t.user_id is null no_trial
+         from milton_auth."user" n join identities i on i.provider=$1 and i.subject=n.id
+         join users u on u.id=i.user_id left join trial_accounts t on t.user_id=u.id
+         where n.email=$2`,
+        [ISSUER, TEST_EMAIL],
+      )
+    ).rows,
+    [
+      {
+        verified: true,
+        status: "active",
+        marked: true,
+        status_value: null,
+        no_trial: true,
+      },
+    ],
+  );
+  assert.equal(provisioned.subject.length, 32);
+  // Refusals, each before any write: an existing email, an existing file and
+  // an address outside .invalid.
+  const unchanged = await quiet();
+  for (const [email, output, code] of [
+    [TEST_EMAIL, join(root, "again.env"), "test_email_exists"],
+    ["other@milton-test.invalid", secrets, "output_exists"],
+    [
+      "person@example.com",
+      join(root, "real.env"),
+      "test_email_must_end_invalid",
+    ],
+  ] as const) {
+    await assert.rejects(
+      provisionTestAccount({
+        email,
+        output,
+        owners,
+        fetch: dispatch,
+        report: () => {},
+      }),
+      (e) => e instanceof CheckError && e.code === code,
+      code,
+    );
+    assert.equal(await quiet(), unchanged);
+  }
+  assert(
+    !existsSync(join(root, "again.env")) && !existsSync(join(root, "real.env")),
+  );
+  pass(
+    "test account provisioning: verified .invalid user, no mail, no Stripe call, marked active account with no trial, 0600 file; refuses existing email, existing file and real addresses",
+  );
   console.log(
     `PASS ${groups} product integration groups (Node26/PostgreSQL18 TLS, no external network)`,
   );

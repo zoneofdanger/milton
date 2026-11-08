@@ -94,6 +94,7 @@ const stripePost = async <T,>(
     | `customers/${string}`
     | "subscriptions"
     | "checkout/sessions"
+    | `checkout/sessions/${string}/expire`
     | "billing_portal/sessions",
   params: Record<string, string>,
   shape: z.ZodType<T>,
@@ -181,12 +182,25 @@ const redirectTo = (origin: string) =>
 const idempotencyKey = (kind: "customer" | "subscription", userId: string) =>
   `milton-${kind}-${userId}-${Math.floor(Date.now() / 60000)}`;
 
+const deletionUnderway = () =>
+  new AuthError(
+    "account_deleting",
+    "This account is being deleted, so it cannot subscribe. Nothing was charged.",
+    409,
+  );
+
 // Stored before anything else happens with it, so a later failure leaves it
-// findable.
+// findable. A refused link means the account's deletion has begun (or its row is
+// gone with it). Two creates in the same minute share an idempotency key, so
+// Stripe may have answered with the customer another request already linked:
+// that one (`held` reads the row's) is the deletion's to end. Any other is
+// linked nowhere and may hold the email, so it is deleted at Stripe straight
+// away, best effort: a failed delete is only logged, and leaves it at Stripe.
 async function createCustomer(
   billing: StripeApiConfig,
   userId: string,
   link: (customer: string) => Promise<string | undefined>,
+  held: () => Promise<string | null>,
   email?: string,
 ) {
   const created = await stripePost(
@@ -200,14 +214,20 @@ async function createCustomer(
     idempotencyKey("customer", userId),
   );
   const customer = await link(created.id);
-  if (!customer) throw stripeFailed();
-  return customer;
+  if (customer) return customer;
+  if ((await held()) !== created.id)
+    await deleteCustomer(billing, created.id).catch((error: unknown) =>
+      logUnexpected("billing", error),
+    );
+  throw deletionUnderway();
 }
 
 /** Gives an enrolled account with no subscription its 30-day Stripe trial; a
  * no-op for any other account or without billing. What Stripe already has is
  * stored rather than starting a second trial. A failure throws a 503 that says to
- * try again, and repeating the attempt is the retry. */
+ * try again, and repeating the attempt is the retry; an account whose deletion
+ * has begun gets the 409 `account_deleting` instead, before or during the
+ * attempt. */
 export async function ensureSubscription(
   config: StoreBindings & { billing?: StripeApiConfig },
   userId: string,
@@ -218,7 +238,10 @@ export async function ensureSubscription(
   try {
     const store = billingForAccount(config, userId);
     const account = await store.account();
-    // A test account never gets a trial, customer or subscription.
+    // An account being deleted (or gone) is refused, so sign-in and the
+    // backfill can say so; a test account never gets a trial, customer or
+    // subscription.
+    if (account.deleting) throw deletionUnderway();
     if (account.test || !account.enrolled || account.status !== null) return;
     // The row stays locked across customer, list and create. Two attempts across
     // a minute boundary have different keys, so only the lock stops each making a
@@ -228,8 +251,17 @@ export async function ensureSubscription(
     // customer can still leave an orphan once the minute turns: it is never
     // charged, may hold an email, and is removed by hand in Stripe if ever needed.
     await store.whileWaiting(async ({ customer: stored, link, save }) => {
+      // The row was empty when locked and stays locked, so nothing else has
+      // linked a customer to it since.
       const customer =
-        stored ?? (await createCustomer(billing, userId, link, email));
+        stored ??
+        (await createCustomer(
+          billing,
+          userId,
+          link,
+          async () => stored,
+          email,
+        ));
       await save(
         decidingSubscription(await listSubscriptions(billing, customer)) ??
           (await stripePost(
@@ -249,6 +281,9 @@ export async function ensureSubscription(
       );
     });
   } catch (error) {
+    // A deletion that began mid-enrolment is not a reason to try again.
+    if (error instanceof AuthError && error.code === "account_deleting")
+      throw error;
     logUnexpected("billing", error);
     throw new AuthError(
       "auth_unavailable",
@@ -258,19 +293,11 @@ export async function ensureSubscription(
   }
 }
 
-/** Deletes the account's Stripe customer, which ends any subscription at once. A
- * failed DELETE proves nothing either way: a key from the wrong mode gets a 404 for
- * a live customer who would go on being charged, and a repeat on a deleted customer
- * may answer anything. So on any failure, only a read that reports the customer
- * deleted counts as done. The row then forgets the customer before Milton's own
- * delete, which can still fail. Throws on anything else, including a customer on
- * record with billing unconfigured. Issues no refund. */
-export async function endStripeCustomer(config: RuntimeConfig, userId: string) {
-  const store = billingForAccount(config, userId);
-  const { customer } = await store.account();
-  if (!customer) return;
-  const billing = config.billing;
-  if (!billing) throw stripeFailed();
+// A failed DELETE proves nothing either way: a key from the wrong mode gets a 404
+// for a live customer who would go on being charged, and a repeat on a deleted
+// customer may answer anything. So on any failure, only a read that reports the
+// customer deleted counts as done; anything else throws.
+async function deleteCustomer(billing: StripeApiConfig, customer: string) {
   const path = `customers/${customer}`;
   const response = await stripeCall(billing, "DELETE", path);
   if (!response.ok)
@@ -278,6 +305,23 @@ export async function endStripeCustomer(config: RuntimeConfig, userId: string) {
       await stripeCall(billing, "GET", path),
       z.object({ deleted: z.literal(true) }),
     );
+}
+
+/** Deletes the account's Stripe customer, which ends any subscription at once,
+ * inside account deletion's transaction. It reads the customer holding the row
+ * enrolment holds across its Stripe calls, so it waits for one in flight, and
+ * the row stays held until the transaction ends; once deletion has begun,
+ * nothing links a new customer (linkStripeCustomer). The row then forgets the
+ * customer before Milton's own delete, which can still fail. Throws on a failed
+ * delete (see deleteCustomer), including a customer on record with billing
+ * unconfigured. Issues no refund. */
+export async function endStripeCustomer(config: RuntimeConfig, userId: string) {
+  const store = billingForAccount(config, userId);
+  const customer = await store.lockCustomer();
+  if (!customer) return;
+  const billing = config.billing;
+  if (!billing) throw stripeFailed();
+  await deleteCustomer(billing, customer);
   await store.clearCustomer();
 }
 
@@ -370,6 +414,10 @@ async function billingRoute(ctx: PageContext): Promise<Response> {
       "This test account has no subscription.",
       409,
     );
+  // Asked before any Stripe call; a deletion that begins after this read is
+  // caught where a new customer would be linked (createCustomer) and once a
+  // Checkout session is open (below).
+  if (account.deleting) throw deletionUnderway();
   if (url.pathname === "/billing/portal") {
     if (!account.customer)
       throw new AuthError(
@@ -419,6 +467,7 @@ async function billingRoute(ctx: PageContext): Promise<Response> {
           billing,
           store.userId,
           store.linkCustomer,
+          async () => (await store.account()).customer,
           user.email,
         )),
       payment_method_collection: "always",
@@ -430,8 +479,24 @@ async function billingRoute(ctx: PageContext): Promise<Response> {
         Math.floor(Date.now() / 1000) + CHECKOUT_LIFETIME_SECONDS,
       ),
     },
-    redirectTo("https://checkout.stripe.com"),
+    redirectTo("https://checkout.stripe.com").extend({
+      id: z.string().regex(/^cs_[A-Za-z0-9_]{1,251}$/),
+    }),
   );
+  // A deletion that began since the first check (during the live read or the
+  // email copy, or after a link): the session is expired, best effort, before
+  // anyone is sent to it. One that begins after this read still deletes the
+  // customer; whether Stripe then refuses to complete the open session is not
+  // verified at Stripe.
+  if ((await store.account()).deleting) {
+    await stripePost(
+      billing,
+      `checkout/sessions/${session.id}/expire`,
+      {},
+      z.object({}),
+    ).catch((error: unknown) => logUnexpected("billing", error));
+    throw deletionUnderway();
+  }
   return navigation(session.url);
 }
 

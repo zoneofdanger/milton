@@ -123,6 +123,24 @@ describe("auth product boundaries", () => {
       "http://127.0.0.1:19912/internal/auth/admit",
     ]);
     expect(calls[0]!.headers.has("x-serverless-authorization")).toBe(false);
+    // A 410 says the account's deletion has begun; any other refusal is false.
+    for (const [status, answer] of [
+      [410, "deleting"],
+      [409, false],
+      [503, false],
+    ] as const) {
+      const refusing = admissionClient(
+        {
+          AUTH_ADMISSION_URL: "http://127.0.0.1:19912",
+          AUTH_ADMISSION_SECRET: secret,
+        },
+        async () => new Response(null, { status }),
+      );
+      expect([status, await refusing("/internal/auth/admit", {})]).toEqual([
+        status,
+        answer,
+      ]);
+    }
   });
   test("client metadata URLs need an https DNS host without credentials", async () => {
     const { metadataDocumentUrlAllowed: allowed } =

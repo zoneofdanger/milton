@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { z } from "zod";
 import type { RuntimeConfig } from "./config";
 import { database, lockActiveAccount, lookupIdentityAccount } from "./store";
+import type { StoreDatabase, StoreSession } from "./store/database";
 import type { PageContext, SessionUser } from "./auth-session";
 import { endStripeCustomer } from "./billing";
 import { hash } from "./auth-oidc";
@@ -227,15 +228,30 @@ async function advanceOperation(config: RuntimeConfig, original: Operation) {
   let op = await read();
   if (op.progress === "complete") return op;
   if (op.progress === "pending") {
-    await database(config).query(
-      sql`SELECT milton_guard.begin_operation(${op.operation_id},${op.subject},${op.incarnation},${op.kind === "disconnect" ? op.client_id : null},${op.kind})`,
-    );
-    await database(config).query(
-      sql`UPDATE milton_app.lifecycle SET progress='refused' WHERE operation_id=${op.operation_id}::uuid AND progress='pending'`,
-    );
+    // One transaction: billing reads a deletion as begun from this progress, so
+    // native refusal never commits while it still reads pending. A retry of a
+    // refusal that did commit returns the original operation.
+    await database(config).transaction(async (tx) => {
+      await tx.query(
+        sql`SELECT milton_guard.begin_operation(${op.operation_id},${op.subject},${op.incarnation},${op.kind === "disconnect" ? op.client_id : null},${op.kind})`,
+      );
+      await tx.query(
+        sql`UPDATE milton_app.lifecycle SET progress='refused' WHERE operation_id=${op.operation_id}::uuid AND progress='pending'`,
+      );
+    });
     op = await read();
   }
   if (op.kind === "delete") {
+    // The billing store's calls, inside this phase's transaction.
+    const scoped = (connection: StoreDatabase, tx: StoreSession) => ({
+      ...config,
+      storeDatabase: {
+        ...connection,
+        query: tx.query.bind(tx),
+        transaction: async <T>(work: (s: StoreSession) => Promise<T>) =>
+          work(tx),
+      },
+    });
     await database(config).withConnection((connection) =>
       connection.transaction(async (tx) => {
         const current = operationSchema.parse(
@@ -246,41 +262,41 @@ async function advanceOperation(config: RuntimeConfig, original: Operation) {
           )[0],
         );
         if (current.progress !== "refused") return;
-        const scoped = {
-          ...config,
-          storeDatabase: {
-            ...connection,
-            query: tx.query.bind(tx),
-            transaction: async <T>(work: (s: typeof tx) => Promise<T>) =>
-              work(tx),
-          },
-        };
-        await endStripeCustomer(scoped, current.user_id);
+        await endStripeCustomer(scoped(connection, tx), current.user_id);
         await tx.query(
           sql`UPDATE milton_app.lifecycle SET progress='stripe-ended' WHERE operation_id=${op.operation_id}::uuid`,
         );
       }),
     );
-    await database(config).transaction(async (tx) => {
-      const current = operationSchema.parse(
-        (
-          await tx.query(
-            sql`SELECT * FROM milton_app.lifecycle WHERE operation_id=${op.operation_id}::uuid FOR UPDATE`,
-          )
-        )[0],
-      );
-      if (current.progress !== "stripe-ended") return;
-      await tx.query(
-        sql`SELECT id FROM users WHERE id=${current.user_id} FOR UPDATE`,
-      );
-      await tx.query(sql`DELETE FROM users WHERE id=${current.user_id}`);
-      await tx.query(
-        sql`DELETE FROM milton_app.session WHERE issuer=${current.issuer} AND subject=${current.subject} AND incarnation=${current.incarnation}`,
-      );
-      await tx.query(
-        sql`UPDATE milton_app.lifecycle SET progress='writing-erased' WHERE operation_id=${op.operation_id}::uuid`,
-      );
-    });
+    await database(config).withConnection((connection) =>
+      connection.transaction(async (tx) => {
+        const current = operationSchema.parse(
+          (
+            await tx.query(
+              sql`SELECT * FROM milton_app.lifecycle WHERE operation_id=${op.operation_id}::uuid FOR UPDATE`,
+            )
+          )[0],
+        );
+        if (current.progress !== "stripe-ended") return;
+        // Nothing links a customer once deletion has begun, but one linked
+        // anyway (by an image without that refusal, while a release rolls out)
+        // is ended here, holding the billing row until the erase, so the account
+        // is never erased with a live customer. That row before the account's:
+        // an enrolment holding it may still take a share lock on the account's
+        // row to save, so the reverse order could deadlock.
+        await endStripeCustomer(scoped(connection, tx), current.user_id);
+        await tx.query(
+          sql`SELECT id FROM users WHERE id=${current.user_id} FOR UPDATE`,
+        );
+        await tx.query(sql`DELETE FROM users WHERE id=${current.user_id}`);
+        await tx.query(
+          sql`DELETE FROM milton_app.session WHERE issuer=${current.issuer} AND subject=${current.subject} AND incarnation=${current.incarnation}`,
+        );
+        await tx.query(
+          sql`UPDATE milton_app.lifecycle SET progress='writing-erased' WHERE operation_id=${op.operation_id}::uuid`,
+        );
+      }),
+    );
     op = await read();
     if (op.progress !== "writing-erased" && op.progress !== "complete")
       throw unavailable();

@@ -67,6 +67,13 @@ export function metadataDocumentUrlAllowed(clientIdUrl: string): boolean {
   );
 }
 const invalid = () => new APIError("BAD_REQUEST", { error: "invalid_grant" });
+// Final, not a retry: the app answered an admission 410, the account's
+// deletion having begun. Whichever path admits, the person reads this.
+const ACCOUNT_DELETING = {
+  error: "account_deleting",
+  message: "This Milton account is being deleted.",
+};
+const accountDeleting = () => new APIError("FORBIDDEN", ACCOUNT_DELETING);
 const hash = (v: string) => createHash("sha256").update(v).digest("hex");
 export function createProvider(
   config: Config,
@@ -289,14 +296,15 @@ export function createProvider(
     );
     const identity = result.rows[0]?.identity;
     if (!identity) throw invalid();
-    if (
-      !(await admission("/internal/auth/admit", {
-        issuer: ISSUER,
-        subject,
-        continuation,
-        ...identity,
-      }))
-    )
+    const admitted = await admission("/internal/auth/admit", {
+      issuer: ISSUER,
+      subject,
+      continuation,
+      ...identity,
+    });
+    // A deletion that began after the identity read above: final, not a retry.
+    if (admitted === "deleting") throw accountDeleting();
+    if (admitted !== true)
       throw new APIError("SERVICE_UNAVAILABLE", {
         error: "admission_retry_required",
       });
@@ -530,13 +538,13 @@ export function createProvider(
           // This happens before native enters the removal transaction. The app
           // reads native status and persists metadata without a parent-lock cycle.
           if (
-            !(await admission("/internal/auth/preserve-eligibility", {
+            (await admission("/internal/auth/preserve-eligibility", {
               issuer: ISSUER,
               subject: original.id,
               sid: s.securitySession.id,
               incarnation: original.miltonIdentityIncarnation,
               generation: original.miltonSecurityGeneration,
-            }))
+            })) !== true
           )
             throw new APIError("SERVICE_UNAVAILABLE", {
               error: "eligibility_preservation_retry_required",
@@ -994,6 +1002,14 @@ export function createProvider(
         return json({ error: "retryable_dependency_failure" }, 503);
       return response;
     } catch (error) {
+      // The link handoff's admission runs after native answers, outside its
+      // error handling, so its final refusal is answered here.
+      if (
+        error instanceof APIError &&
+        (error.body as { error?: unknown } | undefined)?.error ===
+          ACCOUNT_DELETING.error
+      )
+        return json(ACCOUNT_DELETING, 403);
       console.error("auth_request", safeError(error));
       return json({ error: "retryable_dependency_failure" }, 503);
     } finally {

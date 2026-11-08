@@ -596,6 +596,35 @@ try {
   );
   assert.equal(await (await call("/get-session")).json(), null);
   assert.equal((await call("/sign-in/email", { email, password })).status, 200);
+  // A link whose admission finds the account's deletion begun (the app answers
+  // 410) is refused as final, not retryable; native has linked it already.
+  admitStatus = 410;
+  const refusedLink = await social(true);
+  admitStatus = 204;
+  assert.deepEqual(
+    [
+      refusedLink.status,
+      ((await refusedLink.json()) as { error?: string }).error,
+    ],
+    [403, "account_deleting"],
+    "a link during a deletion is refused as final",
+  );
+  const relinked = (
+    await authPool.query(
+      `select id from milton_auth.account where "providerId"='google' and "userId"=$1`,
+      [session.user.id],
+    )
+  ).rows[0];
+  assert(relinked);
+  assert.equal(
+    (await call("/unlink-account", { accountId: relinked.id })).status,
+    200,
+  );
+  // The extra link and sign-in spend fixture rate windows the later groups use.
+  await p.owner.query(
+    'delete from milton_auth."rateLimit"; delete from milton_guard.rate_bucket',
+  );
+  assert.equal((await call("/sign-in/email", { email, password })).status, 200);
   const credential = (
     await authPool.query(
       `select id from milton_auth.account where "providerId"='credential' and "userId"=$1`,

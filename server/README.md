@@ -449,7 +449,13 @@ Disconnect and deletion use durable original-incarnation operations. Refusal com
 before cleanup; reconnect/recreation cannot change an earlier operation's targets.
 Deletion requires exact confirmation, live authoritative native freshness and current
 verified-identity fingerprint retention. Stripe cancellation commits before writing
-erasure; native bounded cleanup is last. An incomplete operation stays retryable and is
+erasure; native bounded cleanup is last. Native refusal and the progress billing reads
+commit together; once they do, billing links no Stripe customer for the account (one
+Stripe made for a refused link and linked nowhere is deleted, best effort, a failure
+only logged), checkout expires a session it opened, best effort, when it finds the
+deletion afterwards (finished or not: the lifecycle row outlives the erase), and the erase first ends any customer still linked. A deletion
+that begins after checkout's last read still deletes the customer; whether Stripe then
+refuses to complete that open session is not verified at Stripe. An incomplete operation stays retryable and is
 never presented as deleted. Logout ends this browser's local and native session while
 leaving offline assistants connected.
 
@@ -679,7 +685,7 @@ the account lock, in the transaction that would publish them. Exact replay still
 recovers an already accepted receipt. Web view/download remains available.
 
 With billing configured, no new approval lands until the account has a subscription:
-The authenticated native admission handoff starts the trial first, and a Stripe failure stops it with a retryable 503. An approval the native provider
+The authenticated native admission handoff starts the trial first, and a Stripe failure stops it with a retryable 503; an account whose deletion has begun gets a 410, which native turns into a final 403 `account_deleting` on sign-in, consent and explicit linking alike. An approval the native provider
 already holds refreshes without any Milton page, so existing accounts depend on the
 backfill. The signed Stripe
 webhook keeps `subscription_status` and the dates current; the next request rechecks

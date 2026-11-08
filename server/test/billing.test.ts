@@ -1,4 +1,4 @@
-import { clientSettings } from "./auth-fixtures";
+import { appStorage, clientSettings } from "./auth-fixtures";
 import { expect, spyOn, test } from "bun:test";
 import { createHmac } from "node:crypto";
 import { sql } from "drizzle-orm";
@@ -13,6 +13,7 @@ import {
 import { linkStripeCustomer } from "../src/store/billing";
 import { localStore, openTransactions } from "./local-store";
 import { fixtureStore } from "./store-fixtures";
+import { billingAccount } from "../src/store/billing";
 
 const appOrigin = "http://localhost:3001";
 // Obviously fake values in the shapes Stripe uses.
@@ -68,6 +69,8 @@ const webhookSecret = "whsec_fixtureNotASecret";
 async function webhookFixture(configured = true) {
   const { stripe, billing } = fakeStripe();
   const local = await localStore();
+  // Billing reads the account's deletion from the app schema.
+  await appStorage(local.pg);
   await local.db.query(sql`UPDATE store_config SET trials_enabled=true`);
   await local.db.query(sql`INSERT INTO users(id) VALUES (${userId})`);
   // An ended subscription on its Stripe customer.
@@ -191,6 +194,10 @@ test("the gate follows the subscription status: unknown or missing is allowed, p
     expect(await linkStripeCustomer(local.db, userId, "cus_second")).toBe(
       "cus_fixture",
     );
+    // An account that is gone reads as being deleted: billing sells it nothing.
+    expect(
+      await billingAccount(local.db, "m_00000000-0000-4000-8000-000000000099"),
+    ).toMatchObject({ deleting: true, enrolled: false });
     for (const refused of [
       `subscription_status='${"x".repeat(65)}'`,
       "stripe_customer_id='sub_notACustomer'",
@@ -607,6 +614,8 @@ test("a partial subscription list is a failed read: the resync counts it as fail
 
 test("the backfill refuses without trials or a live key, dry-runs, creates, leaves failures at NULL, and reruns as a no-op", async () => {
   const local = await localStore();
+  // Billing reads the account's deletion from the app schema.
+  await appStorage(local.pg);
   const { billing } = fakeStripe();
   const calls: string[] = [];
   let failing = false;

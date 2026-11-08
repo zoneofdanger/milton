@@ -20,6 +20,7 @@ import {
   billingAccount,
   cancelReturningIdentities,
   clearStripeCustomer,
+  lockStripeAccount,
   enrollForBackfill,
   linkStripeCustomer,
   lockWaitingSubscription,
@@ -481,7 +482,14 @@ export function billingForAccount(bindings: StoreBindings, userId: string) {
     userId,
     account: () => billingAccount(db, userId),
     linkCustomer: (customer: string) =>
-      linkStripeCustomer(db, userId, customer),
+      db.transaction(async (tx) => {
+        await lockStripeAccount(tx, userId);
+        return linkStripeCustomer(tx, userId, customer);
+      }),
+    /** The stored customer, its row held for the rest of the caller's
+     * transaction (account deletion's). */
+    lockCustomer: async () =>
+      (await lockStripeAccount(db, userId))?.customer ?? null,
     clearCustomer: () => clearStripeCustomer(db, userId),
     /** Reads Stripe with no transaction open, as the webhook does, and returns
      * what the read found, storing it if anything, only over an unchanged row (see

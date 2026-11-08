@@ -1,9 +1,10 @@
 # Deletion inventory: what account deletion does to every column that can hold text.
 #
-# Rule: every column of a text, character, JSON, bytea, tsvector or XML type (or an
-# array or domain of one) in every table a fresh install of the three migration
-# tracks creates (server/drizzle, apps/auth/migrations, server/migrations), except
-# the Drizzle migrator's own journal. server/test/deletion-inventory.test.ts applies
+# Rule: every column of a text, character, JSON, bytea, tsvector, XML or enum type
+# (or an array, domain or composite type holding one, resolved recursively) in every
+# table and materialized view a fresh install of the three migration tracks creates
+# (server/drizzle, apps/auth/migrations, server/migrations), except the Drizzle
+# migrator's own journal. server/test/deletion-inventory.test.ts applies
 # all three tracks to an empty PostgreSQL and fails on any such column missing here,
 # or listed here but gone. Classes:
 #   deleted       account deletion removes the row

@@ -158,9 +158,10 @@ the lock and journal and says so):
   so it needs that line or `-- no-drop-or-rename: <reason>`.
 
 `test/deletion-inventory.test.ts` applies all three tracks to an empty PGlite and fails
-on any text, character, JSON, bytea, tsvector or XML column (or array of one) not
-classified in [docs/deletion-inventory.txt](../docs/deletion-inventory.txt) as deleted
-by account deletion, hidden (kept, never served) or not personal, with a reason.
+on any text, character, JSON, bytea, tsvector, XML or enum column (or array, domain or
+composite holding one), in a table or materialized view, not classified in
+[docs/deletion-inventory.txt](../docs/deletion-inventory.txt) as deleted by account
+deletion, hidden (kept, never served) or not personal, with a reason.
 
 ## Deploy
 

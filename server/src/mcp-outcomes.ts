@@ -227,6 +227,9 @@ export const nextSteps: Record<string, NextStep> = {
     "tell_user",
     "Tell the person to revoke an unused connection key in Milton first; don't retry.",
   ),
+  // Billing's own refusals, met only in sign-in and checkout.
+  billing_unavailable: retryOnce,
+  enrolment_taken_over: retryOnce,
   // Store invariants and configuration a correct call never meets (Milton
   // derives descriptions and reasons itself).
   configuration: unavailableNow,

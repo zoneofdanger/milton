@@ -430,8 +430,9 @@ describe("OAuth profile refusals before database access", () => {
     const script = `
       const { createProvider } = await import(${JSON.stringify(import.meta.resolve("../src/provider.ts"))});
       const { fixtureConfig } = await import(${JSON.stringify(import.meta.resolve("./fixture-config.ts"))});
+      let queries = 0;
       const pool = { on: () => pool, connect: async () => { throw new Error("refused"); },
-        query: async (t, v) => ({ rows: [{ allowed: t.includes("take_rate") && v[2] === 120 }] }) };
+        query: async (t, v) => (queries++, { rows: [{ allowed: t.includes("take_rate") && v[2] === 120 }] }) };
       const service = createProvider(fixtureConfig(), { pool });
       let seen;
       service.provider.handler = async (r) => {
@@ -439,15 +440,17 @@ describe("OAuth profile refusals before database access", () => {
         seen = r.headers.get("content-type") === "application/json"
           ? { json: Object.entries(JSON.parse(text)) }
           : { form: [...(await r.formData())], reread: [...new URLSearchParams(text)] };
-        seen.length = r.headers.get("content-length");
+        seen.stale = ["content-length", "content-encoding", "transfer-encoding", "content-md5", "digest", "content-digest"].filter((h) => r.headers.has(h));
         return new Response(null, { status: 204 });
       };
       const out = [];
       for (const [path, type, body] of ${JSON.stringify(cases)}) {
         seen = null;
+        queries = 0;
         const r = await service.handler(new Request("https://auth.meetmilton.com/api/auth" + path,
-          { method: "POST", headers: { "content-type": type, "content-length": String(Buffer.byteLength(body)) }, body }), "127.0.0.1");
-        out.push({ status: r.status, error: r.status === 204 ? null : (await r.json()).error, seen });
+          { method: "POST", headers: { "content-type": type, "content-length": String(Buffer.byteLength(body)),
+            "content-encoding": "identity", "content-md5": "fictional", digest: "sha-256=fictional", "content-digest": "sha-256=:fictional:" }, body }), "127.0.0.1");
+        out.push({ status: r.status, error: r.status === 204 ? null : (await r.json()).error, queries, seen });
       }
       console.log(JSON.stringify(out));`;
     const run = Bun.spawnSync(
@@ -474,23 +477,26 @@ describe("OAuth profile refusals before database access", () => {
     expect(
       JSON.parse(run.stdout.toString().trim().split("\n").at(-1)!),
     ).toEqual([
-      { status: 415, error: "unsupported_media_type", seen: null },
+      { status: 415, error: "unsupported_media_type", queries: 0, seen: null },
       {
         status: 204,
         error: null,
-        seen: { form: bom, reread: bom, length: null },
+        queries: 1,
+        seen: { form: bom, reread: bom, stale: [] },
       },
       {
         status: 204,
         error: null,
-        seen: { form: entries, reread: entries, length: null },
+        queries: 1,
+        seen: { form: entries, reread: entries, stale: [] },
       },
-      { status: 413, error: "request_too_large", seen: null },
+      { status: 413, error: "request_too_large", queries: 0, seen: null },
       {
         status: 204,
         error: null,
+        queries: 1,
         seen: {
-          length: null,
+          stale: [],
           json: [
             ["redirect_uris", ["https://client.example/callback"]],
             ["client_name", "Fictional é 🔒"],

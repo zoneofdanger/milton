@@ -625,6 +625,17 @@ export function createProvider(
       if ([...new Set(f.keys())].some((k) => f.getAll(k).length > 1))
         return json({ error: "ambiguous_form" }, 400);
     }
+    if (path === "/request-password-reset") {
+      body.redirectTo = AUTH_ORIGIN + "/reset-password";
+      source =
+        mediaType === "application/json"
+          ? JSON.stringify(body)
+          : new URLSearchParams(body as Record<string, string>).toString();
+    }
+    // Re-encoding can grow the body, so the rebuilt body meets the incoming
+    // limit too, before any database work.
+    if (Buffer.byteLength(source) > 16384)
+      return json({ error: "request_too_large" }, 413);
     if (inFlight >= 4) return json({ error: "busy_retry" }, 429);
     inFlight++;
     acquired = true;
@@ -658,18 +669,17 @@ export function createProvider(
       headers.set("x-milton-transport-ip", ip);
       if (request.method === "POST") headers.set("content-type", mediaType);
       if (path === "/oauth2/register") headers.delete("cookie");
-      if (path === "/request-password-reset") {
-        body.redirectTo = AUTH_ORIGIN + "/reset-password";
-        source =
-          mediaType === "application/json"
-            ? JSON.stringify(body)
-            : new URLSearchParams(body as Record<string, string>).toString();
-      }
-      // Re-encoding can grow the body, so the rebuilt body meets the incoming
-      // limit too, and its length is left for the runtime to set.
-      if (Buffer.byteLength(source) > 16384)
-        return json({ error: "request_too_large" }, 413);
-      headers.delete("content-length");
+      // The rebuilt body has its own length, and no client header may
+      // describe the original bytes.
+      for (const k of [
+        "content-length",
+        "content-encoding",
+        "transfer-encoding",
+        "content-md5",
+        "digest",
+        "content-digest",
+      ])
+        headers.delete(k);
       const native = new Request(request.url, {
         method: request.method,
         headers,

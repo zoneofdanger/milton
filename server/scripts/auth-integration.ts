@@ -59,9 +59,12 @@ import { AUTH_MIGRATIONS } from "../../apps/auth/scripts/migrations";
 import { createApp as createAuthPages } from "../../apps/auth/src/app";
 import { versionAssets } from "@milton/theme/assets";
 import {
+  browser,
   CheckError,
   ownerPools,
+  PRODUCTION,
   provisionTestAccount,
+  signIn,
   TEST_EMAIL,
   type Fetch,
 } from "./test-account";
@@ -2908,6 +2911,77 @@ try {
   );
   pass(
     "test account provisioning: verified .invalid user, no mail, no Stripe call, marked active account with no trial, 0600 file; refuses existing email, existing file and real addresses",
+  );
+  stage = "test account partial provisioning";
+  // A failure at either commit leaves nothing anyone can sign in to, so no
+  // unmarked account, trial or Stripe call can follow; --resume converges.
+  {
+    const refused = new Error("fictional_connection_lost");
+    const broken = (pool: pg.Pool) =>
+      ({
+        query: pool.query.bind(pool),
+        connect: async () => {
+          throw refused;
+        },
+      }) as unknown as pg.Pool;
+    const counts = async () =>
+      JSON.stringify(
+        (
+          await owner.query(
+            "select (select count(*) from users where not test_account) unmarked,(select count(*) from trial_accounts t join users u on u.id=t.user_id where u.test_account) trials",
+          )
+        ).rows[0],
+      ) + JSON.stringify([stripe.customers, stripe.subscriptions]);
+    const held = await counts();
+    for (const side of ["writing", "native"] as const) {
+      const email = `e2e-partial-${side}@milton-test.invalid`;
+      const file = join(root, `partial-${side}.env`);
+      await assert.rejects(
+        provisionTestAccount({
+          email,
+          output: file,
+          owners: { ...owners, [side]: broken(owners[side]) },
+          fetch: dispatch,
+          report: () => {},
+        }),
+        (e) => e === refused,
+      );
+      await owner.query(
+        'delete from milton_auth."rateLimit"; delete from milton_guard.rate_bucket',
+      );
+      const password = /^E2E_PASSWORD=(.+)$/m.exec(
+        readFileSync(file, "utf8"),
+      )![1]!;
+      await assert.rejects(
+        signIn(browser(PRODUCTION, dispatch), PRODUCTION, email, password),
+        (e) => e instanceof CheckError && e.code === "sign_in_refused",
+        `${side}: nobody can sign in after a partial run`,
+      );
+      assert.equal(await counts(), held, `${side}: no unmarked account`);
+      await provisionTestAccount({
+        email,
+        output: file,
+        owners,
+        fetch: dispatch,
+        report: () => {},
+        resume: true,
+      });
+      assert.match(readFileSync(file, "utf8"), /^E2E_CONNECTION_KEY=mk_/m);
+    }
+    assert.equal(await counts(), held, "resumed accounts stay marked");
+    assert.equal(
+      (
+        await owner.query(
+          `select count(*)::int n from users u join identities i on i.user_id=u.id
+           where u.test_account and not exists(select 1 from milton_auth."user" n where n.id=i.subject)`,
+        )
+      ).rows[0].n,
+      0,
+      "no marked account is left without its native user",
+    );
+  }
+  pass(
+    "partial provisioning at either commit leaves no account anyone can sign in to; --resume converges on the marked, trial-free account",
   );
   stage = "e2e check";
   // What one run adds to the account, by table: the runbook's daily footprint.

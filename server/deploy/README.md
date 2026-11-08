@@ -335,20 +335,24 @@ Before any write it refuses an existing file, an email native already holds, an 
 outside `.invalid`, a wrong owner role on either connection and a database without 0009.
 Then, printing one JSON line per step (`step`, `ok`, `ms`; never a password, key, cookie
 or URL): it writes `E2E_EMAIL` and a random `E2E_PASSWORD` to the new mode-0600 file;
-creates the native user and its password credential in one owner transaction (native's
-own id shape and scrypt hash); creates the marked Milton account and its identity in one
-owner transaction; signs in over HTTPS exactly as a browser does (app `/login`, the auth
-sign-in page and form, the app's code flow) and checks the app shows this account; mints a
-read-and-save key expiring in 365 days through the app's key form; checks as the owner that
-exactly this account is marked, active, without a trial row and holds that key; and
-appends `E2E_CONNECTION_KEY`. Exit 0 only when every step passed.
+chooses the native user id and, in one owner transaction, creates the marked Milton
+account without a trial row and its identity bound to that id; only then creates the native
+user and its password credential in one owner transaction (native's own scrypt hash), the
+step that makes sign-in possible, so no one can ever sign in to an account that is not
+already marked and trial-free; checks that binding again; signs in over HTTPS exactly as a
+browser does (app `/login`, the auth sign-in page and form, the app's code flow) and checks
+the app shows this account; mints a read-and-save key expiring in 365 days through the
+app's key form; checks as the owner that exactly this account is marked, active, without a
+trial row and holds that key; and appends `E2E_CONNECTION_KEY`. Exit 0 only when every
+step passed.
 
-If a step after `secrets_file` fails, the file holds the password, so nothing is stranded:
-read the failing step, then either finish by hand (sign in at the app with the file's
-password, create the key on Connected assistants, append it as `E2E_CONNECTION_KEY`) or,
-with Peter's go, delete the half-made account as the owners (the native user by email,
-which cascades its credential and sessions; the Milton account through its identity) and
-the file, and run it again. A plain env file, not dotenvx: dotenvx would keep its private
+If any step fails, never sign in by hand. Fix the cause and run the same command with
+`--resume` added and the same file: it reads the file's password, refuses a file that
+already holds a key, binds or finds the marked, trial-free account (adopting the one marked
+account a failed run left without its native user, refusing an unmarked one), creates the
+native user only if it is missing, verifies the binding and only then signs in and mints the
+key. The rehearsal fails each commit in turn and shows nobody can sign in, then resumes. A
+plain env file, not dotenvx: dotenvx would keep its private
 key next to the file in the same 0600 directory and protect nothing more, and `~/keys`
 already holds plain owner files.
 

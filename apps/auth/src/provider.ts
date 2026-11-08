@@ -665,6 +665,11 @@ export function createProvider(
             ? JSON.stringify(body)
             : new URLSearchParams(body as Record<string, string>).toString();
       }
+      // Re-encoding can grow the body, so the rebuilt body meets the incoming
+      // limit too, and its length is left for the runtime to set.
+      if (Buffer.byteLength(source) > 16384)
+        return json({ error: "request_too_large" }, 413);
+      headers.delete("content-length");
       const native = new Request(request.url, {
         method: request.method,
         headers,

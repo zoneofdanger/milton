@@ -415,6 +415,12 @@ describe("OAuth profile refusals before database access", () => {
       ],
       // Legitimate bodies keep order, empty values and Unicode.
       ["/oauth2/token", form, "b=1&a=&c=%C3%A9+%F0%9F%94%92&d=x%26y"],
+      // Re-encoding grows this 6,032-byte body past the 16 KiB limit.
+      [
+        "/oauth2/token",
+        form,
+        "grant_type=authorization_code&x=" + "!".repeat(6000),
+      ],
       [
         "/oauth2/register",
         "application/json",
@@ -433,14 +439,15 @@ describe("OAuth profile refusals before database access", () => {
         seen = r.headers.get("content-type") === "application/json"
           ? { json: Object.entries(JSON.parse(text)) }
           : { form: [...(await r.formData())], reread: [...new URLSearchParams(text)] };
+        seen.length = r.headers.get("content-length");
         return new Response(null, { status: 204 });
       };
       const out = [];
       for (const [path, type, body] of ${JSON.stringify(cases)}) {
         seen = null;
         const r = await service.handler(new Request("https://auth.meetmilton.com/api/auth" + path,
-          { method: "POST", headers: { "content-type": type }, body }), "127.0.0.1");
-        out.push({ status: r.status, seen });
+          { method: "POST", headers: { "content-type": type, "content-length": String(Buffer.byteLength(body)) }, body }), "127.0.0.1");
+        out.push({ status: r.status, error: r.status === 204 ? null : (await r.json()).error, seen });
       }
       console.log(JSON.stringify(out));`;
     const run = Bun.spawnSync(
@@ -467,12 +474,23 @@ describe("OAuth profile refusals before database access", () => {
     expect(
       JSON.parse(run.stdout.toString().trim().split("\n").at(-1)!),
     ).toEqual([
-      { status: 415, seen: null },
-      { status: 204, seen: { form: bom, reread: bom } },
-      { status: 204, seen: { form: entries, reread: entries } },
+      { status: 415, error: "unsupported_media_type", seen: null },
       {
         status: 204,
+        error: null,
+        seen: { form: bom, reread: bom, length: null },
+      },
+      {
+        status: 204,
+        error: null,
+        seen: { form: entries, reread: entries, length: null },
+      },
+      { status: 413, error: "request_too_large", seen: null },
+      {
+        status: 204,
+        error: null,
         seen: {
+          length: null,
           json: [
             ["redirect_uris", ["https://client.example/callback"]],
             ["client_name", "Fictional é 🔒"],

@@ -549,11 +549,17 @@ export function createProvider(
       return json({ error: "unsupported_media_type" }, 415);
     try {
       source = await boundedBody(request);
-      if (source)
-        body =
-          mediaType === "application/json"
-            ? JSON.parse(source)
-            : Object.fromEntries(new URLSearchParams(source));
+      // Native is sent the body re-serialised from what the guards read, so
+      // no later decode (a BOM strip, another parser) can find a field the
+      // guards did not see.
+      if (source && mediaType === "application/json") {
+        body = JSON.parse(source);
+        source = JSON.stringify(body);
+      } else if (source) {
+        const fields = new URLSearchParams(source);
+        body = Object.fromEntries(fields);
+        source = fields.toString();
+      }
       if (!body || typeof body !== "object" || Array.isArray(body))
         return json({ error: "invalid_body" }, 400);
     } catch {

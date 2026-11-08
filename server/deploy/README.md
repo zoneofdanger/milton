@@ -268,8 +268,10 @@ fictional end-to-end check account (see [Test account and daily check](#test-acc
 It is additive: one column with a constant default is a catalog change with no rewrite,
 every existing account reads false, and serving app/MCP code never names the column, so
 traffic stays open. App/MCP code from this change on reads it (the test-account exemption
-from trials and billing), so release that code only after 0009, and after its release roll
-app/MCP back past it only together with the snapshot. 011 narrows app's INSERT on `users` to `id`, `status` and `created_at` (the
+from trials and billing), so release that code only after 0009. Roll that code back like
+any schema-compatible release, code only, keeping 0009 and 011 (see [Rolling back past the
+test-account release](#rolling-back-past-the-test-account-release)); never restore the
+snapshot for it, which would discard every later save. 011 narrows app's INSERT on `users` to `id`, `status` and `created_at` (the
 only columns it could insert before) so no runtime login can set the mark. 0009 sets a 5 s
 lock limit in its own transaction: the ADD COLUMN briefly locks `users` exclusively. Rehearse
 on a disposable branch or database first (`server/scripts/check-auth-integration.ts` applies
@@ -299,8 +301,9 @@ both), then:
    production the next new sign-up exercises it, so watch `milton-app-errors-log` for a
    `permission denied` after applying 011.
 
-Rollback is the pre-migration snapshot; there is no down script. Every recorded app/MCP
-revision runs on either schema.
+A failed migration's rollback is the pre-migration snapshot, used only before any code that
+reads the column serves; there is no down script. Every recorded app/MCP revision runs on
+either schema, so rolling code back never needs it.
 
 ## Test account and daily check
 
@@ -333,6 +336,30 @@ Each step needs Peter's go; the release coordinator runs it.
 5. Provision the account; confirm the snapshot gate (Run the check); run the check once by
    hand.
 6. Create `milton-e2e-daily` (below; milton-duo).
+
+### Rolling back past the test-account release
+
+Roll back code only; keep 0009 and 011 and never restore a snapshot for it, which would
+discard every save made since.
+
+- **App/MCP** to a revision before `6fbd8af`: the older code never names `test_account`,
+  and its account creation inserts only `id`, which 011 still allows, so it serves
+  normally. The test account keeps working too, since it has no trial row (older sign-in
+  starts nothing for an account without one and checkout answers 409), but its exemption is
+  no longer structural: older code would start a trial for a stray empty trial row and
+  close access on an ended one. Pause the daily check while that code serves
+  (`gcloud scheduler jobs pause milton-e2e-daily --project=milton-510506 --location=us-east4`;
+  resume it after rolling forward). The job pins its own image, so a service rollback does
+  not move it.
+- **Backfill:** never run a checkout older than `1694b1b` while the test account exists.
+  That backfill counts the test account as waiting (no trial row) and with `--apply` gives
+  it a trial row and a live Stripe customer and 30-day trial for `e2e@milton-test.invalid`;
+  its dry run only counts it.
+- **Auth** to a revision before `d2a7e78`: auth again queues mail to `.invalid` addresses.
+  The check never asks for mail, but anyone's password-reset request for the test address
+  would then queue a message the delivery job sends to Resend, where it cannot be
+  delivered. Keep auth at or after `d2a7e78` while the test account exists, or accept that
+  for the rollback's duration.
 
 ### Provision the account (once, after steps 1–4)
 
@@ -369,7 +396,10 @@ If any step fails, never sign in by hand. Fix the cause and run the same command
 already holds a key, binds or finds the marked, trial-free account (adopting the one marked
 account a failed run left without its native user, refusing an unmarked one), creates the
 native user only if it is missing, verifies the binding and only then signs in and mints the
-key. The rehearsal fails each commit in turn and shows nobody can sign in, then resumes. A
+key. The rehearsal fails a run before the Milton account's commit and between the two
+commits (nobody can sign in afterwards), and after a native commit that succeeded but whose
+acknowledgment was lost (the native user exists, bound to the marked account); `--resume`
+finishes each. A
 plain env file, not dotenvx: dotenvx would keep its private
 key next to the file in the same 0600 directory and protect nothing more, and `~/keys`
 already holds plain owner files.

@@ -392,6 +392,38 @@ describe("OAuth profile refusals before database access", () => {
       expect(await refused(reply)).toEqual([415, "unsupported_media_type"]);
     expect(queries).toHaveLength(admitted);
   });
+
+  test("on Node, a combined Content-Type cannot hide a multipart field from the wrapper", () => {
+    // Node's formData() reads the last type in a combined header, Bun's the
+    // first, so this runs on Node. A probe stands in for native and records
+    // the fields native's own formData() call would recover.
+    const script = `
+      const { createProvider } = await import(${JSON.stringify(import.meta.resolve("../src/provider.ts"))});
+      const { fixtureConfig } = await import(${JSON.stringify(import.meta.resolve("./fixture-config.ts"))});
+      const pool = { on: () => pool, connect: async () => { throw new Error("refused"); },
+        query: async (t, v) => ({ rows: [{ allowed: t.includes("take_rate") && v[2] === 120 }] }) };
+      const service = createProvider(fixtureConfig(), { pool });
+      let seen = null;
+      service.provider.handler = async (r) => { seen = [...(await r.formData()).keys()]; return new Response(null, { status: 204 }); };
+      const r = await service.handler(new Request("https://auth.meetmilton.com/api/auth/oauth2/token", { method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded; charset=UTF-8, multipart/form-data; boundary=abc" },
+        body: '--abc\\r\\nContent-Disposition: form-data; name="client_assertion"\\r\\n\\r\\nx.y.z\\r\\n--abc--\\r\\n' }), "127.0.0.1");
+      console.log(JSON.stringify({ status: r.status, seen }));`;
+    const run = Bun.spawnSync(
+      [
+        "node",
+        "--experimental-strip-types",
+        "--input-type=module",
+        "-e",
+        script,
+      ],
+      { env: { PATH: process.env.PATH }, stderr: "pipe" },
+    );
+    expect(run.exitCode).toBe(0);
+    expect(
+      JSON.parse(run.stdout.toString().trim().split("\n").at(-1)!),
+    ).toEqual({ status: 415, seen: null });
+  });
 });
 
 test("static assets cache by content version and keep the other security headers", async () => {

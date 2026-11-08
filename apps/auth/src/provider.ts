@@ -535,15 +535,16 @@ export function createProvider(
     let source = "";
     let body: Record<string, unknown> = {};
     // Native lowercases the type and parses by it, so every body guard below
-    // reads this one value; any other POST type is refused before native.
-    const mediaType = (request.headers.get("content-type") ?? "")
-      .split(";")[0]!
-      .trim()
-      .toLowerCase();
+    // reads this one value, and native is sent only this value. Any other POST
+    // type is refused before native, as is a combined (comma-joined) header,
+    // whose later types some runtimes' formData() honours.
+    const contentType = request.headers.get("content-type") ?? "";
+    const mediaType = contentType.split(";")[0]!.trim().toLowerCase();
     if (
       request.method === "POST" &&
-      mediaType !== "application/json" &&
-      mediaType !== "application/x-www-form-urlencoded"
+      (contentType.includes(",") ||
+        (mediaType !== "application/json" &&
+          mediaType !== "application/x-www-form-urlencoded"))
     )
       return json({ error: "unsupported_media_type" }, 415);
     try {
@@ -649,6 +650,7 @@ export function createProvider(
       ])
         headers.delete(k);
       headers.set("x-milton-transport-ip", ip);
+      if (request.method === "POST") headers.set("content-type", mediaType);
       if (path === "/oauth2/register") headers.delete("cookie");
       if (path === "/request-password-reset") {
         body.redirectTo = AUTH_ORIGIN + "/reset-password";

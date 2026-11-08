@@ -1080,10 +1080,372 @@ try {
   group(
     "shared atomic rate bucket across pools and effective runtime privilege audits",
   );
+  {
+    // Server-side callers put many people behind one address. Each reply is
+    // "status error-or-code", and runs of equal replies are counted, so a
+    // limit's refusal and native's own answer are both asserted exactly.
+    await p.owner.query(
+      'delete from milton_auth."rateLimit"; delete from milton_guard.rate_bucket',
+    );
+    const send = (
+      path: string,
+      peer: string,
+      body?: Record<string, unknown>,
+      type = "application/x-www-form-urlencoded",
+      authorization?: string,
+    ) =>
+      service.handler(
+        new Request(ISSUER + path, {
+          method: body ? "POST" : "GET",
+          headers: {
+            ...(body ? { "content-type": type } : {}),
+            ...(["/sign-in/email", "/request-password-reset"].includes(path)
+              ? { origin: AUTH_ORIGIN }
+              : {}),
+            ...(authorization ? { authorization } : {}),
+          },
+          ...(body
+            ? {
+                body:
+                  type === "application/json"
+                    ? JSON.stringify(body)
+                    : new URLSearchParams(
+                        body as Record<string, string>,
+                      ).toString(),
+              }
+            : {}),
+        }),
+        peer,
+      );
+    const outcome = async (r: Response) => {
+      const b = (await r.json().catch(() => ({}))) as {
+        error?: string;
+        code?: string;
+      };
+      return `${r.status} ${b.error ?? b.code ?? ""}`.trim();
+    };
+    // Runs of equal outcomes: [outcome, count][].
+    const runs = (v: string[]) =>
+      v.reduce<[string, number][]>((out, x) => {
+        const last = out.at(-1);
+        if (last?.[0] === x) last[1]++;
+        else out.push([x, 1]);
+        return out;
+      }, []);
+    const refresh = (c: { client_id: string; client_secret: string }) => ({
+      grant_type: "refresh_token",
+      refresh_token: secret(),
+      client_id: c.client_id,
+      client_secret: c.client_secret,
+    });
+    // One connector backend registers six connections in a minute; the
+    // rest come from their own addresses, so (a) has its clients.
+    const registered: { client_id: string; client_secret: string }[] = [];
+    const registrations: string[] = [];
+    for (let i = 0; i < 37; i++) {
+      const r = await send(
+        "/oauth2/register",
+        i < 6 ? "198.51.100.1" : `198.51.100.${i + 10}`,
+        {
+          client_name: "Fictional connector",
+          redirect_uris: ["https://assistant.example.invalid/callback"],
+          token_endpoint_auth_method: "client_secret_post",
+          grant_types: ["authorization_code", "refresh_token"],
+        },
+        "application/json",
+      );
+      if (r.status === 201) {
+        registered.push(
+          (await r.json()) as { client_id: string; client_secret: string },
+        );
+        registrations.push("201");
+      } else registrations.push(await outcome(r));
+    }
+    // (a) Twenty-one authenticated clients refresh from one address, and
+    // thirty-one revoke from another.
+    const distinct: string[] = [];
+    for (const c of registered.slice(0, 21))
+      distinct.push(
+        await outcome(await send("/oauth2/token", "198.51.100.2", refresh(c))),
+      );
+    const revoked: string[] = [];
+    for (const c of registered.slice(0, 31))
+      revoked.push(
+        await outcome(
+          await send("/oauth2/revoke", "198.51.100.6", {
+            token: secret(),
+            client_id: c.client_id,
+            client_secret: c.client_secret,
+          }),
+        ),
+      );
+    // (b) One client from one address past its own limit.
+    const same: string[] = [];
+    for (let i = 0; i < 61; i++)
+      same.push(
+        await outcome(
+          await send("/oauth2/token", "198.51.100.3", refresh(registered[0]!)),
+        ),
+      );
+    // (c) The app's egress address has spent its network bucket. The app
+    // still exchanges, introspects and reads UserInfo when it proves itself
+    // (its secret, or its own access token that native would still accept,
+    // however the header spaces it); requests that only name it, carry
+    // another client's real token, or carry an app token that is expired,
+    // revoked or no longer current, do not.
+    const mintApp = () =>
+      authorize(
+        {
+          client_id: client.AUTH_APP_CLIENT_ID,
+          client_secret: client.AUTH_APP_CLIENT_SECRET,
+        },
+        "openid profile email",
+        undefined,
+        false,
+      );
+    const appGrant = await mintApp();
+    const expiredGrant = await mintApp();
+    const revokedGrant = await mintApp();
+    const assistantToken = (
+      await authorize(
+        assistant,
+        "openid offline_access milton:read",
+        "https://mcp.meetmilton.com/mcp",
+      )
+    ).access_token;
+    const tokenRow = (t: string) =>
+      createHash("sha256").update(t).digest("base64url");
+    // Token rows change only under their subject's parent lock (token_gate).
+    const alterToken = async (t: string, change: string) => {
+      const c = await p.owner.connect();
+      try {
+        await c.query("begin");
+        await c.query(
+          `select set_config('credential.locked',(select "userId" from milton_auth."oauthAccessToken" where token=$1),true)`,
+          [tokenRow(t)],
+        );
+        await c.query(
+          `update milton_auth."oauthAccessToken" set ${change} where token=$1`,
+          [tokenRow(t)],
+        );
+        await c.query("commit");
+      } finally {
+        c.release();
+      }
+    };
+    await alterToken(
+      expiredGrant.access_token,
+      `"expiresAt"=now()-interval '1 second'`,
+    );
+    await alterToken(revokedGrant.access_token, "revoked=now()");
+    for (let i = 0; i < 120; i++) await send("/ok", "198.51.100.4");
+    const userInfo = (authorization: string) =>
+      send(
+        "/oauth2/userinfo",
+        "198.51.100.4",
+        undefined,
+        undefined,
+        authorization,
+      ).then(outcome);
+    const app = {
+      client_id: client.AUTH_APP_CLIENT_ID,
+      client_secret: client.AUTH_APP_CLIENT_SECRET,
+    };
+    const firstParty: string[] = [];
+    for (let i = 0; i < 25; i++)
+      firstParty.push(
+        await outcome(
+          await send("/oauth2/token", "198.51.100.4", refresh(app)),
+        ),
+      );
+    firstParty.push(
+      await outcome(
+        await send("/oauth2/introspect", "198.51.100.4", {
+          token: secret(),
+          ...app,
+        }),
+      ),
+    );
+    for (let i = 0; i < 3; i++)
+      firstParty.push(await userInfo("Bearer " + appGrant.access_token));
+    firstParty.push(await userInfo("Bearer\t" + appGrant.access_token));
+    const named = [
+      await outcome(
+        await send("/oauth2/token", "198.51.100.4", {
+          ...refresh(app),
+          client_secret: secret(),
+        }),
+      ),
+      await userInfo("Bearer " + secret()),
+      await userInfo("Bearer " + assistantToken),
+      await userInfo("Bearer " + expiredGrant.access_token),
+      await userInfo("Bearer " + revokedGrant.access_token),
+    ];
+    // A password change advances the generation (002's credential gate);
+    // the same app token then proves nothing. The generation is restored so
+    // later groups keep their sessions.
+    const subject = (
+      await p.owner.query(
+        `select "userId" as id from milton_auth."oauthAccessToken" where token=$1`,
+        [tokenRow(appGrant.access_token)],
+      )
+    ).rows[0].id as string;
+    const generation = (
+      await p.owner.query(
+        `select "miltonSecurityGeneration" as g from milton_auth."user" where id=$1`,
+        [subject],
+      )
+    ).rows[0].g as string;
+    await p.owner.query(
+      `update milton_auth."user" set "miltonSecurityGeneration"=milton_credential.next_fence() where id=$1`,
+      [subject],
+    );
+    named.push(await userInfo("Bearer " + appGrant.access_token));
+    await p.owner.query(
+      `update milton_auth."user" set "miltonSecurityGeneration"=$2 where id=$1`,
+      [subject, generation],
+    );
+    // (e) Once the network bucket refuses, invented clients, tokens and
+    // emails (and a targeted email's existing bucket) take nothing.
+    const target = "targeted@example.invalid";
+    await send(
+      "/sign-in/email",
+      "198.51.100.7",
+      { email: target, password: "A fictional wrong password 000" },
+      "application/json",
+    );
+    const buckets = async () =>
+      (
+        await p.owner.query(
+          "select count(*)::int as n, sum(hits)::int as hits from milton_guard.rate_bucket",
+        )
+      ).rows[0];
+    const before = await buckets();
+    const spam: string[] = [];
+    for (let i = 0; i < 10; i++) {
+      spam.push(
+        await outcome(
+          await send("/oauth2/token", "198.51.100.4", {
+            ...refresh({ client_id: secret(), client_secret: secret() }),
+          }),
+        ),
+        await outcome(
+          await send("/oauth2/revoke", "198.51.100.4", {
+            token: secret(),
+            client_id: secret(),
+          }),
+        ),
+        await outcome(
+          await send(
+            "/oauth2/userinfo",
+            "198.51.100.4",
+            undefined,
+            undefined,
+            "Bearer " + secret(),
+          ),
+        ),
+        await outcome(
+          await send(
+            "/sign-in/email",
+            "198.51.100.4",
+            {
+              email: i % 2 ? target : `invented-${i}@example.invalid`,
+              password: "A fictional wrong password 000",
+            },
+            "application/json",
+          ),
+        ),
+      );
+    }
+    const after = await buckets();
+    // (d) Native's per-path sign-in and mail limits, on the shared buckets.
+    const signIn: string[] = [];
+    for (let i = 0; i < 4; i++)
+      signIn.push(
+        await outcome(
+          await send(
+            "/sign-in/email",
+            "198.51.100.5",
+            {
+              email: `limited-${i}@example.invalid`,
+              password: "A fictional wrong password 000",
+            },
+            "application/json",
+          ),
+        ),
+      );
+    const resetMail: string[] = [];
+    for (let i = 0; i < 4; i++)
+      resetMail.push(
+        await outcome(
+          await send(
+            "/request-password-reset",
+            "198.51.100.5",
+            { email: `limited-${i}@example.invalid` },
+            "application/json",
+          ),
+        ),
+      );
+    await drain();
+    const storage = (
+      await p.owner.query(
+        `select (select count(*)::int from milton_auth."rateLimit") as native, (select count(*)::int from milton_guard.rate_bucket where key !~ '^[0-9a-f]{64}$') as plain`,
+      )
+    ).rows[0];
+    assert.deepEqual(
+      {
+        registrations: runs(registrations),
+        distinct: runs(distinct),
+        revoked: runs(revoked),
+        same: runs(same),
+        firstParty: runs(firstParty),
+        named,
+        spam: runs(spam),
+        growth: { before, after },
+        signIn: runs(signIn),
+        resetMail: runs(resetMail),
+        storage,
+      },
+      {
+        registrations: [["201", 37]],
+        // Native authenticated each client, then refused the unknown token.
+        distinct: [["400 invalid_grant", 21]],
+        revoked: [["400 invalid_request", 31]],
+        same: [
+          ["400 invalid_grant", 60],
+          ["429 rate_limited", 1],
+        ],
+        firstParty: [
+          ["400 invalid_grant", 25],
+          ["200", 5],
+        ],
+        // Named app, invented token, another client's real token, expired,
+        // revoked, and no-longer-current app tokens.
+        named: Array(6).fill("429 rate_limited"),
+        spam: [["429 rate_limited", 40]],
+        growth: { before, after: before },
+        signIn: [
+          ["401 INVALID_EMAIL_OR_PASSWORD", 3],
+          ["429", 1],
+        ],
+        resetMail: [
+          ["200", 3],
+          ["429", 1],
+        ],
+        storage: { native: 0, plain: 0 },
+      },
+    );
+  }
+  group(
+    "server-side callers keep per-client token, revoke and UserInfo buckets, the proven app skips the network bucket, refused requests take no other bucket, and native limits use hashed shared buckets",
+  );
   await p.owner.query(
     'delete from milton_auth."rateLimit"; delete from milton_guard.rate_bucket',
   );
-  await httpFixture(service);
+  await httpFixture(service, {
+    rateSecret: config.AUTH_RATE_SECRET,
+    owner: p.owner,
+  });
   group(
     "compiled Node HTTPS Hono mounting, canonical Host, local assets, escaped forms, Origin and host-only cookie/security handoff",
   );

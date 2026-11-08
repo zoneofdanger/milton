@@ -8,6 +8,10 @@ import {
   getSessionFromCtx,
 } from "better-auth/api";
 import { getCurrentAuthEndpointContext } from "@better-auth/core/context";
+import {
+  decodeBasicCredentials,
+  parseAccessTokenAuthorization,
+} from "@better-auth/core/oauth2";
 import { jwt } from "better-auth/plugins";
 import {
   getOAuthProviderState,
@@ -79,6 +83,10 @@ export function createProvider(
       query_timeout: 6000,
     });
   pool.on("error", (error) => console.error("auth_database", safeError(error)));
+  // Every rate bucket, native or the wrapper's, is an HMAC'd key in
+  // milton_guard.take_rate: one atomic statement, no plain address stored.
+  const rate = (v: string) =>
+    createHmac("sha256", config.AUTH_RATE_SECRET).update(v).digest("hex");
   const networkFetch = options.boundaries?.fetch ?? fetch;
   const field: DBFieldAttribute = {
     type: "string",
@@ -325,7 +333,47 @@ export function createProvider(
         requireEmailVerification: true,
       },
     },
-    rateLimit: { enabled: true, storage: "database", window: 60, max: 120 },
+    rateLimit: {
+      enabled: true,
+      // Native decides per address and path ("ip|path") in one take_rate
+      // call; its default per-path 120/minute repeats the wrapper's network
+      // bucket, so only the rules below cost a round trip.
+      customStorage: {
+        consume: async (key, rule) => {
+          const r = await pool.query<{ allowed: boolean }>(
+            "select milton_guard.take_rate($1,$2,$3) as allowed",
+            [rate("native:" + key), rule.window, rule.max],
+          );
+          return { allowed: r.rows[0]?.allowed === true, retryAfter: null };
+        },
+      },
+      // The first matching key wins. These replace native's built-in sign-in
+      // and mail rules and the OAuth plugin's, so every native limit is here;
+      // README's table gives each one's reason.
+      customRules: {
+        // Password guessing per address (Better Auth's default).
+        "/sign-in/*": { window: 10, max: 3 },
+        "/sign-up/*": { window: 10, max: 3 },
+        "/change-password": { window: 10, max: 3 },
+        // Each sends mail (Better Auth's default).
+        "/request-password-reset": { window: 60, max: 3 },
+        "/send-verification-email": { window: 60, max: 3 },
+        // Called from servers that share addresses: the wrapper keys these
+        // per client or token instead (see handler).
+        "/oauth2/token": false,
+        "/oauth2/introspect": false,
+        "/oauth2/revoke": false,
+        "/oauth2/userinfo": false,
+        // A person's browser (the OAuth plugin's default).
+        "/oauth2/authorize": { window: 60, max: 30 },
+        // Every registration is a permanent anonymous client row with no
+        // cleanup, so storage sets this: 20 a minute caps one address at
+        // 28,800 rows a day, while still admitting 20 new connections a
+        // minute through one assistant's egress (native's 5 refused the 6th).
+        "/oauth2/register": { window: 60, max: 20 },
+        "/**": false,
+      },
+    },
     databaseHooks: {
       account: {
         create: {
@@ -515,6 +563,16 @@ export function createProvider(
         refreshTokenExpiresIn: 2592000,
         codeExpiresIn: 600,
         refreshTokenReuseInterval: 0,
+        // Native OAuth limits are rateLimit.customRules above.
+        rateLimit: {
+          token: false,
+          authorize: false,
+          introspect: false,
+          revoke: false,
+          register: false,
+          rotateClientKeys: false,
+          userinfo: false,
+        },
       }),
       cimd({
         fetchClientMetadataResource,
@@ -640,23 +698,86 @@ export function createProvider(
     inFlight++;
     acquired = true;
     const ip = isIP(peer) ? peer : "127.0.0.1";
-    const rate = (v: string) =>
-      createHmac("sha256", config.AUTH_RATE_SECRET).update(v).digest("hex");
-    try {
-      const network = await pool.query<{ allowed: boolean }>(
-        "select milton_guard.take_rate($1,$2,$3) as allowed",
-        [rate("network:" + ip), 60, 120],
-      );
-      if (!network.rows[0]?.allowed)
-        return json({ error: "rate_limited" }, 429);
-      if (typeof body.email === "string") {
-        const account = await pool.query<{ allowed: boolean }>(
-          "select milton_guard.take_rate($1,$2,$3) as allowed",
-          [rate("account:" + body.email.toLowerCase()), 60, 10],
-        );
-        if (!account.rows[0]?.allowed)
-          return json({ error: "rate_limited" }, 429);
+    // Server-side callers (the app, assistant backends) put many people
+    // behind one address, so their endpoints are keyed per client (token,
+    // revoke) or per access token (UserInfo) and address, not per address.
+    // The client is read as native reads it: a Basic header first, else the
+    // body. A client or token that is only named, not proven, is keyed on
+    // the caller's own address, so it spends nothing of anyone's elsewhere.
+    let caller: string | undefined, callerSecret: string | undefined;
+    if (
+      ["/oauth2/token", "/oauth2/introspect", "/oauth2/revoke"].includes(path)
+    ) {
+      const authorization = request.headers.get("authorization");
+      if (authorization && /^Basic +/i.test(authorization)) {
+        try {
+          const basic = decodeBasicCredentials(authorization);
+          caller = basic.clientId;
+          callerSecret = basic.clientSecret;
+        } catch {
+          // Native refuses it; only the network bucket applies.
+        }
+      } else {
+        if (typeof body.client_id === "string") caller = body.client_id;
+        if (typeof body.client_secret === "string")
+          callerSecret = body.client_secret;
       }
+    }
+    // UserInfo's token, read by native's own parser (any scheme, any
+    // whitespace), so both always see the same token. The wrapper refuses
+    // POST UserInfo, so the header is native's only source.
+    const bearer =
+      path === "/oauth2/userinfo"
+        ? parseAccessTokenAuthorization(
+            request.headers.get("authorization") ?? undefined,
+          )?.token || undefined
+        : undefined;
+    // [key, window seconds, max], taken only once the gate admits.
+    const account: [string, number, number][] =
+      typeof body.email === "string"
+        ? [[rate("account:" + body.email.toLowerCase()), 60, 10]]
+        : [];
+    const scoped: [string, number, number][] = [];
+    if (path === "/oauth2/token" && caller)
+      scoped.push([rate("client:" + JSON.stringify([caller, ip])), 60, 60]);
+    if (path === "/oauth2/revoke" && caller)
+      scoped.push([rate("revoke:" + JSON.stringify([caller, ip])), 60, 30]);
+    if (bearer)
+      scoped.push([rate("userinfo:" + JSON.stringify([bearer, ip])), 60, 60]);
+    // The app proves itself by its client secret (token, introspection,
+    // revocation) or by one of its own access tokens (UserInfo), each
+    // compared with native's stored SHA-256/base64url hash in this same
+    // statement. A token proves it only while native would still accept it:
+    // unexpired, unrevoked, its client enabled, its session (if any) live,
+    // and its binding current by binding_status, the check native's claims
+    // extension makes, so a password change or disconnect ends it. A proven
+    // app request takes its own per-address ceiling in place of the network
+    // bucket and skips the scoped buckets.
+    const values: unknown[] = [];
+    const $ = (v: unknown) => (values.push(v), `$${values.length}`);
+    const stored = (v: string) =>
+      createHash("sha256").update(v).digest("base64url");
+    const proof =
+      caller === config.AUTH_APP_CLIENT_ID && callerSecret
+        ? `exists(select 1 from milton_auth."oauthClient" where "clientId"=${$(caller)} and "clientSecret"=${$(stored(callerSecret))} and "disabled" is not true)`
+        : bearer
+          ? `exists(select 1 from milton_auth."oauthAccessToken" t join milton_auth."oauthClient" c on c."clientId"=t."clientId" where t."token"=${$(stored(bearer))} and t."clientId"=${$(config.AUTH_APP_CLIENT_ID)} and t."revoked" is null and t."expiresAt">clock_timestamp() and c."disabled" is not true and (t."sessionId" is null or exists(select 1 from milton_auth.session s where s.id=t."sessionId" and s."expiresAt">clock_timestamp())) and milton_guard.binding_status(coalesce(t."referenceId",''),coalesce(t."userId",''),t."clientId",array(select jsonb_array_elements_text(t."scopes")),array(select jsonb_array_elements_text(t."resources"))) is not null)`
+          : "false";
+    const take = ([key, window, max]: [string, number, number]) =>
+      `milton_guard.take_rate(${$(key)},${$(window)}::integer,${$(max)}::integer)`;
+    const gate = `case when app then ${take([rate("first-party:" + ip), 60, 1000])} else ${take([rate("network:" + ip), 60, 120])} end`;
+    const list = (b: [string, number, number][]) =>
+      ["true", ...b.map(take)].join(",");
+    // The gate decides first. A request it refuses creates and charges no
+    // other bucket, so one refused address cannot grow the table or spend
+    // a targeted email's bucket. CASE evaluates only the branch it selects,
+    // and the volatile CTE runs once.
+    const statement = `with g as (select app, ${gate} as admitted from (select ${proof} as app) p) select case when not admitted then array[false] when app then array[${list(account)}] else array[${list([...account, ...scoped])}] end as allowed from g`;
+    try {
+      const taken = await pool.query<{ allowed: boolean[] }>(statement, values);
+      const allowed = taken.rows[0]?.allowed;
+      if (!Array.isArray(allowed) || !allowed.every((a) => a === true))
+        return json({ error: "rate_limited" }, 429);
       const headers = new Headers(request.headers);
       for (const k of [
         "forwarded",

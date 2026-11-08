@@ -443,6 +443,11 @@ Root global checks are types, `bun test` and `bun run format:check`; CI also run
 rehearsal and the apps/auth integration suite on every pull request. The release
 coordinator owns actual cutover.
 
+`test/served-budget.test.ts` reads the tool descriptions an SDK client is served, in
+both connection modes, and keeps each one and their total under a stated character
+budget (the 2026-11-08 sizes plus 10–15%); growing past it means raising the budget
+in that file, deliberately.
+
 ## Store, history, and limits
 
 `src/store/save.ts` runs each save in one transaction: it takes the account lock,

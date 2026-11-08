@@ -17,6 +17,11 @@ async function key(secret: string) {
     keys: new Map([[1, await makeSignature("milton auth mail v1", secret)]]),
   };
 }
+/** An address on the reserved `.invalid` top-level domain (RFC 2606), which no
+ * mail system delivers to, such as the end-to-end test account's. Milton never
+ * queues mail to one, so the delivery job never sends it either. */
+export const reservedRecipient = (email: string) =>
+  /(^|\.)invalid\.?$/i.test(email.slice(email.lastIndexOf("@") + 1));
 export type NativeMail = {
   kind: "verify" | "reset";
   to: string;
@@ -93,8 +98,10 @@ export async function acceptMail(
 ) {
   if (s.mailFault || (s.mailExpected && !s.mail))
     throw new Error("native_mail_capture_failed");
+  // A reserved recipient's message commits the same no-op receipt an unknown
+  // address does, so the public answer is the same and nothing is queued.
   const id = randomUUID(),
-    m = s.mail;
+    m = s.mail && !reservedRecipient(s.mail.to) ? s.mail : undefined;
   const payload = m
     ? await symmetricEncrypt({
         key: await key(config.AUTH_SECRET),

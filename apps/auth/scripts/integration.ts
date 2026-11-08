@@ -2222,6 +2222,38 @@ try {
         init?: RequestInit,
       ) => Promise<Response>,
     ) => deliverMail(authPool, config, send);
+    // No mail ever goes to a reserved .invalid address, such as the end-to-end
+    // test account: a reset for an existing verified one answers exactly as any
+    // reset does but queues only the no-op receipt, so delivery sends nothing.
+    await clearJobs();
+    const reserved = "reserved-reset@milton-test.invalid";
+    await p.owner.query(
+      `insert into milton_auth."user"(id,name,email,"emailVerified") values('fictional-reserved-user','Fictional',$1,true)`,
+      [reserved],
+    );
+    const reservedReply = await post(
+      noNetwork.handler,
+      "/request-password-reset",
+      reserved,
+    );
+    assert.equal(reservedReply.status, 200);
+    assert.equal(await reservedReply.text(), neutral);
+    const reservedReceipt = await last();
+    assert.deepEqual(
+      [
+        reservedReceipt.state,
+        reservedReceipt.payload,
+        reservedReceipt.origin_user,
+      ],
+      ["noop", null, null],
+      "a reserved recipient's reset queues no message",
+    );
+    let reservedSends = 0;
+    const reservedPass = await worker(async () => {
+      reservedSends++;
+      return new Response(null, { status: 200 });
+    });
+    assert.deepEqual([reservedPass.claimed, reservedSends], [0, 0]);
     // L-1: issue and encrypt the original native proof on a clock 30s ahead
     // of PostgreSQL, without editing the proof, envelope or stored job later.
     await clearJobs();

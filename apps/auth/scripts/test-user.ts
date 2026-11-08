@@ -1,10 +1,12 @@
 import { generateRandomString, hashPassword } from "better-auth/crypto";
 import type pg from "pg";
 import { validPassword } from "../src/password.ts";
+import { reservedRecipient } from "../src/mail.ts";
 
-/** A fictional address on the reserved `.invalid` top-level domain (RFC 2606),
- * which no mail system delivers to, lowercase as native stores emails. */
+/** A fictional address auth never mails (reservedRecipient: the `.invalid`
+ * top-level domain), lowercase as native stores emails. */
 export const fictionalEmail = (email: string) =>
+  reservedRecipient(email) &&
   /^[a-z0-9._+-]{1,64}@([a-z0-9-]{1,63}\.)+invalid$/.test(email);
 
 /** Owner-only, for the fictional end-to-end check account: one native user with a

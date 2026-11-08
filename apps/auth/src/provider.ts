@@ -79,6 +79,10 @@ export function createProvider(
       query_timeout: 6000,
     });
   pool.on("error", (error) => console.error("auth_database", safeError(error)));
+  // Every rate bucket, native or the wrapper's, is an HMAC'd key in
+  // milton_guard.take_rate: one atomic statement, no plain address stored.
+  const rate = (v: string) =>
+    createHmac("sha256", config.AUTH_RATE_SECRET).update(v).digest("hex");
   const networkFetch = options.boundaries?.fetch ?? fetch;
   const field: DBFieldAttribute = {
     type: "string",
@@ -325,7 +329,37 @@ export function createProvider(
         requireEmailVerification: true,
       },
     },
-    rateLimit: { enabled: true, storage: "database", window: 60, max: 120 },
+    rateLimit: {
+      enabled: true,
+      // Native decides per address and path ("ip|path") in one take_rate
+      // call; its default per-path 120/minute repeats the wrapper's network
+      // bucket, so only the rules below cost a round trip.
+      customStorage: {
+        consume: async (key, rule) => {
+          const r = await pool.query<{ allowed: boolean }>(
+            "select milton_guard.take_rate($1,$2,$3) as allowed",
+            [rate("native:" + key), rule.window, rule.max],
+          );
+          return { allowed: r.rows[0]?.allowed === true, retryAfter: null };
+        },
+      },
+      // The first matching key wins. These replace native's built-in sign-in
+      // and mail rules and the OAuth plugin's, so every native limit is here.
+      customRules: {
+        "/sign-in/*": { window: 10, max: 3 },
+        "/sign-up/*": { window: 10, max: 3 },
+        "/change-password": { window: 10, max: 3 },
+        "/request-password-reset": { window: 60, max: 3 },
+        "/send-verification-email": { window: 60, max: 3 },
+        "/oauth2/token": { window: 60, max: 20 },
+        "/oauth2/authorize": { window: 60, max: 30 },
+        "/oauth2/introspect": { window: 60, max: 100 },
+        "/oauth2/revoke": { window: 60, max: 30 },
+        "/oauth2/register": { window: 60, max: 5 },
+        "/oauth2/userinfo": { window: 60, max: 60 },
+        "/**": false,
+      },
+    },
     databaseHooks: {
       account: {
         create: {
@@ -515,6 +549,16 @@ export function createProvider(
         refreshTokenExpiresIn: 2592000,
         codeExpiresIn: 600,
         refreshTokenReuseInterval: 0,
+        // Native OAuth limits are rateLimit.customRules above.
+        rateLimit: {
+          token: false,
+          authorize: false,
+          introspect: false,
+          revoke: false,
+          register: false,
+          rotateClientKeys: false,
+          userinfo: false,
+        },
       }),
       cimd({
         fetchClientMetadataResource,
@@ -640,23 +684,26 @@ export function createProvider(
     inFlight++;
     acquired = true;
     const ip = isIP(peer) ? peer : "127.0.0.1";
-    const rate = (v: string) =>
-      createHmac("sha256", config.AUTH_RATE_SECRET).update(v).digest("hex");
+    // [key, window seconds, max]: the wrapper's buckets, all taken in one
+    // statement. Each is charged even when another refuses.
+    const buckets: [string, number, number][] = [
+      [rate("network:" + ip), 60, 120],
+    ];
+    if (typeof body.email === "string")
+      buckets.push([rate("account:" + body.email.toLowerCase()), 60, 10]);
     try {
-      const network = await pool.query<{ allowed: boolean }>(
-        "select milton_guard.take_rate($1,$2,$3) as allowed",
-        [rate("network:" + ip), 60, 120],
+      const taken = await pool.query<{ allowed: boolean[] }>(
+        `select array[${buckets
+          .map(
+            (_, i) =>
+              `milton_guard.take_rate($${3 * i + 1},$${3 * i + 2},$${3 * i + 3})`,
+          )
+          .join(",")}] as allowed`,
+        buckets.flat(),
       );
-      if (!network.rows[0]?.allowed)
+      const allowed = taken.rows[0]?.allowed;
+      if (!Array.isArray(allowed) || !allowed.every((a) => a === true))
         return json({ error: "rate_limited" }, 429);
-      if (typeof body.email === "string") {
-        const account = await pool.query<{ allowed: boolean }>(
-          "select milton_guard.take_rate($1,$2,$3) as allowed",
-          [rate("account:" + body.email.toLowerCase()), 60, 10],
-        );
-        if (!account.rows[0]?.allowed)
-          return json({ error: "rate_limited" }, 429);
-      }
       const headers = new Headers(request.headers);
       for (const k of [
         "forwarded",

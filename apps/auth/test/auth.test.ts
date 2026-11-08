@@ -206,7 +206,7 @@ test("the security page's session lookup takes each client's own network bucket"
       const count = (taken.get(values[0]) ?? 0) + 1;
       taken.set(values[0], count);
       decisions.push(count <= 1);
-      return { rows: [{ allowed: count <= 1 }] };
+      return { rows: [{ allowed: [count <= 1] }] };
     },
     connect: async () => {
       throw new Error("fixture_database_refused");
@@ -243,7 +243,11 @@ describe("OAuth profile refusals before database access", () => {
         queries.push(text);
         if (!text.includes("milton_guard.take_rate"))
           throw new Error("fixture_database_refused");
-        return { rows: [{ allowed: network && values[2] === 120 }] };
+        // One verdict per [key, window, max] bucket in the statement.
+        const allowed = values
+          .filter((_, i) => i % 3 === 2)
+          .map((max) => network && max === 120);
+        return { rows: [{ allowed }] };
       },
       connect: async () => {
         throw new Error("fixture_database_refused");
@@ -432,7 +436,7 @@ describe("OAuth profile refusals before database access", () => {
       const { fixtureConfig } = await import(${JSON.stringify(import.meta.resolve("./fixture-config.ts"))});
       let queries = 0;
       const pool = { on: () => pool, connect: async () => { throw new Error("refused"); },
-        query: async (t, v) => (queries++, { rows: [{ allowed: t.includes("take_rate") && v[2] === 120 }] }) };
+        query: async (t, v) => (queries++, { rows: [{ allowed: [t.includes("take_rate") && v[2] === 120] }] }) };
       const service = createProvider(fixtureConfig(), { pool });
       let seen;
       service.provider.handler = async (r) => {

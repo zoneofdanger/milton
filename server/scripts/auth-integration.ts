@@ -827,7 +827,7 @@ try {
         incarnation: string;
         generation: string;
       }>(
-        `INSERT INTO milton_auth."user"(id,name,email,"emailVerified") VALUES('fictional-key-subject','Fictional','keys@example.invalid',true) RETURNING id,"miltonIdentityIncarnation" incarnation,"miltonSecurityGeneration" generation`,
+        `INSERT INTO milton_auth."user"(id,name,email,"emailVerified") VALUES('fictional-key-subject','Fictional','keys@example.com',true) RETURNING id,"miltonIdentityIncarnation" incarnation,"miltonSecurityGeneration" generation`,
       )
     ).rows[0]!;
     await owner.query(
@@ -1295,7 +1295,7 @@ try {
     (
       await request(native.handler, ISSUER + "/sign-up/email", authCookies, {
         name: "Fictional Person",
-        email: "person@example.invalid",
+        email: "person@example.com",
         password,
       })
     ).status,
@@ -1306,7 +1306,7 @@ try {
   assert.equal(
     (
       await request(native.handler, ISSUER + "/sign-in/email", authCookies, {
-        email: "person@example.invalid",
+        email: "person@example.com",
         password,
       })
     ).status,
@@ -1934,7 +1934,7 @@ try {
       incarnation: string;
       generation: string;
     }>(
-      `INSERT INTO milton_auth."user"(id,name,email,"emailVerified") VALUES('fictional-unrelated-subject','Fictional','unrelated@example.invalid',true) RETURNING id,"miltonIdentityIncarnation" incarnation,"miltonSecurityGeneration" generation`,
+      `INSERT INTO milton_auth."user"(id,name,email,"emailVerified") VALUES('fictional-unrelated-subject','Fictional','unrelated@example.com',true) RETURNING id,"miltonIdentityIncarnation" incarnation,"miltonSecurityGeneration" generation`,
     )
   ).rows[0]!;
   const unrelatedUser = "m_00000000-0000-4000-8000-0000000000c1";
@@ -2072,7 +2072,7 @@ try {
     native.handler,
     ISSUER + "/request-password-reset",
     authCookies,
-    { email: "person@example.invalid" },
+    { email: "person@example.com" },
   );
   const reset = mail.findLast((m) => m.kind === "reset");
   assert(reset);
@@ -2105,7 +2105,7 @@ try {
   assert.equal(
     (
       await request(native.handler, ISSUER + "/sign-in/email", authCookies, {
-        email: "person@example.invalid",
+        email: "person@example.com",
         password: nextPassword,
       })
     ).status,
@@ -2209,7 +2209,7 @@ try {
   assert.equal(
     (
       await request(native.handler, ISSUER + "/sign-in/email", authCookies, {
-        email: "person@example.invalid",
+        email: "person@example.com",
         password: nextPassword,
       })
     ).status,
@@ -2399,7 +2399,7 @@ try {
     (
       await request(native.handler, ISSUER + "/sign-up/email", authCookies, {
         name: "Fictional replacement",
-        email: "person@example.invalid",
+        email: "person@example.com",
         password,
       })
     ).status,
@@ -2411,7 +2411,7 @@ try {
   assert.equal(
     (
       await request(native.handler, ISSUER + "/sign-in/email", authCookies, {
-        email: "person@example.invalid",
+        email: "person@example.com",
         password,
       })
     ).status,
@@ -2476,7 +2476,7 @@ try {
       owner.query(
         'delete from milton_auth."rateLimit"; delete from milton_guard.rate_bucket',
       );
-    const freshEmail = "unlink-preserve@example.invalid";
+    const freshEmail = "unlink-preserve@example.com";
     const identity = "fictional-unlink-stable-google";
     const freshPassword = "Fictional unlink preservation password";
     authCookies.clear();
@@ -2653,7 +2653,7 @@ try {
     );
     authCookies.clear();
     appCookies.clear();
-    socialEmail = "unlink-changed@example.invalid";
+    socialEmail = "unlink-changed@example.com";
     await clearRates();
     assert.equal((await social(false)).status, 302);
     await appLogin();
@@ -2687,7 +2687,7 @@ try {
     await clearRates();
     authCookies.clear();
     appCookies.clear();
-    const nativeOnly = "unlink-native-only@example.invalid";
+    const nativeOnly = "unlink-native-only@example.com";
     await request(native.handler, ISSUER + "/sign-up/email", authCookies, {
       email: nativeOnly,
       password: freshPassword,

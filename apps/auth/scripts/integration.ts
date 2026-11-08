@@ -71,7 +71,7 @@ try {
     `CREATE SCHEMA fictional_writing; CREATE TABLE fictional_writing.saved(id text PRIMARY KEY,body text); INSERT INTO fictional_writing.saved VALUES('fictional','fictional writing'); CREATE SCHEMA neon_auth; CREATE TABLE neon_auth.retained(value text); INSERT INTO neon_auth.retained VALUES('fictional');`,
   );
   await p.owner.query(
-    `INSERT INTO milton_auth."user"(id,name,email,"emailVerified","createdAt","updatedAt") VALUES('preserved','Fictional migration','preserved@example.invalid',true,now(),now());`,
+    `INSERT INTO milton_auth."user"(id,name,email,"emailVerified","createdAt","updatedAt") VALUES('preserved','Fictional migration','preserved@example.com',true,now(),now());`,
   );
   await p.owner.query(
     `insert into milton_auth.account(id,"accountId","providerId","userId","createdAt","updatedAt") values('preserved-account','fictional-migration-subject','google','preserved',now(),now())`,
@@ -403,7 +403,7 @@ try {
   }
   group("discovery metadata advertises only supported client authentication");
   let password = " Ｆｉｃｔｉｏｎａｌ 🌲 password with spaces ";
-  const email = "person@example.invalid";
+  const email = "person@example.com";
   assert.equal(
     (
       await call("/sign-up/email", {
@@ -1049,7 +1049,7 @@ try {
   });
   github.getUserInfo = async () => ({
     user: {
-      email: "social-only@example.invalid",
+      email: "social-only@example.com",
       emailVerified: true,
       name: "Fictional Social",
     },
@@ -1080,10 +1080,10 @@ try {
   };
   assert(socialUser.user.id);
   await call("/request-password-reset", {
-    email: "social-only@example.invalid",
+    email: "social-only@example.com",
   });
   const firstPasswordMail = mail.findLast(
-    (v) => v.to === "social-only@example.invalid" && v.kind === "reset",
+    (v) => v.to === "social-only@example.com" && v.kind === "reset",
   );
   assert(firstPasswordMail);
   const firstPasswordToken = tokenOf(firstPasswordMail.url);
@@ -1101,7 +1101,7 @@ try {
   assert.equal(
     (
       await call("/sign-in/email", {
-        email: "social-only@example.invalid",
+        email: "social-only@example.com",
         password: "First fictional social password 321",
       })
     ).status,
@@ -1115,7 +1115,7 @@ try {
   assert.equal(
     (
       await call("/sign-in/email", {
-        email: "social-only@example.invalid",
+        email: "social-only@example.com",
         password: "First fictional social password 321",
       })
     ).status,
@@ -1412,7 +1412,7 @@ try {
     );
     // (e) Once the network bucket refuses, invented clients, tokens and
     // emails (and a targeted email's existing bucket) take nothing.
-    const target = "targeted@example.invalid";
+    const target = "targeted@example.com";
     await send(
       "/sign-in/email",
       "198.51.100.7",
@@ -1454,7 +1454,7 @@ try {
             "/sign-in/email",
             "198.51.100.4",
             {
-              email: i % 2 ? target : `invented-${i}@example.invalid`,
+              email: i % 2 ? target : `invented-${i}@example.com`,
               password: "A fictional wrong password 000",
             },
             "application/json",
@@ -1472,7 +1472,7 @@ try {
             "/sign-in/email",
             "198.51.100.5",
             {
-              email: `limited-${i}@example.invalid`,
+              email: `limited-${i}@example.com`,
               password: "A fictional wrong password 000",
             },
             "application/json",
@@ -1486,7 +1486,7 @@ try {
           await send(
             "/request-password-reset",
             "198.51.100.5",
-            { email: `limited-${i}@example.invalid` },
+            { email: `limited-${i}@example.com` },
             "application/json",
           ),
         ),
@@ -1563,18 +1563,18 @@ try {
     'delete from milton_auth."rateLimit"; delete from milton_guard.rate_bucket',
   );
   await call("/sign-up/email", {
-    email: "verification-race@example.invalid",
+    email: "verification-race@example.com",
     password: "Fictional verification race password",
     name: "Fictional race",
   });
   const verificationMail = mail.findLast(
-    (m) => m.kind === "verify" && m.to === "verification-race@example.invalid",
+    (m) => m.kind === "verify" && m.to === "verification-race@example.com",
   );
   assert(verificationMail);
   const originalUser = (
     await authPool.query(
       'select id,"miltonIdentityIncarnation" as incarnation from milton_auth."user" where email=$1',
-      ["verification-race@example.invalid"],
+      ["verification-race@example.com"],
     )
   ).rows[0];
   assert(originalUser);
@@ -1588,7 +1588,7 @@ try {
   const originalFind = context.internalAdapter.findUserByEmail;
   context.internalAdapter.findUserByEmail = async (...args) => {
     const result = await originalFind(...args);
-    if (args[0] === "verification-race@example.invalid") {
+    if (args[0] === "verification-race@example.com") {
       reached();
       await continueRead;
     }
@@ -1612,7 +1612,7 @@ try {
     if (n === 7) throw new Error("race_fixture_cleanup_bound");
   }
   await p.owner.query(
-    `insert into milton_auth."user"(id,name,email,"emailVerified","createdAt","updatedAt") values('replacement-race','Fictional replacement','verification-race@example.invalid',false,now(),now())`,
+    `insert into milton_auth."user"(id,name,email,"emailVerified","createdAt","updatedAt") values('replacement-race','Fictional replacement','verification-race@example.com',false,now(),now())`,
   );
   release();
   await pending;
@@ -1641,7 +1641,7 @@ try {
   );
   // PR-03: actual native requests; private barriers/faults wrap native methods only.
   {
-    const target = "reset-fence@example.invalid";
+    const target = "reset-fence@example.com";
     let current = "Fictional reset fence original password";
     const resetCall = async (
       path: string,
@@ -1877,7 +1877,7 @@ try {
     );
     // First password and unlink are real native handlers too.
     await clearRates();
-    const firstEmail = "social-only@example.invalid";
+    const firstEmail = "social-only@example.com";
     const login = await resetCall("/sign-in/email", {
       email: firstEmail,
       password: "First fictional social password 321",
@@ -2005,8 +2005,8 @@ try {
   }
   // AR-01: one grouped real-native/PG regression; external provider only is fake.
   {
-    const known = "mail-known@example.invalid",
-      unverified = "mail-unverified@example.invalid";
+    const known = "mail-known@example.com",
+      unverified = "mail-unverified@example.com";
     const probePassword = "Fictional mail acceptance password";
     const clearRates = () =>
       p.owner.query(
@@ -2071,21 +2071,21 @@ try {
         [
           "reset-unknown",
           "/request-password-reset",
-          "mail-unknown@example.invalid",
+          "mail-unknown@example.com",
           false,
         ],
         ["reset-unverified", "/request-password-reset", unverified, true],
         [
           "reset-social",
           "/request-password-reset",
-          "social-only@example.invalid",
+          "social-only@example.com",
           true,
         ],
         ["verify-known", "/send-verification-email", known, false],
         [
           "verify-unknown",
           "/send-verification-email",
-          "mail-unknown@example.invalid",
+          "mail-unknown@example.com",
           false,
         ],
         ["verify-unverified", "/send-verification-email", unverified, true],
@@ -2094,7 +2094,7 @@ try {
         [
           "signup-new",
           "/sign-up/email",
-          `mail-new-${suffix}@example.invalid`,
+          `mail-new-${suffix}@example.com`,
           true,
         ],
       ] as const;
@@ -2188,7 +2188,7 @@ try {
           await post(
             noNetwork.handler,
             "/sign-up/email",
-            "mail-missing-callback@example.invalid",
+            "mail-missing-callback@example.com",
           )
         ).status,
         503,
@@ -2237,7 +2237,7 @@ try {
           await post(
             noNetwork.handler,
             "/request-password-reset",
-            "skew-unknown@example.invalid",
+            "skew-unknown@example.com",
           )
         ).status,
         200,
@@ -2557,7 +2557,7 @@ try {
       "fenced",
     );
     await clearJobs();
-    const recreated = "mail-recreated@example.invalid";
+    const recreated = "mail-recreated@example.com";
     await post(noNetwork.handler, "/sign-up/email", recreated);
     const oldJob = await last(),
       operation = randomUUID();
@@ -2618,13 +2618,13 @@ try {
     });
     google.getUserInfo = async () => ({
       user: {
-        email: "mail-social-unverified@example.invalid",
+        email: "mail-social-unverified@example.com",
         emailVerified: false,
         name: "Fictional social",
       },
       data: {
         sub: "fictional-unverified-mail-subject",
-        email: "mail-social-unverified@example.invalid",
+        email: "mail-social-unverified@example.com",
         email_verified: false,
       },
     });
@@ -2663,7 +2663,7 @@ try {
     assert.equal(socialJob.state, "pending");
     assert.equal(socialJob.kind, "verify");
     const socialBody = await openMail(config.AUTH_SECRET, socialJob);
-    assert.equal(socialBody.to[0], "mail-social-unverified@example.invalid");
+    assert.equal(socialBody.to[0], "mail-social-unverified@example.com");
     const serialized = JSON.stringify(
       (await p.owner.query("select * from milton_guard.mail_job")).rows,
     );
@@ -2672,7 +2672,7 @@ try {
       unverified,
       recreated,
       knownURL,
-      "mail-social-unverified@example.invalid",
+      "mail-social-unverified@example.com",
       "/verify-email?token=",
       "/reset-password/",
     ])

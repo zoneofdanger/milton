@@ -660,6 +660,45 @@ test("a setup request makes one database round trip and a tool call four, by tok
       // append (one statement) alongside the snapshot.
       expect(await trips_for(bearer, "tools/call", cover)).toBe(4);
     }
+    // A save: access, then one transaction (the account lock, the receipt,
+    // the trial gate, the snapshot, the limits, the savepoint, one INSERT per
+    // table, the snapshot again, the evidence and the receipt), with the usage
+    // append alongside. Its gate found no reminder due, so no notice claim.
+    const version = async () =>
+      (
+        await (
+          await storeForCurrentRequest(local.env, auth, {
+            issuer,
+            clientId: "version",
+          })
+        ).readTpsReport()
+      ).version;
+    const save = async (rules: string[]) => ({
+      name: "create_memo",
+      arguments: {
+        text: "Fictional rules.",
+        rules: rules.map((text) => ({ report: "cover", text })),
+        request_id: crypto.randomUUID(),
+        expected_version: await version(),
+      },
+    });
+    const one = await save(["Keep fictional dates exact."]);
+    expect(await trips_for(key, "tools/call", one)).toBe(15);
+    const setup = await save(
+      Array.from({ length: 100 }, (_, i) => `Fictional setup rule ${i + 1}.`),
+    );
+    expect(await trips_for(key, "tools/call", setup)).toBe(15);
+    // Unchanged: no card writes and no second snapshot.
+    expect(
+      await trips_for(
+        key,
+        "tools/call",
+        await save(["Keep fictional dates exact."]),
+      ),
+    ).toBe(11);
+    // A replay never reaches the gate, so its notice claim runs (a
+    // transaction of the timeouts and the claim).
+    expect(await trips_for(key, "tools/call", setup)).toBe(5 + 4);
   } finally {
     await local.dispose();
   }

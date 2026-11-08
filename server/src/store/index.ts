@@ -392,7 +392,8 @@ export function tenantStore(
   parseLimits(auth.limits);
   const userId = auth.userId;
   const db = database(bindings);
-  // The trial status the latest read's gate admitted, for that call's notice.
+  // The trial status the latest read's or save's gate admitted, for that
+  // call's notice.
   let gated: TrialStatus | undefined;
   const compiled = compiledMemos(
     db,
@@ -421,7 +422,8 @@ export function tenantStore(
       const status = gated;
       gated = undefined;
       // The claim's conditions are those of a due reminder, so when the
-      // status this call's read just gated on has none, it would find nothing.
+      // status this call's read or save just gated on has none, it would find
+      // nothing.
       if (status?.reminder_stage === 0) return undefined;
       return db.transaction(async (tx) => {
         await tx.query(

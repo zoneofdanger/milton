@@ -26,7 +26,7 @@ export function compiledMemos(
   db: StoreDatabase,
   userId: string,
   actor?: { issuer: string; clientId: string },
-  /** Sees the trial status each assistant read's gate admitted. */
+  /** Sees the trial status each assistant read's or save's gate admitted. */
   gated?: (status: TrialStatus) => void,
   /** Admits the assistant call `call` names, after every gate and before the
    * work; it never waits on the database. */
@@ -117,7 +117,14 @@ export function compiledMemos(
           "Save memos through your connected assistant.",
           403,
         );
-      return runSave(db, userId, actor, parsed.data, () => admit?.(call));
+      return runSave(
+        db,
+        userId,
+        actor,
+        parsed.data,
+        () => admit?.(call),
+        gated,
+      );
     },
   };
 }

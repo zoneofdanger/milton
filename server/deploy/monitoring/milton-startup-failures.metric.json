@@ -1,0 +1,10 @@
+{
+  "name": "milton-startup-failures",
+  "description": "Cloud Run system log lines for a failed probe or a non-zero container exit on milton-app, milton-mcp or milton-auth, e.g. 'Default STARTUP TCP probe failed 1 time consecutively ... The instance was not started.' and 'Container called exit(1).' Read by milton-instance-start and the release gate.",
+  "filter": "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=(\"milton-app\" OR \"milton-mcp\" OR \"milton-auth\") AND logName=\"projects/milton-510506/logs/run.googleapis.com%2Fvarlog%2Fsystem\" AND (textPayload:\"probe failed\" OR (textPayload:\"Container called exit(\" AND NOT textPayload:\"Container called exit(0).\"))",
+  "metricDescriptor": {
+    "metricKind": "DELTA",
+    "valueType": "INT64",
+    "unit": "1"
+  }
+}

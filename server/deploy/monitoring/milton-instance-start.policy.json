@@ -1,0 +1,39 @@
+{
+  "displayName": "milton-instance-start",
+  "documentation": {
+    "content": "**A Milton service is failing to start or crash-looping.** One email per incident; it closes 30 minutes after the condition clears.\n\nSignal: log-based metric `milton-startup-failures`, Cloud Run's system log lines `Default STARTUP TCP probe failed ... The instance was not started.` and `Container called exit(N).` (N not 0). A failed start writes both lines. The metric `container/completed_probe_count` was rejected: it did not record the one real failed start in the last 30 days (milton-auth, 2026-11-07 08:30Z, `Error: Connection terminated due to connection timeout`), because the container exited before the probe completed.\n\nCheck first:\n1. `gcloud logging read 'resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"<service>\" AND (logName:\"varlog%2Fsystem\" OR logName:\"stderr\")' --project=milton-510506 --freshness=30m --limit=50`: the stderr lines before the exit give the cause (database, secrets, configuration).\n2. Did a release just move traffic, or did a secret version change? Roll back per server/deploy/README.md, \"Release verification and rollback\".\n\nThreshold: 3 or more lines in a rolling 15 minutes for one service, so at least two failed starts. Reason: the 30-day worst was 2 lines (the single 11-07 failed start, which recovered on the next attempt 8 s later). A crash loop repeats every few seconds.\n",
+    "mimeType": "text/markdown"
+  },
+  "userLabels": {
+    "tier": "page"
+  },
+  "conditions": [
+    {
+      "displayName": "startup failures or crash exits: ≥ 3 in 15 min",
+      "conditionThreshold": {
+        "filter": "metric.type = \"logging.googleapis.com/user/milton-startup-failures\" AND resource.type = \"cloud_run_revision\" AND resource.labels.service_name = one_of(\"milton-app\", \"milton-mcp\", \"milton-auth\")",
+        "aggregations": [
+          {
+            "alignmentPeriod": "900s",
+            "perSeriesAligner": "ALIGN_DELTA",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "groupByFields": ["resource.label.service_name"]
+          }
+        ],
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 2,
+        "duration": "0s",
+        "trigger": {
+          "count": 1
+        }
+      }
+    }
+  ],
+  "combiner": "OR",
+  "enabled": true,
+  "notificationChannels": ["milton-ops-email"],
+  "alertStrategy": {
+    "autoClose": "1800s",
+    "notificationPrompts": ["OPENED"]
+  }
+}

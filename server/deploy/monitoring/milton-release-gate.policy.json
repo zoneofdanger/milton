@@ -1,0 +1,118 @@
+{
+  "displayName": "milton-release-gate",
+  "documentation": {
+    "content": "**Release gate: no notifications.** This policy emails no one. Its incidents exist so the release gate in server/deploy/README.md (\"Release verification and rollback\") can read them with `gcloud monitoring alerts list`.\n\nConditions (rolling 5 minutes, per service or job): any 5xx; any ERROR log entry (`milton-errors`); any failed `milton-auth-*` execution; any startup failure or crash exit (`milton-startup-failures`); 10 or more 429s. The 7-day backtest shows these open only around releases and deploy errors, plus one 429 burst (48 in 3 minutes on MCP, 11-07 10:55Z), which is why 429 needs 10, not 1.\n",
+    "mimeType": "text/markdown"
+  },
+  "userLabels": {
+    "tier": "gate"
+  },
+  "conditions": [
+    {
+      "displayName": "gate: any 5xx in 5 min",
+      "conditionThreshold": {
+        "filter": "metric.type = \"run.googleapis.com/request_count\" AND resource.type = \"cloud_run_revision\" AND resource.labels.service_name = one_of(\"milton-app\", \"milton-mcp\", \"milton-auth\") AND metric.labels.response_code_class = \"5xx\"",
+        "aggregations": [
+          {
+            "alignmentPeriod": "300s",
+            "perSeriesAligner": "ALIGN_DELTA",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "groupByFields": ["resource.label.service_name"]
+          }
+        ],
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 0,
+        "duration": "0s",
+        "trigger": {
+          "count": 1
+        }
+      }
+    },
+    {
+      "displayName": "gate: any ERROR log entry in 5 min",
+      "conditionThreshold": {
+        "filter": "metric.type = \"logging.googleapis.com/user/milton-errors\" AND resource.type = \"cloud_run_revision\" AND resource.labels.service_name = one_of(\"milton-app\", \"milton-mcp\", \"milton-auth\")",
+        "aggregations": [
+          {
+            "alignmentPeriod": "300s",
+            "perSeriesAligner": "ALIGN_DELTA",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "groupByFields": ["resource.label.service_name"]
+          }
+        ],
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 0,
+        "duration": "0s",
+        "trigger": {
+          "count": 1
+        }
+      }
+    },
+    {
+      "displayName": "gate: any failed job execution in 5 min",
+      "conditionThreshold": {
+        "filter": "metric.type = \"run.googleapis.com/job/completed_execution_count\" AND resource.type = \"cloud_run_job\" AND resource.labels.job_name = one_of(\"milton-auth-mail\", \"milton-auth-maint\") AND metric.labels.result = \"failed\"",
+        "aggregations": [
+          {
+            "alignmentPeriod": "300s",
+            "perSeriesAligner": "ALIGN_DELTA",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "groupByFields": ["resource.label.job_name"]
+          }
+        ],
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 0,
+        "duration": "0s",
+        "trigger": {
+          "count": 1
+        }
+      }
+    },
+    {
+      "displayName": "gate: any startup failure in 5 min",
+      "conditionThreshold": {
+        "filter": "metric.type = \"logging.googleapis.com/user/milton-startup-failures\" AND resource.type = \"cloud_run_revision\" AND resource.labels.service_name = one_of(\"milton-app\", \"milton-mcp\", \"milton-auth\")",
+        "aggregations": [
+          {
+            "alignmentPeriod": "300s",
+            "perSeriesAligner": "ALIGN_DELTA",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "groupByFields": ["resource.label.service_name"]
+          }
+        ],
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 0,
+        "duration": "0s",
+        "trigger": {
+          "count": 1
+        }
+      }
+    },
+    {
+      "displayName": "gate: ≥ 10 429s in 5 min",
+      "conditionThreshold": {
+        "filter": "metric.type = \"run.googleapis.com/request_count\" AND resource.type = \"cloud_run_revision\" AND resource.labels.service_name = one_of(\"milton-app\", \"milton-mcp\", \"milton-auth\") AND metric.labels.response_code = \"429\"",
+        "aggregations": [
+          {
+            "alignmentPeriod": "300s",
+            "perSeriesAligner": "ALIGN_DELTA",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "groupByFields": ["resource.label.service_name"]
+          }
+        ],
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 9,
+        "duration": "0s",
+        "trigger": {
+          "count": 1
+        }
+      }
+    }
+  ],
+  "combiner": "OR",
+  "enabled": true,
+  "notificationChannels": [],
+  "alertStrategy": {
+    "autoClose": "1800s"
+  }
+}

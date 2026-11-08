@@ -22,38 +22,25 @@ This runbook keeps only the latest release record. Earlier release records and a
 one-time procedures are in git history; the last full version is at commit 492b96a
 (`git show 492b96a:server/deploy/README.md`).
 
-## Release record: saves, report cap, round trips, unread columns and auth media types (2026-11-08, PRs #39 #41 #42 #43 #44 #45)
+## Release record: daily allowance removed, usage rows (2026-11-08, PR #40)
 
-- **#41 + #43 (milton-perf), `effac76`:** a transient database error rolls back the whole
-  save (no receipt, no charge); intent reads serve only the ranked samples that fit the
-  256 KiB cap. App/MCP `milton-*-cap-effac76` at 00:08Z (image
-  `sha256:5a71cf62d1f3a6cfbb8ef1adb436785c0243684324f2f90d47eb3f8e71f5793f`).
-- **#44 (milton-perf; milton-qa Astra PASS), `59d1227`:** one fewer serial round trip per
-  signed-in page; the OIDC callback's two auth calls and billing's email copy run in
-  parallel. App/MCP `milton-*-rt3-59d1227` at 00:15Z (image
-  `sha256:951fa78b832677deeaa9829e40f447e1f9fbe72050b92d8ce316a6e91f7c458b`).
-- **#45 (test-trim; Astra PASS), `da46ee8`:** Drizzle 0006 applied at 00:20Z after snapshot
-  `snap-winter-mountain-b8iphgdz` (see "Drop the unread payload columns"); then app/MCP
-  `milton-*-lean-da46ee8` at 00:21Z (image
-  `sha256:1f0a36eddebf22c95012d05b199189eb0cdca5568ad600ee1c8c18be64f1e78a`), which no
-  longer writes `save_requests.source_hash`.
-- **#39 (test-trim):** test-only, no deploy.
-- **#42 (milton-qa; three Astra rounds), `e770c15`:** the auth wrapper normalizes the media
-  type, refuses anything but plain JSON or a standard form (and comma-joined or duplicate
-  Content-Type) with 415, and forwards only a body rebuilt from its own parse. Auth
-  `milton-auth-00009-mrk` at 00:26Z (image
-  `sha256:495876dae0a2418f1758e881792f6073ff98dd2d3e63631988da7e8ded514bc5`; mail and
-  maintenance jobs too). Live through the load balancer: `text/plain`, comma-joined and
-  duplicate Content-Type got 415; `Application/JSON` and `application/json` reached sign-in
-  (401 for a fictional address). Health 200, login 200, Claude Code authorize 302. 0 errors in a
-  5-minute watch.
-
-Each merge checked on main: types, 129–131 tests, format, build, rehearsal 13/13, all 0.
-Watches after #41/#43, #44 and #45: no 5xx, application or audit errors. Smoke after each: health
-200 ×3, MCP 401, app home 200, signed-out pages 403. Rollback: app/MCP `milton-*-rt3-59d1227`
-(compatible with 0006: it writes `source_hash` and never reads `payload_bytes`), then
-`milton-*-cap-effac76`; never further back than `milton-*-dup-cb5199b` without the trial-table
-downs. Auth rollback: `milton-auth-00008-967`.
+Source `90af817` (milton-qa; Peter's decision; Astra over four rounds). The tool-call path no
+longer enforces or charges a daily allowance; each admitted call appends a best-effort
+`usage_calls` row. Snapshot `snap-crimson-field-b87qk777`; Drizzle 0007 applied at 00:51Z as
+`neondb_owner` exactly as the Drizzle migrator does (journal 8), then
+`server/migrations/009-usage-calls-roles.sql`. Before applying, each of the six live guard
+bodies matched the file's body with only the lock reverted; after, each matches the file
+(md5), no public function uses `FOR UPDATE`, and `usage_calls` grants are MCP `INSERT` only.
+App/MCP `milton-*-use-90af817` at 00:53Z (image
+`sha256:1fb604fc46320fe416d3e90bc2f5a7b2b16a2d7d8e89be68252288b88dfd7dc6`); auth unchanged.
+Checks on main: types, 136 tests, format, site and server builds, rehearsal 13/13, all 0.
+Smoke: health 200 ×3, MCP 401s, app home 200, signed-out report 403; a real
+`get_cover_sheet` returned normally and wrote one `usage_calls` row. 0 errors and 0 usage-write
+warnings in a 5-minute watch. Rollback: app/MCP
+`milton-*-lean-da46ee8` (runs on either schema); `rollback/0007_usage_calls.sql` only if the
+table itself must go. Auth `milton-auth-00009-mrk`, rollback `milton-auth-00008-967`.
+Follow-ups: a migration dropping `usage_daily` and the stored `daily_calls` key, and
+`usage_calls` retention.
 
 ## Runtime role timeouts (applied 2026-11-07, TODO #29)
 
@@ -175,7 +162,9 @@ rewrites its table). It refuses, changing nothing, once a save from the new code
 receipt without `source_hash`. The 0006 journal row stays, so re-forwarding means
 `psql -1 -X -v ON_ERROR_STOP=1 -f server/drizzle/0006_drop_unread_columns.sql`.
 
-## Usage rows and the writer guards (pending: Drizzle 0007, PR #40)
+## Usage rows and the writer guards (applied 2026-11-08: Drizzle 0007, PR #40)
+
+Applied 00:51Z after snapshot `snap-crimson-field-b87qk777`; see the release record above.
 
 0007 adds the empty `usage_calls` table (account, time, tool; foreign key cascading from
 `users`). It also re-creates the six writer guard triggers (cards, card versions, accepted
@@ -424,8 +413,8 @@ references. Inspect revision readiness before selecting a recorded revision:
 gcloud run revisions list --service=milton-app --project=milton-510506 --region=us-east4
 ```
 
-Now serving (2026-11-08): app `milton-app-lean-da46ee8` and MCP
-`milton-mcp-lean-da46ee8` (source `da46ee8`), and auth `milton-auth-00009-mrk` (source `e770c15`). The
+Now serving (2026-11-08): app `milton-app-use-90af817` and MCP
+`milton-mcp-use-90af817` (source `90af817`), and auth `milton-auth-00009-mrk` (source `e770c15`). The
 release record above gives the image and rollback revisions.
 
 Roll back only affected services, preserve ingress/IAM, then repeat the canonical

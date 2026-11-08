@@ -221,15 +221,12 @@ export const saveRequests = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     requestId: text("request_id").notNull(),
     inputHash: text("input_hash").notNull(),
-    sourceHash: text("source_hash").notNull(),
+    // Never read, and nullable since 0006 so saves can stop writing it; dropped
+    // once no running or rollback code writes it (TODO.md).
+    sourceHash: text("source_hash"),
     // Written once, with the save's outcome, in the save's transaction.
     result: jsonb("result_json").notNull(),
     createdAt: createdAt(),
-    payloadBytes: bigint("payload_bytes", { mode: "number" })
-      .notNull()
-      .generatedAlwaysAs(
-        sql`octet_length(request_id)::bigint + octet_length(input_hash) + octet_length(source_hash) + 2048 + 128`,
-      ),
   },
   (t) => [
     primaryKey({ columns: [t.userId, t.requestId] }),
@@ -284,11 +281,6 @@ export const instructionCardVersions = pgTable(
     reason: text("reason").notNull(),
     actorJson: text("actor_json").notNull(),
     detailsJson: text("details_json").notNull().default("{}"),
-    payloadBytes: bigint("payload_bytes", { mode: "number" })
-      .notNull()
-      .generatedAlwaysAs(
-        sql`octet_length(description)::bigint + octet_length(body) + octet_length(reason) + octet_length(actor_json) + octet_length(details_json)`,
-      ),
     createdAt: createdAt(),
   },
   (t) => [
@@ -455,11 +447,6 @@ export const acceptedChanges = pgTable(
     beforeSource: text("before_source").notNull(),
     afterSource: text("after_source").notNull(),
     createdAt: createdAt(),
-    payloadBytes: bigint("payload_bytes", { mode: "number" })
-      .notNull()
-      .generatedAlwaysAs(
-        sql`octet_length(request_id)::bigint + octet_length(operation) + octet_length(request_json::text) + octet_length(actor_json::text) + octet_length(transformation_json::text) + octet_length(affected_json::text) + octet_length(before_tps) + octet_length(after_tps) + octet_length(before_source) + octet_length(after_source) + 128`,
-      ),
   },
   (t) => [
     primaryKey({ columns: [t.userId, t.requestId] }),

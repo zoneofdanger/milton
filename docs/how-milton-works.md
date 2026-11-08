@@ -392,7 +392,8 @@ Files: `server/drizzle/`, `server/src/store/schema.ts`, `server/src/store/databa
 - Audit rows are immutable and must reference real card versions.
 - History has no size cap. History rows never shrink short of account deletion, so the
   lifetime cap that refused every save once an account reached it is gone (0030), with
-  the `retained_bytes` counter it read.
+  the `retained_bytes` counter it read; 0006 drops the generated `payload_bytes` columns
+  it summed.
 - User IDs cannot change.
 - Disconnects and identity hashes have no foreign key to users, so they outlive the account.
 - `connection_keys` (0004) cascades from users and from its (issuer, subject) identity, requires the native binding (issuer, subject, incarnation, generation), checks id, hash, name, scope, binding lengths and dates, and grants nothing to the legacy writing group; owner file `006-connection-keys-roles.sql` lets app read every column but the hash (binding included), insert and set `revoked_at`, and MCP read and set `last_used_at` only.

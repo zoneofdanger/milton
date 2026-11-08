@@ -613,7 +613,7 @@ No-op and failed saves add no accepted-change record.
 Replay adds no duplicate. New saves record transformation pipeline `exact:v1`.
 
 Records live as long as internal history and are removed with account deletion.
-Generated payload byte fields remain, with no lifetime history cap.
+There is no lifetime history cap; 0006 drops the generated payload byte fields it summed.
 
 ### Sample context and ranking
 

@@ -8,9 +8,10 @@ import {
   backfillExitCode,
   backfillSubscriptions,
 } from "../scripts/backfill-subscriptions";
-import { billingAccount, linkStripeCustomer } from "../src/store/billing";
+import { linkStripeCustomer } from "../src/store/billing";
 import { localStore } from "./local-store";
 import { fixtureStore } from "./store-fixtures";
+import { billingAccount } from "../src/store/billing";
 
 const appOrigin = "http://localhost:3001";
 // Obviously fake values in the shapes Stripe uses.

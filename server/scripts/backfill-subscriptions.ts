@@ -1,5 +1,4 @@
 import { ensureSubscription } from "../src/billing";
-import { AuthError } from "../src/token";
 import { runtimeConfig, type RuntimeConfig } from "../src/config";
 import { loadEnvironment } from "../src/environment";
 import {
@@ -7,6 +6,7 @@ import {
   subscriptionBackfill,
   type StoreBindings,
 } from "../src/store";
+import { AuthError } from "../src/token";
 
 // About 5 accounts a second: each one fires webhooks, and each webhook reads Stripe.
 const PACE_MS = 200;

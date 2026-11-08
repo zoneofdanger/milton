@@ -8,7 +8,10 @@ import {
   getSessionFromCtx,
 } from "better-auth/api";
 import { getCurrentAuthEndpointContext } from "@better-auth/core/context";
-import { decodeBasicCredentials } from "@better-auth/core/oauth2";
+import {
+  decodeBasicCredentials,
+  parseAccessTokenAuthorization,
+} from "@better-auth/core/oauth2";
 import { jwt } from "better-auth/plugins";
 import {
   getOAuthProviderState,
@@ -720,11 +723,14 @@ export function createProvider(
           callerSecret = body.client_secret;
       }
     }
+    // UserInfo's token, read by native's own parser (any scheme, any
+    // whitespace), so both always see the same token. The wrapper refuses
+    // POST UserInfo, so the header is native's only source.
     const bearer =
       path === "/oauth2/userinfo"
-        ? /^Bearer +(\S+)$/i.exec(
-            request.headers.get("authorization") ?? "",
-          )?.[1]
+        ? parseAccessTokenAuthorization(
+            request.headers.get("authorization") ?? undefined,
+          )?.token || undefined
         : undefined;
     // [key, window seconds, max], taken only once the gate admits.
     const account: [string, number, number][] =
@@ -739,10 +745,14 @@ export function createProvider(
     if (bearer)
       scoped.push([rate("userinfo:" + JSON.stringify([bearer, ip])), 60, 60]);
     // The app proves itself by its client secret (token, introspection,
-    // revocation) or by one of its own unexpired access tokens (UserInfo),
-    // each compared with native's stored SHA-256/base64url hash in this same
-    // statement. A proven app request takes its own per-address ceiling in
-    // place of the network bucket and skips the scoped buckets.
+    // revocation) or by one of its own access tokens (UserInfo), each
+    // compared with native's stored SHA-256/base64url hash in this same
+    // statement. A token proves it only while native would still accept it:
+    // unexpired, unrevoked, its client enabled, its session (if any) live,
+    // and its binding current by binding_status, the check native's claims
+    // extension makes, so a password change or disconnect ends it. A proven
+    // app request takes its own per-address ceiling in place of the network
+    // bucket and skips the scoped buckets.
     const values: unknown[] = [];
     const $ = (v: unknown) => (values.push(v), `$${values.length}`);
     const stored = (v: string) =>
@@ -751,7 +761,7 @@ export function createProvider(
       caller === config.AUTH_APP_CLIENT_ID && callerSecret
         ? `exists(select 1 from milton_auth."oauthClient" where "clientId"=${$(caller)} and "clientSecret"=${$(stored(callerSecret))} and "disabled" is not true)`
         : bearer
-          ? `exists(select 1 from milton_auth."oauthAccessToken" where "token"=${$(stored(bearer))} and "clientId"=${$(config.AUTH_APP_CLIENT_ID)} and "revoked" is null and "expiresAt">clock_timestamp())`
+          ? `exists(select 1 from milton_auth."oauthAccessToken" t join milton_auth."oauthClient" c on c."clientId"=t."clientId" where t."token"=${$(stored(bearer))} and t."clientId"=${$(config.AUTH_APP_CLIENT_ID)} and t."revoked" is null and t."expiresAt">clock_timestamp() and c."disabled" is not true and (t."sessionId" is null or exists(select 1 from milton_auth.session s where s.id=t."sessionId" and s."expiresAt">clock_timestamp())) and milton_guard.binding_status(coalesce(t."referenceId",''),coalesce(t."userId",''),t."clientId",array(select jsonb_array_elements_text(t."scopes")),array(select jsonb_array_elements_text(t."resources"))) is not null)`
           : "false";
     const take = ([key, window, max]: [string, number, number]) =>
       `milton_guard.take_rate(${$(key)},${$(window)}::integer,${$(max)}::integer)`;

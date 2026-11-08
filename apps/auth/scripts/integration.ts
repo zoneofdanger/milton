@@ -1092,7 +1092,7 @@ try {
       peer: string,
       body?: Record<string, unknown>,
       type = "application/x-www-form-urlencoded",
-      bearer?: string,
+      authorization?: string,
     ) =>
       service.handler(
         new Request(ISSUER + path, {
@@ -1102,7 +1102,7 @@ try {
             ...(["/sign-in/email", "/request-password-reset"].includes(path)
               ? { origin: AUTH_ORIGIN }
               : {}),
-            ...(bearer ? { authorization: "Bearer " + bearer } : {}),
+            ...(authorization ? { authorization } : {}),
           },
           ...(body
             ? {
@@ -1189,18 +1189,64 @@ try {
       );
     // (c) The app's egress address has spent its network bucket. The app
     // still exchanges, introspects and reads UserInfo when it proves itself
-    // (its secret, or its own access token); requests that only name it, or
-    // carry another bearer token, do not.
-    const appGrant = await authorize(
-      {
-        client_id: client.AUTH_APP_CLIENT_ID,
-        client_secret: client.AUTH_APP_CLIENT_SECRET,
-      },
-      "openid profile email",
-      undefined,
-      false,
+    // (its secret, or its own access token that native would still accept,
+    // however the header spaces it); requests that only name it, carry
+    // another client's real token, or carry an app token that is expired,
+    // revoked or no longer current, do not.
+    const mintApp = () =>
+      authorize(
+        {
+          client_id: client.AUTH_APP_CLIENT_ID,
+          client_secret: client.AUTH_APP_CLIENT_SECRET,
+        },
+        "openid profile email",
+        undefined,
+        false,
+      );
+    const appGrant = await mintApp();
+    const expiredGrant = await mintApp();
+    const revokedGrant = await mintApp();
+    const assistantToken = (
+      await authorize(
+        assistant,
+        "openid offline_access milton:read",
+        "https://mcp.meetmilton.com/mcp",
+      )
+    ).access_token;
+    const tokenRow = (t: string) =>
+      createHash("sha256").update(t).digest("base64url");
+    // Token rows change only under their subject's parent lock (token_gate).
+    const alterToken = async (t: string, change: string) => {
+      const c = await p.owner.connect();
+      try {
+        await c.query("begin");
+        await c.query(
+          `select set_config('credential.locked',(select "userId" from milton_auth."oauthAccessToken" where token=$1),true)`,
+          [tokenRow(t)],
+        );
+        await c.query(
+          `update milton_auth."oauthAccessToken" set ${change} where token=$1`,
+          [tokenRow(t)],
+        );
+        await c.query("commit");
+      } finally {
+        c.release();
+      }
+    };
+    await alterToken(
+      expiredGrant.access_token,
+      `"expiresAt"=now()-interval '1 second'`,
     );
+    await alterToken(revokedGrant.access_token, "revoked=now()");
     for (let i = 0; i < 120; i++) await send("/ok", "198.51.100.4");
+    const userInfo = (authorization: string) =>
+      send(
+        "/oauth2/userinfo",
+        "198.51.100.4",
+        undefined,
+        undefined,
+        authorization,
+      ).then(outcome);
     const app = {
       client_id: client.AUTH_APP_CLIENT_ID,
       client_secret: client.AUTH_APP_CLIENT_SECRET,
@@ -1221,17 +1267,8 @@ try {
       ),
     );
     for (let i = 0; i < 3; i++)
-      firstParty.push(
-        await outcome(
-          await send(
-            "/oauth2/userinfo",
-            "198.51.100.4",
-            undefined,
-            undefined,
-            appGrant.access_token,
-          ),
-        ),
-      );
+      firstParty.push(await userInfo("Bearer " + appGrant.access_token));
+    firstParty.push(await userInfo("Bearer\t" + appGrant.access_token));
     const named = [
       await outcome(
         await send("/oauth2/token", "198.51.100.4", {
@@ -1239,16 +1276,35 @@ try {
           client_secret: secret(),
         }),
       ),
-      await outcome(
-        await send(
-          "/oauth2/userinfo",
-          "198.51.100.4",
-          undefined,
-          undefined,
-          secret(),
-        ),
-      ),
+      await userInfo("Bearer " + secret()),
+      await userInfo("Bearer " + assistantToken),
+      await userInfo("Bearer " + expiredGrant.access_token),
+      await userInfo("Bearer " + revokedGrant.access_token),
     ];
+    // A password change advances the generation (002's credential gate);
+    // the same app token then proves nothing. The generation is restored so
+    // later groups keep their sessions.
+    const subject = (
+      await p.owner.query(
+        `select "userId" as id from milton_auth."oauthAccessToken" where token=$1`,
+        [tokenRow(appGrant.access_token)],
+      )
+    ).rows[0].id as string;
+    const generation = (
+      await p.owner.query(
+        `select "miltonSecurityGeneration" as g from milton_auth."user" where id=$1`,
+        [subject],
+      )
+    ).rows[0].g as string;
+    await p.owner.query(
+      `update milton_auth."user" set "miltonSecurityGeneration"=milton_credential.next_fence() where id=$1`,
+      [subject],
+    );
+    named.push(await userInfo("Bearer " + appGrant.access_token));
+    await p.owner.query(
+      `update milton_auth."user" set "miltonSecurityGeneration"=$2 where id=$1`,
+      [subject, generation],
+    );
     // (e) Once the network bucket refuses, invented clients, tokens and
     // emails (and a targeted email's existing bucket) take nothing.
     const target = "targeted@example.invalid";
@@ -1285,7 +1341,7 @@ try {
             "198.51.100.4",
             undefined,
             undefined,
-            secret(),
+            "Bearer " + secret(),
           ),
         ),
         await outcome(
@@ -1361,9 +1417,11 @@ try {
         ],
         firstParty: [
           ["400 invalid_grant", 25],
-          ["200", 4],
+          ["200", 5],
         ],
-        named: ["429 rate_limited", "429 rate_limited"],
+        // Named app, invented token, another client's real token, expired,
+        // revoked, and no-longer-current app tokens.
+        named: Array(6).fill("429 rate_limited"),
         spam: [["429 rate_limited", 40]],
         growth: { before, after: before },
         signIn: [

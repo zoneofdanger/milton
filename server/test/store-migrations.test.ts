@@ -7,6 +7,7 @@ import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
 import { generateDrizzleJson, generateMigration } from "drizzle-kit/api";
 import * as schema from "../src/store/schema";
+import { resumeGuides } from "../src/guides/resume";
 import {
   pruneUsage,
   USAGE_PRUNE_BATCH,
@@ -833,6 +834,204 @@ test("0008 drops usage_daily and the stored daily_calls; the maintenance job del
     await rm(scratch, { recursive: true, force: true });
   }
 }, 60000);
+
+test("0010 parks the guide pilot: drops only its trigger and keeps every guide row; resuming restores the trigger and resyncs every report", async () => {
+  const folder = new URL("../drizzle/", import.meta.url).pathname;
+  const scratch = await mkdtemp(join(tmpdir(), "milton-0010-"));
+  const pg = new PGlite();
+  try {
+    await cp(folder, scratch, { recursive: true });
+    const journal = await Bun.file(join(scratch, "meta/_journal.json")).json();
+    const through = async (idx: number) =>
+      writeFile(
+        join(scratch, "meta/_journal.json"),
+        JSON.stringify({
+          ...journal,
+          entries: journal.entries.filter((e: { idx: number }) => e.idx <= idx),
+        }),
+      );
+    await through(9);
+    await migrate(drizzle(pg), { migrationsFolder: scratch });
+    // Production's shape before 0010: guide rows the trigger wrote, a completed
+    // guide, and an enrollment row that is off.
+    await seedUsers(pg, "parked", "idle");
+    for (const [user, report, id] of [
+      ["parked", "email", "e1"],
+      ["parked", "chat", "c1"],
+      ["idle", "email", "i1"],
+    ] as const) {
+      await pg.query(
+        "INSERT INTO sample_kinds(user_id,id,report,label) VALUES ($1,$2,$2,'Fictional kind')",
+        [user, report],
+      );
+      await seedSample(
+        pg,
+        user,
+        id,
+        report,
+        report,
+        { version: 1, summary: "Fictional note" },
+        `Fictional sample ${id}.`,
+      );
+    }
+    await pg.exec(
+      // A completed guide on email (kept) and on chat (whose only sample is
+      // retired while parked, so resuming must clear it), and every row with
+      // spent retries scheduled a day ahead, so resuming must reset both.
+      "UPDATE report_guides SET guide_text='Fictional guide.',completed_version=1,status='ready',reason='completed' WHERE user_id='parked' AND report IN ('email','chat'); UPDATE report_guides SET attempts=2,next_attempt_at=clock_timestamp()+interval '1 day'; INSERT INTO guide_accounts(user_id) VALUES ('idle')",
+    );
+    const guides = async () =>
+      (
+        await pg.query(
+          "SELECT user_id,report,source_version,completed_version,guide_text,status,reason,attempts FROM report_guides ORDER BY user_id,report",
+        )
+      ).rows;
+    const kept = async () => ({
+      guides: (
+        await pg.query("SELECT * FROM report_guides ORDER BY user_id,report")
+      ).rows,
+      accounts: (await pg.query("SELECT * FROM guide_accounts")).rows,
+      function: (
+        await pg.query(
+          "SELECT proowner::regrole::text AS owner,proacl::text AS acl,prosecdef,proconfig::text AS config FROM pg_proc WHERE proname='milton_guide_source_changed'",
+        )
+      ).rows,
+      grants: (
+        await pg.query(
+          "SELECT grantee,table_name,privilege_type FROM information_schema.role_table_grants WHERE table_name IN ('guide_accounts','report_guides','guide_spend','guide_budget_lock') ORDER BY 1,2,3",
+        )
+      ).rows,
+    });
+    const before = await schemaCatalog(pg);
+    const prior = await kept();
+    expect(before.triggers).toContainEqual(
+      expect.objectContaining({ tgname: "report_guide_source" }),
+    );
+    await through(10);
+    await migrate(drizzle(pg), { migrationsFolder: scratch });
+    expect(await schemaCatalog(pg)).toEqual({
+      ...before,
+      triggers: before.triggers.filter(
+        (t) => t.tgname !== "report_guide_source",
+      ),
+    });
+    expect(await kept()).toEqual(prior);
+    // While parked, saves write samples and nothing to report_guides: a new
+    // email sample, the only chat sample retired, a first document sample.
+    const store = fixtureStore(storeDatabase(pg), "parked", "assistant");
+    let version = (await store.getTpsReport()).version;
+    for (const change of [
+      {
+        sample: {
+          report: "email" as const,
+          kind_id: "email",
+          context: { version: 1 as const, summary: "Fictional follow-up" },
+          text: "Fictional sample e2.",
+        },
+      },
+      { retire_samples: ["c1"] },
+      {
+        sample: {
+          report: "document" as const,
+          new_kind: "Fictional plan",
+          context: { version: 1 as const, summary: "Fictional plan" },
+          text: "Fictional sample d1.",
+        },
+      },
+    ]) {
+      const saved = await store.saveMemo({
+        text: "Fictional sample change.",
+        expected_version: version,
+        request_id: crypto.randomUUID(),
+        ...change,
+      });
+      expect(saved.status).toBe("saved");
+      version = saved.version!;
+    }
+    expect(
+      (
+        await pg.query(
+          "SELECT count(*)::int AS n FROM sample_versions WHERE user_id='parked'",
+        )
+      ).rows,
+    ).toEqual([{ n: 5 }]);
+    expect(await kept()).toEqual(prior);
+    // Resuming restores the trigger and treats every report as changed:
+    // reports with active samples queue on a new source version, keeping the
+    // last guide as stale text; a report left with none is cleared. A live
+    // trigger would have left idle's report alone; resuming re-queues it.
+    await resumeGuides(storeDatabase(pg));
+    expect(await schemaCatalog(pg)).toEqual(before);
+    const restored = await kept();
+    expect(restored.accounts).toEqual(prior.accounts);
+    expect(restored.function).toEqual(prior.function);
+    expect(restored.grants).toEqual(prior.grants);
+    const row = (
+      user_id: string,
+      report: string,
+      source_version: number,
+      status: string,
+      reason: string,
+      guide_text: string | null = null,
+    ) => ({
+      user_id,
+      report,
+      source_version,
+      completed_version: guide_text ? 1 : null,
+      guide_text,
+      status,
+      reason,
+      attempts: 0,
+    });
+    expect(await guides()).toEqual([
+      row("idle", "email", 2, "queued", "samples_changed"),
+      row("parked", "chat", 2, "empty", "no_samples"),
+      row("parked", "document", 1, "queued", "samples_changed"),
+      row(
+        "parked",
+        "email",
+        2,
+        "queued",
+        "samples_changed",
+        "Fictional guide.",
+      ),
+    ]);
+    // Every resynced row is due now, not on its old schedule.
+    expect(
+      (
+        await pg.query(
+          "SELECT count(*)::int AS n FROM report_guides WHERE next_attempt_at > clock_timestamp()",
+        )
+      ).rows,
+    ).toEqual([{ n: 0 }]);
+    // A second resume converges: the trigger is replaced, not duplicated.
+    await resumeGuides(storeDatabase(pg));
+    expect(await schemaCatalog(pg)).toEqual(before);
+    // The restored trigger records the next change.
+    expect(
+      (
+        await store.saveMemo({
+          text: "Retire a fictional sample.",
+          expected_version: version,
+          request_id: crypto.randomUUID(),
+          retire_samples: ["e1"],
+        })
+      ).status,
+    ).toBe("saved");
+    expect(
+      (
+        await pg.query(
+          "SELECT source_version,status FROM report_guides WHERE user_id='parked' AND report='email'",
+        )
+      ).rows,
+      // 2 from the first resume, 3 from the second (each counts as a change),
+      // 4 from the trigger.
+    ).toEqual([{ source_version: 4, status: "queued" }]);
+  } finally {
+    await pg.close();
+    await rm(scratch, { recursive: true, force: true });
+  }
+}, 30000);
 
 test("no request path deletes usage rows: only the maintenance job's prune does", async () => {
   // Request-serving code (server/src, apps/auth/src) never deletes from

@@ -710,7 +710,7 @@ wanted. Alert delivery to Peter is unverified until milton-duo sends a test noti
 
 ## Optional guide worker
 
-The default-off private guide pilot has separate [operations and capability instructions](guides.md). No guide job, schedule, provider key or account enrollment is provisioned by its build.
+The default-off private guide pilot has separate [operations and capability instructions](guides.md). No guide job, schedule, provider key or account enrollment is provisioned by its build. It is parked: Drizzle 0010 drops its sample-version trigger and keeps every guide row; apply it as any migration (snapshot first). [Parked state and resume](guides.md#parked-state-and-resume) gives the steps.
 
 ## Cloud resources
 

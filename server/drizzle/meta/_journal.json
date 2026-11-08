@@ -71,6 +71,13 @@
       "when": 1794117597857,
       "tag": "0009_test_account",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1794161485002,
+      "tag": "0010_park_guides",
+      "breakpoints": true
     }
   ]
 }

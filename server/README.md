@@ -821,10 +821,11 @@ limit). Owner, delegate, legacy and guide roles get none. `check-runtime-role.ts
 requires the app/MCP settings. A setting reaches only sessions that start after it.
 Rollback is the pre-migration snapshot.
 
-App and MCP read `sample_versions` and the guide state in `guide_accounts` and
-`report_guides`; MCP appends to `samples` and `sample_versions` but cannot update
-either, because migration `0002` makes every sample change an insert. Neither runtime
-writes guide tables or reads `guide_spend`; the separate `milton_guide_worker`
-capability is described in [the guide pilot runbook](deploy/guides.md).
+App and MCP read `sample_versions`, and the guide state in `guide_accounts` and
+`report_guides` only with `MILTON_GUIDES=on` (off while the pilot is parked); MCP appends
+to `samples` and `sample_versions` but cannot update either, because migration `0002`
+makes every sample change an insert. Neither runtime writes guide tables or reads
+`guide_spend`; the separate `milton_guide_worker` capability is described in [the guide
+pilot runbook](deploy/guides.md).
 
 Native auth mail now uses committed encrypted jobs/no-op receipts before generic public acceptance. No provider call occurs during an auth request; the separately selected auth-only `node deliver.js --apply` command drains bounded leased work using the original native target and exact message. App/MCP receive no mail payload/table/function privileges. [Auth operations](../apps/auth/README.md#bounded-mail-delivery-and-retention) describe uncertain503 recovery, retry/retention bounds, key recovery and disabled job preparation. Native migrations run through007. Old inline-send writers remain unsafe for public fallback; select a compatible fixed self-hosted revision/forward fix. Retained disabled managed sign-in schema/data/backups require separately selected cleanup and are disclosed in the candidate privacy/intake wording.

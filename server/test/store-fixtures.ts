@@ -71,6 +71,17 @@ export const fixtureStore = (
   clientId = "fixture",
 ) => compiledMemos(db, userId, { issuer: "fixture", clientId });
 
+// The same store with the parked guide pilot's reads switched on.
+export const guideStore = (db: StoreDatabase, userId: string) =>
+  compiledMemos(
+    db,
+    userId,
+    { issuer: "fixture", clientId: "fixture" },
+    undefined,
+    undefined,
+    true,
+  );
+
 // One current rule, with a stable identity and its first immutable version.
 export const seedRule = async (
   pg: PGlite,

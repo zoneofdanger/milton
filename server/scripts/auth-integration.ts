@@ -66,6 +66,7 @@ import {
   setGuideEnrollment,
 } from "../src/guides/store";
 import { runGuideWorker } from "../src/guides/worker";
+import { resumeGuides } from "../src/guides/resume";
 import type { GuideProvider } from "../src/guides/provider";
 import { connections, lifecycle } from "../src/auth-lifecycle";
 import type { SessionUser } from "../src/auth-session";
@@ -736,6 +737,27 @@ try {
   await owner.query("GRANT milton_mcp_runtime TO milton_guide_runtime");
   assert.equal(await guideWorkerRoleAllowed(guideDb), false);
   await owner.query("REVOKE milton_mcp_runtime FROM milton_guide_runtime");
+  // Resuming the parked pilot (deploy/guides.md) is owner-only: CREATE TRIGGER
+  // needs ownership of sample_versions, so every runtime login is refused and
+  // changes nothing. The owner restores the trigger; it is dropped again so the
+  // rest runs parked, as production does.
+  const guideTrigger = async () =>
+    (
+      await owner.query(
+        "SELECT count(*)::int n FROM pg_trigger WHERE tgname='report_guide_source'",
+      )
+    ).rows[0].n;
+  assert.equal(await guideTrigger(), 0);
+  for (const service of ["app", "mcp", "guide", "auth"])
+    await assert.rejects(
+      resumeGuides(postgresDatabase(url(service))),
+      (e) => e instanceof StoreError,
+      service,
+    );
+  assert.equal(await guideTrigger(), 0);
+  await resumeGuides(ownerDb);
+  assert.equal(await guideTrigger(), 1);
+  await owner.query("DROP TRIGGER report_guide_source ON sample_versions");
   // Connection keys (006): app creates, lists and revokes without reading a
   // hash; MCP reads and records last use only; auth and the guide get nothing.
   const keyPrivileges = async (role: string) =>

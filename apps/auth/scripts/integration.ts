@@ -1083,7 +1083,10 @@ try {
   await p.owner.query(
     'delete from milton_auth."rateLimit"; delete from milton_guard.rate_bucket',
   );
-  await httpFixture(service);
+  await httpFixture(service, {
+    rateSecret: config.AUTH_RATE_SECRET,
+    owner: p.owner,
+  });
   group(
     "compiled Node HTTPS Hono mounting, canonical Host, local assets, escaped forms, Origin and host-only cookie/security handoff",
   );

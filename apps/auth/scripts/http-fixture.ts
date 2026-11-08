@@ -2,13 +2,18 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createHmac } from "node:crypto";
 import { createServer, request } from "node:https";
 import { serve } from "@hono/node-server";
 import type { AuthService } from "../src/provider.ts";
 import { AUTH_ORIGIN } from "../src/config.ts";
 import { SECURITY_HEADERS } from "../src/http.ts";
 import { assertPortFree, selfSignedCertificate } from "./cluster.ts";
-export async function httpFixture(auth: AuthService) {
+export async function httpFixture(
+  auth: AuthService,
+  // Bucket keys are HMAC'd and readable only by the owner.
+  buckets: { rateSecret: string; owner: import("pg").Pool },
+) {
   const port = 19911;
   await assertPortFree(port, "owned_http_port_in_use");
   const directory = mkdtempSync(join(tmpdir(), "milton-auth-local-tls-"));
@@ -274,13 +279,27 @@ export async function httpFixture(auth: AuthService) {
         ).status,
         200,
       );
+    const network = [
+      "127.0.0.1",
+      "203.0.113.66",
+      "203.0.113.7",
+      "198.51.100.9",
+    ];
+    const keys = network.map((ip) =>
+      createHmac("sha256", buckets.rateSecret)
+        .update("network:" + ip)
+        .digest("hex"),
+    );
     assert.deepEqual(
       (
-        await auth.pool.query<{ key: string }>(
-          `select key from milton_auth."rateLimit" where key like '%|/ok' order by key`,
+        await buckets.owner.query<{ key: string }>(
+          "select key from milton_guard.rate_bucket where key = any($1)",
+          [keys],
         )
-      ).rows.map((r) => r.key),
-      ["127.0.0.1|/ok", "203.0.113.66|/ok", "203.0.113.7|/ok"],
+      ).rows
+        .map((r) => network[keys.indexOf(r.key)])
+        .sort(),
+      ["127.0.0.1", "203.0.113.66", "203.0.113.7"],
     );
     // F-1: exercise the compiled form/document boundary, including native logout.
     // Controlled destinations are separate from actual native confirmation below.

@@ -351,12 +351,15 @@ send is not retention approval. When the person makes the same correction twice,
 assistant proposes one short rule and files it only on approval; a single
 correction is a one-off. Both run through `create_memo` with ordinary approval.
 
-Usage guidance travels in three places: server `instructions` during MCP
-initialization, descriptions in `tools/list`, and descriptions on the save input
-fields. Connection instructions explain the shared read/setup/save workflow;
-tool metadata explains when to use each tool, and field descriptions explain the
-opaque version and same-request retry rules. Server instructions stay at or under
-4,096 characters, because Claude Code truncates longer ones; a test enforces this.
+Usage guidance travels in four places: server `instructions` during MCP
+initialization, descriptions in `tools/list`, descriptions on the save input
+fields, and the `next` step on every error result. Connection instructions explain
+the shared read/setup/save workflow and consent rules and point to `next` for errors;
+tool metadata explains when to use each tool and the save fields (rules, samples,
+version, request ID and what capture excludes), field descriptions explain the opaque
+version and same-request retry rules, and error results say how to recover. Both
+instruction variants stay under 3,500 characters, well inside the 4,096 at which Claude
+Code truncates; a test enforces this and that no error handling is left in them.
 The empty web page also provides a user-invoked setup prompt. No extra setup tool or
 prompt capability is required.
 

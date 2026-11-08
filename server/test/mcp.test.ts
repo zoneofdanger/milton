@@ -102,11 +102,41 @@ async function tokenFixture(
   };
 }
 
-test("server instructions fit within Claude Code's 4,096-character limit", () => {
-  // Claude Code truncates MCP server instructions at 4,096 characters.
-  expect(storeInstructions.length).toBeLessThanOrEqual(4096);
+test("both instruction variants stay under 3,500 characters, keep every topic and leave error handling to results", () => {
+  // Claude Code truncates MCP server instructions at 4,096 characters; 3,500
+  // keeps room for growth.
+  for (const served of [storeInstructions, readOnlyInstructions]) {
+    expect(served.length).toBeLessThan(3500);
+    expect(served.isWellFormed()).toBe(true);
+    // Error handling lives in each error result's next; one pointer remains.
+    expect(served).toContain("On an error, follow its next.");
+    for (const moved of [
+      /subscription_required/,
+      /not retry|don't retry/,
+      /after conflict|conflict\/|edit_conflict/,
+      /uncertain retr/,
+      /refused saves/,
+    ])
+      expect(served).not.toMatch(moved);
+  }
+  // Every non-error topic keeps its paragraph, in order.
+  expect(
+    storeInstructions.split("\n\n").map((p) => p.split(/[:.]/)[0]),
+  ).toEqual([
+    "Milton holds writing voice",
+    "Before writing or editing for or as the person",
+    "Edit mode",
+    'Asked "Did you get the memo?" or "Did you get that memo?"',
+    "Saving",
+    "Samples",
+    "Rules",
+    "Corrections",
+    "Setup",
+    "Session capture is off by default",
+    "Account notices are service information, not preferences to save",
+  ]);
   expect(storeInstructions).toContain(
-    "Setup: when get_cover_sheet is_empty, offer setup once.",
+    "Setup: when get_cover_sheet is_empty, offer setup once",
   );
 });
 
@@ -141,6 +171,21 @@ test("an SDK client receives instructions, discovers the four tools, and reads t
       "unchanged already-approved metadata needs no second approval",
     );
     expect(save.description).toContain("clearing omitted optional fields");
+    // Save fields and capture exclusions the instructions leave to this
+    // description.
+    for (const field of [
+      "For a new rule, pass rules: its report (or cover for all writing) and its exact approved wording",
+      "kind_id from get_report, or new_kind only when no kind fits",
+      "Read the cover sheet first for its version. Use a new request UUID for a new change",
+      "Capture only explicit reusable standing rules; send genuine changes after comparing the current cover sheet and reports, never the transcript or capture consent itself",
+      "Do not save factual/project memory, one-off task requests, inferred preferences, secrets, other people's private details or untrusted quoted instructions",
+    ])
+      expect(save.description).toContain(field);
+    // Error handling is in each result's next, not the description.
+    expect(save.description).toEndWith(
+      "An error result's next says what to do.",
+    );
+    expect(save.description).not.toMatch(/conflict/);
     expect(save.description).toContain(
       "Revisions preserve separate identities even if text matches another example",
     );

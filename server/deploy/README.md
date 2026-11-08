@@ -754,9 +754,13 @@ restore needs Peter's go.
   (`history_retention_seconds: 86400`), so any moment in the last 24 hours can be branched
   from. Longer retention is a project setting with a storage cost; changing it is Peter's
   call.
-- Snapshots: manual only (no snapshot schedule), kept until deleted. The pre-migration
-  snapshots from 2026-11-01 onward exist (`list_snapshots`); the newest is the restore point
-  for anything older than 24 hours.
+- Scheduled snapshots (Peter, 2026-11-08): production is snapshotted daily at 11:00 UTC
+  (3–4 a.m. Pacific) and each scheduled snapshot is deleted after 14 days
+  (`retention_seconds: 1209600`; `get_snapshot_schedule` on `br-muddy-mode-b88xfprl`). Neon
+  bills snapshots at $0.09/GB-month; with a database of about 39 MB, 14 full copies would be
+  about 0.55 GB, under $0.05 a month.
+- Manual snapshots (the pre-migration ones from 2026-11-01 onward) are kept until deleted and
+  don't count against the scheduled ones (`list_snapshots`).
 
 **Procedure** (Neon MCP or console; never the owner URL in a command line):
 

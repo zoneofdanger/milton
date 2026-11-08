@@ -5,7 +5,7 @@
 -- empty table only; safe while older app/MCP code serves (it never touches this
 -- table). Apply before code that writes it; until then that code's appends fail,
 -- are logged by code and change no response. Grants:
--- migrations/009-usage-calls-roles.sql. Rollback is the pre-migration snapshot.
+-- migrations/009-usage-calls-roles.sql. Rollback: rollback/0007_usage_calls.sql.
 CREATE TABLE "usage_calls" (
 	"user_id" text NOT NULL,
 	"at" timestamp with time zone NOT NULL,

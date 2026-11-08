@@ -4,8 +4,8 @@
 -- only while app code from #26 or later serves: older code reads it at first
 -- sign-in. 005-app.up.sql no longer creates it, so a database installed from it
 -- has none and this is a no-op there. No CASCADE: an unexpected dependent fails
--- this file instead of being dropped with it. Rollback is the pre-migration
--- snapshot.
+-- this file instead of being dropped with it. Rows come back only from the
+-- pre-migration snapshot; 008-drop-legacy-mapping.down.sql recreates it empty.
 BEGIN;
 DROP TABLE IF EXISTS milton_app.legacy_mapping;
 COMMIT;

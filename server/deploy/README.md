@@ -133,6 +133,9 @@ branch or database first, then:
 
 Rollback, needed only before traffic returns to app/MCP code older than #26, is the
 pre-migration Neon snapshot `snap-muddy-bonus-b8tjvsii`. There is no down script.
+Comments inside the applied 0005, 0006, 0007 and 008 files still name rollback files deleted
+on 2026-11-08 under the AGENTS.md rule; applied files are never edited, and the
+pre-migration snapshot is the rollback.
 
 ## Drop the unread payload columns (applied 2026-11-08: Drizzle 0006)
 

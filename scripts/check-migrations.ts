@@ -9,7 +9,8 @@
  * 2. Lock: scripts/released-migrations.sha256 holds the SHA-256 of every migration
  *    file (Drizzle snapshots included, the growing journal excepted). A file on main
  *    never changes, moves or disappears, and neither does its line.
- * 3. Drop order: a new migration that drops or renames a table or column carries a
+ * 3. Drop order: a new migration that drops, truncates or renames a table, column,
+ *    view, schema, type or function carries a
  *    `-- code-stopped-by: #NN` line naming the merged PR that stopped all code using
  *    it (AGENTS.md: release the code first).
  *
@@ -47,16 +48,21 @@ export const TRACKS = [
 ];
 // Statements that remove or rename something running code may still read, matched
 // per statement after sqlCode; DROP CONSTRAINT/DEFAULT/NOT NULL and the like pass.
+// Drops and renames cover the same objects: tables, columns, views, schemas,
+// types (their attributes and enum values) and functions.
+const OBJECTS =
+  "TABLE|VIEW|MATERIALIZED\\s+VIEW|FOREIGN\\s+TABLE|SCHEMA|TYPE|DOMAIN|FUNCTION|PROCEDURE|ROUTINE";
 const DESTRUCTIVE = [
-  /^DROP\s+(?:TABLE|SCHEMA)\b/i,
+  new RegExp(`^DROP\\s+(?:${OBJECTS})\\b`, "i"),
   /^TRUNCATE\b/i,
   /\bDROP\s+COLUMN\b/i,
   /^ALTER\s+TABLE\b.*?\bDROP\s+(?!CONSTRAINT\b|DEFAULT\b|NOT\b|EXPRESSION\b|IDENTITY\b)[A-Za-z_"]/i,
   /^ALTER\s+TYPE\b.*\bDROP\s+(?:ATTRIBUTE|VALUE)\b/i,
-  // Renames of what code names: tables, columns, views, schemas, types (their
-  // attributes and enum values) and functions. Index, sequence, trigger and
-  // constraint renames pass.
-  /^ALTER\s+(?:TABLE|VIEW|MATERIALIZED\s+VIEW|FOREIGN\s+TABLE|SCHEMA|TYPE|DOMAIN|FUNCTION|PROCEDURE|ROUTINE)\b.*\bRENAME\b(?!\s+CONSTRAINT\b)/i,
+  // Index, sequence, trigger and constraint renames pass.
+  new RegExp(
+    `^ALTER\\s+(?:${OBJECTS})\\b.*\\bRENAME\\b(?!\\s+CONSTRAINT\\b)`,
+    "i",
+  ),
 ];
 // Dynamic SQL this check cannot read: a DO block, or EXECUTE other than a
 // trigger's EXECUTE FUNCTION or the EXECUTE privilege.
@@ -331,11 +337,11 @@ export function checkMigrations({
     const prs = STOPPED_BY.exec(comments)?.[1]?.split(/\s*,\s*/);
     if (!prs && found)
       fail(
-        `${path} drops or renames a table or column ("${found.slice(0, 60)}"); add a line "-- code-stopped-by: #NN" naming the merged PR that stopped all code using it, and release that code first`,
+        `${path} drops, truncates or renames something code may use ("${found.slice(0, 60)}"); add a line "-- code-stopped-by: #NN" naming the merged PR that stopped all code using it, and release that code first`,
       );
     else if (!prs && !NO_DROP.test(comments))
       fail(
-        `${path} runs dynamic SQL ("${dynamic}"), which this check cannot read; add "-- code-stopped-by: #NN" if it drops or renames a table or column, or "-- no-drop-or-rename: <reason>" if it does not`,
+        `${path} runs dynamic SQL ("${dynamic}"), which this check cannot read; add "-- code-stopped-by: #NN" if it drops, truncates or renames something code may use, or "-- no-drop-or-rename: <reason>" if it does not`,
       );
     else if (prs && base)
       for (const pr of prs.filter((pr) => !merged(pr)))

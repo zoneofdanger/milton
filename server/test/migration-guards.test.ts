@@ -169,7 +169,7 @@ test("a migration that drops or renames needs a merged code-stopped-by PR", () =
     drop("-- Grants only. Never DROP TABLE t.", "GRANT SELECT ON t TO s;"),
   ).toEqual([]);
   expect(drop("-- No header.")).toEqual([
-    'server/migrations/002-drop.sql drops or renames a table or column ("DROP COLUMN"); add a line "-- code-stopped-by: #NN" naming the merged PR that stopped all code using it, and release that code first',
+    'server/migrations/002-drop.sql drops, truncates or renames something code may use ("DROP COLUMN"); add a line "-- code-stopped-by: #NN" naming the merged PR that stopped all code using it, and release that code first',
   ]);
   for (const statement of [
     "DROP TABLE t;",
@@ -200,6 +200,15 @@ test("a migration that drops or renames needs a merged code-stopped-by PR", () =
       "ALTER INDEX t_idx RENAME TO t_idx2; ALTER TABLE t RENAME CONSTRAINT t_pkey TO t_pk; ALTER SEQUENCE s RENAME TO s2;",
     ),
   ).toEqual([]);
+  // Drops cover the same objects as renames.
+  for (const statement of [
+    "DROP VIEW v;",
+    "DROP MATERIALIZED VIEW IF EXISTS m;",
+    "DROP TYPE mood;",
+    "DROP FUNCTION f();",
+    "DROP PROCEDURE p();",
+  ])
+    expect(drop("", statement)).toHaveLength(1);
   // Comments and strings neither hide a statement nor fake one.
   for (const statement of [
     "DROP/**/TABLE t;",
@@ -221,7 +230,7 @@ test("a migration that drops or renames needs a merged code-stopped-by PR", () =
   // Dynamic SQL is unreadable here, so it fails closed until a line says what it does.
   const dynamic = "DO $$ BEGIN EXECUTE 'DR' || 'OP TABLE t'; END $$;";
   expect(drop("", dynamic)).toEqual([
-    'server/migrations/002-drop.sql runs dynamic SQL ("DO"), which this check cannot read; add "-- code-stopped-by: #NN" if it drops or renames a table or column, or "-- no-drop-or-rename: <reason>" if it does not',
+    'server/migrations/002-drop.sql runs dynamic SQL ("DO"), which this check cannot read; add "-- code-stopped-by: #NN" if it drops, truncates or renames something code may use, or "-- no-drop-or-rename: <reason>" if it does not',
   ]);
   expect(drop("-- no-drop-or-rename: grants only", dynamic)).toEqual([]);
   expect(drop("-- code-stopped-by: #40", dynamic)).toEqual([]);

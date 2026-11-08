@@ -149,13 +149,12 @@ the lock and journal and says so):
 - `scripts/released-migrations.sha256` locks every migration file and Drizzle snapshot.
   Never edit, rename or remove one on main; add a new migration. Lock a new one with
   `bun scripts/check-migrations.ts --update` and commit the manifest with it.
-- A new migration that drops, truncates or renames a table or column (or drops a
-  type's attribute) carries a line `-- code-stopped-by: #NN` naming the merged PR that
-  stopped all code using it, and ships only after that code is released. Renaming a
-  view, schema, type, enum value or function needs it too; index, sequence, trigger
-  and constraint renames do not. Comments and
-  string literals are skipped. Dynamic SQL (a `DO` block or `EXECUTE`) cannot be read,
-  so it needs that line or `-- no-drop-or-rename: <reason>`.
+- A new migration that drops, truncates or renames a table, column, view, schema, type
+  (attribute or enum value) or function carries a line `-- code-stopped-by: #NN`
+  naming the merged PR that stopped all code using it, and ships only after that code
+  is released. Index, sequence, trigger and constraint drops and renames do not need
+  it. Comments and string literals are skipped. Dynamic SQL (a `DO` block or
+  `EXECUTE`) cannot be read, so it needs that line or `-- no-drop-or-rename: <reason>`.
 
 `test/deletion-inventory.test.ts` applies all three tracks to an empty PGlite and fails
 on any text, character, JSON, bytea, tsvector, XML or enum column (or array, domain or

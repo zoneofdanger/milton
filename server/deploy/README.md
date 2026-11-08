@@ -22,7 +22,7 @@ This runbook keeps only the latest release record. Earlier release records and a
 one-time procedures are in git history; the last full version is at commit 492b96a
 (`git show 492b96a:server/deploy/README.md`).
 
-## Release record: daily allowance removed, usage rows (2026-11-08, PR #40)
+## Release record: daily allowance removed, usage rows, round 3 fixes (2026-11-08, PRs #40 #46 #47 #48)
 
 Source `90af817` (milton-qa; Peter's decision; Astra over four rounds). The tool-call path no
 longer enforces or charges a daily allowance; each admitted call appends a best-effort
@@ -41,6 +41,21 @@ warnings in a 5-minute watch. Rollback: app/MCP
 table itself must go. Auth `milton-auth-00009-mrk`, rollback `milton-auth-00008-967`.
 Follow-ups: a migration dropping `usage_daily` and the stored `daily_calls` key, and
 `usage_calls` retention.
+
+Then `64435ee`: #46 (sign-in protocol failures and the metadata mismatch logged by class and
+code only; a user's `access_denied` is not logged), #47 ("Switch account" ends the session and
+lands on `/login?fresh=1` via the fixed logout `state` only) and #48 (Checkout sessions expire
+after 31 minutes; confirm with one test-mode Checkout before billing is turned on), all
+milton-qa with light review. App/MCP `milton-*-rnd3-64435ee` at 01:00Z (image
+`sha256:0b8c77e37856a94a3ceef4d729ef73cff6f47acb01c2332de4e255e72048a900`). A first attempt
+with the tag `r3` was refused (tags need 3+ characters). It left each service's spec naming the
+missing `*-r3-64435ee` revision, so on the retry Cloud Run set Ready=False briefly (MCP
+01:00:09Z, app 01:00:23Z; two audit-log errors) while it kept serving the previous routes;
+the retry's traffic update replaced the spec. 0 5xx and no application errors in the 5-minute
+watch. Live:
+`/auth/logged-out?state=switch-account` 303 to `/login?fresh=1`; a URL or a duplicate
+`state` gets the plain page (200); callback `access_denied` 401. Rollback: app/MCP
+`milton-*-use-90af817`.
 
 ## Runtime role timeouts (applied 2026-11-07, TODO #29)
 
@@ -413,8 +428,8 @@ references. Inspect revision readiness before selecting a recorded revision:
 gcloud run revisions list --service=milton-app --project=milton-510506 --region=us-east4
 ```
 
-Now serving (2026-11-08): app `milton-app-use-90af817` and MCP
-`milton-mcp-use-90af817` (source `90af817`), and auth `milton-auth-00009-mrk` (source `e770c15`). The
+Now serving (2026-11-08): app `milton-app-rnd3-64435ee` and MCP
+`milton-mcp-rnd3-64435ee` (source `64435ee`), and auth `milton-auth-00009-mrk` (source `e770c15`). The
 release record above gives the image and rollback revisions.
 
 Roll back only affected services, preserve ingress/IAM, then repeat the canonical

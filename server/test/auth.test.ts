@@ -24,6 +24,7 @@ import {
 } from "./auth-fixtures";
 import { authAdmission, trialFingerprints } from "../src/auth-admission";
 import { ensureSubscription } from "../src/billing";
+import { backfillSubscriptions } from "../scripts/backfill-subscriptions";
 
 const appFor = (env: Partial<Parameters<typeof createMiltonApp>[0]>) =>
   createMiltonApp({ issuer, resource, appOrigin, ...clientSettings, ...env });
@@ -142,6 +143,8 @@ function fakeStripe() {
     subscriptions: [] as Record<string, unknown>[],
     // Runs as Stripe creates or updates a customer, before it answers.
     onCustomer: async () => {},
+    // Runs as Stripe creates a Checkout session, before it answers.
+    onSession: async () => {},
     calls: [] as Record<string, unknown>[],
     onDelete: async () => {},
   };
@@ -188,11 +191,13 @@ function fakeStripe() {
         stripe.subscriptions = [created];
         return Response.json(created);
       }
-      if (path === "/v1/checkout/sessions")
+      if (path === "/v1/checkout/sessions") {
+        await stripe.onSession();
         return Response.json({
           id: "cs_test_fixture",
           url: "https://checkout.stripe.com/c/pay/cs_test_fixture",
         });
+      }
       if (path === "/v1/checkout/sessions/cs_test_fixture/expire")
         return Response.json({ id: "cs_test_fixture", status: "expired" });
       if (path === "/v1/billing_portal/sessions")
@@ -1227,12 +1232,23 @@ test("account deletion: a checkout in flight as it begins links no customer and 
       account: 1,
       customer: null,
     });
-    // Nothing enrols the account either, the subscription backfill included.
+    // Nothing enrols the account either: enrolment refuses it, and the
+    // subscription backfill counts it as skipped.
     await local.db.query(
       sql`UPDATE trial_accounts SET subscription_status=NULL`,
     );
+    await local.db.query(sql`UPDATE store_config SET trials_enabled=true`);
     stripe.calls.length = 0;
-    await ensureSubscription(local.config, userId);
+    await expect(
+      ensureSubscription(local.config, userId),
+    ).rejects.toMatchObject({ code: "account_deleting", status: 409 });
+    expect(
+      await backfillSubscriptions(
+        local.config,
+        { apply: true, allowTestKey: true },
+        async () => {},
+      ),
+    ).toEqual({ total: 1, created: 0, skipped: 1, failed: 0, still_null: 1 });
     expect(stripe.calls).toEqual([]);
     // A customer linked anyway, as an image without that refusal could while a
     // release rolls out, is ended before the erase.
@@ -1342,6 +1358,42 @@ test("account deletion: a checkout with a stored customer expires the session it
     ]);
   } finally {
     quiet.mockRestore();
+    await fixture.dispose();
+  }
+}, 30000);
+
+test("account deletion: a checkout expires its session when the deletion finishes, account erased, while Stripe opens it", async () => {
+  const fixture = await deletionFixture();
+  const { local, send, stripe } = fixture;
+  try {
+    await local.db.query(
+      sql`UPDATE trial_accounts SET subscription_status='canceled'`,
+    );
+    const operation = operationIn(await (await send("/account/delete")).text());
+    let deletion: Response | undefined;
+    stripe.onSession = async () => {
+      stripe.onSession = async () => {};
+      deletion = await send("/account/delete", {
+        operation,
+        confirm: "delete my account",
+      });
+    };
+    const checkout = await send("/billing/checkout", {});
+    expect(deletion?.status).toBe(200);
+    expect((await fixture.remains()).account).toBe(0);
+    expect(checkout.status).toBe(409);
+    expect(await checkout.text()).not.toContain("checkout.stripe.com");
+    expect(
+      stripe.calls
+        .map(({ call }) => String(call))
+        .filter((call) => !call.startsWith("GET /v1/subscriptions")),
+    ).toEqual([
+      "POST /v1/customers/cus_fixture",
+      "POST /v1/checkout/sessions",
+      "DELETE /v1/customers/cus_fixture",
+      "POST /v1/checkout/sessions/cs_test_fixture/expire",
+    ]);
+  } finally {
     await fixture.dispose();
   }
 }, 30000);

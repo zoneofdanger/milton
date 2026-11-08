@@ -3116,6 +3116,51 @@ try {
         billing.fetch = shared;
       }
     }
+    // The same through a native sign-in: its admission is enrolling the account
+    // when the deletion begins, and native refuses the sign-in as an account
+    // being deleted rather than asking for a retry.
+    {
+      const { deletions, erased } = await signedUp("signin-race@example.com");
+      const start = await request(app, config.appOrigin + "/login", appCookies);
+      const creating = gate();
+      const release = gate();
+      hooks.customer = async () => {
+        creating.open();
+        await release.opened;
+      };
+      calls.length = 0;
+      billing.fetch = stub;
+      try {
+        const authorizing = request(
+          native.handler,
+          start.headers.get("Location")!,
+          authCookies,
+        );
+        await creating.opened;
+        const deletion = deletions.run("delete", randomUUID());
+        await lockWaiters(1, "the deletion waits on the admission's row");
+        release.open();
+        const refused = await authorizing;
+        const answer = await refused.text();
+        assert.deepEqual(
+          [refused.status, answer.includes("account_deleting")],
+          [403, true],
+          `native refuses the sign-in as an account being deleted: ${refused.status} ${answer.slice(0, 200)}`,
+        );
+        const { operation, failed } = await deletion;
+        assert.equal(failed, false);
+        assert.equal(operation.progress, "complete");
+        assert.deepEqual(calls, [
+          "POST /v1/customers",
+          "DELETE /v1/customers/cus_race",
+        ]);
+        assert(await erased());
+      } finally {
+        release.open();
+        hooks.customer = async () => {};
+        billing.fetch = shared;
+      }
+    }
     // A checkout's link waits behind a row another transaction holds while the
     // deletion begins: it reads the deletion once it has the row, so it links
     // nothing and opens no session.

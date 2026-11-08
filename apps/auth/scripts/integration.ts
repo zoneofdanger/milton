@@ -23,6 +23,7 @@ import { fixtureConfig } from "../test/fixture-config.ts";
 import { AUTH_MIGRATIONS } from "./migrations.ts";
 import { deliverMail, openMail, type MailJob } from "../src/mail.ts";
 import { createProvider } from "../src/provider.ts";
+import { transport } from "../src/adapter.ts";
 import { AUTH_ORIGIN, ISSUER, safeError } from "../src/config.ts";
 
 const p = await disposable();
@@ -31,6 +32,10 @@ const secret = () => randomBytes(32).toString("hex");
 const TEST_PEER = "127.0.0.1";
 const config = fixtureConfig();
 const admissions: Record<string, unknown>[] = [];
+// The app's answer to each admission; a test sets 503 to refuse one, and
+// onAdmit runs inside the admitting request.
+let admitStatus = 204;
+let onAdmit: ((subject: string) => void) | undefined;
 const mail: { to: string; url: string; kind: "reset" | "verify" }[] = [];
 const boundaries = {
   fetch: async (input: string | URL | Request, init?: RequestInit) => {
@@ -40,10 +45,13 @@ const boundaries = {
     )
       return new Response(null, { status: 204 });
     if (String(input) === "https://app.meetmilton.com/internal/auth/admit") {
-      admissions.push(
-        JSON.parse(String(init?.body)) as Record<string, unknown>,
-      );
-      return new Response(null, { status: 204 });
+      const admission = JSON.parse(String(init?.body)) as Record<
+        string,
+        unknown
+      >;
+      admissions.push(admission);
+      onAdmit?.(String(admission.subject));
+      return new Response(null, { status: admitStatus });
     }
     throw new Error("external_network_refused");
   },
@@ -711,6 +719,103 @@ try {
       id_token?: string;
     };
   }
+  {
+    // Native asks for the flow twice in one authorize (postLogin.shouldRedirect,
+    // then consentReferenceId) and twice in one consent accept. Each request
+    // admits once (one admission_identity, one POST to the app) and binds at
+    // each ask. A refused admission still refuses, the next request admits
+    // afresh, and a differing input in the same request admits afresh.
+    const statements: string[] = [];
+    const query = authPool.query;
+    authPool.query = ((...args: [string, unknown[]]) => {
+      statements.push(args[0]);
+      return query.apply(authPool, args as never);
+    }) as never;
+    const counted = async (run: () => Promise<Response>) => {
+      statements.length = 0;
+      const before = admissions.length;
+      const response = await run();
+      const of = (name: string) =>
+        statements.filter((s) => s.includes(`milton_guard.${name}(`)).length;
+      return {
+        response,
+        admits: admissions.length - before,
+        identity: of("admission_identity"),
+        bind: of("bind_flow"),
+      };
+    };
+    const once = { admits: 1, identity: 1, bind: 2 };
+    const scope = "openid offline_access milton:read";
+    const start = () =>
+      new URLSearchParams({
+        client_id: assistant.client_id,
+        redirect_uri: "https://assistant.example.invalid/callback",
+        response_type: "code",
+        scope,
+        code_challenge: createHash("sha256")
+          .update(secret())
+          .digest("base64url"),
+        code_challenge_method: "S256",
+        state: secret(),
+        nonce: secret(),
+        resource: "https://mcp.meetmilton.com/mcp",
+      });
+    try {
+      admitStatus = 503;
+      const refused = await counted(() =>
+        call("/oauth2/authorize?" + start().toString()),
+      );
+      admitStatus = 204;
+      assert.equal(refused.response.status, 503);
+      assert.equal(refused.response.headers.get("location"), null);
+      // Refused at the app, before any binding, and never asked again.
+      const { response: _, ...tried } = refused;
+      assert.deepEqual(tried, { admits: 1, identity: 1, bind: 0 });
+      const first = await counted(() =>
+        call("/oauth2/authorize?" + start().toString()),
+      );
+      const { response, ...counts } = first;
+      assert.deepEqual(counts, once);
+      const target = new URL(response.headers.get("location")!, AUTH_ORIGIN);
+      assert.equal(target.pathname, "/consent");
+      const { response: chosen, ...accepted } = await counted(() =>
+        call("/oauth2/consent", {
+          accept: true,
+          scope,
+          oauth_query: target.searchParams.toString(),
+        }),
+      );
+      assert.equal(chosen.status, 200);
+      assert(
+        new URL(
+          ((await chosen.json()) as { url: string }).url,
+        ).searchParams.get("code"),
+      );
+      assert.deepEqual(accepted, once);
+      // The first ask's admission leaves a newer security generation in this
+      // request's snapshot: the second ask admits afresh, and is refused.
+      onAdmit = (subject) => {
+        const state = transport.getStore()!;
+        state.users.set(subject, {
+          ...state.users.get(subject)!,
+          miltonSecurityGeneration: "fictional-advanced-generation",
+        });
+      };
+      const { response: changed, ...rechecked } = await counted(() =>
+        call("/oauth2/authorize?" + start().toString()),
+      );
+      onAdmit = undefined;
+      assert.equal(changed.status, 400);
+      assert.deepEqual(rechecked, { admits: 1, identity: 2, bind: 1 });
+    } finally {
+      admitStatus = 204;
+      onAdmit = undefined;
+      authPool.query = query;
+    }
+  }
+  group(
+    "one authorize and one consent accept each admit once and bind at each ask; refusals and changed inputs refuse",
+  );
   const grants = await authorize(
     assistant,
     "openid offline_access milton:read milton:write",

@@ -32,6 +32,8 @@ export type RequestState = {
   clientId?: string;
   users: Map<string, Snapshot>;
   credentials: Map<string, Credential>;
+  /** This request's admissions of OAuth flows, by admission's inputs. */
+  admissions: Map<string, Promise<void>>;
   subject?: string;
   noCredentialObserved?: string;
   originalRefresh?: OriginalToken;

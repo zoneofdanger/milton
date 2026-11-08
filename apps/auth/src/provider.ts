@@ -149,19 +149,36 @@ export function createProvider(
     )
       throw invalid();
     const continuation = hash(JSON.stringify(tuple));
-    await admit(context.user.id, context.session.id, continuation);
+    const state = transport.getStore();
+    if (!state) throw invalid();
+    const user = context.user.id,
+      sid = context.session.id;
+    const original = state.users.get(user);
+    // Native asks twice in one request: authorize calls shouldRedirect then
+    // consentReferenceId, and a consent accept calls consentReferenceId then
+    // authorize's, each with the same session and stored query. So a request
+    // asks the app once: a later ask with every admission input the same
+    // shares the first's outcome, a refusal included, and a differing input
+    // admits afresh. Each ask still runs its own bind_flow, so a session or
+    // binding that ends between the two is refused at the second. Nothing
+    // outlives the request.
+    const key = JSON.stringify([
+      user,
+      sid,
+      original?.miltonIdentityIncarnation,
+      original?.miltonSecurityGeneration,
+      continuation,
+    ]);
+    let admitted = state.admissions.get(key);
+    if (!admitted) {
+      admitted = admit(user, sid, continuation);
+      state.admissions.set(key, admitted);
+    }
+    await admitted;
     try {
       const r = await pool.query<{ reference: string }>(
         "SELECT * FROM milton_guard.bind_flow($1,$2,$3,$4,$5,$6,$7)",
-        [
-          continuation,
-          context.user.id,
-          context.session.id,
-          tuple[0],
-          tuple[4],
-          context.scopes,
-          create,
-        ],
+        [continuation, user, sid, tuple[0], tuple[4], context.scopes, create],
       );
       if (!r.rows[0]) throw invalid();
       return r.rows[0].reference;
@@ -817,6 +834,7 @@ export function createProvider(
           typeof body.client_id === "string" ? body.client_id : undefined,
         users: new Map(),
         credentials: new Map(),
+        admissions: new Map(),
       };
       const response = await transport.run(requestState, async () => {
         const response = await provider.handler(native);

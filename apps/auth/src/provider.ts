@@ -830,8 +830,16 @@ export function createProvider(
       if (
         path === "/oauth2/userinfo" &&
         !(await liveBinding(bearer, bearer ? stored(bearer) : ""))
-      )
-        return json({ error: "invalid_token" }, 401);
+      ) {
+        // RFC 6750 §3: a refused bearer gets its challenge; a request with
+        // no credentials gets a bare one.
+        const refused = json({ error: "invalid_token" }, 401);
+        refused.headers.set(
+          "www-authenticate",
+          bearer ? 'Bearer error="invalid_token"' : "Bearer",
+        );
+        return refused;
+      }
       const headers = new Headers(request.headers);
       for (const k of [
         "forwarded",

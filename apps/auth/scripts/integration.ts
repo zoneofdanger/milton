@@ -1017,13 +1017,19 @@ try {
       };
     };
     const userInfo = async (tokens: string[]) => {
-      const outcomes: { status: number; body: Record<string, unknown> }[] = [];
+      const outcomes: {
+        status: number;
+        challenge: string | null;
+        body: Record<string, unknown>;
+      }[] = [];
       for (const t of tokens) {
         const r = await call("/oauth2/userinfo", undefined, {
           authorization: "Bearer " + t,
         });
         outcomes.push({
           status: r.status,
+          challenge:
+            r.status === 401 ? r.headers.get("www-authenticate") : null,
           body: (await r.json()) as Record<string, unknown>,
         });
       }
@@ -1035,8 +1041,10 @@ try {
         assert.equal(r.body.sub, subject);
       }
     };
+    // RFC 6750 §3: each refusal carries the Bearer challenge.
     const refused = Array(3).fill({
       status: 401,
+      challenge: 'Bearer error="invalid_token"',
       body: { error: "invalid_token" },
     });
     const operations: string[] = [];

@@ -311,6 +311,7 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
 - Auth's CSS, favicon and fonts keep every security header but cache like the app's assets (immutable at the versioned URL, otherwise no-cache); every other auth response stays no-store.
 - App uses maintained code/S256 OIDC with shared SQL one-use state/nonce/verifier, exact callback, signature/issuer/audience/subject and matching UserInfo/opaque-token proof.
 - Identity-only app sessions last at most one absolute hour and never outlive their native opaque token; renewal starts a new SSO flow with no refresh/offline scope.
+- An app session row holds the cookie's SHA-256, the native issuer, subject, sid, binding, incarnation, generation and verified email, and its expiry; the native access token is used only within the sign-in request (UserInfo and introspection) and never stored (owner file `012` made the old column nullable; a later migration drops it).
 - App cookies are host-only Secure/HttpOnly/SameSite=Lax over HTTPS; every use checks the original nonempty sid, immutable binding, incarnation and generation against native SQL, in the statement that reads the session and its identity's active account.
 - Invalid proof refuses; actual native5xx/network/timeout is 503; an uncertain spent callback recovers through a new login. Every discovery, token, UserInfo or introspection failure and any discovery metadata mismatch is logged (class and code only); a person declining sign-in (`access_denied`) is not.
 - New logins reclaim at most16 expired flows/sessions each; admission correlations expire after24 hours with bounded reclaim, while eligibility/key policy and original operation associations remain indefinitely for their stated purposes. Migrations `0005` and `008` drop the unread `deleted_identities` and legacy mapping tables; rollback is the pre-migration snapshot.
@@ -337,6 +338,7 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
 - App persists lifecycle UUID, original account/subject/incarnation/client and requester association before first native/remote attempt; retries never select current/recreated targets.
 - Disconnect commits native original-binding refusal before bounded cleanup; a failed or unfinished step answers 503 with a retry page re-posting the same operation, as deletion does; reconnect creates a new binding and never revives an old token.
 - Deletion saves the current verified-identity fingerprints as it starts, then commits refusal, then Stripe cancellation, then writing erasure (which records no identity of its own), and finally bounded native cleanup; unknown inventory/cascade shape leaves a retryable incomplete operation.
+- Anonymous assistant client registrations belong to no account: their free-text fields (client name, contacts, URIs, metadata) are kept indefinitely, and account deletion does not remove them.
 - Writing and original-incarnation app credentials are never erased before Stripe cancellation succeeds; incomplete deletion never claims completion.
 - Browser logout removes local authority and navigates through fixed-client native RP logout with exact return and native confirmation, leaving offline assistant grants independent; "Switch account" adds the one fixed logout `state` native echoes back, and only that exact single value sends the signed-out return on to a fresh sign-in (`prompt=login`).
 
@@ -459,6 +461,7 @@ Files: `server/drizzle/`, `server/src/store/schema.ts`, `server/src/store/databa
 - User IDs cannot change.
 - `users.test_account` (0009, default false) marks the fictional end-to-end check account; owner file `011-test-account-roles.sql` narrows app's INSERT on `users` to its other columns, so no runtime login can set it, and usage and metric counts exclude it.
 - Disconnects and identity hashes have no foreign key to users, so they outlive the account.
+- `docs/deletion-inventory.txt` classifies every text-bearing column the three migration tracks create as deleted by account deletion, hidden (kept, never served), retained (tied to no account, so deletion cannot remove it) or not personal; a test on a fresh schema fails on any column missing from it.
 - `connection_keys` (0004) cascades from users and from its (issuer, subject) identity, requires the native binding (issuer, subject, incarnation, generation), checks id, hash, name, scope, binding lengths and dates, and grants nothing to the legacy writing group; owner file `006-connection-keys-roles.sql` lets app read every column but the hash (binding included), insert and set `revoked_at`, and MCP read and set `last_used_at` only.
 - Native 007 adds only `milton_guard.connection_key_status(subject, incarnation, generation)`: SECURITY DEFINER, fixed `pg_catalog, pg_temp` path, false on NULL or any mismatch, no PUBLIC/auth/guide EXECUTE and no table grants; MCP and app may execute it. Without it, every key is refused.
 - The native auth migrator applies each migration file and its ledger row in one transaction under an advisory lock, so a crash leaves both or neither; a file that commits or rolls back the transaction itself fails after running and gets no ledger row.
@@ -499,7 +502,8 @@ Files: `apps/site/`.
 
 ## Theme, scripts, and CI
 
-Files: `packages/theme/`, `server/scripts/`, `.github/workflows/checks.yml`.
+Files: `packages/theme/`, `server/scripts/`, `scripts/check-migrations.ts`,
+`.github/workflows/checks.yml`.
 
 - A shared theme supplies fonts, favicons, and tokens, with a WCAG contrast test. App and auth text outside the Latin JetBrains Mono subset fetches the full master on demand, which also renders a non-Latin letter with its combining mark; the site serves only the subset.
 - `migrate.ts` applies writing migrations only as neondb_owner; explicit --app-auth applies app-only migration005 after native004 as an approved app migration owner, with no runtime startup migration.
@@ -512,7 +516,8 @@ Files: `packages/theme/`, `server/scripts/`, `.github/workflows/checks.yml`.
 - `e2e.ts` checks a deployment end to end on the test account only: a browser sign-in (following redirects, Continue pages and native's JSON redirects, which native sends because Node's fetch always says `Sec-Fetch-Mode: cors`, only to the app and auth origins) that must show the account and list the key's public id before the key is sent anywhere, an MCP connection with that key listing four tools, then a gate before any write (nothing on file but this check's marked leftovers, which it retires first), a marked fictional sample saved, read fresh, revised by `sample_id`, read fresh and retired, and a final read equal to the run's start. One JSON line per step with no secret or sample body; a key under 30 days from expiry warns; exit 0 only when every step passes, and 1 for a refusal, a failed step, a crash or a run past 240 s.
 - `build.ts` builds the CSS with Vite, versions the public assets by content hash, and bundles the Cloud Run, guide worker and end-to-end check (`e2e.js`, the `milton-e2e-daily` job) entries with Bun, minified except identifiers, with source maps the image leaves out.
 - `dev.ts` serves the app on loopback and rebuilds the CSS on change.
-- CI runs types, tests, formatting, and both integration suites on PostgreSQL 18, holds no secrets, and does not deploy.
+- CI runs the migration guards, types, tests, formatting, and both integration suites on PostgreSQL 18, holds no secrets, and does not deploy.
+- `check-migrations` compares with main: a new migration is numbered above main's highest in its track with its own number, Drizzle journal entries run in order with strictly increasing `when`, every migration file and snapshot matches its hash in `scripts/released-migrations.sha256` (main's never change), and a new drop, truncate or rename of a table, column, view, schema, type or function names its merged code-stopped-by PR (comments and strings skipped; a `DO` block, `EXECUTE` (top level or in a function body), or a function body that drops, truncates or renames, needs that or a `no-drop-or-rename` reason). Without origin/main it checks only the lock and journal; in CI that fails.
 
 ## Optional report guides
 

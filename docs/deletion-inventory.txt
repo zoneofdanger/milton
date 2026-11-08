@@ -1,0 +1,62 @@
+# Deletion inventory: what account deletion does to every column that can hold text.
+#
+# Rule: every column of a text, character, JSON, bytea, tsvector, XML or enum type
+# (or an array, domain or composite type holding one, resolved recursively) in every
+# table and materialized view a fresh install of the three migration tracks creates
+# (server/drizzle, apps/auth/migrations, server/migrations), except the Drizzle
+# migrator's own journal. server/test/deletion-inventory.test.ts applies
+# all three tracks to an empty PostgreSQL and fails on any such column missing here,
+# or listed here but gone. Classes:
+#   deleted       account deletion removes the row
+#   hidden        kept after deletion (until it expires, or for a stated purpose),
+#                 never served to an assistant or shown on a page
+#   retained      kept with no link to any account, so deletion cannot remove it,
+#                 and may hold personal data someone entered; the reason says how long
+#   not-personal  holds nothing about a person
+#
+# schema.table | class | columns | reason
+
+public.users | deleted | id status | Writing erasure deletes the row; every public table below marked deleted cascades from it.
+public.identities | deleted | provider subject user_id | Cascades from users.
+public.accepted_changes | deleted | actor_json affected_json after_source after_tps before_source before_tps operation request_id request_json transformation_json user_id | Cascades from users.
+public.instruction_cards | deleted | id user_id | Cascades from users.
+public.instruction_card_versions | deleted | actor_json body card_id description details_json reason report user_id | Cascades from instruction_cards.
+public.sample_kinds | deleted | id label report user_id | Cascades from users.
+public.samples | deleted | client_json id user_id | Cascades from users.
+public.sample_versions | deleted | actor_json body context kind_id provenance report request_id retire_reason sample_id search user_id | Cascades from samples.
+public.save_requests | deleted | input_hash request_id result_json source_hash user_id | Cascades from users.
+public.trial_accounts | deleted | stripe_customer_id stripe_subscription_id subscription_status user_id | Cascades from users, after Stripe cancellation.
+public.usage_calls | deleted | tool user_id | Cascades from users.
+public.report_guides | deleted | guide_text lease_token reason report status user_id | Cascades from users.
+public.guide_accounts | deleted | opt_in_reference user_id | Cascades from users.
+public.connection_keys | deleted | generation id incarnation issuer name scope secret_hash subject user_id | Cascades from users.
+public.assistant_disconnects | hidden | client_id provider subject | No foreign key to users: outlives the account so a later account for the same identity stays disconnected.
+public.guide_spend | hidden | account_key id | Content-free spend entries (account_key is a SHA-256 of the account ID) outlive accounts so deletion cannot reset caps.
+public.store_config | not-personal | limits_json | Service limits.
+public.stripe_events | not-personal | id payload_sha256 type | Event ID, type and body hash, never the payload.
+milton_app.session | deleted | access_token binding email generation incarnation issuer sid subject token_hash | Deleted with the writing (server/src/auth-lifecycle.ts); access_token is no longer written (null in new rows) and a later migration drops it.
+milton_app.account_fingerprint | deleted | fingerprint user_id | Cascades from users.
+milton_app.trial_fingerprint | hidden | fingerprint first_user_id | Keyed trial-eligibility fingerprint and first claimant, kept after deletion to block a second trial.
+milton_app.lifecycle | hidden | client_id incarnation issuer kind progress requester_hash subject user_id | The deletion or disconnect operation, kept so a retry resumes it and never starts another.
+milton_app.admission | hidden | continuation issuer subject user_id | Sign-in correlation, expires after 24 hours with bounded reclaim.
+milton_app.flow | not-personal | browser_hash destination nonce state_hash verifier | One sign-in attempt's hashes and nonces, before any identity; expires in 10 minutes.
+milton_app.eligibility_policy | not-personal | key_check | Check value of the fingerprint key.
+milton_auth.user | deleted | email id image miltonIdentityIncarnation miltonSecurityGeneration name | Native cleanup (milton_guard.cleanup_operation) deletes it last.
+milton_auth.session | deleted | id ipAddress miltonIdentityIncarnation miltonSecurityGeneration token userAgent userId | Native cleanup deletes the user's sessions.
+milton_auth.account | deleted | accessToken accountId id idToken miltonCredentialRevision miltonExpectedCredentialRevision password providerId refreshToken scope userId | Native cleanup deletes the user's sign-in methods.
+milton_auth.oauthAccessToken | deleted | authorizationCodeId clientId confirmation id referenceId refreshId requestedUserInfoClaims resources scopes sessionId token userId | Native cleanup deletes every token of the account's bindings; deletion refuses while one remains.
+milton_auth.oauthRefreshToken | deleted | authorizationCodeId clientId confirmation id referenceId requestedUserInfoClaims resources rotationReplayResponse scopes sessionId token userId | As oauthAccessToken.
+milton_auth.oauthConsent | deleted | clientId id referenceId requestedUserInfoClaims resources scopes userId | As oauthAccessToken.
+milton_auth.verification | hidden | id identifier value | Native cleanup deletes the account's; the rest expire within an hour and maintenance removes them a day later.
+milton_auth.rateLimit | hidden | id key | Request counters; maintenance removes stale rows.
+milton_auth.jwks | not-personal | alg crv id privateKey publicKey | Signing keys.
+milton_auth.oauthClient | retained | backchannelLogoutUri clientDiscoveryId contacts icon jwksUri metadata name policy postLogoutRedirectUris redirectUris softwareId softwareStatement softwareVersion tos uri | Free text from anonymous client registration (client_name, contacts, URIs, metadata), which may name a person or hold an address; registrations belong to no account and are kept indefinitely (nothing deletes them).
+milton_auth.oauthClient | not-personal | applicationType clientCredentialsScopes clientId clientSecret grantTypes id jwks referenceId responseTypes scopes subjectType tokenEndpointAuthMethod userId | Client identifiers, secrets, keys and protocol settings; userId and referenceId stay empty for anonymous clients (deletion refuses an owned one).
+milton_auth.oauthClientAssertion | not-personal | id | Client assertion replay IDs.
+milton_auth.oauthClientResource | not-personal | clientId id metadata resourceId | Client-to-resource links.
+milton_auth.oauthResource | not-personal | allowedScopes customClaims id identifier metadata name signingAlgorithm signingKeyId | Protected resources Milton defines.
+milton_guard.authorization_binding | hidden | client_id code_record final_scopes flow_key miltonIdentityIncarnation miltonSecurityGeneration origin_session origin_user reference requested_scopes resources state | Revoked when deletion begins; maintenance drops it once expired (at most 30 days).
+milton_guard.security_operation | hidden | client_id incarnation kind operation_id origin_user progress targets | The native deletion's tombstone, kept for replay safety; targets emptied once complete.
+milton_guard.mail_job | hidden | generation incarnation kind origin_user payload state | Encrypted message cleared at a terminal state; the receipt (no recipient or link) is removed 24 hours after acceptance.
+milton_guard.rate_bucket | hidden | key | Rate-limit counters; maintenance removes them a day later.
+milton_guard.first_party_policy | not-personal | client_id | Milton's own app client.

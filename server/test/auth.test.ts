@@ -1872,6 +1872,15 @@ test("OIDC callback is correlated once, checks native proof on every use, and cl
   try {
     let callback = await start();
     expect((await send(callback)).status).toBe(303);
+    // The native access token proves the sign-in and is never stored: no field
+    // of the fixture's session or the new one holds it.
+    const stored = await local.db.query<{ row: string }>(
+      sql`SELECT row_to_json(s)::text AS row FROM milton_app.session s`,
+    );
+    expect(stored).toHaveLength(2);
+    expect(stored.filter((s) => s.row.includes("fictional-opaque"))).toEqual(
+      [],
+    );
     expect((await send("/tps-report")).status).toBe(403); // verified identity has not been admitted in this protocol unit fixture
     await resolveIdentityAccount(config, {
       provider: issuer,

@@ -144,6 +144,33 @@ there is no reverse SQL that recreates the retired subsystem. Production applied
 cleanup on 2026-11-04; the hosting runbook at commit 492b96a records the snapshot,
 baseline journal and preservation checks.
 
+CI runs `bun scripts/check-migrations.ts` on every pull request, against the merge base
+with `origin/main` (without it, as in a clone that never fetched main, it checks only
+the lock and journal and says so):
+
+- A new migration in `drizzle/`, `migrations/` or `apps/auth/migrations/` is numbered
+  above main's highest in its track, with a number of its own; the Drizzle journal's
+  idx and tag run without gaps and its `when` values strictly increase.
+- `scripts/released-migrations.sha256` locks every migration file and Drizzle snapshot.
+  Never edit, rename or remove one on main; add a new migration. Lock a new one with
+  `bun scripts/check-migrations.ts --update` and commit the manifest with it.
+- A new migration that drops, truncates or renames a table, column, view, schema, type
+  (attribute or enum value) or function carries a line `-- code-stopped-by: #NN`
+  naming the merged PR that stopped all code using it, and ships only after that code
+  is released. Index, sequence, trigger and constraint drops and renames do not need
+  it. Comments and string literals are skipped. Dynamic SQL (a `DO` block or
+  `EXECUTE`, also inside a function or procedure body) cannot be read, so it needs that
+  line or `-- no-drop-or-rename: <reason>`, as does a function, procedure, `DO` or
+  `EXECUTE` body that itself drops, truncates or renames one of those; a plain function
+  body, a trigger's `EXECUTE FUNCTION` and `GRANT EXECUTE` pass.
+
+`test/deletion-inventory.test.ts` applies all three tracks to an empty PGlite and fails
+on any text, character, JSON, bytea, tsvector, XML or enum column (or array, domain or
+composite holding one), in a table or materialized view, not classified in
+[docs/deletion-inventory.txt](../docs/deletion-inventory.txt) as deleted by account
+deletion, hidden (kept, never served), retained (tied to no account, so deletion cannot
+remove it, such as anonymous client registrations) or not personal, with a reason.
+
 ## Deploy
 
 For Cloud Run, build and publish the container, then use separate app and MCP
@@ -452,6 +479,11 @@ must also be checked independently.
 Root global checks are types, `bun test` and `bun run format:check`; CI also runs this
 rehearsal and the apps/auth integration suite on every pull request. The release
 coordinator owns actual cutover.
+
+`test/served-budget.test.ts` reads the tool descriptions an SDK client is served, in
+both connection modes, and keeps each one and their total under a stated character
+budget (the 2026-11-08 sizes plus 10–15%); growing past it means raising the budget
+in that file, deliberately.
 
 ## Store, history, and limits
 

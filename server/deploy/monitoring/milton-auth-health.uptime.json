@@ -1,0 +1,20 @@
+{
+  "displayName": "milton-auth-health",
+  "monitoredResource": {
+    "type": "uptime_url",
+    "labels": {
+      "project_id": "milton-510506",
+      "host": "auth.meetmilton.com"
+    }
+  },
+  "httpCheck": {
+    "requestMethod": "GET",
+    "path": "/api/auth/ok",
+    "port": 443,
+    "useSsl": true,
+    "validateSsl": true
+  },
+  "period": "300s",
+  "timeout": "10s",
+  "selectedRegions": ["USA_OREGON", "USA_IOWA", "USA_VIRGINIA"]
+}

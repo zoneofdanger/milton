@@ -1,0 +1,39 @@
+{
+  "displayName": "milton-uptime",
+  "documentation": {
+    "content": "**A Milton health endpoint is failing from at least two regions.** One email per incident; it closes 30 minutes after the checks pass again.\n\nChecks: `https://app.meetmilton.com/health`, `https://mcp.meetmilton.com/health`, `https://auth.meetmilton.com/api/auth/ok`, every 5 minutes from Oregon, Iowa and Virginia, 10 s timeout. The incident names the host.\n\nCheck first:\n1. `curl -sS -o /dev/null -w '%{http_code} %{time_total}\\n' https://<host>/<path>` from your machine.\n2. Did a release just move traffic? `gcloud run services describe <service> --project=milton-510506 --region=us-east4 --format='yaml(status.traffic)'`. If so, roll back per server/deploy/README.md, \"Release verification and rollback\".\n3. The edge: certificate map `milton-mcp`, URL map `milton-mcp`, DNS A records at 35.227.244.36 (Cloudflare, DNS-only).\n\nThreshold: failing from 2 or more of 3 regions for 10 minutes (two consecutive 5-minute rounds). Reason: one region's probe path can fail on its own; two rounds rule out a single dropped probe. Uptime conditions are never charged.\n",
+    "mimeType": "text/markdown"
+  },
+  "userLabels": {
+    "tier": "page"
+  },
+  "conditions": [
+    {
+      "displayName": "health check failing from ≥ 2 regions for 10 min",
+      "conditionThreshold": {
+        "filter": "metric.type = \"monitoring.googleapis.com/uptime_check/check_passed\" AND resource.type = \"uptime_url\" AND resource.labels.host = one_of(\"app.meetmilton.com\", \"mcp.meetmilton.com\", \"auth.meetmilton.com\")",
+        "aggregations": [
+          {
+            "alignmentPeriod": "300s",
+            "perSeriesAligner": "ALIGN_NEXT_OLDER",
+            "crossSeriesReducer": "REDUCE_COUNT_FALSE",
+            "groupByFields": ["resource.label.host"]
+          }
+        ],
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 1,
+        "duration": "600s",
+        "trigger": {
+          "count": 1
+        }
+      }
+    }
+  ],
+  "combiner": "OR",
+  "enabled": true,
+  "notificationChannels": ["milton-ops-email"],
+  "alertStrategy": {
+    "autoClose": "1800s",
+    "notificationPrompts": ["OPENED"]
+  }
+}

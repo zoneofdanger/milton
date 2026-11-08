@@ -66,6 +66,8 @@ export type { StripeSubscriptionState } from "./billing";
 
 export interface StoreBindings {
   DATABASE_URL?: string;
+  /** Reads include the parked guide pilot's state; off unless MILTON_GUIDES=on. */
+  guides?: boolean;
   // Private dependency injection for the embedded fixture; never populated from a request.
   storeDatabase?: StoreDatabase;
 }
@@ -416,6 +418,7 @@ export function tenantStore(
         /* Usage never fails a call. */
       }
     },
+    bindings.guides === true,
   );
   return {
     appOrigin: bindings.appOrigin,
@@ -448,7 +451,14 @@ export function personStoreForCurrentRequest(
   auth: VerifiedStoreAuth,
 ) {
   const db = database(bindings);
-  const compiled = compiledMemos(db, auth.userId);
+  const compiled = compiledMemos(
+    db,
+    auth.userId,
+    undefined,
+    undefined,
+    undefined,
+    bindings.guides === true,
+  );
   return {
     readTpsReport: compiled.getTpsReport,
     readDocuments: compiled.readDocuments,

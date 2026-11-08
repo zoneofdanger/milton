@@ -19,6 +19,7 @@ import { createAccessTokenVerifier } from "../src/token";
 import {
   connectionKeysForAccount,
   lookupIdentityAccount,
+  personStoreForCurrentRequest,
   resolveIdentityAccount,
 } from "../src/store";
 import { storeForCurrentRequest } from "./store-fixtures";
@@ -825,6 +826,93 @@ test("a setup request makes one database round trip and a tool call four, by tok
     await local.dispose();
   }
 }, 30000);
+
+test("with the parked guide pilot off, reads send no guide statement; on, they read guide state", async () => {
+  // Off unless MILTON_GUIDES is exactly "on" (server/deploy/guides.md).
+  const env = {
+    APP_ORIGIN: "https://app.example",
+    MCP_RESOURCE: "https://mcp.example/mcp",
+    AUTH_ISSUER: "https://auth.example/auth",
+  };
+  expect(mcpRuntimeConfig(env).guides).toBeUndefined();
+  expect(mcpRuntimeConfig({ ...env, MILTON_GUIDES: "1" }).guides).toBeFalsy();
+  expect(mcpRuntimeConfig({ ...env, MILTON_GUIDES: "on" }).guides).toBe(true);
+  const local = await localStore();
+  try {
+    await resolveIdentityAccount(local.env, {
+      provider: issuer,
+      subject: "parked",
+    });
+    const auth = await lookupIdentityAccount(local.env, {
+      provider: issuer,
+      subject: "parked",
+    });
+    const fixture = await tokenFixture(local.pg);
+    const token = await fixture.token("parked");
+    const dialect = new PgDialect();
+    const sent: string[] = [];
+    const watched = (session: StoreSession): StoreSession => ({
+      query<Row extends Record<string, unknown>>(statement: SQL) {
+        sent.push(dialect.sqlToQuery(statement).sql);
+        return session.query<Row>(statement);
+      },
+    });
+    const db: StoreDatabase = {
+      ...watched(local.db),
+      transaction: (work) => local.db.transaction((tx) => work(watched(tx))),
+      withConnection: (work) => work(db),
+    };
+    const guideStatements = () =>
+      sent.filter((s) => /report_guides|guide_accounts/.test(s));
+    for (const guides of [false, true]) {
+      const bindings = { storeDatabase: db, ...(guides ? { guides } : {}) };
+      const handler = createMiltonHandler(
+        { ...bindings, issuer, resource, appOrigin: origin },
+        fixture.verify,
+        () => {},
+      );
+      for (const [name, args] of [
+        ["get_cover_sheet", {}],
+        [
+          "get_report",
+          {
+            report_id: "email",
+            intent: { situation: "confirming what is on file" },
+          },
+        ],
+      ] as const) {
+        sent.length = 0;
+        const response = await handler(
+          new Request(resource, {
+            method: "POST",
+            headers: {
+              Host: "localhost:3001",
+              Authorization: "Bearer " + token,
+              Accept: "application/json, text/event-stream",
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              jsonrpc: "2.0",
+              id: 1,
+              method: "tools/call",
+              params: { name, arguments: args },
+            }),
+          }),
+        );
+        expect(response.status).toBe(200);
+        expect(await response.text()).not.toContain('"isError":true');
+        expect(sent.length).toBeGreaterThan(0);
+        expect(guideStatements().length > 0).toBe(guides);
+      }
+      // The web page reads through the person's store.
+      sent.length = 0;
+      await personStoreForCurrentRequest(bindings, auth).readDocuments();
+      expect(guideStatements().length > 0).toBe(guides);
+    }
+  } finally {
+    await local.dispose();
+  }
+});
 
 test("an admitted call appends its usage alongside its work without a blocking lock, and its reply waits for the row at most 250 ms", async () => {
   const local = await localStore();

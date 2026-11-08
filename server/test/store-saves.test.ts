@@ -7,10 +7,11 @@ import { StoreError } from "../src/store/errors";
 import { database } from "../src/store/index";
 import { BASELINE_NOTE } from "../src/store/reports";
 import { baselineRefusal } from "../src/store/save";
-import { localStore } from "./local-store";
+import { localStore, restoreGuides } from "./local-store";
 import {
   cardHeads,
   fixtureStore,
+  guideStore,
   insideTransactions,
   seedRule,
   seedSample,
@@ -1299,6 +1300,7 @@ test("opt-in report guides fence lifecycle work without changing approved source
   const { reportEnvelope, reportList } = await import("../src/mcp-tools");
   const local = await localStore();
   try {
+    await restoreGuides(local.pg);
     await seedUsers(local.pg, "guide-a", "guide-b");
     await local.pg
       .exec(`INSERT INTO sample_kinds(user_id,id,report,label) VALUES ('guide-a','kind','email','Fictional note');
@@ -1318,7 +1320,7 @@ test("opt-in report guides fence lifecycle work without changing approved source
         },
         `The seedlings are ready ${i}. Collect them on Saturday.`,
       );
-    const store = fixtureStore(local.db, "guide-a");
+    const store = guideStore(local.db, "guide-a");
     const original = await store.readDocuments();
     const exported = await store.exportTpsReport();
     expect(original.reports[0]!.guide).toBeUndefined();
@@ -1380,8 +1382,7 @@ test("opt-in report guides fence lifecycle work without changing approved source
       reportList(docs).reports[0]!.guide,
     );
     expect(
-      (await fixtureStore(local.db, "guide-b").readDocuments()).reports[0]!
-        .guide,
+      (await guideStore(local.db, "guide-b").readDocuments()).reports[0]!.guide,
     ).toBeUndefined();
     const rule = await store.saveMemo({
       text: "Fictional rule",
@@ -1499,6 +1500,7 @@ test("guide leases, source moves, revoked eligibility and account deletion fence
   const { runGuideWorker } = await import("../src/guides/worker");
   const local = await localStore();
   try {
+    await restoreGuides(local.pg);
     for (const mode of ["move", "revoke", "delete"] as const) {
       const id = `guide-${mode}`;
       await seedUsers(local.pg, id);
@@ -1577,7 +1579,7 @@ test("guide leases, source moves, revoked eligibility and account deletion fence
         ),
       ).toBe(0);
       if (mode === "move") {
-        const store = fixtureStore(local.db, id);
+        const store = guideStore(local.db, id);
         const docs = await store.readDocuments();
         expect(
           (
@@ -1641,6 +1643,7 @@ test("guide reservations and recovery bound concurrent spend and retries", async
   const conservativeReservation = 1_120_000; // Full 200k input + 16,000 output, even for tiny reports.
   const local = await localStore();
   try {
+    await restoreGuides(local.pg);
     for (const id of ["budget-a", "budget-b"]) {
       await seedUsers(local.pg, id);
       await local.pg.query(
@@ -1749,6 +1752,7 @@ test("guide bounds reject whole oversize input before processing and reserve mon
   const conservativeReservation = 1_120_000; // Full 200k input + 16,000 output, even for tiny reports.
   const local = await localStore();
   try {
+    await restoreGuides(local.pg);
     await seedUsers(local.pg, "bounded");
     await local.pg.exec(
       "INSERT INTO sample_kinds(user_id,id,report,label) VALUES ('bounded','kind','email','Fictional note'); INSERT INTO trial_accounts(user_id,started_at,subscription_status) VALUES ('bounded',now(),'active')",
@@ -1783,15 +1787,14 @@ test("guide bounds reject whole oversize input before processing and reserve mon
     await runGuideWorker(local.db, provider, { maxReports: 1 });
     expect([counts, calls]).toEqual([0, 0]);
     expect(
-      (await fixtureStore(local.db, "bounded").readDocuments()).reports[0]!
-        .guide,
+      (await guideStore(local.db, "bounded").readDocuments()).reports[0]!.guide,
     ).toMatchObject({
       status: "unavailable",
       reason: "input_too_large",
       text: null,
     });
     // Shrink all originals through approved complete revisions; rules do not enter input.
-    const store = fixtureStore(local.db, "bounded");
+    const store = guideStore(local.db, "bounded");
     for (let i = 0; i < 2; i++)
       expect(
         (

@@ -75,12 +75,20 @@ const DOLLAR = /^\$(?:[A-Za-z_]\w*)?\$/;
  * (quoted, E'', dollar-quoted) as '' and every quoted identifier as "q", so only
  * real SQL is matched; and its line comments, where the headers live. */
 export function sqlCode(text: string) {
+  const statements: { code: string; bodies: string[] }[] = [];
   let code = "",
+    bodies: string[] = [],
     comments = "",
     i = 0;
   const skipTo = (close: string, from: number) => {
     const end = text.indexOf(close, from);
     return end < 0 ? text.length : end + close.length;
+  };
+  const end = () => {
+    const statement = code.replace(/\s+/g, " ").trim();
+    if (statement) statements.push({ code: statement, bodies });
+    code = "";
+    bodies = [];
   };
   while (i < text.length) {
     const c = text[i]!;
@@ -102,10 +110,12 @@ export function sqlCode(text: string) {
     } else if (c === "'") {
       const escapes =
         /[eE]/.test(text[i - 1] ?? "") && !/\w/.test(text[i - 2] ?? "");
+      const start = i + 1;
       for (i++; i < text.length; i++)
         if (escapes && text[i] === "\\") i++;
         else if (text[i] === "'" && text[i + 1] === "'") i++;
         else if (text[i] === "'") break;
+      bodies.push(text.slice(start, i).replaceAll("''", "'"));
       i++;
       code += "''";
     } else if (c === '"') {
@@ -116,18 +126,48 @@ export function sqlCode(text: string) {
       code += '"q"';
     } else if (c === "$" && !word && DOLLAR.test(text.slice(i))) {
       const tag = DOLLAR.exec(text.slice(i))![0];
-      i = skipTo(tag, i + tag.length);
+      const start = i + tag.length;
+      i = skipTo(tag, start);
+      bodies.push(text.slice(start, Math.max(start, i - tag.length)));
       code += "''";
+    } else if (c === ";") {
+      end();
+      i++;
     } else {
       code += c;
       i++;
     }
   }
-  const statements = code
-    .split(";")
-    .map((s) => s.replace(/\s+/g, " ").trim())
-    .filter(Boolean);
+  end();
   return { statements, comments };
+}
+
+// Statements whose string bodies are SQL: function and procedure bodies, DO
+// blocks and EXECUTE arguments (a RAISE message, say, is not).
+const BODIES =
+  /^(?:CREATE(?:\s+OR\s+REPLACE)?\s+(?:FUNCTION|PROCEDURE)|DO)\b|\bEXECUTE\b(?!\s+(?:FUNCTION|PROCEDURE|ON)\b)/i;
+
+// In a PL/pgSQL body a statement may follow BEGIN, THEN, LOOP and the like, so
+// the same patterns match anywhere in it.
+const IN_BODY = DESTRUCTIVE.map(
+  (re) => new RegExp(re.source.replace(/^\^/, "\\b"), "i"),
+);
+
+/** The first drop, truncate or rename inside those bodies, read the same way. */
+export function bodyFinding(
+  statements: { code: string; bodies: string[] }[],
+): string | undefined {
+  for (const { code, bodies } of statements)
+    if (BODIES.test(code))
+      for (const body of bodies) {
+        const inner = sqlCode(body).statements;
+        const found =
+          inner
+            .flatMap((s) => IN_BODY.map((re) => re.exec(s.code)?.[0]))
+            .find(Boolean) ?? bodyFinding(inner);
+        if (found) return found;
+      }
+  return undefined;
 }
 
 /** path → file text, for every file under the three track directories. */
@@ -329,15 +369,20 @@ export function checkMigrations({
     const { statements, comments } = sqlCode(text);
     const first = (patterns: RegExp[]) =>
       statements
-        .flatMap((s) => patterns.map((re) => re.exec(s)?.[0]))
+        .flatMap((s) => patterns.map((re) => re.exec(s.code)?.[0]))
         .find(Boolean);
     const found = first(DESTRUCTIVE);
+    const inBody = bodyFinding(statements);
     const dynamic = first(DYNAMIC);
-    if (!found && !dynamic) continue;
+    if (!found && !inBody && !dynamic) continue;
     const prs = STOPPED_BY.exec(comments)?.[1]?.split(/\s*,\s*/);
     if (!prs && found)
       fail(
         `${path} drops, truncates or renames something code may use ("${found.slice(0, 60)}"); add a line "-- code-stopped-by: #NN" naming the merged PR that stopped all code using it, and release that code first`,
+      );
+    else if (!prs && inBody && !NO_DROP.test(comments))
+      fail(
+        `${path} has a function or DO body that drops, truncates or renames something code may use ("${inBody.slice(0, 60)}"); add "-- code-stopped-by: #NN" if this migration or later code runs it, or "-- no-drop-or-rename: <reason>" if not`,
       );
     else if (!prs && !NO_DROP.test(comments))
       fail(

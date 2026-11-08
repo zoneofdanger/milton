@@ -237,6 +237,26 @@ test("a migration that drops or renames needs a merged code-stopped-by PR", () =
   expect(
     drop("-- no-drop-or-rename: says so, but drops", "DROP TABLE t;"),
   ).toHaveLength(1);
+  // Function and DO bodies are read the same way.
+  const body =
+    "CREATE OR REPLACE FUNCTION f() RETURNS void LANGUAGE plpgsql AS $fn$ BEGIN DROP TABLE t; END $fn$;";
+  expect(drop("", body)).toEqual([
+    'server/migrations/002-drop.sql has a function or DO body that drops, truncates or renames something code may use ("DROP TABLE"); add "-- code-stopped-by: #NN" if this migration or later code runs it, or "-- no-drop-or-rename: <reason>" if not',
+  ]);
+  for (const statement of [
+    "CREATE PROCEDURE p() LANGUAGE sql AS 'TRUNCATE t';",
+    "CREATE FUNCTION f() RETURNS void LANGUAGE plpgsql AS $$ BEGIN EXECUTE 'ALTER TABLE t RENAME TO u'; END $$;",
+    "DO $$ BEGIN ALTER TABLE t DROP COLUMN id; END $$;",
+  ])
+    expect(drop("", statement)).toHaveLength(1);
+  expect(drop("-- no-drop-or-rename: an owner-only repair", body)).toEqual([]);
+  expect(drop("-- code-stopped-by: #40", body)).toEqual([]);
+  expect(
+    drop(
+      "",
+      "CREATE FUNCTION g() RETURNS int LANGUAGE plpgsql AS $$ BEGIN -- DROP TABLE t\n RAISE NOTICE 'DROP TABLE t'; RETURN 1; END $$;",
+    ),
+  ).toEqual([]);
   expect(drop("-- code-stopped-by: #41")).toEqual([
     "server/migrations/002-drop.sql names #41 in code-stopped-by, but no commit on main merges #41; merge and release that PR before this migration",
   ]);

@@ -56,7 +56,7 @@ const DESTRUCTIVE = [
   new RegExp(`^DROP\\s+(?:${OBJECTS})\\b`, "i"),
   /^TRUNCATE\b/i,
   /\bDROP\s+COLUMN\b/i,
-  /^ALTER\s+TABLE\b.*?\bDROP\s+(?!CONSTRAINT\b|DEFAULT\b|NOT\b|EXPRESSION\b|IDENTITY\b)[A-Za-z_"]/i,
+  /^ALTER\s+(?:FOREIGN\s+)?TABLE\b.*?\bDROP\s+(?!CONSTRAINT\b|DEFAULT\b|NOT\b|EXPRESSION\b|IDENTITY\b)[A-Za-z_"]/i,
   /^ALTER\s+TYPE\b.*\bDROP\s+(?:ATTRIBUTE|VALUE)\b/i,
   // Index, sequence, trigger and constraint renames pass.
   new RegExp(

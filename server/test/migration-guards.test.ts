@@ -207,6 +207,8 @@ test("a migration that drops or renames needs a merged code-stopped-by PR", () =
     "DROP TYPE mood;",
     "DROP FUNCTION f();",
     "DROP PROCEDURE p();",
+    "ALTER FOREIGN TABLE t DROP secret;",
+    "ALTER FOREIGN TABLE t RENAME COLUMN secret TO hidden;",
   ])
     expect(drop("", statement)).toHaveLength(1);
   // Comments and strings neither hide a statement nor fake one.

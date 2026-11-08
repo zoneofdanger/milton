@@ -23,8 +23,25 @@ This runbook keeps only the latest release record. Earlier release records and a
 one-time procedures are in git history; the last full version is at commit 492b96a
 (`git show 492b96a:server/deploy/README.md`).
 
-## Release record: guide pilot parked, deletion links, UserInfo binding, private admission service, session token drop, e2e fix, MCP next steps, guards (2026-11-08, PRs #58–#66, #68, #69)
+## Release record: Stripe reads off the lock, guide pilot parked, deletion links, UserInfo binding, private admission service, session token drop, e2e fix, MCP next steps, guards (2026-11-08, PRs #58–#66, #68–#70)
 
+- **#70 (Peter's go; milton-perf, milton-qa PASS; supersedes #67), `7ffc5cf`:** checkout's
+  live read and the webhook read Stripe with no transaction open and write by
+  compare-and-set on `trial_accounts.stripe_revision` (see
+  [its section](#stripe-reads-off-the-row-lock-applied-2026-11-08-drizzle-0011-pr-70)).
+  Snapshot `snap-damp-water-b8kiylpo` at 22:06:38Z; `0011_stripe_revision` at 22:06:47Z
+  (journal 12 entries; `bigint NOT NULL DEFAULT 0`). With no billing or admission request in
+  the previous 2 minutes, app `milton-app-srl-7ffc5cf` took 100% at 22:07:34Z and
+  `milton-admit-00002-ws6` (from [admit.service.json](admit.service.json); invoker still only
+  `milton-auth@`, min 1) at 22:07:45Z, image
+  `sha256:d866739c63b0856fd8c7ecbbd58cdf7aa0b9288bd9e06f0e15be339db41b13a3` (the daily job
+  too); MCP stays on `milton-mcp-park-f735701` (its only change is an error code met only in
+  checkout). No request reached an older app or admit revision after 22:07:50Z. Resync:
+  dry run 2 customers, `--apply` reconciled 2, failed 0, exit 0 (both trialing, revision 1).
+  Live: health 200 ×3, app home 200, forms probe PASS, admit 403 without a token, an e2e
+  sign-in passed and admitted (204, 150 ms; `milton-e2e-daily-nndz9`). Checks on the merge
+  (`0558765`, same tree): CI green, its integration run applying 0011. Gate at 22:18Z (from 22:06Z):
+  clean.
 - **#66 (Peter's go; milton-perf, milton-qa PASS), `f735701`:** the parked guide pilot is off
   every read unless `MILTON_GUIDES=on` (unset in both payloads and services), and Drizzle 0010
   drops the sample-version trigger. Step 1: app/MCP `milton-*-park-f735701` at 21:19:23Z
@@ -122,7 +139,10 @@ one-time procedures are in git history; the last full version is at commit 492b9
 
 Auth `milton-auth-00020-hef`, rollback `milton-auth-00018-heq` (code only); floor `00018-heq` (older auth calls the
 app's removed admission routes: roll auth back only together with app/MCP to
-`milton-*-token-0f7d5aa`, then auth to `00016-kul`). App/MCP `milton-*-park-f735701`,
+`milton-*-token-0f7d5aa`, then auth to `00016-kul`). App `milton-app-srl-7ffc5cf`, rollback `milton-app-park-f735701` (code only; it runs on
+0011), and admit `milton-admit-00002-ws6`, rollback `milton-admit-00001-ggf`; roll both back
+together, then, once the new code returns, run the resync again. MCP `milton-mcp-park-f735701`.
+Before those, app/MCP `milton-*-park-f735701`,
 rollback `milton-*-admit-20b0f27` (code only; with no guide account it serves no stale guide), then `milton-*-token-0f7d5aa` (never before #62). Once owner file 013 is applied, the app never rolls back to an image older than #62:
 `milton-app-token-0f7d5aa` is its floor, and `milton-app-guards-1a82fde` is no longer a
 rollback (its sign-in writes the dropped column). MCP never touches sessions; its rollback
@@ -489,6 +509,37 @@ app never rolls back to an image older than #62 (`milton-app-token-0f7d5aa` is t
 its transaction rolls back and changes nothing; rerun it. Otherwise a failed migration's
 rollback is the pre-migration snapshot; there is no down script.
 
+## Stripe reads off the row lock (applied 2026-11-08: Drizzle 0011, PR #70)
+
+Checkout's live read and the webhook now read Stripe with no transaction open and write by
+compare-and-set on `trial_accounts.stripe_revision` (server README). Sign-in enrolment and
+account deletion are unchanged: they still call Stripe under their locks (TODO.md). 0011 is
+additive; older code never names the column. Older revisions' writes of the Stripe state (the
+webhook, checkout, and sign-in enrolment on admit) do not advance the revision, so while both
+versions serve, a new read in flight could land over one of them, where the old row lock kept
+them apart, and record its event, so a redelivery is deduplicated and repairs nothing. A
+stale state would last until that customer's next Stripe event. Checkout does not repair it:
+it sends a stored trialing, active, past_due, unpaid or paused status to the portal without
+reading Stripe. So the release ends with a one-off resync that re-reads every stored
+customer:
+
+1. Rehearse (`check-auth-integration.ts` applies 0011), then snapshot production.
+2. As `neondb_owner`: `bun run --cwd server db:migrate` applies `0011_stripe_revision`
+   (journal 12 entries). Old code runs on it unchanged.
+3. In a quiet window (no webhook delivery, checkout or admission in milton-app's and
+   milton-admit's request logs for the last 2 minutes), release the image to `milton-app`
+   and `milton-admit` back to back, so the mixed window stays short, then wait until neither
+   previous revision serves a request (app timeout 60 s, admit 30 s).
+4. Once both services run the new image and the old revisions have drained, run the resync
+   from a checkout of the released commit, set up as for the backfill below:
+   `bun --no-env-file scripts/backfill-subscriptions.ts --resync` (dry run: the count of
+   stored customers), then the same with `--apply`. It re-reads each from Stripe as a webhook
+   does and writes through the same compare-and-set, at about 5 a second. A nonzero exit
+   means a read failed or a write conflicted twice: rerun it until it exits 0.
+
+Rollback: code to the previous revision, which runs on 0011; the pre-migration snapshot is
+0011's rollback, and there is no down script.
+
 ## Test account and daily check
 
 `e2e@milton-test.invalid` is a fictional account that holds nothing but what the daily
@@ -752,7 +803,7 @@ The tracked app and MCP manifests still pin the pre-cutover release: app
 [Release verification and rollback](#release-verification-and-rollback); derive a manifest
 from the live service before replacing it. [auth.service.template.json](auth.service.template.json)
 is deliberately non-deployable. Production's writing journal holds `0000_baseline` through
-`0010_park_guides` (11 entries), the native auth ledger 001–008, and the owner files
+`0011_stripe_revision` (12 entries), the native auth ledger 001–008, and the owner files
 `000-app-owner.sql`, `005-app.up.sql`, `005-app-roles.sql`, `006-connection-keys-roles.sql`,
 `007-role-timeouts.up.sql`, `008-drop-legacy-mapping.up.sql`, `009-usage-calls-roles.sql`,
 `010-usage-retention-roles.sql`, `011-test-account-roles.sql`, `012-session-token-nullable.up.sql` and `013-drop-session-access-token.up.sql` (see [runtime role timeouts](#runtime-role-timeouts-applied-2026-11-07-todo-29)). There is no memo-update
@@ -1246,8 +1297,8 @@ references. Inspect revision readiness before selecting a recorded revision:
 gcloud run revisions list --service=milton-app --project=milton-510506 --region=us-east4
 ```
 
-Now serving (2026-11-08): app `milton-app-park-f735701`, MCP `milton-mcp-park-f735701`
-(source `f735701`), admission `milton-admit` (source `20b0f27`), and auth `milton-auth-00020-hef` (source `f464237`). The
+Now serving (2026-11-08): app `milton-app-srl-7ffc5cf` and admission `milton-admit-00002-ws6`
+(source `7ffc5cf`), MCP `milton-mcp-park-f735701` (source `f735701`), and auth `milton-auth-00020-hef` (source `f464237`). The
 release record above gives the image and rollback revisions.
 
 Roll back only affected services, preserve ingress/IAM, then repeat the canonical
@@ -1478,7 +1529,10 @@ It prints only counts (total, created, skipped, failed, still NULL), at about 5 
 over active accounts other than test accounts (it reads `users.test_account`, so a checkout from
 this change on needs Drizzle 0009 applied), and refuses without `trials_enabled` and a live key. `--allow-test-key` is for disposable
 databases only. With `--apply` it exits nonzero if any account still has no status; rerun it, since
-rows with a status are skipped. A returning deleted
+rows with a status are skipped. `--resync` (same setup, guards and pacing) instead re-reads every
+stored customer of a non-test account from Stripe and writes what it finds through the webhook's
+compare-and-set, with no event; it prints total, reconciled and failed, calls Stripe for nothing
+without `--apply`, and exits nonzero when any failed. A returning deleted
 identity's row is canceled and counted as skipped. A row left at NULL is free until a browser sign-in: an approval
 Neon already holds refreshes without any Milton page. A customer it creates has no email
 until its person first opens billing, when Milton copies their sign-in email to Stripe. Everyone

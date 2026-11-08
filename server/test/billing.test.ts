@@ -7,9 +7,11 @@ import { claimTrialNotice, trialStatus } from "../src/store/trials";
 import {
   backfillExitCode,
   backfillSubscriptions,
+  resyncExitCode,
+  resyncSubscriptions,
 } from "../scripts/backfill-subscriptions";
 import { linkStripeCustomer } from "../src/store/billing";
-import { localStore } from "./local-store";
+import { localStore, openTransactions } from "./local-store";
 import { fixtureStore } from "./store-fixtures";
 import { billingAccount } from "../src/store/billing";
 
@@ -36,6 +38,10 @@ const fakeStripe = () => {
     answer: Response.json({ data: [subscription("active")] }) as
       Response | undefined,
     calls: [] as { url: string; version: string | null }[],
+    // Every call made while a database transaction was open.
+    inTransaction: [] as string[],
+    // Runs while each call is out, after its answer is fixed.
+    during: async () => {},
   };
   return {
     stripe,
@@ -48,8 +54,11 @@ const fakeStripe = () => {
           url,
           version: new Headers(init.headers).get("Stripe-Version"),
         });
-        if (!stripe.answer) throw new Error("Stripe is unreachable");
-        return stripe.answer.clone();
+        if (openTransactions() > 0) stripe.inTransaction.push(url);
+        const answer = stripe.answer?.clone();
+        await stripe.during();
+        if (!answer) throw new Error("Stripe is unreachable");
+        return answer;
       },
     },
   };
@@ -101,6 +110,7 @@ async function webhookFixture(configured = true) {
   return {
     local,
     stripe,
+    billing,
     sign,
     post,
     status: async () => (await trialStatus(local.db, userId)).status,
@@ -295,7 +305,7 @@ test("a verified event only triggers a re-read: the list decides, a replay and a
     expect(await status()).toBe("paid");
     expect(stripe.calls).toEqual([
       {
-        url: "https://api.stripe.com/v1/subscriptions?customer=cus_fixture&status=all&limit=10",
+        url: "https://api.stripe.com/v1/subscriptions?customer=cus_fixture&status=all&limit=100",
         version: "2026-10-28.endive",
       },
     ]);
@@ -413,6 +423,190 @@ test("a verified event only triggers a re-read: the list decides, a replay and a
       await post(event("evt_bad", "invoice.paid", { customer: 7 })),
     ).toEqual([400, '{"error":"event_invalid"}']);
     expect((await ledger()).map(({ id }) => id)).not.toContain("evt_bad");
+  } finally {
+    await local.dispose();
+  }
+});
+
+test("a webhook's read never lands over a newer write: one conflict reads again, a second answers 503 unrecorded", async () => {
+  const { local, stripe, post, ledger } = await webhookFixture();
+  const status = async () =>
+    (
+      await local.db.query<{ status: string }>(
+        sql`SELECT subscription_status AS status FROM trial_accounts`,
+      )
+    )[0]!.status;
+  // While each read is out, another writer stores a newer state; `then` is
+  // what Stripe answers the next read.
+  const steps: { write: string; then?: string }[] = [];
+  stripe.during = async () => {
+    const step = steps.shift();
+    if (!step) return;
+    await local.db.query(
+      sql`UPDATE trial_accounts SET subscription_status=${step.write},stripe_revision=stripe_revision+1`,
+    );
+    if (step.then)
+      stripe.answer = Response.json({ data: [subscription(step.then)] });
+  };
+  try {
+    // The first read answers past_due, stale against the newer active write;
+    // the second reads again and stores what Stripe holds now.
+    stripe.answer = Response.json({ data: [subscription("past_due")] });
+    steps.push({ write: "active", then: "trialing" });
+    expect(await post(updated)).toEqual([200, '{"received":true}']);
+    expect(await status()).toBe("trialing");
+    expect(stripe.calls).toHaveLength(2);
+    // Two conflicts in a row: unrecorded, so Stripe redelivers, and the newer
+    // writes stand.
+    stripe.calls.length = 0;
+    stripe.answer = Response.json({ data: [subscription("past_due")] });
+    steps.push({ write: "paused" }, { write: "active" });
+    const twice = event("evt_twice", "invoice.paid", {
+      customer: "cus_fixture",
+    });
+    expect(await post(twice)).toEqual([503, '{"error":"server_unavailable"}']);
+    expect(await status()).toBe("active");
+    expect(stripe.calls).toHaveLength(2);
+    expect((await ledger()).map(({ id }) => id)).not.toContain("evt_twice");
+    expect(stripe.inTransaction).toEqual([]);
+  } finally {
+    await local.dispose();
+  }
+});
+
+test("a newer reconciliation that leaves the state unchanged still stops an older read from landing (ABA)", async () => {
+  const { local, stripe, post, ledger, status } = await webhookFixture();
+  const { applyStripeEvent } = await import("../src/store");
+  const active = subscription("active");
+  const activeState = {
+    id: active.id,
+    status: "active",
+    trialEnd: active.trial_end,
+    periodStart: active.items.data[0]!.current_period_start,
+    periodEnd: active.items.data[0]!.current_period_end,
+  };
+  let newer = 0;
+  try {
+    // Stored and current at Stripe: active.
+    expect(await post(updated)).toEqual([200, '{"received":true}']);
+    expect(await status()).toBe("paid");
+    // An older read answers past_due. While each of its reads is out, a newer
+    // reconciliation lands active again, unchanged values.
+    stripe.answer = Response.json({ data: [subscription("past_due")] });
+    stripe.during = async () => {
+      expect(
+        await applyStripeEvent(
+          local.env,
+          {
+            id: `evt_newer${++newer}`,
+            type: "invoice.paid",
+            payloadSha256: "0".repeat(64),
+          },
+          "cus_fixture",
+          async () => activeState,
+        ),
+      ).toEqual({ recorded: true });
+    };
+    const older = event("evt_older", "invoice.payment_failed", {
+      customer: "cus_fixture",
+    });
+    expect(await post(older)).toEqual([503, '{"error":"server_unavailable"}']);
+    // The older past_due never landed, and its event stays unrecorded for
+    // Stripe to redeliver; both newer events are recorded.
+    expect(await status()).toBe("paid");
+    const ids = (await ledger()).map(({ id }) => id);
+    expect(ids).not.toContain("evt_older");
+    expect(ids).toEqual(expect.arrayContaining(["evt_newer1", "evt_newer2"]));
+  } finally {
+    await local.dispose();
+  }
+});
+
+test("the resync repairs a stale managed status an old-style writer left: dry run calls nothing, a conflict counts as failed and exits nonzero", async () => {
+  const { local, stripe, billing, status } = await webhookFixture();
+  const config = { ...local.env, billing };
+  const pause = async () => {};
+  try {
+    // Stripe holds active; an old revision's write (no revision bump) left a
+    // stale past_due, which checkout sends to the portal without reading Stripe.
+    await local.db.query(
+      sql`UPDATE trial_accounts SET subscription_status='past_due',current_period_start=clock_timestamp()-interval '10 days'`,
+    );
+    // Neither a test account's customer nor an account without one is read.
+    await local.db.query(
+      sql`INSERT INTO users(id,test_account) VALUES ('m_test',true),('m_none',false)`,
+    );
+    await local.db.query(
+      sql`INSERT INTO trial_accounts(user_id,started_at,stripe_customer_id) VALUES ('m_test',clock_timestamp(),'cus_testAccount'),('m_none',clock_timestamp(),NULL)`,
+    );
+    // The same refusals as the backfill: a test key needs the flag.
+    await expect(resyncSubscriptions(config, {}, pause)).rejects.toMatchObject({
+      code: "configuration",
+    });
+    const dry = await resyncSubscriptions(
+      config,
+      { allowTestKey: true },
+      pause,
+    );
+    expect(dry).toEqual({ total: 1, reconciled: 0, failed: 0 });
+    expect(resyncExitCode(dry, false)).toBe(0);
+    expect(stripe.calls).toEqual([]);
+    expect(await status()).toBe("expired");
+    // A newer write lands during each read: two conflicts count as failed.
+    stripe.during = async () => {
+      await local.db.query(
+        sql`UPDATE trial_accounts SET stripe_revision=stripe_revision+1 WHERE user_id=${userId}`,
+      );
+    };
+    const conflicted = await resyncSubscriptions(
+      config,
+      { apply: true, allowTestKey: true },
+      pause,
+    );
+    expect(conflicted).toEqual({ total: 1, reconciled: 0, failed: 1 });
+    expect(resyncExitCode(conflicted, true)).toBe(1);
+    expect(await status()).toBe("expired");
+    // The rerun reads Stripe, as the webhook does, and repairs it.
+    stripe.during = async () => {};
+    stripe.calls.length = 0;
+    const repaired = await resyncSubscriptions(
+      config,
+      { apply: true, allowTestKey: true },
+      pause,
+    );
+    expect(repaired).toEqual({ total: 1, reconciled: 1, failed: 0 });
+    expect(resyncExitCode(repaired, true)).toBe(0);
+    expect(await status()).toBe("paid");
+    expect(stripe.calls.map(({ url }) => url)).toEqual([
+      "https://api.stripe.com/v1/subscriptions?customer=cus_fixture&status=all&limit=100",
+    ]);
+    expect(stripe.inTransaction).toEqual([]);
+  } finally {
+    await local.dispose();
+  }
+});
+
+test("a partial subscription list is a failed read: the resync counts it as failed and stores nothing", async () => {
+  const { local, stripe, billing, status } = await webhookFixture();
+  const config = { ...local.env, billing };
+  try {
+    await local.db.query(
+      sql`UPDATE trial_accounts SET subscription_status='past_due',current_period_start=clock_timestamp()-interval '10 days'`,
+    );
+    // The first page holds only canceled subscriptions; an active one is on
+    // a later page. Deciding from this page would store canceled.
+    stripe.answer = Response.json({
+      data: Array.from({ length: 100 }, () => subscription("canceled")),
+      has_more: true,
+    });
+    const partial = await resyncSubscriptions(
+      config,
+      { apply: true, allowTestKey: true },
+      async () => {},
+    );
+    expect(partial).toEqual({ total: 1, reconciled: 0, failed: 1 });
+    expect(resyncExitCode(partial, true)).toBe(1);
+    expect(await status()).toBe("expired");
   } finally {
     await local.dispose();
   }

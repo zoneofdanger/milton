@@ -334,6 +334,7 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
 - Billing failures stop admission with retryable503; existing Stripe state is listed/reconciled before another create. An admission for an account whose deletion has begun answers 410, and native refuses that sign-in, consent or explicit link with 403 `account_deleting`, not a retry; native's own identity read already refuses one that starts after the deletion begins.
 - Owner-only `server/scripts/test-account.ts` provisions the fictional end-to-end account (`e2e@milton-test.invalid`): its Milton account, created first by the owner marked `test_account` and with no trial row and bound to a pre-chosen native id, so sign-in, checkout and the backfill never call Stripe for it; then the native user with a verified `.invalid` email and a random password, created last and without queuing any mail, so nobody can sign in to an unmarked account; a browser sign-in; and a 365-day read-and-save key minted through the app's form. It writes the three values to a new mode-0600 env file and refuses an existing email or file and any address outside `.invalid`, before any write; after a failure, `--resume` with the same file converges on the marked account, verifying it before signing in.
 - The subscription backfill remains an owner-selected dry run by default and never gives returning deleted identities another trial; it skips test accounts entirely (not counted, no Stripe call).
+- Its `--resync` mode, for after a release whose old and new revisions overlapped, re-reads every stored customer of a non-test account from Stripe through the webhook's read and compare-and-set (no event), with the same dry-run default, live-key guard, pacing and counts-only output; a failed read or second conflict counts as failed and exits nonzero.
 - Account security routes to native UI; destructive deletion requires authoritative native freshness, exact typed confirmation and retention of current guarded verified-identity fingerprints.
 - App persists lifecycle UUID, original account/subject/incarnation/client and requester association before first native/remote attempt; retries never select current/recreated targets.
 - Disconnect commits native original-binding refusal before bounded cleanup; a failed or unfinished step answers 503 with a retry page re-posting the same operation, as deletion does; reconnect creates a new binding and never revives an old token.
@@ -419,8 +420,11 @@ Files: `server/src/store/index.ts`, `server/src/store/trials.ts`,
   only a customer ID from the six handled event types, because Stripe does not guarantee
   event order.
 - A handled event Milton cannot parse gets a 400 unrecorded, so Stripe retries it.
-- For a customer Milton holds, the webhook locks the row, reads the customer's
-  subscriptions from Stripe, and writes the deciding one where it records the event.
+- For a customer Milton holds, the webhook reads the customer's subscriptions from Stripe
+  with no transaction open, then writes the deciding one where it records the event, only
+  if the row's `stripe_revision`, which every write of the Stripe state by Milton's code advances even with
+  unchanged values, is what it was before the read, so an older read never lands over a
+  newer one; on a change it reads once more, and a second change answers 503 unrecorded.
 - The deciding subscription is active, then trialing, then past_due, otherwise the newest.
 - Only a successful empty list with a stored subscription writes canceled.
 - Any non-2xx from Stripe's list, 404 included, is a failed read: the webhook answers 503
@@ -435,8 +439,10 @@ Files: `server/src/store/index.ts`, `server/src/store/trials.ts`,
   account that is gone as being deleted.
 - `/billing/checkout` sends trialing, active, past_due, unpaid, and paused to the Stripe
   portal.
-- With a stored customer, it lists Stripe first and goes to the portal if any such
-  subscription exists, storing it, so a late webhook cannot sell a second subscription.
+- With a stored customer, it lists Stripe first, with no transaction open, and goes to the
+  portal if any such subscription exists, storing it as the webhook does (over an unchanged
+  revision, one re-read, then 503); an empty answer is checked against the revision too, so
+  a late webhook or a write during the read cannot sell a second subscription.
 - An account still waiting on its trial takes it first, then the portal, or a 503 if it did
   not start, so paying early cannot lose the 30 days.
 - Any other status gets Checkout in subscription mode, card required, no trial; each
@@ -467,6 +473,7 @@ Files: `server/drizzle/`, `server/src/store/schema.ts`, `server/src/store/databa
   the `retained_bytes` counter it read; 0006 drops the generated `payload_bytes` columns
   it summed.
 - User IDs cannot change.
+- `trial_accounts.stripe_revision` (0011, bigint, default 0) advances on every write of the Stripe state columns by Milton's code; app's table-wide grant on `trial_accounts` (005) covers it, and MCP's column list leaves it out.
 - `users.test_account` (0009, default false) marks the fictional end-to-end check account; owner file `011-test-account-roles.sql` narrows app's INSERT on `users` to its other columns, so no runtime login can set it, and usage and metric counts exclude it.
 - Disconnects and identity hashes have no foreign key to users, so they outlive the account.
 - `docs/deletion-inventory.txt` classifies every text-bearing column the three migration tracks create as deleted by account deletion, hidden (kept, never served), retained (tied to no account, so deletion cannot remove it) or not personal; a test on a fresh schema fails on any column missing from it.

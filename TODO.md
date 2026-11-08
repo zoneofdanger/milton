@@ -10,7 +10,7 @@ landed and the item is still open), `blocked: <why or #id>`. A bolded headline o
 or fewer states the task; one item is one landing. **A section heading and its preamble are
 shared context for every item beneath it.**
 
-**next-id: 31.** Ids are never reused, so this counter survives deleting the newest item.
+**next-id: 33.** Ids are never reused, so this counter survives deleting the newest item.
 
 ## MVP
 
@@ -77,6 +77,40 @@ reports, memos) and plain text on security screens and anything an assistant rea
       column and rewrites `save_request_hashes` to check `input_hash` alone (no CASCADE, with a
       rollback file and a runbook section), and remove the two raw test INSERTs' `source_hash`
       in server/test/store-saves.test.ts.
+
+- [ ] #31 (server, low) **Take Stripe off sign-in and deletion after launch.** The
+      narrowed follow-up to PR #67 took checkout's live read and the webhook off the row lock
+      (compare-and-set on `trial_accounts.stripe_revision`, 0011, with a one-off `--resync`
+      after its cutover) and deferred the rest. Sign-in still waits on Stripe, up to three
+      5 s calls under `trial_accounts FOR UPDATE` (`whileWaiting`), so a Stripe outage is a
+      sign-in 503; deletion's Stripe DELETE still runs inside its lifecycle transaction.
+      Moving enrolment to the background failed two reviews (Astra). It needs a durable
+      retry, and a retry sweep can starve behind accounts that keep failing; a sweep whose
+      every account failed still answered HTTP 200, so the maintenance job's failed-execution
+      alert would see nothing. A takeover can duplicate trials: Stripe prunes idempotency
+      keys after 24 hours, and a 500 can take effect late, so neither proves a create failed;
+      duplicate subscriptions can both charge once the customer has a default payment method
+      (the trial's cancel-without-payment-method setting doesn't apply then). An enrolment in
+      flight races deletion: deletion can find no customer, finish, and leave the customer and
+      trial the enrolment then creates (main's own form of this race is #32); a fence must
+      cover every customer link, checkout's included, which bypassed it. And old and new
+      revisions overlap at cutover, with nothing enforcing a quiescent switch.
+      The stale holder's lease overwrite and the ineffective fence regression test were
+      retired with that design. Full argument: PR #67 (closed unmerged) and its
+      description's Round 2 section.
+
+- [ ] #32 (server, med, founder) **Fence account deletion against checkout and enrolment.**
+      Both races exist on main today (Astra reproduced them offline against main's code while
+      reviewing PR #70). Checkout during a deletion: deletion reaches `stripe-ended`, checkout
+      then links a customer and returns a payable Checkout session, and deletion's retry erases
+      the account without any Stripe DELETE, so a person can pay for an account that no longer
+      exists and keep a live Stripe customer. Enrolment during a deletion: deletion reads the
+      customer without the enrolment's `trial_accounts FOR UPDATE` lock, can find none while a
+      customer is being created, and finishes; the enrolment then leaves a cardless trial (it
+      cancels at its end) and a customer that still holds the email, which trial cancellation
+      does not delete. A fix makes deletion's Stripe step hold or check the same row enrolment
+      and checkout link through, and refuses new customer links once deletion has begun.
+      Peter decides whether it is a pre-launch fix (founder).
 
 ## From the audit of 2026-11-02 (`.agents/tmp/audit/report.md`)
 

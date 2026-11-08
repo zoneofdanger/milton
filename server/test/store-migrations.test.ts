@@ -1060,6 +1060,64 @@ test("no request path deletes usage rows: only the maintenance job's prune does"
   ).toContain("pruneUsage(");
 });
 
+test("0011 adds stripe_revision; existing trial rows keep their state and start at 0", async () => {
+  const folder = new URL("../drizzle/", import.meta.url).pathname;
+  const scratch = await mkdtemp(join(tmpdir(), "milton-0011-"));
+  const pg = new PGlite();
+  try {
+    await cp(folder, scratch, { recursive: true });
+    const journal = await Bun.file(join(scratch, "meta/_journal.json")).json();
+    const through = async (tag: string) =>
+      writeFile(
+        join(scratch, "meta/_journal.json"),
+        JSON.stringify({
+          ...journal,
+          entries: journal.entries.slice(
+            0,
+            journal.entries.findIndex((e: { tag: string }) => e.tag === tag) +
+              1,
+          ),
+        }),
+      );
+    await through("0009_test_account");
+    await migrate(drizzle(pg), { migrationsFolder: scratch });
+    // Production's shape before 0010: one row waiting on its trial, one paid.
+    await seedUsers(pg, "waiting", "paid");
+    await pg.exec(
+      "INSERT INTO trial_accounts(user_id,started_at) VALUES ('waiting',now()); INSERT INTO trial_accounts(user_id,started_at,stripe_customer_id,stripe_subscription_id,subscription_status) VALUES ('paid',now()-interval '40 days','cus_kept','sub_kept','active')",
+    );
+    const rows = async () =>
+      (
+        await pg.query(
+          "SELECT user_id,stripe_customer_id,stripe_subscription_id,subscription_status FROM trial_accounts ORDER BY user_id",
+        )
+      ).rows;
+    const before = await rows();
+    await through("0011_stripe_revision");
+    await migrate(drizzle(pg), { migrationsFolder: scratch });
+    expect(await rows()).toEqual(before);
+    expect(
+      (
+        await pg.query(
+          "SELECT data_type,is_nullable,column_default FROM information_schema.columns WHERE table_name='trial_accounts' AND column_name='stripe_revision'",
+        )
+      ).rows,
+    ).toEqual([
+      { data_type: "bigint", is_nullable: "NO", column_default: "0" },
+    ]);
+    expect(
+      (
+        await pg.query(
+          "SELECT count(*)::int AS n FROM trial_accounts WHERE stripe_revision=0",
+        )
+      ).rows,
+    ).toEqual([{ n: 2 }]);
+  } finally {
+    await pg.close();
+    await rm(scratch, { recursive: true, force: true });
+  }
+});
+
 test("native 008 links each authorized registration from what survives, by identity incarnation, and applies deletion's rule to deleted identities' registrations", async () => {
   const native = (name: string) =>
     Bun.file(

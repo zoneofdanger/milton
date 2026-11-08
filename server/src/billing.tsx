@@ -80,6 +80,12 @@ async function stripeAnswer<T>(response: Response, shape: z.ZodType<T>) {
   return parsed.data;
 }
 
+// Stripe accepts 30 minutes to 24 hours after it creates the session; the
+// extra minute keeps network delay and clock skew from undercutting the minimum.
+// Each click opens a new session with no idempotency key, so nothing replays a
+// stale expiry.
+const CHECKOUT_LIFETIME_SECONDS = 1860;
+
 const stripePost = async <T,>(
   billing: BillingConfig,
   path:
@@ -375,7 +381,8 @@ async function billingRoute(ctx: PageContext): Promise<Response> {
     return portal(account.customer);
   // The stored status can lag a payment by hours, when a webhook is retrying, so
   // ask Stripe before selling a second subscription. Two sessions opened before
-  // either is paid stay possible.
+  // either is paid stay possible, but each expires after 31 minutes instead of
+  // Stripe's default 24 hours, so an abandoned tab cannot pay a day later.
   if (account.customer) {
     const { customer } = account;
     const live = await store.syncSubscription(customer, async () =>
@@ -406,6 +413,9 @@ async function billingRoute(ctx: PageContext): Promise<Response> {
       "line_items[0][quantity]": "1",
       success_url: home,
       cancel_url: home,
+      expires_at: String(
+        Math.floor(Date.now() / 1000) + CHECKOUT_LIFETIME_SECONDS,
+      ),
     },
     redirectTo("https://checkout.stripe.com"),
   );

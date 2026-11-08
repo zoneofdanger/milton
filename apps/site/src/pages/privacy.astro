@@ -170,17 +170,15 @@ import SiteLayout from "../layouts/SiteLayout.astro";
     Milton then removes your rules, samples, derived guides and pending guide
     work, internal memos and their history, your cover sheet and reports,
     request receipts, accepted-change records, usage counts and billing record,
-    and the app’s sign-in sessions and credentials. Cleanup then removes your
-    sign-in profile, password hashes, linked sign-in methods, browser sessions,
-    assistant grants, tokens and sign-in authorization records from Milton’s
-    sign-in service, along with the registrations of assistants only you
-    approved. An assistant registration another account also approved stays so
-    that account’s connection keeps working, without its name or contact
-    details. For each registration removed or cleared this way, Milton keeps a
-    one-way fingerprint of its client identifier, so its name and contact
-    details stay empty even if an assistant registers again under that same
-    identifier. Any registration approved before November 8, 2026 that can no
-    longer be linked to an account remains as registered. If account cleanup is
+    and the app’s sign-in sessions and credentials. When you delete your
+    account, Milton’s sign-in service also deletes your sign-in profile,
+    password hashes, linked sign-in methods, sessions, and every assistant
+    connection you approved. An assistant registration that only you approved is
+    deleted; one that another account also approved stays, with its name and
+    contact details erased. We keep only a one-way fingerprint of each deleted
+    or erased registration’s ID, so its details stay erased if it registers
+    again. Any registration approved before November 8, 2026 that can no longer
+    be linked to an account remains as registered. If account cleanup is
     incomplete, the app offers a retry; deletion is confirmed only when that
     cleanup finishes. Unused password reset links stop working when account
     security changes or deletion starts, as well as when they expire.

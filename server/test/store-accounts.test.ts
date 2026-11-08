@@ -9,6 +9,7 @@ import {
   read,
   seedRule,
   seedSample,
+  storeForCurrentRequest,
 } from "./store-fixtures";
 import { createStoreMemoTools } from "../src/mcp-tools";
 import { createHash } from "node:crypto";
@@ -16,7 +17,6 @@ import { backgroundSettled, type StoreDatabase } from "../src/store/database";
 import {
   resolveIdentityAccount,
   lookupIdentityAccount,
-  storeForCurrentRequest,
   personStoreForCurrentRequest,
   connectionKeyAccount,
   connectionKeysForAccount,

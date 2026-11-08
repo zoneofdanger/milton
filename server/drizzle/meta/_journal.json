@@ -47,8 +47,15 @@
     {
       "idx": 6,
       "version": "7",
-      "when": 1794095980849,
-      "tag": "0006_usage_calls",
+      "when": 1794096338675,
+      "tag": "0006_drop_unread_columns",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1794097594918,
+      "tag": "0007_usage_calls",
       "breakpoints": true
     }
   ]

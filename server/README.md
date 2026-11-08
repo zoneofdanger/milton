@@ -616,7 +616,7 @@ No-op and failed saves add no accepted-change record.
 Replay adds no duplicate. New saves record transformation pipeline `exact:v1`.
 
 Records live as long as internal history and are removed with account deletion.
-Generated payload byte fields remain, with no lifetime history cap.
+There is no lifetime history cap; 0006 drops the generated payload byte fields it summed.
 
 ### Sample context and ranking
 
@@ -701,13 +701,13 @@ read and set `last_used_at` only. No runtime can change a key's binding columns.
 `007-connection-key-status` grants `connection_key_status` EXECUTE to MCP and app only.
 Rerunning 006 converges.
 
-Usage rows (`usage_calls`, Drizzle `0006`) get no legacy-group grants either. The owner
-applies `migrations/009-usage-calls-roles.sql` after `0006` and before code that records
+Usage rows (`usage_calls`, Drizzle `0007`) get no legacy-group grants either. The owner
+applies `migrations/009-usage-calls-roles.sql` after `0007` and before code that records
 usage: MCP may only insert; app gets nothing (erasure cascades as the table owner).
-`0006` also moves the six writer guard triggers' account lock from `FOR UPDATE` to
+`0007` also moves the six writer guard triggers' account lock from `FOR UPDATE` to
 `FOR NO KEY UPDATE` (each otherwise unchanged), so no save waits on a usage row's
 foreign-key check.
-Rerunning 009 converges. `drizzle/rollback/0006_usage_calls.sql` drops the table.
+Rerunning 009 converges. `drizzle/rollback/0007_usage_calls.sql` drops the table and restores the guards.
 
 Server timeouts live on the runtime logins, because Neon's proxy and pooler drop the
 `statement_timeout`/`lock_timeout` a client passes at connect (the pools still pass them,

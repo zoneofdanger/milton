@@ -382,13 +382,9 @@ export async function memoPages(
    * otherwise uses today (UTC) and a random comment. */
   options: { billing?: boolean; now?: () => Date; comment?: () => string } = {},
 ): Promise<Response> {
+  // Reached only for a GET of a memo route (isMemoRoute): browserPages answers
+  // every other path and method first.
   const path = new URL(request.url).pathname;
-  if (!["/", "/tps-report", "/download"].includes(path))
-    return page("Not found", <p>This page does not exist.</p>, 404);
-  if (request.method !== "GET" && request.method !== "POST")
-    return page("Method not allowed", "", 405);
-  if (request.method !== "GET")
-    return page("Not found", <p>This page does not exist.</p>, 404);
   if (path === "/download")
     return new Response(await store.exportTpsReport(), {
       headers: {

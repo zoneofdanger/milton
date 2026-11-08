@@ -99,7 +99,7 @@ Files: `server/src/handler.ts`, `server/src/token.ts`, `server/src/mcp.ts`,
   for it before closing pools. A batch that fails is retried row by row.
 - The row's foreign key cascades from `users`, so account erasure removes it. Writers
   (saves, key creation, and the six guard triggers on cards, card versions, accepted
-  changes, sample kinds, samples and sample versions, since `0006`) lock the account
+  changes, sample kinds, samples and sample versions, since `0007`) lock the account
   `FOR NO KEY UPDATE`, which the row's key-share check does not wait on; sign-in, lifecycle and deletion lock `FOR UPDATE`, so a row
   for an account being deleted waits, then fails its check, and never outlives the
   account.
@@ -264,6 +264,7 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
 `server/scripts/backfill-subscriptions.ts`, `packages/forwarded-client/`.
 
 - Native auth hosts verified password/email, Google/GitHub, consent and account security; own form destinations and direct native URL-encoded browser form POST redirects (including logout confirmation) share an escaped fresh-document Continue navigation under strict same-origin form policy; direct GET, JSON/fetch and machine calls retain native redirects, and finalized native/static/refusal responses use strict-origin referrers (origin only, no paths/queries/proofs, suppressed on HTTPS downgrade) so same-origin form POSTs retain Origin while missing/null/foreign Origins stay refused; responses retain their security headers and native cookies; app never handles passwords or native cookies.
+- Auth's wrapper guards read each POST body by its lowercased media type, and native is sent only that type with the body re-serialised from what the guards parsed, so no later decode finds a field the guards missed; a POST that is not exactly `application/json` or `application/x-www-form-urlencoded` (including an empty one with no type, or a combined comma-joined header) gets 415 before any database work.
 - Auth's CSS, favicon and fonts keep every security header but cache like the app's assets (immutable at the versioned URL, otherwise no-cache); every other auth response stays no-store.
 - App uses maintained code/S256 OIDC with shared SQL one-use state/nonce/verifier, exact callback, signature/issuer/audience/subject and matching UserInfo/opaque-token proof.
 - Identity-only app sessions last at most one absolute hour and never outlive their native opaque token; renewal starts a new SSO flow with no refresh/offline scope.
@@ -404,7 +405,8 @@ Files: `server/drizzle/`, `server/src/store/schema.ts`, `server/src/store/databa
 - Audit rows are immutable and must reference real card versions.
 - History has no size cap. History rows never shrink short of account deletion, so the
   lifetime cap that refused every save once an account reached it is gone (0030), with
-  the `retained_bytes` counter it read.
+  the `retained_bytes` counter it read; 0006 drops the generated `payload_bytes` columns
+  it summed.
 - User IDs cannot change.
 - Disconnects and identity hashes have no foreign key to users, so they outlive the account.
 - `connection_keys` (0004) cascades from users and from its (issuer, subject) identity, requires the native binding (issuer, subject, incarnation, generation), checks id, hash, name, scope, binding lengths and dates, and grants nothing to the legacy writing group; owner file `006-connection-keys-roles.sql` lets app read every column but the hash (binding included), insert and set `revoked_at`, and MCP read and set `last_used_at` only.

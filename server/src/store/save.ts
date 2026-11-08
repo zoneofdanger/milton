@@ -184,8 +184,8 @@ export async function runSave(
         }
       };
       const outcome = await decide();
-      await tx.query(sql`INSERT INTO save_requests(user_id,request_id,input_hash,source_hash,result_json)
-        VALUES (${userId},${input.request_id},${inputHash},${current.fingerprint},${JSON.stringify(outcome)}::jsonb)`);
+      await tx.query(sql`INSERT INTO save_requests(user_id,request_id,input_hash,result_json)
+        VALUES (${userId},${input.request_id},${inputHash},${JSON.stringify(outcome)}::jsonb)`);
       return outcome;
     });
   } catch (error) {

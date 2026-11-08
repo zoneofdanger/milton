@@ -232,17 +232,18 @@ test("the security page's session lookup takes each client's own network bucket"
 
 describe("OAuth profile refusals before database access", () => {
   // A pool that never connects: it records the network rate-limit query that
-  // every admitted request makes first, and refuses it.
-  const fixture = async () => {
+  // every admitted request makes first, and refuses it (or, with network,
+  // admits the network bucket and refuses the per-account one).
+  const fixture = async ({ network = false } = {}) => {
     const { createProvider } = await import("../src/provider.ts");
     const queries: string[] = [];
     const pool = {
       on: () => pool,
-      query: async (text: string) => {
+      query: async (text: string, values: unknown[] = []) => {
         queries.push(text);
         if (!text.includes("milton_guard.take_rate"))
           throw new Error("fixture_database_refused");
-        return { rows: [{ allowed: false }] };
+        return { rows: [{ allowed: network && values[2] === 120 }] };
       },
       connect: async () => {
         throw new Error("fixture_database_refused");
@@ -358,6 +359,153 @@ describe("OAuth profile refusals before database access", () => {
       "rate_limited",
     ]);
     expect(queries).toHaveLength(1);
+  });
+
+  test("body guards parse each media type as native does and refuse other types", async () => {
+    const { post, refused, queries } = await fixture({ network: true });
+    const as = (type: string, body: unknown) => ({
+      headers: { origin: "https://auth.meetmilton.com", "content-type": type },
+      body: JSON.stringify(body),
+    });
+    const signIn = {
+      email: "fictional@example.com",
+      password: "fictional password",
+    };
+    const keyed = { ...client, jwks_uri: "https://client.example/jwks" };
+    // Native lowercases the type, so this is JSON to both: the per-email limit
+    // and the registration refusals still apply.
+    expect(
+      await refused(post("/sign-in/email", as("Application/JSON", signIn))),
+    ).toEqual([429, "rate_limited"]);
+    expect(
+      await refused(
+        post("/oauth2/register", as("Application/JSON; Charset=UTF-8", keyed)),
+      ),
+    ).toEqual([400, "client_capability_refused"]);
+    const admitted = queries.length;
+    for (const reply of [
+      post("/sign-in/email", as("application/merge-patch+json", signIn)),
+      post("/oauth2/register", as("application/vnd.api+json", keyed)),
+      post("/sign-in/email", as("text/plain", signIn)),
+      post("/sign-out", { headers: { origin: "https://auth.meetmilton.com" } }),
+    ])
+      expect(await refused(reply)).toEqual([415, "unsupported_media_type"]);
+    expect(queries).toHaveLength(admitted);
+  });
+
+  test("on Node, native parses exactly the body the wrapper inspected", () => {
+    // Node's formData() reads the last type in a combined header, Bun's the
+    // first, so this runs on Node. A probe stands in for native and records
+    // what native's own parsers (formData, and the OAuth provider's re-read
+    // with clone().text()) recover from the forwarded request.
+    const form = "application/x-www-form-urlencoded";
+    const cases = [
+      // A combined header: multipart to native's formData(), not to the wrapper.
+      [
+        "/oauth2/token",
+        form + "; charset=UTF-8, multipart/form-data; boundary=abc",
+        '--abc\r\nContent-Disposition: form-data; name="client_assertion"\r\n\r\nx.y.z\r\n--abc--\r\n',
+      ],
+      // Two BOMs: each decode strips one, so a re-decoded copy would find
+      // the field name the wrapper saw with a BOM in front.
+      [
+        "/oauth2/token",
+        form,
+        "\uFEFF\uFEFFclient_assertion=x.y.z&grant_type=authorization_code",
+      ],
+      // Legitimate bodies keep order, empty values and Unicode.
+      ["/oauth2/token", form, "b=1&a=&c=%C3%A9+%F0%9F%94%92&d=x%26y"],
+      // Re-encoding grows this 6,032-byte body past the 16 KiB limit.
+      [
+        "/oauth2/token",
+        form,
+        "grant_type=authorization_code&x=" + "!".repeat(6000),
+      ],
+      [
+        "/oauth2/register",
+        "application/json",
+        '{"redirect_uris":["https://client.example/callback"],"client_name":"Fictional \u00e9 \ud83d\udd12","token_endpoint_auth_method":"none","logo_uri":""}',
+      ],
+    ];
+    const script = `
+      const { createProvider } = await import(${JSON.stringify(import.meta.resolve("../src/provider.ts"))});
+      const { fixtureConfig } = await import(${JSON.stringify(import.meta.resolve("./fixture-config.ts"))});
+      let queries = 0;
+      const pool = { on: () => pool, connect: async () => { throw new Error("refused"); },
+        query: async (t, v) => (queries++, { rows: [{ allowed: t.includes("take_rate") && v[2] === 120 }] }) };
+      const service = createProvider(fixtureConfig(), { pool });
+      let seen;
+      service.provider.handler = async (r) => {
+        const text = await r.clone().text();
+        seen = r.headers.get("content-type") === "application/json"
+          ? { json: Object.entries(JSON.parse(text)) }
+          : { form: [...(await r.formData())], reread: [...new URLSearchParams(text)] };
+        seen.stale = ["content-length", "content-encoding", "transfer-encoding", "content-md5", "digest", "content-digest"].filter((h) => r.headers.has(h));
+        return new Response(null, { status: 204 });
+      };
+      const out = [];
+      for (const [path, type, body] of ${JSON.stringify(cases)}) {
+        seen = null;
+        queries = 0;
+        const r = await service.handler(new Request("https://auth.meetmilton.com/api/auth" + path,
+          { method: "POST", headers: { "content-type": type, "content-length": String(Buffer.byteLength(body)),
+            "content-encoding": "identity", "content-md5": "fictional", digest: "sha-256=fictional", "content-digest": "sha-256=:fictional:" }, body }), "127.0.0.1");
+        out.push({ status: r.status, error: r.status === 204 ? null : (await r.json()).error, queries, seen });
+      }
+      console.log(JSON.stringify(out));`;
+    const run = Bun.spawnSync(
+      [
+        "node",
+        "--experimental-strip-types",
+        "--input-type=module",
+        "-e",
+        script,
+      ],
+      { env: { PATH: process.env.PATH }, stderr: "pipe" },
+    );
+    expect(run.exitCode).toBe(0);
+    const bom = [
+      ["\uFEFFclient_assertion", "x.y.z"],
+      ["grant_type", "authorization_code"],
+    ];
+    const entries = [
+      ["b", "1"],
+      ["a", ""],
+      ["c", "é 🔒"],
+      ["d", "x&y"],
+    ];
+    expect(
+      JSON.parse(run.stdout.toString().trim().split("\n").at(-1)!),
+    ).toEqual([
+      { status: 415, error: "unsupported_media_type", queries: 0, seen: null },
+      {
+        status: 204,
+        error: null,
+        queries: 1,
+        seen: { form: bom, reread: bom, stale: [] },
+      },
+      {
+        status: 204,
+        error: null,
+        queries: 1,
+        seen: { form: entries, reread: entries, stale: [] },
+      },
+      { status: 413, error: "request_too_large", queries: 0, seen: null },
+      {
+        status: 204,
+        error: null,
+        queries: 1,
+        seen: {
+          stale: [],
+          json: [
+            ["redirect_uris", ["https://client.example/callback"]],
+            ["client_name", "Fictional é 🔒"],
+            ["token_endpoint_auth_method", "none"],
+            ["logo_uri", ""],
+          ],
+        },
+      },
+    ]);
   });
 });
 

@@ -19,12 +19,8 @@ import {
   POOL_IDLE_MS,
   postgresDatabase,
 } from "../src/store/database";
-import {
-  database,
-  lookupIdentityAccount,
-  StoreError,
-  storeForCurrentRequest,
-} from "../src/store";
+import { database, lookupIdentityAccount, StoreError } from "../src/store";
+import { storeForCurrentRequest } from "../test/store-fixtures";
 import { recordToolUsage } from "../src/store/usage";
 import {
   authenticateConnectionKey,
@@ -33,7 +29,7 @@ import {
 } from "../src/store/connection-keys";
 import { fingerprintKeyCheck } from "../src/auth-admission";
 import { hash } from "../src/auth-oidc";
-import { appActive, bindingActive } from "../src/auth-authority";
+import { appActive } from "../src/auth-authority";
 import { checkProductRuntimeRole } from "./check-runtime-role";
 import { guideWorkerRoleAllowed } from "../src/guides/store";
 import { runGuideWorker } from "../src/guides/worker";
@@ -103,7 +99,8 @@ try {
     "0003_report_guides",
     "0004_connection_keys",
     "0005_drop_deleted_identities",
-    "0006_usage_calls",
+    "0006_drop_unread_columns",
+    "0007_usage_calls",
   ])
     await owner.query(
       readFileSync(new URL(`./drizzle/${migration}.sql`, sourceRoot), "utf8"),

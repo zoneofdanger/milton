@@ -302,6 +302,15 @@ test("served instructions state edit precedence, retrieval and scoped transforma
     "Stop capture immediately",
   ])
     expect(storeInstructions).toContain(phrase);
+  // The privacy and capture prohibition holds even for a client that drops
+  // tool descriptions.
+  expect(
+    storeInstructions
+      .split("\n\n")
+      .find((p) => p.startsWith("Session capture"))!,
+  ).toContain(
+    "Never send transcripts, secrets or others' private details, or file capture consent as a rule.",
+  );
 });
 
 test("every create_memo shape the server instructions describe parses against saveMemoInput", () => {

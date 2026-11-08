@@ -22,6 +22,7 @@ import { fetchClientMetadataResource } from "@better-auth/cimd/node";
 import type { DBFieldAttribute } from "@better-auth/core/db";
 import { PostgresDialect } from "kysely";
 import pg from "pg";
+import { decodeJwt } from "jose";
 import {
   AUTH_ORIGIN,
   APP_ORIGIN,
@@ -218,6 +219,57 @@ export function createProvider(
       miltonIdentityIncarnation: b.miltonIdentityIncarnation,
       miltonSecurityGeneration: b.miltonSecurityGeneration,
     };
+  }
+  // UserInfo answers only while the token's binding is live, the check MCP
+  // and the app make on every call: native checks a JWT's signature and
+  // session, never its binding. A JWT's claims are read here unverified and
+  // native then verifies the signature of the same token, so a forged claim
+  // passes neither; its client is `azp`, the claim native validates. An
+  // opaque token is looked up by its stored hash, as the rate gate's app
+  // proof does. Anything unreadable is refused.
+  async function liveBinding(token: string | undefined, stored: string) {
+    if (!token) return false;
+    if (token.split(".").length === 3) {
+      let c: Record<string, unknown>;
+      try {
+        c = decodeJwt(token);
+      } catch {
+        return false;
+      }
+      const text = (v: unknown) => (typeof v === "string" && v ? v : null);
+      const [binding, subject, client, scope, incarnation, generation] = [
+        c.miltonBinding,
+        c.sub,
+        c.azp,
+        c.scope,
+        c.miltonIdentityIncarnation,
+        c.miltonSecurityGeneration,
+      ].map(text);
+      if (
+        !binding ||
+        !subject ||
+        !client ||
+        !scope ||
+        !incarnation ||
+        !generation
+      )
+        return false;
+      const r = await pool.query<{ b: Record<string, string> | null }>(
+        "SELECT milton_guard.binding_status($1,$2,$3,$4,ARRAY[]::text[]) AS b",
+        [binding, subject, client, scope.split(" ")],
+      );
+      const b = r.rows[0]?.b;
+      return (
+        b?.reference === binding &&
+        b.miltonIdentityIncarnation === incarnation &&
+        b.miltonSecurityGeneration === generation
+      );
+    }
+    const r = await pool.query<{ live: boolean }>(
+      `SELECT exists(SELECT 1 FROM milton_auth."oauthAccessToken" t WHERE t."token"=$1 AND milton_guard.binding_status(coalesce(t."referenceId",''),coalesce(t."userId",''),t."clientId",array(SELECT jsonb_array_elements_text(t."scopes")),array(SELECT jsonb_array_elements_text(t."resources"))) IS NOT NULL) AS live`,
+      [stored],
+    );
+    return r.rows[0]?.live === true;
   }
   type Identity = {
     verifiedEmail: string;
@@ -775,6 +827,11 @@ export function createProvider(
       const allowed = taken.rows[0]?.allowed;
       if (!Array.isArray(allowed) || !allowed.every((a) => a === true))
         return json({ error: "rate_limited" }, 429);
+      if (
+        path === "/oauth2/userinfo" &&
+        !(await liveBinding(bearer, bearer ? stored(bearer) : ""))
+      )
+        return json({ error: "invalid_token" }, 401);
       const headers = new Headers(request.headers);
       for (const k of [
         "forwarded",

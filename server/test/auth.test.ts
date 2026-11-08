@@ -140,10 +140,10 @@ function fakeStripe() {
     // What a read of the customer answers after a DELETE 404.
     customer: { status: 404, body: {} as Record<string, unknown> },
     subscriptions: [] as Record<string, unknown>[],
-    calls: [] as Record<string, unknown>[],
-    onDelete: async () => {},
     // Runs as Stripe creates a customer, before it answers.
     onCustomer: async () => {},
+    calls: [] as Record<string, unknown>[],
+    onDelete: async () => {},
   };
   const billing = {
     secretKey: "rk_test_fixtureNotAKey",

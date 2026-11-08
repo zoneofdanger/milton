@@ -10,7 +10,7 @@ import pg from "pg";
 import * as oidc from "openid-client";
 import { createMiltonHandler } from "../src/handler";
 import { createAccessTokenVerifier } from "../src/token";
-import { sql } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
 import { createMiltonApp } from "../src/index";
 import { runtimeConfig, type RuntimeConfig } from "../src/config";
 import {
@@ -18,7 +18,10 @@ import {
   closeDatabasePools,
   POOL_IDLE_MS,
   postgresDatabase,
+  type StoreDatabase,
+  type StoreSession,
 } from "../src/store/database";
+import { PgDialect } from "drizzle-orm/pg-core";
 import {
   database,
   lockActiveAccount,
@@ -1593,44 +1596,76 @@ try {
     assert.deepEqual(await usageRows(doomed, kept), [kept]);
     await owner.query("DELETE FROM users WHERE id=$1", [kept]);
   }
-  stage = "a usage row skipped behind a short FOR UPDATE lands on its retry";
+  stage =
+    "usage rows skipped behind short FOR UPDATEs land on their own retries";
   {
-    const briefly = "m_00000000-0000-4000-8000-0000000000c7";
-    await owner.query("INSERT INTO users(id) VALUES($1)", [briefly]);
-    const signIn = await owner.connect();
-    let appended: Promise<void> = Promise.resolve();
-    let first: string[] = [];
+    // Two accounts under short FOR UPDATEs (as a sign-in holds it), skipped
+    // at different times. Each row retries 50 ms after its own skip: the first
+    // lands once its lock ends; the second, skipped about 25 ms later while
+    // the first was waiting, must not retry with the first (its lock is still
+    // held then), and lands after its own lock ends.
+    const first = "m_00000000-0000-4000-8000-0000000000c7",
+      second = "m_00000000-0000-4000-8000-0000000000c8";
+    await owner.query("INSERT INTO users(id) VALUES($1),($2)", [first, second]);
+    const [lockFirst, lockSecond] = [
+      await owner.connect(),
+      await owner.connect(),
+    ];
+    const now = async () =>
+      (await owner.query("SELECT clock_timestamp() t")).rows[0].t as Date;
+    let appended: Promise<unknown> = Promise.resolve();
     try {
-      await signIn.query("BEGIN");
-      await signIn.query("SELECT id FROM users WHERE id=$1 FOR UPDATE", [
-        briefly,
-      ]);
-      const since = (await owner.query("SELECT clock_timestamp() t")).rows[0]
-        .t as Date;
-      appended = recordToolUsage(
+      for (const [client, id] of [
+        [lockFirst, first],
+        [lockSecond, second],
+      ] as const) {
+        await client.query("BEGIN");
+        await client.query("SELECT id FROM users WHERE id=$1 FOR UPDATE", [id]);
+      }
+      const sinceFirst = await now();
+      const firstRow = recordToolUsage(
         mcpConfig.DATABASE_URL,
         usageDb,
-        briefly,
+        first,
         "get_cover_sheet",
       );
-      // The first attempt ran and skipped; the lock ends before the retry.
-      await usageRan(since);
-      first = await usageRows(briefly);
-      await signIn.query("COMMIT");
+      await usageRan(sinceFirst);
+      await lockFirst.query("COMMIT");
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      const sinceSecond = await now();
+      const secondRow = recordToolUsage(
+        mcpConfig.DATABASE_URL,
+        usageDb,
+        second,
+        "get_cover_sheet",
+      );
+      appended = Promise.all([firstRow, secondRow]);
+      await usageRan(sinceSecond);
+      // The first row's retry has landed; the second's is still to come.
+      for (let n = 0; n < 200; n++) {
+        if ((await usageRows(first)).length) break;
+        await new Promise((resolve) => setTimeout(resolve, 2));
+      }
+      await lockSecond.query("COMMIT");
     } finally {
-      signIn.release();
+      lockFirst.release();
+      lockSecond.release();
     }
     await appended;
-    assert.deepEqual(first, [], "skipped while the account was locked");
-    assert.deepEqual(await usageRows(briefly), [briefly], "lands on its retry");
-    await owner.query("DELETE FROM users WHERE id=$1", [briefly]);
+    assert.deepEqual(
+      await usageRows(first, second),
+      [first, second].sort(),
+      "each lands on its own retry",
+    );
+    await owner.query("DELETE FROM users WHERE id IN ($1,$2)", [first, second]);
   }
   stage = "account A's save and FOR UPDATE against account B's deletion";
   {
-    // B's deletion holds B's FOR UPDATE while a usage batch for A and B runs.
-    // A's save (FOR NO KEY UPDATE, its own and its triggers') and A's
-    // FOR UPDATE (as sign-in, eligibility, lifecycle and deletion take it)
-    // finish promptly: no usage statement waits, so none holds A's key share.
+    // B's deletion holds B's FOR UPDATE, and A's save is paused holding its
+    // FOR NO KEY UPDATE on A. A usage batch for A and B then lands A at once
+    // (a key share does not conflict with the save's lock) and skips B, with
+    // no statement waiting. A's save then finishes, and A's FOR UPDATE (as
+    // sign-in, eligibility, lifecycle and deletion take it) follows promptly.
     const saverId = "m_00000000-0000-4000-8000-0000000000c5",
       leaving = "m_00000000-0000-4000-8000-0000000000c6";
     await owner.query("INSERT INTO users(id) VALUES($1),($2)", [
@@ -1645,8 +1680,33 @@ try {
       "INSERT INTO trial_accounts(user_id,started_at,subscription_status) VALUES($1,now(),'active')",
       [saverId],
     );
+    // The MCP database, pausing a save right after it takes its account lock.
+    const dialect = new PgDialect();
+    const base = postgresDatabase(mcpConfig.DATABASE_URL);
+    let pauseSave = false;
+    let locked!: () => void, resume!: () => void;
+    const saveLocked = new Promise<void>((resolve) => (locked = resolve));
+    const resumed = new Promise<void>((resolve) => (resume = resolve));
+    const pausing = (session: StoreSession): StoreSession => ({
+      async query<Row extends Record<string, unknown>>(statement: SQL) {
+        const rows = await session.query<Row>(statement);
+        if (
+          pauseSave &&
+          / FOR NO KEY UPDATE$/.test(dialect.sqlToQuery(statement).sql)
+        ) {
+          pauseSave = false;
+          locked();
+          await resumed;
+        }
+        return rows;
+      },
+    });
+    const saverDb: StoreDatabase = {
+      ...base,
+      transaction: (work) => base.transaction((tx) => work(pausing(tx))),
+    };
     const saver = await storeForCurrentRequest(
-      mcpConfig,
+      { ...mcpConfig, storeDatabase: saverDb },
       await lookupIdentityAccount(mcpConfig, {
         provider: "fictional-usage",
         subject: "saver",
@@ -1655,53 +1715,77 @@ try {
     );
     const version = (await saver.readTpsReport()).version;
     const deletion = await owner.connect();
-    let saved: unknown,
-      locked: unknown,
+    let saved: unknown, lockedA: unknown, usageSettled: unknown;
+    let landedDuringSave: string[] = [],
       waiters = -1;
     try {
       await deletion.query("BEGIN");
       await deletion.query("SELECT id FROM users WHERE id=$1 FOR UPDATE", [
         leaving,
       ]);
-      const appended = Promise.all([
-        recordToolUsage(mcpConfig.DATABASE_URL, usageDb, saverId, "get_report"),
-        recordToolUsage(mcpConfig.DATABASE_URL, usageDb, leaving, "get_report"),
-      ]);
-      [saved, locked] = await Promise.all([
-        within(
-          saver
-            .saveMemo({
-              text: "Keep fictional measurements explicit.",
-              rules: [
-                {
-                  report: "cover",
-                  text: "Keep fictional measurements explicit.",
-                },
-              ],
-              request_id: randomUUID(),
-              expected_version: version,
-            })
-            .then((outcome) => outcome.status),
-          3000,
-        ),
-        within(
-          database(config).transaction((tx) =>
-            lockActiveAccount(tx, "fictional-usage", "saver"),
+      pauseSave = true;
+      const saving = saver
+        .saveMemo({
+          text: "Keep fictional measurements explicit.",
+          rules: [
+            { report: "cover", text: "Keep fictional measurements explicit." },
+          ],
+          request_id: randomUUID(),
+          expected_version: version,
+        })
+        .then((outcome) => outcome.status);
+      await saveLocked;
+      usageSettled = await within(
+        Promise.all([
+          recordToolUsage(
+            mcpConfig.DATABASE_URL,
+            usageDb,
+            saverId,
+            "get_report",
           ),
-          3000,
-        ),
-      ]);
+          recordToolUsage(
+            mcpConfig.DATABASE_URL,
+            usageDb,
+            leaving,
+            "get_report",
+          ),
+        ]),
+        1000,
+      );
+      landedDuringSave = await usageRows(saverId, leaving);
       waiters = await usageLockWaiters();
-      await within(appended, 1000);
+      resume();
+      saved = await within(saving, 3000);
+      lockedA = await within(
+        database(config).transaction((tx) =>
+          lockActiveAccount(tx, "fictional-usage", "saver"),
+        ),
+        3000,
+      );
       await deletion.query("DELETE FROM users WHERE id=$1", [leaving]);
       await deletion.query("COMMIT");
     } finally {
+      resume();
       deletion.release();
     }
     await backgroundSettled();
-    assert.equal(saved, "saved", "A's save never waits on B's deletion");
-    assert.equal(locked, saverId, "A's FOR UPDATE never waits on B's deletion");
+    assert.notEqual(
+      usageSettled,
+      "waited",
+      "the batch settles during the save",
+    );
+    assert.deepEqual(
+      landedDuringSave,
+      [saverId],
+      "A lands while A's save holds its lock",
+    );
     assert.equal(waiters, 0, "no usage statement waits on a lock");
+    assert.equal(saved, "saved", "A's save never waits on B's deletion");
+    assert.equal(
+      lockedA,
+      saverId,
+      "A's FOR UPDATE never waits on B's deletion",
+    );
     assert.deepEqual(await usageRows(saverId, leaving), [saverId]);
     await owner.query("DELETE FROM users WHERE id=$1", [saverId]);
   }

@@ -96,11 +96,18 @@ Files: `server/src/handler.ts`, `server/src/token.ts`, `server/src/mcp.ts`,
   identity-free logs. One writer per process sends at once when idle and batches rows
   that arrive meanwhile (up to 50), holds at most one pooled connection, drops rows
   beyond 1,000 waiting, and logs a failure by class and code only; shutdown waits for it
-  before closing pools. Each batch is one autocommit statement that never waits on a
-  lock: it takes the key share of each batch account it can lock now (`SKIP LOCKED`) and
-  inserts only those accounts' rows, so it holds key shares only on accounts it writes,
-  only while it runs. A row skipped behind its account's `FOR UPDATE` is retried once
-  after 50 ms, then dropped and logged by code.
+  before closing pools. Each batch is one autocommit statement that never waits on an
+  account row lock: it takes the key share of each batch account it can lock now (`SKIP
+LOCKED`) and inserts only those accounts' rows, so it holds key shares only on accounts
+  it writes, only while it runs. A row skipped behind its account's `FOR UPDATE` is
+  retried once, 50 ms after its own skip, then dropped and logged by code. `SKIP LOCKED`
+  covers row locks only: a migration holding a table lock on `usage_calls` or `users`
+  can delay usage rows (as it delays requests), while each reply still waits at most
+  250 ms.
+- Usage is best-effort. A row is lost when it is skipped again on its retry (its
+  account still under `FOR UPDATE`, or erased), when more than 1,000 rows are waiting,
+  when its statement fails, or when the process exits (the 8 s shutdown bound or a
+  crash) with rows still queued.
 - The row's foreign key cascades from `users`, so account erasure removes it. Writers
   (saves, key creation, and the six guard triggers on cards, card versions, accepted
   changes, sample kinds, samples and sample versions, since `0007`) lock the account

@@ -352,6 +352,54 @@ the file, and run it again. A plain env file, not dotenvx: dotenvx would keep it
 key next to the file in the same 0600 directory and protect nothing more, and `~/keys`
 already holds plain owner files.
 
+### Run the check
+
+From a checkout, with no owner or service credential in the environment:
+
+```sh
+bun --no-env-file server/scripts/e2e.ts ~/keys/milton.test-account.env
+```
+
+It uses only the file's three values and production's public HTTPS endpoints. Steps, each
+one JSON line (`step`, `ok`, `ms`, `severity`; never a password, key, cookie or sample
+body), each request bounded at 15 s:
+
+1. `secrets`: the email must end `.invalid` and the key be well formed.
+2. `sign_in`: app `/login`, the auth sign-in page and form, the code flow; the app must show
+   "Signed in as" this email.
+3. `mcp_connect`: initialize with the key; `tools/list` must list exactly the four tools.
+4. `safety_gate`, before any write: Connected assistants must show this email and list this
+   key's public id; the cover sheet must hold no rule, no report a rule, and every served
+   sample must carry the check's marker (kind `e2e check`, summary `Milton e2e check, run …`),
+   fewer than eight per report. Anything else stops the run with
+   `account_holds_foreign_data`, having written nothing. It also reports `key_days_left`
+   and, under 30, `warning: key_expires_within_30_days` at severity `WARNING` without
+   failing.
+5. `retire_leftovers`: retires marked samples a crashed run left, reporting the count.
+6. `baseline`: the account must now be empty; its version and reports are the baseline.
+7. `save_sample`, `fresh_read`: `create_memo` files a fictional sample marked with this run;
+   a new MCP session's `get_report` must serve exactly that text and context.
+8. `revise_sample`, `fresh_read_revision`: a revision through `sample_id`; a new session
+   must serve revision 2 and not the old text.
+9. `retire_sample`, `cleanup`: `retire_samples` removes it; a new session must read an
+   empty account with the baseline's version and reports.
+
+Exit 0 only when every step passed; otherwise the last line names the failing step and a
+fixed error code, and the exit is 1. Renew the key before it expires: sign in to the app as
+the test account with the file's password, create a new 365-day read-and-save key, replace
+`E2E_CONNECTION_KEY` and revoke the old one.
+
+**Footprint per run**, measured on the rehearsal (`check-auth-integration.ts` asserts it).
+Immutable rows that stay as long as the account: 1 `samples`, 3 `sample_versions` (save,
+revision, retirement), 3 `save_requests` receipts and 3 `accepted_changes` records, about
+10 small rows a day, some 3,700 a year; one `sample_kinds` row on the first run only; no
+rule cards. A crashed run's retirement adds one more of each receipt and record. Pruned:
+11 `usage_calls` rows (deleted after 90 days). Short-lived auth rows: one native session
+(7 days), one app session (1 hour), one admission correlation (1 day), the app's code-flow
+token and binding rows, all removed by expiry, later sign-ins and the maintenance job; at most about eight native sessions are live at once,
+under the 64-per-user cap. The key's `last_used_at` is updated. Nothing is mailed and
+nothing calls Stripe.
+
 ## Optional guide worker
 
 The default-off private guide pilot has separate [operations and capability instructions](guides.md). No guide job, schedule, provider key or account enrollment is provisioned by its build.

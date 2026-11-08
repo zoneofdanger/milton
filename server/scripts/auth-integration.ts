@@ -65,6 +65,7 @@ import {
   TEST_EMAIL,
   type Fetch,
 } from "./test-account";
+import { runE2E, type Line } from "./e2e";
 
 const port = 55623;
 const sourceRoot = pathToFileURL(process.cwd() + "/");
@@ -2780,13 +2781,15 @@ try {
     "/fonts/jetbrains-mono-regular.woff2",
   ]);
   const authPages = createAuthPages(nativeService, authAssets);
+  // Each run is its own client behind the load balancer, as daily runs are
+  // for the key-lookup limits.
+  let checkClient = 200;
   const dispatch: Fetch = async (target, init) => {
     const u = new URL(target);
     const headers = new Headers(init.headers);
     headers.set("Host", u.host);
-    // The check's own client behind the load balancer, for key-lookup limits.
     if (u.host === "mcp.meetmilton.com")
-      headers.set("X-Forwarded-For", "198.51.100.250, 192.0.2.1");
+      headers.set("X-Forwarded-For", `198.51.100.${checkClient}, 192.0.2.1`);
     const forwarded = new Request(u, {
       method: init.method,
       headers,
@@ -2902,6 +2905,154 @@ try {
   );
   pass(
     "test account provisioning: verified .invalid user, no mail, no Stripe call, marked active account with no trial, 0600 file; refuses existing email, existing file and real addresses",
+  );
+  stage = "e2e check";
+  // What one run adds to the account, by table: the runbook's daily footprint.
+  const footprint = async () =>
+    (
+      await owner.query(
+        `select (select count(*) from samples where user_id=$1)::int samples,
+          (select count(*) from sample_versions where user_id=$1)::int versions,
+          (select count(*) from sample_kinds where user_id=$1)::int kinds,
+          (select count(*) from save_requests where user_id=$1)::int receipts,
+          (select count(*) from accepted_changes where user_id=$1)::int changes,
+          (select count(*) from instruction_cards where user_id=$1)::int cards,
+          (select count(*) from usage_calls where user_id=$1)::int usage`,
+        [provisioned.userId],
+      )
+    ).rows[0] as Record<string, number>;
+  const grew = (a: Record<string, number>, b: Record<string, number>) =>
+    Object.fromEntries(Object.keys(a).map((k) => [k, b[k]! - a[k]!]));
+  const checkLines: Line[] = [];
+  const check = async () => {
+    await owner.query(
+      'delete from milton_auth."rateLimit"; delete from milton_guard.rate_bucket',
+    );
+    checkClient++;
+    checkLines.length = 0;
+    const counted = await footprint();
+    try {
+      await runE2E({
+        secrets,
+        fetch: dispatch,
+        report: (l) => checkLines.push(l),
+      });
+    } finally {
+      await backgroundSettled();
+    }
+    return grew(counted, await footprint());
+  };
+  const perRun = {
+    samples: 1,
+    versions: 3,
+    kinds: 0,
+    receipts: 3,
+    changes: 3,
+    cards: 0,
+    usage: 11,
+  };
+  // First run: the kind is made once; every later run reuses it.
+  assert.deepEqual(await check(), { ...perRun, kinds: 1 });
+  assert.deepEqual(
+    checkLines.map((l) => [l.step, l.ok]),
+    [
+      "secrets",
+      "sign_in",
+      "mcp_connect",
+      "safety_gate",
+      "retire_leftovers",
+      "baseline",
+      "save_sample",
+      "fresh_read",
+      "revise_sample",
+      "fresh_read_revision",
+      "retire_sample",
+      "cleanup",
+      "done",
+    ].map((step) => [step, true]),
+  );
+  assert.deepEqual(await check(), perRun);
+  const printed = JSON.stringify(checkLines);
+  assert(
+    !printed.includes(values.E2E_PASSWORD!) &&
+      !printed.includes(values.E2E_CONNECTION_KEY!.slice(26)) &&
+      !printed.includes("tide table"),
+    "lines carry no password, key or sample body",
+  );
+  // A crashed run's marked leftover is retired first and reported, and a key
+  // under 30 days from expiry warns without failing.
+  const testKeyCall = async (name: string, args: object) =>
+    JSON.parse(
+      (
+        await result(
+          await rpc(
+            values.E2E_CONNECTION_KEY!,
+            "tools/call",
+            { name, arguments: args },
+            { "X-Forwarded-For": "198.51.100.199, 192.0.2.1" },
+          ),
+        )
+      ).result.content![0]!.text,
+    );
+  const testSave = async (args: object) =>
+    assert.equal(
+      (
+        await testKeyCall("create_memo", {
+          request_id: randomUUID(),
+          expected_version: (await testKeyCall("get_cover_sheet", {})).version,
+          ...args,
+        })
+      ).status,
+      "saved",
+    );
+  await testSave({
+    text: "Fictional crashed-run leftover.",
+    sample: {
+      report: "document",
+      new_kind: "e2e check",
+      context: { version: 1, summary: "Milton e2e check, run crashed0" },
+      text: "Fictional leftover the crashed run filed.",
+    },
+  });
+  await owner.query(
+    "update connection_keys set expires_at=now()+interval '20 days' where user_id=$1",
+    [provisioned.userId],
+  );
+  assert.equal((await check()).versions, 4, "leftover retired, then the run");
+  const gate = checkLines.find((l) => l.step === "safety_gate")!;
+  assert.deepEqual(
+    [gate.severity, gate.warning, gate.leftovers, gate.key_days_left],
+    ["WARNING", "key_expires_within_30_days", 1, 19],
+  );
+  assert.equal(
+    checkLines.find((l) => l.step === "retire_leftovers")!.retired,
+    1,
+  );
+  assert.equal(checkLines.at(-1)!.step, "done");
+  // Foreign data (a rule nobody marked) refuses before any write.
+  await testSave({
+    text: "Fictional foreign rule.",
+    rules: [{ report: "cover", text: "Fictional foreign rule." }],
+  });
+  const held = await footprint();
+  await assert.rejects(
+    check(),
+    (e) => e instanceof CheckError && e.code === "account_holds_foreign_data",
+  );
+  assert.deepEqual(
+    { ...grew(held, await footprint()), usage: 0 },
+    { ...perRun, samples: 0, versions: 0, receipts: 0, changes: 0, usage: 0 },
+    "refused without writing",
+  );
+  assert.deepEqual(checkLines.at(-1), {
+    ...checkLines.at(-1),
+    step: "safety_gate",
+    ok: false,
+    severity: "ERROR",
+    error: "account_holds_foreign_data",
+  });
+  pass(
+    "e2e check: browser sign-in, MCP key, safety gate, save, fresh reads, revision, retirement and restored baseline; bounded per-run footprint; leftovers retired; expiring key warns; foreign data refused without writing",
   );
   console.log(
     `PASS ${groups} product integration groups (Node26/PostgreSQL18 TLS, no external network)`,

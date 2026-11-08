@@ -22,42 +22,23 @@ This runbook keeps only the latest release record. Earlier release records and a
 one-time procedures are in git history; the last full version is at commit 492b96a
 (`git show 492b96a:server/deploy/README.md`).
 
-## Release record: daily allowance removed, usage rows, round 3 fixes (2026-11-08, PRs #40 #46 #47 #48)
+## Release record: save round trips; rollback scripts retired (2026-11-08, PRs #51 #52)
 
-Source `90af817` (milton-qa; Peter's decision; Astra over four rounds). The tool-call path no
-longer enforces or charges a daily allowance; each admitted call appends a best-effort
-`usage_calls` row. Snapshot `snap-crimson-field-b87qk777`; Drizzle 0007 applied at 00:51Z as
-`neondb_owner` exactly as the Drizzle migrator does (journal 8), then
-`server/migrations/009-usage-calls-roles.sql`. Before applying, each of the six live guard
-bodies matched the file's body with only the lock reverted; after, each matches the file
-(md5), no public function uses `FOR UPDATE`, and `usage_calls` grants are MCP `INSERT` only.
-App/MCP `milton-*-use-90af817` at 00:53Z (image
-`sha256:1fb604fc46320fe416d3e90bc2f5a7b2b16a2d7d8e89be68252288b88dfd7dc6`); auth unchanged.
-Checks on main: types, 136 tests, format, site and server builds, rehearsal 13/13, all 0.
-Smoke: health 200 ×3, MCP 401s, app home 200, signed-out report 403; a real
-`get_cover_sheet` returned normally and wrote one `usage_calls` row. 0 errors and 0 usage-write
-warnings in a 5-minute watch. Rollback: app/MCP
-`milton-*-lean-da46ee8` (runs on either schema); the schema's rollback is the pre-migration
-snapshot `snap-crimson-field-b87qk777`. Auth `milton-auth-00009-mrk`, rollback `milton-auth-00008-967`.
-Warm production `get_cover_sheet` went from 25–30 ms to 19–25 ms, and all usage rows
-landed with no skips (milton-perf, `.agents/tmp/pr16/production-latency.md`). Follow-ups: a migration dropping `usage_daily` and the stored `daily_calls` key, and
-`usage_calls` retention.
+- **#51 (milton-perf; Astra should-fix fixed in `ace5e74`, milton-qa passed):** saves take a
+  fixed 15 round trips at any size (local: a one-rule save 96 → 71 ms, a 100-rule setup save
+  1.03 s → 75 ms); the trial gate is always awaited. App/MCP `milton-*-save-b85f428` at 02:00Z
+  (image `sha256:a1b9298b1679e24221c0fd08922b4932271b7a9fcc884bdb52e959e2194c3961`). Checks on
+  main: types, 137 tests, format, build, rehearsal 13/13, all 0; health 200 ×3, MCP 401, app
+  home 200, signed-out report 403; no 5xx, application or audit errors in a 5-minute watch.
+  Sample retirement's true/NULL array elements were tested on
+  PGlite only. Rollback: app/MCP `milton-*-rnd3-64435ee`.
+- **#52 (Peter's decision, AGENTS.md rule):** deleted the pre-launch rollback scripts for
+  0005, 0006, 0007 and 008; each migration's rollback is its pre-migration snapshot. The
+  applied migration files are byte-identical (their hashes match the production journal). No
+  deploy.
 
-Then `64435ee`: #46 (sign-in protocol failures and the metadata mismatch logged by class and
-code only; a user's `access_denied` is not logged), #47 ("Switch account" ends the session and
-lands on `/login?fresh=1` via the fixed logout `state` only) and #48 (Checkout sessions expire
-after 31 minutes; confirm with one test-mode Checkout before billing is turned on), all
-milton-qa with light review. App/MCP `milton-*-rnd3-64435ee` at 01:00Z (image
-`sha256:0b8c77e37856a94a3ceef4d729ef73cff6f47acb01c2332de4e255e72048a900`). A first attempt
-with the tag `r3` was refused (tags need 3+ characters). It left each service's spec naming the
-missing `*-r3-64435ee` revision, so on the retry Cloud Run set Ready=False briefly (MCP
-01:00:09Z, app 01:00:23Z; three audit-log errors in all, counting the refused first attempt at
-00:59Z) while it kept serving the previous routes;
-the retry's traffic update replaced the spec. 0 5xx and no application errors in the 5-minute
-watch. Live:
-`/auth/logged-out?state=switch-account` 303 to `/login?fresh=1`; a URL or a duplicate
-`state` gets the plain page (200); callback `access_denied` 401. Rollback: app/MCP
-`milton-*-use-90af817`.
+Auth `milton-auth-00009-mrk`, rollback `milton-auth-00008-967`. Earlier records: git history
+(`git log -p server/deploy/README.md`).
 
 ## Runtime role timeouts (applied 2026-11-07, TODO #29)
 
@@ -422,8 +403,8 @@ references. Inspect revision readiness before selecting a recorded revision:
 gcloud run revisions list --service=milton-app --project=milton-510506 --region=us-east4
 ```
 
-Now serving (2026-11-08): app `milton-app-rnd3-64435ee` and MCP
-`milton-mcp-rnd3-64435ee` (source `64435ee`), and auth `milton-auth-00009-mrk` (source `e770c15`). The
+Now serving (2026-11-08): app `milton-app-save-b85f428` and MCP
+`milton-mcp-save-b85f428` (source `b85f428`), and auth `milton-auth-00009-mrk` (source `e770c15`). The
 release record above gives the image and rollback revisions.
 
 Roll back only affected services, preserve ingress/IAM, then repeat the canonical

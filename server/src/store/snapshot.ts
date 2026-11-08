@@ -5,6 +5,7 @@ import { cardHeadsJson, cardFingerprint, type CardHead } from "./cards";
 import type { StoreSession } from "./database";
 import { accountUnavailable } from "./accounts";
 import { StoreError } from "./errors";
+import { parseLimits, reportCap } from "./limits";
 import {
   assembleDocuments,
   type Documents,
@@ -82,6 +83,7 @@ export async function readSnapshot(
       heads: CardHead[];
       samples: Sample[];
       kind_valid: boolean;
+      limits: unknown;
       guides: Partial<Record<ReportId, GuidePresentation>>;
     }>(
       sql`SELECT EXISTS(SELECT 1 FROM users WHERE id=${userId} AND status='active') AS open,
@@ -94,6 +96,7 @@ export async function readSnapshot(
         FROM (${sampleHeads(userId)}) s JOIN sample_kinds k ON k.user_id=s.user_id AND k.id=s.kind_id
         WHERE s.user_id=${userId} AND NOT s.retired) AS samples,
       ${intent ? kindValid(userId, intent) : sql`true`} AS kind_valid,
+      ${intent ? sql`(SELECT limits_json FROM store_config WHERE singleton=1)` : sql`NULL`} AS limits,
       (${includeGuides ? guidePresentation(userId) : sql`SELECT '{}'::json`}) AS guides`,
     )
   )[0]!;
@@ -123,6 +126,7 @@ export async function readSnapshot(
           served: assembleDocuments(active, samples, {
             report: intent.report,
             intent,
+            cap: reportCap(parseLimits(row.limits)),
           }),
         }
       : {}),

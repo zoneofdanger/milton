@@ -11,7 +11,7 @@ import {
 import { StoreError } from "./errors";
 import { exactEditsProposal, exactMoves } from "../exact-edits";
 import { MAX_REQUEST_BYTES } from "../http";
-import { readLimits, utf8Bytes, type StoreLimits } from "./limits";
+import { readLimits, reportCap, utf8Bytes, type StoreLimits } from "./limits";
 import { recordAcceptedChange } from "./provenance";
 import { BASELINE, bullet, FILINGS, ruleText, type Documents } from "./reports";
 import { applySampleChanges } from "./samples";
@@ -61,8 +61,7 @@ async function receipt(tx: StoreSession, userId: string, id: string) {
 async function checkSize(tx: StoreSession, documents: Documents) {
   // Every source byte is preserved; only headings, when lines, sample context
   // and quoting, and blank lines are added. Each body has its own cap.
-  const limits = await readLimits(tx);
-  const cap = Math.min(limits.report_body_bytes, 262144);
+  const cap = reportCap(await readLimits(tx));
   if (
     utf8Bytes(documents.cover) > cap ||
     documents.reports.some((r) => utf8Bytes(r.body) > cap) ||

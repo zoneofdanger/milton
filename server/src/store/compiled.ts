@@ -35,7 +35,8 @@ export function compiledMemos(
    * and writes only its charge: for an assistant the trial gate (whose
    * statement first checks the account and the intent's kind, so they refuse
    * before the gate, as on the snapshot), then the charge, then one statement for the snapshot. The size cap
-   * bounds saves; a read serves what is on file. */
+   * bounds saves; a read serves what is on file, except that an intent's
+   * report serves only the ranked samples that fit the cap. */
   async function read(intent?: ReportIntent, includeGuides = false) {
     try {
       if (actor) {

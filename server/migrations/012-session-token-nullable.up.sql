@@ -11,8 +11,8 @@
 -- Rollback is the pre-migration snapshot; there is no down script.
 -- DROP NOT NULL is a catalog change with no table scan, but it briefly takes an
 -- exclusive lock on session. Neon drops the limits a client passes at connect, so
--- the limit is set here: a lock not free within 5 s fails this file instead of
--- queueing sign-ins behind it.
+-- the limit is set here: a lock not free within 5 s fails this file, so sign-ins
+-- queued behind its wait are held at most 5 s.
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 ALTER TABLE milton_app.session ALTER COLUMN access_token DROP NOT NULL;

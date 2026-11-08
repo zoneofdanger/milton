@@ -41,9 +41,15 @@ one-time procedures are in git history; the last full version is at commit 492b9
   Dockerfile was regenerated to copy the e2e files). Checks on the merge: types, 144 tests,
   format, site, auth and server builds, auth integration 20/20, rehearsal 18/18, all 0. Live:
   health 200 ×3, app home 200, MCP 401 unauthenticated, an MCP read succeeded. Release gate
-  from 06:54:08Z at 07:10Z: only the deleted test policy's alert. The account isn't
-  provisioned yet, and `milton-e2e-daily` doesn't exist yet (milton-qa runs the check by hand
-  first).
+  from 06:54:08Z at 07:10Z: only the deleted test policy's alert. Afterwards (Peter's
+  go): milton-qa provisioned `e2e@milton-test.invalid` (snapshot gate
+  `snap-dawn-grass-b8zqz03n`) and its manual run passed; milton-duo provisioned the two Muse
+  reviewer accounts (`.agents/tmp/muse-connector/reviewer-accounts.md`; their connection keys
+  revoked) and created `milton-e2e`, secret `milton-e2e-account:1` and the job
+  `milton-e2e-daily`. Its first execution (`milton-e2e-daily-t4b4p`) failed at `sign_in`:
+  Node's fetch sends `sec-fetch-mode: cors`, so authorize answers JSON instead of a redirect
+  (milton-qa is fixing the check). The scheduler trigger and the e2e alert are not created
+  until a fixed image passes.
 - Earlier today: #53 admit once (auth `00012-qod`), #54 down scripts deleted, #55 usage
   retention (auth `00014-juv`, snapshot `snap-snowy-haze-b8dl4hvc`), the owner password reset,
   Neon autoscaling to 4 CU and the budget. App/MCP must not roll back past #40 without
@@ -732,6 +738,51 @@ Cost: free until no sooner than 2027-09-01, then $0.35 per non-uptime condition 
 (22 applied, about $7.70; $8.40 with the end-to-end policy) plus $0.50 per million points.
 Uptime checks run about 78k times a month against a free million. Stripe's webhook-failure
 emails and Neon's compute alerts are Dashboard settings, not these policies.
+
+## Database recovery
+
+**Post-launch rule: fix forward by default; restore only for a disaster** (data destroyed or
+corrupted beyond repair by a forward fix). A restore returns the whole database to an earlier
+moment and loses every write made after it: saves, accounts, sign-ins, keys, Stripe state
+and usage. Before launch the pre-migration snapshot was each migration's rollback; after
+launch, a bad migration or release is fixed with a new migration or a code rollback, and a
+restore needs Peter's go.
+
+**Restore window (measured 2026-11-08, Neon Scale).**
+
+- Point in time: the project's history retention is 24 hours
+  (`history_retention_seconds: 86400`), so any moment in the last 24 hours can be branched
+  from. Longer retention is a project setting with a storage cost; changing it is Peter's
+  call.
+- Snapshots: manual only (no snapshot schedule), kept until deleted. The pre-migration
+  snapshots from 2026-11-01 onward exist (`list_snapshots`); the newest is the restore point
+  for anything older than 24 hours.
+
+**Procedure** (Neon MCP or console; never the owner URL in a command line):
+
+1. Choose the point: a snapshot (`list_snapshots`) or a timestamp inside the last 24 hours.
+2. Restore to a **new** branch, not finalized: `restore_snapshot` with `finalize: false` and a
+   name such as `restore-<date>`. ⚠ `restore_snapshot` finalizes by default when it creates a
+   branch, which moves production's compute onto it: always pass `finalize: false` until
+   step 4.
+3. Verify the new branch (it gets a read-write compute): row counts of `users`, `samples`,
+   `sample_versions`, `connection_keys`, `usage_calls`, `trial_accounts`,
+   `milton_auth."user"` and the Drizzle journal, and `compare_database_schema` against
+   production (expect an empty diff unless a migration ran since). Writes made after the
+   restore point are what the restore will lose; list them for Peter.
+4. With Peter's go: `finalize_branch_restore` on the new branch. It moves production's
+   compute and connection hosts onto it (restarting the compute: seconds of dropped
+   connections) and renames the old branch, which is kept. The services reconnect on their
+   own; run the release checks and the alert gate.
+5. Keep the old branch until the restored data is confirmed, then delete it.
+
+**Rehearsal (2026-11-08, steps 1–3 only, production untouched).** Restored
+`snap-dawn-grass-b8zqz03n` (07:11:54Z) to `restore-rehearsal-2026-11-08`: the restore call
+took 5.4 s, the branch answered queries at once, and counts plus the schema diff were done
+44 s after the start. The schema diff was empty. Counts differed from production only by the
+writes made after the snapshot (two reviewer accounts and their keys, the first end-to-end
+run's sample and versions, 11 usage rows), which is exactly what a restore would lose. The
+branch was deleted afterwards. Step 4 was not rehearsed: it would act on production.
 
 ## Release verification and rollback
 

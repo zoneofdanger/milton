@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { jwtVerify, createLocalJWKSet } from "jose";
+import { decodeJwt, jwtVerify, createLocalJWKSet } from "jose";
 import { randomUUID, createHash, randomBytes } from "node:crypto";
 import pg from "pg";
 import { bundleFixture } from "./bundle-fixture.ts";
@@ -886,20 +886,11 @@ try {
     true,
   );
   await call("/sign-out", {});
-  // Refreshed after sign-out, the JWT names no live session (native's own
-  // check), so UserInfo's answer rests on the binding alone.
-  const offline = await token({
+  await token({
     grant_type: "refresh_token",
     refresh_token: grants.refresh_token!,
     resource: "https://mcp.meetmilton.com/mcp",
   });
-  const userInfo = async () =>
-    (
-      await call("/oauth2/userinfo", undefined, {
-        authorization: "Bearer " + offline.access_token,
-      })
-    ).status;
-  assert.equal(await userInfo(), 200, "UserInfo answers a live binding");
   assert((await status()).rows[0].binding);
   const operation = randomUUID();
   await appPool.query("select milton_guard.begin_operation($1,$2,$3,$4,$5)", [
@@ -910,7 +901,6 @@ try {
     "disconnect",
   ]);
   assert.equal((await status()).rows[0].binding, null);
-  assert.equal(await userInfo(), 401, "UserInfo refuses a revoked binding");
   for (let n = 0; n < 64; n++) {
     const r = await appPool.query(
       "select milton_guard.cleanup_operation($1,2) as progress",
@@ -943,6 +933,177 @@ try {
   assert(!String(fresh.payload.scope).includes("milton:write"));
   group(
     "native code/S256/JWT/identity-only app; offline logout and durable disconnect/reconnect containment",
+  );
+  // UserInfo reads an account's claims only while the token's binding is
+  // live: a disconnect (a), or a begun deletion that revokes every binding
+  // and advances the generation while the native user still exists (b),
+  // refuses at once a JWT access token with a live session, one with no
+  // session and an opaque token, each answered with claims just before.
+  // One binding per account and client, so each kind has its own client.
+  {
+    const jar = new Map(cookies),
+      jarHeader = cookie;
+    cookies.clear();
+    cookie = "";
+    const scope = "openid offline_access milton:read";
+    const mcp = "https://mcp.meetmilton.com/mcp";
+    const clients: (typeof assistant)[] = [];
+    for (const kind of ["no-sid", "sid", "opaque"]) {
+      const r = await call("/oauth2/register", {
+        client_name: "Fictional UserInfo assistant " + kind,
+        redirect_uris: ["https://assistant.example.invalid/callback"],
+        token_endpoint_auth_method: "client_secret_post",
+        scope,
+        grant_types: ["authorization_code", "refresh_token"],
+      });
+      assert.equal(r.status, 201);
+      clients.push((await r.json()) as typeof assistant);
+    }
+    const [noSidClient, sidClient, opaqueClient] = clients as [
+      typeof assistant,
+      typeof assistant,
+      typeof assistant,
+    ];
+    const connect = async (address: string) => {
+      await p.owner.query(
+        'delete from milton_auth."rateLimit"; delete from milton_guard.rate_bucket',
+      );
+      const secretWord = "Fictional UserInfo binding password";
+      const signIn = async () =>
+        assert.equal(
+          (
+            await call("/sign-in/email", {
+              email: address,
+              password: secretWord,
+            })
+          ).status,
+          200,
+        );
+      await call("/sign-up/email", {
+        email: address,
+        password: secretWord,
+        name: "Fictional UserInfo person",
+      });
+      await service.handler(
+        new Request(
+          mail.findLast((m) => m.kind === "verify" && m.to === address)!.url,
+        ),
+        TEST_PEER,
+      );
+      await signIn();
+      const offline = await authorize(noSidClient, scope, mcp);
+      await call("/sign-out", {});
+      // Refreshed after sign-out, the JWT names no session, so native's own
+      // session check cannot refuse it.
+      const noSid = await token(
+        {
+          grant_type: "refresh_token",
+          refresh_token: offline.refresh_token!,
+          resource: mcp,
+        },
+        noSidClient,
+      );
+      await signIn();
+      const withSid = await authorize(sidClient, scope, mcp);
+      const opaque = await authorize(opaqueClient, scope);
+      const claims = decodeJwt(withSid.access_token);
+      assert(!decodeJwt(noSid.access_token).sid);
+      assert(claims.sid);
+      assert(!opaque.access_token.includes("."));
+      return {
+        subject: String(claims.sub),
+        incarnation: String(claims.miltonIdentityIncarnation),
+        tokens: [noSid, withSid, opaque].map((t) => t.access_token),
+      };
+    };
+    const userInfo = async (tokens: string[]) => {
+      const outcomes: {
+        status: number;
+        challenge: string | null;
+        body: Record<string, unknown>;
+      }[] = [];
+      for (const t of tokens) {
+        const r = await call("/oauth2/userinfo", undefined, {
+          authorization: "Bearer " + t,
+        });
+        outcomes.push({
+          status: r.status,
+          challenge:
+            r.status === 401 ? r.headers.get("www-authenticate") : null,
+          body: (await r.json()) as Record<string, unknown>,
+        });
+      }
+      return outcomes;
+    };
+    const answered = async (tokens: string[], subject: string) => {
+      for (const r of await userInfo(tokens)) {
+        assert.equal(r.status, 200);
+        assert.equal(r.body.sub, subject);
+      }
+    };
+    // RFC 6750 §3: each refusal carries the Bearer challenge.
+    const refused = Array(3).fill({
+      status: 401,
+      challenge: 'Bearer error="invalid_token"',
+      body: { error: "invalid_token" },
+    });
+    const operations: string[] = [];
+    const disconnected = await connect("userinfo-disconnect@example.com");
+    await answered(disconnected.tokens, disconnected.subject);
+    for (const c of clients) {
+      operations.push(randomUUID());
+      await appPool.query(
+        "select milton_guard.begin_operation($1,$2,$3,$4,$5)",
+        [
+          operations.at(-1),
+          disconnected.subject,
+          disconnected.incarnation,
+          c.client_id,
+          "disconnect",
+        ],
+      );
+    }
+    const afterDisconnect = await userInfo(disconnected.tokens);
+    const deleting = await connect("userinfo-deletion@example.com");
+    await answered(deleting.tokens, deleting.subject);
+    operations.push(randomUUID());
+    await appPool.query(
+      "select milton_guard.begin_operation($1,$2,$3,null,'delete')",
+      [operations.at(-1), deleting.subject, deleting.incarnation],
+    );
+    assert.equal(
+      (
+        await authPool.query(
+          'select count(*)::int as n from milton_auth."user" where id=$1',
+          [deleting.subject],
+        )
+      ).rows[0].n,
+      1,
+    );
+    // Each case lists the no-sid JWT, the sid JWT and the opaque token.
+    assert.deepEqual(
+      {
+        disconnect: afterDisconnect,
+        deletion: await userInfo(deleting.tokens),
+      },
+      { disconnect: refused, deletion: refused },
+      "UserInfo refuses with no claims once the binding is revoked",
+    );
+    for (const operation of operations)
+      for (let n = 0; n < 64; n++) {
+        const r = await appPool.query(
+          "select milton_guard.cleanup_operation($1,16) as progress",
+          [operation],
+        );
+        if (r.rows[0].progress === "complete") break;
+        if (n === 63) throw new Error("bounded_cleanup_did_not_finish");
+      }
+    cookies.clear();
+    for (const [k, v] of jar) cookies.set(k, v);
+    cookie = jarHeader;
+  }
+  group(
+    "UserInfo refuses a JWT (with or without sid) or opaque token at once after a disconnect or a begun deletion",
   );
   await p.owner.query(
     'delete from milton_auth."rateLimit"; delete from milton_guard.rate_bucket',

@@ -220,12 +220,13 @@ export function createProvider(
       miltonSecurityGeneration: b.miltonSecurityGeneration,
     };
   }
-  // UserInfo answers only while the token's binding is live, as MCP and the
-  // app require on every call: native checks a JWT's signature and session,
-  // never its binding. A JWT's claims are read here unverified, and native
-  // then verifies the signature of the same token, so a forged claim passes
-  // neither. An opaque token is looked up by its stored hash, as the rate
-  // gate's app proof does. Anything unreadable is refused.
+  // UserInfo answers only while the token's binding is live, the check MCP
+  // and the app make on every call: native checks a JWT's signature and
+  // session, never its binding. A JWT's claims are read here unverified and
+  // native then verifies the signature of the same token, so a forged claim
+  // passes neither; its client is `azp`, the claim native validates. An
+  // opaque token is looked up by its stored hash, as the rate gate's app
+  // proof does. Anything unreadable is refused.
   async function liveBinding(token: string | undefined, stored: string) {
     if (!token) return false;
     if (token.split(".").length === 3) {
@@ -239,7 +240,7 @@ export function createProvider(
       const [binding, subject, client, scope, incarnation, generation] = [
         c.miltonBinding,
         c.sub,
-        c.client_id ?? c.azp,
+        c.azp,
         c.scope,
         c.miltonIdentityIncarnation,
         c.miltonSecurityGeneration,
@@ -829,8 +830,16 @@ export function createProvider(
       if (
         path === "/oauth2/userinfo" &&
         !(await liveBinding(bearer, bearer ? stored(bearer) : ""))
-      )
-        return json({ error: "invalid_token" }, 401);
+      ) {
+        // RFC 6750 §3: a refused bearer gets its challenge; a request with
+        // no credentials gets a bare one.
+        const refused = json({ error: "invalid_token" }, 401);
+        refused.headers.set(
+          "www-authenticate",
+          bearer ? 'Bearer error="invalid_token"' : "Bearer",
+        );
+        return refused;
+      }
       const headers = new Headers(request.headers);
       for (const k of [
         "forwarded",

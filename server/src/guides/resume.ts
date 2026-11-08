@@ -19,7 +19,7 @@ import type { StoreDatabase } from "../store/database";
 export const resumeGuides = (db: StoreDatabase) =>
   db.transaction(async (tx) => {
     await tx.query(sql`SELECT set_config('lock_timeout','5s',true)`);
-    await tx.query(sql`CREATE TRIGGER report_guide_source AFTER INSERT ON public.sample_versions
+    await tx.query(sql`CREATE OR REPLACE TRIGGER report_guide_source AFTER INSERT ON public.sample_versions
       FOR EACH ROW EXECUTE FUNCTION public.milton_guide_source_changed()`);
     await tx.query(sql`INSERT INTO public.report_guides(user_id,report,source_version,status,reason)
       SELECT user_id,report,1,'queued','samples_changed'

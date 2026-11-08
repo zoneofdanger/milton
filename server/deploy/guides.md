@@ -11,8 +11,15 @@ it at startup): off, a cover-sheet, report or web-page read sends no statement n
 `0010_park_guides` drops the sample-version trigger `report_guide_source`, so saves no
 longer touch `report_guides`. The function, the guide tables and their rows, the grants
 and `milton_guide_worker` stay, and nothing is enrolled. 0010 changes no row and no code
-needs the trigger, so apply it with the normal runbook (snapshot first,
-`bun run --cwd server db:migrate` as `neondb_owner`) in either order with this code.
+needs the trigger, but code from before it reads guide state on every read: once the
+trigger is gone, that state stops following sample changes, and an old revision would
+serve a stale guide as current (a report's last sample retired, its guide still `ready`).
+So release in this order:
+
+1. Release app and MCP from this code with `MILTON_GUIDES` unset, and wait until no older
+   revision serves traffic (100% on the new revisions, the old ones drained).
+2. Snapshot production.
+3. Apply 0010 with the normal runbook (`bun run --cwd server db:migrate` as `neondb_owner`).
 
 To resume, after Peter's decision:
 
@@ -20,10 +27,13 @@ To resume, after Peter's decision:
 2. From `server/`, with the owner URL already supplied securely in
    `MILTON_OWNER_DATABASE_URL` (no env-file fallback; it refuses any role but
    `neondb_owner`): `bun --no-env-file scripts/guide-enrollment.ts resume`. One
-   transaction (`resumeGuides`, `src/guides/resume.ts`): it recreates the trigger and resyncs every account's guide rows. While
+   transaction (`resumeGuides`, `src/guides/resume.ts`): it recreates the trigger
+   (`CREATE OR REPLACE`, so a rerun converges) and resyncs every account's guide rows. While
    parked nothing recorded which reports changed, so every report with an active sample
    queues on a new source version (its last guide kept as stale text) and every other
-   guide row is cleared to `empty`/`no_samples`.
+   guide row is cleared to `empty`/`no_samples`, its guide text and retries reset. A
+   report that had no guide row and gained and lost all its samples while parked gets
+   none; enrollment creates every report's row, as it does today.
 3. Check: `SELECT tgname FROM pg_trigger WHERE tgname='report_guide_source'` returns one
    row.
 4. Set `MILTON_GUIDES=on` in the app and MCP payloads and deploy new revisions. Then the

@@ -874,7 +874,10 @@ test("0010 parks the guide pilot: drops only its trigger and keeps every guide r
       );
     }
     await pg.exec(
-      "UPDATE report_guides SET guide_text='Fictional guide.',completed_version=1,status='ready',reason='completed' WHERE user_id='parked' AND report='email'; INSERT INTO guide_accounts(user_id) VALUES ('idle')",
+      // A completed guide on email (kept) and on chat (whose only sample is
+      // retired while parked, so resuming must clear it), and every row with
+      // spent retries scheduled a day ahead, so resuming must reset both.
+      "UPDATE report_guides SET guide_text='Fictional guide.',completed_version=1,status='ready',reason='completed' WHERE user_id='parked' AND report IN ('email','chat'); UPDATE report_guides SET attempts=2,next_attempt_at=clock_timestamp()+interval '1 day'; INSERT INTO guide_accounts(user_id) VALUES ('idle')",
     );
     const guides = async () =>
       (
@@ -992,6 +995,17 @@ test("0010 parks the guide pilot: drops only its trigger and keeps every guide r
         "Fictional guide.",
       ),
     ]);
+    // Every resynced row is due now, not on its old schedule.
+    expect(
+      (
+        await pg.query(
+          "SELECT count(*)::int AS n FROM report_guides WHERE next_attempt_at > clock_timestamp()",
+        )
+      ).rows,
+    ).toEqual([{ n: 0 }]);
+    // A second resume converges: the trigger is replaced, not duplicated.
+    await resumeGuides(storeDatabase(pg));
+    expect(await schemaCatalog(pg)).toEqual(before);
     // The restored trigger records the next change.
     expect(
       (
@@ -1009,7 +1023,9 @@ test("0010 parks the guide pilot: drops only its trigger and keeps every guide r
           "SELECT source_version,status FROM report_guides WHERE user_id='parked' AND report='email'",
         )
       ).rows,
-    ).toEqual([{ source_version: 3, status: "queued" }]);
+      // 2 from the first resume, 3 from the second (each counts as a change),
+      // 4 from the trigger.
+    ).toEqual([{ source_version: 4, status: "queued" }]);
   } finally {
     await pg.close();
     await rm(scratch, { recursive: true, force: true });

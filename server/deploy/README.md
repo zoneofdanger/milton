@@ -319,7 +319,18 @@ trigger's URL ends in `:run`: a shell expansion once turned it into `un`, and th
 silently got 404s. For mail throttling, use the
 [owner-only throttle procedure](../../apps/auth/README.md#throttle-inspection-and-recovery-prepared-not-enabled).
 The production Neon endpoint `ep-curly-cherry-b8l7hc8f` has autosuspend off
-(`suspend_timeout_seconds: -1`, since 2026-11-07).
+(`suspend_timeout_seconds: -1`, since 2026-11-07) and autoscales from 1 to 4 CU (Peter,
+2026-11-08; it was pinned at 1). Neon sets `max_connections` from the max size: 1802 at 4 CU
+(450 at 1), and the change restarted the compute once, with no 5xx or errors. The pools fit
+with room to spare: app and MCP hold at most 40 connections per instance and auth 8 per
+instance (3 instances max), all through the pooler (10,000 client connections). On Neon
+Scale at $0.222 per CU-hour, the 1 CU floor is about $162 a month; each hour at 4 CU adds
+up to $0.67, so the ceiling is about $648 a month.
+
+**Budget.** `milton-monthly-500` (billing account `019BCA-9D6FC9-B3E1DC`, project
+`milton-510506` only): $500 a month of actual spend, emailing only `milton-ops-email` at 50%
+and 100%, so at most two emails a month. Default emails to billing admins are off. It alerts
+and never stops anything. It covers Google Cloud only; Neon bills separately.
 
 The shared edge retains the name `milton-mcp`: reserved IPv4, URL map, HTTPS proxy
 and certificate map. App and MCP have separate serverless NEGs and backends named

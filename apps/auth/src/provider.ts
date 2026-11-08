@@ -534,14 +534,25 @@ export function createProvider(
     let acquired = false;
     let source = "";
     let body: Record<string, unknown> = {};
+    // Native lowercases the type and parses by it, so every body guard below
+    // reads this one value; any other POST type is refused before native.
+    const mediaType = (request.headers.get("content-type") ?? "")
+      .split(";")[0]!
+      .trim()
+      .toLowerCase();
+    if (
+      request.method === "POST" &&
+      mediaType !== "application/json" &&
+      mediaType !== "application/x-www-form-urlencoded"
+    )
+      return json({ error: "unsupported_media_type" }, 415);
     try {
       source = await boundedBody(request);
       if (source)
-        body = request.headers
-          .get("content-type")
-          ?.startsWith("application/json")
-          ? JSON.parse(source)
-          : Object.fromEntries(new URLSearchParams(source));
+        body =
+          mediaType === "application/json"
+            ? JSON.parse(source)
+            : Object.fromEntries(new URLSearchParams(source));
       if (!body || typeof body !== "object" || Array.isArray(body))
         return json({ error: "invalid_body" }, 400);
     } catch {
@@ -592,9 +603,7 @@ export function createProvider(
       (request.method !== "POST" ||
         request.headers.has("authorization") ||
         body.client_id !== config.AUTH_APP_CLIENT_ID ||
-        !request.headers
-          .get("content-type")
-          ?.startsWith("application/x-www-form-urlencoded") ||
+        mediaType !== "application/x-www-form-urlencoded" ||
         [
           "client_id",
           "client_secret",
@@ -604,12 +613,7 @@ export function createProvider(
         body.client_assertion)
     )
       return json({ error: "introspection_caller_refused" }, 403);
-    if (
-      source &&
-      request.headers
-        .get("content-type")
-        ?.startsWith("application/x-www-form-urlencoded")
-    ) {
+    if (source && mediaType === "application/x-www-form-urlencoded") {
       const f = new URLSearchParams(source);
       if ([...new Set(f.keys())].some((k) => f.getAll(k).length > 1))
         return json({ error: "ambiguous_form" }, 400);
@@ -648,9 +652,10 @@ export function createProvider(
       if (path === "/oauth2/register") headers.delete("cookie");
       if (path === "/request-password-reset") {
         body.redirectTo = AUTH_ORIGIN + "/reset-password";
-        source = headers.get("content-type")?.startsWith("application/json")
-          ? JSON.stringify(body)
-          : new URLSearchParams(body as Record<string, string>).toString();
+        source =
+          mediaType === "application/json"
+            ? JSON.stringify(body)
+            : new URLSearchParams(body as Record<string, string>).toString();
       }
       const native = new Request(request.url, {
         method: request.method,

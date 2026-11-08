@@ -232,17 +232,18 @@ test("the security page's session lookup takes each client's own network bucket"
 
 describe("OAuth profile refusals before database access", () => {
   // A pool that never connects: it records the network rate-limit query that
-  // every admitted request makes first, and refuses it.
-  const fixture = async () => {
+  // every admitted request makes first, and refuses it (or, with network,
+  // admits the network bucket and refuses the per-account one).
+  const fixture = async ({ network = false } = {}) => {
     const { createProvider } = await import("../src/provider.ts");
     const queries: string[] = [];
     const pool = {
       on: () => pool,
-      query: async (text: string) => {
+      query: async (text: string, values: unknown[] = []) => {
         queries.push(text);
         if (!text.includes("milton_guard.take_rate"))
           throw new Error("fixture_database_refused");
-        return { rows: [{ allowed: false }] };
+        return { rows: [{ allowed: network && values[2] === 120 }] };
       },
       connect: async () => {
         throw new Error("fixture_database_refused");
@@ -358,6 +359,38 @@ describe("OAuth profile refusals before database access", () => {
       "rate_limited",
     ]);
     expect(queries).toHaveLength(1);
+  });
+
+  test("body guards parse each media type as native does and refuse other types", async () => {
+    const { post, refused, queries } = await fixture({ network: true });
+    const as = (type: string, body: unknown) => ({
+      headers: { origin: "https://auth.meetmilton.com", "content-type": type },
+      body: JSON.stringify(body),
+    });
+    const signIn = {
+      email: "fictional@example.com",
+      password: "fictional password",
+    };
+    const keyed = { ...client, jwks_uri: "https://client.example/jwks" };
+    // Native lowercases the type, so this is JSON to both: the per-email limit
+    // and the registration refusals still apply.
+    expect(
+      await refused(post("/sign-in/email", as("Application/JSON", signIn))),
+    ).toEqual([429, "rate_limited"]);
+    expect(
+      await refused(
+        post("/oauth2/register", as("Application/JSON; Charset=UTF-8", keyed)),
+      ),
+    ).toEqual([400, "client_capability_refused"]);
+    const admitted = queries.length;
+    for (const reply of [
+      post("/sign-in/email", as("application/merge-patch+json", signIn)),
+      post("/oauth2/register", as("application/vnd.api+json", keyed)),
+      post("/sign-in/email", as("text/plain", signIn)),
+      post("/sign-out", { headers: { origin: "https://auth.meetmilton.com" } }),
+    ])
+      expect(await refused(reply)).toEqual([415, "unsupported_media_type"]);
+    expect(queries).toHaveLength(admitted);
   });
 });
 

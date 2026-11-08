@@ -37,7 +37,8 @@ function expiry(token: string) {
  * bearer secret in Authorization stays the service's own second check. A
  * loopback origin (local development and tests; refused in production) gets no
  * token. Answers whether the service accepted; a failed token fetch answers
- * false without calling it, exactly as a refusal does. */
+ * false without calling it, exactly as a refusal does. A 410 answers
+ * "deleting": the account's deletion has begun, so there is nothing to retry. */
 export function admissionClient(
   config: Pick<Config, "AUTH_ADMISSION_URL" | "AUTH_ADMISSION_SECRET">,
   networkFetch: Fetch,
@@ -60,7 +61,10 @@ export function admissionClient(
     cached = { token, refreshAt: exp * 1000 - REFRESH_MS };
     return token;
   }
-  return async (path: AdmissionPath, body: unknown): Promise<boolean> => {
+  return async (
+    path: AdmissionPath,
+    body: unknown,
+  ): Promise<boolean | "deleting"> => {
     const signal = AbortSignal.timeout(5000);
     const headers: Record<string, string> = {
       authorization: `Bearer ${config.AUTH_ADMISSION_SECRET}`,
@@ -82,6 +86,7 @@ export function admissionClient(
       body: JSON.stringify(body),
     });
     await response.body?.cancel();
+    if (response.status === 410) return "deleting";
     return response.ok;
   };
 }

@@ -170,10 +170,14 @@ export function authAdmission(config: AdmitConfig) {
       return new Response(null, { status: 204, headers });
     } catch (error) {
       return new Response(null, {
+        // 410 only for a deletion that has begun, so native refuses the
+        // sign-in as final rather than asking for a retry.
         status:
-          error instanceof AuthError || error instanceof StoreError
-            ? error.status
-            : 503,
+          error instanceof AuthError && error.code === "account_deleting"
+            ? 410
+            : error instanceof AuthError || error instanceof StoreError
+              ? error.status
+              : 503,
         headers,
       });
     }

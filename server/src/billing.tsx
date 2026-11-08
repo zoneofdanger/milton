@@ -219,7 +219,9 @@ async function createCustomer(
 /** Gives an enrolled account with no subscription its 30-day Stripe trial; a
  * no-op for any other account or without billing. What Stripe already has is
  * stored rather than starting a second trial. A failure throws a 503 that says to
- * try again, and repeating the attempt is the retry. */
+ * try again, and repeating the attempt is the retry; an account whose deletion
+ * has begun gets the 409 `account_deleting` instead, before or during the
+ * attempt. */
 export async function ensureSubscription(
   config: StoreBindings & { billing?: StripeApiConfig },
   userId: string,
@@ -230,15 +232,11 @@ export async function ensureSubscription(
   try {
     const store = billingForAccount(config, userId);
     const account = await store.account();
-    // A test account never gets a trial, customer or subscription, nor does an
-    // account being deleted.
-    if (
-      account.test ||
-      account.deleting ||
-      !account.enrolled ||
-      account.status !== null
-    )
-      return;
+    // An account being deleted (or gone) is refused, so sign-in and the
+    // backfill can say so; a test account never gets a trial, customer or
+    // subscription.
+    if (account.deleting) throw deletionUnderway();
+    if (account.test || !account.enrolled || account.status !== null) return;
     // The row stays locked across customer, list and create. Two attempts across
     // a minute boundary have different keys, so only the lock stops each making a
     // customer, or each listing nothing and starting a trial, which could charge

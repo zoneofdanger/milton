@@ -1,4 +1,5 @@
 import { ensureSubscription } from "../src/billing";
+import { AuthError } from "../src/token";
 import { runtimeConfig, type RuntimeConfig } from "../src/config";
 import { loadEnvironment } from "../src/environment";
 import {
@@ -23,7 +24,8 @@ const refuse = (message: string) => new StoreError("configuration", message);
 /** Starts the 30-day Stripe trial for every active account still without a
  * subscription. Dry run unless apply is set. Rows with a status are skipped, so a
  * rerun is safe and canceled rows never get a trial, and a returning deleted
- * identity an older image left with no status is canceled and counted as skipped. Sends Stripe no email, since
+ * identity an older image left with no status is canceled and counted as skipped,
+ * as is an account whose deletion has begun. Sends Stripe no email, since
  * Milton holds none. created counts accounts that now hold a subscription, whether
  * started here or found at Stripe. */
 export async function backfillSubscriptions(
@@ -59,9 +61,12 @@ export async function backfillSubscriptions(
         await store.enroll(id);
         await ensureSubscription(config, id);
         counts.created++;
-      } catch {
+      } catch (error) {
+        // An account whose deletion has begun is skipped, never enrolled.
+        if (error instanceof AuthError && error.code === "account_deleting")
+          counts.skipped++;
         // ensureSubscription has logged where, class and code; the row stays NULL.
-        counts.failed++;
+        else counts.failed++;
       }
       await pause();
     }

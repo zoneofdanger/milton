@@ -8,7 +8,7 @@ import {
   backfillExitCode,
   backfillSubscriptions,
 } from "../scripts/backfill-subscriptions";
-import { linkStripeCustomer } from "../src/store/billing";
+import { billingAccount, linkStripeCustomer } from "../src/store/billing";
 import { localStore } from "./local-store";
 import { fixtureStore } from "./store-fixtures";
 
@@ -183,6 +183,10 @@ test("the gate follows the subscription status: unknown or missing is allowed, p
     expect(await linkStripeCustomer(local.db, userId, "cus_second")).toBe(
       "cus_fixture",
     );
+    // An account that is gone reads as being deleted: billing sells it nothing.
+    expect(
+      await billingAccount(local.db, "m_00000000-0000-4000-8000-000000000099"),
+    ).toMatchObject({ deleting: true, enrolled: false });
     for (const refused of [
       `subscription_status='${"x".repeat(65)}'`,
       "stripe_customer_id='sub_notACustomer'",

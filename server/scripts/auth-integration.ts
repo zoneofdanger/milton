@@ -1240,8 +1240,16 @@ try {
             admitVia(handoff.clone()),
             admitVia(handoff.clone()),
           ]);
-          assert.equal(first.status, 204, "native admission contract");
-          assert.equal(second.status, 204, "concurrent native admission");
+          // Admitted, or refused for a deletion that has begun (410).
+          assert(
+            [204, 410].includes(first.status),
+            "native admission contract",
+          );
+          assert.equal(
+            second.status,
+            first.status,
+            "concurrent native admission",
+          );
           return first;
         }
         throw new Error("external_network_refused");
@@ -3136,9 +3144,12 @@ try {
           start.headers.get("Location")!,
           authCookies,
         );
+        // Native sends each admission twice at once (see the harness above):
+        // one holds the row while Stripe creates its customer, the other waits.
         await creating.opened;
+        await lockWaiters(1, "the second admission waits on the row");
         const deletion = deletions.run("delete", randomUUID());
-        await lockWaiters(1, "the deletion waits on the admission's row");
+        await lockWaiters(2, "the deletion waits on the admission's row");
         release.open();
         const refused = await authorizing;
         const answer = await refused.text();
@@ -3150,7 +3161,10 @@ try {
         const { operation, failed } = await deletion;
         assert.equal(failed, false);
         assert.equal(operation.progress, "complete");
+        // Each admission's link is refused and it deletes its own customer.
         assert.deepEqual(calls, [
+          "POST /v1/customers",
+          "DELETE /v1/customers/cus_race",
           "POST /v1/customers",
           "DELETE /v1/customers/cus_race",
         ]);

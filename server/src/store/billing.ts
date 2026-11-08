@@ -25,9 +25,11 @@ const deletionBegun = (userId: string) =>
 
 /** The account's billing row, if any. A test account (users.test_account) is
  * permanently outside trials and billing, whatever row it holds: `test` tells
- * every caller to start, sell or manage nothing for it, and so does `deleting`. */
+ * every caller to start, sell or manage nothing for it, and so does `deleting`.
+ * `deleting` is read from the lifecycle row, which outlives the erase and
+ * native cleanup, and is true too once the account itself is gone. */
 export async function billingAccount(db: StoreSession, userId: string) {
-  const row = (
+  return (
     await db.query<{
       test: boolean;
       deleting: boolean;
@@ -35,20 +37,13 @@ export async function billingAccount(db: StoreSession, userId: string) {
       customer: string | null;
       status: string | null;
     }>(sql`
-    SELECT u.test_account AS test, ${deletionBegun(userId)} AS deleting,
+    SELECT coalesce(u.test_account,false) AS test,
+      (u.id IS NULL OR ${deletionBegun(userId)}) AS deleting,
       t.user_id IS NOT NULL AS enrolled,
       t.stripe_customer_id AS customer, t.subscription_status AS status
-    FROM users u LEFT JOIN trial_accounts t ON t.user_id=u.id WHERE u.id=${userId}`)
-  )[0];
-  return (
-    row ?? {
-      test: false,
-      deleting: false,
-      enrolled: false,
-      customer: null,
-      status: null,
-    }
-  );
+    FROM (SELECT ${userId}::text AS id) a LEFT JOIN users u ON u.id=a.id
+    LEFT JOIN trial_accounts t ON t.user_id=u.id`)
+  )[0]!;
 }
 /** Test accounts are never written by billing. */
 const billable = sql`NOT EXISTS (SELECT 1 FROM users x WHERE x.id=user_id AND x.test_account)`;

@@ -87,7 +87,7 @@ export const trialAccounts = pgTable(
       withTimezone: true,
     }),
     currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
-    // While in the future, one enrolment attempt may call Stripe (0011).
+    // While in the future, one enrolment attempt may call Stripe (0010).
     enrolLeaseUntil: timestamp("enrol_lease_until", { withTimezone: true }),
   },
   (t) => [

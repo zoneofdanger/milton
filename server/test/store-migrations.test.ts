@@ -860,9 +860,9 @@ test("no request path deletes usage rows: only the maintenance job's prune does"
   ).toContain("pruneUsage(");
 });
 
-test("0011 adds the nullable enrolment lease; existing trial rows keep their state and hold no lease", async () => {
+test("0010 adds the nullable enrolment lease; existing trial rows keep their state and hold no lease", async () => {
   const folder = new URL("../drizzle/", import.meta.url).pathname;
-  const scratch = await mkdtemp(join(tmpdir(), "milton-0011-"));
+  const scratch = await mkdtemp(join(tmpdir(), "milton-0010-"));
   const pg = new PGlite();
   try {
     await cp(folder, scratch, { recursive: true });
@@ -881,7 +881,7 @@ test("0011 adds the nullable enrolment lease; existing trial rows keep their sta
       );
     await through("0009_test_account");
     await migrate(drizzle(pg), { migrationsFolder: scratch });
-    // Production's shape before 0011: one row waiting on its trial, one paid.
+    // Production's shape before 0010: one row waiting on its trial, one paid.
     await seedUsers(pg, "waiting", "paid");
     await pg.exec(
       "INSERT INTO trial_accounts(user_id,started_at) VALUES ('waiting',now()); INSERT INTO trial_accounts(user_id,started_at,stripe_customer_id,stripe_subscription_id,subscription_status) VALUES ('paid',now()-interval '40 days','cus_kept','sub_kept','active')",
@@ -893,7 +893,7 @@ test("0011 adds the nullable enrolment lease; existing trial rows keep their sta
         )
       ).rows;
     const before = await rows();
-    await through("0011_enrol_lease");
+    await through("0010_enrol_lease");
     await migrate(drizzle(pg), { migrationsFolder: scratch });
     expect(await rows()).toEqual(before);
     expect(

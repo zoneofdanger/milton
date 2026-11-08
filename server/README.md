@@ -811,10 +811,10 @@ rerun of 005, which restores table-wide INSERT. The legacy `milton_runtime` grou
 table-wide grants (baseline) still cover the column; its `milton_app` login is unused.
 Rerunning 011 converges. Rollback is the pre-migration snapshot.
 
-The enrolment lease (Drizzle `0011`) adds nullable `trial_accounts.enrol_lease_until`, a
+The enrolment lease (Drizzle `0010`) adds nullable `trial_accounts.enrol_lease_until`, a
 catalog change with no rewrite and no grant file: app's table-wide `SELECT, INSERT, UPDATE`
 on `trial_accounts` (005) covers it and MCP's column list leaves it out. Code that claims
-the lease fails every enrolment without the column, so apply `0011` before releasing it;
+the lease fails every enrolment without the column, so apply `0010` before releasing it;
 older code never names the column. Rollback is the pre-migration snapshot.
 
 Server timeouts live on the runtime logins, because Neon's proxy and pooler drop the

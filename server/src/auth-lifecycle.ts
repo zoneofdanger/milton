@@ -228,12 +228,17 @@ async function advanceOperation(config: RuntimeConfig, original: Operation) {
   let op = await read();
   if (op.progress === "complete") return op;
   if (op.progress === "pending") {
-    await database(config).query(
-      sql`SELECT milton_guard.begin_operation(${op.operation_id},${op.subject},${op.incarnation},${op.kind === "disconnect" ? op.client_id : null},${op.kind})`,
-    );
-    await database(config).query(
-      sql`UPDATE milton_app.lifecycle SET progress='refused' WHERE operation_id=${op.operation_id}::uuid AND progress='pending'`,
-    );
+    // One transaction: billing reads a deletion as begun from this progress, so
+    // native refusal never commits while it still reads pending. A retry of a
+    // refusal that did commit returns the original operation.
+    await database(config).transaction(async (tx) => {
+      await tx.query(
+        sql`SELECT milton_guard.begin_operation(${op.operation_id},${op.subject},${op.incarnation},${op.kind === "disconnect" ? op.client_id : null},${op.kind})`,
+      );
+      await tx.query(
+        sql`UPDATE milton_app.lifecycle SET progress='refused' WHERE operation_id=${op.operation_id}::uuid AND progress='pending'`,
+      );
+    });
     op = await read();
   }
   if (op.kind === "delete") {

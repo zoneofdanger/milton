@@ -345,23 +345,29 @@ export function createProvider(
         },
       },
       // The first matching key wins. These replace native's built-in sign-in
-      // and mail rules and the OAuth plugin's, so every native limit is here.
+      // and mail rules and the OAuth plugin's, so every native limit is here;
+      // README's table gives each one's reason.
       customRules: {
+        // Password guessing per address (Better Auth's default).
         "/sign-in/*": { window: 10, max: 3 },
         "/sign-up/*": { window: 10, max: 3 },
         "/change-password": { window: 10, max: 3 },
+        // Each sends mail (Better Auth's default).
         "/request-password-reset": { window: 60, max: 3 },
         "/send-verification-email": { window: 60, max: 3 },
-        // Token and introspection are the wrapper's client buckets; only
-        // the app may introspect.
+        // Called from servers that share addresses: the wrapper keys these
+        // per client or token instead (see handler).
         "/oauth2/token": false,
         "/oauth2/introspect": false,
+        "/oauth2/revoke": false,
+        "/oauth2/userinfo": false,
+        // A person's browser (the OAuth plugin's default).
         "/oauth2/authorize": { window: 60, max: 30 },
-        "/oauth2/revoke": { window: 60, max: 30 },
-        // Assistant backends register each new connection from shared
-        // addresses; the network bucket still bounds one address.
-        "/oauth2/register": { window: 60, max: 60 },
-        "/oauth2/userinfo": { window: 60, max: 60 },
+        // Every registration is a permanent anonymous client row with no
+        // cleanup, so storage sets this: 20 a minute caps one address at
+        // 28,800 rows a day, while still admitting 20 new connections a
+        // minute through one assistant's egress (native's 5 refused the 6th).
+        "/oauth2/register": { window: 60, max: 20 },
         "/**": false,
       },
     },
@@ -689,22 +695,16 @@ export function createProvider(
     inFlight++;
     acquired = true;
     const ip = isIP(peer) ? peer : "127.0.0.1";
-    // [key, window seconds, max]: the wrapper's buckets, all taken in one
-    // statement. Each is charged even when another refuses.
-    const buckets: [string, number, number][] = [
-      [rate("network:" + ip), 60, 120],
-    ];
-    if (typeof body.email === "string")
-      buckets.push([rate("account:" + body.email.toLowerCase()), 60, 10]);
-    // The client native will authenticate, read as native reads it (a Basic
-    // header first, else the body). Server-side callers (the app, assistant
-    // backends) put many people behind one address, so token requests take a
-    // bucket per client and address instead of native's per address. A
-    // client_id that is only named, not proven, is keyed on the caller's own
-    // address, so naming another client spends nothing of that client's
-    // elsewhere; the network bucket still bounds the address.
+    // Server-side callers (the app, assistant backends) put many people
+    // behind one address, so their endpoints are keyed per client (token,
+    // revoke) or per access token (UserInfo) and address, not per address.
+    // The client is read as native reads it: a Basic header first, else the
+    // body. A client or token that is only named, not proven, is keyed on
+    // the caller's own address, so it spends nothing of anyone's elsewhere.
     let caller: string | undefined, callerSecret: string | undefined;
-    if (path === "/oauth2/token" || path === "/oauth2/introspect") {
+    if (
+      ["/oauth2/token", "/oauth2/introspect", "/oauth2/revoke"].includes(path)
+    ) {
       const authorization = request.headers.get("authorization");
       if (authorization && /^Basic +/i.test(authorization)) {
         try {
@@ -720,36 +720,51 @@ export function createProvider(
           callerSecret = body.client_secret;
       }
     }
+    const bearer =
+      path === "/oauth2/userinfo"
+        ? /^Bearer +(\S+)$/i.exec(
+            request.headers.get("authorization") ?? "",
+          )?.[1]
+        : undefined;
+    // [key, window seconds, max], taken only once the gate admits.
+    const account: [string, number, number][] =
+      typeof body.email === "string"
+        ? [[rate("account:" + body.email.toLowerCase()), 60, 10]]
+        : [];
+    const scoped: [string, number, number][] = [];
     if (path === "/oauth2/token" && caller)
-      buckets.push([rate("client:" + JSON.stringify([caller, ip])), 60, 60]);
-    // The app's own client skips those buckets only when its secret matches
-    // the stored hash (native's: SHA-256, base64url), checked in the same
-    // statement; it keeps a per-address ceiling of its own.
-    const firstParty =
-      caller === config.AUTH_APP_CLIENT_ID && Boolean(callerSecret);
-    const list = (offset: number) =>
-      `array[${buckets
-        .map(
-          (_, i) =>
-            `milton_guard.take_rate($${offset + 3 * i + 1},$${offset + 3 * i + 2},$${offset + 3 * i + 3})`,
-        )
-        .join(",")}]`;
+      scoped.push([rate("client:" + JSON.stringify([caller, ip])), 60, 60]);
+    if (path === "/oauth2/revoke" && caller)
+      scoped.push([rate("revoke:" + JSON.stringify([caller, ip])), 60, 30]);
+    if (bearer)
+      scoped.push([rate("userinfo:" + JSON.stringify([bearer, ip])), 60, 60]);
+    // The app proves itself by its client secret (token, introspection,
+    // revocation) or by one of its own unexpired access tokens (UserInfo),
+    // each compared with native's stored SHA-256/base64url hash in this same
+    // statement. A proven app request takes its own per-address ceiling in
+    // place of the network bucket and skips the scoped buckets.
+    const values: unknown[] = [];
+    const $ = (v: unknown) => (values.push(v), `$${values.length}`);
+    const stored = (v: string) =>
+      createHash("sha256").update(v).digest("base64url");
+    const proof =
+      caller === config.AUTH_APP_CLIENT_ID && callerSecret
+        ? `exists(select 1 from milton_auth."oauthClient" where "clientId"=${$(caller)} and "clientSecret"=${$(stored(callerSecret))} and "disabled" is not true)`
+        : bearer
+          ? `exists(select 1 from milton_auth."oauthAccessToken" where "token"=${$(stored(bearer))} and "clientId"=${$(config.AUTH_APP_CLIENT_ID)} and "revoked" is null and "expiresAt">clock_timestamp())`
+          : "false";
+    const take = ([key, window, max]: [string, number, number]) =>
+      `milton_guard.take_rate(${$(key)},${$(window)}::integer,${$(max)}::integer)`;
+    const gate = `case when app then ${take([rate("first-party:" + ip), 60, 1000])} else ${take([rate("network:" + ip), 60, 120])} end`;
+    const list = (b: [string, number, number][]) =>
+      ["true", ...b.map(take)].join(",");
+    // The gate decides first. A request it refuses creates and charges no
+    // other bucket, so one refused address cannot grow the table or spend
+    // a targeted email's bucket. CASE evaluates only the branch it selects,
+    // and the volatile CTE runs once.
+    const statement = `with g as (select app, ${gate} as admitted from (select ${proof} as app) p) select case when not admitted then array[false] when app then array[${list(account)}] else array[${list([...account, ...scoped])}] end as allowed from g`;
     try {
-      const taken = await pool.query<{ allowed: boolean[] }>(
-        firstParty
-          ? `select case when exists(select 1 from milton_auth."oauthClient" where "clientId"=$1 and "clientSecret"=$2 and "disabled" is not true) then array[milton_guard.take_rate($3,$4,$5)] else ${list(5)} end as allowed`
-          : `select ${list(0)} as allowed`,
-        firstParty
-          ? [
-              caller,
-              createHash("sha256").update(callerSecret!).digest("base64url"),
-              rate("first-party:" + ip),
-              60,
-              1000,
-              ...buckets.flat(),
-            ]
-          : buckets.flat(),
-      );
+      const taken = await pool.query<{ allowed: boolean[] }>(statement, values);
       const allowed = taken.rows[0]?.allowed;
       if (!Array.isArray(allowed) || !allowed.every((a) => a === true))
         return json({ error: "rate_limited" }, 429);

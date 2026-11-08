@@ -231,23 +231,20 @@ test("the security page's session lookup takes each client's own network bucket"
 });
 
 describe("OAuth profile refusals before database access", () => {
-  // A pool that never connects: it records the network rate-limit query that
+  // A pool that never connects: it records the rate-limit statement that
   // every admitted request makes first, and refuses it (or, with network,
-  // admits the network bucket and refuses the per-account one).
+  // admits the network gate and refuses the per-account bucket).
   const fixture = async ({ network = false } = {}) => {
     const { createProvider } = await import("../src/provider.ts");
     const queries: string[] = [];
     const pool = {
       on: () => pool,
-      query: async (text: string, values: unknown[] = []) => {
+      query: async (text: string) => {
         queries.push(text);
         if (!text.includes("milton_guard.take_rate"))
           throw new Error("fixture_database_refused");
-        // One verdict per [key, window, max] bucket in the statement.
-        const allowed = values
-          .filter((_, i) => i % 3 === 2)
-          .map((max) => network && max === 120);
-        return { rows: [{ allowed }] };
+        // The statement's verdicts: the gate, then the next bucket.
+        return { rows: [{ allowed: network ? [true, false] : [false] }] };
       },
       connect: async () => {
         throw new Error("fixture_database_refused");
@@ -436,7 +433,7 @@ describe("OAuth profile refusals before database access", () => {
       const { fixtureConfig } = await import(${JSON.stringify(import.meta.resolve("./fixture-config.ts"))});
       let queries = 0;
       const pool = { on: () => pool, connect: async () => { throw new Error("refused"); },
-        query: async (t, v) => (queries++, { rows: [{ allowed: [t.includes("take_rate") && v[2] === 120] }] }) };
+        query: async (t) => (queries++, { rows: [{ allowed: [t.includes("take_rate")] }] }) };
       const service = createProvider(fixtureConfig(), { pool });
       let seen;
       service.provider.handler = async (r) => {

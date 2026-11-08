@@ -316,6 +316,68 @@ test("a read that rebuilds a lagging snapshot serves it whatever the save-time c
   }
 });
 
+test("an intent read skips samples that would pass the report cap and fills from the next best", async () => {
+  const local = await localStore();
+  try {
+    await seedUsers(local.pg, "large");
+    const store = fixtureStore(local.db, "large");
+    const cap = 262144;
+    const long = (i: number) =>
+      `Fictional long update ${i}.\n` + "Plain words only. ".repeat(6667);
+    // Two long updates per newest eight, so every save fits the cap.
+    const bodies = [
+      long(0),
+      long(1),
+      ...[0, 1, 2, 3, 4, 5].map((i) => `Fictional short request ${i}.`),
+      long(2),
+    ];
+    for (const text of bodies)
+      expect(
+        await store.saveMemo({
+          text: "Keep fictional approved example.",
+          request_id: crypto.randomUUID(),
+          expected_version: (await store.getTpsReport()).version,
+          sample: {
+            report: "document",
+            new_kind: "note",
+            context: {
+              version: 1,
+              summary: "A fictional note.",
+              purposes: [text.includes("update") ? "update" : "request"],
+            },
+            text,
+          },
+        }),
+      ).toMatchObject({ status: "saved" });
+    const served = (
+      documents: Awaited<ReturnType<typeof store.readDocuments>>,
+    ) => {
+      const report = documents.reports.find((r) => r.id === "document")!;
+      expect(new TextEncoder().encode(report.body).length).toBeLessThanOrEqual(
+        cap,
+      );
+      return report.samples.map((s) => bodies.indexOf(s.body));
+    };
+    // The three updates rank first; the oldest would pass the cap, so the six
+    // requests fill in after the two that fit, in rank order.
+    expect(
+      served(
+        await store.readDocuments({
+          report: "document",
+          situation: "Writing an update.",
+          context: { purposes: ["update"] },
+        }),
+      ),
+    ).toEqual([8, 1, 7, 6, 5, 4, 3, 2]);
+    // Without an intent, the newest eight, as before.
+    expect(served(await store.readDocuments())).toEqual([
+      8, 7, 6, 5, 4, 3, 2, 1,
+    ]);
+  } finally {
+    await local.dispose();
+  }
+}, 30000);
+
 test("an exact duplicate rule is skipped as unchanged", async () => {
   const local = await localStore();
   try {

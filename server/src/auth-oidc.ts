@@ -4,6 +4,7 @@ import { sql } from "drizzle-orm";
 import { z } from "zod";
 import type { RuntimeConfig } from "./config";
 import { isLoopback } from "./config";
+import { inOrder } from "./http";
 import { database } from "./store";
 import { AuthError } from "./token";
 import {
@@ -206,14 +207,12 @@ export async function finishLogin(
       tokens.expires_in > 3600
     )
       throw invalid();
-    const info = await oidc.fetchUserInfo(
-      client,
-      tokens.access_token,
-      claims.sub,
+    // Both need only the access token; a UserInfo failure is reported first.
+    const [info, introspected] = await inOrder(
+      oidc.fetchUserInfo(client, tokens.access_token, claims.sub),
+      oidc.tokenIntrospection(client, tokens.access_token),
     );
-    const proof = nativeProof.safeParse(
-      await oidc.tokenIntrospection(client, tokens.access_token),
-    );
+    const proof = nativeProof.safeParse(introspected);
     if (!proof.success) throw invalid();
     const p = proof.data;
     if (

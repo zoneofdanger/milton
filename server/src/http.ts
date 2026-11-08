@@ -30,3 +30,15 @@ export async function boundRequest(
   }
   return new Request(request, { body: bytes.buffer });
 }
+
+/** Awaits work started together, and fails as awaiting it one after another
+ * would: with the first listed failure, once all of it has settled. */
+export const inOrder = async <T extends readonly unknown[]>(
+  ...work: { [K in keyof T]: Promise<T[K]> }
+): Promise<T> => {
+  const settled = await Promise.allSettled(work);
+  for (const done of settled) if (done.status === "rejected") throw done.reason;
+  return settled.map(
+    (done) => (done as PromiseFulfilledResult<unknown>).value,
+  ) as unknown as T;
+};

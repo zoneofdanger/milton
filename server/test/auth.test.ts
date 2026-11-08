@@ -1471,6 +1471,22 @@ test("pages stay capped and download includes every active sample, only for the 
   }
 }, 30000);
 
+test("a live session whose account is closing refuses its pages with account_unavailable", async () => {
+  const fixture = await memoPageFixture();
+  try {
+    await fixture.db.query(sql`UPDATE users SET status='deleting'`);
+    for (const path of ["/", "/tps-report", "/assistants"]) {
+      const response = await fixture.send(path);
+      expect(response.status).toBe(403);
+      expect(await response.text()).toContain(
+        "Sign in to Milton before connecting your assistant.",
+      );
+    }
+  } finally {
+    await fixture.dispose();
+  }
+}, 30000);
+
 test("report bullets keep complete text parity and the download needs no layout read", async () => {
   const bodies = [
     "  Keep fictional units explicit.\n\nUnless a condition applies, preserve <tag> & wording.  ",
@@ -1751,7 +1767,15 @@ test("an unrecognized database failure logs its class and code once, never its m
 test("OIDC callback is correlated once, checks native proof on every use, and classifies real library outages", async () => {
   const local = await pageFixture("oidc-person");
   const protocol = await protocolFixture(local.config);
-  const config = { ...local.config, authFetch: protocol.transport };
+  let slowUserInfo = false;
+  const config = {
+    ...local.config,
+    authFetch: (async (input, init) => {
+      if (slowUserInfo && String(input).endsWith("/oauth2/userinfo"))
+        await Bun.sleep(50);
+      return protocol.transport(input, init);
+    }) satisfies typeof protocol.transport,
+  };
   const app = appFor(config);
   const jar = new Map<string, string>();
   const send = browser(app, jar);
@@ -1815,6 +1839,14 @@ test("OIDC callback is correlated once, checks native proof on every use, and cl
       expect((await send(callback)).status).toBe(401);
       protocol.state[fault] = false;
     }
+    // UserInfo and introspection run together; when both fail, the slower
+    // UserInfo refusal is reported, as when they ran one after the other.
+    callback = await start();
+    slowUserInfo = protocol.state.wrongSubject = true;
+    protocol.state.down = "/oauth2/introspect";
+    expect((await send(callback)).status).toBe(401);
+    slowUserInfo = protocol.state.wrongSubject = false;
+    protocol.state.down = "";
     callback = await start();
     protocol.state.sid = "";
     expect((await send(callback)).status).toBe(401);

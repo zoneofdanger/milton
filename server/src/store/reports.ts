@@ -6,6 +6,7 @@ import {
   type ContextDimensions,
 } from "./sample-context";
 import type { CardHead } from "./cards";
+import { utf8Bytes } from "./limits";
 
 /** The five fixed reports. IDs are singular words naming the kind of writing,
  * so an assistant can guess them without the cover sheet. A sixth is a code
@@ -138,6 +139,9 @@ const newestFirst = (samples: Sample[]) =>
         ? 1
         : -1,
   );
+/** One sample as a report prints it: its context line, then its quoted body. */
+const sampleBlock = (s: Sample) =>
+  `Approved, ${s.context.summary}, ${s.date}:${contextDetails(s.context) ? `\nContext: ${contextDetails(s.context)}` : ""}\n${quote(s.body)}`;
 /** Heading, the when line, the selected samples (context line, quoted body),
  * then rules as bullets. The caller selects and orders the samples.
  * Every stored byte of a rule or sample is preserved, apart from one leading
@@ -151,10 +155,7 @@ function reportDocument(
   const parts = [
     `# ${report.title}`,
     `Applies when ${report.when}.`,
-    ...own.map(
-      (s) =>
-        `Approved, ${s.context.summary}, ${s.date}:${contextDetails(s.context) ? `\nContext: ${contextDetails(s.context)}` : ""}\n${quote(s.body)}`,
-    ),
+    ...own.map(sampleBlock),
     ...rules(active, report.id).map(bullet),
   ];
   return {
@@ -189,7 +190,7 @@ export function assembleExport(active: CardHead[], samples: Sample[]): string {
     ),
   );
 }
-/** Unweighted, explicit tiers; broad examples fill all remaining slots. */
+/** Unweighted, explicit tiers, best first; broad examples follow. */
 function rankSamples(samples: Sample[], intent: ReportIntent) {
   return samples
     .map((s) => ({
@@ -210,15 +211,42 @@ function rankSamples(samples: Sample[], intent: ReportIntent) {
           : a.revised_at > b.revised_at
             ? -1
             : a.id.localeCompare(b.id)),
-    )
-    .slice(0, SERVED_SAMPLES);
+    );
+}
+/** The first eight ranked samples that keep the report's body within `cap`
+ * UTF-8 bytes, measured as saves measure it. The body is its parts joined by
+ * "\n\n", so each sample adds its block's bytes plus 2. A sample that would
+ * pass the cap is skipped for the next best, so the served order stays the
+ * ranking's; even the best can, once rules grew after it left the newest
+ * eight. Heading and rules alone fit after every save; if the cap is
+ * lowered below them, no sample fits and the rules are served alone. */
+function withinCap(
+  report: (typeof REPORTS)[number],
+  active: CardHead[],
+  ranked: Sample[],
+  cap: number,
+) {
+  let bytes = utf8Bytes(reportDocument(report, active, []).body);
+  const chosen: Sample[] = [];
+  for (const s of ranked) {
+    if (chosen.length === SERVED_SAMPLES) break;
+    // A string has at least as many UTF-8 bytes as UTF-16 units, so a body
+    // too long in units is skipped before its block is built.
+    if (bytes + s.body.length + 2 > cap) continue;
+    const added = utf8Bytes(sampleBlock(s)) + 2;
+    if (bytes + added > cap) continue;
+    bytes += added;
+    chosen.push(s);
+  }
+  return chosen;
 }
 /** The cover sheet and the five reports. `ranked` replaces one report's newest
- * eight with the samples a read ranked for its intent. */
+ * eight with the best samples a read ranked for its intent that fit `cap`
+ * (reportCap). */
 export function assembleDocuments(
   active: CardHead[],
   samples: Sample[],
-  ranked?: { report: ReportId; intent: ReportIntent },
+  ranked?: { report: ReportId; intent: ReportIntent; cap: number },
 ): Documents {
   const cover = coverSheetText(active);
   const reports = REPORTS.map((r) => {
@@ -227,7 +255,7 @@ export function assembleDocuments(
       r,
       active,
       r.id === ranked?.report
-        ? rankSamples(mine, ranked.intent)
+        ? withinCap(r, active, rankSamples(mine, ranked.intent), ranked.cap)
         : newestFirst(mine).slice(0, SERVED_SAMPLES),
       mine,
     );

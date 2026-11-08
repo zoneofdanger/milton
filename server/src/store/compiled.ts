@@ -33,10 +33,12 @@ export function compiledMemos(
   admit?: (call?: CallUsage) => void,
 ) {
   /** A read assembles the documents from cards and samples. It takes no lock
-   * and writes only its usage row, on its own connection: for an assistant the trial gate (whose statement first
-   * checks the account and the intent's kind, so they refuse before the gate,
-   * as on the snapshot), then one statement for the snapshot. The size cap
-   * bounds saves; a read serves what is on file. */
+   * and writes only its usage row, on its own connection: for an assistant
+   * the trial gate (whose statement first checks the account and the intent's
+   * kind, so they refuse before the gate, as on the snapshot), then one
+   * statement for the snapshot. The size cap bounds saves; a read serves what
+   * is on file, except that an intent's report serves only the ranked samples
+   * that fit the cap. */
   async function read(
     intent?: ReportIntent,
     includeGuides = false,

@@ -214,6 +214,18 @@ export interface AssistantAuth extends VerifiedStoreAuth {
 }
 const storeLimits = sql`(SELECT limits_json FROM store_config WHERE singleton=1)`;
 
+/** The id of the active account a sign-in identity owns; `subject` may be a
+ * column of the enclosing statement. */
+const activeAccount = (provider: string, subject: string | SQL) => sql`
+        SELECT u.id FROM identities i JOIN users u ON u.id=i.user_id
+        WHERE i.provider=${provider} AND i.subject=${subject} AND u.status='active'`;
+const noAccount = () =>
+  new StoreError(
+    "account_unavailable",
+    "Sign in to Milton before connecting your assistant.",
+    403,
+  );
+
 /** Looks up the active account for a sign-in identity; with a guard, also
  * reads the store limits in the same statement. */
 export async function lookupIdentityAccount(
@@ -231,9 +243,7 @@ export async function lookupIdentityAccount(
   guard?: IdentityGuard,
 ): Promise<VerifiedStoreAuth | AssistantAuth> {
   const { provider, subject } = parseIdentity(identity);
-  const account = sql`
-        SELECT u.id FROM identities i JOIN users u ON u.id=i.user_id
-        WHERE i.provider=${provider} AND i.subject=${subject} AND u.status='active'`;
+  const account = activeAccount(provider, subject);
   let row: { id: string | null; limits?: unknown } | undefined;
   if (!guard)
     row = (await database(bindings).query<{ id: string }>(account))[0];
@@ -256,16 +266,48 @@ export async function lookupIdentityAccount(
     guard.admit(guarded?.guard);
     row = guarded;
   }
-  if (!row?.id)
-    throw new StoreError(
-      "account_unavailable",
-      "Sign in to Milton before connecting your assistant.",
-      403,
-    );
+  if (!row?.id) throw noAccount();
   return {
     userId: row.id,
     [verifiedStoreIdentity]: true,
     ...(guard ? { limits: row.limits } : {}),
+  };
+}
+
+/** A browser session read in one statement with its identity's active
+ * account. `session.statement` selects at most one session row, with its
+ * `subject`; `admit` turns that row into the signed-in user, or null for no
+ * usable session, before any account is minted, and a failed statement is the
+ * caller's `outage`. `account()` then refuses as lookupIdentityAccount does
+ * when the identity has no active account. */
+export async function lookupSessionAccount<User>(
+  bindings: StoreBindings,
+  provider: string,
+  session: {
+    statement: SQL;
+    admit(row: Record<string, unknown> | undefined): User | null;
+    outage(): Error;
+  },
+): Promise<{ user: User; account(): VerifiedStoreAuth } | null> {
+  let row: Record<string, unknown> | undefined;
+  try {
+    row = (
+      await database(bindings).query(
+        sql`SELECT s.*, (${activeAccount(provider, sql`s.subject`)}) AS account_id FROM (${session.statement}) s`,
+      )
+    )[0];
+  } catch {
+    throw session.outage();
+  }
+  const user = session.admit(row);
+  if (user === null) return null;
+  const id = row?.account_id;
+  return {
+    user,
+    account() {
+      if (typeof id !== "string" || !id) throw noAccount();
+      return { userId: id, [verifiedStoreIdentity]: true };
+    },
   };
 }
 

@@ -6,6 +6,7 @@ import { cookieName } from "./auth-oidc";
 import { connections, lifecycle, type Operation } from "./auth-lifecycle";
 import { accountKeys, keysSection } from "./auth-keys";
 import { supportEmail } from "./config";
+import { inOrder } from "./http";
 
 export const clientHost = (clientId: string) => {
   try {
@@ -13,18 +14,6 @@ export const clientHost = (clientId: string) => {
     if (id.protocol === "https:") return id.host;
   } catch {}
   return "";
-};
-/** Awaits reads started together, each borrowing its own pooled connection
- * (none borrows while holding one), and fails as awaiting them one after
- * another would: with the first listed failure. */
-const inOrder = async <T extends readonly unknown[]>(
-  ...reads: { [K in keyof T]: Promise<T[K]> }
-): Promise<T> => {
-  const settled = await Promise.allSettled(reads);
-  for (const read of settled) if (read.status === "rejected") throw read.reason;
-  return settled.map(
-    (read) => (read as PromiseFulfilledResult<unknown>).value,
-  ) as unknown as T;
 };
 export const assistants = async (ctx: PageContext): Promise<Response> => {
   const { config, request, url, csrfField, readForm, signedIn } = ctx;
@@ -78,6 +67,7 @@ export const assistants = async (ctx: PageContext): Promise<Response> => {
     return Response.redirect(config.appOrigin + "/assistants", 303);
   }
   const user = await signedIn();
+  // Each read borrows its own pooled connection; none borrows while holding one.
   const [{ items: listed, full }, pending, keys, billing] = await inOrder(
     connections(config, user),
     disconnects.pending("disconnect"),

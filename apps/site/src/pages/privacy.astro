@@ -176,15 +176,18 @@ import SiteLayout from "../layouts/SiteLayout.astro";
     sign-in service, along with the registrations of assistants only you
     approved. An assistant registration another account also approved stays so
     that account’s connection keeps working, without its name or contact
-    details, which are not restored later. A registration approved before
-    November 8, 2026 whose approval records sign-in cleanup had already removed
-    cannot be traced to any account and is kept as registered. If account
-    cleanup is incomplete, the app offers a retry; deletion is confirmed only
-    when that cleanup finishes. Unused password reset links stop working when
-    account security changes or deletion starts, as well as when they expire.
-    Verification links expire after one hour; remaining verification records
-    become eligible for cleanup one day after expiry and can remain until
-    cleanup reaches them. The limited records below remain.
+    details. For each registration removed or cleared this way, Milton keeps a
+    one-way fingerprint of its client identifier, so its name and contact
+    details stay empty even if an assistant registers again under that same
+    identifier. A registration approved before November 8, 2026 whose approval
+    records sign-in cleanup had already removed cannot be traced to any account
+    and is kept as registered. If account cleanup is incomplete, the app offers
+    a retry; deletion is confirmed only when that cleanup finishes. Unused
+    password reset links stop working when account security changes or deletion
+    starts, as well as when they expire. Verification links expire after one
+    hour; remaining verification records become eligible for cleanup one day
+    after expiry and can remain until cleanup reaches them. The limited records
+    below remain.
   </p>
   <p>These records remain after deletion:</p>
   <ul>

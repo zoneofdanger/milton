@@ -23,8 +23,8 @@ the [README](README.md) says what is here, and [TODO.md](TODO.md) is the backlog
   Roles, assignments and ready PRs grant no extra product publishing authority.
   Force-pushes and history rewrites require Peter's explicit approval. Cloud Run hosts
   the browser app and the MCP server; Vercel builds and publishes the static site from
-  main on every push, and a branch build is only ever a preview. Production releases are run by temporary
-  release agents from [the hosting runbook](server/deploy/README.md): preserve rollback
+  main on every push, and a branch build is only ever a preview. Production releases are run by the
+  release coordinator (`milton-duo`) from [the hosting runbook](server/deploy/README.md): preserve rollback
   revisions, pinned images and numeric secret versions; snapshot before every migration;
   when a migration drops something the running code reads, release the code first.
 - **Secrets stay out of git.** One dotenvx payload and one platform-held key per service.

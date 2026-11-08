@@ -12,7 +12,7 @@ import {
 } from "../src/store";
 import { localAsset } from "../src/assets";
 import { seedRule, seedSample, storeForCurrentRequest } from "./store-fixtures";
-import { localStore } from "./local-store";
+import { localStore, openTransactions } from "./local-store";
 
 import {
   appOrigin,
@@ -140,7 +140,10 @@ function fakeStripe() {
     customer: { status: 404, body: {} as Record<string, unknown> },
     subscriptions: [] as Record<string, unknown>[],
     calls: [] as Record<string, unknown>[],
+    // Every call made while a database transaction was open.
+    inTransaction: [] as string[],
     onDelete: async () => {},
+    onList: async () => {},
   };
   const billing = {
     secretKey: "rk_test_fixtureNotAKey",
@@ -160,6 +163,8 @@ function fakeStripe() {
           ? Object.fromEntries(new URLSearchParams(String(init.body)))
           : {}),
       });
+      if (openTransactions() > 0)
+        stripe.inTransaction.push(`${method} ${path}`);
       if (stripe.down === true || stripe.down === `${method} ${path}`)
         return Response.json({}, { status: 500 });
       if (method === "DELETE") {
@@ -173,8 +178,12 @@ function fakeStripe() {
         return Response.json(stripe.customer.body, {
           status: stripe.customer.status,
         });
-      if (path === "/v1/subscriptions" && method === "GET")
-        return Response.json({ data: stripe.subscriptions });
+      if (path === "/v1/subscriptions" && method === "GET") {
+        // What Stripe held when the read began.
+        const data = stripe.subscriptions;
+        await stripe.onList();
+        return Response.json({ data });
+      }
       if (path === "/v1/subscriptions") {
         const created = stripeSubscription("trialing");
         stripe.subscriptions = [created];
@@ -2106,6 +2115,91 @@ test("authenticated admission requires verified provider IDs, converges and pres
     expect(JSON.stringify(fingerprintRows)).not.toContain("example.invalid");
   } finally {
     await local.dispose();
+  }
+}, 30000);
+
+test("checkout's live read never lands over a newer write, an empty one included: one conflict reads again, a second answers 503", async () => {
+  const { stripe, billing } = fakeStripe();
+  const fixture = await accountFixture({ billing });
+  const { send, local } = fixture;
+  const status = async () =>
+    (
+      await local.db.query<{ status: string }>(
+        sql`SELECT subscription_status AS status FROM trial_accounts`,
+      )
+    )[0]?.status;
+  try {
+    await send("/");
+    await local.db.query(sql`UPDATE store_config SET trials_enabled=true`);
+    await local.db.query(
+      sql`INSERT INTO trial_accounts(user_id,started_at,stripe_customer_id,subscription_status) SELECT id,clock_timestamp(),'cus_fixture','canceled' FROM users`,
+    );
+    // While each read is out, another writer stores a newer state, advancing
+    // the revision as every Stripe-state writer does, and the read answers what
+    // Stripe had before it.
+    const newer = (status: string) =>
+      local.db.query(
+        sql`UPDATE trial_accounts SET subscription_status=${status},stripe_revision=stripe_revision+1`,
+      );
+    let conflicts = 1;
+    stripe.onList = async () => {
+      if (conflicts-- <= 0) return;
+      await newer("past_due");
+      stripe.subscriptions = [stripeSubscription("active")];
+    };
+    stripe.subscriptions = [stripeSubscription("trialing")];
+    // The first read is stale; the second sees active and goes to the portal.
+    const healed = await send("/billing/checkout", {});
+    expect(healed.status).toBe(200);
+    expect(await healed.text()).toContain("billing.stripe.com");
+    expect(await status()).toBe("active");
+    expect(
+      stripe.calls.filter(({ call }) => String(call).startsWith("GET")),
+    ).toHaveLength(2);
+    // Two conflicts in a row: 503, nothing sold, and the newer write stands.
+    await local.db.query(
+      sql`UPDATE trial_accounts SET subscription_status='canceled'`,
+    );
+    conflicts = 2;
+    stripe.onList = async () => {
+      if (conflicts-- <= 0) return;
+      await newer(conflicts ? "paused" : "past_due");
+    };
+    stripe.subscriptions = [stripeSubscription("trialing")];
+    stripe.calls.length = 0;
+    expect((await send("/billing/checkout", {})).status).toBe(503);
+    expect(await status()).toBe("past_due");
+    expect(stripe.calls.map(({ call }) => call)).toEqual([
+      "GET /v1/subscriptions?customer=cus_fixture&status=all&limit=10",
+      "GET /v1/subscriptions?customer=cus_fixture&status=all&limit=10",
+    ]);
+    // An empty read is checked too: the stored state goes canceled to active
+    // while a read that finds nothing managed is out. It must not sell a second
+    // subscription: it reads again, finds active and goes to the portal.
+    await local.db.query(
+      sql`UPDATE trial_accounts SET subscription_status='canceled'`,
+    );
+    conflicts = 1;
+    stripe.onList = async () => {
+      if (conflicts-- <= 0) return;
+      await newer("active");
+      stripe.subscriptions = [stripeSubscription("active")];
+    };
+    stripe.subscriptions = [stripeSubscription("canceled")];
+    stripe.calls.length = 0;
+    const empty = await send("/billing/checkout", {});
+    expect(empty.status).toBe(200);
+    expect(await empty.text()).toContain("billing.stripe.com");
+    expect(stripe.calls.map(({ call }) => call)).toEqual([
+      "GET /v1/subscriptions?customer=cus_fixture&status=all&limit=10",
+      "GET /v1/subscriptions?customer=cus_fixture&status=all&limit=10",
+      "POST /v1/customers/cus_fixture",
+      "POST /v1/billing_portal/sessions",
+    ]);
+    expect(await status()).toBe("active");
+    expect(stripe.inTransaction).toEqual([]);
+  } finally {
+    await fixture.dispose();
   }
 }, 30000);
 

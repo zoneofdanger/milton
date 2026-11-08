@@ -10,7 +10,7 @@ landed and the item is still open), `blocked: <why or #id>`. A bolded headline o
 or fewer states the task; one item is one landing. **A section heading and its preamble are
 shared context for every item beneath it.**
 
-**next-id: 31.** Ids are never reused, so this counter survives deleting the newest item.
+**next-id: 32.** Ids are never reused, so this counter survives deleting the newest item.
 
 ## MVP
 
@@ -77,6 +77,20 @@ reports, memos) and plain text on security screens and anything an assistant rea
       column and rewrites `save_request_hashes` to check `input_hash` alone (no CASCADE, with a
       rollback file and a runbook section), and remove the two raw test INSERTs' `source_hash`
       in server/test/store-saves.test.ts.
+
+- [ ] #31 (server, low) **Take Stripe off sign-in and deletion after launch.** The
+      narrowed follow-up to PR #67 took checkout's live read and the webhook off the row lock (compare-and-set on
+      `trial_accounts.stripe_revision`, 0010) and deferred the rest: sign-in still waits on
+      Stripe, up to three 5 s calls under `trial_accounts FOR UPDATE` (`whileWaiting`), so a
+      Stripe outage is a sign-in 503; and deletion's Stripe DELETE runs inside its lifecycle
+      transaction. Moving enrolment to the background failed two reviews (Astra): it needs a
+      durable retry, a takeover can duplicate trials (Stripe prunes idempotency keys after 24
+      hours, and a 500 can take effect late, so neither proves a create failed), checkout's
+      customer link bypassed a deletion fence, a retry sweep can starve behind failing
+      accounts, and old and new revisions overlap at cutover. That last one applies to 0010's
+      revision too: old writers don't advance it, so a quiescent cutover is still unenforced.
+      Full argument: PR #67 (closed unmerged) and both of Astra's verdicts, posted on it at
+      https://github.com/zoneofdanger/milton/pull/67#issuecomment-6726908897.
 
 ## From the audit of 2026-11-02 (`.agents/tmp/audit/report.md`)
 

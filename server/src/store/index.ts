@@ -22,10 +22,10 @@ import {
   clearStripeCustomer,
   enrollForBackfill,
   linkStripeCustomer,
-  lockStripeCustomer,
   lockWaitingSubscription,
   recordStripeEvent,
   saveStripeSubscription,
+  stripeCustomerRow,
   stripeEventRecorded,
   type StripeEvent,
   type StripeSubscriptionState,
@@ -471,18 +471,28 @@ export function billingForAccount(bindings: StoreBindings, userId: string) {
     linkCustomer: (customer: string) =>
       linkStripeCustomer(db, userId, customer),
     clearCustomer: () => clearStripeCustomer(db, userId),
-    /** Reads Stripe holding the customer's row, as the webhook does, and stores
-     * what the read returns, if anything. */
-    syncSubscription: (
+    /** Reads Stripe with no transaction open, as the webhook does, and returns
+     * what the read found, storing it if anything, only over an unchanged row (see
+     * stripeConflict). An empty answer is checked too: it is what lets checkout
+     * sell a subscription. */
+    syncSubscription: async (
       customer: string,
       read: () => Promise<StripeSubscriptionState | undefined>,
-    ) =>
-      db.transaction(async (tx) => {
-        await lockStripeCustomer(tx, customer);
+    ) => {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const before = await stripeCustomerRow(db, customer);
         const state = await read();
-        if (state) await saveStripeSubscription(tx, userId, state);
-        return state;
-      }),
+        if (!before) return state;
+        const unchanged = await db.transaction(async (tx) => {
+          const row = await stripeCustomerRow(tx, customer, true);
+          if (row?.revision !== before.revision) return false;
+          if (state) await saveStripeSubscription(tx, userId, state);
+          return true;
+        });
+        if (unchanged) return state;
+      }
+      throw stripeConflict();
+    },
     /** Runs `work` holding the row, only while it has no subscription. What it
      * stored before failing still commits: a customer must stay findable when the
      * subscription call after it fails. */
@@ -512,6 +522,22 @@ export function billingForAccount(bindings: StoreBindings, userId: string) {
   };
 }
 
+// Checkout's live read and the webhook read Stripe with no transaction open and
+// no row held. The write then runs in a short transaction that holds the
+// customer's row and lands only if the row's stripe_revision is what it was
+// before the read. Every write of the Stripe state advances it, values unchanged
+// included. So an older read cannot land after a newer one: any write that landed
+// between this read's snapshot and its write moved the revision, and this one
+// reads Stripe again instead. A second conflict refuses: checkout answers try
+// again, and the webhook leaves the event unrecorded, so Stripe redelivers it.
+// Enrolment (whileWaiting) still holds the row across its Stripe calls, so this
+// short write can wait behind it up to the lock timeout, as before.
+const stripeConflict = () =>
+  new StoreError(
+    "billing_unavailable",
+    "Billing is unavailable right now. Nothing was charged. Try again.",
+  );
+
 /** What server/scripts/backfill-subscriptions.ts reads and writes. */
 export function subscriptionBackfill(bindings: StoreBindings) {
   const db = database(bindings);
@@ -530,9 +556,10 @@ export function subscriptionBackfill(bindings: StoreBindings) {
 
 /**
  * Records a verified Stripe event, once per id. When it names a customer Milton
- * holds, `read` asks Stripe for that customer's state and the answer is written
- * in the statement that records the event. The row stays locked across the read;
- * a `read` that throws leaves nothing recorded, so Stripe redelivers.
+ * holds, `read` asks Stripe for that customer's state, with no transaction open,
+ * and the answer is written in the statement that records the event, over an
+ * unchanged row (see stripeConflict). A `read` that throws, or a second conflict,
+ * leaves nothing recorded, so Stripe redelivers.
  */
 export async function applyStripeEvent(
   bindings: StoreBindings,
@@ -545,15 +572,21 @@ export async function applyStripeEvent(
 ) {
   const db = database(bindings);
   if (!customer) return recordStripeEvent(db, event);
-  return db.transaction(async (tx) => {
-    const row = await lockStripeCustomer(tx, customer);
-    if (!row) return recordStripeEvent(tx, event);
-    if (await stripeEventRecorded(tx, event.id)) return { recorded: false };
-    const state = await read(customer, row.subscription);
-    return recordStripeEvent(
-      tx,
-      event,
-      state ? { customer, state } : undefined,
-    );
-  });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const before = await stripeCustomerRow(db, customer);
+    if (!before) return recordStripeEvent(db, event);
+    if (await stripeEventRecorded(db, event.id)) return { recorded: false };
+    const state = await read(customer, before.subscription);
+    const result = await db.transaction(async (tx) => {
+      const row = await stripeCustomerRow(tx, customer, true);
+      if (row?.revision !== before.revision) return undefined;
+      return recordStripeEvent(
+        tx,
+        event,
+        state ? { customer, state } : undefined,
+      );
+    });
+    if (result) return result;
+  }
+  throw stripeConflict();
 }

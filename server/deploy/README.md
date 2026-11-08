@@ -404,6 +404,30 @@ app never rolls back to an image older than #62 (`milton-app-token-0f7d5aa` is t
 its transaction rolls back and changes nothing; rerun it. Otherwise a failed migration's
 rollback is the pre-migration snapshot; there is no down script.
 
+## Stripe reads off the row lock (Drizzle 0010, PR #67; prepared, not applied)
+
+Checkout's live read and the webhook now read Stripe with no transaction open and write by
+compare-and-set on `trial_accounts.stripe_revision` (server README). Sign-in enrolment and
+account deletion are unchanged: they still call Stripe under their locks (TODO.md). 0010 is
+additive; older code never names the column. Older revisions' writes of the Stripe state (the
+webhook, checkout, and sign-in enrolment on admit) do not advance the revision, so while both
+versions serve, a new read in flight could land over one of them, where the old row lock kept
+them apart, and record its event, so a redelivery is deduplicated and repairs nothing. A
+stale state would last until that customer's next Stripe event or checkout, both of which
+read Stripe again. Nothing enforces a quiescent cutover yet (Astra round 2, finding 4; TODO
+#31), so:
+
+1. Rehearse (`check-auth-integration.ts` applies 0010), then snapshot production.
+2. As `neondb_owner`: `bun run --cwd server db:migrate` applies `0010_stripe_revision`
+   (journal 11 entries). Old code runs on it unchanged.
+3. In a quiet window (no webhook delivery, checkout or admission in milton-app's and
+   milton-admit's request logs for the last 2 minutes), release the image to `milton-app`
+   and `milton-admit` back to back, so the mixed window stays short, then wait until neither
+   previous revision serves a request (app timeout 60 s, admit 30 s).
+
+Rollback: code to the previous revision, which runs on 0010; the pre-migration snapshot is
+0010's rollback, and there is no down script.
+
 ## Test account and daily check
 
 `e2e@milton-test.invalid` is a fictional account that holds nothing but what the daily

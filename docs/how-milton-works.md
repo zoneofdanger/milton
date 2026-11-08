@@ -417,8 +417,11 @@ Files: `server/src/store/index.ts`, `server/src/store/trials.ts`,
   only a customer ID from the six handled event types, because Stripe does not guarantee
   event order.
 - A handled event Milton cannot parse gets a 400 unrecorded, so Stripe retries it.
-- For a customer Milton holds, the webhook locks the row, reads the customer's
-  subscriptions from Stripe, and writes the deciding one where it records the event.
+- For a customer Milton holds, the webhook reads the customer's subscriptions from Stripe
+  with no transaction open, then writes the deciding one where it records the event, only
+  if the row's `stripe_revision`, which every write of the Stripe state advances even with
+  unchanged values, is what it was before the read, so an older read never lands over a
+  newer one; on a change it reads once more, and a second change answers 503 unrecorded.
 - The deciding subscription is active, then trialing, then past_due, otherwise the newest.
 - Only a successful empty list with a stored subscription writes canceled.
 - Any non-2xx from Stripe's list, 404 included, is a failed read: the webhook answers 503
@@ -428,8 +431,10 @@ Files: `server/src/store/index.ts`, `server/src/store/trials.ts`,
 - `/billing/checkout` answers 409 to an account with no trial row.
 - `/billing/checkout` sends trialing, active, past_due, unpaid, and paused to the Stripe
   portal.
-- With a stored customer, it lists Stripe first and goes to the portal if any such
-  subscription exists, storing it, so a late webhook cannot sell a second subscription.
+- With a stored customer, it lists Stripe first, with no transaction open, and goes to the
+  portal if any such subscription exists, storing it as the webhook does (over an unchanged
+  revision, one re-read, then 503); an empty answer is checked against the revision too, so
+  a late webhook or a write during the read cannot sell a second subscription.
 - An account still waiting on its trial takes it first, then the portal, or a 503 if it did
   not start, so paying early cannot lose the 30 days.
 - Any other status gets Checkout in subscription mode, card required, no trial; each
@@ -460,6 +465,7 @@ Files: `server/drizzle/`, `server/src/store/schema.ts`, `server/src/store/databa
   the `retained_bytes` counter it read; 0006 drops the generated `payload_bytes` columns
   it summed.
 - User IDs cannot change.
+- `trial_accounts.stripe_revision` (0010, bigint, default 0) advances on every write of the Stripe state columns; app's table-wide grant on `trial_accounts` (005) covers it, and MCP's column list leaves it out.
 - `users.test_account` (0009, default false) marks the fictional end-to-end check account; owner file `011-test-account-roles.sql` narrows app's INSERT on `users` to its other columns, so no runtime login can set it, and usage and metric counts exclude it.
 - Disconnects and identity hashes have no foreign key to users, so they outlive the account.
 - `docs/deletion-inventory.txt` classifies every text-bearing column the three migration tracks create as deleted by account deletion, hidden (kept, never served), retained (tied to no account, so deletion cannot remove it) or not personal; a test on a fresh schema fails on any column missing from it.

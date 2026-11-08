@@ -482,7 +482,8 @@ GROUP BY c.tool ORDER BY c.tool;
 ```
 
 Accounts: `SELECT count(*) FROM users WHERE status = 'active' AND NOT test_account;`.
-Operational checks that size a table
+The subscription backfill neither counts test accounts nor starts their trial, so it
+never calls Stripe for one. Operational checks that size a table
 for a migration (such as `0008`'s size gate) count every row, test rows included.
 There are no public archive/restore exemptions or history controls.
 Retained history has no cap.

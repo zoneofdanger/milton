@@ -755,7 +755,8 @@ rm -rf "$dir"
 ```
 
 It prints only counts (total, created, skipped, failed, still NULL), at about 5 accounts a second,
-and refuses without `trials_enabled` and a live key. `--allow-test-key` is for disposable
+over active accounts other than test accounts (it reads `users.test_account`, so a checkout from
+this change on needs Drizzle 0009 applied), and refuses without `trials_enabled` and a live key. `--allow-test-key` is for disposable
 databases only. With `--apply` it exits nonzero if any account still has no status; rerun it, since
 rows with a status are skipped. A returning deleted
 identity's row is canceled and counted as skipped. A row left at NULL is free until a browser sign-in: an approval

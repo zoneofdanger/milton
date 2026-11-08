@@ -445,6 +445,10 @@ test("the backfill refuses without trials or a live key, dry-runs, creates, leav
     await local.db.query(
       sql`UPDATE users SET status='deleting' WHERE id='d-gone'`,
     );
+    // The end-to-end check's test account is never counted or given a trial.
+    await local.db.query(
+      sql`INSERT INTO users(id,test_account) VALUES ('f-test',true)`,
+    );
     await local.db.query(
       sql`INSERT INTO trial_accounts(user_id,started_at) SELECT id,created_at FROM users WHERE id='b-null'`,
     );
@@ -530,6 +534,7 @@ test("the backfill refuses without trials or a live key, dry-runs, creates, leav
       ["c-canceled", "canceled"],
       ["d-gone", null],
       ["e-returned", "canceled"],
+      ["f-test", null],
     ]);
     expect(after.find(({ id }) => id === "e-returned")?.customer).toBeNull();
     // A rerun touches nothing.

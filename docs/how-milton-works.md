@@ -305,7 +305,7 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
 - A trial row with no status gets the existing 30-day Stripe trial when billing is configured; no row/status or billing disabled calls no Stripe API.
 - Subscription creation locks the trial row across customer/list/create; minute-based idempotency retains the known remote-success/local-timeout ambiguity across a minute boundary.
 - Billing failures stop admission with retryable503; existing Stripe state is listed/reconciled before another create.
-- The subscription backfill remains an owner-selected dry run by default and never gives returning deleted identities another trial.
+- The subscription backfill remains an owner-selected dry run by default and never gives returning deleted identities another trial; it skips test accounts entirely (not counted, no Stripe call).
 - Account security routes to native UI; destructive deletion requires authoritative native freshness, exact typed confirmation and retention of current guarded verified-identity fingerprints.
 - App persists lifecycle UUID, original account/subject/incarnation/client and requester association before first native/remote attempt; retries never select current/recreated targets.
 - Disconnect commits native original-binding refusal before bounded cleanup; a failed or unfinished step answers 503 with a retry page re-posting the same operation, as deletion does; reconnect creates a new binding and never revives an old token.

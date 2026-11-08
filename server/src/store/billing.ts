@@ -127,7 +127,8 @@ export async function cancelReturningIdentities(db: StoreSession) {
 }
 
 /** Every active account and its status, null with no row or no status yet.
- * returning marks a row cancelReturningIdentities has not reached. */
+ * returning marks a row cancelReturningIdentities has not reached. Test accounts
+ * (users.test_account) are neither counted nor given a trial: no Stripe call. */
 export async function backfillAccounts(db: StoreSession) {
   return db.query<{
     id: string;
@@ -137,7 +138,7 @@ export async function backfillAccounts(db: StoreSession) {
     SELECT u.id, t.subscription_status AS status,
       coalesce(t.subscription_status IS NULL AND t.started_at < u.created_at,false) AS returning
     FROM users u LEFT JOIN trial_accounts t ON t.user_id=u.id
-    WHERE u.status='active' ORDER BY u.id`);
+    WHERE u.status='active' AND NOT u.test_account ORDER BY u.id`);
 }
 
 /** Gives an active account a clock row with no status, if it has none. */

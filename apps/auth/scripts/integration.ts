@@ -620,6 +620,10 @@ try {
     (await call("/unlink-account", { accountId: relinked.id })).status,
     200,
   );
+  // The extra link and sign-in spend fixture rate windows the later groups use.
+  await p.owner.query(
+    'delete from milton_auth."rateLimit"; delete from milton_guard.rate_bucket',
+  );
   assert.equal((await call("/sign-in/email", { email, password })).status, 200);
   const credential = (
     await authPool.query(

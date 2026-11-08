@@ -115,6 +115,14 @@ test("a new migration is numbered above main's highest, and the journal runs in 
   ).toContain(
     "apps/auth/migrations/002-a.up.sql and apps/auth/migrations/002-b.up.sql share number 2; give each new migration its own number",
   );
+  // A native migration the runner's .up.sql listing would never see.
+  expect(
+    locked((files) =>
+      files.set("apps/auth/migrations/002-next.sql", "SELECT 1;"),
+    ),
+  ).toEqual([
+    "apps/auth/migrations/002-next.sql is not named NNN-name.up.sql; rename it",
+  ]);
   // The native migrator applies only listed files.
   expect(
     locked((files) =>

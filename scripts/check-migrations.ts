@@ -37,9 +37,11 @@ export const TRACKS = [
     name: /^(\d{3})-[a-z0-9-]+(?:\.up)?\.sql$/,
     form: "NNN-name.sql or NNN-name.up.sql",
   },
+  // The runner applies only listed .up.sql files; the 000 prerequisites file on
+  // main predates this rule and is never run by it.
   {
     dir: "apps/auth/migrations",
-    name: /^(\d{3})-[a-z0-9-]+(?:\.up)?\.sql$/,
+    name: /^(\d{3})-[a-z0-9-]+\.up\.sql$/,
     form: "NNN-name.up.sql",
   },
 ];

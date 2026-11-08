@@ -37,8 +37,8 @@ Checks on main: types, 136 tests, format, site and server builds, rehearsal 13/1
 Smoke: health 200 ×3, MCP 401s, app home 200, signed-out report 403; a real
 `get_cover_sheet` returned normally and wrote one `usage_calls` row. 0 errors and 0 usage-write
 warnings in a 5-minute watch. Rollback: app/MCP
-`milton-*-lean-da46ee8` (runs on either schema); `rollback/0007_usage_calls.sql` only if the
-table itself must go. Auth `milton-auth-00009-mrk`, rollback `milton-auth-00008-967`.
+`milton-*-lean-da46ee8` (runs on either schema); the schema's rollback is the pre-migration
+snapshot `snap-crimson-field-b87qk777`. Auth `milton-auth-00009-mrk`, rollback `milton-auth-00008-967`.
 Warm production `get_cover_sheet` went from 25–30 ms to 19–25 ms, and all usage rows
 landed with no skips (milton-perf, `.agents/tmp/pr16/production-latency.md`). Follow-ups: a migration dropping `usage_daily` and the stored `daily_calls` key, and
 `usage_calls` retention.
@@ -118,7 +118,7 @@ Since PR #26 nothing reads or writes `public.deleted_identities` or
 block. App/MCP code before #26 reads both, so apply only while code from #26 or later
 (source `cb5199b` onward, such as `*-drt-c1af8c3`) serves. The recorded app/MCP rollback
 targets `*-lca-9de3099` and `*-tmo-58a4a59` predate #26: after the drop, roll app/MCP back
-no further than `*-dup-cb5199b` unless both downs below run first. Rehearse on a disposable
+no further than `*-dup-cb5199b` unless the snapshot below is restored first. Rehearse on a disposable
 branch or database first, then:
 
 1. Snapshot. It is the only copy of the dropped rows.
@@ -131,13 +131,8 @@ branch or database first, then:
    `SELECT to_regclass('public.deleted_identities') AS d, to_regclass('milton_app.legacy_mapping') AS l;`
    Then `check-runtime-role.ts` must print `ok` for app and MCP.
 
-Rollback, needed only before traffic returns to app/MCP code older than #26: run
-`server/migrations/008-drop-legacy-mapping.down.sql` as `milton_app_owner` (it refuses any
-other role) and `server/drizzle/rollback/0005_drop_deleted_identities.sql` as `neondb_owner`.
-Each recreates its table empty, with its original definition and grants; rows come back
-only from the snapshot. The 0005 journal row stays, so re-forwarding means
-`psql -1 -X -v ON_ERROR_STOP=1 -f server/drizzle/0005_drop_deleted_identities.sql`, then
-008 up again.
+Rollback, needed only before traffic returns to app/MCP code older than #26, is the
+pre-migration Neon snapshot `snap-muddy-bonus-b8tjvsii`. There is no down script.
 
 ## Drop the unread payload columns (applied 2026-11-08: Drizzle 0006)
 
@@ -171,13 +166,9 @@ branch or database first, then:
 
    Then `check-runtime-role.ts` must print `ok` for app and MCP.
 
-Rollback, never needed to roll app/MCP back (older code runs on either schema): roll
-app/MCP back to code that writes `source_hash` first, then run
-`server/drizzle/rollback/0006_drop_unread_columns.sql` as `neondb_owner`. It restores the
-NOT NULL and re-adds the three columns with their baseline definitions (each re-add
-rewrites its table). It refuses, changing nothing, once a save from the new code left a
-receipt without `source_hash`. The 0006 journal row stays, so re-forwarding means
-`psql -1 -X -v ON_ERROR_STOP=1 -f server/drizzle/0006_drop_unread_columns.sql`.
+Rollback, never needed to roll app/MCP back (older code runs on either schema), is the
+pre-migration Neon snapshot `snap-winter-mountain-b8iphgdz`; roll app/MCP back to code that
+writes `source_hash` before restoring it. There is no down script.
 
 ## Usage rows and the writer guards (applied 2026-11-08: Drizzle 0007, PR #40)
 
@@ -199,10 +190,8 @@ after 0006. Rehearse on a disposable branch or database first, then:
 pronamespace='public'::regnamespace` returns 0, and `check-runtime-role.ts` prints
    `ok` for app and MCP. Then release #40's code.
 
-Rollback (older code runs on either schema): run `server/drizzle/rollback/0007_usage_calls.sql`
-as `neondb_owner`. It drops `usage_calls` with its rows and restores the guards' `FOR UPDATE`.
-The 0007 journal row stays, so re-forwarding means
-`psql -1 -X -v ON_ERROR_STOP=1 -f server/drizzle/0007_usage_calls.sql`, then 009.
+Rollback, never needed to roll app/MCP back (older code runs on either schema), is the
+pre-migration Neon snapshot `snap-crimson-field-b87qk777`. There is no down script.
 
 ## Optional guide worker
 

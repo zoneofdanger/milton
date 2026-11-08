@@ -4,8 +4,8 @@
 -- code from this release stops writing source_hash and needs this migration first. Each
 -- statement is a catalog change, no rewrite. No CASCADE: an unexpected dependent fails
 -- this migration instead of being dropped with it. The source_hash column and its
--- save_request_hashes check go in a later migration (TODO.md). Rollback:
--- rollback/0006_drop_unread_columns.sql, which refuses once a save left source_hash NULL.
+-- save_request_hashes check go in a later migration (TODO.md). Rollback is the
+-- pre-migration snapshot.
 ALTER TABLE "save_requests" ALTER COLUMN "source_hash" DROP NOT NULL;--> statement-breakpoint
 ALTER TABLE "accepted_changes" DROP COLUMN "payload_bytes";--> statement-breakpoint
 ALTER TABLE "instruction_card_versions" DROP COLUMN "payload_bytes";--> statement-breakpoint

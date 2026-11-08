@@ -15,6 +15,115 @@ describe("auth product boundaries", () => {
   test("missing production capabilities fail startup without secret output", () => {
     expect(() => readConfig({})).toThrow("invalid_auth_configuration");
   });
+  test("admission goes only to a run.app origin in production, or loopback elsewhere", () => {
+    const env = Object.fromEntries(
+      Object.entries(fixtureConfig()).map(([k, v]) => [k, String(v)]),
+    );
+    const run = "https://milton-admit-419545871671.us-east4.run.app";
+    const at = (url: string, NODE_ENV = "production") =>
+      readConfig({ ...env, AUTH_ADMISSION_URL: url, NODE_ENV })
+        .AUTH_ADMISSION_URL;
+    expect(at(run)).toBe(run);
+    expect(at("http://127.0.0.1:19912", "test")).toBe("http://127.0.0.1:19912");
+    for (const url of [
+      "http://127.0.0.1:19912",
+      "https://app.meetmilton.com",
+      run + "/",
+      run + "/internal/auth/admit",
+      "http://milton-admit-419545871671.us-east4.run.app",
+      "https://milton-admit.us-east4.run.app:8443",
+      "https://run.app.example",
+      "https://user@milton-admit.us-east4.run.app",
+    ])
+      expect(() => at(url)).toThrow("invalid_auth_configuration");
+  });
+  test("admission sends a cached Google ID token on run.app, none on loopback, and fails closed without one", async () => {
+    const { admissionClient } = await import("../src/admission.ts");
+    const run = "https://milton-admit-419545871671.us-east4.run.app";
+    const jwt = (exp: number) =>
+      [{ alg: "RS256" }, { aud: run, exp }, "signature"]
+        .map((p) =>
+          Buffer.from(typeof p === "string" ? p : JSON.stringify(p)).toString(
+            "base64url",
+          ),
+        )
+        .join(".");
+    let clock = 1_000_000_000_000;
+    let identity: () => Response = () => new Response(jwt(clock / 1000 + 3600));
+    const calls: { url: string; headers: Headers; body?: string }[] = [];
+    const networkFetch = async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      const url = String(input);
+      calls.push({
+        url,
+        headers: new Headers(init?.headers),
+        body: init?.body ? String(init.body) : undefined,
+      });
+      if (url.startsWith("http://metadata.google.internal/")) return identity();
+      return new Response(null, { status: 204 });
+    };
+    const secret = "s".repeat(32);
+    const google = admissionClient(
+      { AUTH_ADMISSION_URL: run, AUTH_ADMISSION_SECRET: secret },
+      networkFetch,
+      () => clock,
+    );
+    expect(await google("/internal/auth/admit", { a: 1 })).toBe(true);
+    expect(calls.map((c) => c.url)).toEqual([
+      "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=" +
+        encodeURIComponent(run),
+      run + "/internal/auth/admit",
+    ]);
+    expect(calls[0]!.headers.get("metadata-flavor")).toBe("Google");
+    expect(calls[1]!.headers.get("authorization")).toBe(`Bearer ${secret}`);
+    const token = calls[1]!.headers.get("x-serverless-authorization");
+    expect(token).toBe(`Bearer ${jwt(clock / 1000 + 3600)}`);
+    expect(calls[1]!.body).toBe('{"a":1}');
+    // Cached until five minutes before expiry, then fetched again.
+    clock += 54 * 60_000;
+    expect(await google("/internal/auth/preserve-eligibility", {})).toBe(true);
+    expect(calls).toHaveLength(3);
+    expect(calls[2]!.headers.get("x-serverless-authorization")).toBe(token);
+    clock += 2 * 60_000;
+    expect(await google("/internal/auth/admit", {})).toBe(true);
+    expect(calls).toHaveLength(5);
+    expect(calls[4]!.headers.get("x-serverless-authorization")).not.toBe(token);
+    // No token, no call: a refused or malformed identity answers false.
+    clock += 60 * 60_000;
+    const logged = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      for (const refused of [
+        () => new Response("nope", { status: 404 }),
+        () => new Response("not-a-jwt"),
+        () => {
+          throw new TypeError("fetch failed");
+        },
+      ]) {
+        identity = refused;
+        const before = calls.length;
+        expect(await google("/internal/auth/admit", {})).toBe(false);
+        expect(calls.slice(before).map((c) => c.url)).toHaveLength(1);
+      }
+      expect(JSON.stringify(logged.mock.calls)).not.toContain(secret);
+    } finally {
+      logged.mockRestore();
+    }
+    calls.length = 0;
+    const loopback = admissionClient(
+      {
+        AUTH_ADMISSION_URL: "http://127.0.0.1:19912",
+        AUTH_ADMISSION_SECRET: secret,
+      },
+      networkFetch,
+    );
+    expect(await loopback("/internal/auth/admit", {})).toBe(true);
+    expect(calls.map((c) => c.url)).toEqual([
+      "http://127.0.0.1:19912/internal/auth/admit",
+    ]);
+    expect(calls[0]!.headers.has("x-serverless-authorization")).toBe(false);
+  });
   test("client metadata URLs need an https DNS host without credentials", async () => {
     const { metadataDocumentUrlAllowed: allowed } =
       await import("../src/provider.ts");

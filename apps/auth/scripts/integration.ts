@@ -41,10 +41,10 @@ const boundaries = {
   fetch: async (input: string | URL | Request, init?: RequestInit) => {
     if (
       String(input) ===
-      "https://app.meetmilton.com/internal/auth/preserve-eligibility"
+      config.AUTH_ADMISSION_URL + "/internal/auth/preserve-eligibility"
     )
       return new Response(null, { status: 204 });
-    if (String(input) === "https://app.meetmilton.com/internal/auth/admit") {
+    if (String(input) === config.AUTH_ADMISSION_URL + "/internal/auth/admit") {
       const admission = JSON.parse(String(init?.body)) as Record<
         string,
         unknown

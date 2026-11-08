@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { z } from "zod";
 import type { RuntimeConfig } from "./config";
-import { database } from "./store";
+import { database, type StoreBindings } from "./store";
 import { AuthError } from "./token";
 
 export const unavailable = () =>
@@ -63,7 +63,7 @@ export function checkBinding(status: unknown, a: BindingClaims) {
     throw invalid();
 }
 export async function securityStatus(
-  config: RuntimeConfig,
+  config: StoreBindings,
   a: Pick<Authority, "subject" | "sid" | "incarnation" | "generation">,
 ): Promise<unknown> {
   try {

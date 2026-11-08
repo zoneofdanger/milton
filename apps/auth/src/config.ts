@@ -14,10 +14,33 @@ export const SCOPES = [
   "milton:write",
 ];
 const secret = z.string().min(32).max(512);
+/** Where auth sends admissions: the milton-admit service's run.app origin, which
+ * gets a Google ID token, or a loopback origin for local development and tests,
+ * which does not and is refused in production. Nothing else. */
+export function admissionTarget(
+  value: string,
+): "cloud-run" | "loopback" | null {
+  if (!URL.canParse(value)) return null;
+  const url = new URL(value);
+  if (url.origin !== value) return null;
+  if (
+    url.protocol === "https:" &&
+    !url.port &&
+    /^[a-z0-9-]+(\.[a-z0-9-]+)*\.run\.app$/.test(url.hostname)
+  )
+    return "cloud-run";
+  if (
+    url.protocol === "http:" &&
+    ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)
+  )
+    return "loopback";
+  return null;
+}
 const schema = z.object({
   AUTH_DATABASE_URL: z.url().refine((v) => /^postgres(ql)?:/.test(v)),
   AUTH_SECRET: secret,
   AUTH_ADMISSION_SECRET: secret,
+  AUTH_ADMISSION_URL: z.string().refine((v) => admissionTarget(v) !== null),
   AUTH_RATE_SECRET: secret,
   AUTH_APP_CLIENT_ID: z.string().min(1).max(256),
   AUTH_GOOGLE_CLIENT_ID: z.string().min(1),
@@ -33,7 +56,12 @@ const schema = z.object({
 export type Config = z.infer<typeof schema>;
 export function readConfig(env: NodeJS.ProcessEnv): Config {
   const r = schema.safeParse(env);
-  if (!r.success) throw new Error("invalid_auth_configuration");
+  if (
+    !r.success ||
+    (env.NODE_ENV === "production" &&
+      admissionTarget(r.data.AUTH_ADMISSION_URL) !== "cloud-run")
+  )
+    throw new Error("invalid_auth_configuration");
   databaseOptions(r.data.AUTH_DATABASE_URL);
   if (
     new Set([

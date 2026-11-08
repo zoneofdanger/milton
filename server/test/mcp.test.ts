@@ -862,7 +862,7 @@ test("in one JSON-RPC batch, only the admitted call records usage", async () => 
   }
 }, 30000);
 
-test("invalid store limits refuse a tool call and record no usage; a stored daily_calls is ignored", async () => {
+test("invalid store limits refuse a tool call and record no usage; a stored retired key is ignored", async () => {
   const local = await localStore();
   try {
     const { miltonUserId } = await resolveIdentityAccount(local.env, {
@@ -904,21 +904,20 @@ test("invalid store limits refuse a tool call and record no usage; a stored dail
         )
       )[0]!.n;
     };
-    // Production's stored row still holds the retired daily_calls key; calls
-    // pass whatever its value, and the key is left as stored.
-    const legacy = {
+    // 0008 removed the retired daily_calls key; a stored one is ignored
+    // whatever its value, and left as stored.
+    const current = {
       body_bytes: 131072,
       description_bytes: 500,
       reason_bytes: 500,
       report_body_bytes: 262144,
-      daily_calls: 10000,
     };
     const valid = (
       await local.db.query<{ limits: unknown }>(
         sql`SELECT limits_json AS limits FROM store_config`,
       )
     )[0]!.limits;
-    expect(valid).toEqual(legacy);
+    expect(valid).toEqual(current);
     expect(await cover()).not.toContain('"isError":true');
     expect(await used()).toBe(1);
     for (const retired of ["1", "0", '"none"']) {

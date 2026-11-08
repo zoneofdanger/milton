@@ -2,7 +2,9 @@
  * files, inherited database credentials, external requests or live operations. */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { request as httpRequest } from "node:http";
+import http, { request as httpRequest } from "node:http";
+import https from "node:https";
+import { syncBuiltinESMExports } from "node:module";
 import {
   cpSync,
   existsSync,
@@ -102,6 +104,8 @@ const root = cluster.dir,
 const secret = () => randomBytes(32).toString("hex");
 const pools: pg.Pool[] = [];
 const servers: ServerType[] = [];
+// Undoes the propagation groups' outbound guard; run in the final cleanup.
+let restoreOutbound = () => {};
 let groups = 0,
   stage = "setup";
 const pass = (name: string) => {
@@ -3450,6 +3454,70 @@ try {
       new URL(config.resource).origin,
       await listen(createMcpApp(mcpConfig)),
     );
+    // Nothing these groups run may leave the machine. Global fetch and
+    // node:http/https requests to anything but loopback are refused and
+    // recorded (a caller may swallow the error: the MCP verifier turns a failed
+    // key fetch into a 401), and the record must stay empty. Auth's canonical
+    // origin is the local auth listener: createMcpApp builds its verifier with
+    // the default fetch, so its JWKS request is routed here, not to production.
+    const outbound: string[] = [];
+    const local = (host: string) =>
+      ["127.0.0.1", "localhost", "::1", "[::1]"].includes(host);
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      const target = new URL(input instanceof Request ? input.url : input);
+      if (target.origin === AUTH_ORIGIN)
+        return loopback("203.0.113.251")(target.href, {
+          method: input instanceof Request ? input.method : init?.method,
+          headers: input instanceof Request ? input.headers : init?.headers,
+          body: init?.body,
+          signal: init?.signal,
+        });
+      if (!local(target.hostname)) {
+        outbound.push(target.origin);
+        throw new Error("outbound_request_refused");
+      }
+      return realFetch(input, init);
+    }) as typeof fetch;
+    const guarded = <T extends (...args: never[]) => unknown>(
+      original: T,
+      scheme: string,
+    ) =>
+      ((...args: unknown[]) => {
+        const [first, second] = args;
+        const options = (
+          typeof first === "string" || first instanceof URL
+            ? new URL(first)
+            : (first ?? second ?? {})
+        ) as { hostname?: string | null; host?: string | null };
+        const host = options.hostname ?? options.host ?? "localhost";
+        if (!local(host)) {
+          outbound.push(`${scheme}://${host}`);
+          throw new Error("outbound_request_refused");
+        }
+        return (original as unknown as (...all: unknown[]) => unknown)(...args);
+      }) as unknown as T;
+    const builtins = [
+      [http, "http"],
+      [https, "https"],
+    ] as const;
+    const saved = builtins.map(([module]) => [module.request, module.get]);
+    for (const [module, scheme] of builtins) {
+      module.request = guarded(module.request, scheme);
+      module.get = guarded(module.get, scheme);
+    }
+    syncBuiltinESMExports();
+    restoreOutbound = () => {
+      globalThis.fetch = realFetch;
+      builtins.forEach(([module], i) => {
+        module.request = saved[i]![0]!;
+        module.get = saved[i]![1]!;
+      });
+      syncBuiltinESMExports();
+    };
     const intent = { situation: "confirming what is on file" };
     const reportIds = ["email", "chat", "post", "document", "speech"] as const;
     const surfaceNames = [
@@ -4061,6 +4129,15 @@ try {
           })
         ).status;
       assert.equal(await userInfo(), 200, "the assistant's token works");
+      // A JWT at MCP: its verifier fetches native's JWKS, from the local listener.
+      const assistantTools = async () => {
+        const response = await mcpPost(grant.access_token, "tools/list", {});
+        assert.deepEqual(outbound, [], "no request left the machine");
+        return response.status === 200
+          ? (await result(response)).result.tools?.length
+          : response.status;
+      };
+      assert.equal(await assistantTools(), 4, "the assistant reaches MCP");
       assert.equal(
         (await nativeJson("/request-password-reset", { email: alder.email }))
           .status,
@@ -4170,6 +4247,7 @@ try {
         );
       }
       assert.notEqual(await userInfo(), 200, "the assistant's token");
+      assert.equal(await assistantTools(), 401, "the assistant at MCP");
       await assert.rejects(
         oidc.refreshTokenGrant(oauth, grant.refresh_token, {
           resource: config.resource,
@@ -4251,6 +4329,7 @@ try {
         served(settled.get(birch)!),
         "the other account serves exactly what it did",
       );
+      assert.deepEqual(outbound, [], "no request left the machine");
     }
     pass(
       "account deletion through the app leaves no row referencing the account or its native user (catalog-derived, every one populated first, one listed exclusion), only pinned id-only leftovers (table, column, rows) and none of its email or text; its key, assistant grant, app session, native session and password stop working; the other account is untouched",
@@ -4271,6 +4350,7 @@ try {
   );
   process.exitCode = 1;
 } finally {
+  restoreOutbound();
   for (const server of servers)
     if ("closeAllConnections" in server) {
       server.closeAllConnections();

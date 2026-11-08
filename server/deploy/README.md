@@ -39,7 +39,8 @@ Smoke: health 200 ×3, MCP 401s, app home 200, signed-out report 403; a real
 warnings in a 5-minute watch. Rollback: app/MCP
 `milton-*-lean-da46ee8` (runs on either schema); `rollback/0007_usage_calls.sql` only if the
 table itself must go. Auth `milton-auth-00009-mrk`, rollback `milton-auth-00008-967`.
-Follow-ups: a migration dropping `usage_daily` and the stored `daily_calls` key, and
+Warm production `get_cover_sheet` went from 25–30 ms to 19–25 ms, and all usage rows
+landed with no skips (milton-perf, `.agents/tmp/pr16/production-latency.md`). Follow-ups: a migration dropping `usage_daily` and the stored `daily_calls` key, and
 `usage_calls` retention.
 
 Then `64435ee`: #46 (sign-in protocol failures and the metadata mismatch logged by class and
@@ -50,7 +51,8 @@ milton-qa with light review. App/MCP `milton-*-rnd3-64435ee` at 01:00Z (image
 `sha256:0b8c77e37856a94a3ceef4d729ef73cff6f47acb01c2332de4e255e72048a900`). A first attempt
 with the tag `r3` was refused (tags need 3+ characters). It left each service's spec naming the
 missing `*-r3-64435ee` revision, so on the retry Cloud Run set Ready=False briefly (MCP
-01:00:09Z, app 01:00:23Z; two audit-log errors) while it kept serving the previous routes;
+01:00:09Z, app 01:00:23Z; three audit-log errors in all, counting the refused first attempt at
+00:59Z) while it kept serving the previous routes;
 the retry's traffic update replaced the spec. 0 5xx and no application errors in the 5-minute
 watch. Live:
 `/auth/logged-out?state=switch-account` 303 to `/login?fresh=1`; a URL or a duplicate

@@ -1115,6 +1115,8 @@ test("0011 adds stripe_revision; existing trial rows keep their state and start 
   } finally {
     await pg.close();
     await rm(scratch, { recursive: true, force: true });
+  }
+});
 
 test("native 008 links each authorized registration from what survives, by identity incarnation, and applies deletion's rule to deleted identities' registrations", async () => {
   const native = (name: string) =>

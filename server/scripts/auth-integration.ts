@@ -2783,13 +2783,16 @@ try {
   const authPages = createAuthPages(nativeService, authAssets);
   // Each run is its own client behind the load balancer, as daily runs are
   // for the key-lookup limits.
-  let checkClient = 200;
+  let checkClient = 200,
+    mcpRequests = 0;
   const dispatch: Fetch = async (target, init) => {
     const u = new URL(target);
     const headers = new Headers(init.headers);
     headers.set("Host", u.host);
-    if (u.host === "mcp.meetmilton.com")
+    if (u.host === "mcp.meetmilton.com") {
+      mcpRequests++;
       headers.set("X-Forwarded-For", `198.51.100.${checkClient}, 192.0.2.1`);
+    }
     const forwarded = new Request(u, {
       method: init.method,
       headers,
@@ -2958,6 +2961,7 @@ try {
     [
       "secrets",
       "sign_in",
+      "key_owner",
       "mcp_connect",
       "safety_gate",
       "retire_leftovers",
@@ -3019,16 +3023,55 @@ try {
     [provisioned.userId],
   );
   assert.equal((await check()).versions, 4, "leftover retired, then the run");
-  const gate = checkLines.find((l) => l.step === "safety_gate")!;
+  const owned = checkLines.find((l) => l.step === "key_owner")!;
   assert.deepEqual(
-    [gate.severity, gate.warning, gate.leftovers, gate.key_days_left],
-    ["WARNING", "key_expires_within_30_days", 1, 19],
+    [owned.severity, owned.warning, owned.key_days_left],
+    ["WARNING", "key_expires_within_30_days", 19],
   );
+  assert.equal(checkLines.find((l) => l.step === "safety_gate")!.leftovers, 1);
   assert.equal(
     checkLines.find((l) => l.step === "retire_leftovers")!.retired,
     1,
   );
   assert.equal(checkLines.at(-1)!.step, "done");
+  // Another account's key, supplied by mistake with the test account's
+  // password, is refused before any MCP request, so that key is never used.
+  const foreignSecrets = join(root, "foreign-key.env");
+  writeFileSync(
+    foreignSecrets,
+    `E2E_EMAIL=${values.E2E_EMAIL}\nE2E_PASSWORD=${values.E2E_PASSWORD}\nE2E_CONNECTION_KEY=${unrelatedKey}\n`,
+    { mode: 0o600 },
+  );
+  await owner.query(
+    "update connection_keys set last_used_at=now()-interval '1 day' where id=$1",
+    [unrelatedKey.slice(3, 25)],
+  );
+  const foreignUse = async () =>
+    (
+      await owner.query(
+        "select last_used_at from connection_keys where id=$1",
+        [unrelatedKey.slice(3, 25)],
+      )
+    ).rows[0].last_used_at.getTime();
+  const foreignBefore = await foreignUse();
+  const mcpBefore = mcpRequests;
+  await owner.query(
+    'delete from milton_auth."rateLimit"; delete from milton_guard.rate_bucket',
+  );
+  checkLines.length = 0;
+  await assert.rejects(
+    runE2E({
+      secrets: foreignSecrets,
+      fetch: dispatch,
+      report: (l) => checkLines.push(l),
+    }),
+    (e) => e instanceof CheckError && e.code === "key_not_on_account",
+  );
+  assert.deepEqual(
+    [mcpRequests - mcpBefore, await foreignUse()],
+    [0, foreignBefore],
+    "a foreign key makes no MCP request and is never touched",
+  );
   // Foreign data (a rule nobody marked) refuses before any write.
   await testSave({
     text: "Fictional foreign rule.",

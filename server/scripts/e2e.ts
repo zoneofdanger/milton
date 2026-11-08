@@ -182,14 +182,10 @@ export async function runE2E(options: {
     await signIn(b, origins, secrets.email, secrets.password);
     done();
 
-    step = "mcp_connect";
-    const first = await session();
-    if ((await first.tools()).join() !== TOOLS.join()) fail("tools_unexpected");
-    done({ tools: TOOLS.length });
-
-    // Nothing is written until the account is known to be the test account,
-    // this key is its own and it holds only this check's marked leftovers.
-    step = "safety_gate";
+    // The key is used only once the signed-in test account's own key list
+    // shows its public id: a key from another account is never sent to MCP,
+    // so it is never authenticated or marked used.
+    step = "key_owner";
     const assistants = await b.follow(origins.app + "/assistants");
     if (
       assistants.status !== 200 ||
@@ -208,6 +204,23 @@ export async function runE2E(options: {
     const daysLeft = expires
       ? Math.floor((Date.parse(expires) - Date.now()) / 86_400_000)
       : null;
+    const warn = daysLeft !== null && daysLeft < KEY_WARN_DAYS;
+    done(
+      {
+        key_days_left: daysLeft,
+        ...(warn ? { warning: "key_expires_within_30_days" } : {}),
+      },
+      warn ? "WARNING" : "INFO",
+    );
+
+    step = "mcp_connect";
+    const first = await session();
+    if ((await first.tools()).join() !== TOOLS.join()) fail("tools_unexpected");
+    done({ tools: TOOLS.length });
+
+    // Nothing is written until the account holds only this check's marked
+    // leftovers.
+    step = "safety_gate";
     const cover = await first.cover();
     const listed = await first.reports();
     const stale = listed.reports.flatMap((r) => r.samples.filter(leftover));
@@ -221,15 +234,7 @@ export async function runE2E(options: {
       )
     )
       fail("account_holds_foreign_data");
-    const warn = daysLeft !== null && daysLeft < KEY_WARN_DAYS;
-    done(
-      {
-        key_days_left: daysLeft,
-        leftovers: stale.length,
-        ...(warn ? { warning: "key_expires_within_30_days" } : {}),
-      },
-      warn ? "WARNING" : "INFO",
-    );
+    done({ leftovers: stale.length });
 
     step = "retire_leftovers";
     if (stale.length)

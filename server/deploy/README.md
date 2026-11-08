@@ -367,14 +367,16 @@ body), each request bounded at 15 s:
 1. `secrets`: the email must end `.invalid` and the key be well formed.
 2. `sign_in`: app `/login`, the auth sign-in page and form, the code flow; the app must show
    "Signed in as" this email.
-3. `mcp_connect`: initialize with the key; `tools/list` must list exactly the four tools.
-4. `safety_gate`, before any write: Connected assistants must show this email and list this
-   key's public id; the cover sheet must hold no rule, no report a rule, and every served
-   sample must carry the check's marker (kind `e2e check`, summary `Milton e2e check, run …`),
-   fewer than eight per report. Anything else stops the run with
-   `account_holds_foreign_data`, having written nothing. It also reports `key_days_left`
-   and, under 30, `warning: key_expires_within_30_days` at severity `WARNING` without
-   failing.
+3. `key_owner`, before any MCP request: Connected assistants must show this email and list
+   this key's public id, or the run stops with `key_not_on_account` and the key is never
+   sent, so another account's key supplied by mistake is never authenticated or marked
+   used. It reports `key_days_left` and, under 30, `warning: key_expires_within_30_days` at
+   severity `WARNING` without failing.
+4. `mcp_connect`: initialize with the key; `tools/list` must list exactly the four tools.
+   `safety_gate`, before any write: the cover sheet must hold no rule, no report a rule,
+   and every served sample must carry the check's marker (kind `e2e check`, summary
+   `Milton e2e check, run …`), fewer than eight per report. Anything else stops the run
+   with `account_holds_foreign_data`, having written nothing.
 5. `retire_leftovers`: retires marked samples a crashed run left, reporting the count.
 6. `baseline`: the account must now be empty; its version and reports are the baseline.
 7. `save_sample`, `fresh_read`: `create_memo` files a fictional sample marked with this run;

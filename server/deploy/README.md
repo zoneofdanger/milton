@@ -330,8 +330,9 @@ Each step needs Peter's go; the release coordinator runs it.
 2. Snapshot production.
 3. Apply 0009, then 011, with their checks (the section above).
 4. Release app and MCP (the explicit test-account exemption, which reads 0009's column).
-5. Provision the account, then run the check once by hand.
-6. Create the daily job (below).
+5. Provision the account; confirm the snapshot gate (Run the check); run the check once by
+   hand.
+6. Create `milton-e2e-daily` (below; milton-duo).
 
 ### Provision the account (once, after steps 1–4)
 
@@ -374,6 +375,11 @@ key next to the file in the same 0600 directory and protect nothing more, and `~
 already holds plain owner files.
 
 ### Run the check
+
+**Snapshot gate.** Each run writes to production (only to the test account, but writes all
+the same). Before the first production run, by hand or by the job, confirm a Neon snapshot
+taken since 0009 was applied exists and record its name; if none does, take one first.
+Later daily runs need no new snapshot.
 
 From a checkout, with no owner or service credential in the environment:
 
@@ -423,37 +429,95 @@ token and binding rows, all removed by expiry, later sign-ins and the maintenanc
 under the 64-per-user cap. The key's `last_used_at` is updated. Nothing is mailed and
 nothing calls Stripe.
 
-### Daily run (proposal, not built)
+### Daily job: `milton-e2e-daily` (defined here; milton-duo applies it)
 
-Follow the maintenance job's pattern (`milton-auth-maint`: a Cloud Run job, a Cloud Scheduler
-trigger, numeric secret versions), with nothing shared with it:
+Production order step 6, after the snapshot gate above and one passing manual run. The same
+pattern as `milton-auth-mail` and `milton-auth-maint` (explicit `gcloud` commands, a pinned
+image digest, numeric secret versions, a scheduler job created paused), sharing nothing
+with them but the scheduler's invoker. Project `milton-510506`, region `us-east4`.
 
-- **Image.** The runtime image runs Node with bundled files and has no `bun` or
-  `server/scripts`, so add `e2e.ts` as a Node bundle (`e2e.js`, the MCP SDK bundled) to
-  `server/scripts/build.ts` and the image, as the auth image carries `deliver.js` and
-  `maintain.js`. Pin the image digest like the services.
-- **Job.** `milton-e2e` in `us-east4`, command `node e2e.js /run/milton-e2e/account.env`, one
-  task, no platform retries (a failure is the signal; the next day's run retires any
-  leftover), task timeout 300 s, service account `milton-e2e@` with no database, project
-  or other secret access.
-- **Secret.** `milton-e2e-account`, version 1 = the provisioned env file, added from the
-  file (`gcloud secrets versions add milton-e2e-account --data-file=...`), mounted at a
-  numeric version as `/run/milton-e2e/account.env`; only `milton-e2e@` may access it. A
-  renewed key is a new version and a job update.
-- **Schedule.** Once a day at a quiet hour (say 14:00 UTC), triggered as `milton-auth-cron@`
-  or a dedicated invoker with `run.invoker` on this job only; check the trigger URL ends in
-  `:run`.
-- **Alerts.** The job prints `severity` in each JSON line, which Cloud Logging reads as the
-  entry's severity, and the failing step's line is `ERROR`. `milton-auth-jobs-errors-log`
-  matches only `milton-auth-*` jobs, so add `milton-e2e-errors-log` the same way (any ERROR
-  from the `milton-e2e` job or its scheduler job, rate limit 10 minutes) to the same
-  `milton-ops-email` channel, Peter's address; and a second log match on
-  `jsonPayload.warning="key_expires_within_30_days"`, at most one notification a day,
-  for the key renewal. A run that never starts (scheduler paused or deleted) raises
-  nothing; a log-absence alert on the `done` line over 26 hours would cover it.
-  **Alert delivery is unverified:** this runbook records the channel and policies but no
-  test notification reaching Peter; send one when the policies are created.
-- **Cost.** About a minute of one vCPU a day, inside Cloud Run's free tier; the writes above.
+- **Image.** The runtime image (`server/Dockerfile`) carries `server/dist/e2e.js`, the check
+  bundled for Node with the MCP SDK and no database driver. Use the digest of the app/MCP
+  release from step 4.
+- **Exit.** 0 only when every step passed; 1 for a refused gate, a failed step, a crash or a
+  run past 240 s; one task, `--max-retries=0` and a 300 s task timeout, so one failure is
+  one failed execution. Each stdout line is JSON with `severity`, which Cloud Logging reads
+  as the entry's severity: the failing step's line is `ERROR`, an expiring key `WARNING`.
+- **Identity.** Its own service account, `milton-e2e@`, with `secretAccessor` on its own
+  secret only: no database URL, no other secret, no project role. The check uses only the
+  public HTTPS endpoints.
+- **Schedule.** Daily at 14:07 UTC (`7 14 * * *`): off the maintenance job's quarter-hour
+  starts (`*/15`) and inside a quiet hour.
+
+Each command touches production; run them only with Peter's go. Create the identity and the
+secret from the provisioned file, which is never printed (`--data-file` reads it):
+
+```sh
+P=--project=milton-510506
+SA=milton-e2e@milton-510506.iam.gserviceaccount.com
+gcloud iam service-accounts create milton-e2e $P --display-name='Milton daily e2e check'
+# Match the replication of the existing secrets (gcloud secrets describe milton-auth-owner-url).
+gcloud secrets create milton-e2e-account $P --replication-policy=automatic
+gcloud secrets versions add milton-e2e-account $P --data-file="$HOME/keys/milton.test-account.env"
+# Expect version 1.
+gcloud secrets versions list milton-e2e-account $P --format='value(name,state)'
+gcloud secrets add-iam-policy-binding milton-e2e-account $P \
+  --member=serviceAccount:$SA --role=roles/secretmanager.secretAccessor
+```
+
+The job (`gcloud run jobs create` does not execute it; do not add `--execute-now`):
+
+```sh
+gcloud run jobs create milton-e2e-daily \
+  --project=milton-510506 --region=us-east4 \
+  --image=us-east4-docker.pkg.dev/milton-510506/milton/runtime@sha256:<STEP_4_DIGEST> \
+  --service-account=milton-e2e@milton-510506.iam.gserviceaccount.com \
+  --command=node \
+  --args=server/dist/e2e.js,/run/milton-e2e/account.env \
+  --set-secrets=/run/milton-e2e/account.env=milton-e2e-account:1 \
+  --tasks=1 --parallelism=1 --max-retries=0 --task-timeout=300s \
+  --cpu=1 --memory=512Mi \
+  --labels=app=milton,component=e2e
+gcloud run jobs add-iam-policy-binding milton-e2e-daily \
+  --project=milton-510506 --region=us-east4 \
+  --member=serviceAccount:milton-auth-cron@milton-510506.iam.gserviceaccount.com \
+  --role=roles/run.invoker
+gcloud run jobs execute milton-e2e-daily --project=milton-510506 --region=us-east4 --wait
+```
+
+The first execution must succeed, its last log line `{"step":"done","ok":true,…}`. Then the
+trigger, created with a schedule that cannot fire soon, paused, then given its real schedule
+while paused (`gcloud scheduler jobs create http` has no `--paused` flag):
+
+```sh
+gcloud scheduler jobs create http milton-e2e-daily \
+  --project=milton-510506 --location=us-east4 \
+  --schedule='0 0 1 1 *' --time-zone=Etc/UTC \
+  --uri=https://run.googleapis.com/v2/projects/milton-510506/locations/us-east4/jobs/milton-e2e-daily:run \
+  --http-method=POST \
+  --oauth-service-account-email=milton-auth-cron@milton-510506.iam.gserviceaccount.com \
+  --max-retry-attempts=0 --attempt-deadline=30s \
+  --description='Milton daily end-to-end check on the fictional test account'
+gcloud scheduler jobs pause milton-e2e-daily --project=milton-510506 --location=us-east4
+gcloud scheduler jobs update http milton-e2e-daily --project=milton-510506 --location=us-east4 --schedule='7 14 * * *'
+gcloud scheduler jobs describe milton-e2e-daily --project=milton-510506 --location=us-east4 \
+  --format='value(state,schedule,httpTarget.uri)'
+# required: PAUSED  7 14 * * *  …/jobs/milton-e2e-daily:run   (the URL must end in :run)
+gcloud scheduler jobs resume milton-e2e-daily --project=milton-510506 --location=us-east4
+```
+
+A renewed key is a new secret version: `gcloud secrets versions add` from the updated file,
+then `gcloud run jobs update milton-e2e-daily --set-secrets=/run/milton-e2e/account.env=milton-e2e-account:<n>`
+(region and project as above), then disable the old version. A new runtime image moves the
+job with `gcloud run jobs update milton-e2e-daily --image=…@sha256:<digest>` at each app/MCP
+release.
+
+**Alerts** are milton-duo's (spec item 5): at least one failed execution of
+`milton-e2e-daily` in 24 hours, or no execution for 26 hours. The `WARNING` line
+(`jsonPayload.warning="key_expires_within_30_days"`) is there for a renewal alert if one is
+wanted. Alert delivery to Peter is unverified until milton-duo sends a test notification.
+
+**Cost.** About a minute of one vCPU a day, inside Cloud Run's free tier; the writes above.
 
 ## Optional guide worker
 

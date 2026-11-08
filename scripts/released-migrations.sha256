@@ -35,3 +35,4 @@ b635d478f65a82bfdd8e9e7576b543bd81b1feee912ecbf95d4e392bb4e76538  server/migrati
 aeb3521d29ca9fe5c7eeaa81b8f5f00ea07ed64cfabc253f53e817a14f4e858a  server/migrations/009-usage-calls-roles.sql
 4b8675d3bfd29ea996ec075d497efdbb73561d900492c5f01eca71d2c467dfb4  server/migrations/010-usage-retention-roles.sql
 f58fc44aadd6d50a8881eaae3dc853556782975e071af22dd4343e5731713603  server/migrations/011-test-account-roles.sql
+b913b73d374b3ac7a07b027c6f4eb0e7586c9952a33e829adbcf824a1c3481ba  server/migrations/012-session-token-nullable.up.sql

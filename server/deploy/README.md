@@ -22,7 +22,21 @@ This runbook keeps only the latest release record. Earlier release records and a
 one-time procedures are in git history; the last full version is at commit 492b96a
 (`git show 492b96a:server/deploy/README.md`).
 
-## Release record: admit once, owner password retired, down scripts deleted (2026-11-08, PRs #53 #54)
+## Release record: usage retention, admit once, owner password retired (2026-11-08, PRs #53 #54 #55)
+
+- **#55 (Peter; milton-qa, Astra passed with two should-fixes fixed in `be24774`), `7211521`:**
+  Drizzle 0008 dropped `usage_daily` (9 rows) and the stored `daily_calls` key, and added
+  `usage_calls_by_at` and `prune_usage_calls` (90 days); owner file 010 lets only
+  `milton_auth_owner` run it. Snapshot `snap-snowy-haze-b8dl4hvc` at 04:24Z; size gate 21
+  rows; applied with `db:migrate` (journal 9, hash `eae2dd56…`) and `psql` for 010; checks:
+  no `usage_daily`, no key, ACL owner + `milton_auth_owner`, index valid, runtime audits `ok`
+  for app and MCP. Auth `milton-auth-00014-juv` at 04:26Z (image
+  `sha256:e6d303ca038354afc45691d7f4f36daa9b6885a5a49b41e1a0dea0acfc7736d2`; mail and
+  maintenance jobs too). A manual maintenance run succeeded ("Usage rows past retention
+  removed: 0"); an MCP read appended a usage row. Checks on the merge: types, 139 tests,
+  format, site, auth build, auth integration 20/20, rehearsal 14/14, all 0. In a 5-minute
+  watch: no 5xx, 429, application, job or audit errors; mail runs succeeded. After 0008,
+  app/MCP must not roll back past #40 without restoring the snapshot.
 
 - **Owner credential retired (Peter, 2026-11-08):** `neondb_owner`'s password was reset
   through the Neon API at 03:36Z (the old one is rejected); the owner connection kept for
@@ -48,7 +62,7 @@ one-time procedures are in git history; the last full version is at commit 492b9
   read with an auth-issued token succeeded. In a 5-minute watch: no 5xx, 429, application,
   job or audit errors; mail runs succeeded. Not verified live: a real browser sign-in.
 
-Auth `milton-auth-00012-qod`, rollback `milton-auth-00010-g64`. App/MCP unchanged
+Auth `milton-auth-00014-juv`, rollback `milton-auth-00012-qod` (its jobs run on either schema). App/MCP unchanged
 (`milton-*-save-b85f428`, rollback `milton-*-rnd3-64435ee`). Earlier records: git history
 (`git log -p server/deploy/README.md`).
 
@@ -189,7 +203,7 @@ pronamespace='public'::regnamespace` returns 0, and `check-runtime-role.ts` prin
 Rollback, never needed to roll app/MCP back (older code runs on either schema), is the
 pre-migration Neon snapshot `snap-crimson-field-b87qk777`. There is no down script.
 
-## Usage retention and the daily allowance's leftovers (prepared: Drizzle 0008, owner file 010)
+## Usage retention and the daily allowance's leftovers (applied 2026-11-08: Drizzle 0008, owner file 010, PR #55)
 
 0008 drops `usage_daily`, removes the stored `daily_calls` key from the `store_config` row
 (idempotent) and from the column default, adds the index `usage_calls_by_at`, and creates
@@ -243,8 +257,8 @@ or database first, then:
    log line `Usage rows past retention removed: N` reads 0 until about 2027-02-06, 90 days
    after the first usage row.
 
-Rollback is the pre-migration Neon snapshot; there is no down script. Older auth images run
-on either schema (they never prune). Before restoring the snapshot, move the auth jobs back
+Rollback is the pre-migration Neon snapshot `snap-snowy-haze-b8dl4hvc`; there is no down
+script. Older auth images run on either schema (they never prune). Before restoring the snapshot, move the auth jobs back
 to an image without the prune, or each run fails on the missing function.
 
 ## Optional guide worker
@@ -265,8 +279,10 @@ The tracked app and MCP manifests still pin the pre-cutover release: app
 [Release verification and rollback](#release-verification-and-rollback); derive a manifest
 from the live service before replacing it. [auth.service.template.json](auth.service.template.json)
 is deliberately non-deployable. Production's writing journal holds `0000_baseline` through
-`0004_connection_keys` (5 entries), the native auth ledger 001–007, and the owner files
-`000-app-owner.sql`, `005-app.up.sql`, `005-app-roles.sql`, `006-connection-keys-roles.sql` and `007-role-timeouts.up.sql` (see [runtime role timeouts](#runtime-role-timeouts-applied-2026-11-07-todo-29)). There is no memo-update
+`0008_usage_retention` (9 entries), the native auth ledger 001–007, and the owner files
+`000-app-owner.sql`, `005-app.up.sql`, `005-app-roles.sql`, `006-connection-keys-roles.sql`,
+`007-role-timeouts.up.sql`, `008-drop-legacy-mapping.up.sql`, `009-usage-calls-roles.sql` and
+`010-usage-retention-roles.sql` (see [runtime role timeouts](#runtime-role-timeouts-applied-2026-11-07-todo-29)). There is no memo-update
 or daily call allowance (removed by PR #40, serving since 2026-11-08). Existing positive account safeguards remain
 in effect. Trials and billing are live (since 2026-11-04).
 Each image includes both roles and browser assets. Validate manifests before applying:
@@ -472,7 +488,7 @@ gcloud run revisions list --service=milton-app --project=milton-510506 --region=
 ```
 
 Now serving (2026-11-08): app `milton-app-save-b85f428` and MCP
-`milton-mcp-save-b85f428` (source `b85f428`), and auth `milton-auth-00012-qod` (source `06868cc`). The
+`milton-mcp-save-b85f428` (source `b85f428`), and auth `milton-auth-00014-juv` (source `7211521`). The
 release record above gives the image and rollback revisions.
 
 Roll back only affected services, preserve ingress/IAM, then repeat the canonical

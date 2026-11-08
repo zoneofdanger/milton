@@ -340,9 +340,11 @@ must not roll back to an image older than this change, whose sign-in writes the 
 
 Since #62 the app never writes `milton_app.session.access_token` and nothing has ever read
 it; 012 made it nullable, and production has stored no token since `milton-*-token-0f7d5aa`
-began serving (2026-11-08 17:47Z). 013 drops the column and with it the tokens older rows
-still hold, each expired within an hour of its sign-in. DROP COLUMN is a catalog change
-with no table rewrite; 013 sets a 5 s lock limit in its own transaction because it briefly
+began serving (2026-11-08 17:47Z). 013 drops the column, so no SQL can read the tokens
+older rows still hold, each expired within an hour of its sign-in. DROP COLUMN is a
+catalog change with no table rewrite: it does not erase those bytes, which stay in the
+tuples until the expired rows are reclaimed and vacuumed, and in WAL and snapshots until
+they age out (snapshots are kept 14 days); 013 sets a 5 s lock limit in its own transaction because it briefly
 locks `session` exclusively. Apply only while the app serves `milton-app-token-0f7d5aa` or
 later: older app code inserts the column, so every sign-in on it fails after the drop. MCP
 never touches sessions. Rehearse on a disposable database first

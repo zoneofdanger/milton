@@ -2,7 +2,10 @@
 -- As the milton_app owner (milton_app_owner, the role migrate.ts --app-auth runs
 -- as): psql -X -v ON_ERROR_STOP=1 -f this file. Since #62 the app never stores the
 -- native access token in milton_app.session and nothing has ever read the column;
--- 012 made it nullable. This drops the column and the tokens older rows still hold.
+-- 012 made it nullable. This drops the column, so no SQL can read the tokens older
+-- rows still hold (each expired within an hour of its sign-in). DROP COLUMN does not
+-- erase their bytes: they stay in those tuples until the rows are reclaimed and
+-- vacuumed, and in WAL and snapshots until those age out.
 -- Apply only while app code from #62 or later serves: older app code inserts the
 -- column and fails every sign-in without it, so after this file the app never rolls
 -- back to an image older than #62 (milton-app-token-0f7d5aa) unless the snapshot is

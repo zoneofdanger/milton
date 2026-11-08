@@ -17,7 +17,7 @@ import { BASELINE, bullet, FILINGS, ruleText, type Documents } from "./reports";
 import { applySampleChanges } from "./samples";
 import { requireActiveAccount } from "./accounts";
 import { hash, readSnapshot, type Snapshot } from "./snapshot";
-import { assertTrialAccess } from "./trials";
+import { assertTrialAccess, type TrialStatus } from "./trials";
 
 const retiredSample = z.object({
   id: z.string(),
@@ -58,10 +58,10 @@ async function receipt(tx: StoreSession, userId: string, id: string) {
   )[0];
 }
 
-async function checkSize(tx: StoreSession, documents: Documents) {
+function checkSize(documents: Documents, limits: StoreLimits) {
   // Every source byte is preserved; only headings, when lines, sample context
   // and quoting, and blank lines are added. Each body has its own cap.
-  const cap = reportCap(await readLimits(tx));
+  const cap = reportCap(limits);
   if (
     utf8Bytes(documents.cover) > cap ||
     documents.reports.some((r) => utf8Bytes(r.body) > cap) ||
@@ -93,6 +93,8 @@ export async function runSave(
   input: SaveMemoInput,
   /** Admits the call (see below); never waits on the database. */
   admit?: () => void,
+  /** Sees the trial status the save's gate admitted; a replay never reaches it. */
+  gated?: (status: TrialStatus) => void,
 ): Promise<SaveOutcome> {
   const inputHash = hash(input);
   // Every save is exact: the caller sends the bytes, and no model rewrites them.
@@ -141,7 +143,9 @@ export async function runSave(
         throw new StoreError("invalid_input", nameTheReport, 400);
       // Account gates answer without a receipt, so the same request can
       // succeed once the gate opens.
-      await assertTrialAccess(tx, userId);
+      // Always awaited: with no callback, `gated?.(…)` would skip its argument.
+      const status = await assertTrialAccess(tx, userId);
+      gated?.(status);
       // Admitted here, after replay and every gate: a save that records an
       // outcome (saved, unchanged, conflict or failed) is admitted, a replay
       // of it is not. Its usage append runs on another connection, and this
@@ -364,13 +368,20 @@ async function applySave(
     retire.length === 0 &&
     updates.every((m) => known.get(m.id)?.body === m.text);
   if (unchanged) return result("unchanged", { version: current.version });
-  const append = async (
+  // Every new card, then every new version, each in one statement whose rows
+  // keep this order; the row triggers check each row.
+  const newCards: string[] = [];
+  const versions: {
+    h: Pick<Head, "id" | "version" | "description" | "body" | "report">;
+    archived: boolean;
+    kind: string;
+  }[] = [];
+  const append = (
     h: Pick<Head, "id" | "version" | "description" | "body" | "report">,
     archived: boolean,
     kind: string,
   ) => {
-    await tx.query(sql`INSERT INTO instruction_card_versions(user_id,card_id,version,description,body,archived,report,reason,actor_json,details_json)
-        VALUES (${userId},${h.id},${h.version + 1},${h.description},${h.body},${archived},${h.report},'Filed memo',${attribution},${JSON.stringify({ kind, request_id: input.request_id })})`);
+    versions.push({ h, archived, kind });
   };
   // Only explicit targets get new history rows. Omission preserves bytes,
   // descriptions, reports and versions; it never means retirement. A
@@ -378,7 +389,7 @@ async function applySave(
   for (const memo of updates) {
     const old = known.get(memo.id)!;
     if (old.body === memo.text) continue;
-    await append(
+    append(
       {
         ...old,
         body: memo.text,
@@ -390,13 +401,11 @@ async function applySave(
     moveTo.delete(memo.id);
   }
   for (const [id, report] of moveTo)
-    await append({ ...known.get(id)!, report }, false, "move");
+    append({ ...known.get(id)!, report }, false, "move");
   for (const memo of creates) {
     const id = randomUUID();
-    await tx.query(
-      sql`INSERT INTO instruction_cards(user_id,id) VALUES (${userId},${id})`,
-    );
-    await append(
+    newCards.push(id);
+    append(
       {
         id,
         version: 0,
@@ -411,8 +420,26 @@ async function applySave(
       "create",
     );
   }
-  for (const id of retire) await append(known.get(id)!, true, "archive");
-  return publishSave(save, tx, current, samples.retired, attribution);
+  for (const id of retire) append(known.get(id)!, true, "archive");
+  // One array parameter per column, so a save's size never meets the
+  // statement's parameter limit. ORDER BY the ordinality keeps the rows (and
+  // the positions nextval gives new cards) in this order.
+  if (newCards.length)
+    await tx.query(sql`INSERT INTO instruction_cards(user_id,id)
+      SELECT ${userId}::text,c.id FROM unnest(${sql.param(newCards)}::text[]) WITH ORDINALITY AS c(id,ord) ORDER BY c.ord`);
+  if (versions.length)
+    await tx.query(sql`INSERT INTO instruction_card_versions(user_id,card_id,version,description,body,archived,report,reason,actor_json,details_json)
+      SELECT ${userId}::text,v.card_id,v.version,v.description,v.body,v.archived,v.report,'Filed memo',${attribution}::text,v.details_json
+      FROM unnest(${sql.param(versions.map((v) => v.h.id))}::text[],
+        ${sql.param(versions.map((v) => v.h.version + 1))}::int[],
+        ${sql.param(versions.map((v) => v.h.description))}::text[],
+        ${sql.param(versions.map((v) => v.h.body))}::text[],
+        ${sql.param(versions.map((v) => v.archived))}::boolean[],
+        ${sql.param(versions.map((v) => v.h.report))}::text[],
+        ${sql.param(versions.map((v) => JSON.stringify({ kind: v.kind, request_id: input.request_id })))}::text[])
+        WITH ORDINALITY AS v(card_id,version,description,body,archived,report,details_json,ord)
+      ORDER BY v.ord`);
+  return publishSave(save, tx, current, samples.retired, attribution, limits);
 }
 
 /** Publish: check the assembled documents against their size limits, record
@@ -424,10 +451,11 @@ async function publishSave(
   before: Snapshot,
   retired: z.infer<typeof retiredSample>[],
   attribution: string,
+  limits: StoreLimits,
 ) {
   const { userId, input, result } = save;
   const updated = await readSnapshot(tx, userId);
-  await checkSize(tx, updated.documents);
+  checkSize(updated.documents, limits);
   await recordAcceptedChange(tx, {
     userId,
     requestId: input.request_id,

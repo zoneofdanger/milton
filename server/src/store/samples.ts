@@ -33,15 +33,23 @@ export async function applySampleChanges(
     [...retiring].some((id) => !current.samples.some((s) => s.id === id))
   )
     conflict("Each sample to retire must be an active sample, listed once.");
-  const append = async (
+  // Every new version, in this order, in one statement; the row triggers
+  // check each row.
+  const versions: {
+    sample: Pick<
+      Sample,
+      "id" | "revision" | "report" | "kind_id" | "context" | "body"
+    >;
+    retired: boolean;
+  }[] = [];
+  const append = (
     sample: Pick<
       Sample,
       "id" | "revision" | "report" | "kind_id" | "context" | "body"
     >,
     retired = false,
   ) => {
-    await tx.query(sql`INSERT INTO sample_versions(user_id,sample_id,version,report,kind_id,context,body,retired,retire_reason,actor_json,request_id,created_at)
-      VALUES (${userId},${sample.id},${sample.revision + 1},${sample.report},${sample.kind_id},${JSON.stringify(sample.context)}::jsonb,${sample.body},${retired},${retired ? "removed" : null},${attribution},${input.request_id},clock_timestamp())`);
+    versions.push({ sample, retired });
   };
   let changed = false;
   const sample = input.sample;
@@ -100,7 +108,7 @@ export async function applySampleChanges(
         await tx.query(
           sql`INSERT INTO samples(user_id,id,client_json) VALUES (${userId},${stableId},${attribution})`,
         );
-      await append({
+      append({
         id: stableId,
         revision: previous?.revision ?? 0,
         report,
@@ -112,10 +120,25 @@ export async function applySampleChanges(
     }
   }
   for (const id of retiring)
-    await append(
+    append(
       current.samples.find((s) => s.id === id)!,
       true,
     );
+  // One array parameter per column, so a save's size never meets the
+  // statement's parameter limit.
+  if (versions.length)
+    await tx.query(sql`INSERT INTO sample_versions(user_id,sample_id,version,report,kind_id,context,body,retired,retire_reason,actor_json,request_id,created_at)
+      SELECT ${userId}::text,v.sample_id,v.version,v.report,v.kind_id,v.context::jsonb,v.body,v.retired,v.retire_reason,${attribution}::text,${input.request_id}::text,clock_timestamp()
+      FROM unnest(${sql.param(versions.map((v) => v.sample.id))}::text[],
+        ${sql.param(versions.map((v) => v.sample.revision + 1))}::int[],
+        ${sql.param(versions.map((v) => v.sample.report))}::text[],
+        ${sql.param(versions.map((v) => v.sample.kind_id))}::text[],
+        ${sql.param(versions.map((v) => JSON.stringify(v.sample.context)))}::text[],
+        ${sql.param(versions.map((v) => v.sample.body))}::text[],
+        ${sql.param(versions.map((v) => v.retired))}::boolean[],
+        ${sql.param(versions.map((v) => (v.retired ? "removed" : null)))}::text[])
+        WITH ORDINALITY AS v(sample_id,version,report,kind_id,context,body,retired,retire_reason,ord)
+      ORDER BY v.ord`);
   return {
     changed: changed || retiring.size > 0,
     retired: [...retiring].map((id) => ({ id, reason: "removed" as const })),

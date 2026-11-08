@@ -1,6 +1,8 @@
 import { compiledMemos, type SaveMemoInput } from "../src/store/compiled";
 import { expect, test } from "bun:test";
-import { sql } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
+import type { StoreDatabase, StoreSession } from "../src/store/database";
 import { StoreError } from "../src/store/errors";
 import { database } from "../src/store/index";
 import { BASELINE_NOTE } from "../src/store/reports";
@@ -1151,6 +1153,141 @@ test("no save files or keeps a Baseline: rule, new, edited or moved; retiring on
       (await cardHeads(local.db, "baseline")).map((h) => h.body),
     ).toContain(own);
     expect((await store.getTpsReport()).text).not.toContain(BASELINE_NOTE);
+  } finally {
+    await local.dispose();
+  }
+});
+
+test("a save writes each table in one statement, rows in order, and reads the limits once", async () => {
+  const local = await localStore();
+  try {
+    await seedUsers(local.pg, "batched");
+    const dialect = new PgDialect();
+    const statements: string[] = [];
+    const watched = (session: StoreSession): StoreSession => ({
+      query<Row extends Record<string, unknown>>(statement: SQL) {
+        statements.push(dialect.sqlToQuery(statement).sql);
+        return session.query<Row>(statement);
+      },
+    });
+    const db: StoreDatabase = {
+      ...watched(local.db),
+      transaction: (work) => local.db.transaction((tx) => work(watched(tx))),
+      withConnection: (work) => work(db),
+    };
+    const store = fixtureStore(db, "batched");
+    // The save's INSERTs by table, and its reads of the limits.
+    const save = async (extra: object) => {
+      const expected_version = (await store.getTpsReport()).version;
+      const request_id = crypto.randomUUID();
+      statements.length = 0;
+      const outcome = await store.saveMemo({
+        text: "Fictional change.",
+        request_id,
+        expected_version,
+        ...extra,
+      } as SaveMemoInput);
+      const inserts: Record<string, number> = {};
+      for (const s of statements) {
+        const table = /^\s*INSERT INTO (\w+)/i.exec(s)?.[1];
+        if (table) inserts[table] = (inserts[table] ?? 0) + 1;
+      }
+      return {
+        request_id,
+        outcome,
+        inserts,
+        limits: statements.filter((s) => s.includes("limits_json")).length,
+      };
+    };
+    const texts = Array.from(
+      { length: 100 },
+      (_, i) => `Fictional rule ${i + 1}.`,
+    );
+    const many = await save({
+      rules: texts.map((text, i) => ({
+        report: i % 2 ? ("email" as const) : ("cover" as const),
+        text,
+      })),
+    });
+    expect(many.outcome.status).toBe("saved");
+    expect(many.inserts).toEqual({
+      instruction_cards: 1,
+      instruction_card_versions: 1,
+      accepted_changes: 1,
+      save_requests: 1,
+    });
+    expect(many.limits).toBe(1);
+    // Positions follow the rules as sent.
+    const heads = await cardHeads(local.db, "batched");
+    expect(heads.map((h) => h.body)).toEqual(texts);
+    // An edit, a move, a removal and two new rules: one INSERT per table.
+    const mixed = await save({
+      exact_edits: [
+        { before: "Fictional rule 1.", after: "Fictional rule one." },
+        { before: "Fictional rule 2.", after: "" },
+      ],
+      moves: [{ before: "Fictional rule 3.", report: "chat" }],
+      rules: [
+        { report: "cover", text: "Fictional rule 101." },
+        { report: "speech", text: "Fictional rule 102." },
+      ],
+    });
+    expect(mixed.outcome.status).toBe("saved");
+    expect(mixed.inserts).toEqual(many.inserts);
+    expect(mixed.limits).toBe(1);
+    const after = await cardHeads(local.db, "batched");
+    expect(after.slice(0, 3)).toMatchObject([
+      { id: heads[0]!.id, version: 2, body: "Fictional rule one." },
+      { id: heads[1]!.id, version: 2, archived: true },
+      { id: heads[2]!.id, version: 2, report: "chat" },
+    ]);
+    expect(after.slice(-2)).toMatchObject([
+      { version: 1, body: "Fictional rule 101.", report: "cover" },
+      { version: 1, body: "Fictional rule 102.", report: "speech" },
+    ]);
+    expect(
+      (
+        await local.pg.query(
+          `SELECT details_json::jsonb->>'kind' AS kind FROM instruction_card_versions
+          WHERE user_id='batched' AND details_json::jsonb->>'request_id'=$1`,
+          [mixed.request_id],
+        )
+      ).rows
+        .map((r) => (r as { kind: string }).kind)
+        .sort(),
+    ).toEqual(["archive", "create", "create", "move", "update"]);
+    // A new sample and two retirements: one INSERT of their versions.
+    const sample = (text: string) => ({
+      sample: {
+        report: "email" as const,
+        new_kind: "Follow-up",
+        context: { version: 1 as const, summary: "after a call" },
+        text,
+      },
+    });
+    await save(sample("Fictional sample one."));
+    await save(sample("Fictional sample two."));
+    const active = (await store.readDocuments()).reports.find(
+      (r) => r.id === "email",
+    )!.samples;
+    expect(active).toHaveLength(2);
+    const samples = await save({
+      ...sample("Fictional sample three."),
+      retire_samples: active.map((s) => s.id),
+    });
+    expect(samples.outcome).toMatchObject({ status: "saved" });
+    expect(samples.inserts).toEqual({
+      samples: 1,
+      sample_versions: 1,
+      accepted_changes: 1,
+      save_requests: 1,
+    });
+    expect(samples.limits).toBe(1);
+    expect(
+      (await store.readDocuments()).reports
+        .find((r) => r.id === "email")!
+        .samples.map((s) => s.body),
+    ).toEqual(["Fictional sample three."]);
   } finally {
     await local.dispose();
   }

@@ -30,3 +30,7 @@ export function parseLimits(value: unknown): StoreLimits {
 }
 export const utf8Bytes = (value: string) =>
   new TextEncoder().encode(value).length;
+/** The bound on each assembled body, in UTF-8 bytes (utf8Bytes): saves refuse
+ * past it, and an intent read selects its samples within it. */
+export const reportCap = (limits: StoreLimits) =>
+  Math.min(limits.report_body_bytes, 262144);

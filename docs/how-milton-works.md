@@ -137,7 +137,7 @@ Files: `server/src/store/reports.ts`, `server/src/store/compiled.ts`.
 - Cards print as bullets in insertion order, and an older stored `- ` is not doubled.
 - A report is its heading, "Applies when…", selected samples as quotes, and then rules.
 - `get_report` requires intent (situation, optional personal `kind_id` and context dimensions); invalid or foreign kinds are refused without creating one.
-- One snapshot computes full-text rank; deterministic selection prefers requested kind, purpose overlap count, exact dimension match count, situation rank over summary/body, newest, then ascending ID, filling up to eight with broader examples and reporting exact match signals.
+- One snapshot computes full-text rank; deterministic selection prefers requested kind, purpose overlap count, exact dimension match count, situation rank over summary/body, newest, then ascending ID, filling up to eight with broader examples and reporting exact match signals; a sample that would take the report past its size cap (as saves measure it) is skipped for the next best.
 - Unknown scope stays unknown; excerpts do not establish whole-work structure, and report text, app and complete export show approved summary and dimensions.
 - Without intent (`list_reports`, the web page), a report serves its newest eight.
 - The cover sheet prints a note explaining `Baseline:` whenever any active rule has that
@@ -198,7 +198,9 @@ not at all.
 ### Apply
 
 - Validation and writes run after a savepoint; a refusal or failure rolls back to it,
-  so nothing changes and the receipt stores the failure.
+  so nothing changes and the receipt stores the failure. A transient or unknown
+  database error (`store_unavailable`) rolls back the whole save instead, with no
+  receipt or charge, so the same request can succeed on retry.
 - Rule changes append new versions, so nothing is overwritten.
 - An edit plus a move on the same rule produces one version.
 - Moving a rule to the report it is already in changes nothing.

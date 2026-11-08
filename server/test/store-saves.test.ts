@@ -288,16 +288,29 @@ test("stale and failed compiled saves preserve current memos, receipts and charg
     const before = await local.pg.query(
       "SELECT card_id,version,body FROM instruction_card_versions WHERE user_id='race' ORDER BY card_id,version",
     );
+    // A transient database error while applying (here a statement timeout)
+    // stores no receipt, so the same request saves once the fault clears.
     await local.pg
-      .exec(`CREATE FUNCTION reject_report() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fixture report failure'; END $$;
+      .exec(`CREATE FUNCTION reject_report() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fixture statement timeout' USING ERRCODE = '57014'; END $$;
       CREATE TRIGGER reject_report BEFORE INSERT ON accepted_changes FOR EACH ROW EXECUTE FUNCTION reject_report();`);
-    const failed = await store.saveMemo({
+    const transient = {
       text: "A changed instruction.",
       exact_edits: [{ before: "Be concise.", after: "A changed instruction." }],
       request_id: crypto.randomUUID(),
       expected_version: first.version,
+    };
+    await expect(store.saveMemo(transient)).rejects.toMatchObject({
+      code: "store_unavailable",
+      status: 503,
     });
-    expect(failed.status).toBe("failed");
+    expect(
+      (
+        await local.pg.query(
+          "SELECT count(*)::int AS n FROM save_requests WHERE request_id=$1",
+          [transient.request_id],
+        )
+      ).rows,
+    ).toEqual([{ n: 0 }]);
     expect(
       await local.pg.query(
         "SELECT card_id,version,body FROM instruction_card_versions WHERE user_id='race' ORDER BY card_id,version",
@@ -311,6 +324,24 @@ test("stale and failed compiled saves preserve current memos, receipts and charg
         )
       ).rows,
     ).toEqual([{ n: 1 }]);
+    await local.pg.exec("DROP TRIGGER reject_report ON accepted_changes");
+    const retried = await store.saveMemo(transient);
+    expect(retried.status).toBe("saved");
+    expect(await store.saveMemo(transient)).toEqual(retried);
+    expect(
+      (
+        await local.pg.query(
+          "SELECT count(*)::int AS n FROM instruction_card_versions WHERE user_id='race'",
+        )
+      ).rows,
+    ).toEqual([{ n: before.rows.length + 1 }]);
+    expect(
+      (
+        await local.pg.query(
+          "SELECT count(*)::int AS n FROM accepted_changes WHERE user_id='race'",
+        )
+      ).rows,
+    ).toEqual([{ n: 2 }]);
   } finally {
     await local.dispose();
   }

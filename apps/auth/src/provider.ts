@@ -8,6 +8,7 @@ import {
   getSessionFromCtx,
 } from "better-auth/api";
 import { getCurrentAuthEndpointContext } from "@better-auth/core/context";
+import { decodeBasicCredentials } from "@better-auth/core/oauth2";
 import { jwt } from "better-auth/plugins";
 import {
   getOAuthProviderState,
@@ -351,11 +352,15 @@ export function createProvider(
         "/change-password": { window: 10, max: 3 },
         "/request-password-reset": { window: 60, max: 3 },
         "/send-verification-email": { window: 60, max: 3 },
-        "/oauth2/token": { window: 60, max: 20 },
+        // Token and introspection are the wrapper's client buckets; only
+        // the app may introspect.
+        "/oauth2/token": false,
+        "/oauth2/introspect": false,
         "/oauth2/authorize": { window: 60, max: 30 },
-        "/oauth2/introspect": { window: 60, max: 100 },
         "/oauth2/revoke": { window: 60, max: 30 },
-        "/oauth2/register": { window: 60, max: 5 },
+        // Assistant backends register each new connection from shared
+        // addresses; the network bucket still bounds one address.
+        "/oauth2/register": { window: 60, max: 60 },
         "/oauth2/userinfo": { window: 60, max: 60 },
         "/**": false,
       },
@@ -691,15 +696,59 @@ export function createProvider(
     ];
     if (typeof body.email === "string")
       buckets.push([rate("account:" + body.email.toLowerCase()), 60, 10]);
+    // The client native will authenticate, read as native reads it (a Basic
+    // header first, else the body). Server-side callers (the app, assistant
+    // backends) put many people behind one address, so token requests take a
+    // bucket per client and address instead of native's per address. A
+    // client_id that is only named, not proven, is keyed on the caller's own
+    // address, so naming another client spends nothing of that client's
+    // elsewhere; the network bucket still bounds the address.
+    let caller: string | undefined, callerSecret: string | undefined;
+    if (path === "/oauth2/token" || path === "/oauth2/introspect") {
+      const authorization = request.headers.get("authorization");
+      if (authorization && /^Basic +/i.test(authorization)) {
+        try {
+          const basic = decodeBasicCredentials(authorization);
+          caller = basic.clientId;
+          callerSecret = basic.clientSecret;
+        } catch {
+          // Native refuses it; only the network bucket applies.
+        }
+      } else {
+        if (typeof body.client_id === "string") caller = body.client_id;
+        if (typeof body.client_secret === "string")
+          callerSecret = body.client_secret;
+      }
+    }
+    if (path === "/oauth2/token" && caller)
+      buckets.push([rate("client:" + JSON.stringify([caller, ip])), 60, 60]);
+    // The app's own client skips those buckets only when its secret matches
+    // the stored hash (native's: SHA-256, base64url), checked in the same
+    // statement; it keeps a per-address ceiling of its own.
+    const firstParty =
+      caller === config.AUTH_APP_CLIENT_ID && Boolean(callerSecret);
+    const list = (offset: number) =>
+      `array[${buckets
+        .map(
+          (_, i) =>
+            `milton_guard.take_rate($${offset + 3 * i + 1},$${offset + 3 * i + 2},$${offset + 3 * i + 3})`,
+        )
+        .join(",")}]`;
     try {
       const taken = await pool.query<{ allowed: boolean[] }>(
-        `select array[${buckets
-          .map(
-            (_, i) =>
-              `milton_guard.take_rate($${3 * i + 1},$${3 * i + 2},$${3 * i + 3})`,
-          )
-          .join(",")}] as allowed`,
-        buckets.flat(),
+        firstParty
+          ? `select case when exists(select 1 from milton_auth."oauthClient" where "clientId"=$1 and "clientSecret"=$2 and "disabled" is not true) then array[milton_guard.take_rate($3,$4,$5)] else ${list(5)} end as allowed`
+          : `select ${list(0)} as allowed`,
+        firstParty
+          ? [
+              caller,
+              createHash("sha256").update(callerSecret!).digest("base64url"),
+              rate("first-party:" + ip),
+              60,
+              1000,
+              ...buckets.flat(),
+            ]
+          : buckets.flat(),
       );
       const allowed = taken.rows[0]?.allowed;
       if (!Array.isArray(allowed) || !allowed.every((a) => a === true))

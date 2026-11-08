@@ -1080,6 +1080,163 @@ try {
   group(
     "shared atomic rate bucket across pools and effective runtime privilege audits",
   );
+  {
+    // Server-side callers put many people behind one address. A 429 is the
+    // only refusal counted; every other reply reached native's own checks.
+    await p.owner.query(
+      'delete from milton_auth."rateLimit"; delete from milton_guard.rate_bucket',
+    );
+    const send = (
+      path: string,
+      peer: string,
+      body?: Record<string, unknown>,
+      type = "application/x-www-form-urlencoded",
+    ) =>
+      service.handler(
+        new Request(ISSUER + path, {
+          method: body ? "POST" : "GET",
+          headers: {
+            ...(body ? { "content-type": type } : {}),
+            ...(path.startsWith("/sign-in") ? { origin: AUTH_ORIGIN } : {}),
+          },
+          ...(body
+            ? {
+                body:
+                  type === "application/json"
+                    ? JSON.stringify(body)
+                    : new URLSearchParams(
+                        body as Record<string, string>,
+                      ).toString(),
+              }
+            : {}),
+        }),
+        peer,
+      );
+    const refusal = async (r: Response) =>
+      r.status === 429
+        ? (((await r.json()) as { error?: string }).error ?? "native")
+        : null;
+    const refresh = (c: { client_id: string; client_secret: string }) => ({
+      grant_type: "refresh_token",
+      refresh_token: secret(),
+      client_id: c.client_id,
+      client_secret: c.client_secret,
+    });
+    // One connector backend registers six connections in a minute; the
+    // rest come from their own addresses, so (a) has its 21 clients.
+    const registered: { client_id: string; client_secret: string }[] = [];
+    const registrations: (string | null)[] = [];
+    for (let i = 0; i < 26; i++) {
+      const r = await send(
+        "/oauth2/register",
+        i < 6 ? "198.51.100.1" : `198.51.100.${i + 10}`,
+        {
+          client_name: "Fictional connector",
+          redirect_uris: ["https://assistant.example.invalid/callback"],
+          token_endpoint_auth_method: "client_secret_post",
+          grant_types: ["authorization_code", "refresh_token"],
+        },
+        "application/json",
+      );
+      registrations.push(await refusal(r));
+      if (r.status === 201)
+        registered.push(
+          (await r.json()) as { client_id: string; client_secret: string },
+        );
+    }
+    // (a) Twenty-one authenticated clients refresh from one address.
+    const distinct: (string | null)[] = [];
+    for (const c of registered.slice(0, 21))
+      distinct.push(
+        await refusal(await send("/oauth2/token", "198.51.100.2", refresh(c))),
+      );
+    // (b) One client from one address past its own limit.
+    const same: (string | null)[] = [];
+    for (let i = 0; i < 61; i++)
+      same.push(
+        await refusal(
+          await send("/oauth2/token", "198.51.100.3", refresh(registered[0]!)),
+        ),
+      );
+    // (c) The app's egress address has spent its network bucket; the app
+    // client still exchanges and introspects when it authenticates, and a
+    // request that only names it does not.
+    for (let i = 0; i < 120; i++) await send("/ok", "198.51.100.4");
+    const app = {
+      client_id: client.AUTH_APP_CLIENT_ID,
+      client_secret: client.AUTH_APP_CLIENT_SECRET,
+    };
+    const firstParty: (string | null)[] = [];
+    for (let i = 0; i < 25; i++)
+      firstParty.push(
+        await refusal(
+          await send("/oauth2/token", "198.51.100.4", refresh(app)),
+        ),
+      );
+    firstParty.push(
+      await refusal(
+        await send("/oauth2/introspect", "198.51.100.4", {
+          token: secret(),
+          ...app,
+        }),
+      ),
+    );
+    const named = await refusal(
+      await send("/oauth2/token", "198.51.100.4", {
+        ...refresh(app),
+        client_secret: secret(),
+      }),
+    );
+    // (d) Native's per-path sign-in limit, decided on the shared buckets.
+    const signIn: (string | null)[] = [];
+    for (let i = 0; i < 4; i++)
+      signIn.push(
+        await refusal(
+          await send(
+            "/sign-in/email",
+            "198.51.100.5",
+            {
+              email: `limited-${i}@example.invalid`,
+              password: "A fictional wrong password 000",
+            },
+            "application/json",
+          ),
+        ),
+      );
+    const storage = (
+      await p.owner.query(
+        `select (select count(*)::int from milton_auth."rateLimit") as native, (select count(*)::int from milton_guard.rate_bucket where key !~ '^[0-9a-f]{64}$') as plain`,
+      )
+    ).rows[0];
+    const first = (v: (string | null)[]) => {
+      const i = v.findIndex((x) => x !== null);
+      return i < 0 ? null : [i, v[i]];
+    };
+    assert.deepEqual(
+      {
+        registrations: first(registrations),
+        distinct: first(distinct),
+        same: first(same),
+        firstParty: first(firstParty),
+        named,
+        signIn,
+        storage,
+      },
+      {
+        registrations: null,
+        distinct: null,
+        same: [60, "rate_limited"],
+        firstParty: null,
+        named: "rate_limited",
+        signIn: [null, null, null, "native"],
+        storage: { native: 0, plain: 0 },
+      },
+    );
+    assert.equal(distinct.length, 21);
+  }
+  group(
+    "server-side callers keep per-client token buckets, the authenticated app skips the network bucket, and native limits use hashed shared buckets",
+  );
   await p.owner.query(
     'delete from milton_auth."rateLimit"; delete from milton_guard.rate_bucket',
   );

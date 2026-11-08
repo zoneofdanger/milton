@@ -96,15 +96,17 @@ Files: `server/src/handler.ts`, `server/src/token.ts`, `server/src/mcp.ts`,
   identity-free logs. One writer per process sends at once when idle and batches rows
   that arrive meanwhile (up to 50), holds at most one pooled connection, drops rows
   beyond 1,000 waiting, and logs a failure by class and code only; shutdown waits for it
-  before closing pools. Each account's rows are their own short transaction with a 1 s
-  lock timeout, which commits before the next account's, so a wait on one account holds
-  no lock on another; a failure or timeout drops only that account's rows.
+  before closing pools. Each batch is one autocommit statement that never waits on a
+  lock: it takes the key share of each batch account it can lock now (`SKIP LOCKED`) and
+  inserts only those accounts' rows, so it holds key shares only on accounts it writes,
+  only while it runs. A row skipped behind its account's `FOR UPDATE` is retried once
+  after 50 ms, then dropped and logged by code.
 - The row's foreign key cascades from `users`, so account erasure removes it. Writers
   (saves, key creation, and the six guard triggers on cards, card versions, accepted
   changes, sample kinds, samples and sample versions, since `0007`) lock the account
   `FOR NO KEY UPDATE`, which the row's key-share check does not wait on; sign-in,
   eligibility, lifecycle and deletion lock `FOR UPDATE`, so a row for an account being
-  deleted waits (at most 1 s), then fails or is dropped, and never outlives the account.
+  deleted is skipped, then dropped, and never outlives the account.
 - Each call logs the tool, outcome, time, and an error code from a fixed list, never
   text or identity.
 - The tool name is read early, so calls refused before dispatch are still logged.

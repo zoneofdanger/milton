@@ -656,10 +656,9 @@ test("a setup request makes one database round trip and a tool call four, by tok
       expect(await trips_for(bearer, "initialize", initialize)).toBe(1);
       expect(await trips_for(bearer, "notifications/initialized")).toBe(1);
       expect(await trips_for(bearer, "tools/list", {})).toBe(1);
-      // Access, the trial gate and the snapshot in sequence, and alongside
-      // the snapshot the usage append: BEGIN, its lock timeout, the insert
-      // and COMMIT.
-      expect(await trips_for(bearer, "tools/call", cover)).toBe(7);
+      // Access, the trial gate and the snapshot in sequence, and the usage
+      // append (one statement) alongside the snapshot.
+      expect(await trips_for(bearer, "tools/call", cover)).toBe(4);
     }
   } finally {
     await local.dispose();
@@ -676,25 +675,22 @@ test("an admitted call appends its usage alongside its work without a blocking l
     });
     const fixture = await tokenFixture(local.pg);
     const token = await fixture.token("usage");
-    // Every statement a request's own work runs. A usage append is the only
-    // transaction a cover-sheet read starts, so holding transactions holds it
-    // (before it begins: PGlite has one connection).
+    // Every statement a request's own work runs; usage appends can be held
+    // before they are sent.
     const dialect = new PgDialect();
     const during: string[] = [];
     let hold: Promise<void> | undefined;
     const watched = (session: StoreSession): StoreSession => ({
       async query<Row extends Record<string, unknown>>(statement: SQL) {
         const text = dialect.sqlToQuery(statement).sql;
-        if (!/usage_calls|lock_timeout/.test(text)) during.push(text);
+        if (/usage_calls/.test(text)) await hold;
+        else during.push(text);
         return session.query<Row>(statement);
       },
     });
     const db: StoreDatabase = {
       ...watched(local.db),
-      transaction: async (work) => {
-        await hold;
-        return local.db.transaction((tx) => work(watched(tx)));
-      },
+      transaction: (work) => local.db.transaction((tx) => work(watched(tx))),
       withConnection: (work) => work(db),
     };
     const handler = createMiltonHandler(

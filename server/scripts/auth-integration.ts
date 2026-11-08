@@ -1516,18 +1516,27 @@ try {
     "DELETE FROM usage_calls",
   ])
     await assert.rejects(mcpPool.query(statement), /permission denied/);
-  // Until a usage insert is actually waiting on a row lock.
-  const usageBlocked = async () => {
+  // No usage statement is ever waiting on a row lock.
+  const usageLockWaiters = async () =>
+    (
+      await owner.query(
+        "SELECT count(*)::int n FROM pg_stat_activity WHERE wait_event_type='Lock' AND query LIKE 'WITH r AS%usage_calls%'",
+      )
+    ).rows[0].n as number;
+  // Until a usage statement has finished since `since` (its backend idle
+  // with that statement as its last query).
+  const usageRan = async (since: Date) => {
     for (let n = 0; n < 250; n++) {
       const [row] = (
         await owner.query(
-          "SELECT count(*)::int n FROM pg_stat_activity WHERE wait_event_type='Lock' AND query LIKE 'INSERT INTO usage_calls%'",
+          "SELECT count(*)::int n FROM pg_stat_activity WHERE state='idle' AND query LIKE 'WITH r AS%usage_calls%' AND state_change > $1",
+          [since],
         )
       ).rows;
       if (row.n > 0) return;
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      await new Promise((resolve) => setTimeout(resolve, 5));
     }
-    throw new Error("usage insert never blocked");
+    throw new Error("usage statement never ran");
   };
   const within = <T>(work: Promise<T>, ms: number) =>
     Promise.race([
@@ -1546,44 +1555,82 @@ try {
     ).rows.map((r: { user_id: string }) => r.user_id);
   stage = "MCP usage append against account deletion";
   {
-    // The deletion holds the doomed account's lock, so that account's insert
-    // waits on it. Each account's rows are their own statement with a 1 s
-    // lock timeout: the doomed rows give up and are dropped, and the other
-    // account's rows still land while the deletion is open.
+    // The deletion holds the doomed account's FOR UPDATE. One batch for both
+    // accounts lands the other account's row at once and skips the doomed
+    // one, which skips again on its retry and is dropped; nothing waits.
     const doomed = "m_00000000-0000-4000-8000-0000000000c3",
       kept = "m_00000000-0000-4000-8000-0000000000c4";
     await owner.query("INSERT INTO users(id) VALUES($1),($2)", [doomed, kept]);
     const deletion = await owner.connect();
-    let appended: Promise<unknown> = Promise.resolve();
-    let landed: string[] = [];
+    let settled: unknown,
+      landed: string[] = [],
+      waiters = -1;
     try {
       await deletion.query("BEGIN");
       await deletion.query("SELECT id FROM users WHERE id=$1 FOR UPDATE", [
         doomed,
       ]);
-      appended = Promise.all([
+      const appended = Promise.all([
         recordToolUsage(mcpConfig.DATABASE_URL, usageDb, doomed, "get_report"),
         recordToolUsage(mcpConfig.DATABASE_URL, usageDb, kept, "get_report"),
       ]);
-      await usageBlocked();
-      await within(appended, 3000);
+      settled = await within(appended, 1000);
+      waiters = await usageLockWaiters();
       landed = await usageRows(doomed, kept);
       await deletion.query("DELETE FROM users WHERE id=$1", [doomed]);
       await deletion.query("COMMIT");
     } finally {
       deletion.release();
     }
-    await appended;
-    assert.deepEqual(landed, [kept], "the other account's row lands meanwhile");
+    await backgroundSettled();
+    assert.equal(waiters, 0, "no usage statement waits on a lock");
+    assert.notEqual(
+      settled,
+      "waited",
+      "the batch settles while deletion is open",
+    );
+    assert.deepEqual(landed, [kept], "the other account's row lands at once");
     assert.deepEqual(await usageRows(doomed, kept), [kept]);
     await owner.query("DELETE FROM users WHERE id=$1", [kept]);
   }
+  stage = "a usage row skipped behind a short FOR UPDATE lands on its retry";
+  {
+    const briefly = "m_00000000-0000-4000-8000-0000000000c7";
+    await owner.query("INSERT INTO users(id) VALUES($1)", [briefly]);
+    const signIn = await owner.connect();
+    let appended: Promise<void> = Promise.resolve();
+    let first: string[] = [];
+    try {
+      await signIn.query("BEGIN");
+      await signIn.query("SELECT id FROM users WHERE id=$1 FOR UPDATE", [
+        briefly,
+      ]);
+      const since = (await owner.query("SELECT clock_timestamp() t")).rows[0]
+        .t as Date;
+      appended = recordToolUsage(
+        mcpConfig.DATABASE_URL,
+        usageDb,
+        briefly,
+        "get_cover_sheet",
+      );
+      // The first attempt ran and skipped; the lock ends before the retry.
+      await usageRan(since);
+      first = await usageRows(briefly);
+      await signIn.query("COMMIT");
+    } finally {
+      signIn.release();
+    }
+    await appended;
+    assert.deepEqual(first, [], "skipped while the account was locked");
+    assert.deepEqual(await usageRows(briefly), [briefly], "lands on its retry");
+    await owner.query("DELETE FROM users WHERE id=$1", [briefly]);
+  }
   stage = "account A's save and FOR UPDATE against account B's deletion";
   {
-    // B's deletion holds B's row lock while a usage write for A and B waits
-    // on it. A's save (FOR NO KEY UPDATE, its own and its triggers') and A's
+    // B's deletion holds B's FOR UPDATE while a usage batch for A and B runs.
+    // A's save (FOR NO KEY UPDATE, its own and its triggers') and A's
     // FOR UPDATE (as sign-in, eligibility, lifecycle and deletion take it)
-    // must not wait: no usage statement holds A's key share while it waits on B.
+    // finish promptly: no usage statement waits, so none holds A's key share.
     const saverId = "m_00000000-0000-4000-8000-0000000000c5",
       leaving = "m_00000000-0000-4000-8000-0000000000c6";
     await owner.query("INSERT INTO users(id) VALUES($1),($2)", [
@@ -1608,18 +1655,18 @@ try {
     );
     const version = (await saver.readTpsReport()).version;
     const deletion = await owner.connect();
-    let appended: Promise<unknown> = Promise.resolve();
-    let saved: unknown, locked: unknown;
+    let saved: unknown,
+      locked: unknown,
+      waiters = -1;
     try {
       await deletion.query("BEGIN");
       await deletion.query("SELECT id FROM users WHERE id=$1 FOR UPDATE", [
         leaving,
       ]);
-      appended = Promise.all([
+      const appended = Promise.all([
         recordToolUsage(mcpConfig.DATABASE_URL, usageDb, saverId, "get_report"),
         recordToolUsage(mcpConfig.DATABASE_URL, usageDb, leaving, "get_report"),
       ]);
-      await usageBlocked();
       [saved, locked] = await Promise.all([
         within(
           saver
@@ -1644,15 +1691,17 @@ try {
           3000,
         ),
       ]);
+      waiters = await usageLockWaiters();
+      await within(appended, 1000);
       await deletion.query("DELETE FROM users WHERE id=$1", [leaving]);
       await deletion.query("COMMIT");
     } finally {
       deletion.release();
     }
-    await appended;
     await backgroundSettled();
     assert.equal(saved, "saved", "A's save never waits on B's deletion");
     assert.equal(locked, saverId, "A's FOR UPDATE never waits on B's deletion");
+    assert.equal(waiters, 0, "no usage statement waits on a lock");
     assert.deepEqual(await usageRows(saverId, leaving), [saverId]);
     await owner.query("DELETE FROM users WHERE id=$1", [saverId]);
   }

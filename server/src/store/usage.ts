@@ -8,59 +8,62 @@ export type ToolName =
 export type CallUsage = { tool: ToolName; recorded?: Promise<void> };
 
 /** How long a reply waits for its call's usage row. A warm append is one
- * single-row statement that runs alongside the call's own work and ends before
- * it; a cold pool checkout (TLS and SCRAM) takes tens of milliseconds more.
- * 250 ms covers both and bounds the worst case (a slow database, or an append
- * waiting on a sign-in's or a deletion's row lock); past it the reply goes and
- * the row finishes in the background. */
+ * statement that runs alongside the call's own work and ends before it; a
+ * cold pool checkout (TLS and SCRAM) takes tens of milliseconds more. 250 ms
+ * covers both and bounds the worst case (a slow database, or a row waiting
+ * for its retry); past it the reply goes and the row finishes in the
+ * background. */
 export const USAGE_WAIT_MS = 250;
+/** How long a row skipped behind its account's FOR UPDATE waits for its one
+ * retry. Sign-in and eligibility hold that lock for milliseconds; a deletion
+ * holds it until the account is gone, and its rows then drop. */
+export const USAGE_RETRY_MS = 50;
 
 type Waiting = {
   row: { user_id: string; at: string; tool: ToolName };
   done: () => void;
+  retried?: boolean;
 };
+type Writer = { queue: Waiting[]; retry: Waiting[]; retryAt: number };
 // Each database's one writer and the rows waiting for it. Bounded, so a slow
 // database costs dropped records, never memory.
 const MAX_WAITING = 1000;
 // Small, so a row that arrives while a batch is in flight waits about one
-// batch before its own.
+// statement before its own.
 const BATCH = 50;
-const writers = new Map<unknown, { queue: Waiting[] }>();
+const writers = new Map<unknown, Writer>();
 
-/** How long one account's insert may wait for its account row (its foreign
- * key's key share). Only a FOR UPDATE holder makes it wait: a sign-in,
- * eligibility or lifecycle transaction, which holds it for milliseconds, or a
- * deletion's erase. One second lets the first kind pass and gives up on a
- * deletion that is still running, dropping that account's rows, so the queue
- * behind it waits at most a second instead of the role's 10 s. */
-export const USAGE_LOCK_TIMEOUT = "1s";
-
-// One account's rows in their own short transaction: it commits, releasing
-// that account's key share, before the writer moves on, so a wait on one
-// account never holds a lock on another.
-const append = (db: StoreDatabase, rows: Waiting["row"][]) =>
-  db.transaction(async (tx) => {
-    await tx.query(
-      sql`SELECT set_config('lock_timeout',${USAGE_LOCK_TIMEOUT},true)`,
-    );
-    await tx.query(sql`INSERT INTO usage_calls (user_id,at,tool)
-      SELECT r.user_id, r.at, r.tool
-      FROM jsonb_to_recordset(${JSON.stringify(rows)}::jsonb)
-        AS r(user_id text, at timestamptz, tool text)
-      WHERE EXISTS (SELECT 1 FROM users u WHERE u.id = r.user_id)`);
-  });
+/** One batch in one autocommit statement that never waits on a lock: it
+ * takes the key share of each batch account it can lock now (SKIP LOCKED),
+ * so its foreign-key checks find that lock already held, and inserts only
+ * those accounts' rows. Only a FOR UPDATE holder (sign-in, eligibility,
+ * lifecycle, deletion) makes an account skip; a writer's FOR NO KEY UPDATE
+ * does not. Returns the accounts it wrote. */
+async function append(db: StoreDatabase, rows: Waiting["row"][]) {
+  const written = await db.query<{ id: string }>(sql`WITH r AS (
+      SELECT * FROM unnest(${sql.param(rows.map((r) => r.user_id))}::text[],
+        ${sql.param(rows.map((r) => r.at))}::timestamptz[],
+        ${sql.param(rows.map((r) => r.tool))}::text[]) AS r(user_id,at,tool)),
+    locked AS MATERIALIZED (
+      SELECT id FROM users WHERE id IN (SELECT user_id FROM r)
+      FOR KEY SHARE SKIP LOCKED),
+    inserted AS (
+      INSERT INTO usage_calls (user_id,at,tool)
+      SELECT r.user_id, r.at, r.tool FROM r JOIN locked ON locked.id = r.user_id)
+    SELECT id FROM locked`);
+  return new Set(written.map((w) => w.id));
+}
 
 /**
  * Appends one usage row for a call as it is admitted, alongside the call's own
- * work; the returned promise settles when the row commits or fails, and never
- * rejects. Each process runs at most one writer per database, so usage holds
- * at most one pooled connection: an idle writer sends at once, and rows that
- * arrive meanwhile go in its next batch, one short transaction per account.
- * The row takes no lock beyond its foreign key's key share of its own account
- * row, which only a FOR UPDATE holder (sign-in, eligibility, lifecycle,
- * deletion) delays, for at most USAGE_LOCK_TIMEOUT; once an account is erased
- * its rows fail that check. Either way only that account's rows are dropped.
- * Failures are logged by class and code only.
+ * work; the returned promise settles when the row commits or is dropped, and
+ * never rejects. Each process runs at most one writer per database, so usage
+ * holds at most one pooled connection: an idle writer sends at once, and rows
+ * that arrive meanwhile go in its next batch. A statement holds key shares
+ * only on the accounts it inserts, only while it runs, and never waits for
+ * one. A row skipped behind its account's FOR UPDATE is retried once after
+ * USAGE_RETRY_MS, then dropped (an erased account's rows drop this way).
+ * Failures and drops are logged by class and code only.
  */
 export function recordToolUsage(
   key: unknown,
@@ -69,45 +72,64 @@ export function recordToolUsage(
   tool: ToolName,
 ): Promise<void> {
   return new Promise((done) => {
-    const row = { user_id: userId, at: new Date().toISOString(), tool };
+    const waiting = {
+      row: { user_id: userId, at: new Date().toISOString(), tool },
+      done,
+    };
     const running = writers.get(key);
     if (running) {
-      if (running.queue.length < MAX_WAITING) running.queue.push({ row, done });
+      if (running.queue.length + running.retry.length < MAX_WAITING)
+        running.queue.push(waiting);
       else {
         logUnexpected("usage", { code: "usage_dropped" });
         done();
       }
       return;
     }
-    const writer = { queue: [{ row, done }] };
+    const writer: Writer = { queue: [waiting], retry: [], retryAt: 0 };
     writers.set(key, writer);
     inBackground(async () => {
       try {
         // Rows admitted in this same turn share the first batch.
         await Promise.resolve();
         const target = db();
-        while (writer.queue.length) {
-          const batch = writer.queue.splice(0, BATCH);
-          const accounts = new Map<string, Waiting[]>();
-          for (const waiting of batch)
-            accounts.set(waiting.row.user_id, [
-              ...(accounts.get(waiting.row.user_id) ?? []),
-              waiting,
-            ]);
-          for (const rows of accounts.values()) {
-            // A failure (an erased account's foreign key, a lock timeout
-            // behind its deletion) drops only this account's rows.
-            await append(
+        while (writer.queue.length || writer.retry.length) {
+          if (!writer.queue.length)
+            await new Promise((resolve) =>
+              setTimeout(resolve, Math.max(0, writer.retryAt - Date.now())),
+            );
+          const batch =
+            Date.now() >= writer.retryAt ? writer.retry.splice(0, BATCH) : [];
+          batch.push(...writer.queue.splice(0, BATCH - batch.length));
+          let written: Set<string>;
+          try {
+            written = await append(
               target,
-              rows.map((w) => w.row),
-            ).catch((error) => logUnexpected("usage", error));
-            for (const waiting of rows) waiting.done();
+              batch.map((w) => w.row),
+            );
+          } catch (error) {
+            logUnexpected("usage", error);
+            for (const w of batch) w.done();
+            continue;
           }
+          let skipped = 0;
+          for (const w of batch)
+            if (written.has(w.row.user_id)) w.done();
+            else if (!w.retried) {
+              if (!writer.retry.length)
+                writer.retryAt = Date.now() + USAGE_RETRY_MS;
+              w.retried = true;
+              writer.retry.push(w);
+            } else {
+              skipped++;
+              w.done();
+            }
+          if (skipped) logUnexpected("usage", { code: "usage_skipped" });
         }
       } catch (error) {
         logUnexpected("usage", error);
       } finally {
-        for (const waiting of writer.queue.splice(0)) waiting.done();
+        for (const w of [...writer.queue, ...writer.retry]) w.done();
         writers.delete(key);
       }
     });

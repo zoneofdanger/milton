@@ -216,10 +216,10 @@ export const usageDaily = pgTable(
     check("usage_nonnegative", sql`${t.toolCalls} >= 0`),
   ],
 );
-// One row per admitted tool call, appended alongside its work. The foreign
-// key's key-share check waits only on a sign-in's, lifecycle's or deletion's
-// FOR UPDATE (writers and their guard triggers lock FOR NO KEY UPDATE, since
-// 0007), and erasure cascades here, so a row can
+// One row per admitted tool call, appended alongside its work. The append
+// skips an account under a sign-in's, lifecycle's or deletion's FOR UPDATE
+// rather than wait (writers and their guard triggers lock FOR NO KEY UPDATE,
+// since 0007), and erasure cascades here, so a row can
 // never outlive its account. Outcomes stay in the identity-free logs.
 export const usageCalls = pgTable(
   "usage_calls",

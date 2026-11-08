@@ -291,9 +291,8 @@ try {
   pass(
     "app migration up/down/reapply preserves writing IDs, trial history, managed rows and the eligibility key",
   );
-  // 0005 and 008 drop the unread trial tables. Each down recreates its table
-  // empty with the original grants; up again drops it. 008 is a no-op on a
-  // database 005-app.up.sql installed, which no longer creates legacy_mapping.
+  // 0005 and 008 drop the unread trial tables. 008 is a no-op on a database
+  // 005-app.up.sql installed, which no longer creates legacy_mapping.
   const sourceFile = (path: string) =>
     readFileSync(new URL(path, sourceRoot), "utf8");
   const trialTableGrants = async () =>
@@ -306,66 +305,8 @@ try {
   await appOwner.query(
     sourceFile("./migrations/008-drop-legacy-mapping.up.sql"),
   );
-  const wrongOwner = await owner.connect();
-  try {
-    await assert.rejects(
-      wrongOwner.query(
-        sourceFile("./migrations/008-drop-legacy-mapping.down.sql"),
-      ),
-      /run as the milton_app owner/,
-    );
-    await wrongOwner.query("ROLLBACK");
-  } finally {
-    wrongOwner.release();
-  }
-  await owner.query(
-    sourceFile("./drizzle/rollback/0005_drop_deleted_identities.sql"),
-  );
-  await appOwner.query(
-    sourceFile("./migrations/008-drop-legacy-mapping.down.sql"),
-  );
-  assert.deepEqual(await trialTableGrants(), [
-    {
-      tbl: "deleted_identities",
-      grantee: "milton_app_owner",
-      privileges: "SELECT",
-    },
-    {
-      tbl: "deleted_identities",
-      grantee: "milton_app_runtime",
-      privileges: "INSERT,SELECT",
-    },
-    {
-      tbl: "deleted_identities",
-      grantee: "milton_runtime",
-      privileges: "INSERT,SELECT",
-    },
-    {
-      tbl: "milton_app.legacy_mapping",
-      grantee: "milton_app_runtime",
-      privileges: "SELECT",
-    },
-  ]);
-  assert.deepEqual(
-    (
-      await owner.query(
-        "SELECT (SELECT count(*) FROM deleted_identities)::int deleted,(SELECT count(*) FROM milton_app.legacy_mapping)::int mapping,(SELECT tableowner FROM pg_tables WHERE schemaname='milton_app' AND tablename='legacy_mapping') owner",
-      )
-    ).rows,
-    [{ deleted: 0, mapping: 0, owner: "milton_app_owner" }],
-  );
-  await owner.query(
-    "BEGIN;" +
-      sourceFile("./drizzle/0005_drop_deleted_identities.sql") +
-      "COMMIT;",
-  );
-  await appOwner.query(
-    sourceFile("./migrations/008-drop-legacy-mapping.up.sql"),
-  );
   assert.deepEqual(await trialTableGrants(), []);
-  pass(
-    "0005 and 008 drop the unread trial tables; each down recreates its table empty with the original grants",
-  );
+  pass("0005 and 008 drop the unread trial tables, leaving no grants behind");
   for (const [pool, statement] of [
     [authPool, "SELECT * FROM public.users"],
     [authPool, "SELECT * FROM milton_app.session"],

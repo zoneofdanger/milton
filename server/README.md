@@ -707,7 +707,7 @@ usage: MCP may only insert; app gets nothing (erasure cascades as the table owne
 `0007` also moves the six writer guard triggers' account lock from `FOR UPDATE` to
 `FOR NO KEY UPDATE` (each otherwise unchanged), so no save waits on a usage row's
 foreign-key check.
-Rerunning 009 converges. `drizzle/rollback/0007_usage_calls.sql` drops the table and restores the guards.
+Rerunning 009 converges. Rollback is the pre-migration snapshot.
 
 Server timeouts live on the runtime logins, because Neon's proxy and pooler drop the
 `statement_timeout`/`lock_timeout` a client passes at connect (the pools still pass them,

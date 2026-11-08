@@ -143,7 +143,9 @@ export async function runSave(
         throw new StoreError("invalid_input", nameTheReport, 400);
       // Account gates answer without a receipt, so the same request can
       // succeed once the gate opens.
-      gated?.(await assertTrialAccess(tx, userId));
+      // Always awaited: with no callback, `gated?.(…)` would skip its argument.
+      const status = await assertTrialAccess(tx, userId);
+      gated?.(status);
       // Admitted here, after replay and every gate: a save that records an
       // outcome (saved, unchanged, conflict or failed) is admitted, a replay
       // of it is not. Its usage append runs on another connection, and this

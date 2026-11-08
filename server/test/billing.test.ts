@@ -217,6 +217,27 @@ test("the gate follows the subscription status: unknown or missing is allowed, p
     await expect(
       fixtureStore(local.db, userId).readDocuments(),
     ).rejects.toMatchObject({ code: "subscription_required" });
+    // So does an assistant save, with no caller watching the gate: no card,
+    // no version, no evidence and no receipt.
+    const writes = async () =>
+      (
+        await local.db.query<{ n: number }>(
+          sql`SELECT (SELECT count(*) FROM instruction_cards WHERE user_id=${userId})
+            + (SELECT count(*) FROM instruction_card_versions WHERE user_id=${userId})
+            + (SELECT count(*) FROM accepted_changes WHERE user_id=${userId})
+            + (SELECT count(*) FROM save_requests WHERE user_id=${userId}) AS n`,
+        )
+      )[0]!.n;
+    const before = Number(await writes());
+    await expect(
+      fixtureStore(local.db, userId).saveMemo({
+        text: "Fictional rule.",
+        rules: [{ report: "cover", text: "Keep fictional dates exact." }],
+        request_id: crypto.randomUUID(),
+        expected_version: "a".repeat(64),
+      }),
+    ).rejects.toMatchObject({ code: "subscription_required" });
+    expect(Number(await writes())).toBe(before);
     // A trial_end in the past never expires a trial: Stripe's status decides.
     await set("trialing");
     await local.db.query(

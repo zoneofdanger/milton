@@ -2969,6 +2969,66 @@ try {
       });
       assert.match(readFileSync(file, "utf8"), /^E2E_CONNECTION_KEY=mk_/m);
     }
+    // The native COMMIT succeeds but its acknowledgment is lost: the native
+    // user exists, already bound to the marked account, and --resume takes the
+    // existing-user branch without creating another.
+    const ackLost = {
+      query: owners.native.query.bind(owners.native),
+      connect: async () => {
+        const client = await owners.native.connect();
+        const query = client.query.bind(client) as (
+          ...args: unknown[]
+        ) => Promise<unknown>;
+        return Object.assign(client, {
+          query: async (...args: unknown[]) => {
+            const done = await query(...args);
+            if (args[0] === "commit") throw refused;
+            return done;
+          },
+        });
+      },
+    } as unknown as pg.Pool;
+    const lostEmail = "e2e-partial-ack@milton-test.invalid";
+    const lostFile = join(root, "partial-ack.env");
+    await assert.rejects(
+      provisionTestAccount({
+        email: lostEmail,
+        output: lostFile,
+        owners: { ...owners, native: ackLost },
+        fetch: dispatch,
+        report: () => {},
+      }),
+      (e) => e === refused,
+    );
+    const nativeRows = async () =>
+      (
+        await owner.query(
+          `select u.test_account marked,exists(select 1 from trial_accounts t where t.user_id=u.id) trial
+           from milton_auth."user" n join identities i on i.provider=$1 and i.subject=n.id
+           join users u on u.id=i.user_id where n.email=$2`,
+          [ISSUER, lostEmail],
+        )
+      ).rows;
+    assert.deepEqual(await nativeRows(), [{ marked: true, trial: false }]);
+    assert.equal(await counts(), held, "ack lost: no unmarked account");
+    await owner.query(
+      'delete from milton_auth."rateLimit"; delete from milton_guard.rate_bucket',
+    );
+    const steps: [string, boolean, object?][] = [];
+    await provisionTestAccount({
+      email: lostEmail,
+      output: lostFile,
+      owners,
+      fetch: dispatch,
+      report: (step, ok, _ms, extra) => steps.push([step, ok, extra]),
+      resume: true,
+    });
+    assert.deepEqual(
+      steps.find(([step]) => step === "native_user"),
+      ["native_user", true, { created: false }],
+    );
+    assert.deepEqual(await nativeRows(), [{ marked: true, trial: false }]);
+    assert.match(readFileSync(lostFile, "utf8"), /^E2E_CONNECTION_KEY=mk_/m);
     assert.equal(await counts(), held, "resumed accounts stay marked");
     assert.equal(
       (
@@ -2982,7 +3042,7 @@ try {
     );
   }
   pass(
-    "partial provisioning at either commit leaves no account anyone can sign in to; --resume converges on the marked, trial-free account",
+    "partial provisioning before or between the commits leaves no account anyone can sign in to, a lost native commit acknowledgment leaves it marked; --resume converges on the marked, trial-free account",
   );
   stage = "e2e check";
   // What one run adds to the account, by table: the runbook's daily footprint.

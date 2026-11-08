@@ -222,19 +222,9 @@ export function createProvider(
     verifiedEmail: string;
     verifiedIdentities: { provider: "google" | "github"; subject: string }[];
   };
-  // The app's admission can make three Stripe calls, 15 s at worst
-  // (ensureSubscription in server/src/billing.tsx), so it gets what the
-  // request's deadline leaves, less this reserve for the bind_flow statement
-  // and native's redirect after it: room for a slow database, not a
-  // guarantee (a statement may run 5 s). At most 12 s, from a request's start.
-  const ADMIT_RESERVE_MS = 2000;
-  // With less than this left the app would be cut off mid-admission, so the
-  // request is refused for retry without asking it.
-  const ADMIT_FLOOR_MS = 1000;
   async function admit(subject: string, sid: string, continuation: string) {
-    const state = transport.getStore();
-    const original = state?.users.get(subject);
-    if (!state || !original) throw invalid();
+    const original = transport.getStore()?.users.get(subject);
+    if (!original) throw invalid();
     const result = await pool.query<{ identity: Identity | null }>(
       "select milton_guard.admission_identity($1,$2,$3,$4) as identity",
       [
@@ -246,15 +236,10 @@ export function createProvider(
     );
     const identity = result.rows[0]?.identity;
     if (!identity) throw invalid();
-    const left = state.deadline - performance.now() - ADMIT_RESERVE_MS;
-    if (left < ADMIT_FLOOR_MS)
-      throw new APIError("SERVICE_UNAVAILABLE", {
-        error: "admission_retry_required",
-      });
     const response = await networkFetch(APP_ORIGIN + "/internal/auth/admit", {
       method: "POST",
       redirect: "error",
-      signal: AbortSignal.timeout(Math.floor(left)),
+      signal: AbortSignal.timeout(5000),
       headers: {
         authorization: `Bearer ${config.AUTH_ADMISSION_SECRET}`,
         "content-type": "application/json",
@@ -615,14 +600,8 @@ export function createProvider(
     ],
   });
   let inFlight = 0;
-  // Cloud Run ends an auth request at 15 s (timeoutSeconds in
-  // server/deploy/auth.service.template.json); node's requestTimeout in
-  // cloud-run.ts bounds only receiving it. Waits inside a request are budgeted
-  // to 14 s from the handler's start, a second short of that.
-  const REQUEST_DEADLINE_MS = 14000;
   // The peer keys the network rate limits, so every caller names the client.
   async function handler(request: Request, peer: string): Promise<Response> {
-    const deadline = performance.now() + REQUEST_DEADLINE_MS;
     const denied = guardRequest(request);
     if (denied) return denied;
     const u = new URL(request.url),
@@ -856,7 +835,6 @@ export function createProvider(
         users: new Map(),
         credentials: new Map(),
         admissions: new Map(),
-        deadline,
       };
       const response = await transport.run(requestState, async () => {
         const response = await provider.handler(native);

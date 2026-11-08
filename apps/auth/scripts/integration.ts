@@ -724,18 +724,11 @@ try {
     // then consentReferenceId) and twice in one consent accept. Each request
     // admits once (one admission_identity, one POST to the app) and binds at
     // each ask. A refused admission still refuses, the next request admits
-    // afresh, a differing input in the same request admits afresh, and an
-    // admission with too little of the request's time left is not asked.
+    // afresh, and a differing input in the same request admits afresh.
     const statements: string[] = [];
     const query = authPool.query;
-    const clock = performance.now.bind(performance);
-    let late = 0,
-      lateAtIdentity = 0;
-    performance.now = () => clock() + late;
     authPool.query = ((...args: [string, unknown[]]) => {
       statements.push(args[0]);
-      if (args[0].includes("milton_guard.admission_identity("))
-        late += lateAtIdentity;
       return query.apply(authPool, args as never);
     }) as never;
     const counted = async (run: () => Promise<Response>) => {
@@ -814,24 +807,14 @@ try {
       onAdmit = undefined;
       assert.equal(changed.status, 400);
       assert.deepEqual(rechecked, { admits: 1, identity: 2, bind: 1 });
-      // 13 s gone by the admission leaves less than its 1 s floor of the
-      // 14 s budget once the 2 s reserve is kept: refused, the app not asked.
-      lateAtIdentity = 13000;
-      const { response: tooLate, ...unasked } = await counted(() =>
-        call("/oauth2/authorize?" + start().toString()),
-      );
-      lateAtIdentity = 0;
-      assert.equal(tooLate.status, 503);
-      assert.deepEqual(unasked, { admits: 0, identity: 1, bind: 0 });
     } finally {
       admitStatus = 204;
       onAdmit = undefined;
       authPool.query = query;
-      performance.now = clock;
     }
   }
   group(
-    "one authorize and one consent accept each admit once and bind at each ask; refusals, changed inputs and the request deadline refuse",
+    "one authorize and one consent accept each admit once and bind at each ask; refusals and changed inputs refuse",
   );
   const grants = await authorize(
     assistant,

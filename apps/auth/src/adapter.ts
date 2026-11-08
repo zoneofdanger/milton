@@ -34,8 +34,6 @@ export type RequestState = {
   credentials: Map<string, Credential>;
   /** This request's admissions of OAuth flows, by admission's inputs. */
   admissions: Map<string, Promise<void>>;
-  /** performance.now() by which this request's own work should finish. */
-  deadline: number;
   subject?: string;
   noCredentialObserved?: string;
   originalRefresh?: OriginalToken;

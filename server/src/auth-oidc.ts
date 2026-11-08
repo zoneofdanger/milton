@@ -285,9 +285,13 @@ export async function removeSession(
     throw unavailable();
   }
 }
-export async function endSessionUrl(config: RuntimeConfig) {
+/** The one RP-initiated logout `state` Milton sends: native echoes it onto the
+ * exact registered return, where it means only "start a fresh sign-in". */
+export const switchAccountState = "switch-account";
+export async function endSessionUrl(config: RuntimeConfig, switching = false) {
   return oidc.buildEndSessionUrl(await oidcClient(config), {
     client_id: config.oidc.clientId,
     post_logout_redirect_uri: config.appOrigin + "/auth/logged-out",
+    ...(switching ? { state: switchAccountState } : {}),
   });
 }

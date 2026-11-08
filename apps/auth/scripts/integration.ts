@@ -23,6 +23,7 @@ import { fixtureConfig } from "../test/fixture-config.ts";
 import { AUTH_MIGRATIONS } from "./migrations.ts";
 import { deliverMail, openMail, type MailJob } from "../src/mail.ts";
 import { createProvider } from "../src/provider.ts";
+import { transport } from "../src/adapter.ts";
 import { AUTH_ORIGIN, ISSUER, safeError } from "../src/config.ts";
 
 const p = await disposable();
@@ -31,8 +32,10 @@ const secret = () => randomBytes(32).toString("hex");
 const TEST_PEER = "127.0.0.1";
 const config = fixtureConfig();
 const admissions: Record<string, unknown>[] = [];
-// The app's answer to each admission; a test sets 503 to refuse one.
+// The app's answer to each admission; a test sets 503 to refuse one, and
+// onAdmit runs inside the admitting request.
 let admitStatus = 204;
+let onAdmit: ((subject: string) => void) | undefined;
 const mail: { to: string; url: string; kind: "reset" | "verify" }[] = [];
 const boundaries = {
   fetch: async (input: string | URL | Request, init?: RequestInit) => {
@@ -42,9 +45,12 @@ const boundaries = {
     )
       return new Response(null, { status: 204 });
     if (String(input) === "https://app.meetmilton.com/internal/auth/admit") {
-      admissions.push(
-        JSON.parse(String(init?.body)) as Record<string, unknown>,
-      );
+      const admission = JSON.parse(String(init?.body)) as Record<
+        string,
+        unknown
+      >;
+      admissions.push(admission);
+      onAdmit?.(String(admission.subject));
       return new Response(null, { status: admitStatus });
     }
     throw new Error("external_network_refused");
@@ -716,12 +722,20 @@ try {
   {
     // Native asks for the flow twice in one authorize (postLogin.shouldRedirect,
     // then consentReferenceId) and twice in one consent accept. Each request
-    // admits once: one admission_identity, one bind_flow, one POST to the app.
-    // A refused admission still refuses, and the next request admits afresh.
+    // admits once (one admission_identity, one POST to the app) and binds at
+    // each ask. A refused admission still refuses, the next request admits
+    // afresh, a differing input in the same request admits afresh, and an
+    // admission with too little of the request's time left is not asked.
     const statements: string[] = [];
     const query = authPool.query;
+    const clock = performance.now.bind(performance);
+    let late = 0,
+      lateAtIdentity = 0;
+    performance.now = () => clock() + late;
     authPool.query = ((...args: [string, unknown[]]) => {
       statements.push(args[0]);
+      if (args[0].includes("milton_guard.admission_identity("))
+        late += lateAtIdentity;
       return query.apply(authPool, args as never);
     }) as never;
     const counted = async (run: () => Promise<Response>) => {
@@ -737,7 +751,7 @@ try {
         bind: of("bind_flow"),
       };
     };
-    const once = { admits: 1, identity: 1, bind: 1 };
+    const once = { admits: 1, identity: 1, bind: 2 };
     const scope = "openid offline_access milton:read";
     const start = () =>
       new URLSearchParams({
@@ -785,13 +799,39 @@ try {
         ).searchParams.get("code"),
       );
       assert.deepEqual(accepted, once);
+      // The first ask's admission leaves a newer security generation in this
+      // request's snapshot: the second ask admits afresh, and is refused.
+      onAdmit = (subject) => {
+        const state = transport.getStore()!;
+        state.users.set(subject, {
+          ...state.users.get(subject)!,
+          miltonSecurityGeneration: "fictional-advanced-generation",
+        });
+      };
+      const { response: changed, ...rechecked } = await counted(() =>
+        call("/oauth2/authorize?" + start().toString()),
+      );
+      onAdmit = undefined;
+      assert.equal(changed.status, 400);
+      assert.deepEqual(rechecked, { admits: 1, identity: 2, bind: 1 });
+      // 13 s gone by the admission leaves less than its 1 s floor of the
+      // 14 s budget once the 2 s reserve is kept: refused, the app not asked.
+      lateAtIdentity = 13000;
+      const { response: tooLate, ...unasked } = await counted(() =>
+        call("/oauth2/authorize?" + start().toString()),
+      );
+      lateAtIdentity = 0;
+      assert.equal(tooLate.status, 503);
+      assert.deepEqual(unasked, { admits: 0, identity: 1, bind: 0 });
     } finally {
       admitStatus = 204;
+      onAdmit = undefined;
       authPool.query = query;
+      performance.now = clock;
     }
   }
   group(
-    "one authorize and one consent accept each admit once; a refused admission refuses",
+    "one authorize and one consent accept each admit once and bind at each ask; refusals, changed inputs and the request deadline refuse",
   );
   const grants = await authorize(
     assistant,

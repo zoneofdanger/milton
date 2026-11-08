@@ -156,52 +156,42 @@ export function createProvider(
     const original = state.users.get(user);
     // Native asks twice in one request: authorize calls shouldRedirect then
     // consentReferenceId, and a consent accept calls consentReferenceId then
-    // authorize's, each with the same session, scopes and stored query. So a
-    // request admits and binds a flow once: a later call with every input
-    // the same shares the first call's outcome, a refusal included, and any
-    // differing input admits afresh. create is not an input: bind_flow checks
-    // a found binding the same either way. Nothing outlives the request.
+    // authorize's, each with the same session and stored query. So a request
+    // asks the app once: a later ask with every admission input the same
+    // shares the first's outcome, a refusal included, and a differing input
+    // admits afresh. Each ask still runs its own bind_flow, so a session or
+    // binding that ends between the two is refused at the second. Nothing
+    // outlives the request.
     const key = JSON.stringify([
       user,
       sid,
       original?.miltonIdentityIncarnation,
       original?.miltonSecurityGeneration,
       continuation,
-      context.scopes,
     ]);
-    let flow = state.flows.get(key);
-    if (!flow) {
-      flow = (async () => {
-        await admit(user, sid, continuation);
-        try {
-          const r = await pool.query<{ reference: string }>(
-            "SELECT * FROM milton_guard.bind_flow($1,$2,$3,$4,$5,$6,$7)",
-            [
-              continuation,
-              user,
-              sid,
-              tuple[0],
-              tuple[4],
-              context.scopes,
-              create,
-            ],
-          );
-          if (!r.rows[0]) throw invalid();
-          return r.rows[0].reference;
-        } catch (e) {
-          if (
-            e &&
-            typeof e === "object" &&
-            "code" in e &&
-            ["23514", "P0002"].includes(String(e.code))
-          )
-            throw invalid();
-          throw e;
-        }
-      })();
-      state.flows.set(key, flow);
+    let admitted = state.admissions.get(key);
+    if (!admitted) {
+      admitted = admit(user, sid, continuation);
+      state.admissions.set(key, admitted);
     }
-    return flow;
+    await admitted;
+    try {
+      const r = await pool.query<{ reference: string }>(
+        "SELECT * FROM milton_guard.bind_flow($1,$2,$3,$4,$5,$6,$7)",
+        [continuation, user, sid, tuple[0], tuple[4], context.scopes, create],
+      );
+      if (!r.rows[0]) throw invalid();
+      return r.rows[0].reference;
+    } catch (e) {
+      if (
+        e &&
+        typeof e === "object" &&
+        "code" in e &&
+        ["23514", "P0002"].includes(String(e.code))
+      )
+        throw invalid();
+      throw e;
+    }
   }
   async function claims(input: {
     referenceId?: string;
@@ -233,13 +223,18 @@ export function createProvider(
     verifiedIdentities: { provider: "google" | "github"; subject: string }[];
   };
   // The app's admission can make three Stripe calls, 15 s at worst
-  // (ensureSubscription in server/src/billing.tsx), so the wait is as long as
-  // a request allows: 12 s still answers inside the auth service's 15 s Cloud
-  // Run request timeout (server/deploy/auth.service.template.json).
-  const ADMIT_TIMEOUT_MS = 12000;
+  // (ensureSubscription in server/src/billing.tsx), so it gets what the
+  // request's deadline leaves, less this reserve for the bind_flow statement
+  // and native's redirect after it: room for a slow database, not a
+  // guarantee (a statement may run 5 s). At most 12 s, from a request's start.
+  const ADMIT_RESERVE_MS = 2000;
+  // With less than this left the app would be cut off mid-admission, so the
+  // request is refused for retry without asking it.
+  const ADMIT_FLOOR_MS = 1000;
   async function admit(subject: string, sid: string, continuation: string) {
-    const original = transport.getStore()?.users.get(subject);
-    if (!original) throw invalid();
+    const state = transport.getStore();
+    const original = state?.users.get(subject);
+    if (!state || !original) throw invalid();
     const result = await pool.query<{ identity: Identity | null }>(
       "select milton_guard.admission_identity($1,$2,$3,$4) as identity",
       [
@@ -251,10 +246,15 @@ export function createProvider(
     );
     const identity = result.rows[0]?.identity;
     if (!identity) throw invalid();
+    const left = state.deadline - performance.now() - ADMIT_RESERVE_MS;
+    if (left < ADMIT_FLOOR_MS)
+      throw new APIError("SERVICE_UNAVAILABLE", {
+        error: "admission_retry_required",
+      });
     const response = await networkFetch(APP_ORIGIN + "/internal/auth/admit", {
       method: "POST",
       redirect: "error",
-      signal: AbortSignal.timeout(ADMIT_TIMEOUT_MS),
+      signal: AbortSignal.timeout(Math.floor(left)),
       headers: {
         authorization: `Bearer ${config.AUTH_ADMISSION_SECRET}`,
         "content-type": "application/json",
@@ -615,8 +615,14 @@ export function createProvider(
     ],
   });
   let inFlight = 0;
+  // Cloud Run ends an auth request at 15 s (timeoutSeconds in
+  // server/deploy/auth.service.template.json); node's requestTimeout in
+  // cloud-run.ts bounds only receiving it. Waits inside a request are budgeted
+  // to 14 s from the handler's start, a second short of that.
+  const REQUEST_DEADLINE_MS = 14000;
   // The peer keys the network rate limits, so every caller names the client.
   async function handler(request: Request, peer: string): Promise<Response> {
+    const deadline = performance.now() + REQUEST_DEADLINE_MS;
     const denied = guardRequest(request);
     if (denied) return denied;
     const u = new URL(request.url),
@@ -849,7 +855,8 @@ export function createProvider(
           typeof body.client_id === "string" ? body.client_id : undefined,
         users: new Map(),
         credentials: new Map(),
-        flows: new Map(),
+        admissions: new Map(),
+        deadline,
       };
       const response = await transport.run(requestState, async () => {
         const response = await provider.handler(native);

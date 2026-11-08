@@ -1,7 +1,7 @@
 import { serve } from "@hono/node-server";
 import { loadEnvironment } from "./environment";
-import { mcpRuntimeConfig, runtimeConfig } from "./config";
-import { createMcpApp } from "./index";
+import { admitRuntimeConfig, mcpRuntimeConfig, runtimeConfig } from "./config";
+import { createAdmitApp, createMcpApp } from "./index";
 import { createCloudApp } from "./cloud-app";
 import { logUnexpected } from "./error-log";
 import { closeDatabasePools } from "./store/database";
@@ -10,11 +10,14 @@ try {
   const env = loadEnvironment();
   const port = Number(env.PORT ?? 8080);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error();
-  if (!["app", "mcp"].includes(env.MILTON_SERVICE ?? "")) throw new Error();
+  if (!["app", "mcp", "admit"].includes(env.MILTON_SERVICE ?? ""))
+    throw new Error();
   const fetch =
     env.MILTON_SERVICE === "app"
       ? createCloudApp(runtimeConfig(env))
-      : createMcpApp(mcpRuntimeConfig(env));
+      : env.MILTON_SERVICE === "admit"
+        ? createAdmitApp(admitRuntimeConfig(env))
+        : createMcpApp(mcpRuntimeConfig(env));
   const server = serve({ fetch, port, hostname: "0.0.0.0" });
   const shutdown = () => {
     // In-flight requests finish first, then pooled connections close.

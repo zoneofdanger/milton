@@ -8,6 +8,7 @@ Milton uses Bun for installs, builds and tests, and Node 26 LTS in production.
 | `app.meetmilton.com`                   | Hono JSX, Vite theme assets, Cloud Run `milton-app`                   |
 | `mcp.meetmilton.com`                   | Hono MCP, Cloud Run `milton-mcp`, Google external HTTPS load balancer |
 | `auth.meetmilton.com`                  | Self-hosted Better Auth, Cloud Run `milton-auth`, same load balancer  |
+| none (`run.app`, invoker-only)         | Auth's admission calls, Cloud Run `milton-admit`, no load balancer    |
 
 Neon PostgreSQL is the source of truth. Sign-in is the self-hosted auth service at
 `https://auth.meetmilton.com/api/auth` (since 2026-11-07). Managed Neon Auth is disabled,
@@ -552,7 +553,8 @@ Project `milton-510506`, Cloud Run/Artifact Registry region `us-east4`. **Warm i
 one instance warm through the service-level minimum (`gcloud run services update <svc> --min=1`;
 `run.googleapis.com/minScale: 1` on the service, about $10/month each). It applies across
 revisions, so deploys and rollbacks keep it; when replacing a service from a manifest, keep it.
-Check: `gcloud run services describe <svc> --format='value(metadata.annotations."run.googleapis.com/minScale")'` prints 1. Service manifests in this directory pin an immutable image and
+Check: `gcloud run services describe <svc> --format='value(metadata.annotations."run.googleapis.com/minScale")'` prints 1.
+`milton-admit` has no minimum until Peter decides (see [its section](#admission-service-milton-admit)). Service manifests in this directory pin an immutable image and
 secret versions. They contain configuration and secret references, never values.
 The tracked app and MCP manifests still pin the pre-cutover release: app
 `milton-app-edit-00223ec` and MCP `milton-mcp-edit-00223ec`, both using image index
@@ -646,6 +648,175 @@ CNAMEs for app, MCP and auth. Apex, www and mail records stay unchanged. Validat
 `gcloud compute url-maps validate --global --load-balancing-scheme=EXTERNAL_MANAGED --source=<file>`
 before importing them.
 
+## Admission service (`milton-admit`)
+
+Auth's two internal calls, `POST /internal/auth/admit` (every authorize and consent accept)
+and `POST /internal/auth/preserve-eligibility` (unlink), go to their own Cloud Run service,
+`milton-admit`, running the runtime image with `MILTON_SERVICE=admit`. It serves those two
+paths and answers 404 to everything else; app and MCP answer 404 on `/internal/*`. Before
+this, the routes were on the app, reachable by anyone through the load balancer, and the
+admission bearer was the only check (critique finding 8).
+
+- **Reachability.** Not attached to the load balancer or URL map. Ingress `all`, because
+  auth has no VPC egress and reaches `run.app` over Google's network; Cloud Run's invoker
+  check is on and only `milton-auth@` holds `roles/run.invoker` on the service (no
+  `allUsers`). Google's front end refuses a request without a Google-signed ID token from a
+  principal holding `run.routes.invoke` (403, "The request was not authenticated"), before
+  the container sees it.
+- **Two checks.** Auth gets an ID token for the audience `AUTH_ADMISSION_URL` from the
+  metadata server (`…/instance/service-accounts/default/identity?audience=…`,
+  `Metadata-Flavor: Google`), caches it until five minutes before its `exp` (Google's
+  tokens last about an hour), and sends it as `X-Serverless-Authorization: Bearer <token>`.
+  [Google's service-to-service guide](https://docs.cloud.google.com/run/docs/authenticating/service-to-service):
+  that header exists for applications that already use `Authorization` for their own
+  check; with both present "only the `X-Serverless-Authorization` header is checked", and
+  Cloud Run "removes the signature before passing the token to the user container". The
+  audience must be the service URL (custom domains are not supported). So
+  `Authorization: Bearer <AUTH_ADMISSION_SECRET>` reaches the container unchanged, and the
+  container checks it as before. A failed or malformed token fetch sends nothing and fails
+  sign-in with `admission_retry_required`, like a refused admission, and logs
+  `auth_admission_identity` (class and code only).
+- **Configuration.** Auth reads `AUTH_ADMISSION_URL`, a plain environment variable (not a
+  secret) on `milton-auth` and on the `milton-auth-mail` job, which reads the same config:
+  `https://milton-admit-419545871671.us-east4.run.app` (the deterministic URL; token
+  audience and target are the same string). Auth refuses to start in production with
+  anything but an `https://…run.app` origin; a loopback origin (no token) is for
+  development and the integration checks only.
+- **Identity and secrets (least privilege).** Its own service account `milton-admit@`
+  with `secretAccessor` on `milton-admit-env` and `milton-admit-key` only, and its own
+  dotenvx keypair. The payload holds exactly what admission reads: `DATABASE_URL` (the
+  app's `milton_app_runtime` login, which already holds the admission grants), `AUTH_ISSUER`,
+  `AUTH_ADMISSION_SECRET`, `MILTON_TRIAL_FINGERPRINT_KEY`, `STRIPE_SECRET_KEY` and
+  `STRIPE_PRICE_ID`; never the app's cookie or OIDC client secrets, nor the Stripe webhook
+  secret (`admitRuntimeConfig` does not read it). Reusing `milton-app@` would have meant no
+  new secrets but would give a second, differently exposed service everything the app
+  holds. A separate database login was not created: it would need a new owner grant file
+  and role audit for the same privileges; the audit runs as the app's
+  (`MILTON_SERVICE=app server/scripts/check-runtime-role.ts` with the admit payload). The
+  trade-off: a change to any of those six values (the database password, the Stripe key)
+  is now minted into both payloads.
+- **Settings** ([admit.service.json](admit.service.json)): concurrency 40 (the database
+  pool's maximum, so each request can hold a connection; auth can have at most 24 calls in
+  flight, 3 instances × 8); timeout 30 s (auth gives up at 5 s, but an admission with
+  Stripe can take about 15 s, and finishing lets auth's retry find it done); max 3
+  instances, as app and MCP; startup CPU boost on.
+- **Cold start and minimum instances.** The built bundle (`server/dist/cloud-run.js`,
+  3.3 MB) answered its first request 143–151 ms after `node` started (median 145 ms over 10
+  runs, Node 26.13.0, Apple silicon laptop; app 163 ms, MCP 150 ms), so the code adds
+  little to the 5 s wait; Cloud Run's own instance start and the first Neon TLS connection
+  are not measured. With about 8 to 25 requests an hour across the services, most
+  admissions after a quiet spell would start an instance. The manifest has no minimum (0).
+  One warm instance, as the other three services keep, costs about $10 a month: Peter's
+  call. Check after release: the first admission after 15 idle minutes, in
+  `httpRequest.latency` of milton-admit's request log.
+
+### Release order (no compatibility shims)
+
+Each step touches production: milton-duo runs them with Peter's go. Record the current
+revisions, images and secret versions first.
+
+**1. Create `milton-admit` and its IAM.** Build and push the runtime image as for an
+app/MCP release, but do not move app or MCP yet. In a no-history shell inside a private
+temporary directory (`umask 077`), as in [Runtime role](#runtime-role) step 4:
+
+```sh
+P=--project=milton-510506
+SA=milton-admit@milton-510506.iam.gserviceaccount.com
+gcloud iam service-accounts create milton-admit $P --display-name='Milton admission'
+# The app's current payload: the version milton-app's serving revision mounts.
+gcloud secrets versions access <N> --secret=milton-app-env $P > app-current.env
+export DOTENV_PRIVATE_KEY="$(gcloud secrets versions access <K> --secret=milton-app-key $P)"
+dotenvx decrypt -f app-current.env --stdout \
+  | grep -E '^(DATABASE_URL|AUTH_ISSUER|AUTH_ADMISSION_SECRET|MILTON_TRIAL_FINGERPRINT_KEY|STRIPE_SECRET_KEY|STRIPE_PRICE_ID)=' \
+  > admit.env
+# The app's key must not encrypt the new payload: its own keypair, generated now.
+unset DOTENV_PRIVATE_KEY
+dotenvx encrypt -f admit.env --env-keys-file admit.keys
+grep -c '="encrypted:' admit.env   # must print 6
+# Public keys differ (they are not secret):
+grep '^DOTENV_PUBLIC_KEY' app-current.env admit.env
+gcloud secrets create milton-admit-env $P --replication-policy=automatic --data-file=admit.env
+grep '^DOTENV_PRIVATE_KEY=' admit.keys | cut -d= -f2- | tr -d '"' \
+  | gcloud secrets create milton-admit-key $P --replication-policy=automatic --data-file=-
+for s in milton-admit-env milton-admit-key; do
+  gcloud secrets add-iam-policy-binding $s $P --member=serviceAccount:$SA --role=roles/secretmanager.secretAccessor
+done
+```
+
+Match the replication of the existing secrets (`gcloud secrets describe milton-app-env`).
+From the repository checkout, audit the login through the payload (`<dir>` is the
+temporary directory): `MILTON_SERVICE=app dotenvx run -f <dir>/admit.env --env-keys-file <dir>/admit.keys -- bun --no-env-file server/scripts/check-runtime-role.ts`
+prints `ok`. Then copy the encrypted payload to private release storage, delete the
+directory, set the image digest in [admit.service.json](admit.service.json),
+and create the service and its one invoker:
+
+```sh
+R="--project=milton-510506 --region=us-east4"
+gcloud run services replace server/deploy/admit.service.json --dry-run $R
+gcloud run services replace server/deploy/admit.service.json $R
+gcloud run services add-iam-policy-binding milton-admit $R \
+  --member=serviceAccount:milton-auth@milton-510506.iam.gserviceaccount.com --role=roles/run.invoker
+gcloud run services get-iam-policy milton-admit $R   # exactly that one binding
+gcloud run services describe milton-admit $R \
+  --format='value(metadata.annotations."run.googleapis.com/invoker-iam-disabled")'   # empty
+```
+
+Verify (the service URL is `https://milton-admit-419545871671.us-east4.run.app`; check it
+with `--format='value(metadata.annotations."run.googleapis.com/urls")'`):
+
+```sh
+U=https://milton-admit-419545871671.us-east4.run.app
+curl -s -o /dev/null -w '%{http_code}\n' -X POST $U/internal/auth/admit   # 403: no ID token
+# With your own identity (project Owner): reaches the container, which refuses without its bearer.
+T="$(gcloud auth print-identity-token)"
+curl -s -o /dev/null -w '%{http_code}\n' -X POST -H "Authorization: Bearer $T" $U/internal/auth/admit   # 401
+curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $T" $U/health   # 404: the admit role
+unset T
+```
+
+Plan and apply the alerts (`bun server/scripts/monitoring.ts`, then `--apply`): the shared
+metrics, the release gate and milton-instance-start now include `milton-admit`.
+
+**2. Release auth pointing at it.** Deploy the auth image from this change with the URL in
+the same revision (the image refuses to start without it), and move `milton-auth-mail` with
+the same variable:
+
+```sh
+gcloud run deploy milton-auth $R --image=<AUTH_IMAGE@sha256> \
+  --update-env-vars=AUTH_ADMISSION_URL=https://milton-admit-419545871671.us-east4.run.app
+gcloud run jobs update milton-auth-mail $R --image=<AUTH_IMAGE@sha256> \
+  --update-env-vars=AUTH_ADMISSION_URL=https://milton-admit-419545871671.us-east4.run.app
+gcloud run jobs update milton-auth-maint $R --image=<AUTH_IMAGE@sha256>
+```
+
+Verify a sign-in admits: run `milton-e2e-daily` once (it signs in through auth), or sign
+in to the app, then
+`gcloud logging read 'resource.labels.service_name="milton-admit" AND httpRequest.requestUrl:"/internal/auth/admit"' --project=milton-510506 --freshness=15m --limit=5 --format='value(httpRequest.status,httpRequest.latency)'`
+shows 204, and auth's log has no `auth_admission_identity`.
+
+**3. Release app and MCP without the routes** (the image from step 1), then verify through
+the load balancer:
+
+```sh
+for h in app mcp; do for p in admit preserve-eligibility; do
+  curl -s -o /dev/null -w "$h $p %{http_code}\n" -X POST https://$h.meetmilton.com/internal/auth/$p
+done; done   # 404 each
+```
+
+**Afterwards (optional, recommended):** mint the next `milton-app-env` version without
+`AUTH_ADMISSION_SECRET`, which the app no longer reads, so the app's account no longer
+holds it. Older app revisions keep their pinned version.
+
+**Rollback.** `milton-admit` rolls back by revision like any service. App or MCP may roll
+back to a pre-change revision: that only reopens the old public route, which nothing calls.
+**After step 3, rolling auth back to an image from before this change breaks sign-in:** it
+calls `https://app.meetmilton.com/internal/auth/admit`, which now answers 404, so every
+authorize and consent accept fails with `admission_retry_required` and unlink with
+`eligibility_preservation_retry_required`. Treat the step 2 auth revision as auth's rollback
+floor. If an older auth must run, first roll the app back to a revision that still serves
+the routes (for example `milton-app-e2e-7938dd5`; code only, schema compatible), and move
+it forward again once auth is current.
+
 ## Secrets
 
 Use separate dotenvx keypairs for app and MCP. Store encrypted payloads in
@@ -728,6 +899,12 @@ that metric did not record the one real failed start in 30 days, because the con
 The deploy errors of 2026-11-08 01:00Z (`traffic[21].tag: must be at least 3 characters`,
 `Revision 'milton-*-r3-64435ee' does not exist`) and 11-07 23:23Z (`Deadline expired`) are
 ERROR audit entries on the service, so they count in `milton-errors` and open the gate.
+
+`milton-admit` is in `milton-errors`, `milton-startup-failures`, milton-instance-start and
+the release gate, but has no page policy or uptime check of its own: it has no health
+route and refuses unauthenticated probes, and a failing admission is a failing sign-in,
+which auth answers with 503 and milton-auth's 5xx condition pages (its documentation
+points at milton-admit). No new condition, so no added cost.
 
 **Pending:** [monitoring/pending/milton-e2e-daily.policy.json](monitoring/pending/milton-e2e-daily.policy.json)
 pages on ≥ 1 failed execution of the Cloud Run job `milton-e2e-daily` in 24 h, or none for

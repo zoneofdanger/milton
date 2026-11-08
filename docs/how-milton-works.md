@@ -15,14 +15,24 @@ here.
 Files: `server/src/cloud-run.ts`, `server/src/environment.ts`, `server/src/config.ts`,
 `server/Dockerfile`, `server/deploy/`, `apps/site/vercel.json`.
 
-- One Docker image runs as two Cloud Run services, and `MILTON_SERVICE` picks `app` or
-  `mcp`.
+- One Docker image runs as three Cloud Run services, and `MILTON_SERVICE` picks `app`,
+  `mcp` or `admit`.
+- `admit` (Cloud Run `milton-admit`) serves only auth's `POST /internal/auth/admit` and
+  `/internal/auth/preserve-eligibility`; everything else is 404, and the app and MCP serve
+  no `/internal/` path. It is not behind the load balancer: Cloud Run's invoker check
+  admits only auth's service account, whose Google ID token auth sends in
+  `X-Serverless-Authorization`, and the admission bearer stays the second check.
+- Auth sends admissions to `AUTH_ADMISSION_URL`: a `run.app` origin gets a metadata-server
+  ID token for that origin, cached until five minutes before expiry; a loopback origin
+  (development and tests) gets none and is refused in production. A failed token fetch
+  sends nothing and fails like a refused admission.
 - The prepared auth service has its own canonical host, issuer and database role; app/MCP routing stays separate. Live routing changes require the release runbook.
 - HTTP upgrades to HTTPS with a redirect that keeps the method.
 - Vercel builds the static site from main on every push.
 - Startup decrypts a dotenvx file using a separate platform-held key.
-- Startup fails on bad URLs, a missing/short app client, admission or eligibility secret, a bad support email, a bad port, or an
-  unknown service name.
+- Startup fails on bad URLs, a missing/short app client or eligibility secret (admit: a
+  missing/short admission or eligibility secret or bad issuer), a bad support email, a bad
+  port, or an unknown service name.
 - Auth startup checks its runtime role before listening; connection failures retry with backoff for about 15 seconds, while a role refusal fails at once. App/MCP startup does no database work.
 - Plain HTTP is allowed only on loopback outside production.
 - On SIGTERM the server stops accepting requests and force-exits after 8 seconds.
@@ -308,13 +318,13 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
 - Auth rate limits key each network, for every native request including the account-security page's own session lookups, by the client address Google's load balancer appends (second-to-last `X-Forwarded-For` entry, IPv4-mapped IPv6 as IPv4, other IPv6 by /64, never the first entry; else the socket peer): one statement first takes the 120-a-minute network gate (for a request proven to be the app, by its client secret or its own access token against native's stored hash, the token only while native would accept it and its binding is current, a 1,000-a-minute app ceiling instead) and, only if it admits, 10 a minute per account email and, except for the app, 60 token and 30 revoke requests a minute per client and network and 60 UserInfo requests a minute per bearer token and network, so a refused request creates or charges no other bucket; Better Auth's per-network-and-path 3 sign-in/sign-up/change-password attempts per 10 seconds, 3 mail requests, 30 authorize and 20 registration requests a minute are each one atomic `take_rate` call; every bucket is an HMAC'd key in `milton_guard.rate_bucket`.
 - Auth runtime and owner command pools always verify PostgreSQL TLS certificates/hostnames, even with mode omitted; unsafe/libpq/duplicate URL settings refuse.
 - Every native generation advance or deletion atomically retires older reset proofs; issuance takes the original user snapshot under the same parent lock, never the redemption-time generation.
-- Native unlink awaits app eligibility preservation before taking its parent lock; app uses guarded original metadata and stores fingerprints for existing writing accounts only, without billing or admission.
+- Native unlink awaits `milton-admit`'s eligibility preservation before taking its parent lock; it uses guarded original metadata and stores fingerprints for existing writing accounts only, without billing or admission.
 - Native mail callbacks capture one original message; every generic signup/reset/resend success commits the same encrypted-job or no-op receipt outside native swallowing, with no provider I/O during HTTP; failure is uncertain/retryable503. A message to a reserved `.invalid` address is never queued: it commits the no-op receipt an unknown address gets, so the answer is the same and delivery has nothing to send.
 - Auth-only mail functions lease one original message at a time for bounded delivery, stable job-id idempotency, finite retries and shared Retry-After pause capped at24 hours by worker and SQL across passes; native authority never rebinds to a later email owner.
 - Native capture checks its one-hour lifetime on the native clock; SQL accepts only finite future proof expiry and caps mail delivery at native expiry or15 minutes; terminal transitions clear payloads and bounded owner maintenance clears expired/fenced payloads and receipts eligible after24 hours, with physical retention longer if maintenance is delayed.
 - Bootstrap000 validates an explicit complete retained-login CONNECT/audited TEMP inventory before transactional pregrants/PUBLIC revocation; missing or inconsistent inventory refuses without partial privilege loss.
-- Authenticated native admission carries exact issuer/subject/continuation and native-validated verified email and bounded Google/GitHub IDs, including [] for password-only. Each authorize or consent accept asks the app once, though native asks twice: a second ask with the same admission inputs shares the first's outcome, a refusal included, and still runs its own `bind_flow`, so a session or binding that ends between the two is refused; nothing carries to another request. The auth service waits 5 s for the app's admission; revisit that when billing is turned on, since the app's worst case with Stripe is about 15 s.
-- App admission checks the dedicated eligibility-key policy, then creates/finds one stable internal m_* account and trial and applies existing subscription admission; untrusted/invalid handoffs cause no mapping or billing effects.
+- Authenticated native admission carries exact issuer/subject/continuation and native-validated verified email and bounded Google/GitHub IDs, including [] for password-only. Each authorize or consent accept asks the app once, though native asks twice: a second ask with the same admission inputs shares the first's outcome, a refusal included, and still runs its own `bind_flow`, so a session or binding that ends between the two is refused; nothing carries to another request. The auth service waits 5 s, ID token fetch included, for `milton-admit`'s admission; revisit that when billing is turned on, since the app's worst case with Stripe is about 15 s.
+- Admission (`milton-admit`, on the app's database login) checks the dedicated eligibility-key policy, then creates/finds one stable internal m_* account and trial and applies existing subscription admission; untrusted/invalid handoffs cause no mapping or billing effects.
 - Ownership uses exact issuer+subject, never email, provider nickname or eligibility fingerprints; native linking never merges writing or restarts a trial.
 - Account creation's unique identity row and billing's row lock converge under retries/concurrency; a new account starts empty.
 - Email and stable social identities get keyed trial-eligibility fingerprints with a dedicated stable key and first claimant, retained after deletion; changed/unprovisioned keys refuse admission. They are the only second-trial block: a new account sharing one with an earlier account starts canceled, whether trials are on or off.

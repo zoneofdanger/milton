@@ -1,5 +1,5 @@
 import { hostHeaderValidationResponse } from "@modelcontextprotocol/server";
-import type { RuntimeConfig } from "./config";
+import type { AdmitConfig, RuntimeConfig } from "./config";
 import {
   allowedHosts,
   createMiltonHandler,
@@ -12,7 +12,7 @@ import { boundRequest } from "./http";
 import { logUnexpected } from "./error-log";
 import { unavailablePage } from "./pages";
 import { Hono } from "hono";
-import { authAdmission } from "./auth-admission";
+import { ADMISSION_PATHS, authAdmission } from "./auth-admission";
 
 export function createMiltonApp(config: RuntimeConfig, browserOnly = false) {
   return createHttpApp(
@@ -20,8 +20,31 @@ export function createMiltonApp(config: RuntimeConfig, browserOnly = false) {
     browserPages(config),
     browserOnly,
     stripeWebhook(config),
-    authAdmission(config),
   );
+}
+
+/** The admission service (MILTON_SERVICE=admit, Cloud Run `milton-admit`):
+ * auth's two calls and nothing else. It is not behind the load balancer, and
+ * Cloud Run's invoker check admits only auth's service account; the bearer is
+ * the second check. */
+export function createAdmitApp(config: AdmitConfig) {
+  const admission = authAdmission(config);
+  return async (request: Request): Promise<Response> => {
+    if (!ADMISSION_PATHS.includes(new URL(request.url).pathname))
+      return new Response(null, {
+        status: 404,
+        headers: { "Cache-Control": "no-store" },
+      });
+    try {
+      return await admission(request);
+    } catch (error) {
+      logUnexpected("http", error);
+      return new Response(null, {
+        status: 503,
+        headers: { "Cache-Control": "no-store" },
+      });
+    }
+  };
 }
 
 export function createMcpApp(config: McpConfig) {
@@ -57,7 +80,6 @@ function createHttpApp(
   pages?: ReturnType<typeof browserPages>,
   browserOnly = false,
   webhook?: ReturnType<typeof stripeWebhook>,
-  admission?: ReturnType<typeof authAdmission>,
 ) {
   const mcp = createMiltonHandler(config);
   const app = new Hono();
@@ -119,12 +141,9 @@ function createHttpApp(
   // before the browser pages, so no session, cookie or CSRF check reaches it.
   if (webhook)
     app.all("/billing/webhook", (context) => webhook(context.req.raw));
-  if (admission) {
-    app.all("/internal/auth/admit", (context) => admission(context.req.raw));
-    app.all("/internal/auth/preserve-eligibility", (context) =>
-      admission(context.req.raw),
-    );
-  }
+  // Admission is the separate milton-admit service; neither public service has
+  // an internal route, on its own host or through the MCP host's redirect.
+  app.all("/internal/*", () => new Response(null, { status: 404 }));
   app.all("*", async (context) => {
     const request = context.req.raw;
     const resourceHost = new URL(config.resource).host;

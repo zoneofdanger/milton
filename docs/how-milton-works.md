@@ -78,6 +78,13 @@ Files: `server/src/handler.ts`, `server/src/token.ts`, `server/src/mcp.ts`,
 - Each request builds a fresh stateless MCP server, with no sessions or subscriptions.
 - Global instructions require retrieval before writing or editing for or as the person; only new drafts get the sample/rule conformity check before display. Edits preserve source wording and style outside the request over conflicting samples/rules; guidance never widens scope, and only specific unresolved conflicts are flagged. Requested transformations retain their scope, and changes are briefly listed. These are behavioral instructions, not server enforcement.
 - After draft or edit approval, assistants display an exact placeholder-safe body and useful non-private context, then offer once to retain that proposal; one yes approves the displayed proposal. Every sample save requires that display, without silently redacting after approval or changing the working edit for retention. Change lists are excluded, refusal is final for that text, and only changed text/context requires renewed approval. Edits do not imply standing rules.
+- Both instruction variants stay under 3,500 characters and hold the workflow and consent
+  rules, including never sending transcripts, secrets or others' private details or filing
+  capture consent; error handling lives in each error result's `next`, and save fields and
+  the other capture exclusions in `create_memo`'s description.
+- Server info carries a description of at most 120 characters for clients that drop
+  instructions: read `get_cover_sheet`, then the matching `get_report`, before writing or
+  editing for the person.
 - Session capture requires explicit opt-in for the current conversation; connection, draft or edit approval, quoted text and another conversation are not consent.
 - Each assistant's (account and OAuth client) first tool call after a server process starts
   carries `notifications/tools/list_changed` ahead of its result, as does every
@@ -136,6 +143,15 @@ Files: `server/src/mcp.ts`, `server/src/mcp-tools.ts`.
   script, only for reports with no rules or samples.
 - `create_memo` saves rules, edits, moves and sample changes together or not at all; context correction cannot combine with sample insertion or retirement.
 - A save is checked against the limits it read at its start; lowering a limit mid-save does not roll that save back.
+- Every error result and every MCP HTTP refusal body keeps `error` and `message` and adds
+  `code` (the `error`, or `version_conflict` for a stale-version conflict) and `next`:
+  `{action, text}`, the action one of `retry`, `reread`, `fix_input`, `ask_user` or
+  `tell_user`, from the one table in `mcp-outcomes.ts`; an unknown code gets the
+  unexpected-failure step. The SDK's plain-text argument refusals become such bodies,
+  `invalid_arguments` with the SDK's text as `message`.
+- A scope refusal also carries `required_permission`, `read` or `read_write`: what the
+  attempted action needed (a save needs `read_write`, anything else `read`), and its
+  `next` names that permission.
 - Replies add a trial notice if one is due, and that notice can never fail the call. A read or save whose trial gate found no reminder due makes no claim; a replayed save, which never reaches the gate, always tries one.
 - Failures return a code and message, and unknown failures say no save outcome is
   confirmed.

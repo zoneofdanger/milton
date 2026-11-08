@@ -198,6 +198,22 @@ outcome. That receipt's version may be
 older than the current report. Reusing an ID with different arguments is rejected.
 For a conflict, reread the cover sheet and reconsider a new request. No blind retry.
 
+Every error says what to do next in the result itself, so error handling never depends
+on the server instructions reaching the model. Each error result (and each MCP HTTP
+refusal body: invalid token, scope, rate and busy limits, oversized request, outage)
+keeps its `error` and `message` and adds `code`, the same stable code (`version_conflict`
+for a stale-version `conflict`, which has no `error`), and `next: {action, text}`. A
+scope refusal also carries `required_permission` (`read`, or `read_write` for a save):
+what the attempted action needed, which its `next` names.
+`action` is one of `retry` (repeat the identical call, a save with its request ID),
+`reread` (read the cover sheet or report again, then save with a new request ID),
+`fix_input` (correct the arguments), `ask_user` (the fix needs the person's approval or
+choice) and `tell_user` (stop and tell the person); `text` is the one-line step, such as
+giving the subscription link once without retrying. The mapping is one table,
+`nextSteps` in `src/mcp-outcomes.ts`, and a test checks that every code in the source has
+an entry. The SDK's plain-text argument refusals become the same JSON body with
+`invalid_arguments` and the SDK's text as `message`.
+
 A save runs in one transaction under the account lock, so a concurrent save of the
 same request waits and then replays; there is no pending state. Account gates (trial
 access) answer without a receipt, so the same request can succeed once the gate
@@ -337,12 +353,20 @@ send is not retention approval. When the person makes the same correction twice,
 assistant proposes one short rule and files it only on approval; a single
 correction is a one-off. Both run through `create_memo` with ordinary approval.
 
-Usage guidance travels in three places: server `instructions` during MCP
-initialization, descriptions in `tools/list`, and descriptions on the save input
-fields. Connection instructions explain the shared read/setup/save workflow;
-tool metadata explains when to use each tool, and field descriptions explain the
-opaque version and same-request retry rules. Server instructions stay at or under
-4,096 characters, because Claude Code truncates longer ones; a test enforces this.
+For clients that drop instructions, server info (`serverInfo.description`, MCP's
+`Implementation.description`) carries one line of at most 120 characters, tested: Milton
+holds the person's writing voice, and before writing or editing for them the assistant
+reads `get_cover_sheet`, then the matching `get_report`.
+
+Usage guidance travels in four places: server `instructions` during MCP
+initialization, descriptions in `tools/list`, descriptions on the save input
+fields, and the `next` step on every error result. Connection instructions explain
+the shared read/setup/save workflow and consent rules and point to `next` for errors;
+tool metadata explains when to use each tool and the save fields (rules, samples,
+version, request ID and what capture excludes), field descriptions explain the opaque
+version and same-request retry rules, and error results say how to recover. Both
+instruction variants stay under 3,500 characters, well inside the 4,096 at which Claude
+Code truncates; a test enforces this and that no error handling is left in them.
 The empty web page also provides a user-invoked setup prompt. No extra setup tool or
 prompt capability is required.
 

@@ -535,6 +535,7 @@ test("billing checkout and portal: 503 without config; signed-in CSRF forms; the
     "line_items[0][quantity]": "1",
     success_url: appOrigin + "/",
     cancel_url: appOrigin + "/",
+    expires_at: expect.any(String),
   });
   try {
     await send("/");
@@ -601,8 +602,14 @@ test("billing checkout and portal: 503 without config; signed-in CSRF forms; the
         sql`UPDATE trial_accounts SET subscription_status=${status}`,
       );
       stripe.calls.length = 0;
+      const now = Math.floor(Date.now() / 1000);
       await leavesFor(await send("/billing/checkout", {}), location);
       expect([status, stripe.calls]).toEqual([status, [...calls]]);
+      // An abandoned tab stops being payable soon after Stripe's 30-minute
+      // minimum, with headroom so Stripe's later creation time never undercuts it.
+      for (const { call, expires_at } of stripe.calls)
+        if (call === "POST /v1/checkout/sessions")
+          expect(Number(expires_at) - now).toBeWithin(1830, 1921);
     }
     // A webhook that has not landed: the stored copy says canceled, Stripe has a
     // live one. No second subscription, and the row catches up.

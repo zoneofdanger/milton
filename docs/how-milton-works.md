@@ -392,7 +392,8 @@ Files: `server/src/store/index.ts`, `server/src/store/trials.ts`,
   subscription exists, storing it, so a late webhook cannot sell a second subscription.
 - An account still waiting on its trial takes it first, then the portal, or a 503 if it did
   not start, so paying early cannot lose the 30 days.
-- Any other status gets Checkout in subscription mode, card required, no trial.
+- Any other status gets Checkout in subscription mode, card required, no trial; each
+  session expires after 31 minutes (Stripe's 30-minute minimum plus a minute), not 24 hours.
 - `/billing/portal` sends an account with a stored customer to the Stripe portal, and
   answers 409 without one.
 - Before sending anyone to Stripe, both routes copy the sign-in email to a stored customer

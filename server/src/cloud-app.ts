@@ -6,6 +6,15 @@ import { loadAssets, localAsset } from "./assets";
 export function createCloudApp(config: RuntimeConfig) {
   const app = createMiltonApp(config, true);
   loadAssets();
+  return cloudRequests(config, app);
+}
+
+/** The app service's request handling in front of the browser app: the
+ * canonical Host, then the configured origin, then the public assets. */
+export function cloudRequests(
+  config: RuntimeConfig,
+  app: (request: Request) => Promise<Response>,
+) {
   return async (request: Request): Promise<Response> => {
     const refusal = hostHeaderValidationResponse(request, [
       new URL(config.appOrigin).hostname,

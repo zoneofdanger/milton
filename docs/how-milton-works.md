@@ -372,7 +372,8 @@ Files: `server/src/store/index.ts`, `server/src/store/trials.ts`,
 - Any other status gets Checkout in subscription mode, card required, no trial.
 - `/billing/portal` sends an account with a stored customer to the Stripe portal, and
   answers 409 without one.
-- Before opening Stripe, both routes copy the sign-in email to a stored customer, so a
+- Before sending anyone to Stripe, both routes copy the sign-in email to a stored customer
+  (Checkout before it creates its session, the portal while it creates its own), so a
   backfilled customer gets one before it can add a card; a failed copy is logged and never
   stops anyone paying.
 - Both routes leave through a page that navigates, because `form-action 'self'` blocks an

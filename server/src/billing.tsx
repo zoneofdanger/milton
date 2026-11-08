@@ -11,7 +11,7 @@ import {
   type StoreBindings,
   type StripeSubscriptionState,
 } from "./store";
-import { boundRequest } from "./http";
+import { boundRequest, inOrder } from "./http";
 import { AuthError } from "./token";
 import { logUnexpected } from "./error-log";
 import { navigation, page } from "./pages";
@@ -337,18 +337,19 @@ async function billingRoute(ctx: PageContext): Promise<Response> {
   const home = config.appOrigin + "/";
   // navigation, not a redirect: form-action 'self' blocks an external Location
   // after a form, and a person could then neither pay nor add a card.
+  // The portal session needs no email, so the copy runs alongside it; both
+  // finish before the person leaves, and a failed copy is still only logged.
   const portal = async (customer: string) => {
-    await copyEmail(billing, customer, user.email);
-    return navigation(
-      (
-        await stripePost(
-          billing,
-          "billing_portal/sessions",
-          { customer, return_url: home },
-          redirectTo("https://billing.stripe.com"),
-        )
-      ).url,
+    const [, session] = await inOrder(
+      copyEmail(billing, customer, user.email),
+      stripePost(
+        billing,
+        "billing_portal/sessions",
+        { customer, return_url: home },
+        redirectTo("https://billing.stripe.com"),
+      ),
     );
+    return navigation(session.url);
   };
   if (url.pathname === "/billing/portal") {
     if (!account.customer)

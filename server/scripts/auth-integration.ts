@@ -129,6 +129,7 @@ try {
     "0007_usage_calls",
     "0008_usage_retention",
     "0009_test_account",
+    "0011_enrol_lease",
   ])
     await owner.query(
       readFileSync(new URL(`./drizzle/${migration}.sql`, sourceRoot), "utf8"),
@@ -1353,6 +1354,8 @@ try {
     200,
   );
   assert.equal((await request(app, callback, appCookies)).status, 401);
+  // Admission enrols after its reply; both concurrent admissions have finished.
+  await backgroundSettled();
   assert.equal(stripe.customers, 1);
   assert.equal(stripe.subscriptions, 1);
   pass(
@@ -2454,6 +2457,7 @@ try {
     ).rows[0].subscription_status,
     "canceled",
   );
+  await backgroundSettled();
   assert.equal(stripe.customers, 1);
   assert.equal(stripe.subscriptions, 1);
   assert.equal(
@@ -2531,6 +2535,7 @@ try {
       provider: ISSUER,
       subject: original,
     });
+    await backgroundSettled();
     const trialBefore = stripe.subscriptions;
     const nativeContext = await native.provider.$context;
     const google = nativeContext.socialProviders.find(
@@ -2686,6 +2691,7 @@ try {
       "canceled",
       "removed stable identity must survive lost link notification and changed email",
     );
+    await backgroundSettled();
     assert.equal(stripe.subscriptions, trialBefore, "no second trial");
     // Unadmitted native-only subject: callback uncertainty cannot create writing or a trial.
     await clearRates();
@@ -2815,14 +2821,19 @@ try {
   await owner.query(
     'delete from milton_auth."rateLimit"; delete from milton_guard.rate_bucket',
   );
-  const quiet = async () =>
-    JSON.stringify(
-      (
-        await owner.query(
-          "select (select count(*) from milton_guard.mail_job) mail,(select count(*) from users where test_account) marked",
-        )
-      ).rows[0],
-    ) + JSON.stringify([stripe.customers, stripe.subscriptions, mail.length]);
+  const quiet = async () => {
+    // Sign-in enrols after its reply.
+    await backgroundSettled();
+    return (
+      JSON.stringify(
+        (
+          await owner.query(
+            "select (select count(*) from milton_guard.mail_job) mail,(select count(*) from users where test_account) marked",
+          )
+        ).rows[0],
+      ) + JSON.stringify([stripe.customers, stripe.subscriptions, mail.length])
+    );
+  };
   const before = await quiet();
   const secrets = join(root, "test-account.env");
   const lines: string[] = [];
@@ -3255,6 +3266,7 @@ try {
           [testUser],
         )
       ).rows;
+    await backgroundSettled();
     const requests = stripe.requests;
     await owner.query(
       "update users set created_at=now()-interval '31 days' where id=$1",
@@ -3297,6 +3309,7 @@ try {
     });
     await checkout.body?.cancel();
     assert.equal(checkout.status, 409, "checkout refuses a test account");
+    await backgroundSettled();
     assert.equal(stripe.requests, requests, "no Stripe request at all");
   }
   pass(

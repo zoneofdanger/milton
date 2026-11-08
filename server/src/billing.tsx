@@ -167,11 +167,11 @@ const redirectTo = (origin: string) =>
   });
 
 // A key that lasts one UTC minute. Stripe replays a stored error for the same key
-// for 24 hours or more, and refuses the same key with other params; under the
-// rule that a failure stops the sign-in, a fixed key would lock the person out for
-// a day. Double submits within a minute still dedupe, and listing under the row
-// lock reconciles a later retry, with one gap: a create that timed out here and is
-// still running at Stripe can be missed once the minute has turned.
+// for 24 hours or more, and refuses the same key with other params; a fixed key
+// would keep every retry failing for a day. Double submits within a minute still
+// dedupe, and listing under the enrolment lease reconciles a later retry, with one
+// gap: a create that timed out here and is still running at Stripe can be missed
+// once the minute has turned.
 const idempotencyKey = (kind: "customer" | "subscription", userId: string) =>
   `milton-${kind}-${userId}-${Math.floor(Date.now() / 60000)}`;
 
@@ -199,9 +199,10 @@ async function createCustomer(
 }
 
 /** Gives an enrolled account with no subscription its 30-day Stripe trial; a
- * no-op for any other account or without billing. What Stripe already has is
- * stored rather than starting a second trial. A failure throws a 503 that says to
- * try again, and repeating the attempt is the retry. */
+ * no-op for any other account or without billing, or while another attempt holds
+ * the enrolment. What Stripe already has is stored rather than starting a second
+ * trial. A failure throws a 503 that says to try again, and repeating the attempt
+ * is the retry. Sign-in runs it in the background; checkout waits for it. */
 export async function ensureSubscription(
   config: StoreBindings & Pick<RuntimeConfig, "billing">,
   userId: string,
@@ -209,40 +210,50 @@ export async function ensureSubscription(
 ) {
   const billing = config.billing;
   if (!billing) return;
+  let lease:
+    | Awaited<ReturnType<ReturnType<typeof billingForAccount>["enrolment"]>>
+    | undefined;
   try {
     const store = billingForAccount(config, userId);
     const account = await store.account();
     // A test account never gets a trial, customer or subscription.
     if (account.test || !account.enrolled || account.status !== null) return;
-    // The row stays locked across customer, list and create. Two attempts across
-    // a minute boundary have different keys, so only the lock stops each making a
-    // customer, or each listing nothing and starting a trial, which could charge
-    // the person twice. That is at most three Stripe calls, 15 s; a waiter gives up
-    // at the 10 s lock_timeout with the same 503. A reply lost after Stripe made the
-    // customer can still leave an orphan once the minute turns: it is never
-    // charged, may hold an email, and is removed by hand in Stripe if ever needed.
-    await store.whileWaiting(async ({ customer: stored, link, save }) => {
-      const customer =
-        stored ?? (await createCustomer(billing, userId, link, email));
-      await save(
-        decidingSubscription(await listSubscriptions(billing, customer)) ??
-          (await stripePost(
-            billing,
-            "subscriptions",
-            {
-              customer,
-              "items[0][price]": billing.priceId,
-              trial_period_days: "30",
-              "payment_settings[save_default_payment_method]":
-                "on_subscription",
-              "trial_settings[end_behavior][missing_payment_method]": "cancel",
-            },
-            stripeSubscription,
-            idempotencyKey("subscription", userId),
-          )),
+    // Only the lease's holder calls Stripe, and no transaction stays open across
+    // a call. Two attempts across a minute boundary have different keys, so only
+    // the lease stops each making a customer, or each listing nothing and
+    // starting a trial, which could charge the person twice. A reply lost after
+    // Stripe made the customer can still leave an orphan once the minute turns:
+    // it is never charged, may hold an email, and is removed by hand in Stripe if
+    // ever needed.
+    lease = await store.enrolment();
+    if (!lease) return;
+    const customer =
+      lease.customer ??
+      (await createCustomer(billing, userId, store.linkCustomer, email));
+    let state = decidingSubscription(
+      await listSubscriptions(billing, customer),
+    );
+    if (!state) {
+      await lease.renew();
+      state = await stripePost(
+        billing,
+        "subscriptions",
+        {
+          customer,
+          "items[0][price]": billing.priceId,
+          trial_period_days: "30",
+          "payment_settings[save_default_payment_method]": "on_subscription",
+          "trial_settings[end_behavior][missing_payment_method]": "cancel",
+        },
+        stripeSubscription,
+        idempotencyKey("subscription", userId),
       );
-    });
+    }
+    await lease.save(state);
+    lease = undefined;
   } catch (error) {
+    // The next attempt need not wait the lease out.
+    await lease?.release().catch(() => {});
     logUnexpected("billing", error);
     throw new AuthError(
       "auth_unavailable",
@@ -256,13 +267,13 @@ export async function ensureSubscription(
  * failed DELETE proves nothing either way: a key from the wrong mode gets a 404 for
  * a live customer who would go on being charged, and a repeat on a deleted customer
  * may answer anything. So on any failure, only a read that reports the customer
- * deleted counts as done. The row then forgets the customer before Milton's own
- * delete, which can still fail. Throws on anything else, including a customer on
- * record with billing unconfigured. Issues no refund. */
+ * deleted counts as done. Returns the customer ended, or null with none stored; the
+ * caller then forgets it (forgetStripeCustomer) before Milton's own delete, which
+ * can still fail. Runs with no transaction open. Throws on anything else, including
+ * a customer on record with billing unconfigured. Issues no refund. */
 export async function endStripeCustomer(config: RuntimeConfig, userId: string) {
-  const store = billingForAccount(config, userId);
-  const { customer } = await store.account();
-  if (!customer) return;
+  const { customer } = await billingForAccount(config, userId).account();
+  if (!customer) return null;
   const billing = config.billing;
   if (!billing) throw stripeFailed();
   const path = `customers/${customer}`;
@@ -272,7 +283,7 @@ export async function endStripeCustomer(config: RuntimeConfig, userId: string) {
       await stripeCall(billing, "GET", path),
       z.object({ deleted: z.literal(true) }),
     );
-  await store.clearCustomer();
+  return customer;
 }
 
 // Copies the sign-in email to a stored customer, so Stripe's receipts and reminders

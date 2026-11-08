@@ -9,7 +9,7 @@ import {
   saveFingerprints,
   StoreError,
 } from "./store";
-import type { StoreSession } from "./store/database";
+import { inBackground, type StoreSession } from "./store/database";
 import { ensureSubscription } from "./billing";
 import { AuthError } from "./token";
 import { boundRequest } from "./http";
@@ -154,7 +154,6 @@ export function authAdmission(config: RuntimeConfig) {
         { provider: p.issuer, subject: p.subject },
         trialFingerprints(config.trialFingerprintKey, p),
       );
-      await ensureSubscription(config, miltonUserId, p.verifiedEmail);
       // Correlation receipts carry no ongoing authority and need not become
       // permanent identity history. Native login flows expire after ten minutes.
       await database(config).query(
@@ -162,6 +161,12 @@ export function authAdmission(config: RuntimeConfig) {
       );
       await database(config).query(
         sql`INSERT INTO milton_app.admission(issuer,subject,continuation,user_id) VALUES(${p.issuer},${p.subject},${p.continuation},${miltonUserId}) ON CONFLICT DO NOTHING`,
+      );
+      // Sign-in never waits on Stripe: the trial starts after the reply, and
+      // shutdown waits for it. A failure is logged and leaves no status, which
+      // the gate reads as early access; the next sign-in or checkout retries.
+      inBackground(() =>
+        ensureSubscription(config, miltonUserId, p.verifiedEmail),
       );
       return new Response(null, { status: 204, headers });
     } catch (error) {

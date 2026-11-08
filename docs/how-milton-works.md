@@ -297,20 +297,20 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
 - Auth-only mail functions lease one original message at a time for bounded delivery, stable job-id idempotency, finite retries and shared Retry-After pause capped at24 hours by worker and SQL across passes; native authority never rebinds to a later email owner.
 - Native capture checks its one-hour lifetime on the native clock; SQL accepts only finite future proof expiry and caps mail delivery at native expiry or15 minutes; terminal transitions clear payloads and bounded owner maintenance clears expired/fenced payloads and receipts eligible after24 hours, with physical retention longer if maintenance is delayed.
 - Bootstrap000 validates an explicit complete retained-login CONNECT/audited TEMP inventory before transactional pregrants/PUBLIC revocation; missing or inconsistent inventory refuses without partial privilege loss.
-- Authenticated native admission carries exact issuer/subject/continuation and native-validated verified email and bounded Google/GitHub IDs, including [] for password-only. Each authorize or consent accept asks the app once, though native asks twice: a second ask with the same admission inputs shares the first's outcome, a refusal included, and still runs its own `bind_flow`, so a session or binding that ends between the two is refused; nothing carries to another request. The auth service waits 5 s for the app's admission; revisit that when billing is turned on, since the app's worst case with Stripe is about 15 s.
+- Authenticated native admission carries exact issuer/subject/continuation and native-validated verified email and bounded Google/GitHub IDs, including [] for password-only. Each authorize or consent accept asks the app once, though native asks twice: a second ask with the same admission inputs shares the first's outcome, a refusal included, and still runs its own `bind_flow`, so a session or binding that ends between the two is refused; nothing carries to another request. The auth service waits 5 s for the app's admission, which never waits on Stripe.
 - App admission checks the dedicated eligibility-key policy, then creates/finds one stable internal m_* account and trial and applies existing subscription admission; untrusted/invalid handoffs cause no mapping or billing effects.
 - Ownership uses exact issuer+subject, never email, provider nickname or eligibility fingerprints; native linking never merges writing or restarts a trial.
-- Account creation's unique identity row and billing's row lock converge under retries/concurrency; a new account starts empty.
+- Account creation's unique identity row and billing's enrolment lease converge under retries/concurrency; a new account starts empty.
 - Email and stable social identities get keyed trial-eligibility fingerprints with a dedicated stable key and first claimant, retained after deletion; changed/unprovisioned keys refuse admission. They are the only second-trial block: a new account sharing one with an earlier account starts canceled, whether trials are on or off.
 - A trial row with no status gets the existing 30-day Stripe trial when billing is configured; no row/status or billing disabled calls no Stripe API.
-- Subscription creation locks the trial row across customer/list/create; minute-based idempotency retains the known remote-success/local-timeout ambiguity across a minute boundary.
-- Billing failures stop admission with retryable503; existing Stripe state is listed/reconciled before another create.
+- Subscription creation holds a 60 s enrolment lease (`trial_accounts.enrol_lease_until`, 0011), claimed in one committed statement, not a row lock: only the holder calls Stripe for customer/list/create, the customer is stored as soon as it exists, the lease is renewed before the create, and the subscription is stored only while the row has none; another attempt meanwhile calls nothing. Minute-based idempotency retains the known remote-success/local-timeout ambiguity across a minute boundary.
+- Admission replies without waiting on Stripe and starts the trial in the background from the same request; shutdown waits for it. A failure is logged and leaves no status (early access), and the next sign-in or checkout retries; existing Stripe state is listed/reconciled before another create.
 - Owner-only `server/scripts/test-account.ts` provisions the fictional end-to-end account (`e2e@milton-test.invalid`): its Milton account, created first by the owner marked `test_account` and with no trial row and bound to a pre-chosen native id, so sign-in, checkout and the backfill never call Stripe for it; then the native user with a verified `.invalid` email and a random password, created last and without queuing any mail, so nobody can sign in to an unmarked account; a browser sign-in; and a 365-day read-and-save key minted through the app's form. It writes the three values to a new mode-0600 env file and refuses an existing email or file and any address outside `.invalid`, before any write; after a failure, `--resume` with the same file converges on the marked account, verifying it before signing in.
 - The subscription backfill remains an owner-selected dry run by default and never gives returning deleted identities another trial; it skips test accounts entirely (not counted, no Stripe call).
 - Account security routes to native UI; destructive deletion requires authoritative native freshness, exact typed confirmation and retention of current guarded verified-identity fingerprints.
 - App persists lifecycle UUID, original account/subject/incarnation/client and requester association before first native/remote attempt; retries never select current/recreated targets.
 - Disconnect commits native original-binding refusal before bounded cleanup; a failed or unfinished step answers 503 with a retry page re-posting the same operation, as deletion does; reconnect creates a new binding and never revives an old token.
-- Deletion saves the current verified-identity fingerprints as it starts, then commits refusal, then Stripe cancellation, then writing erasure (which records no identity of its own), and finally bounded native cleanup; unknown inventory/cascade shape leaves a retryable incomplete operation.
+- Deletion saves the current verified-identity fingerprints as it starts, then commits refusal, then Stripe cancellation (called with no transaction open, then recorded under the operation's lock with the ended customer forgotten), then writing erasure (which records no identity of its own), and finally bounded native cleanup; unknown inventory/cascade shape leaves a retryable incomplete operation.
 - Writing and original-incarnation app credentials are never erased before Stripe cancellation succeeds; incomplete deletion never claims completion.
 - Browser logout removes local authority and navigates through fixed-client native RP logout with exact return and native confirmation, leaving offline assistant grants independent; "Switch account" adds the one fixed logout `state` native echoes back, and only that exact single value sends the signed-out return on to a fresh sign-in (`prompt=login`).
 
@@ -388,21 +388,26 @@ Files: `server/src/store/index.ts`, `server/src/store/trials.ts`,
   only a customer ID from the six handled event types, because Stripe does not guarantee
   event order.
 - A handled event Milton cannot parse gets a 400 unrecorded, so Stripe retries it.
-- For a customer Milton holds, the webhook locks the row, reads the customer's
-  subscriptions from Stripe, and writes the deciding one where it records the event.
+- No Stripe call runs inside a database transaction or under a row lock.
+- For a customer Milton holds, the webhook reads the customer's subscriptions from Stripe,
+  then writes the deciding one where it records the event, only if the row's stored state
+  is unchanged since before the read, so an older read never lands over a newer write; on a
+  change it reads once more, and a second change answers 503 unrecorded.
 - The deciding subscription is active, then trialing, then past_due, otherwise the newest.
 - Only a successful empty list with a stored subscription writes canceled.
 - Any non-2xx from Stripe's list, 404 included, is a failed read: the webhook answers 503
-  unrecorded so Stripe retries, and sign-in stops with try again.
+  unrecorded so Stripe retries, and sign-in still admits with no trial yet.
 - A replayed event, an unknown type, or a customer Milton does not hold calls nothing.
 - Both billing routes take only signed-in POST forms with the CSRF check.
 - `/billing/checkout` answers 409 to an account with no trial row.
 - `/billing/checkout` sends trialing, active, past_due, unpaid, and paused to the Stripe
   portal.
 - With a stored customer, it lists Stripe first and goes to the portal if any such
-  subscription exists, storing it, so a late webhook cannot sell a second subscription.
+  subscription exists, storing it as the webhook does (over an unchanged row, one re-read,
+  then 503), so a late webhook cannot sell a second subscription.
 - An account still waiting on its trial takes it first, then the portal, or a 503 if it did
-  not start, so paying early cannot lose the 30 days.
+  not start (another attempt holding the enrolment included), so paying early cannot lose
+  the 30 days.
 - Any other status gets Checkout in subscription mode, card required, no trial; each
   session expires after 31 minutes (Stripe's 30-minute minimum plus a minute), not 24 hours.
 - `/billing/portal` sends an account with a stored customer to the Stripe portal, and
@@ -432,6 +437,7 @@ Files: `server/drizzle/`, `server/src/store/schema.ts`, `server/src/store/databa
   it summed.
 - User IDs cannot change.
 - `users.test_account` (0009, default false) marks the fictional end-to-end check account; owner file `011-test-account-roles.sql` narrows app's INSERT on `users` to its other columns, so no runtime login can set it, and usage and metric counts exclude it.
+- `trial_accounts.enrol_lease_until` (0011, nullable, no default) holds the enrolment lease; app's table-wide grant on `trial_accounts` (005) covers it, and MCP's column list leaves it out.
 - Disconnects and identity hashes have no foreign key to users, so they outlive the account.
 - `connection_keys` (0004) cascades from users and from its (issuer, subject) identity, requires the native binding (issuer, subject, incarnation, generation), checks id, hash, name, scope, binding lengths and dates, and grants nothing to the legacy writing group; owner file `006-connection-keys-roles.sql` lets app read every column but the hash (binding included), insert and set `revoked_at`, and MCP read and set `last_used_at` only.
 - Native 007 adds only `milton_guard.connection_key_status(subject, incarnation, generation)`: SECURITY DEFINER, fixed `pg_catalog, pg_temp` path, false on NULL or any mismatch, no PUBLIC/auth/guide EXECUTE and no table grants; MCP and app may execute it. Without it, every key is refused.

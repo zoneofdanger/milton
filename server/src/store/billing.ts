@@ -51,21 +51,68 @@ export async function linkStripeCustomer(
   )[0]?.customer;
 }
 
-/** Locks the row for the rest of the transaction if it still has no subscription,
- * and returns it. A second attempt waits here and then finds it set. */
-export async function lockWaitingSubscription(
-  db: StoreSession,
-  userId: string,
-) {
+// Covers the most an attempt does between claiming and renewing, or renewing and
+// saving: two Stripe calls (5 s timeout each) and a statement (20 s limit), 30 s,
+// so a holder still working is not taken over. A holder paused longer (Cloud Run
+// throttles CPU after the reply) finds its renewal refused before it can start a
+// second trial.
+const LEASE = sql`clock_timestamp()+interval '60 seconds'`;
+
+/** Claims the right to enrol the account with Stripe, if it still has no
+ * subscription and no other attempt holds a live lease. One committed statement,
+ * so no row stays locked while Stripe is called. Returns the stored customer and
+ * the lease, whose text is the token later statements compare. */
+export async function claimEnrolment(db: StoreSession, userId: string) {
   return (
-    await db.query<{ customer: string | null }>(sql`
-    SELECT stripe_customer_id AS customer FROM trial_accounts
-    WHERE user_id=${userId} AND subscription_status IS NULL AND ${billable} FOR UPDATE`)
+    await db.query<{ customer: string | null; lease: string }>(sql`
+    UPDATE trial_accounts SET enrol_lease_until=${LEASE}
+    WHERE user_id=${userId} AND subscription_status IS NULL AND ${billable}
+      AND (enrol_lease_until IS NULL OR enrol_lease_until < clock_timestamp())
+    RETURNING stripe_customer_id AS customer, enrol_lease_until::text AS lease`)
   )[0];
 }
 
-/** Writes what Stripe answered. Callers hold the row, so an older read cannot
- * land after a newer one. */
+/** Extends a lease still held, before a call that could start a second trial;
+ * returns the new token, or nothing once another attempt has taken it over. */
+export async function renewEnrolment(
+  db: StoreSession,
+  userId: string,
+  lease: string,
+) {
+  return (
+    await db.query<{ lease: string }>(sql`
+    UPDATE trial_accounts SET enrol_lease_until=${LEASE}
+    WHERE user_id=${userId} AND subscription_status IS NULL
+      AND enrol_lease_until=${lease}::timestamptz
+    RETURNING enrol_lease_until::text AS lease`)
+  )[0]?.lease;
+}
+
+/** Stores what Stripe answered, only while the account still has no
+ * subscription (a webhook may have stored a newer one meanwhile), and ends the
+ * lease. */
+export async function saveEnrolment(
+  db: StoreSession,
+  userId: string,
+  state: StripeSubscriptionState,
+) {
+  await db.query(sql`UPDATE trial_accounts SET ${subscriptionColumns(state)},
+    enrol_lease_until=NULL
+    WHERE user_id=${userId} AND subscription_status IS NULL AND ${billable}`);
+}
+
+/** Ends a lease still held, so the next attempt need not wait it out. */
+export async function releaseEnrolment(
+  db: StoreSession,
+  userId: string,
+  lease: string,
+) {
+  await db.query(sql`UPDATE trial_accounts SET enrol_lease_until=NULL
+    WHERE user_id=${userId} AND enrol_lease_until=${lease}::timestamptz`);
+}
+
+/** Writes what Stripe answered. Callers write only while the row's stored state
+ * is what it was before their read (see stripeCustomerRow). */
 export async function saveStripeSubscription(
   db: StoreSession,
   userId: string,
@@ -75,14 +122,24 @@ export async function saveStripeSubscription(
     WHERE user_id=${userId}`);
 }
 
-/** Locks the row holding this customer, if any, for the rest of the transaction.
- * Reads of Stripe for one customer run one at a time, so a slower, older read
- * cannot land after a newer one. */
-export async function lockStripeCustomer(db: StoreSession, customer: string) {
+// The stored Stripe state as one comparable text, independent of time zone.
+const storedState = sql`row(stripe_subscription_id,subscription_status,
+  extract(epoch from trial_end),extract(epoch from current_period_start),
+  extract(epoch from current_period_end))::text`;
+
+/** The row holding this customer, if any: its subscription and its stored
+ * Stripe state. With `lock`, the row is held for the rest of the transaction,
+ * which only compares and writes: Stripe is read before it opens. */
+export async function stripeCustomerRow(
+  db: StoreSession,
+  customer: string,
+  lock = false,
+) {
   return (
-    await db.query<{ subscription: string | null }>(sql`
-    SELECT stripe_subscription_id AS subscription FROM trial_accounts
-    WHERE stripe_customer_id=${customer} AND ${billable} FOR UPDATE`)
+    await db.query<{ subscription: string | null; stored: string }>(sql`
+    SELECT stripe_subscription_id AS subscription, ${storedState} AS stored
+    FROM trial_accounts WHERE stripe_customer_id=${customer} AND ${billable}
+    ${lock ? sql`FOR UPDATE` : sql``}`)
   )[0];
 }
 
@@ -98,6 +155,26 @@ export async function clearStripeCustomer(db: StoreSession, userId: string) {
   await db.query(sql`UPDATE trial_accounts SET stripe_customer_id=NULL,
     stripe_subscription_id=NULL,subscription_status='canceled'
     WHERE user_id=${userId}`);
+}
+
+/** Forgets the customer Stripe has just ended, holding the row for the rest of
+ * the caller's transaction. False when the row now holds another customer, which
+ * a retry must end first. */
+export async function forgetStripeCustomer(
+  db: StoreSession,
+  userId: string,
+  ended: string | null,
+) {
+  const stored =
+    (
+      await db.query<{ customer: string | null }>(sql`
+      SELECT stripe_customer_id AS customer FROM trial_accounts
+      WHERE user_id=${userId} FOR UPDATE`)
+    )[0]?.customer ?? null;
+  if (stored === null) return true;
+  if (stored !== ended) return false;
+  await clearStripeCustomer(db, userId);
+  return true;
 }
 
 /** Records the event and writes what Stripe answered in one statement: a

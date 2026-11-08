@@ -1,7 +1,12 @@
 import { sql } from "drizzle-orm";
 import { z } from "zod";
 import type { RuntimeConfig } from "./config";
-import { database, lockActiveAccount, lookupIdentityAccount } from "./store";
+import {
+  database,
+  forgetStripeCustomer,
+  lockActiveAccount,
+  lookupIdentityAccount,
+} from "./store";
 import type { PageContext, SessionUser } from "./auth-session";
 import { endStripeCustomer } from "./billing";
 import { hash } from "./auth-oidc";
@@ -236,8 +241,12 @@ async function advanceOperation(config: RuntimeConfig, original: Operation) {
     op = await read();
   }
   if (op.kind === "delete") {
-    await database(config).withConnection((connection) =>
-      connection.transaction(async (tx) => {
+    if (op.progress === "refused") {
+      // Stripe is called with no transaction open. Concurrent retries may each
+      // send the DELETE; a repeat is confirmed by the read that reports the
+      // customer deleted. The step is then recorded under the operation's lock.
+      const ended = await endStripeCustomer(config, op.user_id);
+      await database(config).transaction(async (tx) => {
         const current = operationSchema.parse(
           (
             await tx.query(
@@ -246,21 +255,14 @@ async function advanceOperation(config: RuntimeConfig, original: Operation) {
           )[0],
         );
         if (current.progress !== "refused") return;
-        const scoped = {
-          ...config,
-          storeDatabase: {
-            ...connection,
-            query: tx.query.bind(tx),
-            transaction: async <T>(work: (s: typeof tx) => Promise<T>) =>
-              work(tx),
-          },
-        };
-        await endStripeCustomer(scoped, current.user_id);
+        // A customer stored since the read is still live: the retry ends it.
+        if (!(await forgetStripeCustomer(tx, current.user_id, ended)))
+          throw unavailable();
         await tx.query(
           sql`UPDATE milton_app.lifecycle SET progress='stripe-ended' WHERE operation_id=${op.operation_id}::uuid`,
         );
-      }),
-    );
+      });
+    }
     await database(config).transaction(async (tx) => {
       const current = operationSchema.parse(
         (

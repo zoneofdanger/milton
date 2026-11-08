@@ -19,13 +19,15 @@ import {
   backfillAccounts,
   billingAccount,
   cancelReturningIdentities,
-  clearStripeCustomer,
+  claimEnrolment,
   enrollForBackfill,
   linkStripeCustomer,
-  lockStripeCustomer,
-  lockWaitingSubscription,
   recordStripeEvent,
+  releaseEnrolment,
+  renewEnrolment,
+  saveEnrolment,
   saveStripeSubscription,
+  stripeCustomerRow,
   stripeEventRecorded,
   type StripeEvent,
   type StripeSubscriptionState,
@@ -62,6 +64,7 @@ export {
   type KeyScope,
 } from "./connection-keys";
 export type { StripeSubscriptionState } from "./billing";
+export { forgetStripeCustomer } from "./billing";
 
 export interface StoreBindings {
   DATABASE_URL?: string;
@@ -470,47 +473,71 @@ export function billingForAccount(bindings: StoreBindings, userId: string) {
     account: () => billingAccount(db, userId),
     linkCustomer: (customer: string) =>
       linkStripeCustomer(db, userId, customer),
-    clearCustomer: () => clearStripeCustomer(db, userId),
-    /** Reads Stripe holding the customer's row, as the webhook does, and stores
-     * what the read returns, if anything. */
-    syncSubscription: (
+    /** Reads Stripe with no transaction open, as the webhook does, and stores
+     * what the read returns, if anything, over an unchanged row (see
+     * stripeConflict). */
+    syncSubscription: async (
       customer: string,
       read: () => Promise<StripeSubscriptionState | undefined>,
-    ) =>
-      db.transaction(async (tx) => {
-        await lockStripeCustomer(tx, customer);
-        const state = await read();
-        if (state) await saveStripeSubscription(tx, userId, state);
-        return state;
-      }),
-    /** Runs `work` holding the row, only while it has no subscription. What it
-     * stored before failing still commits: a customer must stay findable when the
-     * subscription call after it fails. */
-    whileWaiting: async (
-      work: (row: {
-        customer: string | null;
-        link: (customer: string) => Promise<string | undefined>;
-        save: (state: StripeSubscriptionState) => Promise<void>;
-      }) => Promise<void>,
     ) => {
-      let failed: { error: unknown } | undefined;
-      await db.transaction(async (tx) => {
-        const row = await lockWaitingSubscription(tx, userId);
-        if (!row) return;
-        try {
-          await work({
-            customer: row.customer,
-            link: (customer) => linkStripeCustomer(tx, userId, customer),
-            save: (state) => saveStripeSubscription(tx, userId, state),
-          });
-        } catch (error) {
-          failed = { error };
-        }
-      });
-      if (failed) throw failed.error;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const before = await stripeCustomerRow(db, customer);
+        const state = await read();
+        if (!state || !before) return state;
+        const written = await db.transaction(async (tx) => {
+          const row = await stripeCustomerRow(tx, customer, true);
+          if (row?.stored !== before.stored) return false;
+          await saveStripeSubscription(tx, userId, state);
+          return true;
+        });
+        if (written) return state;
+      }
+      throw stripeConflict();
+    },
+    /** Claims the account's enrolment, if it has no subscription and no other
+     * attempt holds it. Only the holder calls Stripe, with no transaction open;
+     * each step below is its own committed statement. */
+    enrolment: async () => {
+      const claimed = await claimEnrolment(db, userId);
+      if (!claimed) return undefined;
+      let lease = claimed.lease;
+      return {
+        customer: claimed.customer,
+        /** Before a call that could start a trial: throws once another attempt
+         * has taken the lease over. */
+        renew: async () => {
+          const renewed = await renewEnrolment(db, userId, lease);
+          if (!renewed)
+            throw new StoreError(
+              "enrolment_taken_over",
+              "Another attempt is starting this subscription. Try again.",
+            );
+          lease = renewed;
+        },
+        /** Stores the subscription, if none is stored yet, and ends the lease. */
+        save: (state: StripeSubscriptionState) =>
+          saveEnrolment(db, userId, state),
+        release: () => releaseEnrolment(db, userId, lease),
+      };
     },
   };
 }
+
+// Stripe is read with no transaction open and no row held. The write then runs
+// in a short transaction that holds the customer's row and lands only if the
+// row's stored state (subscription, status, trial end, period start and end) is
+// what it was before the read. So an older read cannot land after a newer one:
+// a write that landed in between changed the stored state, and this one reads
+// Stripe again instead. A newer write that found the state already current
+// changed nothing and so cannot stop an older read; that matters only if
+// Stripe's state left the stored one and came back between the two reads. A
+// second conflict refuses: checkout answers try again, and the webhook leaves
+// the event unrecorded, so Stripe redelivers it.
+const stripeConflict = () =>
+  new StoreError(
+    "billing_unavailable",
+    "Billing is unavailable right now. Nothing was charged. Try again.",
+  );
 
 /** What server/scripts/backfill-subscriptions.ts reads and writes. */
 export function subscriptionBackfill(bindings: StoreBindings) {
@@ -530,9 +557,10 @@ export function subscriptionBackfill(bindings: StoreBindings) {
 
 /**
  * Records a verified Stripe event, once per id. When it names a customer Milton
- * holds, `read` asks Stripe for that customer's state and the answer is written
- * in the statement that records the event. The row stays locked across the read;
- * a `read` that throws leaves nothing recorded, so Stripe redelivers.
+ * holds, `read` asks Stripe for that customer's state, with no transaction open,
+ * and the answer is written in the statement that records the event, over an
+ * unchanged row (see stripeConflict). A `read` that throws, or a second conflict,
+ * leaves nothing recorded, so Stripe redelivers.
  */
 export async function applyStripeEvent(
   bindings: StoreBindings,
@@ -545,15 +573,21 @@ export async function applyStripeEvent(
 ) {
   const db = database(bindings);
   if (!customer) return recordStripeEvent(db, event);
-  return db.transaction(async (tx) => {
-    const row = await lockStripeCustomer(tx, customer);
-    if (!row) return recordStripeEvent(tx, event);
-    if (await stripeEventRecorded(tx, event.id)) return { recorded: false };
-    const state = await read(customer, row.subscription);
-    return recordStripeEvent(
-      tx,
-      event,
-      state ? { customer, state } : undefined,
-    );
-  });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const before = await stripeCustomerRow(db, customer);
+    if (!before) return recordStripeEvent(db, event);
+    if (await stripeEventRecorded(db, event.id)) return { recorded: false };
+    const state = await read(customer, before.subscription);
+    const result = await db.transaction(async (tx) => {
+      const row = await stripeCustomerRow(tx, customer, true);
+      if (row?.stored !== before.stored) return undefined;
+      return recordStripeEvent(
+        tx,
+        event,
+        state ? { customer, state } : undefined,
+      );
+    });
+    if (result) return result;
+  }
+  throw stripeConflict();
 }

@@ -859,3 +859,65 @@ test("no request path deletes usage rows: only the maintenance job's prune does"
     ).text(),
   ).toContain("pruneUsage(");
 });
+
+test("0011 adds the nullable enrolment lease; existing trial rows keep their state and hold no lease", async () => {
+  const folder = new URL("../drizzle/", import.meta.url).pathname;
+  const scratch = await mkdtemp(join(tmpdir(), "milton-0011-"));
+  const pg = new PGlite();
+  try {
+    await cp(folder, scratch, { recursive: true });
+    const journal = await Bun.file(join(scratch, "meta/_journal.json")).json();
+    const through = async (tag: string) =>
+      writeFile(
+        join(scratch, "meta/_journal.json"),
+        JSON.stringify({
+          ...journal,
+          entries: journal.entries.slice(
+            0,
+            journal.entries.findIndex((e: { tag: string }) => e.tag === tag) +
+              1,
+          ),
+        }),
+      );
+    await through("0009_test_account");
+    await migrate(drizzle(pg), { migrationsFolder: scratch });
+    // Production's shape before 0011: one row waiting on its trial, one paid.
+    await seedUsers(pg, "waiting", "paid");
+    await pg.exec(
+      "INSERT INTO trial_accounts(user_id,started_at) VALUES ('waiting',now()); INSERT INTO trial_accounts(user_id,started_at,stripe_customer_id,stripe_subscription_id,subscription_status) VALUES ('paid',now()-interval '40 days','cus_kept','sub_kept','active')",
+    );
+    const rows = async () =>
+      (
+        await pg.query(
+          "SELECT user_id,stripe_customer_id,stripe_subscription_id,subscription_status FROM trial_accounts ORDER BY user_id",
+        )
+      ).rows;
+    const before = await rows();
+    await through("0011_enrol_lease");
+    await migrate(drizzle(pg), { migrationsFolder: scratch });
+    expect(await rows()).toEqual(before);
+    expect(
+      (
+        await pg.query(
+          "SELECT data_type,is_nullable,column_default FROM information_schema.columns WHERE table_name='trial_accounts' AND column_name='enrol_lease_until'",
+        )
+      ).rows,
+    ).toEqual([
+      {
+        data_type: "timestamp with time zone",
+        is_nullable: "YES",
+        column_default: null,
+      },
+    ]);
+    expect(
+      (
+        await pg.query(
+          "SELECT count(*)::int AS n FROM trial_accounts WHERE enrol_lease_until IS NOT NULL",
+        )
+      ).rows,
+    ).toEqual([{ n: 0 }]);
+  } finally {
+    await pg.close();
+    await rm(scratch, { recursive: true, force: true });
+  }
+});

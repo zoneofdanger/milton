@@ -309,7 +309,7 @@ other, so nothing for it reaches the mail queue or Resend. Usage and metric coun
 
 Trials stay on, and the account is permanently exempt from them and from billing, so its
 access never depends on a trial or a Stripe customer. With billing configured, a trial row
-with no status gets a Stripe customer and a 30-day trial at sign-in (`ensureSubscription`),
+with no status gets a Stripe customer and a 30-day trial just after sign-in (`ensureSubscription`),
 which would put a fictional customer in live Stripe and lock the account out when that
 trial ended without a card. So provisioning creates the Milton account itself, marked and
 without a trial row, before the native user exists, and every billing path checks
@@ -1048,7 +1048,7 @@ is flipped. Test mode runs on a disposable database only, never on production ro
 does not exist in live mode, so no live event ever names that row, it stays `trialing` for
 free, and the portal fails for that person. If a production row ever holds a test id, clear it
 before going live. A key from the wrong mode against real rows reads as a failed Stripe list:
-webhooks answer 503 and Stripe retries, sign-ins stop with try again, nobody is marked
+webhooks answer 503 and Stripe retries, sign-ins still admit with no trial started, nobody is marked
 canceled, and account deletion refuses rather than leave a live subscription charging.
 
 A row holding an id the key cannot see, such as a test id under a live key, refuses deletion every

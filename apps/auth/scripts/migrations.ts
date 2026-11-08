@@ -8,4 +8,5 @@ export const AUTH_MIGRATIONS = [
   "005-recovery",
   "006-mail",
   "007-connection-key-status",
+  "008-deletion-links",
 ];

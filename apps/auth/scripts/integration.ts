@@ -2817,6 +2817,7 @@ try {
       "select * from milton_auth.verification",
       "select * from neon_auth.retained",
       "select * from milton_guard.authorization_binding",
+      "select * from milton_guard.client_link",
       "select nextval('milton_credential.fence_ids')",
       "set role milton_auth_owner",
       "create temp table credential_bypass(id int)",

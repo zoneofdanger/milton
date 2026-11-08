@@ -298,6 +298,33 @@ A failed migration's rollback is the pre-migration snapshot, used only before an
 reads the column serves; there is no down script. Every recorded app/MCP revision runs on
 either schema, so rolling code back never needs it.
 
+## Deletion removes sign-in grants and assistant registrations (not yet applied: native 008)
+
+Native 008 adds `milton_guard.client_link` (account, registration), written by
+`consent_gate` whenever an account consents to an assistant registration, and replaces
+`consent_gate` and `cleanup_operation`: a deletion's cleanup now also takes the account's
+links (deleting a registration no other account links, otherwise clearing its `name` and
+`contacts`) and its sign-in grant bindings, before the native user. While it runs it
+holds a SHARE lock on `milton_auth."oauthConsent"`, so consents wait until it commits; it
+backfills links from existing consents and consented bindings, applies the
+rule to registrations named by a consented binding of an account already deleted, and
+then deletes bindings whose native user is gone and that nothing references. No app, MCP or
+auth code changes, so traffic stays open and any recorded revision runs on either
+schema. Rehearse on a disposable branch or database first (both integration suites
+apply it), then:
+
+1. Snapshot.
+2. As `milton_auth_delegate` assuming `milton_auth_owner`:
+   `node --experimental-strip-types apps/auth/scripts/migrate.ts up --apply` applies
+   `008-deletion-links` (native ledger 001–008).
+3. Check as the owner: `SELECT count(*) FROM milton_guard.authorization_binding b WHERE
+NOT EXISTS (SELECT 1 FROM milton_auth."user" u WHERE u.id = b.origin_user)` returns 0,
+   and `check-runtime-role.ts` prints `ok` for app and MCP.
+
+A registration authorized only by accounts deleted before 008 whose bindings maintenance
+had already pruned cannot be traced and stays as it was. Rollback is the pre-migration
+snapshot; there is no down script.
+
 ## Test account and daily check
 
 `e2e@milton-test.invalid` is a fictional account that holds nothing but what the daily

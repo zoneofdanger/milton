@@ -110,6 +110,7 @@ try {
     "0006_drop_unread_columns",
     "0007_usage_calls",
     "0008_usage_retention",
+    "0009_test_account",
   ])
     await owner.query(
       readFileSync(new URL(`./drizzle/${migration}.sql`, sourceRoot), "utf8"),
@@ -179,10 +180,11 @@ try {
         "utf8",
       ),
     );
-  // 009 and 010: rerunning converges too.
+  // 009, 010 and 011: rerunning converges too.
   for (const file of [
     "009-usage-calls-roles.sql",
     "010-usage-retention-roles.sql",
+    "011-test-account-roles.sql",
   ])
     for (let n = 0; n < 2; n++)
       await owner.query(
@@ -720,6 +722,50 @@ try {
     "milton_runtime",
   ])
     assert.deepEqual(await keyPrivileges(role), [], role);
+  // 0009 and 011: only the owner marks a test account. No runtime login can
+  // set users.test_account, by UPDATE or at INSERT; app still creates accounts.
+  for (const role of [
+    "milton_app_runtime",
+    "milton_mcp_runtime",
+    "milton_auth_runtime",
+    "milton_guide_runtime",
+  ])
+    assert.deepEqual(
+      (
+        await owner.query(
+          "SELECT has_column_privilege($1,'public.users','test_account','INSERT') i,has_column_privilege($1,'public.users','test_account','UPDATE') u",
+          [role],
+        )
+      ).rows[0],
+      { i: false, u: false },
+      role,
+    );
+  for (const [pool, statement] of [
+    [appPool, "UPDATE users SET test_account=true WHERE false"],
+    [mcpPool, "UPDATE users SET test_account=true WHERE false"],
+    [
+      appPool,
+      "INSERT INTO users(id,test_account) VALUES('m_fictional_flagged',true)",
+    ],
+  ] as const)
+    await assert.rejects(
+      pool.query(statement),
+      (e) => (e as { code?: string }).code === "42501",
+      statement,
+    );
+  {
+    const created = `m_${randomUUID()}`;
+    await appPool.query("INSERT INTO users(id) VALUES($1)", [created]);
+    assert.equal(
+      (
+        await owner.query("SELECT test_account FROM users WHERE id=$1", [
+          created,
+        ])
+      ).rows[0].test_account,
+      false,
+    );
+    await appPool.query("DELETE FROM users WHERE id=$1", [created]);
+  }
   // Native 007: one narrow SECURITY DEFINER status function with a fixed path,
   // EXECUTE for MCP and app only, never PUBLIC, auth or the guide.
   const keyStatus = "milton_guard.connection_key_status(text,text,text)";

@@ -261,6 +261,45 @@ Rollback is the pre-migration Neon snapshot `snap-snowy-haze-b8dl4hvc`; there is
 script. Older auth images run on either schema (they never prune). Before restoring the snapshot, move the auth jobs back
 to an image without the prune, or each run fails on the missing function.
 
+## Test accounts (pending: Drizzle 0009, owner file 011)
+
+0009 adds `users.test_account boolean NOT NULL DEFAULT false`, the owner-only mark on the
+fictional end-to-end check account (see [Test account and daily check](#test-account-and-daily-check)).
+It is additive and needs no code release: one column with a constant default is a catalog
+change with no rewrite, every existing account reads false, and serving app/MCP code never
+names the column. 011 narrows app's INSERT on `users` to `id`, `status` and `created_at` (the
+only columns it could insert before) so no runtime login can set the mark. 0009 sets a 5 s
+lock limit in its own transaction: the ADD COLUMN briefly locks `users` exclusively. Rehearse
+on a disposable branch or database first (`server/scripts/check-auth-integration.ts` applies
+both), then:
+
+1. Snapshot production.
+2. As `neondb_owner`: `bun run --cwd server db:migrate` applies `0009_test_account`
+   (journal 10 entries).
+3. As `neondb_owner`, at once:
+   `psql -X -v ON_ERROR_STOP=1 -f server/migrations/011-test-account-roles.sql` (one
+   transaction; rerunning converges).
+4. Check as the owner. The first row is `boolean`, `false`, `NO` and 0; the next two list
+   `f` for every runtime login:
+
+   ```sql
+   SELECT data_type, column_default, is_nullable,
+     (SELECT count(*) FROM users WHERE test_account) AS marked
+   FROM information_schema.columns
+   WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'test_account';
+   SELECT r, has_column_privilege(r, 'public.users', 'test_account', 'INSERT') AS can_insert,
+     has_column_privilege(r, 'public.users', 'test_account', 'UPDATE') AS can_update
+   FROM unnest(ARRAY['milton_app_runtime','milton_mcp_runtime','milton_auth_runtime']) r;
+   ```
+
+   Then `check-runtime-role.ts` must print `ok` for app and MCP. Account creation's
+   `INSERT INTO users (id)` under the narrowed grant is covered by the rehearsal; in
+   production the next new sign-up exercises it, so watch `milton-app-errors-log` for a
+   `permission denied` after applying 011.
+
+Rollback is the pre-migration snapshot; there is no down script. Every recorded app/MCP
+revision runs on either schema.
+
 ## Optional guide worker
 
 The default-off private guide pilot has separate [operations and capability instructions](guides.md). No guide job, schedule, provider key or account enrollment is provisioned by its build.

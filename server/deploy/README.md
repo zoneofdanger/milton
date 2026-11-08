@@ -22,49 +22,36 @@ This runbook keeps only the latest release record. Earlier release records and a
 one-time procedures are in git history; the last full version is at commit 492b96a
 (`git show 492b96a:server/deploy/README.md`).
 
-## Release record: usage retention, admit once, owner password retired (2026-11-08, PRs #53 #54 #55)
+## Release record: alerts as code, test account (2026-11-08, PRs #56 #57)
 
-- **#55 (Peter; milton-qa, Astra passed with two should-fixes fixed in `be24774`), `7211521`:**
-  Drizzle 0008 dropped `usage_daily` (9 rows) and the stored `daily_calls` key, and added
-  `usage_calls_by_at` and `prune_usage_calls` (90 days); owner file 010 lets only
-  `milton_auth_owner` run it. Snapshot `snap-snowy-haze-b8dl4hvc` at 04:24Z; size gate 21
-  rows; applied with `db:migrate` (journal 9, hash `eae2dd56…`) and `psql` for 010; checks:
-  no `usage_daily`, no key, ACL owner + `milton_auth_owner`, index valid, runtime audits `ok`
-  for app and MCP. Auth `milton-auth-00014-juv` at 04:26Z (image
-  `sha256:e6d303ca038354afc45691d7f4f36daa9b6885a5a49b41e1a0dea0acfc7736d2`; mail and
-  maintenance jobs too). A manual maintenance run succeeded ("Usage rows past retention
-  removed: 0"); an MCP read appended a usage row. Checks on the merge: types, 139 tests,
-  format, site, auth build, auth integration 20/20, rehearsal 14/14, all 0. In a 5-minute
-  watch: no 5xx, 429, application, job or audit errors; mail runs succeeded. After 0008,
-  app/MCP must not roll back past #40 without restoring the snapshot.
+- **#56 (Peter's request; builder, milton-duo review), `9a3c74f`:** production alerts as code
+  (`server/deploy/monitoring/`, `server/scripts/monitoring.ts`; see [Alerts](#alerts)).
+  `--apply` at 06:47Z created 2 log metrics, 3 uptime checks and 7 policies and deleted the
+  10 hand-made policies; a second dry run reported 12 unchanged. Delivery test: a temporary
+  always-true policy opened one alert at 06:55:08Z, Peter confirmed the one email arrived,
+  and the policy was deleted. Checks: types, 144 tests, format, all 0.
+- **#57 (Peter; milton-qa, Astra PASS at `c93bfdc`), `7938dd5`:** the fictional test account
+  and the daily end-to-end check. Auth `milton-auth-00016-kul` at 06:54Z (no mail to
+  `.invalid`; mail and maintenance jobs too; image
+  `sha256:7ee6dc3d2416077c03667e84135a59c04c1dd2f5507a662b7e6dfe7866f38610`). Snapshot
+  `snap-royal-math-b8fd06v5`; Drizzle 0009 (journal 10, hash `2c9d8429…`) and owner file 011
+  (app INSERT on `users` is now `id`, `status`, `created_at`); runtime audits `ok`. App/MCP
+  `milton-*-e2e-7938dd5` at 06:55:30Z (image
+  `sha256:ec5df5a67e36ef6937e5223750a912ca11216116556a004c82eb121bff5fd0f5`; the pinned server
+  Dockerfile was regenerated to copy the e2e files). Checks on the merge: types, 144 tests,
+  format, site, auth and server builds, auth integration 20/20, rehearsal 18/18, all 0. Live:
+  health 200 ×3, app home 200, MCP 401 unauthenticated, an MCP read succeeded. Release gate
+  from 06:54:08Z at 07:10Z: only the deleted test policy's alert. The account isn't
+  provisioned yet, and `milton-e2e-daily` doesn't exist yet (milton-qa runs the check by hand
+  first).
+- Earlier today: #53 admit once (auth `00012-qod`), #54 down scripts deleted, #55 usage
+  retention (auth `00014-juv`, snapshot `snap-snowy-haze-b8dl4hvc`), the owner password reset,
+  Neon autoscaling to 4 CU and the budget. App/MCP must not roll back past #40 without
+  restoring the 0008 snapshot.
 
-- **Owner credential retired (Peter, 2026-11-08):** `neondb_owner`'s password was reset
-  through the Neon API at 03:36Z (the old one is rejected); the owner connection kept for
-  migrations was updated in place and connects. `milton-app-env:1`, `milton-mcp-env:1` and
-  `milton-mcp-env:2` are disabled. No service connected as the owner; the maintenance job's
-  `milton-auth-owner-url` is `milton_auth_delegate` and kept running. Any tagged revision that
-  mounts those versions can no longer start. In a 5-minute watch: no 5xx, no application,
-  permission, `store_unavailable` or audit errors; health 200 ×3; an MCP read succeeded. The
-  cutover rehearsal branch `rehearsal-auth-cutover-20261107` was deleted (Peter); the
-  role-timeouts rehearsal branch was already gone.
-- **#54 (Peter's decision, AGENTS.md rule):** deleted `005-app.down.sql` and
-  `007-role-timeouts.down.sql`; rollback is the pre-migration snapshot. The auth integration
-  now installs 005 through `migrate.ts --app-auth`. Checks: types, 137 tests, format,
-  rehearsal 13/13, all 0. No deploy.
-- **#53 (milton-qa; Astra passed the admit-once part), `06868cc`:** an OAuth flow is admitted
-  once per authorize or consent request (keyed on every admission input, request-local); each
-  ask still runs its own `bind_flow`. Harness: authorize 75.6 → 51.2 ms, consent accept
-  134.0 → 105.4 ms. The admit wait stays 5 s (revisit when billing is turned on). Auth
-  `milton-auth-00012-qod` at 03:44Z (image
-  `sha256:0899b179ebf1a89896cfc2e1b04f6d505000ac7fdded3b9e31c67de9d7fef957`; mail and
-  maintenance jobs too). Checks on the merge: types, 137 tests, format, auth build, auth
-  integration 20/20, rehearsal 13/13, all 0. Live: health, OIDC metadata and JWKS 200; an MCP
-  read with an auth-issued token succeeded. In a 5-minute watch: no 5xx, 429, application,
-  job or audit errors; mail runs succeeded. Not verified live: a real browser sign-in.
-
-Auth `milton-auth-00014-juv`, rollback `milton-auth-00012-qod` (its jobs run on either schema). App/MCP unchanged
-(`milton-*-save-b85f428`, rollback `milton-*-rnd3-64435ee`). Earlier records: git history
-(`git log -p server/deploy/README.md`).
+Auth `milton-auth-00016-kul`, rollback `milton-auth-00014-juv`. App/MCP
+`milton-*-e2e-7938dd5`, rollback `milton-*-save-b85f428` (code only; keep 0009 and 011).
+Earlier records: git history (`git log -p server/deploy/README.md`).
 
 ## Runtime role timeouts (applied 2026-11-07, TODO #29)
 
@@ -261,7 +248,7 @@ Rollback is the pre-migration Neon snapshot `snap-snowy-haze-b8dl4hvc`; there is
 script. Older auth images run on either schema (they never prune). Before restoring the snapshot, move the auth jobs back
 to an image without the prune, or each run fails on the missing function.
 
-## Test accounts (pending: Drizzle 0009, owner file 011)
+## Test accounts (applied 2026-11-08: Drizzle 0009, owner file 011, PR #57)
 
 0009 adds `users.test_account boolean NOT NULL DEFAULT false`, the owner-only mark on the
 fictional end-to-end check account (see [Test account and daily check](#test-account-and-daily-check)).
@@ -567,10 +554,10 @@ The tracked app and MCP manifests still pin the pre-cutover release: app
 [Release verification and rollback](#release-verification-and-rollback); derive a manifest
 from the live service before replacing it. [auth.service.template.json](auth.service.template.json)
 is deliberately non-deployable. Production's writing journal holds `0000_baseline` through
-`0008_usage_retention` (9 entries), the native auth ledger 001–007, and the owner files
+`0009_test_account` (10 entries), the native auth ledger 001–007, and the owner files
 `000-app-owner.sql`, `005-app.up.sql`, `005-app-roles.sql`, `006-connection-keys-roles.sql`,
-`007-role-timeouts.up.sql`, `008-drop-legacy-mapping.up.sql`, `009-usage-calls-roles.sql` and
-`010-usage-retention-roles.sql` (see [runtime role timeouts](#runtime-role-timeouts-applied-2026-11-07-todo-29)). There is no memo-update
+`007-role-timeouts.up.sql`, `008-drop-legacy-mapping.up.sql`, `009-usage-calls-roles.sql`,
+`010-usage-retention-roles.sql` and `011-test-account-roles.sql` (see [runtime role timeouts](#runtime-role-timeouts-applied-2026-11-07-todo-29)). There is no memo-update
 or daily call allowance (removed by PR #40, serving since 2026-11-08). Existing positive account safeguards remain
 in effect. Trials and billing are live (since 2026-11-04).
 Each image includes both roles and browser assets. Validate manifests before applying:
@@ -793,7 +780,8 @@ revision and its imported image, then verify startup again when assigning traffi
    No output passes. Any row (gate or page, open or opened since the deploy) means
    investigate before calling the release done; a gate row names its condition's service or
    job. The filter runs on the server (`state`, `open_time`, `policy.display_name`). This
-   replaces the manual 5-minute watch.
+   replaces the manual 5-minute watch. An alert whose policy was deleted can stay `OPEN`
+   (seen 2026-11-08 with the delivery test's policy); judge such a row by its policy name.
 
 **Migrations.** Snapshot first (a Neon snapshot, plus a private `pg_dump` checkpoint
 before each step), and rehearse on a throwaway Neon branch or disposable database. Run
@@ -828,8 +816,8 @@ references. Inspect revision readiness before selecting a recorded revision:
 gcloud run revisions list --service=milton-app --project=milton-510506 --region=us-east4
 ```
 
-Now serving (2026-11-08): app `milton-app-save-b85f428` and MCP
-`milton-mcp-save-b85f428` (source `b85f428`), and auth `milton-auth-00014-juv` (source `7211521`). The
+Now serving (2026-11-08): app `milton-app-e2e-7938dd5` and MCP
+`milton-mcp-e2e-7938dd5`, and auth `milton-auth-00016-kul` (all source `7938dd5`). The
 release record above gives the image and rollback revisions.
 
 Roll back only affected services, preserve ingress/IAM, then repeat the canonical

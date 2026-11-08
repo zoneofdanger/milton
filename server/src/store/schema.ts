@@ -217,8 +217,9 @@ export const usageDaily = pgTable(
   ],
 );
 // One row per admitted tool call, appended alongside its work. The foreign
-// key's key-share check waits only on a sign-in's or a deletion's FOR UPDATE
-// (writers lock FOR NO KEY UPDATE), and erasure cascades here, so a row can
+// key's key-share check waits only on a sign-in's, lifecycle's or deletion's
+// FOR UPDATE (writers and their guard triggers lock FOR NO KEY UPDATE, since
+// 0006), and erasure cascades here, so a row can
 // never outlive its account. Outcomes stay in the identity-free logs.
 export const usageCalls = pgTable(
   "usage_calls",

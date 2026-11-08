@@ -19,7 +19,12 @@ import {
   POOL_IDLE_MS,
   postgresDatabase,
 } from "../src/store/database";
-import { database, lookupIdentityAccount, StoreError } from "../src/store";
+import {
+  database,
+  lookupIdentityAccount,
+  StoreError,
+  storeForCurrentRequest,
+} from "../src/store";
 import { recordToolUsage } from "../src/store/usage";
 import {
   authenticateConnectionKey,
@@ -1548,35 +1553,85 @@ try {
       ).rows,
       [{ user_id: kept }],
     );
-    // A writer's account lock (FOR NO KEY UPDATE, as a save takes it) does
-    // not hold an append back: it commits while that transaction is open.
-    const saving = await mcpPool.connect();
+    await owner.query("DELETE FROM users WHERE id=$1", [kept]);
+  }
+  stage = "a save against an unrelated account's deletion";
+  {
+    // B's deletion holds B's row lock. A usage batch for A and B takes A's
+    // key share, then waits on B. A's save must still finish: every lock it
+    // takes on A (its own and its triggers') is FOR NO KEY UPDATE, which a
+    // key share does not block.
+    const saverId = "m_00000000-0000-4000-8000-0000000000c5",
+      leaving = "m_00000000-0000-4000-8000-0000000000c6";
+    await owner.query("INSERT INTO users(id) VALUES($1),($2)", [
+      saverId,
+      leaving,
+    ]);
+    await owner.query(
+      "INSERT INTO identities(provider,subject,user_id) VALUES('fictional-usage','saver',$1)",
+      [saverId],
+    );
+    await owner.query(
+      "INSERT INTO trial_accounts(user_id,started_at,subscription_status) VALUES($1,now(),'active')",
+      [saverId],
+    );
+    const saver = await storeForCurrentRequest(
+      mcpConfig,
+      await lookupIdentityAccount(mcpConfig, {
+        provider: "fictional-usage",
+        subject: "saver",
+      }),
+      { issuer: "fixture", clientId: "fictional-saver" },
+    );
+    const version = (await saver.readTpsReport()).version;
+    const usageDb = () => database(mcpConfig);
+    const deletion = await owner.connect();
+    let appended: Promise<unknown> = Promise.resolve();
+    let saved: unknown;
     try {
-      await saving.query("BEGIN");
-      await saving.query(
-        "SELECT id FROM users WHERE id=$1 AND status='active' FOR NO KEY UPDATE",
-        [kept],
-      );
-      await recordToolUsage(
-        mcpConfig.DATABASE_URL,
-        usageDb,
-        kept,
-        "create_memo",
-      );
-      await saving.query("COMMIT");
+      await deletion.query("BEGIN");
+      await deletion.query("SELECT id FROM users WHERE id=$1 FOR UPDATE", [
+        leaving,
+      ]);
+      appended = Promise.all([
+        recordToolUsage(mcpConfig.DATABASE_URL, usageDb, saverId, "get_report"),
+        recordToolUsage(mcpConfig.DATABASE_URL, usageDb, leaving, "get_report"),
+      ]);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      saved = await Promise.race([
+        saver
+          .saveMemo({
+            text: "Keep fictional measurements explicit.",
+            rules: [
+              {
+                report: "cover",
+                text: "Keep fictional measurements explicit.",
+              },
+            ],
+            request_id: randomUUID(),
+            expected_version: version,
+          })
+          .then((outcome) => outcome.status),
+        new Promise((resolve) => setTimeout(() => resolve("waited"), 3000)),
+      ]);
+      await deletion.query("DELETE FROM users WHERE id=$1", [leaving]);
+      await deletion.query("COMMIT");
     } finally {
-      saving.release();
+      deletion.release();
     }
-    assert.equal(
+    await appended;
+    await backgroundSettled();
+    assert.equal(saved, "saved", "A's save never waits on B's deletion");
+    assert.deepEqual(
       (
         await owner.query(
-          "SELECT count(*)::int n FROM usage_calls WHERE user_id=$1",
-          [kept],
+          "SELECT user_id FROM usage_calls WHERE user_id IN ($1,$2)",
+          [saverId, leaving],
         )
-      ).rows[0].n,
-      2,
+      ).rows,
+      [{ user_id: saverId }],
     );
-    await owner.query("DELETE FROM users WHERE id=$1", [kept]);
+    await owner.query("DELETE FROM users WHERE id=$1", [saverId]);
   }
   stage = "read-only native authorization";
   const readGrant = await authorizeAssistant(

@@ -98,8 +98,9 @@ Files: `server/src/handler.ts`, `server/src/token.ts`, `server/src/mcp.ts`,
   rows beyond 1,000 waiting, and logs a failure by class and code only; shutdown waits
   for it before closing pools. A batch that fails is retried row by row.
 - The row's foreign key cascades from `users`, so account erasure removes it. Writers
-  (saves, key creation) lock the account `FOR NO KEY UPDATE`, which the row's key-share
-  check does not wait on; sign-in, lifecycle and deletion lock `FOR UPDATE`, so a row
+  (saves, key creation, and the six guard triggers on cards, card versions, accepted
+  changes, sample kinds, samples and sample versions, since `0006`) lock the account
+  `FOR NO KEY UPDATE`, which the row's key-share check does not wait on; sign-in, lifecycle and deletion lock `FOR UPDATE`, so a row
   for an account being deleted waits, then fails its check, and never outlives the
   account.
 - Each call logs the tool, outcome, time, and an error code from a fixed list, never

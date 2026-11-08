@@ -548,7 +548,7 @@ test("0005 drops the unread deleted_identities table and its rollback recreates 
   }
 });
 
-test("0006 adds an empty usage_calls table the legacy group cannot reach, and its rollback restores the 0005 schema", async () => {
+test("0006 adds an empty usage_calls table the legacy group cannot reach and moves the writer guards to FOR NO KEY UPDATE; its rollback restores the 0005 schema", async () => {
   const folder = new URL("../drizzle/", import.meta.url).pathname;
   const scratch = await mkdtemp(join(tmpdir(), "milton-0006-"));
   const pg = new PGlite();
@@ -563,6 +563,13 @@ test("0006 adds an empty usage_calls table the legacy group cannot reach, and it
     );
     await migrate(drizzle(pg), { migrationsFolder: scratch });
     const before = await schemaCatalog(pg);
+    const fns = async () =>
+      (
+        await pg.query(
+          "SELECT proname,proowner::regrole::text AS owner,proacl::text AS acl,prosecdef,proconfig::text AS config FROM pg_proc WHERE pronamespace='public'::regnamespace AND proname LIKE 'milton_%' ORDER BY proname",
+        )
+      ).rows;
+    const fnsBefore = await fns();
     await seedUsers(pg, "kept");
     await pg.exec(
       "INSERT INTO usage_daily(user_id,day_utc,tool_calls) VALUES ('kept','2026-11-07',3)",
@@ -577,10 +584,38 @@ test("0006 adds an empty usage_calls table the legacy group cannot reach, and it
         )
       ).rows,
     ).toEqual([{ n: 0, reachable: false }]);
+    // Each guard changed only its account lock; owner, privileges, security
+    // and settings are as they were.
+    const guards = before.functions as {
+      proname: string;
+      definition: string;
+    }[];
+    const lock = "status='active' FOR UPDATE;";
+    const moved = guards.filter((g) => g.definition.includes(lock));
+    expect(moved.map((g) => g.proname)).toEqual([
+      "milton_accepted_change_guard",
+      "milton_card_guard",
+      "milton_card_version_guard",
+      "milton_sample_guard",
+      "milton_sample_kind_guard",
+      "milton_sample_version_guard",
+    ]);
+    expect((after.functions as typeof guards).map((g) => g.definition)).toEqual(
+      guards.map((g) =>
+        g.definition.replace(lock, "status='active' FOR NO KEY UPDATE;"),
+      ),
+    );
+    expect(
+      (after.functions as typeof guards).some((g) =>
+        / FOR (UPDATE|SHARE)\b/.test(g.definition),
+      ),
+    ).toBe(false);
+    expect(await fns()).toEqual(fnsBefore);
     await pg.exec(
       await Bun.file(folder + "rollback/0006_usage_calls.sql").text(),
     );
     expect(await schemaCatalog(pg)).toEqual(before);
+    expect(await fns()).toEqual(fnsBefore);
     // The journal row stays: re-forwarding runs the file by hand, as one
     // transaction.
     await pg.exec(

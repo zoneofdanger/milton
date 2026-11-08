@@ -6,14 +6,22 @@
 -- snapshot; there is no down script.
 -- Every statement is a catalog change or touches a small table. The DROP briefly takes
 -- an exclusive lock on users (its foreign key's triggers) and the index build a share
--- lock on usage_calls (appends wait for it; each reply waits at most 250 ms), so a lock
--- that is not free within 5 s fails this migration instead of queueing requests.
+-- lock on usage_calls until commit (appends wait for it; each reply waits at most
+-- 250 ms). Both limits are set here, in the migrator's one transaction, because Neon
+-- drops the ones a client passes at connect. A lock not free within 5 s fails this
+-- migration instead of queueing requests behind it.
 SET LOCAL lock_timeout = '5s';
+--> statement-breakpoint
+-- No statement may run past 5 s: under the app/MCP runtimes' 10 s lock limit (007), so a
+-- request or usage append queued behind this migration's locks is not failed by it. A
+-- plain index build on 1,000,000 usage rows took 205 ms on a disposable PostgreSQL 18;
+-- the runbook stops above that size (build the index CONCURRENTLY first).
+SET LOCAL statement_timeout = '5s';
 --> statement-breakpoint
 -- Lets the prune read the oldest rows first and stop after its batch, instead of
 -- scanning the table on every batch (usage_calls_by_user leads with the account). One
--- more index entry per append.
-CREATE INDEX "usage_calls_by_at" ON "usage_calls" USING btree ("at");--> statement-breakpoint
+-- more index entry per append. IF NOT EXISTS: a large table gets it CONCURRENTLY first.
+CREATE INDEX IF NOT EXISTS "usage_calls_by_at" ON "usage_calls" USING btree ("at");--> statement-breakpoint
 ALTER TABLE "store_config" ALTER COLUMN "limits_json" SET DEFAULT '{"body_bytes":131072,"description_bytes":500,"reason_bytes":500,"report_body_bytes":262144}'::jsonb;--> statement-breakpoint
 -- Idempotent: a row without the key is left as it is.
 UPDATE store_config SET limits_json = limits_json - 'daily_calls'

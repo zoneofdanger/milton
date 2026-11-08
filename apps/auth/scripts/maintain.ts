@@ -18,8 +18,16 @@ try {
     "select milton_guard.cleanup_expired(16) as removed",
   );
   console.log("Bounded auth expiry rows removed:", r.rows[0].removed);
-  const pruned = await pruneUsage((text, values) => pool.query(text, values));
-  console.log("Usage rows past retention removed:", pruned);
+  // One checked-out connection: each prune batch is a transaction on it.
+  const client = await pool.connect();
+  try {
+    const pruned = await pruneUsage((text, values) =>
+      client.query(text, values),
+    );
+    console.log("Usage rows past retention removed:", pruned);
+  } finally {
+    client.release();
+  }
 } catch (error) {
   console.error("auth_maintenance", safeError(error));
   process.exitCode = 1;

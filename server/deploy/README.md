@@ -198,23 +198,35 @@ EXECUTE revoked from PUBLIC. It deletes at most `batch` (1–10,000) usage rows 
 days, oldest first, skipping rows an erasure has locked. Owner file 010 lets only
 `milton_auth_owner` execute it. The auth maintenance job (`milton-auth-maint`, every 15
 minutes, as `milton_auth_owner` through `milton-auth-owner-url`'s `milton_auth_delegate`)
-then runs it after its auth cleanup: 1,000 rows per autocommit statement, at most 20 per run.
+then runs it after its auth cleanup: 1,000 rows per batch, at most 20 batches per run, each
+batch its own transaction whose `SET LOCAL` 10 s statement and 2 s lock limits are read back
+before its one DELETE (Neon drops connect-time limits, and 007 sets none for the delegate).
 
 Since PR #40 nothing reads or writes `usage_daily` or `daily_calls`. Serving app/MCP
 `*-save-b85f428` and the recorded rollback `*-rnd3-64435ee` both contain #40 (`90af817`), so
 traffic stays open. App/MCP code before #40 requires `daily_calls` and refuses every tool
 call without it: after 0008, roll app/MCP back no further than #40 unless the snapshot is
-restored first. Auth reads no writing table. 0008 sets a 5 s lock timeout: the drop briefly
-locks `users` and the index build blocks usage appends while it runs (each reply still waits
-at most 250 ms); on a disposable PostgreSQL 18 with 25,500 usage rows the migrator took
-49 ms. Rehearse on a disposable branch or database first, then:
+restored first. Auth reads no writing table. 0008 sets, in its own transaction, a 5 s lock
+and a 5 s statement limit (under the runtimes' 10 s lock limit): the drop briefly locks
+`users`, and the plain index build blocks usage appends until commit (each reply still waits
+at most 250 ms). On a disposable PostgreSQL 18 the whole migration took 49 ms with 25,500
+usage rows, and the index build alone 205 ms on 1,000,000. Rehearse on a disposable branch
+or database first, then:
 
 1. Snapshot production. It is the only copy of the dropped rows and key.
-2. As `neondb_owner`: `bun run --cwd server db:migrate` applies `0008_usage_retention`
+2. Size gate, read-only as the owner: `SELECT count(*) FROM usage_calls;`. Expected today:
+   a few thousand at most (one row per admitted call since 2026-11-08, two accounts).
+   Proceed only below 1,000,000 rows, where the plain build stays well inside 0008's 5 s
+   limit. At or above it, stop: with Peter's go, first run
+   `CREATE INDEX CONCURRENTLY IF NOT EXISTS usage_calls_by_at ON usage_calls USING btree (at);`
+   as the owner, outside a transaction (it blocks no appends), confirm
+   `SELECT indisvalid FROM pg_index WHERE indexrelid='usage_calls_by_at'::regclass` is true
+   (drop and rebuild an invalid one), then continue; 0008's `IF NOT EXISTS` keeps it.
+3. As `neondb_owner`: `bun run --cwd server db:migrate` applies `0008_usage_retention`
    (journal 9 entries).
-3. As `neondb_owner`: `psql -X -v ON_ERROR_STOP=1 -f server/migrations/010-usage-retention-roles.sql`
+4. As `neondb_owner`: `psql -X -v ON_ERROR_STOP=1 -f server/migrations/010-usage-retention-roles.sql`
    (one transaction; rerunning converges).
-4. Check as the owner. The first two columns are null and false; the ACL lists only
+5. Check as the owner. The first two columns are null and false; the ACL lists only
    `neondb_owner` and `milton_auth_owner`:
 
    ```sql
@@ -225,8 +237,8 @@ at most 250 ms); on a disposable PostgreSQL 18 with 25,500 usage rows the migrat
 
    Then `check-runtime-role.ts` must print `ok` for app and MCP.
 
-5. Release an auth image built from this source to `milton-auth-maint` (an auth release
-   moves the service and both jobs). Before steps 2–3 its prune fails (the job exits 1 after
+6. Release an auth image built from this source to `milton-auth-maint` (an auth release
+   moves the service and both jobs). Before steps 3–4 its prune fails (the job exits 1 after
    its auth cleanup and `milton-auth-jobs-errors-log` alerts), so release it after them. Its
    log line `Usage rows past retention removed: N` reads 0 until about 2027-02-06, 90 days
    after the first usage row.

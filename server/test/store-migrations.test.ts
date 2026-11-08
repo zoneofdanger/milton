@@ -11,6 +11,8 @@ import {
   pruneUsage,
   USAGE_PRUNE_BATCH,
   USAGE_PRUNE_BATCHES,
+  USAGE_PRUNE_LOCK_TIMEOUT,
+  USAGE_PRUNE_STATEMENT_TIMEOUT,
 } from "../../apps/auth/scripts/prune-usage";
 import { cp, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -777,9 +779,43 @@ test("0008 drops usage_daily and the stored daily_calls; the maintenance job del
       ).rejects.toThrow("usage_prune_batch_invalid");
     // The maintenance job's prune, as its role: one run stops at its bound,
     // the next finishes; rows from the last 90 days stay.
+    // Each batch's server-side limits, read inside its transaction right
+    // before its delete.
+    const seen: Record<string, unknown>[] = [];
     const run = () =>
-      pruneUsage((text, values) => pg.query<{ removed: number }>(text, values));
+      pruneUsage(async (text, values) => {
+        const result = await pg.query<Record<string, unknown>>(text, values);
+        if (text.startsWith("select public.prune_usage_calls"))
+          seen.push(
+            (
+              await pg.query<Record<string, unknown>>(
+                "SELECT current_setting('statement_timeout') s,current_setting('lock_timeout') l",
+              )
+            ).rows[0]!,
+          );
+        return result;
+      });
+    // A connection that drops the settings (as Neon drops connect-time ones)
+    // refuses before deleting anything.
+    await expect(
+      pruneUsage((text, values) =>
+        pg.query<Record<string, unknown>>(
+          text.startsWith("set local") ? "SELECT 1" : text,
+          text.startsWith("set local") ? [] : values,
+        ),
+      ),
+    ).rejects.toThrow("usage_prune_timeouts_unset");
     expect(await run()).toBe(USAGE_PRUNE_BATCH * USAGE_PRUNE_BATCHES);
+    expect(seen).toEqual(
+      Array.from({ length: USAGE_PRUNE_BATCHES }, () => ({
+        s: USAGE_PRUNE_STATEMENT_TIMEOUT,
+        l: USAGE_PRUNE_LOCK_TIMEOUT,
+      })),
+    );
+    // Session settings are untouched between batches.
+    expect(
+      (await pg.query("SELECT current_setting('lock_timeout') l")).rows,
+    ).toEqual([{ l: "0" }]);
     expect(await run()).toBe(old - USAGE_PRUNE_BATCH * USAGE_PRUNE_BATCHES);
     expect(await run()).toBe(0);
     await pg.exec("RESET ROLE");

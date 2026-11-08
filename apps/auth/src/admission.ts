@@ -55,7 +55,8 @@ export function admissionClient(
     const token = response.ok ? (await response.text()).trim() : "";
     if (!response.ok) await response.body?.cancel();
     const exp = expiry(token);
-    if (exp === null) throw new Error("admission_identity_unavailable");
+    if (exp === null || exp * 1000 <= now())
+      throw new Error("admission_identity_unavailable");
     cached = { token, refreshAt: exp * 1000 - REFRESH_MS };
     return token;
   }

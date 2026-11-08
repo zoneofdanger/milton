@@ -132,7 +132,7 @@ export const nextSteps: Record<string, NextStep> = {
   ),
   sample_conflict: step(
     "reread",
-    "Reread get_report and use an active sample_id from its samples; save with a new request_id.",
+    "Reread get_report and fix what message names; a new example stays new and a revision keeps its id; ask the person if unclear. Use a new request_id.",
   ),
   sample_version_conflict: step(
     "reread",

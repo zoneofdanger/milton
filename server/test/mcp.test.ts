@@ -1162,6 +1162,19 @@ test("refused tool calls record no usage; each admitted call records one row", a
     // Replaying a recorded save records nothing.
     expect((await call("create_memo", save)).status).toBe("saved");
     expect(await used()).toBe(3);
+    // A sample refusal has several causes; its next follows the message and
+    // keeps the intended identity, never adding a sample_id to a new example.
+    const sampleRefused = await call("create_memo", {
+      text: "Fictional removal.",
+      retire_samples: ["no-such-sample"],
+      request_id: crypto.randomUUID(),
+      expected_version: filed.version,
+    });
+    refused(sampleRefused, "sample_conflict", "reread");
+    expect(sampleRefused.next.text).toContain("message");
+    expect(sampleRefused.next.text).toContain("a new example stays new");
+    expect(sampleRefused.next.text).toContain("ask the person");
+    expect(sampleRefused.next.text).not.toMatch(/use an active sample_id/);
   } finally {
     await local.dispose();
   }

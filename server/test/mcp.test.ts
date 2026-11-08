@@ -11,6 +11,7 @@ import {
   createMiltonServer,
   storeInstructions,
   readOnlyInstructions,
+  serverDescription,
   type ToolCall,
 } from "../src/mcp";
 import { createMiltonHandler, keyAttemptSource } from "../src/handler";
@@ -153,6 +154,14 @@ test("an SDK client receives instructions, discovers the four tools, and reads t
     await client.connect(clientTransport);
     expect(await checkMcp(client)).toContain("exactly four");
     expect(calls).toEqual(["get_cover_sheet"]);
+    // For clients that drop instructions: a short description in server info
+    // that still says to read before writing.
+    const description = client.getServerVersion()?.description;
+    expect(description).toBe(serverDescription);
+    expect(serverDescription.length).toBeLessThanOrEqual(120);
+    expect(serverDescription).toMatch(
+      /writing voice\. Before writing or editing .*get_cover_sheet.*get_report/,
+    );
     const tools = (await client.listTools()).tools;
     // Assistants see cover sheet and reports, never the retired TPS name.
     for (const served of [client.getInstructions(), ...tools])
@@ -562,6 +571,8 @@ test("scopes control discovery and direct calls; original binding revocation sur
     };
     const reader = await connect(readToken);
     expect(reader.getInstructions()).toBe(readOnlyInstructions);
+    // Over HTTP too, read only or not, server info carries the description.
+    expect(reader.getServerVersion()?.description).toBe(serverDescription);
     expect(readOnlyInstructions.length).toBeLessThanOrEqual(4096);
     expect((await reader.listTools()).tools.map((t) => t.name)).toEqual([
       "get_cover_sheet",

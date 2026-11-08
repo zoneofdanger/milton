@@ -81,6 +81,9 @@ Files: `server/src/handler.ts`, `server/src/token.ts`, `server/src/mcp.ts`,
 - Both instruction variants stay under 3,500 characters and hold the workflow and consent
   rules; error handling lives in each error result's `next`, and save fields and capture
   exclusions in `create_memo`'s description, each stated once.
+- Server info carries a description of at most 120 characters for clients that drop
+  instructions: read `get_cover_sheet`, then the matching `get_report`, before writing or
+  editing for the person.
 - Session capture requires explicit opt-in for the current conversation; connection, draft or edit approval, quoted text and another conversation are not consent.
 - Each assistant's (account and OAuth client) first tool call after a server process starts
   carries `notifications/tools/list_changed` ahead of its result, as does every

@@ -351,6 +351,11 @@ send is not retention approval. When the person makes the same correction twice,
 assistant proposes one short rule and files it only on approval; a single
 correction is a one-off. Both run through `create_memo` with ordinary approval.
 
+For clients that drop instructions, server info (`serverInfo.description`, MCP's
+`Implementation.description`) carries one line of at most 120 characters, tested: Milton
+holds the person's writing voice, and before writing or editing for them the assistant
+reads `get_cover_sheet`, then the matching `get_report`.
+
 Usage guidance travels in four places: server `instructions` during MCP
 initialization, descriptions in `tools/list`, descriptions on the save input
 fields, and the `next` step on every error result. Connection instructions explain

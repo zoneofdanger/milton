@@ -22,6 +22,11 @@ import {
 } from "./mcp-outcomes";
 export type { ToolCall } from "./mcp-outcomes";
 
+/** Server info's description, at most 120 characters, for clients that drop
+ * the instructions. */
+export const serverDescription =
+  "Holds the person's writing voice. Before writing or editing for them, read get_cover_sheet, then matching get_report.";
+
 export const storeInstructions = [
   "Milton holds writing voice. Samples precede rules. Shape over channel: emailed updates use document for body, email for greeting/sign-off.",
   "Before writing or editing for or as the person: get_cover_sheet, then get_report for matching reports with intent: one-line situation, relevant kind_id/context. Empty guidance: never guess. New drafts: imitate samples; rules fill gaps; check cover rules and matching samples (opening, length, sign-off, forbidden phrases), fixing failures before display.",
@@ -166,7 +171,7 @@ export function createMiltonServer(
       };
     }
   })(
-    { name: "Milton", version: "0.0.0" },
+    { name: "Milton", version: "0.0.0", description: serverDescription },
     {
       instructions: options.readOnly ? readOnlyInstructions : storeInstructions,
     },

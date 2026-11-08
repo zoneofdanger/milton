@@ -449,7 +449,9 @@ Disconnect and deletion use durable original-incarnation operations. Refusal com
 before cleanup; reconnect/recreation cannot change an earlier operation's targets.
 Deletion requires exact confirmation, live authoritative native freshness and current
 verified-identity fingerprint retention. Stripe cancellation commits before writing
-erasure; native bounded cleanup is last. An incomplete operation stays retryable and is
+erasure; native bounded cleanup is last. Once refusal commits, billing links no Stripe
+customer and opens no Checkout for the account (a customer Stripe made for a refused
+link is deleted at once), and the erase first ends any customer still linked. An incomplete operation stays retryable and is
 never presented as deleted. Logout ends this browser's local and native session while
 leaving offline assistants connected.
 

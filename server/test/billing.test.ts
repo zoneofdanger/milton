@@ -1,4 +1,4 @@
-import { clientSettings } from "./auth-fixtures";
+import { appStorage, clientSettings } from "./auth-fixtures";
 import { expect, spyOn, test } from "bun:test";
 import { createHmac } from "node:crypto";
 import { sql } from "drizzle-orm";
@@ -59,6 +59,8 @@ const webhookSecret = "whsec_fixtureNotASecret";
 async function webhookFixture(configured = true) {
   const { stripe, billing } = fakeStripe();
   const local = await localStore();
+  // Billing reads the account's deletion from the app schema.
+  await appStorage(local.pg);
   await local.db.query(sql`UPDATE store_config SET trials_enabled=true`);
   await local.db.query(sql`INSERT INTO users(id) VALUES (${userId})`);
   // An ended subscription on its Stripe customer.
@@ -413,6 +415,8 @@ test("a verified event only triggers a re-read: the list decides, a replay and a
 
 test("the backfill refuses without trials or a live key, dry-runs, creates, leaves failures at NULL, and reruns as a no-op", async () => {
   const local = await localStore();
+  // Billing reads the account's deletion from the app schema.
+  await appStorage(local.pg);
   const { billing } = fakeStripe();
   const calls: string[] = [];
   let failing = false;

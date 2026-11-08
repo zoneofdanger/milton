@@ -338,7 +338,7 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
 - App persists lifecycle UUID, original account/subject/incarnation/client and requester association before first native/remote attempt; retries never select current/recreated targets.
 - Disconnect commits native original-binding refusal before bounded cleanup; a failed or unfinished step answers 503 with a retry page re-posting the same operation, as deletion does; reconnect creates a new binding and never revives an old token.
 - Native UserInfo answers only while the token's binding is live, the same `binding_status` check MCP and the app make on every call: after the rate gate the auth wrapper reads a JWT's binding, subject, client (`azp`), scopes, incarnation and generation (native then verifies its signature) or looks an opaque token up by its stored hash; a missing, revoked or superseded binding gets 401 `invalid_token` with no claims and native is not called, a database failure 503, so a disconnect or a begun deletion ends an assistant token's UserInfo at once rather than at its expiry.
-- Deletion saves the current verified-identity fingerprints as it starts, then commits refusal, then Stripe cancellation, then writing erasure (which records no identity of its own), and finally bounded native cleanup; unknown inventory/cascade shape leaves a retryable incomplete operation.
+- Deletion saves the current verified-identity fingerprints as it starts, then commits refusal, then Stripe cancellation, then writing erasure (which records no identity of its own), and finally bounded native cleanup; unknown inventory/cascade shape leaves a retryable incomplete operation. Once refusal commits, nothing links a Stripe customer to the account (the link reads the deletion while holding the billing row) and a customer Stripe made for a refused link is deleted at once; Stripe cancellation reads the customer holding that same row, so it waits for an enrolment in flight; and the erase ends any customer still linked, holding the row, before erasing, so an account is never erased with a live customer.
 - Anonymous assistant client registrations belong to no account: their free-text fields (client name, contacts, URIs, metadata) are kept indefinitely, and account deletion does not remove them.
 - Writing and original-incarnation app credentials are never erased before Stripe cancellation succeeds; incomplete deletion never claims completion.
 - Browser logout removes local authority and navigates through fixed-client native RP logout with exact return and native confirmation, leaving offline assistant grants independent; "Switch account" adds the one fixed logout `state` native echoes back, and only that exact single value sends the signed-out return on to a fresh sign-in (`prompt=login`).
@@ -426,6 +426,8 @@ Files: `server/src/store/index.ts`, `server/src/store/trials.ts`,
 - A replayed event, an unknown type, or a customer Milton does not hold calls nothing.
 - Both billing routes take only signed-in POST forms with the CSRF check.
 - `/billing/checkout` answers 409 to an account with no trial row.
+- Once an account's deletion has begun, both billing routes answer 409 before any Stripe
+  call, and sign-in and the backfill start no trial for it.
 - `/billing/checkout` sends trialing, active, past_due, unpaid, and paused to the Stripe
   portal.
 - With a stored customer, it lists Stripe first and goes to the portal if any such

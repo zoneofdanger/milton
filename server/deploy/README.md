@@ -265,9 +265,11 @@ to an image without the prune, or each run fails on the missing function.
 
 0009 adds `users.test_account boolean NOT NULL DEFAULT false`, the owner-only mark on the
 fictional end-to-end check account (see [Test account and daily check](#test-account-and-daily-check)).
-It is additive and needs no code release: one column with a constant default is a catalog
-change with no rewrite, every existing account reads false, and serving app/MCP code never
-names the column. 011 narrows app's INSERT on `users` to `id`, `status` and `created_at` (the
+It is additive: one column with a constant default is a catalog change with no rewrite,
+every existing account reads false, and serving app/MCP code never names the column, so
+traffic stays open. App/MCP code from this change on reads it (the test-account exemption
+from trials and billing), so release that code only after 0009, and after its release roll
+app/MCP back past it only together with the snapshot. 011 narrows app's INSERT on `users` to `id`, `status` and `created_at` (the
 only columns it could insert before) so no runtime login can set the mark. 0009 sets a 5 s
 lock limit in its own transaction: the ADD COLUMN briefly locks `users` exclusively. Rehearse
 on a disposable branch or database first (`server/scripts/check-auth-integration.ts` applies
@@ -304,19 +306,34 @@ revision runs on either schema.
 
 `e2e@milton-test.invalid` is a fictional account that holds nothing but what the daily
 end-to-end check writes and retires. `.invalid` is a reserved top-level domain no mail
-system delivers to, and the account is created verified, so nothing is ever mailed for it
-(no verification, welcome or reset message reaches the auth mail queue or Resend).
-Usage and metric counts exclude it (`users.test_account`, server README).
+system delivers to; the account is created verified, and auth never queues any mail (reset,
+verification or other) for a `.invalid` address, answering such a request exactly as any
+other, so nothing for it reaches the mail queue or Resend. Usage and metric counts exclude it
+(`users.test_account`, server README).
 
-It has no trial row, unlike a normal new account. With billing configured, a trial row with
-no status gets a Stripe customer and a 30-day trial at the first sign-in
-(`ensureSubscription`), which would put a fictional customer in live Stripe and lock the
-account out when that trial ends without a card. So provisioning creates the Milton
-account itself, marked, before the first sign-in: admission finds it, the gate reads it as
-early access (the same working access), `/billing/checkout` answers 409 with no trial row,
-and the backfill skips test accounts, so nothing calls Stripe for it.
+Trials stay on, and the account is permanently exempt from them and from billing, so its
+access never depends on a trial or a Stripe customer. With billing configured, a trial row
+with no status gets a Stripe customer and a 30-day trial at sign-in (`ensureSubscription`),
+which would put a fictional customer in live Stripe and lock the account out when that
+trial ended without a card. So provisioning creates the Milton account itself, marked and
+without a trial row, before the native user exists, and every billing path checks
+`test_account` explicitly (server README, "Test accounts"): the gate reads it as early
+access, sign-in starts nothing, checkout and the portal answer 409, and no path gives it a
+row, status, customer or notice.
 
-### Provision the account (once, after 0009 and 011)
+### Production order
+
+Each step needs Peter's go; the release coordinator runs it.
+
+1. Release auth (`d2a7e78`: no mail to `.invalid` addresses), service and both jobs, and
+   check health and a password sign-in.
+2. Snapshot production.
+3. Apply 0009, then 011, with their checks (the section above).
+4. Release app and MCP (the explicit test-account exemption, which reads 0009's column).
+5. Provision the account, then run the check once by hand.
+6. Create the daily job (below).
+
+### Provision the account (once, after steps 1–4)
 
 Owner-only, from a checkout of the released commit after `bun install --frozen-lockfile`,
 in a shell that keeps no history (zsh: `HISTFILE=/dev/null zsh`), with the owner URLs read

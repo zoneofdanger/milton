@@ -17,16 +17,25 @@ const subscriptionColumns = (state: StripeSubscriptionState) =>
     current_period_start=to_timestamp(${state.periodStart}::double precision),
     current_period_end=to_timestamp(${state.periodEnd}::double precision)`;
 
+/** The account's billing row, if any. A test account (users.test_account) is
+ * permanently outside trials and billing, whatever row it holds: `test` tells
+ * every caller to start, sell or manage nothing for it. */
 export async function billingAccount(db: StoreSession, userId: string) {
   const row = (
-    await db.query<{ customer: string | null; status: string | null }>(sql`
-    SELECT stripe_customer_id AS customer, subscription_status AS status
-    FROM trial_accounts WHERE user_id=${userId}`)
+    await db.query<{
+      test: boolean;
+      enrolled: boolean;
+      customer: string | null;
+      status: string | null;
+    }>(sql`
+    SELECT u.test_account AS test, t.user_id IS NOT NULL AS enrolled,
+      t.stripe_customer_id AS customer, t.subscription_status AS status
+    FROM users u LEFT JOIN trial_accounts t ON t.user_id=u.id WHERE u.id=${userId}`)
   )[0];
-  return row
-    ? { enrolled: true, ...row }
-    : { enrolled: false, customer: null, status: null };
+  return row ?? { test: false, enrolled: false, customer: null, status: null };
 }
+/** Test accounts are never written by billing. */
+const billable = sql`NOT EXISTS (SELECT 1 FROM users x WHERE x.id=user_id AND x.test_account)`;
 
 /** Stores the customer on the clock row unless one is already stored; returns
  * the stored customer. */
@@ -51,7 +60,7 @@ export async function lockWaitingSubscription(
   return (
     await db.query<{ customer: string | null }>(sql`
     SELECT stripe_customer_id AS customer FROM trial_accounts
-    WHERE user_id=${userId} AND subscription_status IS NULL FOR UPDATE`)
+    WHERE user_id=${userId} AND subscription_status IS NULL AND ${billable} FOR UPDATE`)
   )[0];
 }
 
@@ -73,7 +82,7 @@ export async function lockStripeCustomer(db: StoreSession, customer: string) {
   return (
     await db.query<{ subscription: string | null }>(sql`
     SELECT stripe_subscription_id AS subscription FROM trial_accounts
-    WHERE stripe_customer_id=${customer} FOR UPDATE`)
+    WHERE stripe_customer_id=${customer} AND ${billable} FOR UPDATE`)
   )[0];
 }
 
@@ -110,7 +119,7 @@ export async function recordStripeEvent(
             write.state === "canceled"
               ? sql`subscription_status='canceled'`
               : subscriptionColumns(write.state)
-          } WHERE stripe_customer_id=${write.customer} AND EXISTS (SELECT 1 FROM e))
+          } WHERE stripe_customer_id=${write.customer} AND ${billable} AND EXISTS (SELECT 1 FROM e))
           SELECT (SELECT count(*) FROM e)::int AS recorded`
         : sql`WITH ${recorded} SELECT (SELECT count(*) FROM e)::int AS recorded`,
     )
@@ -123,7 +132,7 @@ export async function recordStripeEvent(
 export async function cancelReturningIdentities(db: StoreSession) {
   await db.query(sql`UPDATE trial_accounts t SET subscription_status='canceled'
     FROM users u WHERE u.id=t.user_id AND t.started_at < u.created_at
-    AND t.subscription_status IS NULL`);
+    AND t.subscription_status IS NULL AND NOT u.test_account`);
 }
 
 /** Every active account and its status, null with no row or no status yet.
@@ -145,5 +154,5 @@ export async function backfillAccounts(db: StoreSession) {
 export async function enrollForBackfill(db: StoreSession, userId: string) {
   await db.query(sql`INSERT INTO trial_accounts(user_id,started_at)
     SELECT id,created_at FROM users WHERE id=${userId} AND status='active'
-    ON CONFLICT (user_id) DO NOTHING`);
+    AND NOT test_account ON CONFLICT (user_id) DO NOTHING`);
 }

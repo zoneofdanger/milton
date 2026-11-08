@@ -367,6 +367,10 @@ Files: `server/src/store/index.ts`, `server/src/store/trials.ts`,
   expired.
 - No row, no status, or a status Milton does not know reads as early access, so a Stripe
   outage never cuts off a connected assistant, and reads never call Stripe.
+- A test account (`users.test_account`) is permanently exempt from trials and billing,
+  checked explicitly on each path: it always reads as early access, sign-in starts no
+  subscription for it, checkout and the portal answer 409, no path gives it a trial row or
+  status, the webhook never writes its row and no trial notice is offered.
 - A trial notice is claimed once per stage, 7 days and 1 day before `trial_end`, only
   while trialing, and carries the one link, the signed-in app home.
 - Expired accounts are blocked for assistants with a refusal carrying that link, while the

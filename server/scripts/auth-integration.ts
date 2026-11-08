@@ -1201,12 +1201,15 @@ try {
     subscriptions: 0,
     deleteDown: false,
     deleted: false,
+    // Every Stripe request of any kind.
+    requests: 0,
   };
   config.billing = {
     secretKey: "rk_test_fixtureNotAKey",
     webhookSecret: "whsec_fixtureNotASecret",
     priceId: "price_fixture",
     fetch: async (input, init) => {
+      stripe.requests++;
       const path = new URL(input).pathname;
       if (path === "/v1/customers" && init.method === "POST") {
         stripe.customers++;
@@ -3170,6 +3173,76 @@ try {
   });
   pass(
     "e2e check: browser sign-in, MCP key, safety gate, save, fresh reads, revision, retirement and restored baseline; bounded per-run footprint; leftovers retired; expiring key warns; foreign data refused without writing",
+  );
+  stage = "test account exempt from trials and billing";
+  // Trials stay on. The test account's access never depends on a trial: repeated
+  // sign-ins, one with the account 31 days old, create no trial row and make no
+  // Stripe request, and saves stay allowed. Even a trial row put on it by
+  // mistake changes nothing: no subscription starts, an ended status does not
+  // close it, no trial notice is offered and checkout refuses without Stripe.
+  {
+    const testUser = provisioned.userId;
+    const signedIn = async () => {
+      await owner.query(
+        'delete from milton_auth."rateLimit"; delete from milton_guard.rate_bucket',
+      );
+      const b = browser(PRODUCTION, dispatch);
+      await signIn(b, PRODUCTION, TEST_EMAIL, values.E2E_PASSWORD!);
+      return b;
+    };
+    const trialRow = async () =>
+      (
+        await owner.query(
+          "select subscription_status status from trial_accounts where user_id=$1",
+          [testUser],
+        )
+      ).rows;
+    const requests = stripe.requests;
+    await owner.query(
+      "update users set created_at=now()-interval '31 days' where id=$1",
+      [testUser],
+    );
+    for (let n = 0; n < 3; n++) await signedIn();
+    assert.deepEqual(await trialRow(), []);
+    await testSave({
+      text: "Fictional rule after 31 days.",
+      rules: [{ report: "cover", text: "Fictional rule after 31 days." }],
+    });
+    await owner.query(
+      "insert into trial_accounts(user_id,started_at) values($1,now()-interval '31 days')",
+      [testUser],
+    );
+    const b = await signedIn();
+    assert.deepEqual(await trialRow(), [{ status: null }], "no trial started");
+    await owner.query(
+      "update trial_accounts set subscription_status='canceled' where user_id=$1",
+      [testUser],
+    );
+    await testSave({
+      text: "Fictional rule after an ended status.",
+      rules: [
+        { report: "cover", text: "Fictional rule after an ended status." },
+      ],
+    });
+    await owner.query(
+      "update trial_accounts set subscription_status='trialing',trial_end=now()+interval '12 hours' where user_id=$1",
+      [testUser],
+    );
+    assert.equal(
+      (await testKeyCall("get_cover_sheet", {})).notice,
+      undefined,
+      "no trial notice",
+    );
+    const page = await b.follow(PRODUCTION.app + "/assistants");
+    const checkout = await b.go(PRODUCTION.app + "/billing/checkout", {
+      csrf: /name="csrf" value="([A-Za-z0-9_-]{43})"/.exec(page.html)![1]!,
+    });
+    await checkout.body?.cancel();
+    assert.equal(checkout.status, 409, "checkout refuses a test account");
+    assert.equal(stripe.requests, requests, "no Stripe request at all");
+  }
+  pass(
+    "test accounts are exempt from trials and billing: repeated sign-ins past 30 days make no trial or Stripe request; a stray trial row neither starts a subscription, closes access, offers a notice nor opens checkout",
   );
   console.log(
     `PASS ${groups} product integration groups (Node26/PostgreSQL18 TLS, no external network)`,

@@ -482,8 +482,14 @@ GROUP BY c.tool ORDER BY c.tool;
 ```
 
 Accounts: `SELECT count(*) FROM users WHERE status = 'active' AND NOT test_account;`.
-The subscription backfill neither counts test accounts nor starts their trial, so it
-never calls Stripe for one. Operational checks that size a table
+Test accounts are permanently exempt from trials and billing, while trials stay on for
+everyone else: their access never depends on a Stripe trial or customer. Each path checks
+`test_account` explicitly, not only the absent trial row: the gate reads a test account as
+early access whatever row it holds, so an ended status never closes it; sign-in's
+`ensureSubscription` starts nothing for it; checkout and the portal answer 409; account
+creation, the backfill and the returning-identity cancellation never give it a row or a
+status; the webhook never writes its row; and no trial notice is offered. So no path
+creates a Stripe customer for one. Operational checks that size a table
 for a migration (such as `0008`'s size gate) count every row, test rows included.
 There are no public archive/restore exemptions or history controls.
 Retained history has no cap.

@@ -174,7 +174,7 @@ export async function resolveIdentityAccount(
             SELECT u.id,u.created_at,
               CASE WHEN ${returning} THEN 'canceled' END
             FROM users u CROSS JOIN store_config c
-            WHERE u.id=${id} AND c.singleton=1
+            WHERE u.id=${id} AND c.singleton=1 AND NOT u.test_account
             AND (c.trials_enabled OR ${returning})`);
           account = { id, status: "active" };
         }

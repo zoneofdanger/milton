@@ -202,7 +202,9 @@ Every error says what to do next in the result itself, so error handling never d
 on the server instructions reaching the model. Each error result (and each MCP HTTP
 refusal body: invalid token, scope, rate and busy limits, oversized request, outage)
 keeps its `error` and `message` and adds `code`, the same stable code (`version_conflict`
-for a stale-version `conflict`, which has no `error`), and `next: {action, text}`.
+for a stale-version `conflict`, which has no `error`), and `next: {action, text}`. A
+scope refusal also carries `required_permission` (`read`, or `read_write` for a save):
+what the attempted action needed, which its `next` names.
 `action` is one of `retry` (repeat the identical call, a save with its request ID),
 `reread` (read the cover sheet or report again, then save with a new request ID),
 `fix_input` (correct the arguments), `ask_user` (the fix needs the person's approval or

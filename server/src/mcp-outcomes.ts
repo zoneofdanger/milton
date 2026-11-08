@@ -195,9 +195,18 @@ export const nextSteps: Record<string, NextStep> = {
     "tell_user",
     "Tell the person their Milton account is unavailable; don't retry.",
   ),
+  // By required_permission, the permission the attempted action needed.
   insufficient_scope: step(
     "tell_user",
-    "Tell the person this connection can't save; they can reconnect Milton with Read and write. Don't retry.",
+    "Tell the person this connection lacks the permission in required_permission; they can reconnect Milton with it. Don't retry.",
+  ),
+  "insufficient_scope.read": step(
+    "tell_user",
+    "Tell the person this connection can't read Milton; they can reconnect it with Read. Don't retry.",
+  ),
+  "insufficient_scope.read_write": step(
+    "tell_user",
+    "Tell the person this connection can't save; they can reconnect Milton with Read and write, or use a key that can save. Don't retry.",
   ),
   invalid_token: step(
     "tell_user",
@@ -232,7 +241,8 @@ export const nextSteps: Record<string, NextStep> = {
 
 /** An error body with its stable code and next step added; existing fields
  * stay. A stale-version conflict, which has no error field, is
- * version_conflict; an unknown code gets the unexpected-failure step. */
+ * version_conflict; an unknown code gets the unexpected-failure step. A
+ * scope refusal's step follows its required_permission. */
 export function withNext<T extends Record<string, unknown>>(value: T) {
   const code =
     typeof value.error === "string"
@@ -240,10 +250,15 @@ export function withNext<T extends Record<string, unknown>>(value: T) {
       : value.status === "conflict"
         ? "version_conflict"
         : "tool_error";
+  const variant =
+    typeof value.required_permission === "string"
+      ? `${code}.${value.required_permission}`
+      : code;
+  const key = Object.hasOwn(nextSteps, variant) ? variant : code;
   return {
     ...value,
     code,
-    next: Object.hasOwn(nextSteps, code) ? nextSteps[code]! : retryOnce,
+    next: Object.hasOwn(nextSteps, key) ? nextSteps[key]! : retryOnce,
   };
 }
 

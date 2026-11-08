@@ -395,6 +395,7 @@ export function createStoreMemoTools(
           return storeResult(
             {
               error: "insufficient_scope",
+              required_permission: "read_write",
               message:
                 "This connection is read only. Reconnect with Read and write to save approved guidance.",
             },

@@ -625,11 +625,44 @@ test("scopes control discovery and direct calls; original binding revocation sur
       await fixture.token("alpha", "identity-only", "openid"),
     );
     expect(unscoped.status).toBe(403);
-    expect(await unscoped.json()).toMatchObject({
+    // A scope refusal names the permission the attempted action needed: a
+    // read needs only read, so its next never asks for write.
+    const needsRead = await unscoped.json();
+    expect(needsRead).toMatchObject({
       error: "insufficient_scope",
       code: "insufficient_scope",
+      required_permission: "read",
       next: { action: "tell_user" },
     });
+    expect(needsRead.next.text).toContain("Read");
+    expect(needsRead.next.text).not.toMatch(/save|write/i);
+    const save = await handler(
+      new Request(resource, {
+        method: "POST",
+        headers: {
+          Host: "localhost:3001",
+          Authorization:
+            "Bearer " +
+            (await fixture.token("alpha", "reader", "openid milton:read")),
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: { name: "create_memo", arguments: {} },
+        }),
+      }),
+    );
+    expect(save.status).toBe(403);
+    const needsWrite = await save.json();
+    expect(needsWrite).toMatchObject({
+      code: "insufficient_scope",
+      required_permission: "read_write",
+      next: { action: "tell_user" },
+    });
+    expect(needsWrite.next.text).toContain("Read and write");
     await local.pg.exec(
       `CREATE OR REPLACE FUNCTION milton_guard.binding_status(text,text,text,text[],text[]) RETURNS jsonb LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fictional status outage'; END $$`,
     );

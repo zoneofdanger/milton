@@ -378,7 +378,17 @@ export function createMiltonHandler(
           );
         return withMcpCors(
           Response.json(
-            withNext({ error: error.code, message: error.message }),
+            withNext({
+              error: error.code,
+              message: error.message,
+              // What the attempted action needed, as the challenge says.
+              ...(error.code === "insufficient_scope"
+                ? {
+                    required_permission:
+                      pending === "create_memo" ? "read_write" : "read",
+                  }
+                : {}),
+            }),
             { status: error.status, headers },
           ),
         );

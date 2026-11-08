@@ -149,6 +149,9 @@ Files: `server/src/mcp.ts`, `server/src/mcp-tools.ts`.
   `tell_user`, from the one table in `mcp-outcomes.ts`; an unknown code gets the
   unexpected-failure step. The SDK's plain-text argument refusals become such bodies,
   `invalid_arguments` with the SDK's text as `message`.
+- A scope refusal also carries `required_permission`, `read` or `read_write`: what the
+  attempted action needed (a save needs `read_write`, anything else `read`), and its
+  `next` names that permission.
 - Replies add a trial notice if one is due, and that notice can never fail the call. A read or save whose trial gate found no reminder due makes no claim; a replayed save, which never reaches the gate, always tries one.
 - Failures return a code and message, and unknown failures say no save outcome is
   confirmed.

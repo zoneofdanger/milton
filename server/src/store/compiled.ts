@@ -7,6 +7,7 @@ import { StoreError } from "./errors";
 import { assertTrialAccess, type TrialStatus } from "./trials";
 import { invalidKind, kindValid, readSnapshot } from "./snapshot";
 import { runSave, type SaveOutcome } from "./save";
+import type { CallUsage } from "./usage";
 // The save schema is served to assistants, so it lives with the MCP tools.
 import { oneKind, saveMemoInput, type SaveMemoInput } from "../mcp-tools";
 export type { SaveMemoInput } from "../mcp-tools";
@@ -27,16 +28,20 @@ export function compiledMemos(
   actor?: { issuer: string; clientId: string },
   /** Sees the trial status each assistant read's gate admitted. */
   gated?: (status: TrialStatus) => void,
-  /** Marks an assistant call admitted, after every gate and before the work;
-   * it makes no query. */
-  admit?: () => void,
+  /** Admits the assistant call `call` names, after every gate and before the
+   * work; it never waits on the database. */
+  admit?: (call?: CallUsage) => void,
 ) {
   /** A read assembles the documents from cards and samples. It takes no lock
-   * and writes nothing: for an assistant the trial gate (whose statement first
+   * and writes only its usage row, on its own connection: for an assistant the trial gate (whose statement first
    * checks the account and the intent's kind, so they refuse before the gate,
    * as on the snapshot), then one statement for the snapshot. The size cap
    * bounds saves; a read serves what is on file. */
-  async function read(intent?: ReportIntent, includeGuides = false) {
+  async function read(
+    intent?: ReportIntent,
+    includeGuides = false,
+    call?: CallUsage,
+  ) {
     try {
       if (actor) {
         // As the snapshot orders them: the account, then the kind.
@@ -56,7 +61,7 @@ export function compiledMemos(
         );
         gated?.(status);
       }
-      admit?.();
+      admit?.(call);
       return await readSnapshot(db, userId, intent, includeGuides);
     } catch (error) {
       throw databaseFailure(error);
@@ -68,8 +73,9 @@ export function compiledMemos(
      * the same for every intent. */
     async readDocuments(
       intent?: ReportIntent,
+      call?: CallUsage,
     ): Promise<Documents & { version: string }> {
-      const current = await read(intent, true);
+      const current = await read(intent, true, call);
       return {
         ...(current.served ?? current.documents),
         reports: (current.served ?? current.documents).reports.map((r) => ({
@@ -91,7 +97,7 @@ export function compiledMemos(
       const current = await read();
       return assembleExport(current.active, current.samples);
     },
-    async saveMemo(raw: SaveMemoInput): Promise<SaveOutcome> {
+    async saveMemo(raw: SaveMemoInput, call?: CallUsage): Promise<SaveOutcome> {
       const parsed = saveMemoInput.safeParse(raw);
       if (!parsed.success)
         throw new StoreError(
@@ -109,7 +115,7 @@ export function compiledMemos(
           "Save memos through your connected assistant.",
           403,
         );
-      return runSave(db, userId, actor, parsed.data, admit);
+      return runSave(db, userId, actor, parsed.data, () => admit?.(call));
     },
   };
 }

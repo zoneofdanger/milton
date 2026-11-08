@@ -216,26 +216,24 @@ export const usageDaily = pgTable(
     check("usage_nonnegative", sql`${t.toolCalls} >= 0`),
   ],
 );
-// One row per admitted tool call, appended after its response. No foreign
-// key, so the append takes no lock on the account row; account erasure deletes
-// an account's rows explicitly (eraseAccountRows).
+// One row per admitted tool call, appended alongside its work. The foreign
+// key's key-share check waits only on a sign-in's or a deletion's FOR UPDATE
+// (writers lock FOR NO KEY UPDATE), and erasure cascades here, so a row can
+// never outlive its account. Outcomes stay in the identity-free logs.
 export const usageCalls = pgTable(
   "usage_calls",
   {
-    userId: text("user_id").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
     at: timestamp("at", { withTimezone: true }).notNull(),
     tool: text("tool").notNull(),
-    outcome: text("outcome").notNull(),
   },
   (t) => [
     index("usage_calls_by_user").on(t.userId, t.at),
     check(
       "usage_calls_tool",
       sql`${t.tool} IN ('get_cover_sheet','get_report','list_reports','create_memo')`,
-    ),
-    check(
-      "usage_calls_outcome",
-      sql`${t.outcome} IN ('read','saved','unchanged','conflict','refused','failed')`,
     ),
   ],
 );

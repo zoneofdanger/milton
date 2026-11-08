@@ -860,11 +860,10 @@ test("account deletion removes every tenant row, waits for an in-flight save and
       ).toBe("saved");
     }
     await gone.save({ retire_samples: [(await goneSamples())[0]!.id] });
-    // Each account's last admitted save leaves a usage row, as after its
-    // response.
-    gone.store.recordUsage!({ tool: "create_memo", outcome: "saved" });
     expect((await kept.save()).status).toBe("saved");
-    kept.store.recordUsage!({ tool: "create_memo", outcome: "saved" });
+    // An admitted read of each account appends a usage row.
+    for (const { store } of [gone, kept])
+      await store.readDocuments(undefined, { tool: "get_cover_sheet" });
     await backgroundSettled();
     const tenantTables = (
       await local.db.query<{ table_name: string }>(

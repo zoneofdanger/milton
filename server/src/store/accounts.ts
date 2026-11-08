@@ -11,7 +11,10 @@ export const accountUnavailable = () =>
   );
 
 /** Refuses unless the account is active. With `lock`, also takes the account
- * row lock every writer takes, held until the transaction ends. */
+ * row lock every writer takes, held until the transaction ends. It is FOR NO
+ * KEY UPDATE: writers never change users.id, and they still serialize with
+ * each other and with every FOR UPDATE (sign-in, account lifecycle, deletion),
+ * but a foreign-key check (a usage append's) does not wait on them. */
 export async function requireActiveAccount(
   db: StoreSession,
   userId: string,
@@ -19,19 +22,8 @@ export async function requireActiveAccount(
 ): Promise<void> {
   const rows = await db.query(
     lock
-      ? sql`SELECT id FROM users WHERE id=${userId} AND status='active' FOR UPDATE`
+      ? sql`SELECT id FROM users WHERE id=${userId} AND status='active' FOR NO KEY UPDATE`
       : sql`SELECT id FROM users WHERE id=${userId} AND status='active'`,
   );
   if (!rows.length) throw accountUnavailable();
-}
-
-/** Erases an account whose row the caller's transaction has locked: its usage
- * rows, which have no foreign key, then the users row every other tenant table
- * cascades from. */
-export async function eraseAccountRows(
-  tx: StoreSession,
-  userId: string,
-): Promise<void> {
-  await tx.query(sql`DELETE FROM usage_calls WHERE user_id=${userId}`);
-  await tx.query(sql`DELETE FROM users WHERE id=${userId}`);
 }

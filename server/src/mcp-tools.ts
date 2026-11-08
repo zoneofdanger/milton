@@ -5,6 +5,7 @@ import type { TenantStore } from "./store";
 import { StoreError } from "./store/errors";
 import { utf8Bytes } from "./store/limits";
 import { subscriptionRequired } from "./store/trials";
+import { usageWithin, type CallUsage, type ToolName } from "./store/usage";
 import {
   FILINGS,
   REPORT_IDS,
@@ -315,9 +316,15 @@ export function createStoreMemoTools(
       return value;
     }
   }
-  async function run(operation: () => Promise<ToolResult>) {
+  // Each call has its own usage: a call the store admits appends its row
+  // alongside the work, and the reply waits for it at most USAGE_WAIT_MS.
+  async function run(
+    tool: ToolName,
+    operation: (call: CallUsage) => Promise<ToolResult>,
+  ) {
+    const call: CallUsage = { tool };
     try {
-      return await operation();
+      return await operation(call);
     } catch (thrown) {
       const error =
         thrown instanceof StoreError && thrown.code === "subscription_required"
@@ -334,23 +341,27 @@ export function createStoreMemoTools(
         },
         true,
       );
+    } finally {
+      await usageWithin(call);
     }
   }
   return {
     get_cover_sheet: () =>
-      run(async () =>
+      run("get_cover_sheet", async (call) =>
         storeResult(
-          await withNotice(permission(coverSheet(await store.readDocuments()))),
+          await withNotice(
+            permission(coverSheet(await store.readDocuments(undefined, call))),
+          ),
         ),
       ),
     get_report: (input: z.infer<typeof reportInput>) =>
-      run(async () => {
+      run("get_report", async (call) => {
         const report = resolveReportId(input.report_id)!;
         return storeResult(
           await withNotice(
             permission(
               reportEnvelope(
-                await store.readDocuments({ ...input.intent, report }),
+                await store.readDocuments({ ...input.intent, report }, call),
                 report,
               ),
             ),
@@ -358,8 +369,8 @@ export function createStoreMemoTools(
         );
       }),
     list_reports: () =>
-      run(async () => {
-        const list = reportList(await store.readDocuments());
+      run("list_reports", async (call) => {
+        const list = reportList(await store.readDocuments(undefined, call));
         return storeResult(
           await withNotice(
             options.readOnly
@@ -369,7 +380,7 @@ export function createStoreMemoTools(
         );
       }),
     create_memo: (input: SaveMemoInput) =>
-      run(async () => {
+      run("create_memo", async (call) => {
         if (options.readOnly)
           return storeResult(
             {
@@ -379,7 +390,7 @@ export function createStoreMemoTools(
             },
             true,
           );
-        const outcome = await store.saveMemo(input);
+        const outcome = await store.saveMemo(input, call);
         if (outcome.error === "subscription_required") {
           const error = subscriptionRequired(store.appOrigin);
           return storeResult(

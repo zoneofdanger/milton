@@ -1,5 +1,5 @@
 {
-  "id": "08295a28-78b3-4ef4-a2f5-077e11a15a51",
+  "id": "a1a6be2b-8550-439a-beb3-c9965e5165ce",
   "prevId": "72799364-6062-4e8d-a335-caa193eb9814",
   "version": "7",
   "dialect": "postgresql",
@@ -1631,12 +1631,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
-        },
-        "outcome": {
-          "name": "outcome",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
         }
       },
       "indexes": {
@@ -1662,7 +1656,21 @@
           "with": {}
         }
       },
-      "foreignKeys": {},
+      "foreignKeys": {
+        "usage_calls_user_id_users_id_fk": {
+          "name": "usage_calls_user_id_users_id_fk",
+          "tableFrom": "usage_calls",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
@@ -1670,10 +1678,6 @@
         "usage_calls_tool": {
           "name": "usage_calls_tool",
           "value": "\"usage_calls\".\"tool\" IN ('get_cover_sheet','get_report','list_reports','create_memo')"
-        },
-        "usage_calls_outcome": {
-          "name": "usage_calls_outcome",
-          "value": "\"usage_calls\".\"outcome\" IN ('read','saved','unchanged','conflict','refused','failed')"
         }
       },
       "isRLSEnabled": false

@@ -39,7 +39,7 @@ import {
 } from "./compiled";
 import type { ReportIntent } from "./reports";
 import { parseLimits, readLimits } from "./limits";
-import { recordToolUsage, type ToolUsage } from "./usage";
+import { recordToolUsage, type CallUsage } from "./usage";
 import {
   authenticateConnectionKey,
   createConnectionKey,
@@ -50,7 +50,6 @@ import {
   type KeyScope,
 } from "./connection-keys";
 export { StoreError } from "./errors";
-export { eraseAccountRows } from "./accounts";
 export {
   EXPIRED_KEY_HISTORY,
   keyExpiries,
@@ -322,13 +321,13 @@ export interface TenantStore {
   readTpsReport(): Promise<CompiledReport>;
   /** The cover sheet and the five reports at one version, assembled on read;
    * with an intent, that report serves the eight samples ranked for it. */
+  /** `call`, when given, is the tool call this read serves: once admitted,
+   * its usage row is appended alongside the read (see recordToolUsage). */
   readDocuments(
     intent?: ReportIntent,
+    call?: CallUsage,
   ): Promise<Documents & { version: string }>;
-  saveMemo(input: SaveMemoInput): Promise<SaveOutcome>;
-  /** After a tool call's response: records its usage in the background if
-   * the call was admitted, else nothing. Never awaited, never throws. */
-  recordUsage?(usage: ToolUsage): void;
+  saveMemo(input: SaveMemoInput, call?: CallUsage): Promise<SaveOutcome>;
 }
 
 /** An account's store, refused once the account is not active. */
@@ -351,8 +350,9 @@ export async function storeForCurrentRequest(
  * store was built), the SDK validated the input, and the read or save checked
  * its remaining input (a read's kind_id) and the trial gate, right before the
  * tool's own work (the snapshot read, or the save's decision under its account
- * lock; a replayed save is not admitted). Admission writes nothing: only an
- * admitted call's usage is recorded, after its response (see recordToolUsage). */
+ * lock; a replayed save is not admitted). Admission starts that call's usage
+ * append, which runs alongside the work on its own connection; the request
+ * never waits on it inside a transaction (see recordToolUsage). */
 export function tenantStore(
   bindings: StoreBindings & { appOrigin: string },
   auth: AssistantAuth,
@@ -364,7 +364,6 @@ export function tenantStore(
   const db = database(bindings);
   // The trial status the latest read's gate admitted, for that call's notice.
   let gated: TrialStatus | undefined;
-  let admitted = false;
   const compiled = compiledMemos(
     db,
     userId,
@@ -372,8 +371,18 @@ export function tenantStore(
     (status) => {
       gated = status;
     },
-    () => {
-      admitted = true;
+    (call) => {
+      if (!call || call.recorded) return;
+      try {
+        call.recorded = recordToolUsage(
+          bindings.storeDatabase ?? bindings.DATABASE_URL,
+          () => database(bindings),
+          userId,
+          call.tool,
+        );
+      } catch {
+        /* Usage never fails a call. */
+      }
     },
   );
   return {
@@ -394,20 +403,6 @@ export function tenantStore(
     readTpsReport: compiled.getTpsReport,
     readDocuments: compiled.readDocuments,
     saveMemo: compiled.saveMemo,
-    recordUsage(usage) {
-      if (!admitted) return;
-      admitted = false;
-      try {
-        recordToolUsage(
-          bindings.storeDatabase ?? bindings.DATABASE_URL,
-          () => database(bindings),
-          userId,
-          usage,
-        );
-      } catch {
-        /* Usage is observational only. */
-      }
-    },
   };
 }
 

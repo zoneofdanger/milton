@@ -5,7 +5,6 @@ import type { ReportId } from "../src/store/reports";
 import { compiledMemos } from "../src/store/compiled";
 import type { StoreDatabase, StoreSession } from "../src/store/database";
 import { cardHeadsJson, type CardHead } from "../src/store/cards";
-import { eraseAccountRows } from "../src/store/accounts";
 
 // Every card's head version, in position order.
 export async function cardHeads(tx: StoreSession, userId: string) {
@@ -31,8 +30,8 @@ export const insideTransactions = (
 });
 
 // The erasure step of account deletion (auth-lifecycle.ts) for a sign-in
-// identity: the row lock every writer takes, then the same erasure.
-// Trial-eligibility fingerprints outlive it.
+// identity: the row lock every writer takes, then the delete that every tenant
+// table cascades from. Trial-eligibility fingerprints outlive it.
 export const eraseAccount = (
   db: StoreDatabase,
   identity: { provider: string; subject: string },
@@ -42,7 +41,7 @@ export const eraseAccount = (
       SELECT u.id FROM identities i JOIN users u ON u.id=i.user_id
       WHERE i.provider=${identity.provider} AND i.subject=${identity.subject}
         AND u.status='active' FOR UPDATE OF u`);
-    await eraseAccountRows(tx, account!.id);
+    await tx.query(sql`DELETE FROM users WHERE id=${account!.id}`);
   });
 
 // The JSON payload of an MCP tool result.

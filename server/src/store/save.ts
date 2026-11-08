@@ -92,7 +92,7 @@ export async function runSave(
   userId: string,
   actor: Actor,
   input: SaveMemoInput,
-  /** Marks the call admitted (see below); makes no query. */
+  /** Admits the call (see below); never waits on the database. */
   admit?: () => void,
 ): Promise<SaveOutcome> {
   const inputHash = hash(input);
@@ -145,7 +145,9 @@ export async function runSave(
       await assertTrialAccess(tx, userId);
       // Admitted here, after replay and every gate: a save that records an
       // outcome (saved, unchanged, conflict or failed) is admitted, a replay
-      // of it is not.
+      // of it is not. Its usage append runs on another connection, and this
+      // transaction never waits on it; the account lock (FOR NO KEY UPDATE)
+      // does not block that append's foreign-key check.
       admit?.();
       const current = await readSnapshot(tx, userId);
       const decide = async (): Promise<SaveOutcome> => {

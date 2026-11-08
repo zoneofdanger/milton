@@ -461,9 +461,10 @@ save invokes a model.
 | Request body               | 256 KiB before parsing (`MAX_REQUEST_BYTES` in `src/http.ts`) |
 
 There is no daily call or save allowance. Each admitted tool call appends one
-`usage_calls` row (account, time, tool, outcome) after its response, off the request's
-path: no lock, no read back, failures logged by code only (`src/store/usage.ts`). The table
-grows by one row per admitted call and has no retention yet. `usage_daily` and the stored
+`usage_calls` row (account, time, tool) alongside its work; the reply waits for it at
+most 250 ms, and failures are logged by code only (`src/store/usage.ts`). The row's
+foreign key cascades from `users`. The table grows by one row per admitted call and
+has no retention yet. `usage_daily` and the stored
 `daily_calls` key are no longer read or written; a later migration removes both.
 There are no public archive/restore exemptions or history controls.
 Retained history has no cap.
@@ -702,7 +703,7 @@ Rerunning 006 converges.
 
 Usage rows (`usage_calls`, Drizzle `0006`) get no legacy-group grants either. The owner
 applies `migrations/009-usage-calls-roles.sql` after `0006` and before code that records
-usage: MCP may only insert; app may read `user_id` and delete, for account erasure.
+usage: MCP may only insert; app gets nothing (erasure cascades as the table owner).
 Rerunning 009 converges. `drizzle/rollback/0006_usage_calls.sql` drops the table.
 
 Server timeouts live on the runtime logins, because Neon's proxy and pooler drop the

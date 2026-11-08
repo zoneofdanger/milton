@@ -86,15 +86,22 @@ Files: `server/src/handler.ts`, `server/src/token.ts`, `server/src/mcp.ts`,
 - There is no daily call allowance. A `tools/call` is admitted after access, scope and
   the store limits (the request's access statement), the input schema, the `get_report`
   intent and `kind_id`, and the trial and billing gate, right before the tool's own work
-  (the snapshot read, or a save's decision under its account lock); admission makes no
-  query. Every refusal before that, `subscription_required` included, records nothing,
-  and replaying a save receipt is not admitted.
-- Each admitted call appends one `usage_calls` row (account, time, tool, outcome) after
-  its response: nothing awaits it, it takes no lock (the table has no foreign key) and
-  reads nothing back. One writer per process batches waiting rows, holds at most one
-  pooled connection, drops rows beyond 1,000 waiting, and logs a failure by class and
-  code only; shutdown waits for it before closing pools. A row is written only while
-  its account exists, and account erasure deletes the account's rows.
+  (the snapshot read, or a save's decision under its account lock). Every refusal
+  before that, `subscription_required` included, records nothing, and replaying a save
+  receipt is not admitted. Admission is tracked per tool call, so calls sharing a
+  request or a server are recorded independently.
+- Each admitted call starts one `usage_calls` row (account, time, tool) at admission, on
+  its own connection alongside the call's work; the reply waits for it at most 250 ms,
+  then goes and lets the row finish in the background. Outcomes stay in the
+  identity-free logs. One writer per process sends at once when idle and batches rows
+  that arrive meanwhile (50 per statement), holds at most one pooled connection, drops
+  rows beyond 1,000 waiting, and logs a failure by class and code only; shutdown waits
+  for it before closing pools. A batch that fails is retried row by row.
+- The row's foreign key cascades from `users`, so account erasure removes it. Writers
+  (saves, key creation) lock the account `FOR NO KEY UPDATE`, which the row's key-share
+  check does not wait on; sign-in, lifecycle and deletion lock `FOR UPDATE`, so a row
+  for an account being deleted waits, then fails its check, and never outlives the
+  account.
 - Each call logs the tool, outcome, time, and an error code from a fixed list, never
   text or identity.
 - The tool name is read early, so calls refused before dispatch are still logged.

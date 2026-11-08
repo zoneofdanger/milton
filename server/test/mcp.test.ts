@@ -19,6 +19,7 @@ import {
   connectionKeysForAccount,
   lookupIdentityAccount,
   resolveIdentityAccount,
+  storeForCurrentRequest,
 } from "../src/store";
 import { localStore } from "./local-store";
 import { PgDialect } from "drizzle-orm/pg-core";
@@ -566,7 +567,7 @@ test("scopes control discovery and direct calls; original binding revocation sur
   }
 }, 30000);
 
-test("a setup request makes one database round trip and a tool call three, by token or connection key", async () => {
+test("a setup request makes one database round trip and a tool call four, by token or connection key", async () => {
   const local = await localStore();
   try {
     await resolveIdentityAccount(local.env, {
@@ -588,15 +589,12 @@ test("a setup request makes one database round trip and a tool call three, by to
     }).create({ name: "Counted", scope: "read_write", expiry: null });
     const fixture = await tokenFixture(local.pg);
     const token = await fixture.token("counted");
-    // Each statement, BEGIN and COMMIT is one round trip. Usage appends run
-    // after the response, off the request (see the next test), so they are
-    // not the request's.
+    // Each statement, BEGIN and COMMIT is one round trip.
     let trips = 0;
-    const dialect = new PgDialect();
     const counted = {
       ...local.db,
       query: <Row extends Record<string, unknown>>(statement: SQL) => {
-        if (!/usage_calls/.test(dialect.sqlToQuery(statement).sql)) trips++;
+        trips++;
         return local.db.query<Row>(statement);
       },
       transaction: <T>(
@@ -644,9 +642,7 @@ test("a setup request makes one database round trip and a tool call three, by to
       const text = await response.text();
       expect(response.status).toBeLessThan(300);
       expect(text).not.toContain('"isError":true');
-      const counted = trips;
-      await backgroundSettled();
-      return counted;
+      return trips;
     };
     const cover = { name: "get_cover_sheet", arguments: {} };
     const initialize = {
@@ -660,17 +656,18 @@ test("a setup request makes one database round trip and a tool call three, by to
       expect(await trips_for(bearer, "initialize", initialize)).toBe(1);
       expect(await trips_for(bearer, "notifications/initialized")).toBe(1);
       expect(await trips_for(bearer, "tools/list", {})).toBe(1);
-      // Access, the trial gate and the snapshot; usage is recorded after the
-      // response, off the request's path.
-      expect(await trips_for(bearer, "tools/call", cover)).toBe(3);
+      // Access, the trial gate and the snapshot in sequence, and the usage
+      // append alongside the snapshot.
+      expect(await trips_for(bearer, "tools/call", cover)).toBe(4);
     }
   } finally {
     await local.dispose();
   }
 }, 30000);
 
-test("an admitted tool call takes no account lock and writes its usage only after its response", async () => {
+test("an admitted call appends its usage alongside its work without a blocking lock, and its reply waits for the row at most 250 ms", async () => {
   const local = await localStore();
+  let release = () => {};
   try {
     const { miltonUserId } = await resolveIdentityAccount(local.env, {
       provider: issuer,
@@ -678,20 +675,15 @@ test("an admitted tool call takes no account lock and writes its usage only afte
     });
     const fixture = await tokenFixture(local.pg);
     const token = await fixture.token("usage");
-    // Every statement a request runs, and the usage appends, held until
-    // released: a request that waited on one would never answer.
+    // Every statement a request's own work runs; usage appends can be held.
     const dialect = new PgDialect();
     const during: string[] = [];
-    const appends: string[] = [];
-    let release!: () => void;
-    const held = new Promise<void>((resolve) => (release = resolve));
+    let hold: Promise<void> | undefined;
     const watched = (session: StoreSession): StoreSession => ({
       async query<Row extends Record<string, unknown>>(statement: SQL) {
         const text = dialect.sqlToQuery(statement).sql;
-        if (/usage_calls/.test(text)) {
-          appends.push(text);
-          await held;
-        } else during.push(text);
+        if (/usage_calls/.test(text)) await hold;
+        else during.push(text);
         return session.query<Row>(statement);
       },
     });
@@ -707,6 +699,7 @@ test("an admitted tool call takes no account lock and writes its usage only afte
     );
     const call = async (name: string, args: unknown) => {
       during.length = 0;
+      const started = performance.now();
       const body = await (
         await handler(
           new Request(resource, {
@@ -730,15 +723,25 @@ test("an admitted tool call takes no account lock and writes its usage only afte
         body.startsWith("{") ? body : body.split("data: ").at(-1)!,
       ).result;
       return {
+        ms: performance.now() - started,
         statements: [...during],
         value: JSON.parse(result.content[0].text),
       };
     };
+    const rows = async () =>
+      (
+        await local.pg.query<{ tool: string }>(
+          "SELECT tool FROM usage_calls WHERE user_id=$1 ORDER BY at",
+          [miltonUserId],
+        )
+      ).rows.map((r) => r.tool);
+    // The row commits before the reply: no draining needed.
     const cover = await call("get_cover_sheet", {});
     expect(cover.value.version).toBeString();
-    // A read locks nothing and touches no usage table.
+    expect(await rows()).toEqual(["get_cover_sheet"]);
+    // A read takes no row lock.
     expect(
-      cover.statements.filter((s) => /FOR UPDATE|usage_/i.test(s)),
+      cover.statements.filter((s) => /FOR (NO KEY )?UPDATE/i.test(s)),
     ).toEqual([]);
     const save = await call("create_memo", {
       text: "Fictional rule.",
@@ -747,28 +750,73 @@ test("an admitted tool call takes no account lock and writes its usage only afte
       expected_version: cover.value.version,
     });
     expect(save.value.status).toBe("saved");
-    // A save's one lock is its own account lock; no usage statement either.
-    expect(save.statements.filter((s) => /FOR UPDATE/i.test(s))).toHaveLength(
-      1,
-    );
-    expect(save.statements.filter((s) => /usage_/i.test(s))).toEqual([]);
-    // Both answered while the first append was still held.
-    expect(appends).toHaveLength(1);
-    const rows = async () =>
-      (
-        await local.pg.query<{ tool: string; outcome: string }>(
-          "SELECT tool,outcome FROM usage_calls WHERE user_id=$1 ORDER BY at",
-          [miltonUserId],
-        )
-      ).rows;
-    expect(await rows()).toEqual([]);
+    expect(await rows()).toEqual(["get_cover_sheet", "create_memo"]);
+    // A save's one lock is its own account lock, FOR NO KEY UPDATE, which a
+    // usage row's foreign-key check does not wait on.
+    expect(
+      save.statements.filter((s) => /FOR (NO KEY )?UPDATE/i.test(s)),
+    ).toEqual([expect.stringContaining("FOR NO KEY UPDATE")]);
+    // A stalled append delays the reply by the bound, never more.
+    hold = new Promise<void>((resolve) => (release = resolve));
+    const stalled = await call("get_cover_sheet", {});
+    expect(stalled.value.version).toBeString();
+    expect(stalled.ms).toBeGreaterThanOrEqual(240);
+    expect(stalled.ms).toBeLessThan(2000);
+    expect(await rows()).toHaveLength(2);
     release();
     await backgroundSettled();
-    expect(await rows()).toEqual([
-      { tool: "get_cover_sheet", outcome: "read" },
-      { tool: "create_memo", outcome: "saved" },
-    ]);
+    expect(await rows()).toHaveLength(3);
   } finally {
+    release();
+    await backgroundSettled();
+    await local.dispose();
+  }
+}, 30000);
+
+test("in one JSON-RPC batch, only the admitted call records usage", async () => {
+  const local = await localStore();
+  let client: Client | undefined;
+  try {
+    const { miltonUserId } = await resolveIdentityAccount(local.env, {
+      provider: issuer,
+      subject: "batched",
+    });
+    const auth = await lookupIdentityAccount(local.env, {
+      provider: issuer,
+      subject: "batched",
+    });
+    const store = await storeForCurrentRequest(local.env, auth, {
+      issuer: "fixture",
+      clientId: "batched-client",
+    });
+    // One server, so one store, serving both calls at once.
+    const server = createMiltonServer(store, () => {});
+    client = new Client({ name: "fixture", version: "1" });
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    await server.connect(b);
+    await client.connect(a);
+    const [admitted, refused] = await Promise.all([
+      client.callTool({ name: "get_cover_sheet", arguments: {} }),
+      client.callTool({
+        name: "get_report",
+        arguments: {
+          report_id: "email",
+          intent: { situation: "confirming what is on file", kind_id: "none" },
+        },
+      }),
+    ]);
+    expect(admitted.isError).toBeFalsy();
+    expect(refused.isError).toBe(true);
+    await backgroundSettled();
+    expect(
+      (
+        await local.pg.query("SELECT tool FROM usage_calls WHERE user_id=$1", [
+          miltonUserId,
+        ])
+      ).rows,
+    ).toEqual([{ tool: "get_cover_sheet" }]);
+  } finally {
+    await client?.close();
     await backgroundSettled();
     await local.dispose();
   }

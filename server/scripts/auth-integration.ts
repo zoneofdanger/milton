@@ -20,6 +20,7 @@ import {
   postgresDatabase,
 } from "../src/store/database";
 import { database, lookupIdentityAccount, StoreError } from "../src/store";
+import { recordToolUsage } from "../src/store/usage";
 import {
   authenticateConnectionKey,
   createConnectionKey,
@@ -1489,21 +1490,17 @@ try {
     undefined,
     "real-role model-free writing save",
   );
-  stage = "MCP usage after the response";
-  // As the real MCP role: each admitted call appended one row after its
-  // response, and the role can neither read nor change them.
+  stage = "MCP usage alongside the work";
+  // As the real MCP role: each admitted call appended one row (drained here
+  // only so a slow first connection cannot flake this check), and the role
+  // can neither read nor change the rows.
   await backgroundSettled();
   const usage = (
-    await owner.query(
-      "SELECT user_id,tool,outcome FROM usage_calls ORDER BY at",
-    )
-  ).rows as { user_id: string; tool: string; outcome: string }[];
+    await owner.query("SELECT user_id,tool FROM usage_calls ORDER BY at")
+  ).rows as { user_id: string; tool: string }[];
   assert.deepEqual(
-    usage.map((r) => [r.tool, r.outcome]),
-    [
-      ["get_cover_sheet", "read"],
-      ["create_memo", "saved"],
-    ],
+    usage.map((r) => r.tool),
+    ["get_cover_sheet", "create_memo"],
   );
   const usageUser = usage[0]!.user_id;
   for (const statement of [
@@ -1512,6 +1509,75 @@ try {
     "DELETE FROM usage_calls",
   ])
     await assert.rejects(mcpPool.query(statement), /permission denied/);
+  stage = "MCP usage append against account deletion";
+  {
+    // Two rows admitted together share one batch. The deletion holds the
+    // doomed account's row lock first, so that row's foreign-key check waits
+    // on it; once the deletion commits the batch fails its check, and the
+    // other account's row is retried alone. No row outlives its account.
+    const doomed = "m_00000000-0000-4000-8000-0000000000c3",
+      kept = "m_00000000-0000-4000-8000-0000000000c4";
+    await owner.query("INSERT INTO users(id) VALUES($1),($2)", [doomed, kept]);
+    const usageDb = () => database(mcpConfig);
+    const deletion = await owner.connect();
+    let settled = false;
+    let appended: Promise<unknown> = Promise.resolve();
+    try {
+      await deletion.query("BEGIN");
+      await deletion.query("SELECT id FROM users WHERE id=$1 FOR UPDATE", [
+        doomed,
+      ]);
+      appended = Promise.all([
+        recordToolUsage(mcpConfig.DATABASE_URL, usageDb, doomed, "get_report"),
+        recordToolUsage(mcpConfig.DATABASE_URL, usageDb, kept, "get_report"),
+      ]).finally(() => (settled = true));
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      assert.equal(settled, false, "the append waits on the deletion's lock");
+      await deletion.query("DELETE FROM users WHERE id=$1", [doomed]);
+      await deletion.query("COMMIT");
+    } finally {
+      deletion.release();
+    }
+    await appended;
+    assert.deepEqual(
+      (
+        await owner.query(
+          "SELECT user_id FROM usage_calls WHERE user_id IN ($1,$2)",
+          [doomed, kept],
+        )
+      ).rows,
+      [{ user_id: kept }],
+    );
+    // A writer's account lock (FOR NO KEY UPDATE, as a save takes it) does
+    // not hold an append back: it commits while that transaction is open.
+    const saving = await mcpPool.connect();
+    try {
+      await saving.query("BEGIN");
+      await saving.query(
+        "SELECT id FROM users WHERE id=$1 AND status='active' FOR NO KEY UPDATE",
+        [kept],
+      );
+      await recordToolUsage(
+        mcpConfig.DATABASE_URL,
+        usageDb,
+        kept,
+        "create_memo",
+      );
+      await saving.query("COMMIT");
+    } finally {
+      saving.release();
+    }
+    assert.equal(
+      (
+        await owner.query(
+          "SELECT count(*)::int n FROM usage_calls WHERE user_id=$1",
+          [kept],
+        )
+      ).rows[0].n,
+      2,
+    );
+    await owner.query("DELETE FROM users WHERE id=$1", [kept]);
+  }
   stage = "read-only native authorization";
   const readGrant = await authorizeAssistant(
     "openid offline_access milton:read",

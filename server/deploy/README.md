@@ -509,8 +509,8 @@ and inside a private temporary directory outside the repository (`umask 077`).
    new versions, validate with `--dry-run`, replace MCP, then app, and record the
    revisions and versions.
 8. Verify as the new role: canonical health, MCP discovery and unauthenticated 401; an
-   authenticated `get_cover_sheet` returns 200 with an unchanged version (a read; its
-   `usage_calls` row is appended after the response); and a save. With Peter's go, a
+   authenticated `get_cover_sheet` returns 200 with an unchanged version (a read; it
+   also appends one `usage_calls` row); and a save. With Peter's go, a
    `create_memo` that resends one existing cover rule verbatim returns `unchanged`: it
    claims and stores a receipt as `milton_app` and changes no memo. A save that changes
    memos runs only when Peter directs one. Check the logs for `store_unavailable` or

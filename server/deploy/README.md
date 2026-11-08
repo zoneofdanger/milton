@@ -22,42 +22,46 @@ This runbook keeps only the latest release record. Earlier release records and a
 one-time procedures are in git history; the last full version is at commit 492b96a
 (`git show 492b96a:server/deploy/README.md`).
 
-## Release record: alerts as code, test account (2026-11-08, PRs #56 #57)
+## Release record: e2e fix, MCP next steps, propagation, migration guards, session token (2026-11-08, PRs #58–#62)
 
-- **#56 (Peter's request; builder, milton-duo review), `9a3c74f`:** production alerts as code
-  (`server/deploy/monitoring/`, `server/scripts/monitoring.ts`; see [Alerts](#alerts)).
-  `--apply` at 06:47Z created 2 log metrics, 3 uptime checks and 7 policies and deleted the
-  10 hand-made policies; a second dry run reported 12 unchanged. Delivery test: a temporary
-  always-true policy opened one alert at 06:55:08Z, Peter confirmed the one email arrived,
-  and the policy was deleted. Checks: types, 144 tests, format, all 0.
-- **#57 (Peter; milton-qa, Astra PASS at `c93bfdc`), `7938dd5`:** the fictional test account
-  and the daily end-to-end check. Auth `milton-auth-00016-kul` at 06:54Z (no mail to
-  `.invalid`; mail and maintenance jobs too; image
-  `sha256:7ee6dc3d2416077c03667e84135a59c04c1dd2f5507a662b7e6dfe7866f38610`). Snapshot
-  `snap-royal-math-b8fd06v5`; Drizzle 0009 (journal 10, hash `2c9d8429…`) and owner file 011
-  (app INSERT on `users` is now `id`, `status`, `created_at`); runtime audits `ok`. App/MCP
-  `milton-*-e2e-7938dd5` at 06:55:30Z (image
-  `sha256:ec5df5a67e36ef6937e5223750a912ca11216116556a004c82eb121bff5fd0f5`; the pinned server
-  Dockerfile was regenerated to copy the e2e files). Checks on the merge: types, 144 tests,
-  format, site, auth and server builds, auth integration 20/20, rehearsal 18/18, all 0. Live:
-  health 200 ×3, app home 200, MCP 401 unauthenticated, an MCP read succeeded. Release gate
-  from 06:54:08Z at 07:10Z: only the deleted test policy's alert. Afterwards (Peter's
-  go): milton-qa provisioned `e2e@milton-test.invalid` (snapshot gate
-  `snap-dawn-grass-b8zqz03n`) and its manual run passed; milton-duo provisioned the two Muse
-  reviewer accounts (`.agents/tmp/muse-connector/reviewer-accounts.md`; their connection keys
-  revoked) and created `milton-e2e`, secret `milton-e2e-account:1` and the job
-  `milton-e2e-daily`. Its first execution (`milton-e2e-daily-t4b4p`) failed at `sign_in`:
-  Node's fetch sends `sec-fetch-mode: cors`, so authorize answers JSON instead of a redirect
-  (milton-qa is fixing the check). The scheduler trigger and the e2e alert are not created
-  until a fixed image passes.
-- Earlier today: #53 admit once (auth `00012-qod`), #54 down scripts deleted, #55 usage
-  retention (auth `00014-juv`, snapshot `snap-snowy-haze-b8dl4hvc`), the owner password reset,
-  Neon autoscaling to 4 CU and the budget. App/MCP must not roll back past #40 without
-  restoring the 0008 snapshot.
+- **#58 + #59 (milton-qa; #59 Astra PASS at `65fbf86`), `8d3d4df`:** the daily check follows
+  native's JSON redirects under Node; MCP error results carry a code and `next`, the
+  instructions are 3,420 characters and the server has a 117-character description. App/MCP
+  `milton-*-next-8d3d4df` at 17:25:10Z (image
+  `sha256:c6c2f02c88a7d17ae1f0499e636069313112adb65d4c995727f0c52ab5d83283`). Checks on the
+  merge: types, 146 tests, format, site, server build, rehearsal 18/18, all 0; the merged
+  bundle passed 14/14 under Node against production. Live: health 200 ×3, app home 200, MCP
+  401 unauthenticated, an MCP read, forms probe PASS. Gate at 17:35Z: clean.
+- **Daily check (Peter's go):** `milton-e2e-daily` on that image passed 14/14
+  (`milton-e2e-daily-qzn4p`); scheduler `milton-e2e-daily` created paused, URL checked
+  (`…/jobs/milton-e2e-daily:run`), resumed at `7 14 * * *` UTC (first run 2026-11-09 14:07Z).
+  The job moves with each app/MCP image. Its alert (`pending/milton-e2e-daily.policy.json`)
+  is applied after 2026-11-09 07:16Z, when the 07:15Z failure of the first run leaves its
+  24-hour window; applying it earlier would email a stale failure.
+- **#60 + #61 (milton-qa; Astra's last findings fixed, deltas read by milton-qa), `1a82fde`:**
+  propagation, isolation and deletion integration groups (served change: the
+  behavior-preserving `cloudRequests` extraction), and the migration guards in CI (numbering,
+  released-file hash lock, deletion inventory, `-- code-stopped-by: #NN` drop order, tool
+  description budget). App/MCP `milton-*-guards-1a82fde` at 17:36:00Z (image
+  `sha256:81a1bd5fd23b5f19e0aaf3b064bc931e0c725f80f7d25da699e88d42e6ca78c1`). Checks: types,
+  153 tests, format, migration guard (37 files locked; hashes match the production journal),
+  server build, rehearsal 21/21, CI green. Gate at 17:46Z: clean.
+- **#62 (Peter's go; milton-qa, Astra PASS), `0f7d5aa`:** the app no longer stores the native
+  access token. Snapshot `snap-sparkling-firefly-b8p4mpum` at 17:46:16Z; owner file 012 as
+  `milton_app_owner` through the direct host (the pooler refuses the `role` startup option),
+  `is_nullable` now `YES`. App/MCP `milton-*-token-0f7d5aa` at 17:47:15Z (image
+  `sha256:9ee5fb568baa1bad42014646996227983079c9c32207a11a4fc613e2810e0d06`; the daily job
+  too). An e2e run signed in and passed; sessions storing a token since the release: 0.
+  Checks: types, 153 tests, format, migration guard, server build, rehearsal 21/21, CI green.
+  The column drop (step 2) is milton-qa's next PR; after it, the app must not roll back
+  before #62.
+- Earlier today: #56 alerts as code, #57 test account (auth `00016-kul`, 0009/011), #53–#55,
+  the owner password reset, Neon autoscaling and the budget, daily snapshots
+  (11:00 UTC, 14 days; first `snap-silent-feather-b84f2kwj`).
 
 Auth `milton-auth-00016-kul`, rollback `milton-auth-00014-juv`. App/MCP
-`milton-*-e2e-7938dd5`, rollback `milton-*-save-b85f428` (code only; keep 0009 and 011).
-Earlier records: git history (`git log -p server/deploy/README.md`).
+`milton-*-token-0f7d5aa`, rollback `milton-*-guards-1a82fde` (code only; the token column
+exists). Earlier records: git history (`git log -p server/deploy/README.md`).
 
 ## Runtime role timeouts (applied 2026-11-07, TODO #29)
 
@@ -298,7 +302,7 @@ A failed migration's rollback is the pre-migration snapshot, used only before an
 reads the column serves; there is no down script. Every recorded app/MCP revision runs on
 either schema, so rolling code back never needs it.
 
-## Stop storing the app's native access token (owner file 012; not yet applied)
+## Stop storing the app's native access token (applied 2026-11-08: owner file 012, PR #62)
 
 Until this change the app wrote the native access token it receives at sign-in into
 `milton_app.session.access_token` (`NOT NULL`, plaintext) and nothing read it. App code
@@ -312,7 +316,8 @@ the column in the later drop. Rehearse on a disposable database first
 (`server/scripts/check-auth-integration.ts` applies it twice), then:
 
 1. Snapshot production.
-2. As the `milton_app` owner, `milton_app_owner` (as for 008):
+2. As the `milton_app` owner, `milton_app_owner` (as for 008), through the direct host: Neon's
+   pooler refuses the `role` startup option:
    `psql -X -v ON_ERROR_STOP=1 -f server/migrations/012-session-token-nullable.up.sql`
    (one transaction; rerunning converges).
 3. Check as the owner; expect `YES`:
@@ -593,7 +598,7 @@ is deliberately non-deployable. Production's writing journal holds `0000_baselin
 `0009_test_account` (10 entries), the native auth ledger 001–007, and the owner files
 `000-app-owner.sql`, `005-app.up.sql`, `005-app-roles.sql`, `006-connection-keys-roles.sql`,
 `007-role-timeouts.up.sql`, `008-drop-legacy-mapping.up.sql`, `009-usage-calls-roles.sql`,
-`010-usage-retention-roles.sql` and `011-test-account-roles.sql` (see [runtime role timeouts](#runtime-role-timeouts-applied-2026-11-07-todo-29)). There is no memo-update
+`010-usage-retention-roles.sql`, `011-test-account-roles.sql` and `012-session-token-nullable.up.sql` (see [runtime role timeouts](#runtime-role-timeouts-applied-2026-11-07-todo-29)). There is no memo-update
 or daily call allowance (removed by PR #40, serving since 2026-11-08). Existing positive account safeguards remain
 in effect. Trials and billing are live (since 2026-11-04).
 Each image includes both roles and browser assets. Validate manifests before applying:
@@ -901,8 +906,8 @@ references. Inspect revision readiness before selecting a recorded revision:
 gcloud run revisions list --service=milton-app --project=milton-510506 --region=us-east4
 ```
 
-Now serving (2026-11-08): app `milton-app-e2e-7938dd5` and MCP
-`milton-mcp-e2e-7938dd5`, and auth `milton-auth-00016-kul` (all source `7938dd5`). The
+Now serving (2026-11-08): app `milton-app-token-0f7d5aa` and MCP
+`milton-mcp-token-0f7d5aa` (source `0f7d5aa`), and auth `milton-auth-00016-kul` (source `7938dd5`). The
 release record above gives the image and rollback revisions.
 
 Roll back only affected services, preserve ingress/IAM, then repeat the canonical

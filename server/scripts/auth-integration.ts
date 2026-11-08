@@ -19,7 +19,12 @@ import {
   POOL_IDLE_MS,
   postgresDatabase,
 } from "../src/store/database";
-import { database, lookupIdentityAccount, StoreError } from "../src/store";
+import {
+  database,
+  lockActiveAccount,
+  lookupIdentityAccount,
+  StoreError,
+} from "../src/store";
 import { storeForCurrentRequest } from "../test/store-fixtures";
 import { recordToolUsage } from "../src/store/usage";
 import {
@@ -1511,19 +1516,46 @@ try {
     "DELETE FROM usage_calls",
   ])
     await assert.rejects(mcpPool.query(statement), /permission denied/);
+  // Until a usage insert is actually waiting on a row lock.
+  const usageBlocked = async () => {
+    for (let n = 0; n < 250; n++) {
+      const [row] = (
+        await owner.query(
+          "SELECT count(*)::int n FROM pg_stat_activity WHERE wait_event_type='Lock' AND query LIKE 'INSERT INTO usage_calls%'",
+        )
+      ).rows;
+      if (row.n > 0) return;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    throw new Error("usage insert never blocked");
+  };
+  const within = <T>(work: Promise<T>, ms: number) =>
+    Promise.race([
+      work,
+      new Promise<"waited">((resolve) =>
+        setTimeout(() => resolve("waited"), ms),
+      ),
+    ]);
+  const usageDb = () => database(mcpConfig);
+  const usageRows = async (...ids: string[]) =>
+    (
+      await owner.query(
+        "SELECT user_id FROM usage_calls WHERE user_id = ANY($1) ORDER BY user_id",
+        [ids],
+      )
+    ).rows.map((r: { user_id: string }) => r.user_id);
   stage = "MCP usage append against account deletion";
   {
-    // Two rows admitted together share one batch. The deletion holds the
-    // doomed account's row lock first, so that row's foreign-key check waits
-    // on it; once the deletion commits the batch fails its check, and the
-    // other account's row is retried alone. No row outlives its account.
+    // The deletion holds the doomed account's lock, so that account's insert
+    // waits on it. Each account's rows are their own statement with a 1 s
+    // lock timeout: the doomed rows give up and are dropped, and the other
+    // account's rows still land while the deletion is open.
     const doomed = "m_00000000-0000-4000-8000-0000000000c3",
       kept = "m_00000000-0000-4000-8000-0000000000c4";
     await owner.query("INSERT INTO users(id) VALUES($1),($2)", [doomed, kept]);
-    const usageDb = () => database(mcpConfig);
     const deletion = await owner.connect();
-    let settled = false;
     let appended: Promise<unknown> = Promise.resolve();
+    let landed: string[] = [];
     try {
       await deletion.query("BEGIN");
       await deletion.query("SELECT id FROM users WHERE id=$1 FOR UPDATE", [
@@ -1532,32 +1564,26 @@ try {
       appended = Promise.all([
         recordToolUsage(mcpConfig.DATABASE_URL, usageDb, doomed, "get_report"),
         recordToolUsage(mcpConfig.DATABASE_URL, usageDb, kept, "get_report"),
-      ]).finally(() => (settled = true));
-      await new Promise((resolve) => setTimeout(resolve, 300));
-      assert.equal(settled, false, "the append waits on the deletion's lock");
+      ]);
+      await usageBlocked();
+      await within(appended, 3000);
+      landed = await usageRows(doomed, kept);
       await deletion.query("DELETE FROM users WHERE id=$1", [doomed]);
       await deletion.query("COMMIT");
     } finally {
       deletion.release();
     }
     await appended;
-    assert.deepEqual(
-      (
-        await owner.query(
-          "SELECT user_id FROM usage_calls WHERE user_id IN ($1,$2)",
-          [doomed, kept],
-        )
-      ).rows,
-      [{ user_id: kept }],
-    );
+    assert.deepEqual(landed, [kept], "the other account's row lands meanwhile");
+    assert.deepEqual(await usageRows(doomed, kept), [kept]);
     await owner.query("DELETE FROM users WHERE id=$1", [kept]);
   }
-  stage = "a save against an unrelated account's deletion";
+  stage = "account A's save and FOR UPDATE against account B's deletion";
   {
-    // B's deletion holds B's row lock. A usage batch for A and B takes A's
-    // key share, then waits on B. A's save must still finish: every lock it
-    // takes on A (its own and its triggers') is FOR NO KEY UPDATE, which a
-    // key share does not block.
+    // B's deletion holds B's row lock while a usage write for A and B waits
+    // on it. A's save (FOR NO KEY UPDATE, its own and its triggers') and A's
+    // FOR UPDATE (as sign-in, eligibility, lifecycle and deletion take it)
+    // must not wait: no usage statement holds A's key share while it waits on B.
     const saverId = "m_00000000-0000-4000-8000-0000000000c5",
       leaving = "m_00000000-0000-4000-8000-0000000000c6";
     await owner.query("INSERT INTO users(id) VALUES($1),($2)", [
@@ -1581,10 +1607,9 @@ try {
       { issuer: "fixture", clientId: "fictional-saver" },
     );
     const version = (await saver.readTpsReport()).version;
-    const usageDb = () => database(mcpConfig);
     const deletion = await owner.connect();
     let appended: Promise<unknown> = Promise.resolve();
-    let saved: unknown;
+    let saved: unknown, locked: unknown;
     try {
       await deletion.query("BEGIN");
       await deletion.query("SELECT id FROM users WHERE id=$1 FOR UPDATE", [
@@ -1594,22 +1619,30 @@ try {
         recordToolUsage(mcpConfig.DATABASE_URL, usageDb, saverId, "get_report"),
         recordToolUsage(mcpConfig.DATABASE_URL, usageDb, leaving, "get_report"),
       ]);
-      await new Promise((resolve) => setTimeout(resolve, 200));
-      saved = await Promise.race([
-        saver
-          .saveMemo({
-            text: "Keep fictional measurements explicit.",
-            rules: [
-              {
-                report: "cover",
-                text: "Keep fictional measurements explicit.",
-              },
-            ],
-            request_id: randomUUID(),
-            expected_version: version,
-          })
-          .then((outcome) => outcome.status),
-        new Promise((resolve) => setTimeout(() => resolve("waited"), 3000)),
+      await usageBlocked();
+      [saved, locked] = await Promise.all([
+        within(
+          saver
+            .saveMemo({
+              text: "Keep fictional measurements explicit.",
+              rules: [
+                {
+                  report: "cover",
+                  text: "Keep fictional measurements explicit.",
+                },
+              ],
+              request_id: randomUUID(),
+              expected_version: version,
+            })
+            .then((outcome) => outcome.status),
+          3000,
+        ),
+        within(
+          database(config).transaction((tx) =>
+            lockActiveAccount(tx, "fictional-usage", "saver"),
+          ),
+          3000,
+        ),
       ]);
       await deletion.query("DELETE FROM users WHERE id=$1", [leaving]);
       await deletion.query("COMMIT");
@@ -1619,15 +1652,8 @@ try {
     await appended;
     await backgroundSettled();
     assert.equal(saved, "saved", "A's save never waits on B's deletion");
-    assert.deepEqual(
-      (
-        await owner.query(
-          "SELECT user_id FROM usage_calls WHERE user_id IN ($1,$2)",
-          [saverId, leaving],
-        )
-      ).rows,
-      [{ user_id: saverId }],
-    );
+    assert.equal(locked, saverId, "A's FOR UPDATE never waits on B's deletion");
+    assert.deepEqual(await usageRows(saverId, leaving), [saverId]);
     await owner.query("DELETE FROM users WHERE id=$1", [saverId]);
   }
   stage = "read-only native authorization";

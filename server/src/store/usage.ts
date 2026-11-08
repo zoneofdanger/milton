@@ -23,27 +23,44 @@ type Waiting = {
 // database costs dropped records, never memory.
 const MAX_WAITING = 1000;
 // Small, so a row that arrives while a batch is in flight waits about one
-// round trip before its own.
+// batch before its own.
 const BATCH = 50;
 const writers = new Map<unknown, { queue: Waiting[] }>();
 
+/** How long one account's insert may wait for its account row (its foreign
+ * key's key share). Only a FOR UPDATE holder makes it wait: a sign-in,
+ * eligibility or lifecycle transaction, which holds it for milliseconds, or a
+ * deletion's erase. One second lets the first kind pass and gives up on a
+ * deletion that is still running, dropping that account's rows, so the queue
+ * behind it waits at most a second instead of the role's 10 s. */
+export const USAGE_LOCK_TIMEOUT = "1s";
+
+// One account's rows in their own short transaction: it commits, releasing
+// that account's key share, before the writer moves on, so a wait on one
+// account never holds a lock on another.
 const append = (db: StoreDatabase, rows: Waiting["row"][]) =>
-  db.query(sql`INSERT INTO usage_calls (user_id,at,tool)
-    SELECT r.user_id, r.at, r.tool
-    FROM jsonb_to_recordset(${JSON.stringify(rows)}::jsonb)
-      AS r(user_id text, at timestamptz, tool text)
-    WHERE EXISTS (SELECT 1 FROM users u WHERE u.id = r.user_id)`);
+  db.transaction(async (tx) => {
+    await tx.query(
+      sql`SELECT set_config('lock_timeout',${USAGE_LOCK_TIMEOUT},true)`,
+    );
+    await tx.query(sql`INSERT INTO usage_calls (user_id,at,tool)
+      SELECT r.user_id, r.at, r.tool
+      FROM jsonb_to_recordset(${JSON.stringify(rows)}::jsonb)
+        AS r(user_id text, at timestamptz, tool text)
+      WHERE EXISTS (SELECT 1 FROM users u WHERE u.id = r.user_id)`);
+  });
 
 /**
  * Appends one usage row for a call as it is admitted, alongside the call's own
  * work; the returned promise settles when the row commits or fails, and never
  * rejects. Each process runs at most one writer per database, so usage holds
  * at most one pooled connection: an idle writer sends at once, and rows that
- * arrive meanwhile go in its next batch. The row takes no lock beyond its
- * foreign key's key-share check of the account row, which only a sign-in's or
- * a deletion's lock delays; once an account is erased its row fails that
- * check, and the batch's other rows are retried alone. Failures are logged by
- * class and code only.
+ * arrive meanwhile go in its next batch, one short transaction per account.
+ * The row takes no lock beyond its foreign key's key share of its own account
+ * row, which only a FOR UPDATE holder (sign-in, eligibility, lifecycle,
+ * deletion) delays, for at most USAGE_LOCK_TIMEOUT; once an account is erased
+ * its rows fail that check. Either way only that account's rows are dropped.
+ * Failures are logged by class and code only.
  */
 export function recordToolUsage(
   key: unknown,
@@ -71,20 +88,21 @@ export function recordToolUsage(
         const target = db();
         while (writer.queue.length) {
           const batch = writer.queue.splice(0, BATCH);
-          try {
+          const accounts = new Map<string, Waiting[]>();
+          for (const waiting of batch)
+            accounts.set(waiting.row.user_id, [
+              ...(accounts.get(waiting.row.user_id) ?? []),
+              waiting,
+            ]);
+          for (const rows of accounts.values()) {
+            // A failure (an erased account's foreign key, a lock timeout
+            // behind its deletion) drops only this account's rows.
             await append(
               target,
-              batch.map((w) => w.row),
-            );
-          } catch (error) {
-            logUnexpected("usage", error);
-            if (batch.length > 1)
-              for (const waiting of batch)
-                await append(target, [waiting.row]).catch((single) =>
-                  logUnexpected("usage", single),
-                );
+              rows.map((w) => w.row),
+            ).catch((error) => logUnexpected("usage", error));
+            for (const waiting of rows) waiting.done();
           }
-          for (const waiting of batch) waiting.done();
         }
       } catch (error) {
         logUnexpected("usage", error);

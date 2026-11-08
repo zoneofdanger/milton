@@ -94,15 +94,17 @@ Files: `server/src/handler.ts`, `server/src/token.ts`, `server/src/mcp.ts`,
   its own connection alongside the call's work; the reply waits for it at most 250 ms,
   then goes and lets the row finish in the background. Outcomes stay in the
   identity-free logs. One writer per process sends at once when idle and batches rows
-  that arrive meanwhile (50 per statement), holds at most one pooled connection, drops
-  rows beyond 1,000 waiting, and logs a failure by class and code only; shutdown waits
-  for it before closing pools. A batch that fails is retried row by row.
+  that arrive meanwhile (up to 50), holds at most one pooled connection, drops rows
+  beyond 1,000 waiting, and logs a failure by class and code only; shutdown waits for it
+  before closing pools. Each account's rows are their own short transaction with a 1 s
+  lock timeout, which commits before the next account's, so a wait on one account holds
+  no lock on another; a failure or timeout drops only that account's rows.
 - The row's foreign key cascades from `users`, so account erasure removes it. Writers
   (saves, key creation, and the six guard triggers on cards, card versions, accepted
   changes, sample kinds, samples and sample versions, since `0007`) lock the account
-  `FOR NO KEY UPDATE`, which the row's key-share check does not wait on; sign-in, lifecycle and deletion lock `FOR UPDATE`, so a row
-  for an account being deleted waits, then fails its check, and never outlives the
-  account.
+  `FOR NO KEY UPDATE`, which the row's key-share check does not wait on; sign-in,
+  eligibility, lifecycle and deletion lock `FOR UPDATE`, so a row for an account being
+  deleted waits (at most 1 s), then fails or is dropped, and never outlives the account.
 - Each call logs the tool, outcome, time, and an error code from a fixed list, never
   text or identity.
 - The tool name is read early, so calls refused before dispatch are still logged.

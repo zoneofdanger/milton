@@ -8,7 +8,7 @@ import {
   type StoreSession,
 } from "./database";
 import { StoreError } from "./errors";
-import { accountUnavailable, requireActiveAccount } from "./accounts";
+import { accountUnavailable } from "./accounts";
 import {
   claimTrialNotice,
   trialStatus,
@@ -329,18 +329,6 @@ export interface TenantStore {
   /** Counts one admitted call, on `session` (a save's own transaction) or
    * alone. */
   chargeToolCall(session?: StoreSession): Promise<CallAllowance>;
-}
-
-/** An account's store, refused once the account is not active. */
-export async function storeForCurrentRequest(
-  bindings: StoreBindings & { appOrigin: string },
-  auth: VerifiedStoreAuth,
-  assistant?: { issuer: string; clientId: string },
-): Promise<TenantStore> {
-  const db = database(bindings);
-  const limits = await readLimits(db);
-  await requireActiveAccount(db, auth.userId, { lock: false });
-  return tenantStore(bindings, { ...auth, limits }, assistant);
 }
 
 /** The store for an `auth` this request just looked up, which required an

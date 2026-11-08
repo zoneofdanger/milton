@@ -18,12 +18,8 @@ import {
   POOL_IDLE_MS,
   postgresDatabase,
 } from "../src/store/database";
-import {
-  database,
-  lookupIdentityAccount,
-  StoreError,
-  storeForCurrentRequest,
-} from "../src/store";
+import { database, lookupIdentityAccount, StoreError } from "../src/store";
+import { storeForCurrentRequest } from "../test/store-fixtures";
 import {
   authenticateConnectionKey,
   createConnectionKey,

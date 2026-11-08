@@ -175,6 +175,29 @@ rewrites its table). It refuses, changing nothing, once a save from the new code
 receipt without `source_hash`. The 0006 journal row stays, so re-forwarding means
 `psql -1 -X -v ON_ERROR_STOP=1 -f server/drizzle/0006_drop_unread_columns.sql`.
 
+## Usage rows and the writer guards (pending: Drizzle 0007, PR #40)
+
+0007 adds the empty `usage_calls` table (account, time, tool; foreign key cascading from
+`users`). It also re-creates the six writer guard triggers (cards, card versions, accepted
+changes, sample kinds, samples, sample versions) with their account lock moved from
+`FOR UPDATE` to `FOR NO KEY UPDATE`, each otherwise unchanged. Every recorded app/MCP
+revision runs on either schema, so traffic stays open. Code from #40 writes the table;
+before 0007 and 009 its appends fail, are logged by code and change no response. Apply
+after 0006. Rehearse on a disposable branch or database first, then:
+
+1. Snapshot.
+2. As `neondb_owner`: `bun run --cwd server db:migrate` applies `0007_usage_calls`
+   (journal 8 entries), then run `server/migrations/009-usage-calls-roles.sql` (MCP gets
+   `INSERT` only; rerunning converges).
+3. Check as the owner: `SELECT count(*) FROM pg_proc WHERE prosrc LIKE '%FOR UPDATE%' AND
+pronamespace='public'::regnamespace` returns 0, and `check-runtime-role.ts` prints
+   `ok` for app and MCP. Then release #40's code.
+
+Rollback (older code runs on either schema): run `server/drizzle/rollback/0007_usage_calls.sql`
+as `neondb_owner`. It drops `usage_calls` with its rows and restores the guards' `FOR UPDATE`.
+The 0007 journal row stays, so re-forwarding means
+`psql -1 -X -v ON_ERROR_STOP=1 -f server/drizzle/0007_usage_calls.sql`, then 009.
+
 ## Optional guide worker
 
 The default-off private guide pilot has separate [operations and capability instructions](guides.md). No guide job, schedule, provider key or account enrollment is provisioned by its build.
@@ -195,7 +218,8 @@ from the live service before replacing it. [auth.service.template.json](auth.ser
 is deliberately non-deployable. Production's writing journal holds `0000_baseline` through
 `0004_connection_keys` (5 entries), the native auth ledger 001–007, and the owner files
 `000-app-owner.sql`, `005-app.up.sql`, `005-app-roles.sql`, `006-connection-keys-roles.sql` and `007-role-timeouts.up.sql` (see [runtime role timeouts](#runtime-role-timeouts-applied-2026-11-07-todo-29)). There is no memo-update
-allowance; the daily call cap bounds saves. Existing positive account safeguards remain
+or daily call allowance (removed by the branch `agent/remove-daily-allowance`; until it
+serves, production still enforces the 10,000-call daily cap). Existing positive account safeguards remain
 in effect. Trials and billing are live (since 2026-11-04).
 Each image includes both roles and browser assets. Validate manifests before applying:
 
@@ -554,8 +578,8 @@ and inside a private temporary directory outside the repository (`umask 077`).
    new versions, validate with `--dry-run`, replace MCP, then app, and record the
    revisions and versions.
 8. Verify as the new role: canonical health, MCP discovery and unauthenticated 401; an
-   authenticated `get_cover_sheet` returns 200 with an unchanged version (a read,
-   which also writes the daily call count); and a save. With Peter's go, a
+   authenticated `get_cover_sheet` returns 200 with an unchanged version (a read; it
+   also appends one `usage_calls` row); and a save. With Peter's go, a
    `create_memo` that resends one existing cover rule verbatim returns `unchanged`: it
    claims and stores a receipt as `milton_app` and changes no memo. A save that changes
    memos runs only when Peter directs one. Check the logs for `store_unavailable` or

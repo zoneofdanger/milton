@@ -20,7 +20,14 @@ import {
   lookupIdentityAccount,
   resolveIdentityAccount,
 } from "../src/store";
+import { storeForCurrentRequest } from "./store-fixtures";
 import { localStore } from "./local-store";
+import { PgDialect } from "drizzle-orm/pg-core";
+import {
+  backgroundSettled,
+  type StoreDatabase,
+  type StoreSession,
+} from "../src/store/database";
 import { z } from "zod";
 import { createMcpApp } from "../src/index";
 import { mcpRuntimeConfig } from "../src/config";
@@ -462,10 +469,6 @@ test("two authenticated clients isolate tenants and save once", async () => {
         })
       ).value.status,
     ).toBe("conflict");
-    await local.db.query(
-      sql`UPDATE store_config SET limits_json=limits_json || '{"daily_calls":1}'::jsonb`,
-    );
-    expect((await call(0, "get_cover_sheet")).value.error).toBe("rate_limited");
   } finally {
     await Promise.all(clients.map((c) => c.close()));
     await local.dispose();
@@ -653,7 +656,8 @@ test("a setup request makes one database round trip and a tool call four, by tok
       expect(await trips_for(bearer, "initialize", initialize)).toBe(1);
       expect(await trips_for(bearer, "notifications/initialized")).toBe(1);
       expect(await trips_for(bearer, "tools/list", {})).toBe(1);
-      // Access, the trial gate, the charge and the snapshot.
+      // Access, the trial gate and the snapshot in sequence, and the usage
+      // append (one statement) alongside the snapshot.
       expect(await trips_for(bearer, "tools/call", cover)).toBe(4);
     }
   } finally {
@@ -661,7 +665,165 @@ test("a setup request makes one database round trip and a tool call four, by tok
   }
 }, 30000);
 
-test("invalid store limits refuse a tool call without counting it", async () => {
+test("an admitted call appends its usage alongside its work without a blocking lock, and its reply waits for the row at most 250 ms", async () => {
+  const local = await localStore();
+  let release = () => {};
+  try {
+    const { miltonUserId } = await resolveIdentityAccount(local.env, {
+      provider: issuer,
+      subject: "usage",
+    });
+    const fixture = await tokenFixture(local.pg);
+    const token = await fixture.token("usage");
+    // Every statement a request's own work runs; usage appends can be held
+    // before they are sent.
+    const dialect = new PgDialect();
+    const during: string[] = [];
+    let hold: Promise<void> | undefined;
+    const watched = (session: StoreSession): StoreSession => ({
+      async query<Row extends Record<string, unknown>>(statement: SQL) {
+        const text = dialect.sqlToQuery(statement).sql;
+        if (/usage_calls/.test(text)) await hold;
+        else during.push(text);
+        return session.query<Row>(statement);
+      },
+    });
+    const db: StoreDatabase = {
+      ...watched(local.db),
+      transaction: (work) => local.db.transaction((tx) => work(watched(tx))),
+      withConnection: (work) => work(db),
+    };
+    const handler = createMiltonHandler(
+      { storeDatabase: db, issuer, resource, appOrigin: origin },
+      fixture.verify,
+      () => {},
+    );
+    const call = async (name: string, args: unknown) => {
+      during.length = 0;
+      const started = performance.now();
+      const body = await (
+        await handler(
+          new Request(resource, {
+            method: "POST",
+            headers: {
+              Host: "localhost:3001",
+              Authorization: "Bearer " + token,
+              Accept: "application/json, text/event-stream",
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              jsonrpc: "2.0",
+              id: 1,
+              method: "tools/call",
+              params: { name, arguments: args },
+            }),
+          }),
+        )
+      ).text();
+      const result = JSON.parse(
+        body.startsWith("{") ? body : body.split("data: ").at(-1)!,
+      ).result;
+      return {
+        ms: performance.now() - started,
+        statements: [...during],
+        value: JSON.parse(result.content[0].text),
+      };
+    };
+    const rows = async () =>
+      (
+        await local.pg.query<{ tool: string }>(
+          "SELECT tool FROM usage_calls WHERE user_id=$1 ORDER BY at",
+          [miltonUserId],
+        )
+      ).rows.map((r) => r.tool);
+    // The row commits before the reply: no draining needed.
+    const cover = await call("get_cover_sheet", {});
+    expect(cover.value.version).toBeString();
+    expect(await rows()).toEqual(["get_cover_sheet"]);
+    // A read takes no row lock.
+    expect(
+      cover.statements.filter((s) => /FOR (NO KEY )?UPDATE/i.test(s)),
+    ).toEqual([]);
+    const save = await call("create_memo", {
+      text: "Fictional rule.",
+      rules: [{ report: "cover", text: "Keep fictional dates exact." }],
+      request_id: crypto.randomUUID(),
+      expected_version: cover.value.version,
+    });
+    expect(save.value.status).toBe("saved");
+    expect(await rows()).toEqual(["get_cover_sheet", "create_memo"]);
+    // A save's one lock is its own account lock, FOR NO KEY UPDATE, which a
+    // usage row's foreign-key check does not wait on.
+    expect(
+      save.statements.filter((s) => /FOR (NO KEY )?UPDATE/i.test(s)),
+    ).toEqual([expect.stringContaining("FOR NO KEY UPDATE")]);
+    // A stalled append delays the reply by the bound, never more.
+    hold = new Promise<void>((resolve) => (release = resolve));
+    const stalled = await call("get_cover_sheet", {});
+    expect(stalled.value.version).toBeString();
+    expect(stalled.ms).toBeGreaterThanOrEqual(240);
+    expect(stalled.ms).toBeLessThan(2000);
+    expect(await rows()).toHaveLength(2);
+    release();
+    await backgroundSettled();
+    expect(await rows()).toHaveLength(3);
+  } finally {
+    release();
+    await backgroundSettled();
+    await local.dispose();
+  }
+}, 30000);
+
+test("in one JSON-RPC batch, only the admitted call records usage", async () => {
+  const local = await localStore();
+  let client: Client | undefined;
+  try {
+    const { miltonUserId } = await resolveIdentityAccount(local.env, {
+      provider: issuer,
+      subject: "batched",
+    });
+    const auth = await lookupIdentityAccount(local.env, {
+      provider: issuer,
+      subject: "batched",
+    });
+    const store = await storeForCurrentRequest(local.env, auth, {
+      issuer: "fixture",
+      clientId: "batched-client",
+    });
+    // One server, so one store, serving both calls at once.
+    const server = createMiltonServer(store, () => {});
+    client = new Client({ name: "fixture", version: "1" });
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    await server.connect(b);
+    await client.connect(a);
+    const [admitted, refused] = await Promise.all([
+      client.callTool({ name: "get_cover_sheet", arguments: {} }),
+      client.callTool({
+        name: "get_report",
+        arguments: {
+          report_id: "email",
+          intent: { situation: "confirming what is on file", kind_id: "none" },
+        },
+      }),
+    ]);
+    expect(admitted.isError).toBeFalsy();
+    expect(refused.isError).toBe(true);
+    await backgroundSettled();
+    expect(
+      (
+        await local.pg.query("SELECT tool FROM usage_calls WHERE user_id=$1", [
+          miltonUserId,
+        ])
+      ).rows,
+    ).toEqual([{ tool: "get_cover_sheet" }]);
+  } finally {
+    await client?.close();
+    await backgroundSettled();
+    await local.dispose();
+  }
+}, 30000);
+
+test("invalid store limits refuse a tool call and record no usage; a stored daily_calls is ignored", async () => {
   const local = await localStore();
   try {
     const { miltonUserId } = await resolveIdentityAccount(local.env, {
@@ -695,37 +857,62 @@ test("invalid store limits refuse a tool call without counting it", async () => 
           }),
         )
       ).text();
-    const used = async () =>
-      (
+    const used = async () => {
+      await backgroundSettled();
+      return (
         await local.db.query<{ n: number }>(
-          sql`SELECT coalesce(sum(tool_calls),0)::int AS n FROM usage_daily WHERE user_id=${miltonUserId}`,
+          sql`SELECT count(*)::int AS n FROM usage_calls WHERE user_id=${miltonUserId}`,
         )
       )[0]!.n;
+    };
+    // Production's stored row still holds the retired daily_calls key; calls
+    // pass whatever its value, and the key is left as stored.
+    const legacy = {
+      body_bytes: 131072,
+      description_bytes: 500,
+      reason_bytes: 500,
+      report_body_bytes: 262144,
+      daily_calls: 10000,
+    };
     const valid = (
       await local.db.query<{ limits: unknown }>(
         sql`SELECT limits_json AS limits FROM store_config`,
       )
     )[0]!.limits;
+    expect(valid).toEqual(legacy);
     expect(await cover()).not.toContain('"isError":true');
     expect(await used()).toBe(1);
-    for (const invalid of ['{"body_bytes":"large"}', '{"daily_calls":1.5}']) {
+    for (const retired of ["1", "0", '"none"']) {
+      await local.db.query(
+        sql`UPDATE store_config SET limits_json=limits_json || ${`{"daily_calls":${retired}}`}::jsonb`,
+      );
+      expect(await cover()).not.toContain('"isError":true');
+    }
+    expect(await used()).toBe(4);
+    await local.db.query(
+      sql`UPDATE store_config SET limits_json=${JSON.stringify(valid)}::jsonb`,
+    );
+    for (const invalid of [
+      '{"body_bytes":"large"}',
+      '{"report_body_bytes":0}',
+    ]) {
       await local.db.query(
         sql`UPDATE store_config SET limits_json=limits_json || ${invalid}::jsonb`,
       );
       expect(await cover()).toContain("configuration");
-      expect(await used()).toBe(1);
+      expect(await used()).toBe(4);
       await local.db.query(
         sql`UPDATE store_config SET limits_json=${JSON.stringify(valid)}::jsonb`,
       );
     }
     expect(await cover()).not.toContain('"isError":true');
-    expect(await used()).toBe(2);
+    expect(await used()).toBe(5);
   } finally {
     await local.dispose();
   }
 }, 30000);
 
-test("refused tool calls count nothing; a call is charged once its work starts", async () => {
+test("refused tool calls record no usage; each admitted call records one row", async () => {
   const local = await localStore();
   try {
     await local.db.query(sql`UPDATE store_config SET trials_enabled=true`);
@@ -769,12 +956,14 @@ test("refused tool calls count nothing; a call is charged once its work starts",
         return { isError: result.isError };
       }
     };
-    const used = async () =>
-      (
+    const used = async () => {
+      await backgroundSettled();
+      return (
         await local.db.query<{ n: number }>(
-          sql`SELECT coalesce(sum(tool_calls),0)::int AS n FROM usage_daily WHERE user_id=${miltonUserId}`,
+          sql`SELECT count(*)::int AS n FROM usage_calls WHERE user_id=${miltonUserId}`,
         )
       )[0]!.n;
+    };
     const version = (await call("get_cover_sheet", {})).version;
     expect(await used()).toBe(1);
     const save = {
@@ -823,7 +1012,7 @@ test("refused tool calls count nothing; a call is charged once its work starts",
       ).error,
     ).toBe("invalid_kind");
     expect(await used()).toBe(1);
-    // A save that ran is charged, whether it saved or met a stale version.
+    // A save that ran is recorded, whether it saved or met a stale version.
     expect((await call("create_memo", save)).status).toBe("saved");
     expect(await used()).toBe(2);
     expect(
@@ -835,11 +1024,7 @@ test("refused tool calls count nothing; a call is charged once its work starts",
       ).status,
     ).toBe("conflict");
     expect(await used()).toBe(3);
-    // Over the allowance, calls stop; replaying a recorded save stays free.
-    await local.db.query(
-      sql`UPDATE store_config SET limits_json=limits_json || '{"daily_calls":3}'::jsonb`,
-    );
-    expect((await call("get_cover_sheet", {})).error).toBe("rate_limited");
+    // Replaying a recorded save records nothing.
     expect((await call("create_memo", save)).status).toBe("saved");
     expect(await used()).toBe(3);
   } finally {
@@ -1369,7 +1554,6 @@ test("tool dispatch logs bounded final outcomes, invalid arguments, and unknown 
 
 test("final outcomes include early refusal/read failure and a logging failure cannot reverse a save", async () => {
   const { StoreError, lookupIdentityAccount } = await import("../src/store");
-  const { storeForCurrentRequest } = await import("./store-fixtures");
   const local = await localStore(),
     events: import("../src/mcp").ToolCall[] = [];
   let server: ReturnType<typeof createMiltonServer> | undefined,
@@ -1393,10 +1577,6 @@ test("final outcomes include early refusal/read failure and a logging failure ca
     let refuse = true,
       failRead = false,
       throwLog = false;
-    store.chargeToolCall = async () =>
-      refuse
-        ? { allowed: false, retry_at_ms: Date.now() + 1000, limit: "day" }
-        : { allowed: true };
     store.readTpsReport = async () => {
       if (failRead)
         throw new StoreError(
@@ -1407,6 +1587,12 @@ test("final outcomes include early refusal/read failure and a logging failure ca
     };
     const originalDocuments = store.readDocuments.bind(store);
     store.readDocuments = async () => {
+      if (refuse)
+        throw new StoreError(
+          "account_unavailable",
+          "Fictional private error prose.",
+          403,
+        );
       if (failRead)
         throw new StoreError(
           "store_unavailable",
@@ -1461,7 +1647,7 @@ test("final outcomes include early refusal/read failure and a logging failure ca
     expect(
       events.map((e) => [e.tool, e.outcome, e.error_code ?? null]),
     ).toEqual([
-      ["get_cover_sheet", "refused", "rate_limited"],
+      ["get_cover_sheet", "refused", "account_unavailable"],
       ["get_cover_sheet", "failed", "store_unavailable"],
       ["create_memo", "saved", null],
       ["create_memo", "unchanged", null],

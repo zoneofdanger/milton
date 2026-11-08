@@ -15,7 +15,7 @@ import {
   seedUsers,
 } from "./store-fixtures";
 
-test("compiled saves publish memos and TPS together and charge once with durable replay", async () => {
+test("compiled saves publish memos and TPS together with durable replay", async () => {
   const local = await localStore();
   try {
     await seedUsers(local.pg, "compiled-a", "compiled-b");
@@ -156,12 +156,10 @@ test("TPS preserves every active source body verbatim and refreshes only the der
           cards: unknown;
           versions: unknown;
           receipts: unknown;
-          usage: unknown;
         }>(`SELECT
       (SELECT jsonb_agg(c) FROM instruction_cards c WHERE user_id='fidelity') AS cards,
       (SELECT jsonb_agg(v) FROM instruction_card_versions v WHERE user_id='fidelity') AS versions,
-      (SELECT jsonb_agg(r) FROM save_requests r WHERE user_id='fidelity') AS receipts,
-      (SELECT jsonb_agg(d) FROM usage_daily d WHERE user_id='fidelity') AS usage`)
+      (SELECT jsonb_agg(r) FROM save_requests r WHERE user_id='fidelity') AS receipts`)
       ).rows;
     // Reads write nothing; a source change shows on the next read.
     const before = await preserved();
@@ -203,7 +201,6 @@ test("TPS preserves every active source body verbatim and refreshes only the der
     const boundedAfter = await preserved();
     expect(boundedAfter[0]!.versions).toEqual(boundedBefore[0]!.versions);
     expect(boundedAfter[0]!.cards).toEqual(boundedBefore[0]!.cards);
-    expect(boundedAfter[0]!.usage).toEqual(boundedBefore[0]!.usage);
     await local.pg.exec(
       "UPDATE store_config SET limits_json=limits_json || '{\"report_body_bytes\":262144}'::jsonb",
     );
@@ -230,7 +227,7 @@ test("TPS preserves every active source body verbatim and refreshes only the der
   }
 });
 
-test("stale and failed compiled saves preserve current memos, receipts and charges", async () => {
+test("stale and failed compiled saves preserve current memos and receipts", async () => {
   const local = await localStore();
   try {
     await seedUsers(local.pg, "race", "foreign");

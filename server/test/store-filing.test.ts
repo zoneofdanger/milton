@@ -1591,11 +1591,6 @@ test("kind and contextual reads prefer concrete situations and fill sparse match
       ...store,
       appOrigin: "http://localhost:3001",
       readTpsReport: store.getTpsReport,
-      chargeToolCall: async () => ({
-        allowed: true,
-        limit: 10000,
-        retry_at_ms: 0,
-      }),
     };
     const result = JSON.parse(
       (

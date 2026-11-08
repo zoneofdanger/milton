@@ -71,10 +71,10 @@ Files: `server/src/handler.ts`, `server/src/token.ts`, `server/src/mcp.ts`,
 - A malformed, unknown, wrong, revoked or expired key, one whose account is not active, or one whose native binding is no longer current gets the same 401 and challenge as a bad token, with no reason; a failed status lookup is a 503, never an acceptance.
 - Before any database access, a process limits each source (the client address Google's load balancer appends as the second-to-last `X-Forwarded-For` entry, IPv4-mapped IPv6 as IPv4, other IPv6 by /64, else one shared `unknown` source; never the first entry) to a 5-token bucket refilled at 10 a minute in a 10,000-source LRU, where a lookup reserves a token, a failure keeps it, a success is refunded to 0.1, and an empty bucket gets 429 with `Retry-After` without a slot; lets each source run at most 3 key lookups at once, however far its bucket refills (a 4th gets 429 with `Retry-After: 1` without a slot; these counts sit outside the bucket LRU, so eviction never forgets a running lookup); and runs at most 8 key lookups at once (beyond that a quick 503 with `Retry-After: 1`). Limits are per instance (at most 3).
 - A read key lists three tools and is refused `create_memo` (403); a read-and-save key lists four. Key saves are attributed to the key's id.
-- Keys pass the same daily allowance, trial and billing gates as OAuth calls.
+- Keys pass the same trial and billing gates as OAuth calls.
 - A key's last use is recorded at most once a minute; failing to record it never fails the call.
 - Tool-call logs for key calls carry the key's public id, never its secret.
-- Each request looks up the active writing account by exact verified issuer and subject (a key's lookup requires it too); MCP never provisions an account. That lookup is the request's account check, so the store is built without a query and `initialize`, `tools/list` and notifications make no store query; each tool call's charge, read and save check the account again.
+- Each request looks up the active writing account by exact verified issuer and subject (a key's lookup requires it too); MCP never provisions an account. That lookup is the request's account check, so the store is built without a query and `initialize`, `tools/list` and notifications make no store query; each tool call's read and save check the account again.
 - Each request builds a fresh stateless MCP server, with no sessions or subscriptions.
 - Global instructions require retrieval before writing or editing for or as the person; only new drafts get the sample/rule conformity check before display. Edits preserve source wording and style outside the request over conflicting samples/rules; guidance never widens scope, and only specific unresolved conflicts are flagged. Requested transformations retain their scope, and changes are briefly listed. These are behavioral instructions, not server enforcement.
 - After draft or edit approval, assistants display an exact placeholder-safe body and useful non-private context, then offer once to retain that proposal; one yes approves the displayed proposal. Every sample save requires that display, without silently redacting after approval or changing the working edit for retention. Change lists are excluded, refusal is final for that text, and only changed text/context requires renewed approval. Edits do not imply standing rules.
@@ -83,17 +83,37 @@ Files: `server/src/handler.ts`, `server/src/token.ts`, `server/src/mcp.ts`,
   carries `notifications/tools/list_changed` ahead of its result, as does every
   `get_report` refused for a missing intent, so clients holding tool schemas from before
   a release refresh them; the announced set is per process and in memory.
-- A `tools/call` is charged to a daily counter only once it is admitted: after access,
-  scope and the store limits (the request's access statement), the input schema, the
-  `get_report` intent and `kind_id`, and the trial and billing gate, and right before the
-  tool's own work (the snapshot read, or a save's decision under its account lock). Every
-  refusal before that, `subscription_required` included, counts nothing. A save is
-  charged inside its transaction, so it counts once exactly when it records an outcome
-  (`saved`, `unchanged`, `conflict` or `failed`); replaying that receipt counts nothing
-  and works over the limit. A call over the limit returns `rate_limited` with a reset
-  time. The charge is one conditional increment under the account lock, so two calls
-  never both take the last unit: a deletion holding the lock first makes the call refuse
-  as `account_unavailable`; one that comes second sees the counted call.
+- There is no daily call allowance. A `tools/call` is admitted after access, scope and
+  the store limits (the request's access statement), the input schema, the `get_report`
+  intent and `kind_id`, and the trial and billing gate, right before the tool's own work
+  (the snapshot read, or a save's decision under its account lock). Every refusal
+  before that, `subscription_required` included, records nothing, and replaying a save
+  receipt is not admitted. Admission is tracked per tool call, so calls sharing a
+  request or a server are recorded independently.
+- Each admitted call starts one `usage_calls` row (account, time, tool) at admission, on
+  its own connection alongside the call's work; the reply waits for it at most 250 ms,
+  then goes and lets the row finish in the background. Outcomes stay in the
+  identity-free logs. One writer per process sends at once when idle and batches rows
+  that arrive meanwhile (up to 50), holds at most one pooled connection, drops rows
+  beyond 1,000 waiting, and logs a failure by class and code only; shutdown waits for it
+  before closing pools. Each batch is one autocommit statement that never waits on an
+  account row lock: it takes the key share of each batch account it can lock now (`SKIP
+LOCKED`) and inserts only those accounts' rows, so it holds key shares only on accounts
+  it writes, only while it runs. A row skipped behind its account's `FOR UPDATE` is
+  retried once, 50 ms after its own skip, then dropped and logged by code. `SKIP LOCKED`
+  covers row locks only: a migration holding a table lock on `usage_calls` or `users`
+  can delay usage rows (as it delays requests), while each reply still waits at most
+  250 ms.
+- Usage is best-effort. A row is lost when it is skipped again on its retry (its
+  account still under `FOR UPDATE`, or erased), when more than 1,000 rows are waiting,
+  when its statement fails, or when the process exits (the 8 s shutdown bound or a
+  crash) with rows still queued.
+- The row's foreign key cascades from `users`, so account erasure removes it. Writers
+  (saves, key creation, and the six guard triggers on cards, card versions, accepted
+  changes, sample kinds, samples and sample versions, since `0007`) lock the account
+  `FOR NO KEY UPDATE`, which the row's key-share check does not wait on; sign-in,
+  eligibility, lifecycle and deletion lock `FOR UPDATE`, so a row for an account being
+  deleted is skipped, then dropped, and never outlives the account.
 - Each call logs the tool, outcome, time, and an error code from a fixed list, never
   text or identity.
 - The tool name is read early, so calls refused before dispatch are still logged.
@@ -177,7 +197,7 @@ not at all.
 - A request with no rules, edits, moves, or sample changes is refused, but only after
   replay, so an older receipt still recovers.
 - Oversized input fails, and that decision is stored on the receipt so it replays.
-- Trial and daily-limit refusals write no receipt, so the same request can succeed later.
+- Trial refusals write no receipt, so the same request can succeed later.
 - If the commit's acknowledgment is lost, Milton looks up the receipt under the account
   lock: present, it returns the stored outcome; absent, nothing was written and the
   store error stands. Only when that lookup fails too does it return

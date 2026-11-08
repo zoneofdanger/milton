@@ -13,7 +13,7 @@ import {
 } from "./store-fixtures";
 import { createStoreMemoTools } from "../src/mcp-tools";
 import { createHash } from "node:crypto";
-import type { StoreDatabase } from "../src/store/database";
+import { backgroundSettled, type StoreDatabase } from "../src/store/database";
 import {
   resolveIdentityAccount,
   lookupIdentityAccount,
@@ -605,11 +605,11 @@ test("identity lookup never admits or seeds an MCP caller", async () => {
       sql`UPDATE users SET status='deleting' WHERE id=${admitted.miltonUserId}`,
     );
     // A closed account gets no store, and a store built before it closed
-    // charges no further calls.
+    // serves no further reads.
     await expect(storeForCurrentRequest(local.env, auth)).rejects.toMatchObject(
       { code: "account_unavailable", status: 403 },
     );
-    await expect(store.chargeToolCall()).rejects.toMatchObject({
+    await expect(store.readTpsReport()).rejects.toMatchObject({
       code: "account_unavailable",
       status: 403,
     });
@@ -860,8 +860,11 @@ test("account deletion removes every tenant row, waits for an in-flight save and
       ).toBe("saved");
     }
     await gone.save({ retire_samples: [(await goneSamples())[0]!.id] });
-    await gone.store.chargeToolCall();
     expect((await kept.save()).status).toBe("saved");
+    // An admitted read of each account appends a usage row.
+    for (const { store } of [gone, kept])
+      await store.readDocuments(undefined, { tool: "get_cover_sheet" });
+    await backgroundSettled();
     const tenantTables = (
       await local.db.query<{ table_name: string }>(
         sql`SELECT DISTINCT c.table_name FROM information_schema.columns c
@@ -894,7 +897,7 @@ test("account deletion removes every tenant row, waits for an in-flight save and
       "sample_kinds",
       "accepted_changes",
       "save_requests",
-      "usage_daily",
+      "usage_calls",
     ])
       expect(populated[table]).toBeGreaterThan(0);
     expect(

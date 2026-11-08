@@ -211,6 +211,7 @@ test("the runtime has only current grants, its guards hold, and later tables inh
       store_config: "SELECT",
       stripe_events: "INSERT,SELECT,UPDATE",
       trial_accounts: "INSERT,SELECT,UPDATE",
+      usage_calls: "",
       usage_daily: "INSERT,SELECT,UPDATE",
       users: "DELETE,INSERT,SELECT,UPDATE",
     };
@@ -549,15 +550,20 @@ test("0006 drops payload_bytes and source_hash's NOT NULL; its rollback restores
   const folder = new URL("../drizzle/", import.meta.url).pathname;
   const scratch = await mkdtemp(join(tmpdir(), "milton-0006-"));
   const pg = new PGlite();
-  const current = await localStore();
+  // A fresh install through 0006, so later migrations leave this test alone.
+  const current = new PGlite();
   try {
     await cp(folder, scratch, { recursive: true });
     const journal = await Bun.file(join(scratch, "meta/_journal.json")).json();
-    journal.entries = journal.entries.filter((e: { idx: number }) => e.idx < 6);
-    await writeFile(
-      join(scratch, "meta/_journal.json"),
-      JSON.stringify(journal),
-    );
+    const through = async (idx: number) =>
+      writeFile(
+        join(scratch, "meta/_journal.json"),
+        JSON.stringify({
+          ...journal,
+          entries: journal.entries.filter((e: { idx: number }) => e.idx <= idx),
+        }),
+      );
+    await through(5);
     await migrate(drizzle(pg), { migrationsFolder: scratch });
     const before = await schemaCatalog(pg);
     // A receipt as every recorded revision writes it.
@@ -566,8 +572,10 @@ test("0006 drops payload_bytes and source_hash's NOT NULL; its rollback restores
       "INSERT INTO save_requests(user_id,request_id,input_hash,source_hash,result_json) VALUES ('kept',$1,repeat('a',64),repeat('b',64),'{\"status\":\"saved\"}')",
       [crypto.randomUUID()],
     );
-    await migrate(drizzle(pg), { migrationsFolder: folder });
-    const after = await schemaCatalog(current.pg);
+    await through(6);
+    await migrate(drizzle(pg), { migrationsFolder: scratch });
+    await migrate(drizzle(current), { migrationsFolder: scratch });
+    const after = await schemaCatalog(current);
     expect(await schemaCatalog(pg)).toEqual(after);
     expect(
       after.columns.filter((c) => c.column_name === "payload_bytes"),
@@ -611,7 +619,100 @@ test("0006 drops payload_bytes and source_hash's NOT NULL; its rollback restores
       (await pg.query("SELECT count(*)::int AS n FROM save_requests")).rows,
     ).toEqual([{ n: 2 }]);
   } finally {
-    await current.dispose();
+    await current.close();
+    await pg.close();
+    await rm(scratch, { recursive: true, force: true });
+  }
+});
+
+test("0007 adds an empty usage_calls table the legacy group cannot reach and moves the writer guards to FOR NO KEY UPDATE; its rollback restores the 0006 schema", async () => {
+  const folder = new URL("../drizzle/", import.meta.url).pathname;
+  const scratch = await mkdtemp(join(tmpdir(), "milton-0007-"));
+  const pg = new PGlite();
+  // A fresh install through 0007, so later migrations leave this test alone.
+  const current = new PGlite();
+  try {
+    await cp(folder, scratch, { recursive: true });
+    const journal = await Bun.file(join(scratch, "meta/_journal.json")).json();
+    const through = async (idx: number) =>
+      writeFile(
+        join(scratch, "meta/_journal.json"),
+        JSON.stringify({
+          ...journal,
+          entries: journal.entries.filter((e: { idx: number }) => e.idx <= idx),
+        }),
+      );
+    await through(6);
+    await migrate(drizzle(pg), { migrationsFolder: scratch });
+    const before = await schemaCatalog(pg);
+    const fns = async () =>
+      (
+        await pg.query(
+          "SELECT proname,proowner::regrole::text AS owner,proacl::text AS acl,prosecdef,proconfig::text AS config FROM pg_proc WHERE pronamespace='public'::regnamespace AND proname LIKE 'milton_%' ORDER BY proname",
+        )
+      ).rows;
+    const fnsBefore = await fns();
+    await seedUsers(pg, "kept");
+    await pg.exec(
+      "INSERT INTO usage_daily(user_id,day_utc,tool_calls) VALUES ('kept','2026-11-07',3)",
+    );
+    await through(7);
+    await migrate(drizzle(pg), { migrationsFolder: scratch });
+    await migrate(drizzle(current), { migrationsFolder: scratch });
+    const after = await schemaCatalog(current);
+    expect(await schemaCatalog(pg)).toEqual(after);
+    expect(
+      (
+        await pg.query(
+          "SELECT count(*)::int AS n,has_table_privilege('milton_runtime','public.usage_calls','SELECT,INSERT,UPDATE,DELETE') AS reachable FROM usage_calls",
+        )
+      ).rows,
+    ).toEqual([{ n: 0, reachable: false }]);
+    // Each guard changed only its account lock; owner, privileges, security
+    // and settings are as they were.
+    const guards = before.functions as {
+      proname: string;
+      definition: string;
+    }[];
+    const lock = "status='active' FOR UPDATE;";
+    const moved = guards.filter((g) => g.definition.includes(lock));
+    expect(moved.map((g) => g.proname)).toEqual([
+      "milton_accepted_change_guard",
+      "milton_card_guard",
+      "milton_card_version_guard",
+      "milton_sample_guard",
+      "milton_sample_kind_guard",
+      "milton_sample_version_guard",
+    ]);
+    expect((after.functions as typeof guards).map((g) => g.definition)).toEqual(
+      guards.map((g) =>
+        g.definition.replace(lock, "status='active' FOR NO KEY UPDATE;"),
+      ),
+    );
+    expect(
+      (after.functions as typeof guards).some((g) =>
+        / FOR (UPDATE|SHARE)\b/.test(g.definition),
+      ),
+    ).toBe(false);
+    expect(await fns()).toEqual(fnsBefore);
+    await pg.exec(
+      await Bun.file(folder + "rollback/0007_usage_calls.sql").text(),
+    );
+    expect(await schemaCatalog(pg)).toEqual(before);
+    expect(await fns()).toEqual(fnsBefore);
+    // The journal row stays: re-forwarding runs the file by hand, as one
+    // transaction.
+    await pg.exec(
+      "BEGIN;" +
+        (await Bun.file(folder + "0007_usage_calls.sql").text()) +
+        "COMMIT;",
+    );
+    expect(await schemaCatalog(pg)).toEqual(after);
+    expect(
+      (await pg.query("SELECT user_id,tool_calls FROM usage_daily")).rows,
+    ).toEqual([{ user_id: "kept", tool_calls: 3 }]);
+  } finally {
+    await current.close();
     await pg.close();
     await rm(scratch, { recursive: true, force: true });
   }

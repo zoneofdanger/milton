@@ -46,7 +46,10 @@ import { fingerprintKeyCheck } from "../src/auth-admission";
 import { hash } from "../src/auth-oidc";
 import { appActive } from "../src/auth-authority";
 import { checkProductRuntimeRole } from "./check-runtime-role";
-import { guideWorkerRoleAllowed } from "../src/guides/store";
+import {
+  guideWorkerRoleAllowed,
+  setGuideEnrollment,
+} from "../src/guides/store";
 import { runGuideWorker } from "../src/guides/worker";
 import type { GuideProvider } from "../src/guides/provider";
 import { connections, lifecycle } from "../src/auth-lifecycle";
@@ -66,7 +69,7 @@ import {
   signIn,
   type Fetch,
 } from "./e2e-http";
-import { runE2E, type Line } from "./e2e";
+import { readSecrets, runE2E, type Line } from "./e2e";
 
 const port = 55623;
 const sourceRoot = pathToFileURL(process.cwd() + "/");
@@ -3302,6 +3305,624 @@ try {
   pass(
     "test accounts are exempt from trials and billing: repeated sign-ins past 30 days make no trial or Stripe request; a stray trial row neither starts a subscription, closes access, offers a notice nor opens checkout",
   );
+  stage = "propagation: edits and retirements reach every read surface";
+  // Two more fictional accounts, provisioned as the test account is, each filing
+  // rules and samples that carry its own marker. Every read surface (the three
+  // read tools, get_report for all five reports, the TPS.md download and the
+  // web report) is read with that account's own key and browser session.
+  {
+    const clearRates = () =>
+      owner.query(
+        'delete from milton_auth."rateLimit"; delete from milton_guard.rate_bucket',
+      );
+    // Fresh owner pools: the partial-provisioning group left a pooled native
+    // client that fails its commits.
+    const provisioners = ownerPools(testOwnerNative.href, ownerUrl.href);
+    pools.push(provisioners.native, provisioners.writing);
+    const intent = { situation: "confirming what is on file" };
+    const surfaceNames = [
+      "get_cover_sheet",
+      "list_reports",
+      "get_report",
+      "download",
+      "web",
+    ] as const;
+    type Surface = (typeof surfaceNames)[number];
+    type Surfaces = Record<Surface, string>;
+    // Each call is its own client behind the load balancer, so the key-lookup
+    // limits never refuse one.
+    let clients = 0;
+    const forwarded = () => {
+      const n = ++clients;
+      return { "X-Forwarded-For": `198.18.${n >> 8}.${n & 255}, 192.0.2.1` };
+    };
+    const callTool = async (key: string, name: string, args: object = {}) => {
+      const reply = (
+        await result(
+          await rpc(key, "tools/call", { name, arguments: args }, forwarded()),
+        )
+      ).result;
+      return { text: reply.content![0]!.text, isError: reply.isError === true };
+    };
+    const readTool = async (key: string, name: string, args: object = {}) => {
+      const reply = await callTool(key, name, args);
+      assert(!reply.isError, `${name} reads`);
+      return reply.text;
+    };
+    const side = async (name: string) => {
+      const email = `propagation-${name}@milton-test.invalid`;
+      const output = join(root, `propagation-${name}.env`);
+      await clearRates();
+      const account = await provisionTestAccount({
+        email,
+        output,
+        owners: provisioners,
+        fetch: dispatch,
+        report: () => {},
+      });
+      const { key, password } = await readSecrets(output);
+      // Every cookie the browser is sent, by host, so a session can be
+      // replayed after the browser itself has dropped it.
+      const cookies = new Map<string, string>();
+      const recording: Fetch = async (target, init) => {
+        const response = await dispatch(target, init);
+        for (const cookie of response.headers.getSetCookie()) {
+          const pair = cookie.split(";")[0]!;
+          const i = pair.indexOf("=");
+          cookies.set(
+            `${new URL(target).host}\t${pair.slice(0, i)}`,
+            pair.slice(i + 1),
+          );
+        }
+        return response;
+      };
+      const signedIn = async () => {
+        const b = browser(PRODUCTION, recording);
+        await signIn(b, PRODUCTION, email, password);
+        return b;
+      };
+      return {
+        marker: `${name.toUpperCase()}MARK`,
+        email,
+        password,
+        key,
+        browser: await signedIn(),
+        signedIn,
+        cookies,
+        ...account,
+      };
+    };
+    type Side = Awaited<ReturnType<typeof side>>;
+    const alder = await side("alder"),
+      birch = await side("birch");
+    const both = [alder, birch];
+    const other = (s: Side) => (s === alder ? birch : alder);
+    const surfaces = async (s: Side): Promise<Surfaces> => {
+      const reports: string[] = [];
+      for (const report_id of ["email", "chat", "post", "document", "speech"])
+        reports.push(
+          await readTool(s.key, "get_report", { report_id, intent }),
+        );
+      const download = await s.browser.go(PRODUCTION.app + "/download");
+      assert.equal(download.status, 200, "TPS.md download");
+      const web = await s.browser.follow(PRODUCTION.app + "/tps-report");
+      assert.equal(web.status, 200, "web report");
+      return {
+        get_cover_sheet: await readTool(s.key, "get_cover_sheet"),
+        list_reports: await readTool(s.key, "list_reports"),
+        get_report: reports.join("\n"),
+        download: await download.text(),
+        web: web.html,
+      };
+    };
+    // What the assistant surfaces and the download serve, byte for byte (the
+    // web report also prints a random joke).
+    const served = (seen: Surfaces) =>
+      JSON.stringify([
+        seen.get_cover_sheet,
+        seen.list_reports,
+        seen.get_report,
+        seen.download,
+      ]);
+    const status = (text: string) => {
+      try {
+        return (JSON.parse(text) as { status?: string }).status;
+      } catch {
+        return undefined;
+      }
+    };
+    const saveAs = async (s: Side, args: object) =>
+      status(
+        (
+          await callTool(s.key, "create_memo", {
+            request_id: randomUUID(),
+            expected_version: (
+              JSON.parse(await readTool(s.key, "get_cover_sheet")) as {
+                version: string;
+              }
+            ).version,
+            ...args,
+          })
+        ).text,
+      );
+    const cover: Surface[] = ["get_cover_sheet", "download", "web"];
+    const report: Surface[] = ["get_report", "list_reports", "download", "web"];
+    const gone = (m: string) => `Close fictional emails with ${m} email gone.`;
+    const sampleOne = (m: string, age: "old" | "new") => ({
+      summary: `${m} summary ${age}`,
+      text: `Fictional ${m} sample ${age}: the ladder hangs in the barn.`,
+    });
+    const sampleTwo = (m: string) => ({
+      summary: `${m} summary two`,
+      text: `Fictional ${m} sample two: the gate sticks after rain.`,
+    });
+    // Each filed text and the surfaces that must show it.
+    const filed = (m: string): [string, Surface[]][] => [
+      [`${m} cover old`, cover],
+      [`${m} email old`, report],
+      [`${m} email gone`, report],
+      [`${m} sample old`, report],
+      [`${m} summary old`, report],
+      [`${m} sample two`, report],
+      [`${m} summary two`, report],
+    ];
+    const edited = (m: string): [string, Surface[]][] => [
+      [`${m} cover new`, cover],
+      [`${m} email new`, report],
+      [`${m} sample new`, report],
+      [`${m} summary new`, report],
+    ];
+    // Every miss at once, as surface and text, so a failure names them all.
+    const shows = (
+      seen: Surfaces,
+      texts: [string, Surface[]][],
+      when: string,
+    ) =>
+      assert.deepEqual(
+        texts.flatMap(([text, where]) =>
+          where
+            .filter((s) => !seen[s].includes(text))
+            .map((s) => `${s}: ${text}`),
+        ),
+        [],
+        `${when}: each surface shows the text it should`,
+      );
+    const never = (seen: Surfaces, texts: string[], when: string) =>
+      assert.deepEqual(
+        texts.flatMap((text) =>
+          surfaceNames
+            .filter((s) => seen[s].includes(text))
+            .map((s) => `${s}: ${text}`),
+        ),
+        [],
+        `${when}: no surface shows the text`,
+      );
+    // Nothing of the other account: its marker, account id, native subject or
+    // email.
+    const isolated = (s: Side, seen: Surfaces, when: string) => {
+      const o = other(s);
+      never(
+        seen,
+        [o.marker, o.userId, o.subject, o.email],
+        when + " isolation",
+      );
+    };
+    for (const s of both) {
+      const m = s.marker;
+      assert.equal(
+        await saveAs(s, {
+          text: "File fictional propagation rules and a sample.",
+          rules: [
+            {
+              report: "cover",
+              text: `Sign fictional notes with ${m} cover old.`,
+            },
+            {
+              report: "email",
+              text: `Open fictional emails with ${m} email old.`,
+            },
+            { report: "email", text: gone(m) },
+          ],
+          sample: {
+            report: "email",
+            new_kind: "fictional note",
+            context: { version: 1, summary: sampleOne(m, "old").summary },
+            text: sampleOne(m, "old").text,
+          },
+        }),
+        "saved",
+      );
+      assert.equal(
+        await saveAs(s, {
+          text: "File a second fictional sample.",
+          sample: {
+            report: "email",
+            new_kind: "fictional note",
+            context: { version: 1, summary: sampleTwo(m).summary },
+            text: sampleTwo(m).text,
+          },
+        }),
+        "saved",
+      );
+    }
+    for (const s of both) {
+      const seen = await surfaces(s);
+      shows(seen, filed(s.marker), "filed");
+      isolated(s, seen, "filed");
+    }
+    const ids = new Map<Side, { one: string; two: string; kind: string }>();
+    for (const s of both) {
+      const m = s.marker;
+      const email = JSON.parse(
+        await readTool(s.key, "get_report", { report_id: "email", intent }),
+      ) as {
+        samples: {
+          id: string;
+          kind_id: string;
+          context: { summary: string };
+        }[];
+      };
+      const find = (summary: string) =>
+        email.samples.find((x) => x.context.summary === summary)!;
+      const one = find(sampleOne(m, "old").summary),
+        two = find(sampleTwo(m).summary);
+      ids.set(s, { one: one.id, two: two.id, kind: one.kind_id });
+      assert.equal(
+        await saveAs(s, {
+          text: "Correct the fictional rules exactly.",
+          exact_edits: [
+            { before: `${m} cover old`, after: `${m} cover new` },
+            { before: `${m} email old`, after: `${m} email new` },
+            { before: gone(m), after: "" },
+          ],
+        }),
+        "saved",
+      );
+      assert.equal(
+        await saveAs(s, {
+          text: "Revise one fictional sample and retire the other.",
+          sample: {
+            report: "email",
+            kind_id: one.kind_id,
+            sample_id: one.id,
+            context: { version: 1, summary: sampleOne(m, "new").summary },
+            text: sampleOne(m, "new").text,
+          },
+          retire_samples: [two.id],
+        }),
+        "saved",
+      );
+    }
+    const settled = new Map<Side, Surfaces>();
+    for (const s of both) {
+      const seen = await surfaces(s);
+      shows(seen, edited(s.marker), "edited");
+      never(
+        seen,
+        filed(s.marker).map(([text]) => text),
+        "edited",
+      );
+      isolated(s, seen, "edited");
+      settled.set(s, seen);
+    }
+    pass(
+      "an exact edit, a rule removal, a sample revision and a retirement reach get_cover_sheet, list_reports, get_report, the TPS.md download and the web report: the old text is gone from all, the new text shows where it belongs",
+    );
+    stage = "isolation: one account's key and session cannot address another's";
+    {
+      // Alder's key aims at Birch's rule text, sample and kind; Alder's session
+      // names Birch's account. Nothing lands, nothing leaks, and both accounts
+      // still serve exactly what they did.
+      const target = ids.get(birch)!;
+      for (const args of [
+        {
+          text: "Edit a rule on file elsewhere.",
+          exact_edits: [
+            {
+              before: `${birch.marker} cover new`,
+              after: "Fictional takeover.",
+            },
+          ],
+        },
+        {
+          text: "Revise a sample on file elsewhere.",
+          sample: {
+            report: "email",
+            kind_id: target.kind,
+            sample_id: target.one,
+            context: { version: 1, summary: "Fictional takeover" },
+            text: "Fictional takeover.",
+          },
+        },
+        {
+          text: "Retire a sample on file elsewhere.",
+          retire_samples: [target.one],
+        },
+      ])
+        assert.notEqual(
+          await saveAs(alder, args),
+          "saved",
+          "a save never reaches another account's rules or samples",
+        );
+      const aimed = await callTool(alder.key, "get_report", {
+        report_id: "email",
+        intent: { ...intent, kind_id: target.kind },
+      });
+      assert(
+        !aimed.text.includes(birch.marker),
+        "another account's kind serves nothing of it",
+      );
+      for (const path of ["/download", "/tps-report"]) {
+        const page = await alder.browser.follow(
+          `${PRODUCTION.app}${path}?user=${birch.userId}&subject=${birch.subject}`,
+        );
+        assert(
+          !page.html.includes(birch.marker),
+          `${path} names no other account`,
+        );
+      }
+      for (const s of both) {
+        const seen = await surfaces(s);
+        isolated(s, seen, "after foreign attempts");
+        assert.equal(
+          served(seen),
+          served(settled.get(s)!),
+          "both accounts serve exactly what they did",
+        );
+      }
+    }
+    pass(
+      "two accounts' reads (four tools, TPS.md, web) never show each other's markers, ids or emails, before or after edits and retirements; one account's key cannot edit, revise, retire or read another's rules, samples or kind, and its session cannot name another account",
+    );
+    stage = "account deletion leaves nothing of the account";
+    {
+      // Every foreign key to an account (public.users) or to a native user,
+      // read from the catalog, so a new table is covered without a list here.
+      const references = (
+        await owner.query<{
+          tbl: string;
+          col: string;
+          to: "writing" | "native";
+          width: number;
+        }>(
+          `SELECT format('%I.%I',n.nspname,c.relname) tbl, format('%I',a.attname) col,
+            CASE WHEN k.confrelid='public.users'::regclass THEN 'writing' ELSE 'native' END "to",
+            cardinality(k.conkey) width
+          FROM pg_constraint k JOIN pg_class c ON c.oid=k.conrelid JOIN pg_namespace n ON n.oid=c.relnamespace
+          JOIN pg_attribute a ON a.attrelid=k.conrelid AND a.attnum=k.conkey[1]
+          WHERE k.contype='f' AND k.confrelid IN ('public.users'::regclass,'milton_auth."user"'::regclass)
+          ORDER BY 1,2`,
+        )
+      ).rows;
+      assert(
+        references.every((r) => r.width === 1),
+        "every account reference is one column",
+      );
+      const owned = async (s: Side) =>
+        Object.fromEntries(
+          await Promise.all(
+            references.map(async (r) => [
+              `${r.tbl}.${r.col}`,
+              (
+                await owner.query<{ n: number }>(
+                  `SELECT count(*)::int n FROM ${r.tbl} WHERE ${r.col}=$1`,
+                  [r.to === "writing" ? s.userId : s.subject],
+                )
+              ).rows[0]!.n,
+            ]),
+          ),
+        ) as Record<string, number>;
+      // Every base table in every schema, each whole row as text, for the
+      // account id, the native subject, the email and the marker: this finds
+      // what a table without a foreign key would keep.
+      const tables = (
+        await owner.query<{ name: string }>(
+          `SELECT format('%I.%I',table_schema,table_name) AS name FROM information_schema.tables
+          WHERE table_type='BASE TABLE' AND table_schema NOT IN ('pg_catalog','information_schema') ORDER BY 1`,
+        )
+      ).rows.map((r) => r.name);
+      const needles = ["account", "subject", "email", "marker"] as const;
+      const scan = async (s: Side) => {
+        const rows = (
+          await owner.query<
+            Record<(typeof needles)[number], number> & { name: string }
+          >(
+            tables
+              .map(
+                (t) =>
+                  `SELECT '${t.replaceAll("'", "''")}' AS name,` +
+                  needles
+                    .map(
+                      (needle, i) =>
+                        `count(*) FILTER (WHERE strpos(scanned::text,$${i + 1})>0)::int ${needle}`,
+                    )
+                    .join(",") +
+                  ` FROM ${t} scanned`,
+              )
+              .join(" UNION ALL "),
+            [s.userId, s.subject, s.email, s.marker],
+          )
+        ).rows;
+        return Object.fromEntries(
+          rows
+            .map(
+              (r) =>
+                [r.name, needles.filter((needle) => r[needle] > 0)] as const,
+            )
+            .filter(([, found]) => found.length),
+        );
+      };
+      // The two account tables these flows leave empty for a test account: the
+      // operator's guide enrollment, and a stray trial row (as above, it
+      // changes nothing for a test account).
+      await setGuideEnrollment(ownerDb, alder.userId, {
+        enabled: true,
+        optInReference: "fictional-propagation-consent",
+      });
+      await owner.query(
+        "INSERT INTO trial_accounts(user_id,started_at) VALUES($1,now())",
+        [alder.userId],
+      );
+      assert.deepEqual(
+        Object.entries(await owned(alder))
+          .filter(
+            ([column, n]) =>
+              n === 0 &&
+              references.find((r) => `${r.tbl}.${r.col}` === column)!.to ===
+                "writing",
+          )
+          .map(([column]) => column),
+        [],
+        "every table referencing an account holds rows of it before deletion, so the check below is not vacuous",
+      );
+      const found = await scan(alder);
+      assert(
+        found["public.sample_versions"]?.includes("marker") &&
+          found['milton_auth."user"']?.includes("email"),
+        "before deletion the scan finds the account's text and email",
+      );
+      const birchRows = await owned(birch);
+      // The browser session, as the deletion form needs it fresh, kept for replay.
+      await clearRates();
+      const deleting = await alder.signedIn();
+      const held = new Map(alder.cookies);
+      const replay = async (target: string) => {
+        const u = new URL(target);
+        const cookie = [...held]
+          .filter(([k, v]) => k.startsWith(u.host + "\t") && v)
+          .map(([k, v]) => `${k.slice(u.host.length + 1)}=${v}`)
+          .join("; ");
+        const response = await dispatch(target, {
+          method: "GET",
+          headers: { Accept: "text/html", Cookie: cookie },
+          redirect: "manual",
+        });
+        return { status: response.status, body: await response.text() };
+      };
+      const download = await replay(PRODUCTION.app + "/download");
+      assert(
+        download.status === 200 && download.body.includes(alder.marker),
+        "replayed session reads",
+      );
+      assert(
+        (await replay(ISSUER + "/get-session")).body.includes(alder.subject),
+        "replayed native session",
+      );
+      const confirm = await deleting.follow(PRODUCTION.app + "/account/delete");
+      assert.equal(confirm.status, 200, "the deletion page");
+      const field = (name: string) =>
+        new RegExp(`name="${name}" value="([^"]+)"`).exec(confirm.html)![1]!;
+      const operation = field("operation");
+      const deleted = await deleting.follow(
+        PRODUCTION.app + "/account/delete",
+        {
+          csrf: field("csrf"),
+          operation,
+          confirm: "delete my account",
+        },
+      );
+      assert(
+        deleted.status === 200 && deleted.html.includes("Account deleted"),
+        "the app's deletion completes",
+      );
+      await backgroundSettled();
+      assert.equal(
+        (
+          await owner.query(
+            "SELECT progress FROM milton_app.lifecycle WHERE operation_id=$1",
+            [operation],
+          )
+        ).rows[0].progress,
+        "complete",
+      );
+      // The key, the app session and the native session no longer authenticate.
+      for (const [method, params] of [
+        ["tools/list", {}],
+        ["tools/call", { name: "get_cover_sheet", arguments: {} }],
+      ] as const) {
+        const response = await rpc(alder.key, method, params, forwarded());
+        assert.equal(
+          response.status,
+          401,
+          `the deleted account's key: ${method}`,
+        );
+        assert(
+          !(await response.text()).includes(alder.marker),
+          `${method} serves nothing of it`,
+        );
+      }
+      for (const path of ["/", "/tps-report", "/download"]) {
+        const page = await replay(PRODUCTION.app + path);
+        if (path !== "/")
+          assert.notEqual(
+            page.status,
+            200,
+            `the deleted account's session: ${path}`,
+          );
+        assert(
+          !page.body.includes(alder.marker),
+          `${path} serves nothing of it`,
+        );
+      }
+      const nativeSession = (await replay(ISSUER + "/get-session")).body;
+      assert(
+        !nativeSession.includes(alder.subject) &&
+          !nativeSession.includes(alder.email),
+        "native session ended",
+      );
+      await clearRates();
+      await assert.rejects(
+        signIn(
+          browser(PRODUCTION, dispatch),
+          PRODUCTION,
+          alder.email,
+          alder.password,
+        ),
+        (e) => e instanceof CheckError && e.code === "sign_in_refused",
+        "the deleted account's password signs in to nothing",
+      );
+      // No row references the account, and only what deletion keeps by design
+      // still names it, by its opaque ids alone (never its email or text).
+      assert.deepEqual(
+        Object.entries(await owned(alder)).filter(([, n]) => n > 0),
+        [],
+        "no row in a table referencing the account or its native user remains",
+      );
+      assert.deepEqual(
+        await scan(alder),
+        {
+          // Admission correlations, reclaimed by later logins after 24 hours.
+          "milton_app.admission": ["account", "subject"],
+          // The original deletion operation, kept so a retry stays safe.
+          "milton_app.lifecycle": ["account", "subject"],
+          // The trial-eligibility fingerprint's first claimant.
+          "milton_app.trial_fingerprint": ["account"],
+          // Native authorization bindings, pruned by auth maintenance a day
+          // after they expire.
+          "milton_guard.authorization_binding": ["subject"],
+          // Native's record of the deletion operation.
+          "milton_guard.security_operation": ["subject"],
+        },
+        "nothing else names the account or holds its text",
+      );
+      // The other account is untouched.
+      assert.deepEqual(
+        await owned(birch),
+        birchRows,
+        "the other account keeps every row",
+      );
+      const seen = await surfaces(birch);
+      isolated(birch, seen, "after deletion");
+      assert.equal(
+        served(seen),
+        served(settled.get(birch)!),
+        "the other account serves exactly what it did",
+      );
+    }
+    pass(
+      "account deletion through the app leaves no row referencing the account or its native user (catalog-derived, every one populated first) and nothing else naming it or holding its text; its key, app session, native session and password stop working; the other account is untouched",
+    );
+  }
   console.log(
     `PASS ${groups} product integration groups (Node26/PostgreSQL18 TLS, no external network)`,
   );

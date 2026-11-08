@@ -860,7 +860,7 @@ test("no request path deletes usage rows: only the maintenance job's prune does"
   ).toContain("pruneUsage(");
 });
 
-test("0010 adds the nullable enrolment lease; existing trial rows keep their state and hold no lease", async () => {
+test("0010 adds the enrolment lease, key generation and Stripe revision; existing trial rows keep their state, hold no lease and start at 0", async () => {
   const folder = new URL("../drizzle/", import.meta.url).pathname;
   const scratch = await mkdtemp(join(tmpdir(), "milton-0010-"));
   const pg = new PGlite();
@@ -899,23 +899,36 @@ test("0010 adds the nullable enrolment lease; existing trial rows keep their sta
     expect(
       (
         await pg.query(
-          "SELECT data_type,is_nullable,column_default FROM information_schema.columns WHERE table_name='trial_accounts' AND column_name='enrol_lease_until'",
+          "SELECT column_name,data_type,is_nullable,column_default FROM information_schema.columns WHERE table_name='trial_accounts' AND column_name IN ('enrol_lease_until','enrol_generation','stripe_revision') ORDER BY column_name",
         )
       ).rows,
     ).toEqual([
       {
+        column_name: "enrol_generation",
+        data_type: "integer",
+        is_nullable: "NO",
+        column_default: "0",
+      },
+      {
+        column_name: "enrol_lease_until",
         data_type: "timestamp with time zone",
         is_nullable: "YES",
         column_default: null,
+      },
+      {
+        column_name: "stripe_revision",
+        data_type: "bigint",
+        is_nullable: "NO",
+        column_default: "0",
       },
     ]);
     expect(
       (
         await pg.query(
-          "SELECT count(*)::int AS n FROM trial_accounts WHERE enrol_lease_until IS NOT NULL",
+          "SELECT count(*)::int AS n FROM trial_accounts WHERE enrol_lease_until IS NULL AND enrol_generation=0 AND stripe_revision=0",
         )
       ).rows,
-    ).toEqual([{ n: 0 }]);
+    ).toEqual([{ n: 2 }]);
   } finally {
     await pg.close();
     await rm(scratch, { recursive: true, force: true });

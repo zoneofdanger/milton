@@ -5,7 +5,9 @@ type Fetch = (
   init?: RequestInit,
 ) => Promise<Response>;
 export type AdmissionPath =
-  "/internal/auth/admit" | "/internal/auth/preserve-eligibility";
+  | "/internal/auth/admit"
+  | "/internal/auth/preserve-eligibility"
+  | "/internal/billing/enrol-pending";
 const IDENTITY =
   "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity";
 // Google's ID tokens last about an hour; refresh five minutes before expiry.
@@ -26,9 +28,10 @@ function expiry(token: string) {
   }
 }
 
-/** Auth's two calls to the milton-admit service, each within the existing 5 s.
- * Only two URLs are ever fetched: the metadata server's identity endpoint and
- * the configured admission origin plus one of the two paths.
+/** Auth's calls to the milton-admit service: its two admission calls, each within
+ * the existing 5 s, and the maintenance job's pending-enrolment sweep (`send`,
+ * with its own timeout). Only these URLs are ever fetched: the metadata server's
+ * identity endpoint and the configured admission origin plus one of the paths.
  *
  * For a run.app origin (production) each call carries a Google-signed ID token
  * for that origin, fetched from the metadata server and cached until shortly
@@ -60,8 +63,14 @@ export function admissionClient(
     cached = { token, refreshAt: exp * 1000 - REFRESH_MS };
     return token;
   }
-  return async (path: AdmissionPath, body: unknown): Promise<boolean> => {
-    const signal = AbortSignal.timeout(5000);
+  /** POSTs `body` to `path` and returns the answer, or null without an
+   * identity token (logged). */
+  async function send(
+    path: AdmissionPath,
+    body: unknown,
+    timeoutMs = 5000,
+  ): Promise<Response | null> {
+    const signal = AbortSignal.timeout(timeoutMs);
     const headers: Record<string, string> = {
       authorization: `Bearer ${config.AUTH_ADMISSION_SECRET}`,
       "content-type": "application/json",
@@ -72,16 +81,24 @@ export function admissionClient(
           `Bearer ${await idToken(signal)}`;
       } catch (error) {
         console.error("auth_admission_identity", safeError(error));
-        return false;
+        return null;
       }
-    const response = await networkFetch(origin + path, {
+    return networkFetch(origin + path, {
       method: "POST",
       redirect: "error",
       signal,
       headers,
       body: JSON.stringify(body),
     });
+  }
+  const admit = async (
+    path: AdmissionPath,
+    body: unknown,
+  ): Promise<boolean> => {
+    const response = await send(path, body);
+    if (!response) return false;
     await response.body?.cancel();
     return response.ok;
   };
+  return Object.assign(admit, { send });
 }

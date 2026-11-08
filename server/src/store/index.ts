@@ -21,7 +21,11 @@ import {
   cancelReturningIdentities,
   claimEnrolment,
   enrollForBackfill,
+  fenceEnrolment,
   linkStripeCustomer,
+  nextEnrolGeneration,
+  pendingEnrolmentCount,
+  pendingEnrolments,
   recordStripeEvent,
   releaseEnrolment,
   renewEnrolment,
@@ -473,9 +477,15 @@ export function billingForAccount(bindings: StoreBindings, userId: string) {
     account: () => billingAccount(db, userId),
     linkCustomer: (customer: string) =>
       linkStripeCustomer(db, userId, customer),
-    /** Reads Stripe with no transaction open, as the webhook does, and stores
-     * what the read returns, if anything, over an unchanged row (see
-     * stripeConflict). */
+    /** Moves past idempotency keys Stripe refused with a replayed answer. */
+    nextGeneration: (generation: number) =>
+      nextEnrolGeneration(db, userId, generation),
+    /** Deletion's fence (see fenceEnrolment). */
+    fenceEnrolment: () => fenceEnrolment(db, userId),
+    /** Reads Stripe with no transaction open, as the webhook does, and returns
+     * what the read found, storing it if anything, only over an unchanged row (see
+     * stripeConflict). An empty answer is checked too: it is what lets checkout
+     * sell a subscription. */
     syncSubscription: async (
       customer: string,
       read: () => Promise<StripeSubscriptionState | undefined>,
@@ -483,14 +493,14 @@ export function billingForAccount(bindings: StoreBindings, userId: string) {
       for (let attempt = 0; attempt < 2; attempt++) {
         const before = await stripeCustomerRow(db, customer);
         const state = await read();
-        if (!state || !before) return state;
-        const written = await db.transaction(async (tx) => {
+        if (!before) return state;
+        const unchanged = await db.transaction(async (tx) => {
           const row = await stripeCustomerRow(tx, customer, true);
-          if (row?.stored !== before.stored) return false;
-          await saveStripeSubscription(tx, userId, state);
+          if (row?.revision !== before.revision) return false;
+          if (state) await saveStripeSubscription(tx, userId, state);
           return true;
         });
-        if (written) return state;
+        if (unchanged) return state;
       }
       throw stripeConflict();
     },
@@ -503,6 +513,10 @@ export function billingForAccount(bindings: StoreBindings, userId: string) {
       let lease = claimed.lease;
       return {
         customer: claimed.customer,
+        generation: claimed.generation,
+        /** Stores the customer while this lease is live (see linkStripeCustomer). */
+        link: (customer: string) =>
+          linkStripeCustomer(db, userId, customer, lease),
         /** Before a call that could start a trial: throws once another attempt
          * has taken the lease over. */
         renew: async () => {
@@ -514,9 +528,10 @@ export function billingForAccount(bindings: StoreBindings, userId: string) {
             );
           lease = renewed;
         },
-        /** Stores the subscription, if none is stored yet, and ends the lease. */
+        /** Stores the subscription, if none is stored yet, and ends the lease
+         * if it is still this one. */
         save: (state: StripeSubscriptionState) =>
-          saveEnrolment(db, userId, state),
+          saveEnrolment(db, userId, lease, state),
         release: () => releaseEnrolment(db, userId, lease),
       };
     },
@@ -525,19 +540,26 @@ export function billingForAccount(bindings: StoreBindings, userId: string) {
 
 // Stripe is read with no transaction open and no row held. The write then runs
 // in a short transaction that holds the customer's row and lands only if the
-// row's stored state (subscription, status, trial end, period start and end) is
-// what it was before the read. So an older read cannot land after a newer one:
-// a write that landed in between changed the stored state, and this one reads
-// Stripe again instead. A newer write that found the state already current
-// changed nothing and so cannot stop an older read; that matters only if
-// Stripe's state left the stored one and came back between the two reads. A
-// second conflict refuses: checkout answers try again, and the webhook leaves
-// the event unrecorded, so Stripe redelivers it.
+// row's stripe_revision is what it was before the read. Every accepted write of
+// the Stripe state advances it, values unchanged included. So an older read
+// cannot land after a newer one: any write that landed between this read's
+// snapshot and its write moved the revision, and this one reads Stripe again
+// instead. A second conflict refuses: checkout answers try again, and the webhook
+// leaves the event unrecorded, so Stripe redelivers it.
 const stripeConflict = () =>
   new StoreError(
     "billing_unavailable",
     "Billing is unavailable right now. Nothing was charged. Try again.",
   );
+
+/** What the pending-enrolment sweep reads (see pendingEnrolments). */
+export function enrolmentSweep(bindings: StoreBindings) {
+  const db = database(bindings);
+  return {
+    pending: (limit: number) => pendingEnrolments(db, limit),
+    remaining: () => pendingEnrolmentCount(db),
+  };
+}
 
 /** What server/scripts/backfill-subscriptions.ts reads and writes. */
 export function subscriptionBackfill(bindings: StoreBindings) {
@@ -580,7 +602,7 @@ export async function applyStripeEvent(
     const state = await read(customer, before.subscription);
     const result = await db.transaction(async (tx) => {
       const row = await stripeCustomerRow(tx, customer, true);
-      if (row?.stored !== before.stored) return undefined;
+      if (row?.revision !== before.revision) return undefined;
       return recordStripeEvent(
         tx,
         event,

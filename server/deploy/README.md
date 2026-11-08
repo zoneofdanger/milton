@@ -393,6 +393,64 @@ app never rolls back to an image older than #62 (`milton-app-token-0f7d5aa` is t
 its transaction rolls back and changes nothing; rerun it. Otherwise a failed migration's
 rollback is the pre-migration snapshot; there is no down script.
 
+## Enrolment off sign-in and out of row locks (Drizzle 0010, PR #67; prepared, not applied)
+
+Sign-in no longer waits on Stripe: admission starts the trial in the background, and the
+auth maintenance job's 15-minute sweep (`POST /internal/billing/enrol-pending` on
+`milton-admit`) enrols any account left without one. No Stripe call runs inside a
+transaction or under a row lock. 0010 adds `trial_accounts.enrol_lease_until`,
+`enrol_generation` and `stripe_revision` (server README); additive, older code never names
+them.
+
+**Mixed versions are not safe for one account at the same moment.** Older app and admit
+revisions enrol holding `trial_accounts FOR UPDATE` with minute-based idempotency keys, and
+ignore the lease, the key generation and the revision. A new holder's lease takes no row
+lock, so an old revision that starts enrolling the same account while it is out can make a
+second customer and trial (different keys, both list nothing). Old webhook and checkout
+writes do not advance `stripe_revision`, so a new read in flight can land over one of them.
+Each needs the same account on both versions within the drain window: a sign-up whose
+sign-in straddles the traffic switch, or a webhook racing it. The other direction is safe:
+an old enrolment holds the row lock, and a new claim waits on it and then finds the status
+set. So:
+
+1. Rehearse (`check-auth-integration.ts` applies 0010), then snapshot production.
+2. As `neondb_owner`: `bun run --cwd server db:migrate` applies `0010_enrol_lease`
+   (journal 11 entries). Old code runs on it unchanged.
+3. Deploy the new image to `milton-app` and `milton-admit` with `--no-traffic`, then
+   move each to 100% back to back, in a quiet minute (no `/internal/auth/admit` request in
+   milton-admit's log for the last 2 minutes).
+4. Drain: wait at least 60 s (app's request timeout; admit's is 30 s) and until the
+   request logs show no request on the previous revisions. Only then is the release
+   serving one version. Then list Stripe subscriptions created since the switch and check
+   no customer has two; cancel a duplicate in the Dashboard if one ever appears.
+5. Only after the drain, turn the sweep on (below), so no enrolment that no person started
+   runs while old revisions might.
+
+**The sweep's release steps (milton-duo, with Peter's go; none done here):**
+
+- Grant the job's service account the invoker role on milton-admit, the only principal
+  besides `milton-auth@`:
+  `gcloud run services add-iam-policy-binding milton-admit $R --member=serviceAccount:milton-auth-maint@milton-510506.iam.gserviceaccount.com --role=roles/run.invoker`.
+  Check `get-iam-policy` shows exactly those two bindings.
+- Give `milton-auth-maint` `AUTH_ADMISSION_URL=https://milton-admit-419545871671.us-east4.run.app`
+  (plain env, as on `milton-auth`) and `AUTH_ADMISSION_SECRET`, the same value auth and
+  admit hold, as a secret only this job's account can read (as `milton-auth-owner-url` is),
+  `--update-secrets=AUTH_ADMISSION_SECRET=<secret>:<numeric version>`. Never print it. It
+  must change together with the auth and admit payloads on rotation.
+- Order: the admit image with the route (step 3) first, then IAM, then the auth image on
+  `milton-auth-maint` (`gcloud run jobs update milton-auth-maint $R --image=<AUTH_IMAGE@sha256>`),
+  then the two settings. The job image may go earlier: without `AUTH_ADMISSION_URL` it
+  logs `Pending enrolment sweep skipped` and does its other work as before.
+- Verify: `gcloud run jobs execute milton-auth-maint $R --wait`; its log shows
+  `Pending enrolments: {"attempted":…}` (counts only) and milton-admit's request log a 200 at
+  `/internal/billing/enrol-pending`. The call gives up at 28 s, so confirm the job's task
+  timeout covers its other steps plus 28 s. A failed call fails the execution after the other
+  steps ran, which the existing `milton-auth-maint` failed-executions alert reports.
+
+Rollback: code to the previous revisions (they run on 0010); remove the job's two settings
+to stop the sweep. Rolling code back re-opens the overlap above, so drain the same way.
+The pre-migration snapshot is 0010's rollback; there is no down script.
+
 ## Test account and daily check
 
 `e2e@milton-test.invalid` is a fictional account that holds nothing but what the daily
@@ -791,8 +849,8 @@ admission bearer was the only check (critique finding 8).
   is now minted into both payloads.
 - **Settings** ([admit.service.json](admit.service.json)): concurrency 40 (the database
   pool's maximum, so each request can hold a connection; auth can have at most 24 calls in
-  flight, 3 instances × 8); timeout 30 s (auth gives up at 5 s, but an admission with
-  Stripe can take about 15 s, and finishing lets auth's retry find it done); max 3
+  flight, 3 instances × 8); timeout 30 s (auth gives up at 5 s; admission no longer waits on
+  Stripe, and the maintenance job's enrolment sweep, which does, gives up at 28 s); max 3
   instances, as app and MCP; startup CPU boost on.
 - **Cold start and minimum instances.** The built bundle (`server/dist/cloud-run.js`,
   3.3 MB) answered its first request 143–151 ms after `node` started (median 145 ms over 10

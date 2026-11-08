@@ -166,35 +166,65 @@ const redirectTo = (origin: string) =>
       .refine((url) => url.startsWith(origin + "/")),
   });
 
-// A key that lasts one UTC minute. Stripe replays a stored error for the same key
-// for 24 hours or more, and refuses the same key with other params; a fixed key
-// would keep every retry failing for a day. Double submits within a minute still
-// dedupe, and listing under the enrolment lease reconciles a later retry, with one
-// gap: a create that timed out here and is still running at Stripe can be missed
-// once the minute has turned.
-const idempotencyKey = (kind: "customer" | "subscription", userId: string) =>
-  `milton-${kind}-${userId}-${Math.floor(Date.now() / 60000)}`;
+// Stripe API v1 idempotency, as documented at docs.stripe.com/api/idempotent_requests
+// and docs.stripe.com/error-low-level#idempotency (read 2026-11-08): once an endpoint
+// begins executing, Stripe saves the status and body of the first request with a
+// key and returns them to every retry with that key, 500s included. It keeps a key
+// at least 24 hours and may prune it after, and it refuses the key with different
+// parameters. A request that fails validation, or meets another request with the
+// same key still executing (409), is not saved and may be retried with the key.
+// So the keys name the account's enrolment generation, not the time: an attempt
+// after a timeout or lost reply, or one taking over from a paused holder, sends the
+// same key with the same parameters and gets the object the first one made. The
+// generation advances only after an answer Stripe replays for the key, any non-2xx
+// but 409 and 429 (rate limiting refuses before the endpoint runs), so the next
+// attempt is not handed that refusal for a day.
+const idempotencyKey = (
+  kind: "customer" | "subscription",
+  userId: string,
+  generation: number,
+) => `milton-${kind}-${userId}-g${generation}`;
+
+/** A create Stripe dedupes by `key`; `refused` runs after an answer Stripe would
+ * replay for that key. A timeout or lost reply is not one: its outcome is unknown,
+ * and the same key finds it. */
+async function createOnce<T>(
+  billing: StripeApiConfig,
+  path: "customers" | "subscriptions",
+  params: Record<string, string>,
+  shape: z.ZodType<T>,
+  key: string,
+  refused: () => Promise<unknown>,
+) {
+  const response = await stripeCall(billing, "POST", path, params, key);
+  if (!response.ok && response.status !== 409 && response.status !== 429)
+    await refused().catch(() => {});
+  return stripeAnswer(response, shape);
+}
 
 // Stored before anything else happens with it, so a later failure leaves it
-// findable.
+// findable. The create carries only the account id, the same on every attempt, so
+// a repeat under the key is never refused for changed parameters; the sign-in
+// email, which can change between attempts, is copied right after.
 async function createCustomer(
   billing: StripeApiConfig,
   userId: string,
+  generation: number,
   link: (customer: string) => Promise<string | undefined>,
+  refused: () => Promise<unknown>,
   email?: string,
 ) {
-  const created = await stripePost(
+  const created = await createOnce(
     billing,
     "customers",
-    {
-      "metadata[milton_user_id]": userId,
-      ...(email ? { email } : {}),
-    },
+    { "metadata[milton_user_id]": userId },
     stripeCustomer,
-    idempotencyKey("customer", userId),
+    idempotencyKey("customer", userId, generation),
+    refused,
   );
   const customer = await link(created.id);
   if (!customer) throw stripeFailed();
+  await copyEmail(billing, customer, email);
   return customer;
 }
 
@@ -219,23 +249,33 @@ export async function ensureSubscription(
     // A test account never gets a trial, customer or subscription.
     if (account.test || !account.enrolled || account.status !== null) return;
     // Only the lease's holder calls Stripe, and no transaction stays open across
-    // a call. Two attempts across a minute boundary have different keys, so only
-    // the lease stops each making a customer, or each listing nothing and
-    // starting a trial, which could charge the person twice. A reply lost after
-    // Stripe made the customer can still leave an orphan once the minute turns:
-    // it is never charged, may hold an email, and is removed by hand in Stripe if
-    // ever needed.
+    // a call. A holder paused past its lease can still resume into a create, but
+    // its successor sends the same keys (see idempotencyKey), so both get one
+    // customer and one subscription. Link and renewal need the lease live, so a
+    // holder taken over or fenced by account deletion stores nothing: at worst it
+    // leaves a customer it never linked, with no subscription, which is never
+    // charged and is removed by hand in Stripe if ever needed. So is a customer
+    // made on a 500 that moved the generation on.
     lease = await store.enrolment();
     if (!lease) return;
+    const { generation } = lease;
+    const refused = () => store.nextGeneration(generation);
     const customer =
       lease.customer ??
-      (await createCustomer(billing, userId, store.linkCustomer, email));
+      (await createCustomer(
+        billing,
+        userId,
+        generation,
+        lease.link,
+        refused,
+        email,
+      ));
     let state = decidingSubscription(
       await listSubscriptions(billing, customer),
     );
     if (!state) {
       await lease.renew();
-      state = await stripePost(
+      state = await createOnce(
         billing,
         "subscriptions",
         {
@@ -246,11 +286,15 @@ export async function ensureSubscription(
           "trial_settings[end_behavior][missing_payment_method]": "cancel",
         },
         stripeSubscription,
-        idempotencyKey("subscription", userId),
+        idempotencyKey("subscription", userId, generation),
+        refused,
       );
     }
-    await lease.save(state);
+    const held = lease;
     lease = undefined;
+    await held.save(state);
+    // Saved or not (a newer status may already be stored), this lease is done.
+    await held.release().catch(() => {});
   } catch (error) {
     // The next attempt need not wait the lease out.
     await lease?.release().catch(() => {});
@@ -423,7 +467,9 @@ async function billingRoute(ctx: PageContext): Promise<Response> {
         (await createCustomer(
           billing,
           store.userId,
+          account.generation,
           store.linkCustomer,
+          () => store.nextGeneration(account.generation),
           user.email,
         )),
       payment_method_collection: "always",

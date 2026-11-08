@@ -11,11 +11,16 @@ export type StripeSubscriptionState = {
 };
 export type StripeEvent = { id: string; type: string; payloadSha256: string };
 
+// Every write of the Stripe state columns advances the revision, values unchanged
+// included, so a write after a Stripe read can tell whether any other landed since
+// its snapshot (see stripeCustomerRow).
+const advanced = sql`stripe_revision=stripe_revision+1`;
 const subscriptionColumns = (state: StripeSubscriptionState) =>
   sql`stripe_subscription_id=${state.id},subscription_status=${state.status},
     trial_end=to_timestamp(${state.trialEnd}::double precision),
     current_period_start=to_timestamp(${state.periodStart}::double precision),
-    current_period_end=to_timestamp(${state.periodEnd}::double precision)`;
+    current_period_end=to_timestamp(${state.periodEnd}::double precision),
+    ${advanced}`;
 
 /** The account's billing row, if any. A test account (users.test_account) is
  * permanently outside trials and billing, whatever row it holds: `test` tells
@@ -27,27 +32,47 @@ export async function billingAccount(db: StoreSession, userId: string) {
       enrolled: boolean;
       customer: string | null;
       status: string | null;
+      generation: number;
     }>(sql`
     SELECT u.test_account AS test, t.user_id IS NOT NULL AS enrolled,
-      t.stripe_customer_id AS customer, t.subscription_status AS status
+      t.stripe_customer_id AS customer, t.subscription_status AS status,
+      coalesce(t.enrol_generation,0) AS generation
     FROM users u LEFT JOIN trial_accounts t ON t.user_id=u.id WHERE u.id=${userId}`)
   )[0];
-  return row ?? { test: false, enrolled: false, customer: null, status: null };
+  return (
+    row ?? {
+      test: false,
+      enrolled: false,
+      customer: null,
+      status: null,
+      generation: 0,
+    }
+  );
 }
 /** Test accounts are never written by billing. */
 const billable = sql`NOT EXISTS (SELECT 1 FROM users x WHERE x.id=user_id AND x.test_account)`;
+/** An active account billing may enrol: not a test account. */
+const enrollable = sql`EXISTS (SELECT 1 FROM users a WHERE a.id=user_id AND a.status='active' AND NOT a.test_account)`;
+/** The caller's lease, still unexpired. */
+const holding = (lease: string) =>
+  sql`enrol_lease_until=${lease}::timestamptz AND enrol_lease_until>clock_timestamp()`;
+/** Account deletion's lease, which never expires (fenceEnrolment). */
+const FENCE = sql`'infinity'::timestamptz`;
 
-/** Stores the customer on the clock row unless one is already stored; returns
- * the stored customer. */
+/** Stores the customer on the clock row of an active account unless one is
+ * already stored; returns the stored customer. With `lease`, only while that lease
+ * is live, so an enrolment taken over or fenced by deletion links nothing. */
 export async function linkStripeCustomer(
   db: StoreSession,
   userId: string,
   customer: string,
+  lease?: string,
 ) {
   return (
     await db.query<{ customer: string }>(sql`
     UPDATE trial_accounts SET stripe_customer_id=coalesce(stripe_customer_id,${customer})
-    WHERE user_id=${userId} RETURNING stripe_customer_id AS customer`)
+    WHERE user_id=${userId} AND ${enrollable}${lease ? sql` AND ${holding(lease)}` : sql``}
+    RETURNING stripe_customer_id AS customer`)
   )[0]?.customer;
 }
 
@@ -58,22 +83,29 @@ export async function linkStripeCustomer(
 // second trial.
 const LEASE = sql`clock_timestamp()+interval '60 seconds'`;
 
-/** Claims the right to enrol the account with Stripe, if it still has no
- * subscription and no other attempt holds a live lease. One committed statement,
- * so no row stays locked while Stripe is called. Returns the stored customer and
- * the lease, whose text is the token later statements compare. */
+/** Claims the right to enrol an active account with Stripe, if it still has no
+ * subscription and no other attempt holds a live lease (deletion's never expires).
+ * One committed statement, so no row stays locked while Stripe is called. Returns
+ * the stored customer, the generation that names the idempotency keys, and the
+ * lease, whose text is the token later statements compare. A takeover keeps the
+ * generation, so it sends the keys the attempt before it sent. */
 export async function claimEnrolment(db: StoreSession, userId: string) {
   return (
-    await db.query<{ customer: string | null; lease: string }>(sql`
+    await db.query<{
+      customer: string | null;
+      generation: number;
+      lease: string;
+    }>(sql`
     UPDATE trial_accounts SET enrol_lease_until=${LEASE}
-    WHERE user_id=${userId} AND subscription_status IS NULL AND ${billable}
+    WHERE user_id=${userId} AND subscription_status IS NULL AND ${enrollable}
       AND (enrol_lease_until IS NULL OR enrol_lease_until < clock_timestamp())
-    RETURNING stripe_customer_id AS customer, enrol_lease_until::text AS lease`)
+    RETURNING stripe_customer_id AS customer, enrol_generation AS generation,
+      enrol_lease_until::text AS lease`)
   )[0];
 }
 
-/** Extends a lease still held, before a call that could start a second trial;
- * returns the new token, or nothing once another attempt has taken it over. */
+/** Extends a lease still live, before a call that could start a trial; returns
+ * the new token, or nothing once it expired, was taken over or was fenced. */
 export async function renewEnrolment(
   db: StoreSession,
   userId: string,
@@ -82,23 +114,52 @@ export async function renewEnrolment(
   return (
     await db.query<{ lease: string }>(sql`
     UPDATE trial_accounts SET enrol_lease_until=${LEASE}
-    WHERE user_id=${userId} AND subscription_status IS NULL
-      AND enrol_lease_until=${lease}::timestamptz
+    WHERE user_id=${userId} AND subscription_status IS NULL AND ${enrollable}
+      AND ${holding(lease)}
     RETURNING enrol_lease_until::text AS lease`)
   )[0]?.lease;
 }
 
+/** Moves to the next generation of idempotency keys after Stripe refused one with
+ * an answer it replays for that key; once only, however many attempts saw it. */
+export async function nextEnrolGeneration(
+  db: StoreSession,
+  userId: string,
+  generation: number,
+) {
+  await db.query(sql`UPDATE trial_accounts SET enrol_generation=enrol_generation+1
+    WHERE user_id=${userId} AND enrol_generation=${generation}`);
+}
+
 /** Stores what Stripe answered, only while the account still has no
  * subscription (a webhook may have stored a newer one meanwhile), and ends the
- * lease. */
+ * lease if it is still this attempt's, never a successor's. */
 export async function saveEnrolment(
   db: StoreSession,
   userId: string,
+  lease: string,
   state: StripeSubscriptionState,
 ) {
   await db.query(sql`UPDATE trial_accounts SET ${subscriptionColumns(state)},
-    enrol_lease_until=NULL
+    enrol_lease_until=CASE WHEN enrol_lease_until=${lease}::timestamptz
+      THEN NULL ELSE enrol_lease_until END
     WHERE user_id=${userId} AND subscription_status IS NULL AND ${billable}`);
+}
+
+/** Account deletion's fence: takes the lease for good, so no attempt can claim,
+ * renew or link again. Only when no other attempt holds a live lease; false then,
+ * and deletion retries once it has finished or expired. True with no row. */
+export async function fenceEnrolment(db: StoreSession, userId: string) {
+  const row = (
+    await db.query<{ fenced: number; rows: number }>(sql`
+    WITH f AS (UPDATE trial_accounts SET enrol_lease_until=${FENCE}
+      WHERE user_id=${userId} AND (enrol_lease_until IS NULL
+        OR enrol_lease_until<=clock_timestamp() OR enrol_lease_until=${FENCE})
+      RETURNING 1)
+    SELECT (SELECT count(*) FROM f)::int AS fenced,
+      (SELECT count(*) FROM trial_accounts WHERE user_id=${userId})::int AS rows`)
+  )[0]!;
+  return row.fenced === 1 || row.rows === 0;
 }
 
 /** Ends a lease still held, so the next attempt need not wait it out. */
@@ -111,8 +172,8 @@ export async function releaseEnrolment(
     WHERE user_id=${userId} AND enrol_lease_until=${lease}::timestamptz`);
 }
 
-/** Writes what Stripe answered. Callers write only while the row's stored state
- * is what it was before their read (see stripeCustomerRow). */
+/** Writes what Stripe answered. Callers write only while the row's revision is
+ * what it was before their read (see stripeCustomerRow). */
 export async function saveStripeSubscription(
   db: StoreSession,
   userId: string,
@@ -122,22 +183,18 @@ export async function saveStripeSubscription(
     WHERE user_id=${userId}`);
 }
 
-// The stored Stripe state as one comparable text, independent of time zone.
-const storedState = sql`row(stripe_subscription_id,subscription_status,
-  extract(epoch from trial_end),extract(epoch from current_period_start),
-  extract(epoch from current_period_end))::text`;
-
-/** The row holding this customer, if any: its subscription and its stored
- * Stripe state. With `lock`, the row is held for the rest of the transaction,
- * which only compares and writes: Stripe is read before it opens. */
+/** The row holding this customer, if any: its subscription and the revision of
+ * its stored Stripe state (as text, exact). With `lock`, the row is held for the
+ * rest of the transaction, which only compares and writes: Stripe is read before
+ * it opens. */
 export async function stripeCustomerRow(
   db: StoreSession,
   customer: string,
   lock = false,
 ) {
   return (
-    await db.query<{ subscription: string | null; stored: string }>(sql`
-    SELECT stripe_subscription_id AS subscription, ${storedState} AS stored
+    await db.query<{ subscription: string | null; revision: string }>(sql`
+    SELECT stripe_subscription_id AS subscription, stripe_revision::text AS revision
     FROM trial_accounts WHERE stripe_customer_id=${customer} AND ${billable}
     ${lock ? sql`FOR UPDATE` : sql``}`)
   )[0];
@@ -153,24 +210,27 @@ export async function stripeEventRecorded(db: StoreSession, id: string) {
  * id, so keeping it would block a retry and any later subscription. */
 export async function clearStripeCustomer(db: StoreSession, userId: string) {
   await db.query(sql`UPDATE trial_accounts SET stripe_customer_id=NULL,
-    stripe_subscription_id=NULL,subscription_status='canceled'
+    stripe_subscription_id=NULL,subscription_status='canceled',${advanced}
     WHERE user_id=${userId}`);
 }
 
 /** Forgets the customer Stripe has just ended, holding the row for the rest of
- * the caller's transaction. False when the row now holds another customer, which
- * a retry must end first. */
+ * the caller's transaction. False while an enrolment lease other than deletion's
+ * fence is live, or when the row now holds another customer: a retry must end
+ * what that enrolment made first. */
 export async function forgetStripeCustomer(
   db: StoreSession,
   userId: string,
   ended: string | null,
 ) {
-  const stored =
-    (
-      await db.query<{ customer: string | null }>(sql`
-      SELECT stripe_customer_id AS customer FROM trial_accounts
-      WHERE user_id=${userId} FOR UPDATE`)
-    )[0]?.customer ?? null;
+  const row = (
+    await db.query<{ customer: string | null; enrolling: boolean }>(sql`
+      SELECT stripe_customer_id AS customer,
+        coalesce(enrol_lease_until>clock_timestamp() AND enrol_lease_until<>${FENCE},false) AS enrolling
+      FROM trial_accounts WHERE user_id=${userId} FOR UPDATE`)
+  )[0];
+  if (row?.enrolling) return false;
+  const stored = row?.customer ?? null;
   if (stored === null) return true;
   if (stored !== ended) return false;
   await clearStripeCustomer(db, userId);
@@ -194,7 +254,7 @@ export async function recordStripeEvent(
       write
         ? sql`WITH ${recorded}, u AS (UPDATE trial_accounts SET ${
             write.state === "canceled"
-              ? sql`subscription_status='canceled'`
+              ? sql`subscription_status='canceled',${advanced}`
               : subscriptionColumns(write.state)
           } WHERE stripe_customer_id=${write.customer} AND ${billable} AND EXISTS (SELECT 1 FROM e))
           SELECT (SELECT count(*) FROM e)::int AS recorded`
@@ -207,7 +267,7 @@ export async function recordStripeEvent(
 /** 0027's data statement: a returning deleted identity an older image wrote, with
  * no status and a start before its account, is canceled, never given a trial. */
 export async function cancelReturningIdentities(db: StoreSession) {
-  await db.query(sql`UPDATE trial_accounts t SET subscription_status='canceled'
+  await db.query(sql`UPDATE trial_accounts t SET subscription_status='canceled',${advanced}
     FROM users u WHERE u.id=t.user_id AND t.started_at < u.created_at
     AND t.subscription_status IS NULL AND NOT u.test_account`);
 }
@@ -225,6 +285,30 @@ export async function backfillAccounts(db: StoreSession) {
       coalesce(t.subscription_status IS NULL AND t.started_at < u.created_at,false) AS returning
     FROM users u LEFT JOIN trial_accounts t ON t.user_id=u.id
     WHERE u.status='active' AND NOT u.test_account ORDER BY u.id`);
+}
+
+/** Accounts the enrolment sweep picks up, oldest first: trials on, an active,
+ * non-test account whose trial row has no status, started more than 5 minutes ago
+ * (sign-in's own background enrolment has had its chance), and no live lease
+ * (deletion's fence included). A returning deleted identity an older image left
+ * (started before its account) never gets a trial, as in backfillAccounts. */
+const pending = sql`FROM trial_accounts t JOIN users u ON u.id=t.user_id
+  WHERE (SELECT trials_enabled FROM store_config WHERE singleton=1)
+    AND t.subscription_status IS NULL AND u.status='active' AND NOT u.test_account
+    AND t.started_at >= u.created_at
+    AND t.started_at < clock_timestamp()-interval '5 minutes'
+    AND (t.enrol_lease_until IS NULL OR t.enrol_lease_until < clock_timestamp())`;
+export async function pendingEnrolments(db: StoreSession, limit: number) {
+  return (
+    await db.query<{ id: string }>(
+      sql`SELECT t.user_id AS id ${pending} ORDER BY t.started_at,t.user_id LIMIT ${limit}`,
+    )
+  ).map(({ id }) => id);
+}
+export async function pendingEnrolmentCount(db: StoreSession) {
+  return (
+    await db.query<{ n: number }>(sql`SELECT count(*)::int AS n ${pending}`)
+  )[0]!.n;
 }
 
 /** Gives an active account a clock row with no status, if it has none. */

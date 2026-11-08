@@ -436,7 +436,7 @@ test("a webhook's read never lands over a newer write: one conflict reads again,
     const step = steps.shift();
     if (!step) return;
     await local.db.query(
-      sql`UPDATE trial_accounts SET subscription_status=${step.write}`,
+      sql`UPDATE trial_accounts SET subscription_status=${step.write},stripe_revision=stripe_revision+1`,
     );
     if (step.then)
       stripe.answer = Response.json({ data: [subscription(step.then)] });
@@ -467,38 +467,127 @@ test("a webhook's read never lands over a newer write: one conflict reads again,
   }
 });
 
-test("enrolment holds a lease, not a lock: two at once across a minute boundary make one customer and one trial; a live lease calls nothing; an expired one is taken over", async () => {
+test("a newer reconciliation that leaves the state unchanged still stops an older read from landing (ABA)", async () => {
+  const { local, stripe, post, ledger, status } = await webhookFixture();
+  const { applyStripeEvent } = await import("../src/store");
+  const active = subscription("active");
+  const activeState = {
+    id: active.id,
+    status: "active",
+    trialEnd: active.trial_end,
+    periodStart: active.items.data[0]!.current_period_start,
+    periodEnd: active.items.data[0]!.current_period_end,
+  };
+  let newer = 0;
+  try {
+    // Stored and current at Stripe: active.
+    expect(await post(updated)).toEqual([200, '{"received":true}']);
+    expect(await status()).toBe("paid");
+    // An older read answers past_due. While each of its reads is out, a newer
+    // reconciliation lands active again, unchanged values.
+    stripe.answer = Response.json({ data: [subscription("past_due")] });
+    stripe.during = async () => {
+      expect(
+        await applyStripeEvent(
+          local.env,
+          {
+            id: `evt_newer${++newer}`,
+            type: "invoice.paid",
+            payloadSha256: "0".repeat(64),
+          },
+          "cus_fixture",
+          async () => activeState,
+        ),
+      ).toEqual({ recorded: true });
+    };
+    const older = event("evt_older", "invoice.payment_failed", {
+      customer: "cus_fixture",
+    });
+    expect(await post(older)).toEqual([503, '{"error":"server_unavailable"}']);
+    // The older past_due never landed, and its event stays unrecorded for
+    // Stripe to redeliver; both newer events are recorded.
+    expect(await status()).toBe("paid");
+    const ids = (await ledger()).map(({ id }) => id);
+    expect(ids).not.toContain("evt_older");
+    expect(ids).toEqual(expect.arrayContaining(["evt_newer1", "evt_newer2"]));
+  } finally {
+    await local.dispose();
+  }
+});
+
+test("enrolment holds a lease and keys its creates by generation: two at once make one trial; a paused holder and its successor get the same objects and the successor keeps its lease; only a replayed refusal moves the generation", async () => {
   const local = await localStore();
   const made = { customers: 0, subscriptions: 0 };
   const held: Record<string, unknown>[] = [];
+  const replies = new Map<string, Response>();
   const inTransaction: string[] = [];
+  const keys: string[] = [];
+  const gates: (() => void)[] = [];
+  let pause = 0;
+  // What the next subscription create answers instead of creating.
+  let refuse: number | "unreachable" | undefined;
   let calls = 0;
-  // Every create is new, as across a minute boundary, where the idempotency
-  // keys differ and Stripe dedupes nothing.
+  // Honours idempotency keys as Stripe does: a key's first answer is replayed.
   const billing = {
     ...fakeStripe().billing,
     fetch: async (url: string, init: RequestInit) => {
       calls++;
       if (openTransactions() > 0) inTransaction.push(url);
-      await Bun.sleep(20);
+      const { pathname } = new URL(url);
       if (init.method === "GET") return Response.json({ data: held });
-      if (new URL(url).pathname === "/v1/customers")
-        return Response.json({ id: `cus_lease${++made.customers}` });
-      const created = {
-        ...subscription("trialing"),
-        id: `sub_lease${++made.subscriptions}`,
-      };
-      held.push(created);
-      return Response.json(created);
+      const key = new Headers(init.headers).get("Idempotency-Key")!;
+      keys.push(key);
+      // A holder paused before its request reaches Stripe.
+      if (pathname === "/v1/subscriptions" && pause > 0) {
+        pause--;
+        await new Promise<void>((go) => gates.push(go));
+      }
+      if (pathname === "/v1/subscriptions" && refuse !== undefined) {
+        const answer = refuse;
+        refuse = undefined;
+        if (answer === "unreachable") throw new Error("Stripe is unreachable");
+        // A 409 (a same-key request still running) is not saved by Stripe.
+        if (answer === 409) return Response.json({}, { status: 409 });
+        replies.set(key, Response.json({}, { status: answer }));
+      }
+      if (!replies.has(key))
+        if (pathname === "/v1/customers")
+          replies.set(
+            key,
+            Response.json({ id: `cus_lease${++made.customers}` }),
+          );
+        else {
+          const created = {
+            ...subscription("trialing"),
+            id: `sub_lease${++made.subscriptions}`,
+          };
+          held.push(created);
+          replies.set(key, Response.json(created));
+        }
+      return replies.get(key)!.clone();
     },
   };
   const config = { ...local.env, billing };
   const row = async () =>
     (
       await local.db.query(
-        sql`SELECT stripe_customer_id AS customer,subscription_status AS status FROM trial_accounts WHERE user_id=${userId}`,
+        sql`SELECT stripe_customer_id AS customer,subscription_status AS status,enrol_generation AS generation FROM trial_accounts WHERE user_id=${userId}`,
       )
     )[0];
+  const lease = async () =>
+    (
+      await local.db.query<{ lease: string | null }>(
+        sql`SELECT enrol_lease_until::text AS lease FROM trial_accounts`,
+      )
+    )[0]!.lease;
+  const waiting = () =>
+    local.db.query(
+      sql`UPDATE trial_accounts SET stripe_subscription_id=NULL,subscription_status=NULL`,
+    );
+  const reached = async (n: number) => {
+    while (gates.length < n) await Bun.sleep(5);
+  };
+  const quiet = spyOn(console, "error").mockImplementation(() => {});
   try {
     await local.db.query(sql`UPDATE store_config SET trials_enabled=true`);
     await local.db.query(sql`INSERT INTO users(id) VALUES (${userId})`);
@@ -510,32 +599,72 @@ test("enrolment holds a lease, not a lock: two at once across a minute boundary 
       ensureSubscription(config, userId),
     ]);
     expect(made).toEqual({ customers: 1, subscriptions: 1 });
-    expect(await row()).toEqual({ customer: "cus_lease1", status: "trialing" });
-    expect(inTransaction).toEqual([]);
+    expect(await row()).toEqual({
+      customer: "cus_lease1",
+      status: "trialing",
+      generation: 0,
+    });
+    expect(keys).toEqual([
+      `milton-customer-${userId}-g0`,
+      `milton-subscription-${userId}-g0`,
+    ]);
     // A live lease: another attempt is enrolling, so this one calls nothing.
+    await waiting();
     await local.db.query(
-      sql`UPDATE trial_accounts SET stripe_subscription_id=NULL,subscription_status=NULL,enrol_lease_until=clock_timestamp()+interval '1 minute'`,
+      sql`UPDATE trial_accounts SET enrol_lease_until=clock_timestamp()+interval '1 minute'`,
     );
-    held.length = 0;
     calls = 0;
     await ensureSubscription(config, userId);
     expect(calls).toBe(0);
-    expect(await row()).toEqual({ customer: "cus_lease1", status: null });
-    // An expired lease is taken over; the stored customer is reused.
+    // Takeover: A renews and pauses before its create reaches Stripe; its lease
+    // expires and B takes over, pausing at the same point; then A resumes.
+    await local.db.query(sql`UPDATE trial_accounts SET enrol_lease_until=NULL`);
+    held.length = 0;
+    replies.clear();
+    await local.db.query(sql`UPDATE trial_accounts SET enrol_generation=1`);
+    pause = 2;
+    const a = ensureSubscription(config, userId);
+    await reached(1);
     await local.db.query(
       sql`UPDATE trial_accounts SET enrol_lease_until=clock_timestamp()-interval '1 second'`,
     );
-    await ensureSubscription(config, userId);
+    const b = ensureSubscription(config, userId);
+    await reached(2);
+    const successor = await lease();
+    gates[0]!();
+    await a;
+    // A stored the one subscription and left B's lease alone.
+    expect(await row()).toMatchObject({ status: "trialing" });
+    expect(await lease()).toBe(successor);
+    gates[1]!();
+    await b;
+    // B sent the same key and got the same subscription: one trial in all.
     expect(made).toEqual({ customers: 1, subscriptions: 2 });
-    expect(await row()).toEqual({ customer: "cus_lease1", status: "trialing" });
-    expect(
-      (
-        await local.db.query(
-          sql`SELECT enrol_lease_until AS lease FROM trial_accounts`,
-        )
-      )[0],
-    ).toEqual({ lease: null });
+    expect(held).toHaveLength(1);
+    expect(await lease()).toBeNull();
+    // A timeout or lost reply, or a 409, keeps the generation, so the next
+    // attempt's key finds what Stripe made; a replayed refusal (500) moves it.
+    for (const [answer, generation] of [
+      ["unreachable", 1],
+      [409, 1],
+      [500, 2],
+    ] as const) {
+      await waiting();
+      held.length = 0;
+      refuse = answer;
+      await expect(ensureSubscription(config, userId)).rejects.toMatchObject({
+        status: 503,
+      });
+      expect([answer, (await row())!.generation]).toEqual([answer, generation]);
+      expect(await lease()).toBeNull();
+    }
+    keys.length = 0;
+    await ensureSubscription(config, userId);
+    expect(keys).toEqual([`milton-subscription-${userId}-g2`]);
+    expect((await row())!.status).toBe("trialing");
+    expect(inTransaction).toEqual([]);
   } finally {
+    quiet.mockRestore();
     await local.dispose();
   }
 });

@@ -24,6 +24,7 @@ import {
   protocolFixture,
 } from "./auth-fixtures";
 import { authAdmission, trialFingerprints } from "../src/auth-admission";
+import { ensureSubscription } from "../src/billing";
 
 const appFor = (env: Partial<Parameters<typeof createMiltonApp>[0]>) =>
   createMiltonApp({ issuer, resource, appOrigin, ...clientSettings, ...env });
@@ -147,6 +148,7 @@ function fakeStripe() {
     delay: 0,
     onDelete: async () => {},
     onList: async () => {},
+    onCustomer: async () => {},
   };
   const billing = {
     secretKey: "rk_test_fixtureNotAKey",
@@ -175,7 +177,10 @@ function fakeStripe() {
         await stripe.onDelete();
         return Response.json({}, { status: stripe.deleteStatus });
       }
-      if (path === "/v1/customers") return Response.json({ id: "cus_fixture" });
+      if (path === "/v1/customers") {
+        await stripe.onCustomer();
+        return Response.json({ id: "cus_fixture" });
+      }
       if (path === "/v1/customers/cus_fixture" && method === "POST")
         return Response.json({ id: "cus_fixture" });
       if (path === "/v1/customers/cus_fixture")
@@ -254,11 +259,12 @@ test("Cloud Run app serves only canonical browser routes and public assets", asy
   for (const path of [
     "/internal/auth/admit",
     "/internal/auth/preserve-eligibility",
+    "/internal/billing/enrol-pending",
   ])
     expect((await request(path, "app.example", "POST")).status).toBe(404);
 });
 
-test("the admission role serves auth's two calls and nothing else", async () => {
+test("the admission role serves auth's two calls and the enrolment sweep, and nothing else", async () => {
   const { createAdmitApp } = await import("../src/index");
   const { admitRuntimeConfig } = await import("../src/config");
   const env = {
@@ -291,6 +297,7 @@ test("the admission role serves auth's two calls and nothing else", async () => 
   for (const path of [
     "/internal/auth/admit",
     "/internal/auth/preserve-eligibility",
+    "/internal/billing/enrol-pending",
   ]) {
     // Routed to admission, which refuses a missing bearer before anything else.
     expect((await request(path)).status).toBe(401);
@@ -733,8 +740,11 @@ test("billing checkout and portal: 503 without config; signed-in CSRF forms; the
     );
     stripe.calls.length = 0;
     await leavesFor(await send("/billing/checkout", {}), checkoutUrl);
+    // The create carries no email (its key must see the same parameters on
+    // every attempt), so the email is copied right after.
     expect(stripe.calls.map((call) => call.call)).toEqual([
       "POST /v1/customers",
+      "POST /v1/customers/cus_fixture",
       "POST /v1/checkout/sessions",
     ]);
     expect(await clock()).toEqual({
@@ -1188,6 +1198,69 @@ test("account deletion: a Stripe failure keeps the account and its writing; retr
     expect(returning[0]!.user_id).not.toBe(fixture.userId);
     expect(returning[0]!.subscription_status).toBe("canceled");
     // Ending the customer ran with no transaction open.
+    expect(stripe.inTransaction).toEqual([]);
+  } finally {
+    quiet.mockRestore();
+    await fixture.dispose();
+  }
+}, 30000);
+
+test("account deletion fences enrolment: while one holds a live lease it answers 503; a holder past its lease can no longer link the customer it made, and no trial starts", async () => {
+  const fixture = await deletionFixture();
+  const { local, send, stripe, userId } = fixture;
+  const quiet = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    await local.db.query(sql`UPDATE store_config SET trials_enabled=true`);
+    // Waiting on its trial, no customer yet.
+    await local.db.query(
+      sql`UPDATE trial_accounts SET stripe_customer_id=NULL,subscription_status=NULL`,
+    );
+    // An enrolment pauses with its customer create in flight.
+    let resume = () => {};
+    let paused = false;
+    stripe.onCustomer = () =>
+      new Promise<void>((go) => {
+        paused = true;
+        resume = go;
+      });
+    const enrolment = ensureSubscription(
+      local.config,
+      userId,
+      "fixture@example.invalid",
+    );
+    while (!paused) await Bun.sleep(5);
+    const operation = operationIn(await (await send("/account/delete")).text());
+    const confirm = { operation, confirm: "delete my account" };
+    // Its lease is live: deletion waits it out, calling nothing.
+    expect((await send("/account/delete", confirm)).status).toBe(503);
+    // Later, past the lease, with erasing the writing failing: deletion fences
+    // enrolment, finds no customer to end and records the step.
+    await local.db.query(
+      sql`UPDATE trial_accounts SET enrol_lease_until=clock_timestamp()-interval '1 second'`,
+    );
+    await local.pg.exec(
+      `CREATE FUNCTION fixture_outage() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fixture erase outage'; END $$`,
+    );
+    await local.pg.exec(
+      `CREATE TRIGGER fixture_outage BEFORE DELETE ON users FOR EACH ROW EXECUTE FUNCTION fixture_outage()`,
+    );
+    expect((await send("/account/delete", confirm)).status).toBe(503);
+    // The paused holder resumes: Stripe made its customer, but the fence
+    // refuses the link, so it starts no trial.
+    resume();
+    await expect(enrolment).rejects.toMatchObject({ status: 503 });
+    expect(
+      await local.db.query(
+        sql`SELECT stripe_customer_id AS customer,subscription_status AS status FROM trial_accounts`,
+      ),
+    ).toEqual([{ customer: null, status: null }]);
+    await local.pg.exec(`DROP TRIGGER fixture_outage ON users`);
+    expect((await send("/account/delete", confirm)).status).toBe(200);
+    // No trial anywhere, and no DELETE was needed: the customer was never linked
+    // (an orphan with no subscription, never charged).
+    expect(stripe.calls.map(({ call }) => call)).toEqual([
+      "POST /v1/customers",
+    ]);
     expect(stripe.inTransaction).toEqual([]);
   } finally {
     quiet.mockRestore();
@@ -2169,9 +2242,17 @@ test("admission never waits on Stripe: it admits at once and enrols in the backg
     });
     expect(stripe.calls.map((call) => call.call)).toEqual([
       "POST /v1/customers",
+      "POST /v1/customers/cus_fixture",
       "GET /v1/subscriptions?customer=cus_fixture&status=all&limit=10",
       "POST /v1/subscriptions",
     ]);
+    // Keyed by the enrolment generation, never by the time; the create carries
+    // no email, which is copied right after.
+    const keys = stripe.calls.map(({ idempotency }) => idempotency);
+    expect(keys[0]).toMatch(/^milton-customer-m_[0-9a-f-]+-g0$/);
+    expect(keys[3]).toMatch(/^milton-subscription-m_[0-9a-f-]+-g0$/);
+    expect(stripe.calls[0]).not.toHaveProperty("email");
+    expect(stripe.calls[1]).toMatchObject({ email: "waiting@example.invalid" });
     expect(stripe.inTransaction).toEqual([]);
     // Stripe is down: admitted anyway, the failure logged, no status yet, which
     // the gate reads as early access.
@@ -2202,7 +2283,134 @@ test("admission never waits on Stripe: it admits at once and enrols in the backg
   }
 }, 30000);
 
-test("checkout's live read never lands over a newer write: one conflict reads again, a second answers 503", async () => {
+test("the enrolment sweep enrols only accounts left without a trial, five at most per call, honouring leases, and answers counts only", async () => {
+  const local = await pageFixture("page-fixes");
+  const made = { customers: 0, subscriptions: 0 };
+  const inTransaction: string[] = [];
+  const billing = {
+    ...fakeStripe().billing,
+    fetch: async (url: string, init: RequestInit) => {
+      if (openTransactions() > 0) inTransaction.push(url);
+      const { pathname } = new URL(url);
+      if (init.method === "GET") return Response.json({ data: [] });
+      if (pathname === "/v1/customers")
+        return Response.json({ id: `cus_sweep${++made.customers}` });
+      return Response.json({
+        ...stripeSubscription("trialing"),
+        id: `sub_sweep${++made.subscriptions}`,
+      });
+    },
+  };
+  const { createAdmitApp } = await import("../src/index");
+  const sweep = (
+    config: typeof local.config,
+    secret = config.admissionSecret,
+  ) =>
+    createAdmitApp(config)(
+      new Request(
+        "https://milton-admit.example.run.app/internal/billing/enrol-pending",
+        {
+          method: "POST",
+          headers: {
+            Authorization: "Bearer " + secret,
+            "Content-Type": "application/json",
+          },
+          body: "{}",
+        },
+      ),
+    );
+  const status = async () =>
+    Object.fromEntries(
+      (
+        await local.db.query<{ id: string; status: string | null }>(
+          sql`SELECT u.id,t.subscription_status AS status FROM users u JOIN trial_accounts t ON t.user_id=u.id ORDER BY u.id`,
+        )
+      ).map(({ id, status }) => [id, status]),
+    );
+  try {
+    await local.db.query(sql`UPDATE store_config SET trials_enabled=true`);
+    // Seven waiting long enough, one of them a sign-in whose background
+    // enrolment stalled (an expired lease), plus accounts the sweep must leave.
+    for (const id of ["w1", "w2", "w3", "w4", "w5", "w6"])
+      await local.db.query(
+        sql`INSERT INTO users(id,created_at) VALUES (${id},clock_timestamp()-interval '2 hours')`,
+      );
+    await local.db.query(
+      sql`INSERT INTO users(id,created_at) VALUES ('stalled',clock_timestamp()-interval '3 hours')`,
+    );
+    await local.db.query(
+      sql`INSERT INTO users(id,created_at,test_account) VALUES ('test',clock_timestamp()-interval '2 hours',true)`,
+    );
+    for (const id of ["fresh", "leased", "returning", "paid"])
+      await local.db.query(
+        sql`INSERT INTO users(id,created_at) VALUES (${id},clock_timestamp()-interval '2 hours')`,
+      );
+    await local.db.query(
+      sql`INSERT INTO trial_accounts(user_id,started_at) SELECT id,created_at+interval '1 minute' FROM users`,
+    );
+    await local.db.query(
+      sql`UPDATE trial_accounts SET started_at=clock_timestamp()-interval '1 minute' WHERE user_id='fresh'`,
+    );
+    await local.db.query(
+      sql`UPDATE trial_accounts SET enrol_lease_until=clock_timestamp()+interval '1 minute' WHERE user_id='leased'`,
+    );
+    await local.db.query(
+      sql`UPDATE trial_accounts SET enrol_lease_until=clock_timestamp()-interval '1 minute' WHERE user_id='stalled'`,
+    );
+    await local.db.query(
+      sql`UPDATE trial_accounts SET started_at=started_at-interval '1 day' WHERE user_id='returning'`,
+    );
+    await local.db.query(
+      sql`UPDATE trial_accounts SET subscription_status='active' WHERE user_id='paid'`,
+    );
+    // Without the bearer, refused; with billing unconfigured, nothing to do.
+    expect(
+      (await sweep({ ...local.config, billing }, "x".repeat(32))).status,
+    ).toBe(401);
+    const off = await sweep(local.config);
+    expect(off.status).toBe(204);
+    expect(made.customers).toBe(0);
+    const config = { ...local.config, billing };
+    // Oldest first, five at a time: the stalled one first.
+    const first = await sweep(config);
+    expect(first.status).toBe(200);
+    const body = await first.text();
+    expect(JSON.parse(body)).toEqual({
+      attempted: 5,
+      enrolled: 5,
+      failed: 0,
+      remaining: 2,
+    });
+    expect(body).not.toMatch(/w[0-9]|stalled|cus_|example/);
+    expect((await status()).stalled).toBe("trialing");
+    expect(await (await sweep(config)).json()).toEqual({
+      attempted: 2,
+      enrolled: 2,
+      failed: 0,
+      remaining: 0,
+    });
+    expect(await status()).toEqual({
+      fresh: null,
+      leased: null,
+      paid: "active",
+      returning: null,
+      stalled: "trialing",
+      test: null,
+      w1: "trialing",
+      w2: "trialing",
+      w3: "trialing",
+      w4: "trialing",
+      w5: "trialing",
+      w6: "trialing",
+    });
+    expect(made).toEqual({ customers: 7, subscriptions: 7 });
+    expect(inTransaction).toEqual([]);
+  } finally {
+    await local.dispose();
+  }
+}, 30000);
+
+test("checkout's live read never lands over a newer write, an empty one included: one conflict reads again, a second answers 503", async () => {
   const { stripe, billing } = fakeStripe();
   const fixture = await accountFixture({ billing });
   const { send, local } = fixture;
@@ -2218,14 +2426,17 @@ test("checkout's live read never lands over a newer write: one conflict reads ag
     await local.db.query(
       sql`INSERT INTO trial_accounts(user_id,started_at,stripe_customer_id,subscription_status) SELECT id,clock_timestamp(),'cus_fixture','canceled' FROM users`,
     );
-    // While each read is out, another writer stores a newer state, and the read
-    // answers what Stripe had before it.
+    // While each read is out, another writer stores a newer state, advancing
+    // the revision as every Stripe-state writer does, and the read answers what
+    // Stripe had before it.
+    const newer = (status: string) =>
+      local.db.query(
+        sql`UPDATE trial_accounts SET subscription_status=${status},stripe_revision=stripe_revision+1`,
+      );
     let conflicts = 1;
     stripe.onList = async () => {
       if (conflicts-- <= 0) return;
-      await local.db.query(
-        sql`UPDATE trial_accounts SET subscription_status='past_due'`,
-      );
+      await newer("past_due");
       stripe.subscriptions = [stripeSubscription("active")];
     };
     stripe.subscriptions = [stripeSubscription("trialing")];
@@ -2244,9 +2455,7 @@ test("checkout's live read never lands over a newer write: one conflict reads ag
     conflicts = 2;
     stripe.onList = async () => {
       if (conflicts-- <= 0) return;
-      await local.db.query(
-        sql`UPDATE trial_accounts SET subscription_status=${conflicts ? "paused" : "past_due"}`,
-      );
+      await newer(conflicts ? "paused" : "past_due");
     };
     stripe.subscriptions = [stripeSubscription("trialing")];
     stripe.calls.length = 0;
@@ -2256,6 +2465,30 @@ test("checkout's live read never lands over a newer write: one conflict reads ag
       "GET /v1/subscriptions?customer=cus_fixture&status=all&limit=10",
       "GET /v1/subscriptions?customer=cus_fixture&status=all&limit=10",
     ]);
+    // An empty read is checked too: the stored state goes canceled to active
+    // while a read that finds nothing managed is out. It must not sell a second
+    // subscription: it reads again, finds active and goes to the portal.
+    await local.db.query(
+      sql`UPDATE trial_accounts SET subscription_status='canceled'`,
+    );
+    conflicts = 1;
+    stripe.onList = async () => {
+      if (conflicts-- <= 0) return;
+      await newer("active");
+      stripe.subscriptions = [stripeSubscription("active")];
+    };
+    stripe.subscriptions = [stripeSubscription("canceled")];
+    stripe.calls.length = 0;
+    const empty = await send("/billing/checkout", {});
+    expect(empty.status).toBe(200);
+    expect(await empty.text()).toContain("billing.stripe.com");
+    expect(stripe.calls.map(({ call }) => call)).toEqual([
+      "GET /v1/subscriptions?customer=cus_fixture&status=all&limit=10",
+      "GET /v1/subscriptions?customer=cus_fixture&status=all&limit=10",
+      "POST /v1/customers/cus_fixture",
+      "POST /v1/billing_portal/sessions",
+    ]);
+    expect(await status()).toBe("active");
     expect(stripe.inTransaction).toEqual([]);
   } finally {
     await fixture.dispose();

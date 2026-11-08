@@ -124,6 +124,89 @@ describe("auth product boundaries", () => {
     ]);
     expect(calls[0]!.headers.has("x-serverless-authorization")).toBe(false);
   });
+  test("maintenance asks milton-admit to enrol pending accounts with the identity token and bearer, logs counts only, and skips without AUTH_ADMISSION_URL", async () => {
+    const { sweepPendingEnrolments } =
+      await import("../scripts/enrol-pending.ts");
+    const run = "https://milton-admit-419545871671.us-east4.run.app";
+    const now = Math.floor(Date.now() / 1000);
+    const jwt = [{ alg: "RS256" }, { aud: run, exp: now + 3600 }, "signature"]
+      .map((p) =>
+        Buffer.from(typeof p === "string" ? p : JSON.stringify(p)).toString(
+          "base64url",
+        ),
+      )
+      .join(".");
+    let answer = () =>
+      Response.json({ attempted: 2, enrolled: 1, failed: 1, remaining: 0 });
+    const calls: { url: string; headers: Headers; body?: string }[] = [];
+    const networkFetch = async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      const url = String(input);
+      calls.push({
+        url,
+        headers: new Headers(init?.headers),
+        body: init?.body ? String(init.body) : undefined,
+      });
+      if (url.startsWith("http://metadata.google.internal/"))
+        return new Response(jwt);
+      return answer();
+    };
+    const secret = "s".repeat(32);
+    const env = {
+      NODE_ENV: "production",
+      AUTH_ADMISSION_URL: run,
+      AUTH_ADMISSION_SECRET: secret,
+    };
+    const lines: string[] = [];
+    const log = spyOn(console, "log").mockImplementation((...a) => {
+      lines.push(a.join(" "));
+    });
+    const error = spyOn(console, "error").mockImplementation((...a) => {
+      lines.push(a.map((x) => JSON.stringify(x)).join(" "));
+    });
+    try {
+      expect(await sweepPendingEnrolments({}, networkFetch)).toBe("skipped");
+      expect(calls).toEqual([]);
+      expect(lines).toEqual([
+        "Pending enrolment sweep skipped: AUTH_ADMISSION_URL is not configured.",
+      ]);
+      expect(await sweepPendingEnrolments(env, networkFetch)).toBe("done");
+      expect(calls.map((c) => c.url)).toEqual([
+        "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=" +
+          encodeURIComponent(run),
+        run + "/internal/billing/enrol-pending",
+      ]);
+      expect(calls[1]!.headers.get("authorization")).toBe(`Bearer ${secret}`);
+      expect(calls[1]!.headers.get("x-serverless-authorization")).toBe(
+        `Bearer ${jwt}`,
+      );
+      expect(calls[1]!.body).toBe("{}");
+      expect(lines[1]).toBe(
+        'Pending enrolments: {"attempted":2,"enrolled":1,"failed":1,"remaining":0}',
+      );
+      // A refused or unreadable answer, a short secret or a non-run.app origin
+      // in production fails the step; billing off does not.
+      answer = () => new Response(null, { status: 503 });
+      expect(await sweepPendingEnrolments(env, networkFetch)).toBe("failed");
+      answer = () => Response.json({ attempted: "x" });
+      expect(await sweepPendingEnrolments(env, networkFetch)).toBe("failed");
+      answer = () => new Response(null, { status: 204 });
+      expect(await sweepPendingEnrolments(env, networkFetch)).toBe("done");
+      const before = calls.length;
+      for (const bad of [
+        { ...env, AUTH_ADMISSION_SECRET: "short" },
+        { ...env, AUTH_ADMISSION_URL: "http://127.0.0.1:19912" },
+      ])
+        expect(await sweepPendingEnrolments(bad, networkFetch)).toBe("failed");
+      expect(calls).toHaveLength(before);
+      expect(lines.join("\n")).not.toContain(secret);
+    } finally {
+      log.mockRestore();
+      error.mockRestore();
+    }
+  });
   test("client metadata URLs need an https DNS host without credentials", async () => {
     const { metadataDocumentUrlAllowed: allowed } =
       await import("../src/provider.ts");

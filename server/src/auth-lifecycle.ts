@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { z } from "zod";
 import type { RuntimeConfig } from "./config";
 import {
+  billingForAccount,
   database,
   forgetStripeCustomer,
   lockActiveAccount,
@@ -242,9 +243,16 @@ async function advanceOperation(config: RuntimeConfig, original: Operation) {
   }
   if (op.kind === "delete") {
     if (op.progress === "refused") {
+      // First fence enrolment, so no attempt can link a customer or start a
+      // trial from here on; while one still holds a live lease this answers 503
+      // and the retry waits it out. Native refusal leaves the account active, so
+      // only this stops an enrolment already under way.
+      if (!(await billingForAccount(config, op.user_id).fenceEnrolment()))
+        throw unavailable();
       // Stripe is called with no transaction open. Concurrent retries may each
       // send the DELETE; a repeat is confirmed by the read that reports the
-      // customer deleted. The step is then recorded under the operation's lock.
+      // customer deleted. The step is then recorded under the operation's lock,
+      // refusing while an enrolment lease is live.
       const ended = await endStripeCustomer(config, op.user_id);
       await database(config).transaction(async (tx) => {
         const current = operationSchema.parse(
@@ -255,7 +263,8 @@ async function advanceOperation(config: RuntimeConfig, original: Operation) {
           )[0],
         );
         if (current.progress !== "refused") return;
-        // A customer stored since the read is still live: the retry ends it.
+        // A customer stored since the read, or an enrolment still under way, is
+        // still live: the retry ends it.
         if (!(await forgetStripeCustomer(tx, current.user_id, ended)))
           throw unavailable();
         await tx.query(

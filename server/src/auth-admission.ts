@@ -3,7 +3,9 @@ import { sql } from "drizzle-orm";
 import { z } from "zod";
 import type { AdmitConfig } from "./config";
 import {
+  billingForAccount,
   database,
+  enrolmentSweep,
   lockActiveAccount,
   resolveIdentityAccount,
   saveFingerprints,
@@ -86,7 +88,40 @@ export async function saveEligibility(
 export const ADMISSION_PATHS = [
   "/internal/auth/admit",
   "/internal/auth/preserve-eligibility",
+  "/internal/billing/enrol-pending",
 ];
+
+// At most this many accounts per sweep, and none started after the budget, so
+// one call ends well inside the caller's 28 s and milton-admit's 30 s timeout:
+// one account can take about 20 s (four Stripe calls at 5 s).
+const SWEEP_BATCH = 5;
+const SWEEP_BUDGET_MS = 5000;
+
+/** The auth maintenance job's sweep, every 15 minutes: enrols accounts left
+ * without a trial (see pendingEnrolments), one at a time inside the request, so
+ * it runs with request CPU, never in the background. One account's failure is
+ * logged by ensureSubscription and does not stop the rest. Answers counts only;
+ * with billing unconfigured, 204 and nothing done. */
+async function enrolPending(config: AdmitConfig) {
+  const headers = { "Cache-Control": "no-store" };
+  if (!config.billing) return new Response(null, { status: 204, headers });
+  const sweep = enrolmentSweep(config);
+  const started = Date.now();
+  const counts = { attempted: 0, enrolled: 0, failed: 0, remaining: 0 };
+  for (const userId of await sweep.pending(SWEEP_BATCH)) {
+    if (Date.now() - started > SWEEP_BUDGET_MS) break;
+    counts.attempted++;
+    try {
+      await ensureSubscription(config, userId);
+      if ((await billingForAccount(config, userId).account()).status !== null)
+        counts.enrolled++;
+    } catch {
+      counts.failed++;
+    }
+  }
+  counts.remaining = await sweep.remaining();
+  return Response.json(counts, { headers });
+}
 export function authAdmission(config: AdmitConfig) {
   return async (request: Request): Promise<Response> => {
     const headers = { "Cache-Control": "no-store" };
@@ -106,6 +141,10 @@ export function authAdmission(config: AdmitConfig) {
     const bounded = await boundRequest(request);
     if (bounded instanceof Response) return bounded;
     const body: unknown = await bounded.json().catch(() => null);
+    if (new URL(request.url).pathname === "/internal/billing/enrol-pending")
+      return enrolPending(config).catch(
+        () => new Response(null, { status: 503, headers }),
+      );
     if (
       new URL(request.url).pathname === "/internal/auth/preserve-eligibility"
     ) {

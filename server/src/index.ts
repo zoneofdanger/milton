@@ -24,9 +24,10 @@ export function createMiltonApp(config: RuntimeConfig, browserOnly = false) {
 }
 
 /** The admission service (MILTON_SERVICE=admit, Cloud Run `milton-admit`):
- * auth's two calls and nothing else. It is not behind the load balancer, and
- * Cloud Run's invoker check admits only auth's service account; the bearer is
- * the second check. */
+ * auth's two calls and the auth maintenance job's pending-enrolment sweep, and
+ * nothing else. It is not behind the load balancer, and Cloud Run's invoker
+ * check admits only auth's and the maintenance job's service accounts; the
+ * bearer is the second check. */
 export function createAdmitApp(config: AdmitConfig) {
   const admission = authAdmission(config);
   return async (request: Request): Promise<Response> => {

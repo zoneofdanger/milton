@@ -87,8 +87,16 @@ export const trialAccounts = pgTable(
       withTimezone: true,
     }),
     currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
-    // While in the future, one enrolment attempt may call Stripe (0010).
+    // While in the future, one enrolment attempt may call Stripe; 'infinity'
+    // once account deletion has begun (0010).
     enrolLeaseUntil: timestamp("enrol_lease_until", { withTimezone: true }),
+    // Names the enrolment's Stripe idempotency keys; advances only after a
+    // refusal Stripe replays for them (0010).
+    enrolGeneration: integer("enrol_generation").notNull().default(0),
+    // Advances on every accepted write of the Stripe state above (0010).
+    stripeRevision: bigint("stripe_revision", { mode: "number" })
+      .notNull()
+      .default(0),
   },
   (t) => [
     check("trial_notice_stage", sql`${t.noticeStage} BETWEEN 0 AND 2`),

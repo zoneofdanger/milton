@@ -1098,12 +1098,18 @@ try {
       erasure.release();
     }
   }
-  child(
+  // No admission URL here, so the job's last step, the enrolment sweep, logs
+  // that it is skipped and the job still succeeds; its call is unit-tested.
+  const maintained = child(
     [
       new URL("../apps/auth/scripts/maintain.ts", sourceRoot).pathname,
       "--apply",
     ],
-    ownerEnv,
+    { ...ownerEnv, AUTH_ADMISSION_URL: "" },
+  );
+  assert.match(
+    maintained.stdout,
+    /Pending enrolment sweep skipped: AUTH_ADMISSION_URL is not configured\./,
   );
   assert.deepEqual(
     (await owner.query("SELECT tool FROM usage_calls ORDER BY at")).rows,
@@ -1310,6 +1316,9 @@ try {
       }
       if (path === "/v1/customers/cus_fixture" && init.method === "GET")
         return Response.json({ deleted: stripe.deleted });
+      // The sign-in email, copied after the create.
+      if (path === "/v1/customers/cus_fixture" && init.method === "POST")
+        return Response.json({ id: "cus_fixture" });
       throw new Error("unexpected_fictional_stripe_request");
     },
   };

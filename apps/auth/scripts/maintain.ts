@@ -2,6 +2,7 @@ import { databaseOptions } from "../src/database.ts";
 import pg from "pg";
 import { safeError } from "../src/config.ts";
 import { pruneUsage } from "./prune-usage.ts";
+import { sweepPendingEnrolments } from "./enrol-pending.ts";
 if (process.argv[2] !== "--apply" || !process.env.AUTH_OWNER_DATABASE_URL)
   throw new Error("explicit_owner_maintenance_required");
 const pool = new pg.Pool({
@@ -34,3 +35,7 @@ try {
 } finally {
   await pool.end();
 }
+// Last, after the other steps whatever they did: a failed sweep sets the exit
+// code but never stops them.
+if ((await sweepPendingEnrolments(process.env, fetch)) === "failed")
+  process.exitCode = 1;

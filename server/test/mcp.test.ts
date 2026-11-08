@@ -55,6 +55,7 @@ test("standalone MCP needs no browser secret and refuses noncanonical hosts", as
   for (const path of [
     "/internal/auth/admit",
     "/internal/auth/preserve-eligibility",
+    "/internal/billing/enrol-pending",
   ])
     expect(
       (

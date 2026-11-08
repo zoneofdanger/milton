@@ -1,5 +1,5 @@
 {
-  "id": "ee6857e3-d6d0-48de-bf8f-a62ba8d802a9",
+  "id": "0f85254a-916e-4cc8-8e31-3350825f2eca",
   "prevId": "d19ad1da-5d2f-4f46-b819-e2ef1f6def8c",
   "version": "7",
   "dialect": "postgresql",
@@ -1522,6 +1522,20 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
+        },
+        "enrol_generation": {
+          "name": "enrol_generation",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "stripe_revision": {
+          "name": "stripe_revision",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
         }
       },
       "indexes": {},

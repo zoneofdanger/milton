@@ -140,7 +140,7 @@ function fakeStripe() {
     // What a read of the customer answers after a DELETE 404.
     customer: { status: 404, body: {} as Record<string, unknown> },
     subscriptions: [] as Record<string, unknown>[],
-    // Runs as Stripe creates a customer, before it answers.
+    // Runs as Stripe creates or updates a customer, before it answers.
     onCustomer: async () => {},
     calls: [] as Record<string, unknown>[],
     onDelete: async () => {},
@@ -173,8 +173,10 @@ function fakeStripe() {
         await stripe.onCustomer();
         return Response.json({ id: "cus_fixture" });
       }
-      if (path === "/v1/customers/cus_fixture" && method === "POST")
+      if (path === "/v1/customers/cus_fixture" && method === "POST") {
+        await stripe.onCustomer();
         return Response.json({ id: "cus_fixture" });
+      }
       if (path === "/v1/customers/cus_fixture")
         return Response.json(stripe.customer.body, {
           status: stripe.customer.status,
@@ -188,8 +190,11 @@ function fakeStripe() {
       }
       if (path === "/v1/checkout/sessions")
         return Response.json({
+          id: "cs_test_fixture",
           url: "https://checkout.stripe.com/c/pay/cs_test_fixture",
         });
+      if (path === "/v1/checkout/sessions/cs_test_fixture/expire")
+        return Response.json({ id: "cs_test_fixture", status: "expired" });
       if (path === "/v1/billing_portal/sessions")
         return Response.json({
           url: "https://billing.stripe.com/p/session/test_fixture",
@@ -1247,6 +1252,152 @@ test("account deletion: a checkout in flight as it begins links no customer and 
       sessions: 0,
       customer: undefined,
     });
+  } finally {
+    quiet.mockRestore();
+    await fixture.dispose();
+  }
+}, 30000);
+
+test("account deletion: a refused link leaves alone the customer an earlier request linked under the same idempotency key", async () => {
+  const fixture = await deletionFixture();
+  const { local, send, stripe } = fixture;
+  const quiet = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    await local.db.query(
+      sql`UPDATE trial_accounts SET stripe_customer_id=NULL,subscription_status='canceled'`,
+    );
+    const operation = operationIn(await (await send("/account/delete")).text());
+    const confirm = { operation, confirm: "delete my account" };
+    // Ending the customer fails, so the deletion stops refused, the customer
+    // still linked.
+    stripe.down = "DELETE /v1/customers/cus_fixture";
+    // While Stripe creates this checkout's customer, another checkout in the
+    // same minute gets the same one and links it, then the deletion begins.
+    let earlier: Response | undefined;
+    let deletion: Response | undefined;
+    stripe.onCustomer = async () => {
+      stripe.onCustomer = async () => {};
+      earlier = await send("/billing/checkout", {});
+      deletion = await send("/account/delete", confirm);
+    };
+    const later = await send("/billing/checkout", {});
+    expect(earlier?.status).toBe(200);
+    expect(deletion?.status).toBe(503);
+    expect(later.status).toBe(409);
+    // Only the deletion tries to delete the linked customer.
+    expect(
+      stripe.calls.filter(({ call }) => String(call).startsWith("DELETE")),
+    ).toHaveLength(1);
+    expect((await fixture.remains()).customer).toBe("cus_fixture");
+    stripe.down = false;
+    stripe.calls.length = 0;
+    expect((await send("/account/delete", confirm)).status).toBe(200);
+    expect(stripe.calls.map(({ call }) => call)).toEqual([
+      "DELETE /v1/customers/cus_fixture",
+    ]);
+  } finally {
+    quiet.mockRestore();
+    await fixture.dispose();
+  }
+}, 30000);
+
+test("account deletion: a checkout with a stored customer expires the session it opened once the deletion has begun", async () => {
+  const fixture = await deletionFixture();
+  const { local, send, stripe } = fixture;
+  const quiet = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    await local.db.query(
+      sql`UPDATE trial_accounts SET subscription_status='canceled'`,
+    );
+    const operation = operationIn(await (await send("/account/delete")).text());
+    // Erasing fails, so the deletion stops once its Stripe step is done.
+    await local.pg.exec(
+      `CREATE FUNCTION fixture_outage() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fixture erase outage'; END $$`,
+    );
+    await local.pg.exec(
+      `CREATE TRIGGER fixture_outage BEFORE DELETE ON users FOR EACH ROW EXECUTE FUNCTION fixture_outage()`,
+    );
+    // The deletion begins and ends the customer while checkout copies the email.
+    let deletion: Response | undefined;
+    stripe.onCustomer = async () => {
+      stripe.onCustomer = async () => {};
+      deletion = await send("/account/delete", {
+        operation,
+        confirm: "delete my account",
+      });
+    };
+    const checkout = await send("/billing/checkout", {});
+    expect(deletion?.status).toBe(503);
+    expect(checkout.status).toBe(409);
+    expect(await checkout.text()).toContain("This account is being deleted");
+    expect(
+      stripe.calls
+        .map(({ call }) => String(call))
+        .filter((call) => !call.startsWith("GET /v1/subscriptions")),
+    ).toEqual([
+      "POST /v1/customers/cus_fixture",
+      "DELETE /v1/customers/cus_fixture",
+      "POST /v1/checkout/sessions",
+      "POST /v1/checkout/sessions/cs_test_fixture/expire",
+    ]);
+  } finally {
+    quiet.mockRestore();
+    await fixture.dispose();
+  }
+}, 30000);
+
+test("billing answers 409 to an account whose deletion has begun, before any Stripe call", async () => {
+  const fixture = await deletionFixture();
+  const { local, send, stripe, userId } = fixture;
+  try {
+    await send("/");
+    await local.db.query(
+      sql`UPDATE trial_accounts SET subscription_status='canceled'`,
+    );
+    // A refusal recorded after this request's sign-in check, which is all a
+    // request already past that check would see of it.
+    await local.db.query(
+      sql`INSERT INTO milton_app.lifecycle(operation_id,issuer,subject,incarnation,user_id,kind,requester_hash,progress) VALUES(${crypto.randomUUID()}::uuid,${issuer},'account','f:1',${userId},'delete',${"a".repeat(64)},'refused')`,
+    );
+    for (const route of ["/billing/checkout", "/billing/portal"]) {
+      const refused = await send(route, {});
+      expect([route, refused.status]).toEqual([route, 409]);
+      expect(await refused.text()).toContain("This account is being deleted");
+    }
+    expect(stripe.calls).toEqual([]);
+  } finally {
+    await fixture.dispose();
+  }
+}, 30000);
+
+test("account deletion: native refusal and the progress billing reads commit together", async () => {
+  const fixture = await deletionFixture();
+  const { local, send } = fixture;
+  const quiet = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    const operation = operationIn(await (await send("/account/delete")).text());
+    const confirm = { operation, confirm: "delete my account" };
+    await local.pg.exec(
+      `CREATE FUNCTION fixture_refusal_outage() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fixture refusal outage'; END $$`,
+    );
+    await local.pg.exec(
+      `CREATE TRIGGER fixture_refusal_outage BEFORE UPDATE ON milton_app.lifecycle FOR EACH ROW WHEN (NEW.progress='refused') EXECUTE FUNCTION fixture_refusal_outage()`,
+    );
+    expect((await send("/account/delete", confirm)).status).toBe(503);
+    // Neither committed: native deletion has not begun, so billing reading
+    // the operation as pending is right, and the session still works.
+    const native = await local.db.query(
+      sql`SELECT 1 FROM milton_guard.fixture_operation`,
+    );
+    const progress = await local.db.query<{ progress: string }>(
+      sql`SELECT progress FROM milton_app.lifecycle`,
+    );
+    expect([native.length, progress]).toEqual([0, [{ progress: "pending" }]]);
+    expect((await send("/tps-report")).status).toBe(200);
+    await local.pg.exec(
+      `DROP TRIGGER fixture_refusal_outage ON milton_app.lifecycle`,
+    );
+    expect((await send("/account/delete", confirm)).status).toBe(200);
   } finally {
     quiet.mockRestore();
     await fixture.dispose();

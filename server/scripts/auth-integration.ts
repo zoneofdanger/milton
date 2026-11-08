@@ -2894,77 +2894,115 @@ try {
       "lost native link notification -> unlink -> delete -> changed-email recreation preserves trial eligibility; callback uncertainty is safe and native-only unlink admits nobody",
     );
   }
-  // A deletion that begins while an enrolment holds the account's billing row,
-  // on real PostgreSQL row locks: the enrolment has linked its customer and is
-  // starting the trial, uncommitted, when the deletion reads the customer.
+  // Account deletion racing an enrolment or a checkout, on real PostgreSQL row
+  // locks, each case on a fresh account.
   {
-    stage = "deletion during an enrolment";
-    await owner.query(
-      'delete from milton_auth."rateLimit"; delete from milton_guard.rate_bucket',
-    );
-    authCookies.clear();
-    appCookies.clear();
-    const raceEmail = "deletion-race@example.com";
-    const racePassword = "Fictional deletion race password";
-    await request(native.handler, ISSUER + "/sign-up/email", authCookies, {
-      email: raceEmail,
-      password: racePassword,
-      name: "Fictional race",
-    });
-    await native.handler(
-      new Request(mail.findLast((m) => m.kind === "verify")!.url),
-    );
-    assert.equal(
-      (
-        await request(native.handler, ISSUER + "/sign-in/email", authCookies, {
-          email: raceEmail,
-          password: racePassword,
-        })
-      ).status,
-      200,
-    );
-    const start = await request(app, config.appOrigin + "/login", appCookies);
-    const authorized = await request(
-      native.handler,
-      start.headers.get("Location")!,
-      authCookies,
-    );
-    assert.equal(
-      (await request(app, authorized.headers.get("Location")!, appCookies))
-        .status,
-      303,
-    );
-    const authority = (
-      await appPool.query(
-        "select subject,sid,binding,incarnation,generation from milton_app.session order by created_at desc limit 1",
-      )
-    ).rows[0];
-    const { userId: raceUser } = await lookupIdentityAccount(config, {
-      provider: ISSUER,
-      subject: authority.subject,
-    });
-    // Waiting for its trial, as the subscription backfill finds an account.
-    await owner.query(
-      "update trial_accounts set stripe_customer_id=null,stripe_subscription_id=null,subscription_status=null where user_id=$1",
-      [raceUser],
-    );
+    stage = "deletion during an enrolment or a checkout";
+    const signedUp = async (email: string) => {
+      await owner.query(
+        'delete from milton_auth."rateLimit"; delete from milton_guard.rate_bucket',
+      );
+      authCookies.clear();
+      appCookies.clear();
+      const racePassword = "Fictional deletion race password";
+      await request(native.handler, ISSUER + "/sign-up/email", authCookies, {
+        email,
+        password: racePassword,
+        name: "Fictional race",
+      });
+      await native.handler(
+        new Request(mail.findLast((m) => m.kind === "verify")!.url),
+      );
+      assert.equal(
+        (
+          await request(
+            native.handler,
+            ISSUER + "/sign-in/email",
+            authCookies,
+            { email, password: racePassword },
+          )
+        ).status,
+        200,
+      );
+      const start = await request(app, config.appOrigin + "/login", appCookies);
+      const authorized = await request(
+        native.handler,
+        start.headers.get("Location")!,
+        authCookies,
+      );
+      assert.equal(
+        (await request(app, authorized.headers.get("Location")!, appCookies))
+          .status,
+        303,
+      );
+      const authority = (
+        await appPool.query(
+          "select subject,sid,binding,incarnation,generation from milton_app.session order by created_at desc limit 1",
+        )
+      ).rows[0];
+      const { userId } = await lookupIdentityAccount(config, {
+        provider: ISSUER,
+        subject: authority.subject,
+      });
+      // Waiting for its trial, as the subscription backfill finds an account.
+      await owner.query(
+        "update trial_accounts set stripe_customer_id=null,stripe_subscription_id=null,subscription_status=null where user_id=$1",
+        [userId],
+      );
+      const deletions = lifecycleFor(
+        { ...authority, id: authority.subject },
+        appCookies.get("__Host-milton-session")!,
+      );
+      const erased = async () =>
+        (
+          await owner.query("select count(*)::int n from users where id=$1", [
+            userId,
+          ])
+        ).rows[0].n === 0;
+      return { userId, deletions, erased };
+    };
+    // Until `n` lock requests are waiting.
+    const lockWaiters = async (n: number, what: string) => {
+      for (let waited = 0; ; waited += 20) {
+        const waiting = (
+          await owner.query<{ n: number }>(
+            "select count(*)::int n from pg_locks where not granted",
+          )
+        ).rows[0]!.n;
+        if (waiting >= n) return;
+        assert(waited < 5000, what);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+    };
+    const gate = () => {
+      let open = () => {};
+      const opened = new Promise<void>((resolve) => (open = resolve));
+      return { open: () => open(), opened };
+    };
+    // The Stripe stub for these cases: each call is recorded, and a customer or
+    // subscription create awaits its hook before it answers.
     const billing = config.billing!;
     const shared = billing.fetch;
     const calls: string[] = [];
-    let release = () => {};
-    const held = new Promise<void>((resolve) => (release = resolve));
-    let subscribing = () => {};
-    const linked = new Promise<void>((resolve) => (subscribing = resolve));
-    billing.fetch = async (input, init) => {
+    const hooks = { customer: async () => {}, subscription: async () => {} };
+    const stub: typeof shared = async (input, init) => {
       const path = new URL(input).pathname;
       calls.push(`${init.method} ${path}`);
-      if (path === "/v1/customers" && init.method === "POST")
+      if (path === "/v1/customers" && init.method === "POST") {
+        await hooks.customer();
         return Response.json({ id: "cus_race" });
+      }
       if (path === "/v1/subscriptions" && init.method === "GET")
         return Response.json({ data: [] });
+      if (path === "/v1/checkout/sessions" && init.method === "POST")
+        return Response.json({
+          id: "cs_test_race",
+          url: "https://checkout.stripe.com/c/pay/cs_test_race",
+        });
+      if (path === "/v1/checkout/sessions/cs_test_race/expire")
+        return Response.json({ id: "cs_test_race", status: "expired" });
       if (path === "/v1/subscriptions" && init.method === "POST") {
-        subscribing();
-        await held;
+        await hooks.subscription();
         const now = Math.floor(Date.now() / 1000);
         return Response.json({
           id: "sub_race",
@@ -2985,30 +3023,29 @@ try {
         return Response.json({ id: "cus_race", deleted: true });
       throw new Error("unexpected_fictional_stripe_request");
     };
+    // The enrolment has linked its customer and is starting the trial,
+    // uncommitted, when the deletion reads the customer.
+    const raceEmail = "deletion-race@example.com";
+    const { userId: raceUser, deletions, erased } = await signedUp(raceEmail);
+    const subscribing = gate();
+    const release = gate();
+    hooks.subscription = async () => {
+      subscribing.open();
+      await release.opened;
+    };
+    calls.length = 0;
+    billing.fetch = stub;
     try {
       const enrolment = ensureSubscription(config, raceUser, raceEmail).then(
         () => true,
         () => false,
       );
-      await linked;
-      const deletions = lifecycleFor(
-        { ...authority, id: authority.subject },
-        appCookies.get("__Host-milton-session")!,
-      );
+      await subscribing.opened;
       const id = randomUUID();
       const deletion = deletions.run("delete", id);
       // The deletion reaches a row the enrolment holds, then the trial starts.
-      for (let waited = 0; ; waited += 20) {
-        const waiting = (
-          await owner.query<{ n: number }>(
-            "select count(*)::int n from pg_locks where not granted",
-          )
-        ).rows[0]!.n;
-        if (waiting > 0) break;
-        assert(waited < 5000, "the deletion waits on a row lock");
-        await new Promise((resolve) => setTimeout(resolve, 20));
-      }
-      release();
+      await lockWaiters(1, "the deletion waits on a row lock");
+      release.open();
       const enrolled = await enrolment;
       const first = await deletion;
       // A failed deletion gets the retry its page offers.
@@ -3029,20 +3066,108 @@ try {
       // Neither side deadlocks: the deletion waits for the enrolment's row.
       assert.equal(enrolled, true, "the enrolment commits");
       assert.equal(first.failed, false, "the deletion finishes first time");
-      assert.equal(
-        (
-          await owner.query("select count(*)::int n from users where id=$1", [
-            raceUser,
-          ])
-        ).rows[0].n,
-        0,
-      );
+      assert(await erased());
     } finally {
-      release();
+      release.open();
+      hooks.subscription = async () => {};
       billing.fetch = shared;
     }
+    // The enrolment is creating its customer, not yet linked, when the
+    // deletion begins: its link is refused, it deletes that customer and says
+    // the account is being deleted, not to try again.
+    {
+      const email = "enrolment-race@example.com";
+      const { userId, deletions, erased } = await signedUp(email);
+      const creating = gate();
+      const release = gate();
+      hooks.customer = async () => {
+        creating.open();
+        await release.opened;
+      };
+      calls.length = 0;
+      billing.fetch = stub;
+      try {
+        const enrolment = ensureSubscription(config, userId, email).then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+        await creating.opened;
+        const deletion = deletions.run("delete", randomUUID());
+        await lockWaiters(1, "the deletion waits on the enrolment's row");
+        release.open();
+        const refusal = (await enrolment) as
+          { code?: string; status?: number } | undefined;
+        assert.deepEqual(
+          [refusal?.code, refusal?.status],
+          ["account_deleting", 409],
+          "the enrolment answers that the account is being deleted",
+        );
+        const { operation, failed } = await deletion;
+        assert.equal(failed, false);
+        assert.equal(operation.progress, "complete");
+        assert.deepEqual(calls, [
+          "POST /v1/customers",
+          "DELETE /v1/customers/cus_race",
+        ]);
+        assert(await erased());
+      } finally {
+        release.open();
+        hooks.customer = async () => {};
+        billing.fetch = shared;
+      }
+    }
+    // A checkout's link waits behind a row another transaction holds while the
+    // deletion begins: it reads the deletion once it has the row, so it links
+    // nothing and opens no session.
+    {
+      const { userId, deletions, erased } = await signedUp(
+        "checkout-race@example.com",
+      );
+      await owner.query(
+        "update trial_accounts set subscription_status='canceled' where user_id=$1",
+        [userId],
+      );
+      await request(app, config.appOrigin + "/account/delete", appCookies);
+      const holder = await owner.connect();
+      calls.length = 0;
+      billing.fetch = stub;
+      try {
+        await holder.query("begin");
+        await holder.query(
+          "select 1 from trial_accounts where user_id=$1 for update",
+          [userId],
+        );
+        const checkout = request(
+          app,
+          config.appOrigin + "/billing/checkout",
+          appCookies,
+          { csrf: appCookies.get("__Host-milton-csrf")! },
+          true,
+        );
+        await lockWaiters(1, "the checkout's link waits on the held row");
+        const deletion = deletions.run("delete", randomUUID());
+        await lockWaiters(2, "the deletion waits on it too");
+        await holder.query("commit");
+        const answer = await checkout;
+        assert.equal(answer.status, 409);
+        await answer.body?.cancel();
+        const { operation, failed } = await deletion;
+        assert.equal(failed, false);
+        assert.equal(operation.progress, "complete");
+        assert.deepEqual(
+          calls,
+          ["POST /v1/customers", "DELETE /v1/customers/cus_race"],
+          "the link sees the deletion: nothing is linked and no session opens",
+        );
+        assert(await erased());
+      } finally {
+        await holder.query("rollback").catch(() => {});
+        holder.release();
+        billing.fetch = shared;
+      }
+    }
     pass(
-      "a deletion that begins while an enrolment holds the account's billing row waits for it, then deletes the customer it linked before erasing the account",
+      "a deletion that begins while an enrolment holds the account's billing row waits for it and deletes the customer it linked; an enrolment or checkout whose link comes after it begins links nothing, deletes its new customer and answers 409",
     );
   }
   // The test account and its check, through the real auth pages, app and MCP,

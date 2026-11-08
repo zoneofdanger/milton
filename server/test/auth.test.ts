@@ -1767,17 +1767,27 @@ test("OIDC callback is correlated once, checks native proof on every use, and cl
   const local = await pageFixture("oidc-person");
   const protocol = await protocolFixture(local.config);
   let slowUserInfo = false;
+  let rotatedSecret = false;
   const config = {
     ...local.config,
     authFetch: (async (input, init) => {
       if (slowUserInfo && String(input).endsWith("/oauth2/userinfo"))
         await Bun.sleep(50);
+      if (rotatedSecret && String(input).endsWith("/oauth2/token"))
+        return Response.json(
+          {
+            error: "invalid_client",
+            error_description: "Fictional rejected client fixture-secret-text",
+          },
+          { status: 401 },
+        );
       return protocol.transport(input, init);
     }) satisfies typeof protocol.transport,
   };
   const app = appFor(config);
   const jar = new Map<string, string>();
   const send = browser(app, jar);
+  const logged = spyOn(console, "error").mockImplementation(() => {});
   const start = async () => {
     const login = await send("/login");
     expect(login.status).toBe(303);
@@ -1821,6 +1831,26 @@ test("OIDC callback is correlated once, checks native proof on every use, and cl
       expect((await send(callback)).status).toBe(401);
       protocol.state.down = "";
     }
+    // A one-sided secret rotation refuses every sign-in: logged once per attempt,
+    // class and code only. A person declining at the auth service is not logged.
+    logged.mockClear();
+    callback = await start();
+    rotatedSecret = true;
+    expect((await send(callback)).status).toBe(401);
+    rotatedSecret = false;
+    callback = (await start()).replace("code=fictional", "error=access_denied");
+    expect((await send(callback)).status).toBe(401);
+    const lines = logged.mock.calls.map(([line]) => String(line));
+    expect(lines).toEqual([
+      '{"event":"unexpected_error","where":"oidc","class":"ResponseBodyError","code":"OAUTH_RESPONSE_BODY_ERROR"}',
+    ]);
+    for (const secret of [
+      config.oidc.clientSecret,
+      "fixture-secret-text",
+      "invalid_client",
+      "fictional",
+    ])
+      expect(lines.join()).not.toContain(secret);
     callback = await start();
     await local.db.query(
       sql`UPDATE milton_app.flow SET verifier='corrupted-verifier'`,
@@ -1876,6 +1906,7 @@ test("OIDC callback is correlated once, checks native proof on every use, and cl
     );
     expect((await send("/tps-report")).status).toBe(403);
   } finally {
+    logged.mockRestore();
     await local.dispose();
   }
 }, 30000);

@@ -298,7 +298,7 @@ test("a verified event only triggers a re-read: the list decides, a replay and a
     expect(await status()).toBe("paid");
     expect(stripe.calls).toEqual([
       {
-        url: "https://api.stripe.com/v1/subscriptions?customer=cus_fixture&status=all&limit=10",
+        url: "https://api.stripe.com/v1/subscriptions?customer=cus_fixture&status=all&limit=100",
         version: "2026-10-28.endive",
       },
     ]);
@@ -571,9 +571,35 @@ test("the resync repairs a stale managed status an old-style writer left: dry ru
     expect(resyncExitCode(repaired, true)).toBe(0);
     expect(await status()).toBe("paid");
     expect(stripe.calls.map(({ url }) => url)).toEqual([
-      "https://api.stripe.com/v1/subscriptions?customer=cus_fixture&status=all&limit=10",
+      "https://api.stripe.com/v1/subscriptions?customer=cus_fixture&status=all&limit=100",
     ]);
     expect(stripe.inTransaction).toEqual([]);
+  } finally {
+    await local.dispose();
+  }
+});
+
+test("a partial subscription list is a failed read: the resync counts it as failed and stores nothing", async () => {
+  const { local, stripe, billing, status } = await webhookFixture();
+  const config = { ...local.env, billing };
+  try {
+    await local.db.query(
+      sql`UPDATE trial_accounts SET subscription_status='past_due',current_period_start=clock_timestamp()-interval '10 days'`,
+    );
+    // The first page holds only canceled subscriptions; an active one is on
+    // a later page. Deciding from this page would store canceled.
+    stripe.answer = Response.json({
+      data: Array.from({ length: 100 }, () => subscription("canceled")),
+      has_more: true,
+    });
+    const partial = await resyncSubscriptions(
+      config,
+      { apply: true, allowTestKey: true },
+      async () => {},
+    );
+    expect(partial).toEqual({ total: 1, reconciled: 0, failed: 1 });
+    expect(resyncExitCode(partial, true)).toBe(1);
+    expect(await status()).toBe("expired");
   } finally {
     await local.dispose();
   }

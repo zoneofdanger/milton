@@ -134,18 +134,23 @@ type StripeSubscription = StripeSubscriptionState & { created: number };
 
 // Every subscription the customer has, canceled included. Any non-2xx is a failed
 // read, 404 too: an unknown customer proves nothing, and a key from the wrong mode
-// would otherwise mark paying people canceled.
+// would otherwise mark paying people canceled. So is a partial list (has_more):
+// deciding from one page of canceled ones could miss an active one on the next.
+// Stripe's maximum page, 100, leaves room no real customer reaches.
 async function listSubscriptions(billing: StripeApiConfig, customer: string) {
-  return (
-    await stripeAnswer(
-      await stripeCall(
-        billing,
-        "GET",
-        `subscriptions?customer=${customer}&status=all&limit=10`,
-      ),
-      z.object({ data: z.array(stripeSubscription) }),
-    )
-  ).data;
+  const page = await stripeAnswer(
+    await stripeCall(
+      billing,
+      "GET",
+      `subscriptions?customer=${customer}&status=all&limit=100`,
+    ),
+    z.object({
+      data: z.array(stripeSubscription),
+      has_more: z.boolean().optional(),
+    }),
+  );
+  if (page.has_more) throw stripeFailed();
+  return page.data;
 }
 
 const STATUS_ORDER = ["active", "trialing", "past_due"];

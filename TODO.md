@@ -10,7 +10,7 @@ landed and the item is still open), `blocked: <why or #id>`. A bolded headline o
 or fewer states the task; one item is one landing. **A section heading and its preamble are
 shared context for every item beneath it.**
 
-**next-id: 32.** Ids are never reused, so this counter survives deleting the newest item.
+**next-id: 33.** Ids are never reused, so this counter survives deleting the newest item.
 
 ## MVP
 
@@ -92,13 +92,25 @@ reports, memos) and plain text on security screens and anything an assistant rea
       duplicate subscriptions can both charge once the customer has a default payment method
       (the trial's cancel-without-payment-method setting doesn't apply then). An enrolment in
       flight races deletion: deletion can find no customer, finish, and leave the customer and
-      trial the enrolment then creates (main has a narrower form, since deletion reads the
-      customer without the enrolment's row lock; that trial has no card and cancels at its
-      end); a fence must cover every customer link, checkout's included, which bypassed it. And old and new revisions overlap at cutover, with nothing
-      enforcing a quiescent switch.
+      trial the enrolment then creates (main's own form of this race is #32); a fence must
+      cover every customer link, checkout's included, which bypassed it. And old and new
+      revisions overlap at cutover, with nothing enforcing a quiescent switch.
       The stale holder's lease overwrite and the ineffective fence regression test were
       retired with that design. Full argument: PR #67 (closed unmerged) and its
       description's Round 2 section.
+
+- [ ] #32 (server, med, founder) **Fence account deletion against checkout and enrolment.**
+      Both races exist on main today (Astra reproduced them offline against main's code while
+      reviewing PR #70). Checkout during a deletion: deletion reaches `stripe-ended`, checkout
+      then links a customer and returns a payable Checkout session, and deletion's retry erases
+      the account without any Stripe DELETE, so a person can pay for an account that no longer
+      exists and keep a live Stripe customer. Enrolment during a deletion: deletion reads the
+      customer without the enrolment's `trial_accounts FOR UPDATE` lock, can find none while a
+      customer is being created, and finishes; the enrolment then leaves a cardless trial (it
+      cancels at its end) and a customer that still holds the email, which trial cancellation
+      does not delete. A fix makes deletion's Stripe step hold or check the same row enrolment
+      and checkout link through, and refuses new customer links once deletion has begun.
+      Peter decides whether it is a pre-launch fix (founder).
 
 ## From the audit of 2026-11-02 (`.agents/tmp/audit/report.md`)
 

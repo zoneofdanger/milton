@@ -646,7 +646,7 @@ test("billing checkout and portal: 503 without config; signed-in CSRF forms; the
       status: "trialing",
     });
     expect(stripe.calls.map((call) => call.call)).toEqual([
-      "GET /v1/subscriptions?customer=cus_fixture&status=all&limit=10",
+      "GET /v1/subscriptions?customer=cus_fixture&status=all&limit=100",
       "POST /v1/subscriptions",
       "POST /v1/customers/cus_fixture",
       "POST /v1/billing_portal/sessions",
@@ -654,7 +654,7 @@ test("billing checkout and portal: 503 without config; signed-in CSRF forms; the
     // Any subscription Stripe counts as existing, plus a trial, is managed in
     // the portal; anything else subscribes, no trial, after Stripe confirms it.
     const listCall = stripeCall(
-      "GET /v1/subscriptions?customer=cus_fixture&status=all&limit=10",
+      "GET /v1/subscriptions?customer=cus_fixture&status=all&limit=100",
     );
     stripe.subscriptions = [];
     for (const [status, location, calls] of [
@@ -2170,8 +2170,8 @@ test("checkout's live read never lands over a newer write, an empty one included
     expect((await send("/billing/checkout", {})).status).toBe(503);
     expect(await status()).toBe("past_due");
     expect(stripe.calls.map(({ call }) => call)).toEqual([
-      "GET /v1/subscriptions?customer=cus_fixture&status=all&limit=10",
-      "GET /v1/subscriptions?customer=cus_fixture&status=all&limit=10",
+      "GET /v1/subscriptions?customer=cus_fixture&status=all&limit=100",
+      "GET /v1/subscriptions?customer=cus_fixture&status=all&limit=100",
     ]);
     // An empty read is checked too: the stored state goes canceled to active
     // while a read that finds nothing managed is out. It must not sell a second
@@ -2191,8 +2191,8 @@ test("checkout's live read never lands over a newer write, an empty one included
     expect(empty.status).toBe(200);
     expect(await empty.text()).toContain("billing.stripe.com");
     expect(stripe.calls.map(({ call }) => call)).toEqual([
-      "GET /v1/subscriptions?customer=cus_fixture&status=all&limit=10",
-      "GET /v1/subscriptions?customer=cus_fixture&status=all&limit=10",
+      "GET /v1/subscriptions?customer=cus_fixture&status=all&limit=100",
+      "GET /v1/subscriptions?customer=cus_fixture&status=all&limit=100",
       "POST /v1/customers/cus_fixture",
       "POST /v1/billing_portal/sessions",
     ]);

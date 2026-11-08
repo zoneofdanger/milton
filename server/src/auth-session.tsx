@@ -2,7 +2,6 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { sql } from "drizzle-orm";
-import { database } from "./store";
 import {
   authoritySchema,
   securityStatus,
@@ -14,6 +13,7 @@ import type { RuntimeConfig } from "./config";
 import {
   accountTrialStatus,
   lookupIdentityAccount,
+  lookupSessionAccount,
   personStoreForCurrentRequest,
   type VerifiedStoreAuth,
 } from "./store";
@@ -58,27 +58,31 @@ export function pageContext(
     csrf = randomBytes(32).toString("base64url");
     writeCookie(csrfName, csrf);
   };
+  // The signed-in person's active account, read with the session and shared
+  // by every part of the page that needs it.
+  let found:
+    { subject: string; account: () => Promise<VerifiedStoreAuth> } | undefined;
   const session = async (): Promise<SessionUser | null> => {
     const token = cookieValue(request, cookieName(config, "session"));
     if (!token || !/^[A-Za-z0-9_-]{43}$/.test(token)) return null;
-    let row: Record<string, unknown> | undefined;
-    try {
-      row = (
-        await database(config).query(
-          // The session row and its native app status in one statement.
-          sql`SELECT subject,sid,binding,incarnation,generation,email,milton_guard.app_status(binding,subject,${config.oidc.clientId},sid,incarnation,generation) AS active FROM milton_app.session WHERE token_hash=${hash(token)} AND issuer=${config.issuer} AND expires_at>clock_timestamp()`,
-        )
-      )[0];
-    } catch {
-      throw unavailable();
-    }
-    const proof = authoritySchema.safeParse(row);
-    if (!proof.success || row?.active !== true) return null;
-    return {
-      ...proof.data,
-      id: proof.data.subject,
-      ...(typeof row?.email === "string" ? { email: row.email } : {}),
-    };
+    // The session row, its native app status and its identity's active
+    // account in one statement.
+    const read = await lookupSessionAccount(config, config.issuer, {
+      statement: sql`SELECT subject,sid,binding,incarnation,generation,email,milton_guard.app_status(binding,subject,${config.oidc.clientId},sid,incarnation,generation) AS active FROM milton_app.session WHERE token_hash=${hash(token)} AND issuer=${config.issuer} AND expires_at>clock_timestamp()`,
+      admit(row): SessionUser | null {
+        const proof = authoritySchema.safeParse(row);
+        if (!proof.success || row?.active !== true) return null;
+        return {
+          ...proof.data,
+          id: proof.data.subject,
+          ...(typeof row?.email === "string" ? { email: row.email } : {}),
+        };
+      },
+      outage: unavailable,
+    });
+    if (!read) return null;
+    found = { subject: read.user.id, account: async () => read.account() };
+    return read.user;
   };
   const fresh = async (user: SessionUser) => {
     const status = await securityStatus(config, user);
@@ -149,20 +153,15 @@ export function pageContext(
       );
     return form;
   };
-  // The signed-in person's active account, looked up once per request and
-  // shared by every part of the page that needs it.
-  let found:
-    { subject: string; account: Promise<VerifiedStoreAuth> } | undefined;
   const account = (user: SessionUser) => {
-    if (found?.subject !== user.id)
-      found = {
+    if (found?.subject !== user.id) {
+      const lookup = lookupIdentityAccount(config, {
+        provider: config.issuer,
         subject: user.id,
-        account: lookupIdentityAccount(config, {
-          provider: config.issuer,
-          subject: user.id,
-        }),
-      };
-    return found.account;
+      });
+      found = { subject: user.id, account: () => lookup };
+    }
+    return found.account();
   };
   const renderMemos = async (signedInUser?: SessionUser) => {
     const user = signedInUser ?? (await signedIn());

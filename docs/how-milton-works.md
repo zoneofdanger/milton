@@ -256,7 +256,7 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
 - Auth's CSS, favicon and fonts keep every security header but cache like the app's assets (immutable at the versioned URL, otherwise no-cache); every other auth response stays no-store.
 - App uses maintained code/S256 OIDC with shared SQL one-use state/nonce/verifier, exact callback, signature/issuer/audience/subject and matching UserInfo/opaque-token proof.
 - Identity-only app sessions last at most one absolute hour and never outlive their native opaque token; renewal starts a new SSO flow with no refresh/offline scope.
-- App cookies are host-only Secure/HttpOnly/SameSite=Lax over HTTPS; every use checks the original nonempty sid, immutable binding, incarnation and generation against native SQL, in the statement that reads the session.
+- App cookies are host-only Secure/HttpOnly/SameSite=Lax over HTTPS; every use checks the original nonempty sid, immutable binding, incarnation and generation against native SQL, in the statement that reads the session and its identity's active account.
 - Invalid proof refuses; actual native5xx/network/timeout is 503; an uncertain spent callback recovers through a new login.
 - New logins reclaim at most16 expired flows/sessions each; admission correlations expire after24 hours with bounded reclaim, while eligibility/key policy and original operation associations remain indefinitely for their stated purposes. Migrations `0005` and `008` drop the unread `deleted_identities` and legacy mapping tables; their downs recreate them empty.
 - Forms require same origin, an ASCII CSRF token and unique fields; sign-in rotates CSRF.

@@ -1471,6 +1471,22 @@ test("pages stay capped and download includes every active sample, only for the 
   }
 }, 30000);
 
+test("a live session whose account is closing refuses its pages with account_unavailable", async () => {
+  const fixture = await memoPageFixture();
+  try {
+    await fixture.db.query(sql`UPDATE users SET status='deleting'`);
+    for (const path of ["/", "/tps-report", "/assistants"]) {
+      const response = await fixture.send(path);
+      expect(response.status).toBe(403);
+      expect(await response.text()).toContain(
+        "Sign in to Milton before connecting your assistant.",
+      );
+    }
+  } finally {
+    await fixture.dispose();
+  }
+}, 30000);
+
 test("report bullets keep complete text parity and the download needs no layout read", async () => {
   const bodies = [
     "  Keep fictional units explicit.\n\nUnless a condition applies, preserve <tag> & wording.  ",

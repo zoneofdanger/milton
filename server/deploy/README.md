@@ -96,9 +96,9 @@ then:
    connections. Then run `SHOW statement_timeout;` and `SHOW lock_timeout;` as each
    runtime login through the pooler host and expect 20s/10s (app, MCP) and 5s/0 (auth).
 
-Rollback: `psql -X -v ON_ERROR_STOP=1 -f server/migrations/007-role-timeouts.down.sql` as
-the same owner resets exactly these settings; code whose role audit requires them then
-fails that audit, so roll such code back first.
+Rollback is the pre-migration Neon snapshot from step 1. There is no down script. Code whose
+role audit requires these settings fails that audit after the restore, so roll such code back
+first.
 
 ## Drop the unread trial tables (applied 2026-11-07: Drizzle 0005, owner file 008)
 

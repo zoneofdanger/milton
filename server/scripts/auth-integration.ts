@@ -168,7 +168,7 @@ try {
       ),
     );
   // 007: runtime-login timeouts in this database only, nothing on any other
-  // role. Up twice converges; down removes exactly these; up again restores.
+  // role. Up twice converges.
   const roleTimeouts = async () =>
     (
       await owner.query(
@@ -181,18 +181,14 @@ try {
     { role: "milton_auth_runtime", config: ["statement_timeout=5s"] },
     { role: "milton_mcp_runtime", config: bounded },
   ];
-  const roleTimeoutFile = (direction: string) =>
-    readFileSync(
-      new URL(`./migrations/007-role-timeouts.${direction}.sql`, sourceRoot),
-      "utf8",
+  for (let n = 0; n < 2; n++) {
+    await owner.query(
+      readFileSync(
+        new URL("./migrations/007-role-timeouts.up.sql", sourceRoot),
+        "utf8",
+      ),
     );
-  for (const direction of ["up", "up", "down", "down", "up"]) {
-    await owner.query(roleTimeoutFile(direction));
-    assert.deepEqual(
-      await roleTimeouts(),
-      direction === "up" ? timeouts : [],
-      direction,
-    );
+    assert.deepEqual(await roleTimeouts(), timeouts);
   }
   // The guide job's plain login holds only main's NOLOGIN guide capability.
   await owner.query(
@@ -247,34 +243,6 @@ try {
     "INSERT INTO milton_app.eligibility_policy(singleton,key_check) VALUES(true,$1)",
     [fingerprintKeyCheck(fingerprintKey)],
   );
-  await appOwner.query(
-    readFileSync(new URL("./migrations/005-app.down.sql", sourceRoot), "utf8"),
-  );
-  const appMigrationUrl = new URL(ownerUrl);
-  appMigrationUrl.searchParams.set("options", "-c role=milton_app_owner");
-  const reapplied = spawnSync(
-    "bun",
-    ["--no-env-file", "scripts/migrate.ts", "--app-auth"],
-    {
-      cwd: process.cwd(),
-      env: {
-        PATH: process.env.PATH,
-        LC_ALL: "C",
-        MILTON_OWNER_DATABASE_URL: appMigrationUrl.href,
-      },
-      encoding: "utf8",
-    },
-  );
-  assert.equal(
-    reapplied.status,
-    0,
-    "actual owner-only app migration CLI reapply",
-  );
-  assert.deepEqual(
-    (await owner.query("SELECT key_check FROM milton_app.eligibility_policy"))
-      .rows,
-    [{ key_check: fingerprintKeyCheck(fingerprintKey) }],
-  );
   assert.equal(
     (await owner.query("SELECT value FROM neon_auth.retained")).rows[0].value,
     "fictional retained metadata",
@@ -288,9 +256,7 @@ try {
     ).rows[0].subscription_status,
     "canceled",
   );
-  pass(
-    "app migration up/down/reapply preserves writing IDs, trial history, managed rows and the eligibility key",
-  );
+  pass("app migration preserves writing IDs, trial history and managed rows");
   // 0005 and 008 drop the unread trial tables. 008 is a no-op on a database
   // 005-app.up.sql installed, which no longer creates legacy_mapping.
   const sourceFile = (path: string) =>
@@ -2254,20 +2220,6 @@ try {
     ).rows[0].progress,
     "refused",
   );
-  const rollbackProbe = await appOwner.connect();
-  try {
-    await assert.rejects(
-      rollbackProbe.query(
-        readFileSync(
-          new URL("./migrations/005-app.down.sql", sourceRoot),
-          "utf8",
-        ),
-      ),
-    );
-    await rollbackProbe.query("ROLLBACK");
-  } finally {
-    rollbackProbe.release();
-  }
   stripe.deleteDown = false;
   const completedDeletion = await request(
     app,

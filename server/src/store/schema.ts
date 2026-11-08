@@ -88,7 +88,7 @@ export const trialAccounts = pgTable(
     }),
     currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
     // Advances on every write of the Stripe state above, values unchanged
-    // included (0010).
+    // included (0011).
     stripeRevision: bigint("stripe_revision", { mode: "number" })
       .notNull()
       .default(0),

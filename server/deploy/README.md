@@ -343,6 +343,66 @@ A failed migration's rollback is the pre-migration snapshot, used only before an
 reads the column serves; there is no down script. Every recorded app/MCP revision runs on
 either schema, so rolling code back never needs it.
 
+## Deletion removes sign-in grants and assistant registrations (not yet applied: native 008)
+
+Native 008 adds `milton_guard.client_link` (account, registration), written by
+`consent_gate` whenever an account consents to an assistant registration, and
+`milton_guard.cleared_client` (SHA-256 of each cleared or deleted registration's client
+ID, no foreign key) with the `keep_cleared` insert-and-update trigger, and replaces
+`consent_gate` and `cleanup_operation`: a deletion's cleanup now also takes the account's
+links (deleting a registration no other account links, otherwise clearing its `name` and
+`contacts`, and marking it either way) and, in the same step as the native user, its
+sign-in grant bindings. It backfills links from existing consents, consented bindings and
+native's disconnect records (`milton_guard.security_operation`), each matched to the
+user's recorded identity incarnation, applies the rule to registrations named by a
+consented binding or disconnect record of a deleted identity, and then deletes bindings
+of deleted identities that nothing references. App and MCP code do not change. The same
+release's auth image adds the UserInfo binding check (live `binding_status` before native
+answers); it uses only 003's functions, so the image and 008 can go in either order, and
+any recorded revision runs on either schema.
+
+Its first statement locks `milton_auth."user"`, `"oauthClient"`, `"oauthClientResource"`,
+`"oauthConsent"`, `"oauthAccessToken"`, `"oauthRefreshToken"` and
+`milton_guard.authorization_binding` in EXCLUSIVE mode with NOWAIT. If any sign-in,
+consent, token, registration, disconnect or deletion is writing them, 008 fails at once
+with `55P03` (lock not available), applies nothing and records no ledger row: run step 2
+again. Once it holds them, no service transaction or cleanup can hold or take a lock it
+needs, so none can deadlock with it. It can still wait on another owner session (one
+holding the migration ledger, or running owner DDL): open no other owner session while
+it runs (the migrator's advisory lock already keeps a second migrator out). Until it commits, reads
+continue (MCP, app sessions, pages) and every write to those tables waits: sign-in,
+consent, token issue and refresh, registration, disconnect and deletion. The rehearsal
+took 25 ms on empty tables; production time scales with the clients, consents and
+bindings it scans, and is unmeasured. Rehearse on a disposable branch or database first
+(both integration suites apply it), then:
+
+1. Snapshot.
+2. As `milton_auth_delegate` assuming `milton_auth_owner`:
+   `node --experimental-strip-types apps/auth/scripts/migrate.ts up --apply` applies
+   `008-deletion-links` (native ledger 001–008). On `55P03`, rerun.
+3. Check as the owner that no binding the sweep should have removed remains (the same
+   exclusions as 008's sweep: an unfinished operation, or a token, consent or code
+   still referencing it, keeps a binding on purpose); this returns 0:
+
+   ```sql
+   SELECT count(*) FROM milton_guard.authorization_binding b
+    WHERE NOT EXISTS(SELECT 1 FROM milton_auth."user" u WHERE u.id=b.origin_user AND u."miltonIdentityIncarnation"=b."miltonIdentityIncarnation")
+    AND NOT EXISTS(SELECT 1 FROM milton_auth."oauthAccessToken" a WHERE a."referenceId"=b.reference)
+    AND NOT EXISTS(SELECT 1 FROM milton_auth."oauthRefreshToken" r WHERE r."referenceId"=b.reference)
+    AND NOT EXISTS(SELECT 1 FROM milton_auth."oauthConsent" c WHERE c."referenceId"=b.reference)
+    AND NOT EXISTS(SELECT 1 FROM milton_auth.verification v WHERE v.id=b.code_record)
+    AND NOT EXISTS(SELECT 1 FROM milton_guard.security_operation o WHERE o.progress<>'complete' AND b.reference=ANY(o.targets));
+   ```
+
+   and `check-runtime-role.ts` prints `ok` for app and MCP.
+
+Untraceable and kept as they are: a registration whose only authorizations before 008,
+by a live or a deleted account, left no consent, binding or disconnect record by the time
+008 runs (the assistant revoked its own grant, or the grant expired unused, and
+maintenance pruned both). `public.assistant_disconnects` cannot help: nothing has written
+it since native auth (commit `bcb59e7`), so it names no native registration. Rollback is
+the pre-migration snapshot; there is no down script.
+
 ## Stop storing the app's native access token (applied 2026-11-08: owner file 012, PR #62)
 
 Until this change the app wrote the native access token it receives at sign-in into
@@ -404,11 +464,11 @@ app never rolls back to an image older than #62 (`milton-app-token-0f7d5aa` is t
 its transaction rolls back and changes nothing; rerun it. Otherwise a failed migration's
 rollback is the pre-migration snapshot; there is no down script.
 
-## Stripe reads off the row lock (Drizzle 0010, PR #67; prepared, not applied)
+## Stripe reads off the row lock (Drizzle 0011, PR #70; prepared, not applied)
 
 Checkout's live read and the webhook now read Stripe with no transaction open and write by
 compare-and-set on `trial_accounts.stripe_revision` (server README). Sign-in enrolment and
-account deletion are unchanged: they still call Stripe under their locks (TODO.md). 0010 is
+account deletion are unchanged: they still call Stripe under their locks (TODO.md). 0011 is
 additive; older code never names the column. Older revisions' writes of the Stripe state (the
 webhook, checkout, and sign-in enrolment on admit) do not advance the revision, so while both
 versions serve, a new read in flight could land over one of them, where the old row lock kept
@@ -418,9 +478,9 @@ it sends a stored trialing, active, past_due, unpaid or paused status to the por
 reading Stripe. So the release ends with a one-off resync that re-reads every stored
 customer:
 
-1. Rehearse (`check-auth-integration.ts` applies 0010), then snapshot production.
-2. As `neondb_owner`: `bun run --cwd server db:migrate` applies `0010_stripe_revision`
-   (journal 11 entries). Old code runs on it unchanged.
+1. Rehearse (`check-auth-integration.ts` applies 0011), then snapshot production.
+2. As `neondb_owner`: `bun run --cwd server db:migrate` applies `0011_stripe_revision`
+   (journal 12 entries). Old code runs on it unchanged.
 3. In a quiet window (no webhook delivery, checkout or admission in milton-app's and
    milton-admit's request logs for the last 2 minutes), release the image to `milton-app`
    and `milton-admit` back to back, so the mixed window stays short, then wait until neither
@@ -432,8 +492,8 @@ customer:
    does and writes through the same compare-and-set, at about 5 a second. A nonzero exit
    means a read failed or a write conflicted twice: rerun it until it exits 0.
 
-Rollback: code to the previous revision, which runs on 0010; the pre-migration snapshot is
-0010's rollback, and there is no down script.
+Rollback: code to the previous revision, which runs on 0011; the pre-migration snapshot is
+0011's rollback, and there is no down script.
 
 ## Test account and daily check
 
@@ -681,7 +741,7 @@ wanted. Alert delivery to Peter is unverified until milton-duo sends a test noti
 
 ## Optional guide worker
 
-The default-off private guide pilot has separate [operations and capability instructions](guides.md). No guide job, schedule, provider key or account enrollment is provisioned by its build.
+The default-off private guide pilot has separate [operations and capability instructions](guides.md). No guide job, schedule, provider key or account enrollment is provisioned by its build. It is parked: Drizzle 0010 drops its sample-version trigger and keeps every guide row; apply it as any migration (snapshot first). [Parked state and resume](guides.md#parked-state-and-resume) gives the steps.
 
 ## Cloud resources
 

@@ -66,6 +66,7 @@ import {
   setGuideEnrollment,
 } from "../src/guides/store";
 import { runGuideWorker } from "../src/guides/worker";
+import { resumeGuides } from "../src/guides/resume";
 import type { GuideProvider } from "../src/guides/provider";
 import { connections, lifecycle } from "../src/auth-lifecycle";
 import type { SessionUser } from "../src/auth-session";
@@ -736,6 +737,27 @@ try {
   await owner.query("GRANT milton_mcp_runtime TO milton_guide_runtime");
   assert.equal(await guideWorkerRoleAllowed(guideDb), false);
   await owner.query("REVOKE milton_mcp_runtime FROM milton_guide_runtime");
+  // Resuming the parked pilot (deploy/guides.md) is owner-only: CREATE TRIGGER
+  // needs ownership of sample_versions, so every runtime login is refused and
+  // changes nothing. The owner restores the trigger; it is dropped again so the
+  // rest runs parked, as production does.
+  const guideTrigger = async () =>
+    (
+      await owner.query(
+        "SELECT count(*)::int n FROM pg_trigger WHERE tgname='report_guide_source'",
+      )
+    ).rows[0].n;
+  assert.equal(await guideTrigger(), 0);
+  for (const service of ["app", "mcp", "guide", "auth"])
+    await assert.rejects(
+      resumeGuides(postgresDatabase(url(service))),
+      (e) => e instanceof StoreError,
+      service,
+    );
+  assert.equal(await guideTrigger(), 0);
+  await resumeGuides(ownerDb);
+  assert.equal(await guideTrigger(), 1);
+  await owner.query("DROP TRIGGER report_guide_source ON sample_versions");
   // Connection keys (006): app creates, lists and revokes without reading a
   // hash; MCP reads and records last use only; auth and the guide get nothing.
   const keyPrivileges = async (role: string) =>
@@ -4157,88 +4179,220 @@ try {
         enabled: true,
         optInReference: "fictional-propagation-consent",
       });
-      const authCookie = () =>
-        [...alder.cookies]
+      const authCookie = (s: Side) =>
+        [...s.cookies]
           .filter(([k, v]) => k.startsWith("auth.meetmilton.com\t") && v)
           .map(([k, v]) => `${k.split("\t")[1]}=${v}`)
           .join("; ");
-      const nativeJson = (path: string, body: object) =>
-        alder.web(ISSUER + path, {
+      const nativeJson = (s: Side, path: string, body: object) =>
+        s.web(ISSUER + path, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             Accept: "application/json",
             Origin: AUTH_ORIGIN,
-            Cookie: authCookie(),
+            Cookie: authCookie(s),
           },
           body: JSON.stringify(body),
         });
-      await clearRates();
-      const registered = await nativeJson("/oauth2/register", {
-        client_name: "Fictional propagation assistant",
-        redirect_uris: ["https://assistant.example.invalid/callback"],
-        token_endpoint_auth_method: "client_secret_post",
-        scope: "openid offline_access milton:read milton:write",
-        grant_types: ["authorization_code", "refresh_token"],
-      });
-      assert.equal(registered.status, 201, "assistant registration");
-      const registration = (await registered.json()) as {
-        client_id: string;
-        client_secret: string;
-      };
-      const oauth = await oidc.discovery(
-        new URL(ISSUER),
-        registration.client_id,
-        { id_token_signed_response_alg: "EdDSA" },
-        oidc.ClientSecretPost(registration.client_secret),
-        {
-          [oidc.customFetch]: (target, options) =>
-            loopback("203.0.113.13")(target, options as RequestInit),
-          execute: [oidc.enableNonRepudiationChecks],
-          timeout: 5,
-        },
-      );
-      const assistantScope = "openid offline_access milton:read milton:write";
-      const state = oidc.randomState(),
-        nonce = oidc.randomNonce(),
-        pkce = oidc.randomPKCECodeVerifier();
-      const authorization = await alder.web(
-        oidc.buildAuthorizationUrl(oauth, {
-          redirect_uri: "https://assistant.example.invalid/callback",
-          scope: assistantScope,
-          resource: config.resource,
-          state,
-          nonce,
-          code_challenge: await oidc.calculatePKCECodeChallenge(pkce),
-          code_challenge_method: "S256",
-        }).href,
-        {
-          method: "GET",
-          headers: { Accept: "text/html", Cookie: authCookie() },
-        },
-      );
-      let destination =
-        authorization.headers.get("Location") ??
-        ((await authorization.json()) as { url: string }).url;
-      if (new URL(destination, AUTH_ORIGIN).pathname === "/consent") {
-        const choice = await nativeJson("/oauth2/consent", {
-          accept: true,
-          scope: assistantScope,
-          oauth_query: new URL(
-            destination,
-            AUTH_ORIGIN,
-          ).searchParams.toString(),
+      // An anonymous registration with a name and a contact, as an assistant
+      // registers itself.
+      const register = async (client_name: string, contact: string) => {
+        await clearRates();
+        const registered = await nativeJson(alder, "/oauth2/register", {
+          client_name,
+          contacts: [contact],
+          redirect_uris: ["https://assistant.example.invalid/callback"],
+          token_endpoint_auth_method: "client_secret_post",
+          scope: "openid offline_access milton:read milton:write",
+          grant_types: ["authorization_code", "refresh_token"],
         });
-        assert.equal(choice.status, 200, "assistant consent");
-        destination = ((await choice.json()) as { url: string }).url;
-      }
-      const grant = await oidc.authorizationCodeGrant(
-        oauth,
-        new URL(destination, AUTH_ORIGIN),
-        { expectedState: state, expectedNonce: nonce, pkceCodeVerifier: pkce },
-        { resource: config.resource },
+        assert.equal(registered.status, 201, `${client_name} registers`);
+        const registration = (await registered.json()) as {
+          client_id: string;
+          client_secret: string;
+        };
+        const oauth = await oidc.discovery(
+          new URL(ISSUER),
+          registration.client_id,
+          { id_token_signed_response_alg: "EdDSA" },
+          oidc.ClientSecretPost(registration.client_secret),
+          {
+            [oidc.customFetch]: (target, options) =>
+              loopback("203.0.113.13")(target, options as RequestInit),
+            execute: [oidc.enableNonRepudiationChecks],
+            timeout: 5,
+          },
+        );
+        return { clientId: registration.client_id, oauth };
+      };
+      type Registration = Awaited<ReturnType<typeof register>>;
+      const assistantScope = "openid offline_access milton:read milton:write";
+      // One authorization by `s`, consent included, up to the code it returns.
+      const authorize = async (s: Side, client: Registration) => {
+        await clearRates();
+        const state = oidc.randomState(),
+          nonce = oidc.randomNonce(),
+          pkce = oidc.randomPKCECodeVerifier();
+        const authorization = await s.web(
+          oidc.buildAuthorizationUrl(client.oauth, {
+            redirect_uri: "https://assistant.example.invalid/callback",
+            scope: assistantScope,
+            resource: config.resource,
+            state,
+            nonce,
+            code_challenge: await oidc.calculatePKCECodeChallenge(pkce),
+            code_challenge_method: "S256",
+          }).href,
+          {
+            method: "GET",
+            headers: { Accept: "text/html", Cookie: authCookie(s) },
+          },
+        );
+        let destination =
+          authorization.headers.get("Location") ??
+          ((await authorization.json()) as { url: string }).url;
+        if (new URL(destination, AUTH_ORIGIN).pathname === "/consent") {
+          const choice = await nativeJson(s, "/oauth2/consent", {
+            accept: true,
+            scope: assistantScope,
+            oauth_query: new URL(
+              destination,
+              AUTH_ORIGIN,
+            ).searchParams.toString(),
+          });
+          assert.equal(choice.status, 200, "assistant consent");
+          destination = ((await choice.json()) as { url: string }).url;
+        }
+        const callback = new URL(destination, AUTH_ORIGIN);
+        assert(callback.searchParams.get("code"), "an authorization code");
+        return () =>
+          oidc.authorizationCodeGrant(
+            client.oauth,
+            callback,
+            {
+              expectedState: state,
+              expectedNonce: nonce,
+              pkceCodeVerifier: pkce,
+            },
+            { resource: config.resource },
+          );
+      };
+      const connect = async (s: Side, client: Registration) => {
+        const grant = await (await authorize(s, client))();
+        const refresh_token = grant.refresh_token;
+        assert(refresh_token, "an offline assistant grant");
+        return { access_token: grant.access_token, refresh_token };
+      };
+      // A JWT at MCP: its verifier fetches native's JWKS, from the local listener.
+      const toolsWith = async (accessToken: string) => {
+        const response = await mcpPost(accessToken, "tools/list", {});
+        assert.deepEqual(outbound, [], "no request left the machine");
+        return response.status === 200
+          ? (await result(response)).result.tools?.length
+          : response.status;
+      };
+      // Three registrations: one only this account authorizes, one Birch
+      // authorizes too, and one this account disconnected long ago. Alder
+      // connects the first and holds an unredeemed code for the second.
+      const solo = await register(
+        "Fictional propagation assistant",
+        "solo-assistant@example.invalid",
       );
-      assert(grant.refresh_token, "an offline assistant grant");
+      const shared = await register(
+        "Fictional shared assistant",
+        "shared-assistant@example.invalid",
+      );
+      const gone = await register(
+        "Fictional disconnected assistant",
+        "gone-assistant@example.invalid",
+      );
+      const grant = await connect(alder, solo);
+      const outstandingCode = await authorize(alder, shared);
+      const birchGrant = await connect(birch, shared);
+      // The third is disconnected, and its binding then expires and is swept,
+      // as if a month had passed: no consent, token or binding of it is left,
+      // and the account's link to it alone remains.
+      await connect(alder, gone);
+      const disconnect = randomUUID();
+      await owner.query(
+        `SELECT milton_guard.begin_operation($1,id,"miltonIdentityIncarnation",$2,'disconnect') FROM milton_auth."user" WHERE id=$3`,
+        [disconnect, gone.clientId, alder.subject],
+      );
+      for (let n = 0; ; n++) {
+        const { progress } = (
+          await owner.query<{ progress: string }>(
+            "SELECT milton_guard.cleanup_operation($1,16) AS progress",
+            [disconnect],
+          )
+        ).rows[0]!;
+        if (progress === "complete") break;
+        assert(n < 8, "the disconnect's cleanup finishes");
+      }
+      await owner.query(
+        "UPDATE milton_guard.authorization_binding SET expires_at=now()-interval '2 days' WHERE client_id=$1",
+        [gone.clientId],
+      );
+      await owner.query("SELECT milton_guard.cleanup_expired(64)");
+      assert.deepEqual(
+        (
+          await owner.query(
+            `SELECT (SELECT count(*) FROM milton_guard.authorization_binding WHERE client_id=$1)::int bindings,
+             (SELECT count(*) FROM milton_auth."oauthConsent" WHERE "clientId"=$1)::int consents,
+             (SELECT count(*) FROM milton_auth."oauthRefreshToken" WHERE "clientId"=$1)::int refresh,
+             (SELECT count(*) FROM milton_guard.client_link WHERE client_id=$1)::int links`,
+            [gone.clientId],
+          )
+        ).rows[0],
+        { bindings: 0, consents: 0, refresh: 0, links: 1 },
+        "after disconnect and expiry only the account's link names the registration",
+      );
+      const registrations = async () =>
+        (
+          await owner.query<{
+            clientId: string;
+            name: string | null;
+            contacts: unknown;
+          }>(
+            'SELECT "clientId",name,contacts FROM milton_auth."oauthClient" WHERE "clientId"=ANY($1) ORDER BY name NULLS LAST',
+            [[solo.clientId, shared.clientId, gone.clientId]],
+          )
+        ).rows;
+      assert.deepEqual(
+        await registrations(),
+        [
+          {
+            clientId: gone.clientId,
+            name: "Fictional disconnected assistant",
+            contacts: ["gone-assistant@example.invalid"],
+          },
+          {
+            clientId: solo.clientId,
+            name: "Fictional propagation assistant",
+            contacts: ["solo-assistant@example.invalid"],
+          },
+          {
+            clientId: shared.clientId,
+            name: "Fictional shared assistant",
+            contacts: ["shared-assistant@example.invalid"],
+          },
+        ],
+        "every registration keeps the name and contact it sent",
+      );
+      const soloDependents = async () =>
+        (
+          await owner.query<Record<string, number>>(
+            `SELECT (SELECT count(*) FROM milton_auth."oauthClientResource" WHERE "clientId"=$1)::int resources,
+             (SELECT count(*) FROM milton_auth."oauthConsent" WHERE "clientId"=$1)::int consents,
+             (SELECT count(*) FROM milton_auth."oauthRefreshToken" WHERE "clientId"=$1)::int refresh,
+             (SELECT count(*) FROM milton_guard.authorization_binding WHERE client_id=$1)::int bindings`,
+            [solo.clientId],
+          )
+        ).rows[0]!;
+      assert(
+        Object.values(await soloDependents()).every((n) => n > 0),
+        "the solo registration has dependents before deletion",
+      );
       const userInfo = async () =>
         (
           await alder.web(ISSUER + "/oauth2/userinfo", {
@@ -4247,18 +4401,19 @@ try {
           })
         ).status;
       assert.equal(await userInfo(), 200, "the assistant's token works");
-      // A JWT at MCP: its verifier fetches native's JWKS, from the local listener.
-      const assistantTools = async () => {
-        const response = await mcpPost(grant.access_token, "tools/list", {});
-        assert.deepEqual(outbound, [], "no request left the machine");
-        return response.status === 200
-          ? (await result(response)).result.tools?.length
-          : response.status;
-      };
+      const assistantTools = () => toolsWith(grant.access_token);
       assert.equal(await assistantTools(), 4, "the assistant reaches MCP");
       assert.equal(
-        (await nativeJson("/request-password-reset", { email: alder.email }))
-          .status,
+        await toolsWith(birchGrant.access_token),
+        4,
+        "Birch's assistant reaches MCP",
+      );
+      assert.equal(
+        (
+          await nativeJson(alder, "/request-password-reset", {
+            email: alder.email,
+          })
+        ).status,
         200,
         "a reset mail",
       );
@@ -4367,11 +4522,12 @@ try {
       assert.notEqual(await userInfo(), 200, "the assistant's token");
       assert.equal(await assistantTools(), 401, "the assistant at MCP");
       await assert.rejects(
-        oidc.refreshTokenGrant(oauth, grant.refresh_token, {
+        oidc.refreshTokenGrant(solo.oauth, grant.refresh_token, {
           resource: config.resource,
         }),
         "the assistant's refresh token",
       );
+      await assert.rejects(outstandingCode(), "the unredeemed code");
       for (const path of ["/", "/tps-report", "/download"]) {
         const page = await replay(PRODUCTION.app + path);
         if (path !== "/")
@@ -4409,30 +4565,71 @@ try {
         [],
         "no row in a table referencing the account or its native user remains",
       );
-      // Each column that may still name it, with its row count: one sign-in
-      // flow per binding and admission (three here), one mail job per mail sent
-      // (verification and reset). Any other column, or another row, fails.
+      // Each column that may still name it, with its row count: one admission
+      // per sign-in and assistant authorization, one mail job per mail sent
+      // (verification and reset). No sign-in grant binding remains. Any other
+      // column, or another row, fails.
       assert.deepEqual(
         await scan(alder),
         {
           // Admission correlations, reclaimed by later logins after 24 hours.
-          "milton_app.admission.subject": { subject: 3 },
-          "milton_app.admission.user_id": { account: 3 },
+          "milton_app.admission.subject": { subject: 5 },
+          "milton_app.admission.user_id": { account: 5 },
           // The original deletion operation, kept so a retry stays safe.
           "milton_app.lifecycle.subject": { subject: 1 },
           "milton_app.lifecycle.user_id": { account: 1 },
           // The trial-eligibility fingerprint's first claimant.
           "milton_app.trial_fingerprint.first_user_id": { account: 1 },
-          // Native authorization bindings, pruned by auth maintenance a day
-          // after they expire.
-          "milton_guard.authorization_binding.origin_user": { subject: 3 },
           // Sent mail jobs, their payloads already cleared; owner maintenance
           // clears their receipts after 24 hours.
           "milton_guard.mail_job.origin_user": { subject: 2 },
-          // Native's record of the deletion operation.
-          "milton_guard.security_operation.origin_user": { subject: 1 },
+          // Native's records of the deletion and the earlier disconnect.
+          "milton_guard.security_operation.origin_user": { subject: 2 },
         },
         "nothing else names the account or holds its text",
+      );
+      // The registrations only it authorized, the long-disconnected one
+      // included, are gone with their dependents; the one Birch also
+      // authorized stays, without its name or contact.
+      assert.deepEqual(
+        await registrations(),
+        [{ clientId: shared.clientId, name: null, contacts: null }],
+        "the solo and disconnected registrations are deleted and the shared one cleared",
+      );
+      // A metadata-document refresh writing them back keeps them cleared.
+      await owner.query(
+        `UPDATE milton_auth."oauthClient" SET name='Fictional restored name',contacts='["restored@example.invalid"]' WHERE "clientId"=$1`,
+        [shared.clientId],
+      );
+      assert.deepEqual(
+        await registrations(),
+        [{ clientId: shared.clientId, name: null, contacts: null }],
+        "a cleared registration stays cleared",
+      );
+      // So does a deleted one stored again under its client ID, as a client
+      // metadata document's rediscovery would.
+      await owner.query(
+        `INSERT INTO milton_auth."oauthClient"(id,"clientId","redirectUris",name,contacts) VALUES($1,$1,'[]','Fictional restored name','["restored@example.invalid"]')`,
+        [solo.clientId],
+      );
+      assert.deepEqual(
+        (
+          await owner.query(
+            `SELECT name,contacts FROM milton_auth."oauthClient" WHERE "clientId"=$1`,
+            [solo.clientId],
+          )
+        ).rows,
+        [{ name: null, contacts: null }],
+        "a deleted registration stored again gets no name or contacts",
+      );
+      await owner.query(
+        `DELETE FROM milton_auth."oauthClient" WHERE "clientId"=$1`,
+        [solo.clientId],
+      );
+      assert.deepEqual(
+        await soloDependents(),
+        { resources: 0, consents: 0, refresh: 0, bindings: 0 },
+        "nothing of the solo registration remains",
       );
       // The other account is untouched.
       assert.deepEqual(
@@ -4447,6 +4644,28 @@ try {
         served(settled.get(birch)!),
         "the other account serves exactly what it did",
       );
+      // Birch's connection through the cleared registration keeps working, and
+      // Birch can authorize it again.
+      assert.equal(
+        await toolsWith(birchGrant.access_token),
+        4,
+        "Birch's assistant still reaches MCP",
+      );
+      const refreshed = await oidc.refreshTokenGrant(
+        shared.oauth,
+        birchGrant.refresh_token,
+        { resource: config.resource },
+      );
+      assert.equal(
+        await toolsWith(refreshed.access_token),
+        4,
+        "Birch's refreshed token reaches MCP",
+      );
+      assert.equal(
+        await toolsWith((await connect(birch, shared)).access_token),
+        4,
+        "Birch reconnects the cleared registration",
+      );
       assert.deepEqual(outbound, [], "no request left the machine");
       assert(
         admittedOverLoopback > 0,
@@ -4454,7 +4673,7 @@ try {
       );
     }
     pass(
-      "account deletion through the app leaves no row referencing the account or its native user (catalog-derived, every one populated first, one listed exclusion), only pinned id-only leftovers (table, column, rows) and none of its email or text; its key, assistant grant, app session, native session and password stop working; the other account is untouched",
+      "account deletion through the app leaves no row referencing the account or its native user (catalog-derived, every one populated first, one listed exclusion), no sign-in grant binding, only pinned id-only leftovers (table, column, rows) and none of its email or text; its key, assistant grant, unredeemed code, app session, native session and password stop working; the assistant registration only it authorized is deleted and a shared one keeps working for the other account without its name or contacts; the other account is untouched",
     );
   }
   console.log(

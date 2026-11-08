@@ -1,5 +1,5 @@
 {
-  "id": "a58c3c45-c643-498c-892c-66165b1b87f8",
+  "id": "4195b462-77d6-4c96-bcac-4c2f5e20e334",
   "prevId": "d19ad1da-5d2f-4f46-b819-e2ef1f6def8c",
   "version": "7",
   "dialect": "postgresql",
@@ -1516,13 +1516,6 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
-        },
-        "stripe_revision": {
-          "name": "stripe_revision",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
         }
       },
       "indexes": {},

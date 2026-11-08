@@ -210,9 +210,11 @@ never older instruction or TPS data.
 Approved saves remain model-free. Explicitly opted-in eligible paid/trial accounts may
 also receive a separate, derived per-report guide from all active approved samples and
 complete context. Background Anthropic processing never changes approved sources or
-save fences. Reads include an optional self-contained guide/status block; explicit rules,
-Baseline precedence and requested edit scope still govern. Stale successful guides remain
-labeled until replaced; zero samples and valid insufficient evidence clear them. Operator
-controls, spend/retry limits, eligibility and service capabilities are specified in
-[guide operations](server/deploy/guides.md). No public tier, new MCP tool, history UI,
-refresh/disable control or rollout authorization is introduced.
+save fences. With the process switch on, reads include an optional self-contained
+guide/status block; explicit rules, Baseline precedence and requested edit scope still
+govern. Stale successful guides remain labeled until replaced; zero samples and valid
+insufficient evidence clear them. Operator controls, spend/retry limits, eligibility and
+service capabilities are specified in [guide operations](server/deploy/guides.md). No
+public tier, new MCP tool, history UI, refresh/disable control or rollout authorization
+is introduced. Parked 2026-11-07: the switch is off and migration 0010 drops the
+sample-change trigger; the runbook gives the resume steps.

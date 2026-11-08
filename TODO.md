@@ -80,7 +80,7 @@ reports, memos) and plain text on security screens and anything an assistant rea
 
 - [ ] #31 (server, low) **Take Stripe off sign-in and deletion after launch.** The
       narrowed follow-up to PR #67 took checkout's live read and the webhook off the row lock
-      (compare-and-set on `trial_accounts.stripe_revision`, 0010, with a one-off `--resync`
+      (compare-and-set on `trial_accounts.stripe_revision`, 0011, with a one-off `--resync`
       after its cutover) and deferred the rest. Sign-in still waits on Stripe, up to three
       5 s calls under `trial_accounts FOR UPDATE` (`whileWaiting`), so a Stripe outage is a
       sign-in 503; deletion's Stripe DELETE still runs inside its lifecycle transaction.

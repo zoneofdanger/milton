@@ -273,7 +273,7 @@ not at all.
 ### Publish
 
 - Publishing checks the assembled documents against their size limits and answers with
-  their new approved-source fingerprint; sample changes durably invalidate guides in the same transaction.
+  their new approved-source fingerprint; while the guide trigger is installed (not while parked, 0010), sample changes durably invalidate guides in the same transaction.
 - An audit row records the request, assistant, before and after versions, and affected
   cards.
 - The receipt is written last, once, with the outcome.
@@ -340,7 +340,8 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
 - Disconnect commits native original-binding refusal before bounded cleanup; a failed or unfinished step answers 503 with a retry page re-posting the same operation, as deletion does; reconnect creates a new binding and never revives an old token.
 - Native UserInfo answers only while the token's binding is live, the same `binding_status` check MCP and the app make on every call: after the rate gate the auth wrapper reads a JWT's binding, subject, client (`azp`), scopes, incarnation and generation (native then verifies its signature) or looks an opaque token up by its stored hash; a missing, revoked or superseded binding gets 401 `invalid_token` with no claims and native is not called, a database failure 503, so a disconnect or a begun deletion ends an assistant token's UserInfo at once rather than at its expiry.
 - Deletion saves the current verified-identity fingerprints as it starts, then commits refusal, then Stripe cancellation, then writing erasure (which records no identity of its own), and finally bounded native cleanup; unknown inventory/cascade shape leaves a retryable incomplete operation.
-- Anonymous assistant client registrations belong to no account: their free-text fields (client name, contacts, URIs, metadata) are kept indefinitely, and account deletion does not remove them.
+- Native cleanup deletes the account's sign-in grant bindings in the same step as the native user, after its codes, tokens, consents, sessions and sign-in methods (at most 256 rows, the per-user cap `bind_flow` enforces), so no partial run leaves a user or credential without its binding; every code, token, session or consent that named a missing binding is refused (each gate looks the binding up strictly), and the deletion record keeps `bind_flow` from making a new one.
+- Consenting to an anonymous assistant registration writes a durable link from the account to it (`milton_guard.client_link`, native 008); disconnects, token and consent purges and binding expiry leave it, and the native user cannot be deleted while it exists. Deletion takes each link under the registration's lock: a registration no other account is linked to is deleted with its dependents, and one that is keeps working for them with its name and contacts cleared. Either way the SHA-256 of its client ID goes into `milton_guard.cleared_client` (no foreign key, kept indefinitely), and a trigger empties name and contacts on any later insert or update under that client ID, so neither a metadata-document refresh nor a rediscovered registration brings them back. Neither Milton nor its pages show a client name (consent shows the client ID, Connected assistants its host), so a cleared one changes no page. Native 008 backfills links from existing consents, consented bindings and native's disconnect records, each matched to the user's recorded identity incarnation; a record for another incarnation counts as a deleted original identity's. It applies the same rule to registrations a deleted identity's remaining binding or disconnect record names, then drops deleted identities' unreferenced bindings. It first locks every runtime table it writes in one statement that never waits (55P03 if any is in use; run it again), so no service transaction or cleanup can deadlock with it; it can still wait on another owner session (the ledger, owner DDL), which the runbook rules out. Writes to those tables wait until it commits. Kept indefinitely: registrations no account ever authorized, and ones whose only authorization before 008 left no consent, binding or disconnect record (revoked by the assistant or left to expire, then pruned); `public.assistant_disconnects` has had no writer since native auth, so it names no native registration.
 - Writing and original-incarnation app credentials are never erased before Stripe cancellation succeeds; incomplete deletion never claims completion.
 - Browser logout removes local authority and navigates through fixed-client native RP logout with exact return and native confirmation, leaving offline assistant grants independent; "Switch account" adds the one fixed logout `state` native echoes back, and only that exact single value sends the signed-out return on to a fresh sign-in (`prompt=login`).
 
@@ -466,7 +467,7 @@ Files: `server/drizzle/`, `server/src/store/schema.ts`, `server/src/store/databa
   the `retained_bytes` counter it read; 0006 drops the generated `payload_bytes` columns
   it summed.
 - User IDs cannot change.
-- `trial_accounts.stripe_revision` (0010, bigint, default 0) advances on every write of the Stripe state columns by Milton's code; app's table-wide grant on `trial_accounts` (005) covers it, and MCP's column list leaves it out.
+- `trial_accounts.stripe_revision` (0011, bigint, default 0) advances on every write of the Stripe state columns by Milton's code; app's table-wide grant on `trial_accounts` (005) covers it, and MCP's column list leaves it out.
 - `users.test_account` (0009, default false) marks the fictional end-to-end check account; owner file `011-test-account-roles.sql` narrows app's INSERT on `users` to its other columns, so no runtime login can set it, and usage and metric counts exclude it.
 - Disconnects and identity hashes have no foreign key to users, so they outlive the account.
 - `docs/deletion-inventory.txt` classifies every text-bearing column the three migration tracks create as deleted by account deletion, hidden (kept, never served), retained (tied to no account, so deletion cannot remove it) or not personal; a test on a fresh schema fails on any column missing from it.
@@ -529,11 +530,13 @@ Files: `packages/theme/`, `server/scripts/`, `scripts/check-migrations.ts`,
 
 ## Optional report guides
 
-Files: `server/src/guides/`, `server/src/guide-worker.ts`, `server/scripts/guide-enrollment.ts`, `server/drizzle/0003_report_guides.sql`.
+Files: `server/src/guides/`, `server/src/guide-worker.ts`, `server/scripts/guide-enrollment.ts`, `server/drizzle/0003_report_guides.sql`, `server/drizzle/0010_park_guides.sql`.
+
+- Parked (2026-11-07): reads include guide state only when the process sets `MILTON_GUIDES=on`; off, no read sends guide SQL. 0010 drops the sample-version trigger and keeps the function, tables, rows and grants; the owner-only `guide-enrollment.ts resume` (`resumeGuides`) recreates the trigger and re-queues every report with active samples (clearing the rest).
 
 - Operator-only enrollment defaults off and records explicit processing consent plus an epoch that advances on every off/on transition; app/MCP have no enrollment or consent write privilege.
 - Guide eligibility requires enrollment, an active account and an active subscription or an unexpired trial; missing/unknown billing is ineligible.
-- A sample-revision trigger advances report source versions and marks durable work in the sample transaction, including while disabled; classification moves invalidate both reports; rules and unchanged saves do not.
+- When installed, a sample-revision trigger advances report source versions and marks durable work in the sample transaction, including while disabled; classification moves invalidate both reports; rules and unchanged saves do not.
 - Zero active samples immediately clears the guide and fences old work; nonempty changes retain the last successful stale guide with source/current versions and a reason.
 - A finite sequential worker claims at most five reports per run with a 150-second lease, checks eligibility before provider processing/spend/activation and permits two attempts per source/epoch.
 - All active originals and complete approved classification/context go in one generation; rules, prior guides and retired revisions are excluded; input is never sampled, truncated or batched.

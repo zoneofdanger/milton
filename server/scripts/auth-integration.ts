@@ -2,10 +2,12 @@
  * files, inherited database credentials, external requests or live operations. */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { request as httpRequest } from "node:http";
 import {
   cpSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   statSync,
   writeFileSync,
@@ -18,7 +20,14 @@ import * as oidc from "openid-client";
 import { createMiltonHandler } from "../src/handler";
 import { createAccessTokenVerifier } from "../src/token";
 import { sql, type SQL } from "drizzle-orm";
-import { createMiltonApp } from "../src/index";
+import { createMcpApp, createMiltonApp } from "../src/index";
+import { cloudRequests } from "../src/cloud-app";
+import {
+  serve,
+  type Http2Bindings,
+  type HttpBindings,
+  type ServerType,
+} from "@hono/node-server";
 import { runtimeConfig, type RuntimeConfig } from "../src/config";
 import {
   backgroundSettled,
@@ -60,8 +69,14 @@ import { assertPortFree, startCluster } from "../../apps/auth/scripts/cluster";
 import { fixtureConfig } from "../../apps/auth/test/fixture-config";
 import { AUTH_MIGRATIONS } from "../../apps/auth/scripts/migrations";
 import { createApp as createAuthPages } from "../../apps/auth/src/app";
+import { createCloudApp as createAuthCloudApp } from "../../apps/auth/src/cloud-app";
 import { versionAssets } from "@milton/theme/assets";
-import { ownerPools, provisionTestAccount, TEST_EMAIL } from "./test-account";
+import {
+  mintKey,
+  ownerPools,
+  provisionTestAccount,
+  TEST_EMAIL,
+} from "./test-account";
 import {
   browser,
   CheckError,
@@ -86,6 +101,7 @@ const root = cluster.dir,
   cert = cluster.cert;
 const secret = () => randomBytes(32).toString("hex");
 const pools: pg.Pool[] = [];
+const servers: ServerType[] = [];
 let groups = 0,
   stage = "setup";
 const pass = (name: string) => {
@@ -121,18 +137,19 @@ try {
   await owner.query(
     "REVOKE ALL ON DATABASE milton FROM PUBLIC; GRANT CONNECT ON DATABASE milton TO milton_auth_runtime,milton_app_runtime,milton_mcp_runtime,milton_guide_runtime; REVOKE CREATE ON SCHEMA public FROM PUBLIC; CREATE SCHEMA drizzle; CREATE TABLE drizzle.__drizzle_migrations(id serial,hash text,created_at bigint)",
   );
-  for (const migration of [
-    "0000_baseline",
-    "0001_sample_context",
-    "0002_sample_versions",
-    "0003_report_guides",
-    "0004_connection_keys",
-    "0005_drop_deleted_identities",
-    "0006_drop_unread_columns",
-    "0007_usage_calls",
-    "0008_usage_retention",
-    "0009_test_account",
-  ])
+  // Every writing migration the journal lists, in order, so a new one's tables
+  // exist here too.
+  const journal = JSON.parse(
+    readFileSync(new URL("./drizzle/meta/_journal.json", sourceRoot), "utf8"),
+  ) as { entries: { tag: string }[] };
+  assert.deepEqual(
+    journal.entries.map((e) => e.tag + ".sql"),
+    readdirSync(new URL("./drizzle/", sourceRoot))
+      .filter((f) => f.endsWith(".sql"))
+      .sort(),
+    "the journal lists every writing migration file",
+  );
+  for (const { tag: migration } of journal.entries)
     await owner.query(
       readFileSync(new URL(`./drizzle/${migration}.sql`, sourceRoot), "utf8"),
     );
@@ -2975,10 +2992,13 @@ try {
     // The native COMMIT succeeds but its acknowledgment is lost: the native
     // user exists, already bound to the marked account, and --resume takes the
     // existing-user branch without creating another.
+    // The pool keeps its clients, so each patched query is restored afterwards.
+    const patched: [pg.PoolClient, pg.PoolClient["query"]][] = [];
     const ackLost = {
       query: owners.native.query.bind(owners.native),
       connect: async () => {
         const client = await owners.native.connect();
+        patched.push([client, client.query]);
         const query = client.query.bind(client) as (
           ...args: unknown[]
         ) => Promise<unknown>;
@@ -2993,16 +3013,20 @@ try {
     } as unknown as pg.Pool;
     const lostEmail = "e2e-partial-ack@milton-test.invalid";
     const lostFile = join(root, "partial-ack.env");
-    await assert.rejects(
-      provisionTestAccount({
-        email: lostEmail,
-        output: lostFile,
-        owners: { ...owners, native: ackLost },
-        fetch: dispatch,
-        report: () => {},
-      }),
-      (e) => e === refused,
-    );
+    try {
+      await assert.rejects(
+        provisionTestAccount({
+          email: lostEmail,
+          output: lostFile,
+          owners: { ...owners, native: ackLost },
+          fetch: dispatch,
+          report: () => {},
+        }),
+        (e) => e === refused,
+      );
+    } finally {
+      for (const [client, query] of patched) client.query = query;
+    }
     const nativeRows = async () =>
       (
         await owner.query(
@@ -3306,24 +3330,132 @@ try {
     "test accounts are exempt from trials and billing: repeated sign-ins past 30 days make no trial or Stripe request; a stray trial row neither starts a subscription, closes access, offers a notice nor opens checkout",
   );
   stage = "propagation: edits and retirements reach every read surface";
-  // Two more fictional accounts, provisioned as the test account is, each filing
-  // rules and samples that carry its own marker. Every read surface (the three
-  // read tools, get_report for all five reports, the TPS.md download and the
-  // web report) is read with that account's own key and browser session.
+  // Two more fictional accounts, each filing rules and samples that carry its
+  // own marker, read on every surface (the three read tools, get_report for each
+  // of the five reports, the TPS.md download and the web report) with that
+  // account's own key and browser session. Every request these groups make goes
+  // over loopback HTTP: app, auth and MCP run their production request
+  // wrappers under @hono/node-server on 127.0.0.1 ports, as Cloud Run serves
+  // them, and each request carries the canonical Host and X-Forwarded-For that
+  // Google's load balancer forwards. The client is node:http rather than
+  // fetch, since Node's fetch replaces Host and forces Sec-Fetch-Mode: cors,
+  // which no browser navigation sends. (Native's admission callback to the
+  // app stays in process, as the fixture's native service was built with it.)
   {
     const clearRates = () =>
       owner.query(
         'delete from milton_auth."rateLimit"; delete from milton_guard.rate_bucket',
       );
-    // Fresh owner pools: the partial-provisioning group left a pooled native
-    // client that fails its commits.
-    const provisioners = ownerPools(testOwnerNative.href, ownerUrl.href);
-    pools.push(provisioners.native, provisioners.writing);
+    const listen = (
+      service: (
+        request: Request,
+        env: HttpBindings | Http2Bindings,
+      ) => Response | Promise<Response>,
+    ) =>
+      new Promise<number>((resolve) => {
+        servers.push(
+          serve({ fetch: service, port: 0, hostname: "127.0.0.1" }, (info) =>
+            resolve(info.port),
+          ),
+        );
+      });
+    // Each canonical origin's loopback port.
+    const ports = new Map<string, number>();
+    // One HTTP/1.1 request to a service's loopback port, from client address
+    // `from` behind the load balancer (which appends its own address). Never a
+    // redirect followed; the body is read whole.
+    const loopback =
+      (from: string): Fetch =>
+      (target, init) =>
+        new Promise<Response>((resolve, reject) => {
+          const u = new URL(target);
+          const port = ports.get(u.origin);
+          if (!port) return reject(new Error("external_network_refused"));
+          const headers = new Headers(init.headers);
+          headers.set("Host", u.host);
+          if (!headers.has("X-Forwarded-For"))
+            headers.set("X-Forwarded-For", `${from}, 192.0.2.1`);
+          const body =
+            init.body === undefined || init.body === null
+              ? undefined
+              : typeof init.body === "string" ||
+                  init.body instanceof URLSearchParams
+                ? String(init.body)
+                : init.body instanceof Uint8Array
+                  ? init.body
+                  : reject(new Error("unsupported_body"));
+          if (
+            init.body instanceof URLSearchParams &&
+            !headers.has("Content-Type")
+          )
+            headers.set("Content-Type", "application/x-www-form-urlencoded");
+          if (body !== undefined)
+            headers.set(
+              "Content-Length",
+              String(Buffer.byteLength(body as string)),
+            );
+          const sent = httpRequest(
+            {
+              host: "127.0.0.1",
+              port,
+              method: init.method ?? "GET",
+              path: u.pathname + u.search,
+              headers: Object.fromEntries(headers),
+              signal: init.signal ?? undefined,
+            },
+            (incoming) => {
+              const chunks: Buffer[] = [];
+              incoming.on("data", (chunk: Buffer) => chunks.push(chunk));
+              incoming.on("error", reject);
+              incoming.on("end", () => {
+                const received = new Headers();
+                for (const [name, value] of Object.entries(incoming.headers))
+                  for (const one of [value ?? []].flat())
+                    received.append(name, one);
+                const status = incoming.statusCode!;
+                resolve(
+                  new Response(
+                    [101, 204, 205, 304].includes(status)
+                      ? null
+                      : Buffer.concat(chunks),
+                    { status, headers: received },
+                  ),
+                );
+              });
+            },
+          );
+          sent.on("error", reject);
+          sent.end(body);
+        });
+    // The app's own calls to auth (token, UserInfo) go over loopback too.
+    const loopConfig: RuntimeConfig = {
+      ...config,
+      authFetch: ((input: string, init: RequestInit) =>
+        loopback("203.0.113.250")(
+          String(input),
+          init,
+        )) as RuntimeConfig["authFetch"],
+    };
+    ports.set(
+      config.appOrigin,
+      await listen(
+        cloudRequests(loopConfig, createMiltonApp(loopConfig, true)),
+      ),
+    );
+    ports.set(
+      AUTH_ORIGIN,
+      await listen(createAuthCloudApp(nativeService, authAssets)),
+    );
+    ports.set(
+      new URL(config.resource).origin,
+      await listen(createMcpApp(mcpConfig)),
+    );
     const intent = { situation: "confirming what is on file" };
+    const reportIds = ["email", "chat", "post", "document", "speech"] as const;
     const surfaceNames = [
       "get_cover_sheet",
       "list_reports",
-      "get_report",
+      ...reportIds.map((id) => `get_report ${id}` as const),
       "download",
       "web",
     ] as const;
@@ -3332,14 +3464,22 @@ try {
     // Each call is its own client behind the load balancer, so the key-lookup
     // limits never refuse one.
     let clients = 0;
-    const forwarded = () => {
+    const mcpPost = (key: string, method: string, params: unknown) => {
       const n = ++clients;
-      return { "X-Forwarded-For": `198.18.${n >> 8}.${n & 255}, 192.0.2.1` };
+      return loopback(`198.18.${n >> 8}.${n & 255}`)(config.resource, {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + key,
+          "Content-Type": "application/json",
+          Accept: "application/json, text/event-stream",
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+      });
     };
     const callTool = async (key: string, name: string, args: object = {}) => {
       const reply = (
         await result(
-          await rpc(key, "tools/call", { name, arguments: args }, forwarded()),
+          await mcpPost(key, "tools/call", { name, arguments: args }),
         )
       ).result;
       return { text: reply.content![0]!.text, isError: reply.isError === true };
@@ -3349,23 +3489,13 @@ try {
       assert(!reply.isError, `${name} reads`);
       return reply.text;
     };
-    const side = async (name: string) => {
-      const email = `propagation-${name}@milton-test.invalid`;
-      const output = join(root, `propagation-${name}.env`);
-      await clearRates();
-      const account = await provisionTestAccount({
-        email,
-        output,
-        owners: provisioners,
-        fetch: dispatch,
-        report: () => {},
-      });
-      const { key, password } = await readSecrets(output);
-      // Every cookie the browser is sent, by host, so a session can be
-      // replayed after the browser itself has dropped it.
+    // One person's browser traffic, from its own client address: every cookie
+    // it is sent, by host, is kept so a session can be replayed after the
+    // browser itself has dropped it.
+    const person = (name: string, from: string) => {
       const cookies = new Map<string, string>();
-      const recording: Fetch = async (target, init) => {
-        const response = await dispatch(target, init);
+      const web: Fetch = async (target, init) => {
+        const response = await loopback(from)(target, init);
         for (const cookie of response.headers.getSetCookie()) {
           const pair = cookie.split(";")[0]!;
           const i = pair.indexOf("=");
@@ -3376,54 +3506,116 @@ try {
         }
         return response;
       };
+      return { marker: `${name.toUpperCase()}MARK`, cookies, web };
+    };
+    const side = async (
+      p: ReturnType<typeof person>,
+      email: string,
+      password: string,
+      // Known in advance, or found once the first sign-in has made it.
+      account: () => Promise<{ userId: string; subject: string }>,
+      key?: string,
+    ) => {
       const signedIn = async () => {
-        const b = browser(PRODUCTION, recording);
+        const b = browser(PRODUCTION, p.web);
         await signIn(b, PRODUCTION, email, password);
         return b;
       };
+      const b = await signedIn();
       return {
-        marker: `${name.toUpperCase()}MARK`,
+        ...p,
+        ...(await account()),
         email,
         password,
-        key,
-        browser: await signedIn(),
+        key: key ?? (await mintKey(b, PRODUCTION, "Fictional propagation")),
+        browser: b,
         signedIn,
-        cookies,
-        ...account,
       };
     };
-    type Side = Awaited<ReturnType<typeof side>>;
-    const alder = await side("alder"),
-      birch = await side("birch");
+    // Alder, the account deleted later, signs up as a person does (an
+    // example.com address, so native queues its mail), with a trial; Birch is
+    // provisioned as the test account is.
+    await clearRates();
+    const alder = await (async () => {
+      const p = person("alder", "203.0.113.11");
+      const email = "propagation-alder@example.com",
+        password = "Fictional alder propagation password 518";
+      const json = (path: string, body: object) =>
+        p.web(ISSUER + path, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+            Origin: AUTH_ORIGIN,
+          },
+          body: JSON.stringify(body),
+        });
+      const signedUp = await json("/sign-up/email", {
+        name: "Fictional Alder",
+        email,
+        password,
+      });
+      assert.equal(signedUp.status, 200, "native sign-up");
+      await drainMail();
+      const verified = await p.web(
+        mail.findLast((m) => m.kind === "verify")!.url,
+        { method: "GET" },
+      );
+      assert.equal(verified.status, 302, "verification link");
+      const subject = (
+        await owner.query<{ id: string }>(
+          'SELECT id FROM milton_auth."user" WHERE email=$1',
+          [email],
+        )
+      ).rows[0]!.id;
+      return side(p, email, password, async () => ({
+        subject,
+        userId: (
+          await lookupIdentityAccount(config, { provider: ISSUER, subject })
+        ).userId,
+      }));
+    })();
+    const birch = await (async () => {
+      const p = person("birch", "203.0.113.12");
+      const email = "propagation-birch@milton-test.invalid";
+      const output = join(root, "propagation-birch.env");
+      const account = await provisionTestAccount({
+        email,
+        output,
+        owners,
+        fetch: p.web,
+        report: () => {},
+      });
+      const { key, password } = await readSecrets(output);
+      return side(p, email, password, async () => account, key);
+    })();
+    type Side = typeof alder | typeof birch;
     const both = [alder, birch];
     const other = (s: Side) => (s === alder ? birch : alder);
     const surfaces = async (s: Side): Promise<Surfaces> => {
-      const reports: string[] = [];
-      for (const report_id of ["email", "chat", "post", "document", "speech"])
-        reports.push(
-          await readTool(s.key, "get_report", { report_id, intent }),
-        );
-      const download = await s.browser.go(PRODUCTION.app + "/download");
-      assert.equal(download.status, 200, "TPS.md download");
-      const web = await s.browser.follow(PRODUCTION.app + "/tps-report");
-      assert.equal(web.status, 200, "web report");
-      return {
+      const seen = {
         get_cover_sheet: await readTool(s.key, "get_cover_sheet"),
         list_reports: await readTool(s.key, "list_reports"),
-        get_report: reports.join("\n"),
-        download: await download.text(),
-        web: web.html,
-      };
+      } as Surfaces;
+      for (const report_id of reportIds)
+        seen[`get_report ${report_id}`] = await readTool(s.key, "get_report", {
+          report_id,
+          intent,
+        });
+      const download = await s.browser.go(PRODUCTION.app + "/download");
+      assert.equal(download.status, 200, "TPS.md download");
+      seen.download = await download.text();
+      const web = await s.browser.follow(PRODUCTION.app + "/tps-report");
+      assert.equal(web.status, 200, "web report");
+      seen.web = web.html;
+      return seen;
     };
     // What the assistant surfaces and the download serve, byte for byte (the
     // web report also prints a random joke).
     const served = (seen: Surfaces) =>
-      JSON.stringify([
-        seen.get_cover_sheet,
-        seen.list_reports,
-        seen.get_report,
-        seen.download,
-      ]);
+      JSON.stringify(
+        surfaceNames.filter((s) => s !== "web").map((s) => seen[s]),
+      );
     const status = (text: string) => {
       try {
         return (JSON.parse(text) as { status?: string }).status;
@@ -3446,7 +3638,12 @@ try {
         ).text,
       );
     const cover: Surface[] = ["get_cover_sheet", "download", "web"];
-    const report: Surface[] = ["get_report", "list_reports", "download", "web"];
+    const report: Surface[] = [
+      "get_report email",
+      "list_reports",
+      "download",
+      "web",
+    ];
     const gone = (m: string) => `Close fictional emails with ${m} email gone.`;
     const sampleOne = (m: string, age: "old" | "new") => ({
       summary: `${m} summary ${age}`,
@@ -3473,19 +3670,25 @@ try {
       [`${m} summary new`, report],
     ];
     // Every miss at once, as surface and text, so a failure names them all.
+    // Each report's text belongs to that report alone: get_report for any
+    // other report never shows it.
     const shows = (
       seen: Surfaces,
       texts: [string, Surface[]][],
       when: string,
     ) =>
       assert.deepEqual(
-        texts.flatMap(([text, where]) =>
-          where
+        texts.flatMap(([text, where]) => [
+          ...where
             .filter((s) => !seen[s].includes(text))
-            .map((s) => `${s}: ${text}`),
-        ),
+            .map((s) => `missing from ${s}: ${text}`),
+          ...reportIds
+            .map((id) => `get_report ${id}` as const)
+            .filter((s) => !where.includes(s) && seen[s].includes(text))
+            .map((s) => `misplaced in ${s}: ${text}`),
+        ]),
         [],
-        `${when}: each surface shows the text it should`,
+        `${when}: each surface shows the text it should, and only there`,
       );
     const never = (seen: Surfaces, texts: string[], when: string) =>
       assert.deepEqual(
@@ -3606,7 +3809,7 @@ try {
       settled.set(s, seen);
     }
     pass(
-      "an exact edit, a rule removal, a sample revision and a retirement reach get_cover_sheet, list_reports, get_report, the TPS.md download and the web report: the old text is gone from all, the new text shows where it belongs",
+      "over loopback HTTP to the production app, auth and MCP wrappers: an exact edit, a rule removal, a sample revision and a retirement reach get_cover_sheet, list_reports, get_report (each report), the TPS.md download and the web report: the old text is gone from all, the new text shows in its own report only",
     );
     stage = "isolation: one account's key and session cannot address another's";
     {
@@ -3712,32 +3915,36 @@ try {
             ]),
           ),
         ) as Record<string, number>;
-      // Every base table in every schema, each whole row as text, for the
-      // account id, the native subject, the email and the marker: this finds
-      // what a table without a foreign key would keep.
-      const tables = (
-        await owner.query<{ name: string }>(
-          `SELECT format('%I.%I',table_schema,table_name) AS name FROM information_schema.tables
-          WHERE table_type='BASE TABLE' AND table_schema NOT IN ('pg_catalog','information_schema') ORDER BY 1`,
+      // Every column of every base table in every schema, as text, for the
+      // account id, the native subject, the email and the marker: a count per
+      // column and value. This also finds what a table without a foreign key
+      // keeps, but only when it holds rows of this account: a user-owned table
+      // with no foreign key that these fixtures never fill is not caught.
+      const columns = (
+        await owner.query<{ tbl: string; col: string }>(
+          `SELECT format('%I.%I',c.table_schema,c.table_name) tbl, format('%I',c.column_name) col
+          FROM information_schema.columns c JOIN information_schema.tables t USING (table_schema,table_name)
+          WHERE t.table_type='BASE TABLE' AND c.table_schema NOT IN ('pg_catalog','information_schema') ORDER BY 1,2`,
         )
-      ).rows.map((r) => r.name);
+      ).rows;
       const needles = ["account", "subject", "email", "marker"] as const;
+      type Found = Partial<Record<(typeof needles)[number], number>>;
       const scan = async (s: Side) => {
         const rows = (
           await owner.query<
-            Record<(typeof needles)[number], number> & { name: string }
+            Record<(typeof needles)[number], number> & { at: string }
           >(
-            tables
+            columns
               .map(
-                (t) =>
-                  `SELECT '${t.replaceAll("'", "''")}' AS name,` +
+                ({ tbl, col }) =>
+                  `SELECT '${`${tbl}.${col}`.replaceAll("'", "''")}' AS at,` +
                   needles
                     .map(
                       (needle, i) =>
-                        `count(*) FILTER (WHERE strpos(scanned::text,$${i + 1})>0)::int ${needle}`,
+                        `count(*) FILTER (WHERE strpos(${col}::text,$${i + 1})>0)::int ${needle}`,
                     )
                     .join(",") +
-                  ` FROM ${t} scanned`,
+                  ` FROM ${tbl}`,
               )
               .join(" UNION ALL "),
             [s.userId, s.subject, s.email, s.marker],
@@ -3747,38 +3954,149 @@ try {
           rows
             .map(
               (r) =>
-                [r.name, needles.filter((needle) => r[needle] > 0)] as const,
+                [
+                  r.at,
+                  Object.fromEntries(
+                    needles.filter((n) => r[n] > 0).map((n) => [n, r[n]]),
+                  ) as Found,
+                ] as const,
             )
-            .filter(([, found]) => found.length),
+            .filter(([, found]) => Object.keys(found).length),
         );
       };
-      // The two account tables these flows leave empty for a test account: the
-      // operator's guide enrollment, and a stray trial row (as above, it
-      // changes nothing for a test account).
+      // What these flows leave empty: the operator's guide enrollment; an
+      // assistant connected through native OAuth (its client, consent and
+      // tokens); a password-reset mail (its mail job and reset proof).
       await setGuideEnrollment(ownerDb, alder.userId, {
         enabled: true,
         optInReference: "fictional-propagation-consent",
       });
-      await owner.query(
-        "INSERT INTO trial_accounts(user_id,started_at) VALUES($1,now())",
-        [alder.userId],
+      const authCookie = () =>
+        [...alder.cookies]
+          .filter(([k, v]) => k.startsWith("auth.meetmilton.com\t") && v)
+          .map(([k, v]) => `${k.split("\t")[1]}=${v}`)
+          .join("; ");
+      const nativeJson = (path: string, body: object) =>
+        alder.web(ISSUER + path, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+            Origin: AUTH_ORIGIN,
+            Cookie: authCookie(),
+          },
+          body: JSON.stringify(body),
+        });
+      await clearRates();
+      const registered = await nativeJson("/oauth2/register", {
+        client_name: "Fictional propagation assistant",
+        redirect_uris: ["https://assistant.example.invalid/callback"],
+        token_endpoint_auth_method: "client_secret_post",
+        scope: "openid offline_access milton:read milton:write",
+        grant_types: ["authorization_code", "refresh_token"],
+      });
+      assert.equal(registered.status, 201, "assistant registration");
+      const registration = (await registered.json()) as {
+        client_id: string;
+        client_secret: string;
+      };
+      const oauth = await oidc.discovery(
+        new URL(ISSUER),
+        registration.client_id,
+        { id_token_signed_response_alg: "EdDSA" },
+        oidc.ClientSecretPost(registration.client_secret),
+        {
+          [oidc.customFetch]: (target, options) =>
+            loopback("203.0.113.13")(target, options as RequestInit),
+          execute: [oidc.enableNonRepudiationChecks],
+          timeout: 5,
+        },
       );
-      assert.deepEqual(
-        Object.entries(await owned(alder))
-          .filter(
-            ([column, n]) =>
-              n === 0 &&
-              references.find((r) => `${r.tbl}.${r.col}` === column)!.to ===
-                "writing",
-          )
-          .map(([column]) => column),
-        [],
-        "every table referencing an account holds rows of it before deletion, so the check below is not vacuous",
+      const assistantScope = "openid offline_access milton:read milton:write";
+      const state = oidc.randomState(),
+        nonce = oidc.randomNonce(),
+        pkce = oidc.randomPKCECodeVerifier();
+      const authorization = await alder.web(
+        oidc.buildAuthorizationUrl(oauth, {
+          redirect_uri: "https://assistant.example.invalid/callback",
+          scope: assistantScope,
+          resource: config.resource,
+          state,
+          nonce,
+          code_challenge: await oidc.calculatePKCECodeChallenge(pkce),
+          code_challenge_method: "S256",
+        }).href,
+        {
+          method: "GET",
+          headers: { Accept: "text/html", Cookie: authCookie() },
+        },
       );
+      let destination =
+        authorization.headers.get("Location") ??
+        ((await authorization.json()) as { url: string }).url;
+      if (new URL(destination, AUTH_ORIGIN).pathname === "/consent") {
+        const choice = await nativeJson("/oauth2/consent", {
+          accept: true,
+          scope: assistantScope,
+          oauth_query: new URL(
+            destination,
+            AUTH_ORIGIN,
+          ).searchParams.toString(),
+        });
+        assert.equal(choice.status, 200, "assistant consent");
+        destination = ((await choice.json()) as { url: string }).url;
+      }
+      const grant = await oidc.authorizationCodeGrant(
+        oauth,
+        new URL(destination, AUTH_ORIGIN),
+        { expectedState: state, expectedNonce: nonce, pkceCodeVerifier: pkce },
+        { resource: config.resource },
+      );
+      assert(grant.refresh_token, "an offline assistant grant");
+      const userInfo = async () =>
+        (
+          await alder.web(ISSUER + "/oauth2/userinfo", {
+            method: "GET",
+            headers: { Authorization: "Bearer " + grant.access_token },
+          })
+        ).status;
+      assert.equal(await userInfo(), 200, "the assistant's token works");
+      assert.equal(
+        (await nativeJson("/request-password-reset", { email: alder.email }))
+          .status,
+        200,
+        "a reset mail",
+      );
+      await drainMail();
+      // Every reference to an account or native user, from the catalog, holds
+      // rows of this one, and so do the account-linked columns that have no
+      // foreign key; these listed ones only appear during the deletion itself.
+      const unreferenced = [
+        "milton_app.admission.subject",
+        "milton_app.admission.user_id",
+        "milton_app.session.subject",
+        "milton_auth.verification.value",
+        "milton_guard.authorization_binding.origin_user",
+        "milton_guard.mail_job.origin_user",
+      ];
+      // Excluded, with the reason: only native's user-owned client creation
+      // sets it, and no exposed endpoint offers that (dynamic registration is
+      // anonymous, so the assistant's client above has no owner).
+      const unreachable = ['milton_auth."oauthClient"."userId"'];
       const found = await scan(alder);
+      assert.deepEqual(
+        [
+          ...Object.entries(await owned(alder))
+            .filter(([at, n]) => n === 0 && !unreachable.includes(at))
+            .map(([column]) => column),
+          ...unreferenced.filter((at) => !found[at]),
+        ],
+        [],
+        "every account table and column holds rows of it before deletion, so the checks below are not vacuous",
+      );
       assert(
-        found["public.sample_versions"]?.includes("marker") &&
-          found['milton_auth."user"']?.includes("email"),
+        found["public.sample_versions.body"]?.marker &&
+          found['milton_auth."user".email']?.email,
         "before deletion the scan finds the account's text and email",
       );
       const birchRows = await owned(birch);
@@ -3792,10 +4110,9 @@ try {
           .filter(([k, v]) => k.startsWith(u.host + "\t") && v)
           .map(([k, v]) => `${k.slice(u.host.length + 1)}=${v}`)
           .join("; ");
-        const response = await dispatch(target, {
+        const response = await loopback("203.0.113.14")(target, {
           method: "GET",
           headers: { Accept: "text/html", Cookie: cookie },
-          redirect: "manual",
         });
         return { status: response.status, body: await response.text() };
       };
@@ -3835,12 +4152,13 @@ try {
         ).rows[0].progress,
         "complete",
       );
-      // The key, the app session and the native session no longer authenticate.
+      // The key, the assistant's grant, the app session and the native session
+      // no longer authenticate.
       for (const [method, params] of [
         ["tools/list", {}],
         ["tools/call", { name: "get_cover_sheet", arguments: {} }],
       ] as const) {
-        const response = await rpc(alder.key, method, params, forwarded());
+        const response = await mcpPost(alder.key, method, params);
         assert.equal(
           response.status,
           401,
@@ -3851,6 +4169,13 @@ try {
           `${method} serves nothing of it`,
         );
       }
+      assert.notEqual(await userInfo(), 200, "the assistant's token");
+      await assert.rejects(
+        oidc.refreshTokenGrant(oauth, grant.refresh_token, {
+          resource: config.resource,
+        }),
+        "the assistant's refresh token",
+      );
       for (const path of ["/", "/tps-report", "/download"]) {
         const page = await replay(PRODUCTION.app + path);
         if (path !== "/")
@@ -3873,7 +4198,7 @@ try {
       await clearRates();
       await assert.rejects(
         signIn(
-          browser(PRODUCTION, dispatch),
+          browser(PRODUCTION, loopback("203.0.113.15")),
           PRODUCTION,
           alder.email,
           alder.password,
@@ -3888,20 +4213,28 @@ try {
         [],
         "no row in a table referencing the account or its native user remains",
       );
+      // Each column that may still name it, with its row count: one sign-in
+      // flow per binding and admission (three here), one mail job per mail sent
+      // (verification and reset). Any other column, or another row, fails.
       assert.deepEqual(
         await scan(alder),
         {
           // Admission correlations, reclaimed by later logins after 24 hours.
-          "milton_app.admission": ["account", "subject"],
+          "milton_app.admission.subject": { subject: 3 },
+          "milton_app.admission.user_id": { account: 3 },
           // The original deletion operation, kept so a retry stays safe.
-          "milton_app.lifecycle": ["account", "subject"],
+          "milton_app.lifecycle.subject": { subject: 1 },
+          "milton_app.lifecycle.user_id": { account: 1 },
           // The trial-eligibility fingerprint's first claimant.
-          "milton_app.trial_fingerprint": ["account"],
+          "milton_app.trial_fingerprint.first_user_id": { account: 1 },
           // Native authorization bindings, pruned by auth maintenance a day
           // after they expire.
-          "milton_guard.authorization_binding": ["subject"],
+          "milton_guard.authorization_binding.origin_user": { subject: 3 },
+          // Sent mail jobs, their payloads already cleared; owner maintenance
+          // clears their receipts after 24 hours.
+          "milton_guard.mail_job.origin_user": { subject: 2 },
           // Native's record of the deletion operation.
-          "milton_guard.security_operation": ["subject"],
+          "milton_guard.security_operation.origin_user": { subject: 1 },
         },
         "nothing else names the account or holds its text",
       );
@@ -3920,7 +4253,7 @@ try {
       );
     }
     pass(
-      "account deletion through the app leaves no row referencing the account or its native user (catalog-derived, every one populated first) and nothing else naming it or holding its text; its key, app session, native session and password stop working; the other account is untouched",
+      "account deletion through the app leaves no row referencing the account or its native user (catalog-derived, every one populated first, one listed exclusion), only pinned id-only leftovers (table, column, rows) and none of its email or text; its key, assistant grant, app session, native session and password stop working; the other account is untouched",
     );
   }
   console.log(
@@ -3938,6 +4271,11 @@ try {
   );
   process.exitCode = 1;
 } finally {
+  for (const server of servers)
+    if ("closeAllConnections" in server) {
+      server.closeAllConnections();
+      server.close();
+    }
   await Promise.allSettled([
     ...pools.map((pool) => pool.end()),
     closeDatabasePools(),

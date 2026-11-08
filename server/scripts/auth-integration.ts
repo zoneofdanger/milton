@@ -333,6 +333,19 @@ try {
   );
   assert.deepEqual(await trialTableGrants(), []);
   pass("0005 and 008 drop the unread trial tables, leaving no grants behind");
+  // 012: sessions no longer store the native access token. Rerunning converges.
+  for (let n = 0; n < 2; n++)
+    await appOwner.query(
+      sourceFile("./migrations/012-session-token-nullable.up.sql"),
+    );
+  assert.equal(
+    (
+      await owner.query(
+        "SELECT is_nullable FROM information_schema.columns WHERE table_schema='milton_app' AND table_name='session' AND column_name='access_token'",
+      )
+    ).rows[0].is_nullable,
+    "YES",
+  );
   for (const [pool, statement] of [
     [authPool, "SELECT * FROM public.users"],
     [authPool, "SELECT * FROM milton_app.session"],

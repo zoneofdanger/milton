@@ -325,6 +325,36 @@ A registration authorized only by accounts deleted before 008 whose bindings mai
 had already pruned cannot be traced and stays as it was. Rollback is the pre-migration
 snapshot; there is no down script.
 
+## Stop storing the app's native access token (owner file 012; not yet applied)
+
+Until this change the app wrote the native access token it receives at sign-in into
+`milton_app.session.access_token` (`NOT NULL`, plaintext) and nothing read it. App code
+from this change on uses the token only within the sign-in request (UserInfo and
+introspection) and inserts sessions without it, so it needs the column nullable first.
+012 is a catalog change with no table scan; it sets a 5 s lock limit in its own
+transaction because DROP NOT NULL briefly locks `session` exclusively. Older app code
+still writes the column and runs unchanged on either schema. Existing rows keep their
+tokens, each expired within an hour of its sign-in; they are not cleared here and go with
+the column in the later drop. Rehearse on a disposable database first
+(`server/scripts/check-auth-integration.ts` applies it twice), then:
+
+1. Snapshot production.
+2. As the `milton_app` owner, `milton_app_owner` (as for 008):
+   `psql -X -v ON_ERROR_STOP=1 -f server/migrations/012-session-token-nullable.up.sql`
+   (one transaction; rerunning converges).
+3. Check as the owner; expect `YES`:
+   `SELECT is_nullable FROM information_schema.columns WHERE table_schema='milton_app' AND table_name='session' AND column_name='access_token';`
+4. Release the app image from this change (MCP never touches sessions; it may follow on
+   the same image). After a fresh sign-in, as the owner, expect 0:
+   `SELECT count(*) FROM milton_app.session WHERE access_token IS NOT NULL AND created_at > '<release time>';`
+
+Rolling the app back to the previous image is code only: the column still exists and
+accepts the old code's writes. A failed migration's rollback is the pre-migration
+snapshot; there is no down script. The drop is a later migration, carrying
+`-- code-stopped-by:` this change's PR and applied only after this release serves;
+after it, the app must not roll back to an image older than this change, whose sign-in
+writes the column.
+
 ## Test account and daily check
 
 `e2e@milton-test.invalid` is a fictional account that holds nothing but what the daily

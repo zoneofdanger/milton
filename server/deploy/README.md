@@ -23,7 +23,18 @@ This runbook keeps only the latest release record. Earlier release records and a
 one-time procedures are in git history; the last full version is at commit 492b96a
 (`git show 492b96a:server/deploy/README.md`).
 
-## Release record: private admission service, session token drop, e2e fix, MCP next steps, guards (2026-11-08, PRs #58–#64)
+## Release record: UserInfo binding, private admission service, session token drop, e2e fix, MCP next steps, guards (2026-11-08, PRs #58–#65, #69)
+
+- **#69 (milton-qa; Astra's must-fix, the Bearer challenge, fixed), `f464237`:** native
+  UserInfo answers only while the token's grant binding is live (`binding_status` after the
+  rate gate; 401 `invalid_token` with its challenge, 503 on a database error). Auth
+  `milton-auth-00020-hef` at 19:05:44Z (image
+  `sha256:2465afc8731b5f6de6d775fb0bdfd16f77b25714492e023aa556380f2f221554`; mail and
+  maintenance jobs too; `AUTH_ADMISSION_URL` kept). Live: UserInfo without a token 401
+  `Bearer`, with a junk token 401 `Bearer error="invalid_token"`; an e2e sign-in passed (the
+  app's own UserInfo); an MCP read. Checks on the merge: types, 156 tests, format, guard,
+  auth build, auth integration 21/21, rehearsal 21/21, CI green. Gate at 19:15Z: clean.
+- **#65:** runbook only (the milton-admit step-1 snippet). No deploy.
 
 - **#64 (Peter's go; milton-qa, Astra's must-fix fixed in comments), `252fbf7`:** snapshot
   `snap-rapid-wind-b8xon9wq` at 17:58:11Z; owner file 013 as `milton_app_owner` through the
@@ -84,7 +95,7 @@ one-time procedures are in git history; the last full version is at commit 492b9
   the owner password reset, Neon autoscaling and the budget, daily snapshots
   (11:00 UTC, 14 days; first `snap-silent-feather-b84f2kwj`).
 
-Auth `milton-auth-00018-heq`, rollback floor `milton-auth-00018-heq` (older auth calls the
+Auth `milton-auth-00020-hef`, rollback `milton-auth-00018-heq` (code only); floor `00018-heq` (older auth calls the
 app's removed admission routes: roll auth back only together with app/MCP to
 `milton-*-token-0f7d5aa`, then auth to `00016-kul`). App/MCP `milton-*-admit-20b0f27`,
 rollback `milton-*-token-0f7d5aa` (code only; never before #62). Once owner file 013 is applied, the app never rolls back to an image older than #62:
@@ -1151,7 +1162,7 @@ gcloud run revisions list --service=milton-app --project=milton-510506 --region=
 ```
 
 Now serving (2026-11-08): app `milton-app-admit-20b0f27`, MCP `milton-mcp-admit-20b0f27`
-and admission `milton-admit` (source `20b0f27`), and auth `milton-auth-00018-heq` (source `20b0f27`). The
+and admission `milton-admit` (source `20b0f27`), and auth `milton-auth-00020-hef` (source `f464237`). The
 release record above gives the image and rollback revisions.
 
 Roll back only affected services, preserve ingress/IAM, then repeat the canonical

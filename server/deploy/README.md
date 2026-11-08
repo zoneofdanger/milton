@@ -23,8 +23,32 @@ This runbook keeps only the latest release record. Earlier release records and a
 one-time procedures are in git history; the last full version is at commit 492b96a
 (`git show 492b96a:server/deploy/README.md`).
 
-## Release record: Stripe reads off the lock, guide pilot parked, deletion links, UserInfo binding, private admission service, session token drop, e2e fix, MCP next steps, guards (2026-11-08, PRs #58–#66, #68–#70)
+## Release record: deletion fences Stripe, Stripe reads off the lock, guide pilot parked, deletion links, UserInfo binding, private admission service, session token drop, e2e fix, MCP next steps, guards (2026-11-08, PRs #58–#66, #68–#72)
 
+- **#72 (Peter's wording and go), `02f8138`:** the privacy page's plainer account-deletion
+  paragraph (shared registrations stay when another account also approved them; the
+  fingerprint covers deleted and erased ones), live on www.meetmilton.com. Text only.
+- **#71 (Peter's go; milton-qa, three Astra rounds; closes TODO #32), `778a1a1`:** once a
+  deletion has begun, checkout and enrolment link no Stripe customer and open no payable
+  session, the erase step ends any customer still linked, and native sign-in, consent and
+  social-link refuse with a final 403 `account_deleting` (admit answers 410). No migration,
+  no settings change. Admit `milton-admit-00003-rmr` at 22:37:07Z (from
+  [admit.service.json](admit.service.json)) and app `milton-app-race-778a1a1` at 22:37:32Z,
+  image `sha256:f5f29d47496807529aa31f5ddf2b0cd2c32559e5b86e439c4d4dec1ea9774f79` (the daily
+  job too); auth `milton-auth-00016-q4c` at 22:38:34Z, image
+  `sha256:58eaa4bc04ab1c4c15924abea541303ada28142e794924f3d1cb538af925a262` (mail and
+  maintenance jobs too; `AUTH_ADMISSION_URL` kept). ⚠ `gcloud run deploy milton-auth` created
+  the revision but left traffic on the tagged `00020-hef` (traffic names a revision, not
+  latest), and Cloud Run records the image by its amd64 manifest digest (`099a1569…`), not the
+  index digest: after an auth deploy, check the serving revision and move traffic with
+  `update-traffic`. No request reached an older app, admit or auth revision after 22:39:40Z.
+  Live: health 200 ×3, app home 200, MCP 401 unauthenticated, admit 403 without a token,
+  UserInfo 401 on a junk token, forms probe PASS, an e2e sign-in admitted (204, 165 ms;
+  `milton-e2e-daily-hd52d`), an MCP read. Checks: PR CI green on `102dd48` (same tree), main
+  CI green on `02f8138`. Untested at Stripe: whether a Checkout session opened before deletion
+  can still complete on the deleted customer (Peter's sandbox test, with the billing test).
+  Gate at 22:49Z (from 22:37Z): clean; the maintenance job ran on the new image at 22:45Z and
+  succeeded.
 - **#70 (Peter's go; milton-perf, milton-qa PASS; supersedes #67), `7ffc5cf`:** checkout's
   live read and the webhook read Stripe with no transaction open and write by
   compare-and-set on `trial_accounts.stripe_revision` (see
@@ -137,7 +161,10 @@ one-time procedures are in git history; the last full version is at commit 492b9
   the owner password reset, Neon autoscaling and the budget, daily snapshots
   (11:00 UTC, 14 days; first `snap-silent-feather-b84f2kwj`).
 
-Auth `milton-auth-00020-hef`, rollback `milton-auth-00018-heq` (code only); floor `00018-heq` (older auth calls the
+Since #71: app `milton-app-race-778a1a1`, admit `milton-admit-00003-rmr` and auth
+`milton-auth-00016-q4c`; rollback, in any order, to `milton-app-srl-7ffc5cf`,
+`milton-admit-00002-ws6` and `milton-auth-00020-hef` (code only; the erase step then no longer
+ends a customer linked after deletion began). Before #71: auth `milton-auth-00020-hef`, rollback `milton-auth-00018-heq` (code only); floor `00018-heq` (older auth calls the
 app's removed admission routes: roll auth back only together with app/MCP to
 `milton-*-token-0f7d5aa`, then auth to `00016-kul`). App `milton-app-srl-7ffc5cf`, rollback `milton-app-park-f735701` (code only; it runs on
 0011), and admit `milton-admit-00002-ws6`, rollback `milton-admit-00001-ggf`; roll both back
@@ -1297,8 +1324,8 @@ references. Inspect revision readiness before selecting a recorded revision:
 gcloud run revisions list --service=milton-app --project=milton-510506 --region=us-east4
 ```
 
-Now serving (2026-11-08): app `milton-app-srl-7ffc5cf` and admission `milton-admit-00002-ws6`
-(source `7ffc5cf`), MCP `milton-mcp-park-f735701` (source `f735701`), and auth `milton-auth-00020-hef` (source `f464237`). The
+Now serving (2026-11-08): app `milton-app-race-778a1a1`, admission `milton-admit-00003-rmr`
+and auth `milton-auth-00016-q4c` (source `778a1a1`), and MCP `milton-mcp-park-f735701` (source `f735701`). The
 release record above gives the image and rollback revisions.
 
 Roll back only affected services, preserve ingress/IAM, then repeat the canonical

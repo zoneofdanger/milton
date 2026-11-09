@@ -56,10 +56,9 @@ import FilingComparison from "../components/FilingComparison.astro";
     <p class="eyebrow">## Your writing, on file</p>
     <h2 id="why-heading">Start with your own words.</h2>
     <p class="section-lead">
-      Your AI can find a few messages where it already has access, if you ask,
-      or you can paste them. You choose what sounds like you. It shows the
-      proposed examples with private details replaced by placeholders, then
-      Milton keeps only what you approve.
+      Paste a few emails or DMs that sound like you. From then on, every final
+      you accept is kept as a memo too. Your own words become the examples your
+      next AI imitates.
     </p>
     <FilingComparison />
   </section>
@@ -107,8 +106,8 @@ import FilingComparison from "../components/FilingComparison.astro";
               ✓
             </span>
             <p class="slip-text">
-              <strong>Choose.</strong> Pick a few emails or DMs that sound like
-              you. Review the exact examples and approve what Milton may keep.
+              <strong>Cover sheet.</strong> Tell your AI a few hard lines, like
+              “no em dashes.” They go on your cover sheet, in your words.
             </p>
             <p class="slip-initials">
               <span class="slip-initials-label">Initials</span>
@@ -121,7 +120,7 @@ import FilingComparison from "../components/FilingComparison.astro";
             </span>
             <p class="slip-text">
               <strong>Draft.</strong> Give your AI the facts for the next email
-              or message. Ask it to read your examples, then draft.
+              or message. It reads your cover sheet and report, then drafts.
             </p>
             <p class="slip-initials">
               <span class="slip-initials-label">Initials</span>
@@ -133,9 +132,9 @@ import FilingComparison from "../components/FilingComparison.astro";
               ✓
             </span>
             <p class="slip-text">
-              <strong>Keep, if you like.</strong> Edit the draft until it is
-              yours. Your AI can offer to keep that final version as a future
-              sample.
+              <strong>Accept.</strong> Fix the draft until it’s yours, then
+              accept it. Your AI keeps the memo and tells you in one line. Next
+              time, any AI gets your tweaks.
             </p>
             <p class="slip-initials">
               <span class="slip-initials-label">Initials</span>
@@ -167,29 +166,30 @@ import FilingComparison from "../components/FilingComparison.astro";
     <details>
       <summary>What does Milton keep, and what does it never touch?</summary>
       <p>
-        Only what you approve: samples of your writing, kept word for word, and
-        the writing rules you ask for. Milton never rewrites a rule or sample.
-        It does not read your inbox, files, or conversations. If you ask, your
-        AI may find candidates using access you already granted it; Milton
-        receives only the examples you approve for retention.
+        A memo each time you accept a final: your AI’s first draft, your final,
+        one-line tweaks for what you made it change, and a one-line summary of
+        the situation. Plus your cover sheet, in your words. Milton never
+        rewrites any of it. It does not read your inbox, files, or
+        conversations; it gets only what your AI sends. Turn off Keep memos,
+        forget a memo, or delete them all from your TPS page.
       </p>
     </details>
     <details>
       <summary>Couldn’t I just use a Markdown file in a synced folder?</summary>
       <p>
-        Yes. Milton handles the connections and picks samples for the job. We
-        added a cover sheet and made it a recurring expense.
+        Yes. Milton handles the connections, keeps memos as you go and picks the
+        finals for the job. We added a cover sheet and made it a recurring
+        expense.
       </p>
     </details>
     <details>
       <summary>Can I take my writing and leave?</summary>
       <p>
         We won’t take your stapler. The source is public, and you can run Milton
-        yourself. Download all your current rules and every active approved
-        sample as TPS.md. Disconnect an AI and Milton refuses its future reads
-        and saves immediately; it cannot erase copies the AI already read. We’d
-        prefer you keep paying us, but apparently that’s not a retention
-        strategy.
+        yourself. Download your cover sheet, tweaks and every final as TPS.md.
+        Disconnect an AI and Milton refuses its future reads and saves
+        immediately; it cannot erase copies the AI already read. We’d prefer you
+        keep paying us, but apparently that’s not a retention strategy.
       </p>
       <p>
         <a href="https://github.com/zoneofdanger/milton">Read the source ↗</a>
@@ -198,9 +198,9 @@ import FilingComparison from "../components/FilingComparison.astro";
     <details>
       <summary>Is it useful if I only use Claude?</summary>
       <p>
-        Yes. Keep one voice across conversations with the same AI, with samples
-        it can imitate instead of adjectives it has to interpret. Connecting
-        another AI later is optional.
+        Yes. Keep one voice across conversations with the same AI, with your own
+        finals it can imitate instead of adjectives it has to interpret.
+        Connecting another AI later is optional.
       </p>
     </details>
     <details>
@@ -215,18 +215,18 @@ import FilingComparison from "../components/FilingComparison.astro";
     <details>
       <summary>What’s the cover sheet? What’s a report?</summary>
       <p>
-        The cover sheet holds the rules true of all your writing and an index of
-        five reports: email, chat, post, document, and speech. Each report holds
-        the samples you approved for that kind of writing, then its rules. Your
-        AI handles the filing; you don’t manage a memo list. The names are an
-        Office Space reference. The paperwork is less demanding.
+        The cover sheet is your own voice guide: a few short lines every draft
+        follows, like “sign off –P.” A report is what Milton puts together for
+        each draft: your cover sheet, the finals that best match it, then your
+        tweaks. You don’t file anything. The names are an Office Space
+        reference. The paperwork is less demanding.
       </p>
     </details>
     <details>
       <summary>Will my AI always write like me?</summary>
       <p>
-        Not always. Milton keeps approved examples and rules available. A
-        standing instruction asks your AI to read them before writing, but the
+        Not always. Milton keeps your cover sheet, finals and tweaks available.
+        A standing instruction asks your AI to read them before writing, but the
         AI still decides when to read and how to follow them. Ask it to verify
         the read before relying on the result.
       </p>
@@ -235,9 +235,8 @@ import FilingComparison from "../components/FilingComparison.astro";
       <summary>What if Milton is down?</summary>
       <p>
         Your AI writes like itself for a while. You’ll notice. Your cover sheet
-        and reports stay on file: a failed read loses nothing, and nothing was
-        ever saved without your yes. When Milton is back, ask your AI to read
-        the memo again.
+        and memos stay on file: a failed read loses nothing. When Milton is
+        back, ask your AI to read the memo again.
       </p>
     </details>
     <details id="why-this-exists">

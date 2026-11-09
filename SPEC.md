@@ -1,164 +1,194 @@
 # Milton: spec
 
-## Current build: Instruction cards, reports, samples and the cover sheet
+## Current build: memos, tweaks, the cover sheet and reports
 
-Product direction comes from Peter's product note of 2026-11-02 (kept with the
-agents' working notes, not in this repository); where this section and the note
-differ, the note wins. Its vocabulary applies here: a memo is anything sent to Milton
-(a rule, a correction or an approved sample), a report is one assembled document per
-writing situation, and the cover sheet carries the rules true of all writing plus the
-report index. "TPS Report" and "group" are retired words; they survive only as code
-identifiers such as `TPS.md` and `tps_body_limit`. This section records
-the contracts as built. Agents use only `get_cover_sheet`, `get_report`, `list_reports` and
-`create_memo`. Saves are model-free: the assistant names each rule's
-report and sends its exact approved wording, and Milton stores those bytes. Complete
-instructions, including conditions and exceptions, are independently versioned cards. Each card belongs to one of five fixed
-reports (`email`, `chat`, `post`, `document`, `speech`) or to the cover sheet, the
-rules true of all writing. Approved samples are stored exactly as sent in their own
-table with immutable writing; every approved sample stays, and a report read serves the eight that best
-fit the assistant's intent.
-Assembly is deterministic and runs on read: the cover sheet is its rules in
-write-once insertion order, after one fixed note on the `Baseline: ` prefix while any
-active rule carries it; each report prints its heading, its when line, selected samples,
-then its rules (0017). `get_report` requires an intent (a one-line situation, with an
-optional personal kind and context dimensions) and serves up to eight samples ranked by
-requested kind, purpose overlap count, exact dimension match count, Postgres full-text
-rank of the situation against context summary and body, recency, then ascending ID.
-Broader examples fill sparse matches, with exact match evidence and a fallback explanation;
-unknown scope stays unknown and excerpts do not establish whole-work structure.
-The `get_report.kinds` index lists every personal kind with an active sample in that
-report as `{kind_id, kind}`, ascending by ID, independently of intent or the eight-sample
-selection. It includes older unserved kinds without sample bodies; empty and retired-only
-kinds and other accounts/reports are excluded.
-Without an intent (`list_reports`, the web page) a report serves its
-newest eight (0033). The TPS.md download includes all active approved samples, newest
-first. Every rule prints as one bullet, with
-one stored leading `- ` dropped first so rules filed by the retired compiler and rules
-stored as sent read alike. Card text cannot contain Markdown
-headings. The version is a fingerprint of the assembled cover sheet and reports
-(with every active sample's ID, kind and sample revision), the same for every intent, so the same cards and samples always give the same
-version and every save fences on what the assistant read. The memo group tables (0016) remain as history only.
+Product direction comes from the memos-and-tweaks spec of 2026-11-09 (kept with the
+agents' working notes, not in this repository); where this section and that spec
+differ, this section records the code as built. Its vocabulary applies here:
 
-Filing is correctable (0020): a card's report (or `cover`) lives on each version, so
-an explicit `moves` entry appends a version that keeps the card's identity, text and
-history; no card moves to tidy up. Samples belong to stable, immutable
-kinds named once per report; assistants reuse a `kind_id` from `get_report` and use
-`new_kind` only when none fits. Every sample requires approved context: representation
-`version: 1`, a useful summary, and optional known purposes, medium, audience
-relationship/role/familiarity/expertise/group, interaction, whole/excerpt scope with
-optional excerpt role, language and register. Keys are fixed; vocabulary values are
-bounded strings, so unfamiliar kinds and purposes require no migration. Unknowns stay absent.
-Each sample has one stable tenant-scoped identity in `samples`, with original creation
-time and actor, and complete immutable snapshots in `sample_versions`. The latest
-revision alone is current. `sample.sample_id` revises an active identity with complete
-approved text, context and report/kind; omit it for a new example. The old `replaces`
-input is removed. Classification corrections use the same revision, resolving kind
-and report together. `sample_context` appends a complete snapshot preserving body and
-identity, optionally reclassifying within the same report; omitted context fields
-clear. It cannot combine with `sample` or `retire_samples`.
+- A **memo** is one piece of writing Milton keeps: the AI's first draft, the final the
+  person accepted, and the tweaks between them. Writing the person pastes or asks the AI
+  to remember is a memo with only a final. `create_memo` does what its name says.
+- A **tweak** is one line about what the person made the AI change, with its condition
+  where known ("vendor replies: no warm-up opener").
+- The **cover sheet** is the person's own voice guide, written only by them.
+- A **report** is what Milton assembles for one draft: the cover sheet, the
+  best-matching finals as **examples**, then the tweaks. There are no fixed reports.
+- "Did you get the memo?" means "have you read the writing I've settled on?"
 
-An identical revision appends nothing. New examples deduplicate only against a complete
-identical active example: body, report/kind and JSON context. Different context can
-justify separate examples. Revisions never merge identities, even when two examples
-end up identical. Every changed revision fences account saves, including examples
-outside the served eight. Request retries replay the same receipt; mixed rule/sample
-changes apply together or not at all.
+Rules, samples, instruction cards, the five fixed reports, `list_reports`, exact edits,
+moves, session capture, the sample offer and rule-after-twice are gone, with no aliases.
+User-facing copy says "memo", "tweak", "cover sheet", "report" and "AI".
 
-`retire_samples` explicitly appends an inactive snapshot of each named active stable
-ID, reported in `samples_retired`; revisions are not retirements. Reads, the app and
-exports use current active snapshots only, with no history/restore UI. Report metadata
-exposes stable `id` and `revision`. Approval date and sample recency use the latest
-revision time, including context/classification corrections; original creation stays
-separate. Other ranking tiers and report/category vocabulary are unchanged. Kind
-labels stay out of report text.
+Saves are model-free: the AI writes the tweaks and the context summary, and Milton
+stores the bytes it is sent, computes a tier and a change score with plain code, and
+counts tweak citations. Reads are model-free too.
+
+### Tools
+
+Agents use three tools.
+
+- `get_cover_sheet` takes no arguments and returns `text` (the cover sheet), `version`
+  (an integer, 0 before any), `memos` and `tweaks` (counts), `keep_memos` and `is_empty`
+  (no cover sheet text and no memos), plus the setup script while empty.
+- `get_report` requires `intent: {situation, medium, audience, purpose, kind_id?}`:
+  a one-line situation (at most 200 characters), a medium (`email`, `chat`, `post`,
+  `document` or `speech`), audience and purpose (one line, at most 100 characters each,
+  required because vague intents rank worse), and a kind from the person's kinds. It
+  returns `report_id`, `text`, `is_empty`, `examples` (memo id, kind, medium, tier and
+  date, in served order), `tweaks` (`{tweak_id, text, memos}`) and `kinds` (every kind
+  on the account).
+- `create_memo` takes a UUID `request_id` and exactly one of `memo` (with an optional
+  `report_id` from the read before the draft), `cover_sheet`, `forget_memos` or
+  `memo_context`.
+
+Precedence when guidance disagrees: what the person says now, then the cover sheet,
+then tweaks, then examples. Nothing widens an edit's scope.
+
+### What a memo holds
+
+A memo keeps two texts word for word: the first draft, exactly as the AI first showed
+it (in edit mode, its first edit of the person's text), and the final the person
+accepted, hand edits included. If the AI no longer has the first draft verbatim, it
+sends `first_draft_missing` instead of rebuilding it. With either, `mode` (`draft` or
+`edit`) and `rounds` (redrafts after the first draft) are required; with neither, the
+memo is final-only (setup pastes, "remember this") and takes no mode, rounds or tweaks.
+Each text is at most 256 KiB; the whole request has the existing 256 KiB cap.
+
+The AI also sends a context: a one-line placeholder-safe `summary` of the situation and
+the text replied to (never the quoted text), `medium`, and optional `audience` and
+`purpose`, plus a kind (`kind_id`, or `new_kind`, reused by label in any letter case).
+Kinds belong to the account. Milton records the AI, the time, the change score, the
+tier and the `report_id` with the tweaks that report served, so the TPS page can show
+what was served without relying on the AI. Not kept: intermediate drafts, the person's
+correction messages, the ask, and other people's text.
+
+A save whose final and first draft are already on file returns `unchanged` with that
+memo, so a repeat never counts its tweaks twice.
+
+**When a memo is saved** is AI guidance, not server enforcement: the instructions tell
+the AI to save without asking when the person accepts a final (approves it, says it's
+done or they'll send it, or copies it to use), untouched finals included, and not to
+save abandoned drafts, writing not in the person's own voice, or when they ask it not
+to. After a saved result the AI tells the person the result's one-line receipt, with no
+question ("Kept memo: vendor decline, 2 rounds, tweaks: no warm-up opener."; "your
+words" in place of rounds for a final-only memo, at most three tweaks, then "and N
+more"). Whether the line shows depends on the client. No hook or plugin is involved;
+fidelity and capture rate are measured per client before any claim of reliability.
+
+### Tiers and examples
+
+Milton sets each final's tier at save, from the memo's source alone:
+
+- **your words** (`own`): final-only memos and edit-mode memos;
+- **steered by you** (`steered`): drafted memos whose final differs from the first
+  draft, or, with the first draft missing, that had at least one round;
+- **accepted untouched** (`untouched`): drafted memos whose final equals the first
+  draft, or, with it missing, that had no rounds. Untouched finals are never served;
+  they count only on the scoreboard.
+
+A report ranks every memo by requested kind, medium match, tier (your words before
+steered), word overlap of purpose and audience, full-text rank of the situation against
+summary, purpose, audience and final, recency, then id. Examples fill by rank within a
+32 KiB budget, a block that doesn't fit is skipped for the next, and the top one is
+always served. At most 3 steered finals are served per report, and finals over 128 KiB
+are kept but never served. There is no deliberate variety rule.
+
+### Tweaks
+
+Tweaks come from the AI in the same `create_memo` call, only when the final differs
+from the first draft: one line each, at most 200 characters, at most 10 per memo.
+`{tweak_id}` reuses a tweak the account has; `{text}` is normalized (Unicode NFC, lower
+case, collapsed spaces, trailing punctuation dropped) and reuses an exact match, or is
+added. Each memo-and-tweak pair is one citation, and a tweak's count is its citations.
+A tweak is matched only through the memos that cite it: a report serves the tweaks
+cited by the 10 best-ranked memos that cite any, ordered by their best memo's rank,
+then citation count, at most 10. (Ranked over all memos, the person's own pasted
+writing, which ranks first and cites none, would starve tweaks.) Each read records its
+served tweak ids under its `report_id`.
+
+The person can delete a tweak or reword it on the TPS page; a reworded tweak keeps its
+id and citations, and a wording another tweak already has is refused.
+
+### The cover sheet
+
+One free-text document per account, at most 1,500 characters, written only by the
+person. Every change appends a version; nothing is overwritten, and each change carries
+the version it read. The AI changes it only on the person's words ("remember …", "add
+to my cover sheet"): it adds one line (at most 300 characters) or removes one exact
+existing line, never resends the whole text, and can't empty it. It never adds tweaks
+or its own inferences. A correction during a draft is a tweak, not a cover sheet line.
+The TPS page's form rewrites the whole text under the same version fence and may empty
+it; that form ends "only AIs can save" for this one field. The cover sheet is served
+first in every report.
+
+### Scoreboard
+
+The TPS page computes it on read, with no model. Change is normalized token Levenshtein
+from the first draft to the final over the longer token count (not computed when the
+differing middle exceeds 20 million token pairs). Draft and edit memos are scored
+apart, and only memos with a kept first draft and a score count. From 10 memos it shows
+medians of rounds and change and the share of first drafts accepted as-is for the
+latest 5 against the first 5; from 60 memos, the last 30 days against the 30 before.
+Rounds are self-reported, so change is the headline figure.
+
+### Control, retention and deletion
+
+- The TPS page lists the newest 200 memos (older ones stay in the export), opens a full
+  memo on demand, forgets one, edits the cover sheet, and deletes or rewords tweaks. A
+  memo settings page holds the **Keep memos** switch, on by default. Off, a memo with a first draft is
+  refused (`memos_off`); writing the person asks to remember still saves. "Delete all
+  memos" removes every memo, tweak and kind, not the cover sheet.
+- Forgetting a memo (on the page, or `forget_memos` from the AI) deletes it, its
+  citations and any tweak left with none, so its example and scoreboard numbers go too.
+- `memo_context` corrects a memo's summary, medium, audience, purpose or kind; a memo's
+  words never change.
+- Memos are kept until forgotten, deleted with "Delete all memos", or removed with the
+  account. There is no timer.
+- `TPS.md` holds the cover sheet, the tweaks with counts, and every memo's final grouped
+  by medium, newest first. First drafts are not in it.
+- Account deletion removes memos, kinds, tweaks, citations, served-report records, the
+  cover sheet and its versions, and the switch. `docs/deletion-inventory.txt` lists
+  every column.
+
+### Saves
+
+A save runs in one transaction under the account lock: replay a known request ID, or
+check the trial gate, apply the change and write its receipt with the outcome, which
+commits with the change or not at all. The same request ID with the same input replays
+the stored outcome; different input is refused. A refusal rolls back to a savepoint and
+its receipt stores it; a transient database failure rolls back the whole save, receipt
+included, so the same request can succeed. The web app's own session cannot call
+`create_memo`; the TPS page's changes run under the same account lock.
+
+### The release and the wipe
+
+The memo tables ship additively: the old writing tables (cards, card versions, accepted
+changes, sample kinds, samples, sample versions, guides) stay, unread by the new code,
+until a follow-up migration drops them and wipes that writing. That migration names
+the merged PR that stopped reading them in `code-stopped-by`, and milton-duo runs it
+from the runbook after a snapshot. It keeps accounts, sign-ins, connection keys,
+trials, Stripe state and the end-to-end test account. Every account starts with an
+empty cover sheet and no memos and gets the setup offer again; the release note tells
+live accounts their writing was reset. There are no compatibility shims or rollback
+scripts; the pre-migration snapshot is the rollback. The schema history before memos
+(instruction cards, sample revisions, the 0033 cleanup) is in git history and the
+hosting runbook.
+
+### Setup
+
+Setup, when `is_empty`, offers once to help with a real task, to keep a few pieces the
+person pastes as final-only memos (top tier), and to start the cover sheet in their
+words. Setup never reads an inbox and never blocks a writing task.
+
+### Removed, and unchanged
 
 Embeddings, advisory card graphs, task-aware retrieval and observation-only gardening
 were built, measured and removed; their schema is absent from the baseline. What they showed
 and what would justify rebuilding any of them is in
-[the research note](docs/research/derived-systems-2026.md).
-
-Assistants offer to save a sample on approval and a rule on repeated correction, each
-only with the person's yes; no automatic capture. Closed-client execution and actual
-instruction adherence remain outside the server's guarantee.
-
-Every save is exact. `create_memo` needs at least one structured field: `rules`
-(1 to 100 entries of `{ report, text }`, `report` one of the five or `cover`),
-`exact_edits`, `moves`, `sample`, `sample_context` or `retire_samples`. A save with none is refused
-with `invalid_input` ("Name the report and send the rule's text in rules."). Each
-`rules` entry becomes one new card stored byte for byte; its description is its first
-non-blank line, trimmed and cut to the description cap, with no model. An entry whose
-text prints like an active card in the same report, or an earlier entry in the same
-request, is skipped; a save that then changes nothing returns `unchanged` and charges
-nothing. `text` is the stated purpose: recorded with the accepted change, never stored
-as a rule. No save stores a new or changed rule starting with `Baseline: `
-(`baseline_unknown`); existing ones can be retired or edited to drop the prefix.
-The default setup is now sample-first: empty accounts offer it once, and empty
-reports carry optional help. Rules or samples make guidance usable; no quiz or
-rule count gates drafting. The assistant preserves existing guidance, shows exact
-placeholder-safe samples, obtains explicit retention approval for each, saves and
-reads back, then helps draft the next real task matching the report; the entry
-prompt favors email or DM. Every sample save displays exact text and proposed useful,
-non-private context together; one retention approval covers that proposal. Unchanged
-approved metadata needs no second approval; changed text or context, including redaction,
-requires renewed approval. Sending or praise is not retention approval. Skipping examples does not
-block drafting. Setup does not authorize mailbox access, import, account changes
-or saving unseen text. A standing instruction is offered separately with consent. Corrections go through `exact_edits`; an edit whose `before` is a whole rule
-and whose `after` is empty retires it. All fields resolve against one locked snapshot
-and apply atomically. Anchors resolve uniquely within active card bodies, never
-against generated text; overlapping edits fail. The source/report fences, receipt and
-replay, history, size and heading limits still apply; reservation is always zero. A
-report exceeding its bound refuses the entire save; source instructions are never
-truncated. There is no daily call or save allowance; retained history has no cap (0030). A save runs in one
-transaction, takes only the account lock and reads `store_config` without locking it.
-
-Removing the model removes paraphrase drift, not interpretation risk: the assistant
-picks the report and wording, and a free-text correction sent as a new rule leaves
-two rules that disagree. Nothing detects that; the instructions require exact_edits
-for every correction.
-
-History belongs to internal instruction cards; obsolete memo tables are removed by the
-repository cleanup. The
-cover sheet and reports expose only the current documents and a version. The website shows
-them and downloads TPS.md; it exposes no memo-management or history/recovery UI. There are no legacy tool aliases or
-compatibility rollout paths. See server/README.md for the current contracts,
-configuration, migration and local verification instructions.
-
-The web report offers viewing and TPS.md download only. Report refinement (preview,
-Apply and Discard) has been removed; its routes return 404. Wording changes go through
-`create_memo`, including `exact_edits`. Historical refinement receipts and accepted-change
-records stay in the database unchanged.
-
-A read assembles the documents from cards and samples in one statement, takes no
-lock and writes nothing; nothing assembled is stored, so there is no refresh step.
-
-Fresh installations apply the baseline, `0001_sample_context` and
-`0002_sample_versions`. The forward sample revision migration maps ordinary replacement
-chains to root IDs and keeps every known body, context, classification, actor and date;
-legacy IDs, context counters and retirement evidence live in revision provenance.
-Retired leaves stay inactive; dedup-consolidated roots without successors remain
-separate retired identities. Accepted-change evidence remains unchanged. Earlier
-context values/correction times were not stored and are not invented: each legacy row
-contributes only its last known snapshot, dated by its known creation (or leaf
-retirement), with this limitation recorded in provenance. Backfilled revision numbers
-count known snapshots, not missing context edits. Ambiguous lineage (cycles, branching,
-invalid/cross-account or cross-report parents, incompatible parent lifecycle) aborts
-transactionally before dropping old columns.
-
-This breaks schema and sample API compatibility. An authorized release must close
-reads/writes, drain old instances, snapshot, migrate and start compatible app/MCP code
-as one cutover; old runtimes must never use the new schema. Reconnect assistants and
-reread guidance/IDs/version before saving. No compatibility shim or rollback artifact
-is part of this change; no migration or release is authorized by implementation alone.
-An owner-only, atomic one-time transition supports the known 0033 schema; it
-drops the unused memo layer and preserves card identities, every card version and
-all other current data. Other old schema states are refused. Production applied this
-cleanup on 2026-11-04; the hosting runbook records its snapshot and verification.
-Cards organize and narrow edits; they do not establish semantic correctness.
-
-Accepted changes now retain the exact submitted purpose, rules and edits, actor, affected card
-versions and transformation identity atomically with source and history. These internal
-records follow the account-deletion policy, with no history cap. Missing historical
-request evidence remains unavailable.
+[the research note](docs/research/derived-systems-2026.md). The default-off derived-guide
+pilot was parked on 2026-11-07 and its code is removed with memos; its tables go with
+the old writing.
 
 No sign-up cap anywhere, hosted or self-hosted (Peter, 2026-10-30). Sign-ups are open and
 the only mode; the allow-list and closed modes are gone (Peter, 2026-11-03).
@@ -167,30 +197,6 @@ One shared Postgres database on Neon holds every account, with the user id on ev
 behind a mandatory tenant access layer. The services use distinct auth/app/MCP roles that own nothing, so the triggers that guard the data hold against them; only
 migrations run as the owner. Neon's point-in-time history for the whole branch is
 the backup (the retention is a project setting). Product rehearsals use a disposable PostgreSQL database and fictional identities. Verified production source-schema/metadata reconciliation remains a separate owner gate; build work does not read private writing.
-
-### Session capture: MCP-only first
-
-Optional capture uses existing `get_cover_sheet`, `get_report` and `create_memo`, with explicit opt-in
-for the current conversation and an immediate stop instruction. Connection consent
-and first-draft approval do not enable capture; opt-in never replaces approval of
-the complete first draft for an empty account. Capture controls stay in the conversation,
-not in the shared reports. At task completion, the assistant compares explicit reusable
-standing rules against the current cover sheet and reports and saves only genuine changes with
-their original scope and conditions. Exclude one-off requests, project facts,
-unconfirmed inferences, transcripts, secrets and other people's private details.
-Stopping capture preserves existing instructions and cannot undo submitted saves.
-
-Separately from capture, two offers need no opt-in because each save still waits
-for a yes: on approval of a draft, the assistant offers once to save it as a sample
-under the applicable report; on the same correction twice, it proposes one rule.
-A no is final for that draft, and a single correction stays a one-off.
-
-This is assistant guidance, not a server-enforced consent setting or a background
-service. No hook or plugin is required. The assistant must call the tools, respect
-client approvals and use existing save recovery rules. Session-end capture and
-silent/nonblocking behavior are not guaranteed. Evaluate missed instructions and
-incorrect saves across clients before claiming reliability; consider hooks only
-if evidence justifies their installation burden.
 
 ## Hybrid hosting and runtime
 
@@ -204,17 +210,3 @@ The retired Vercel app/MCP project and migration validation services are decommi
 there is no Vercel backend failover. Preserve the current Cloud Run revisions, pinned
 images and secret versions. Future runtime rollback uses Cloud Run revision traffic,
 never older instruction or TPS data.
-
-## Default-off derived-guide pilot
-
-Approved saves remain model-free. Explicitly opted-in eligible paid/trial accounts may
-also receive a separate, derived per-report guide from all active approved samples and
-complete context. Background Anthropic processing never changes approved sources or
-save fences. With the process switch on, reads include an optional self-contained
-guide/status block; explicit rules, Baseline precedence and requested edit scope still
-govern. Stale successful guides remain labeled until replaced; zero samples and valid
-insufficient evidence clear them. Operator controls, spend/retry limits, eligibility and
-service capabilities are specified in [guide operations](server/deploy/guides.md). No
-public tier, new MCP tool, history UI, refresh/disable control or rollout authorization
-is introduced. Parked 2026-11-07: the switch is off and migration 0010 drops the
-sample-change trigger; the runbook gives the resume steps.

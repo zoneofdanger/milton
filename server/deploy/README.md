@@ -795,8 +795,10 @@ writing, and keeps every receipt the memo code wrote. Without them a replay woul
 a replayed save of a memo since forgotten would save it again, and a replayed context
 correction would undo a later one. The two are told apart by the outcome's shape (0013's
 header gives the rule); a failed old receipt whose code the memo code also stores is
-indistinguishable and stays, and its message is fixed text. `save_requests`, its guard and
-its grants stay.
+indistinguishable and stays, and its message is fixed text. One known exception, harmless:
+`compiler_input_limit`, a retired old-store-only code that 0013's delete list leaves out, so
+its receipts stay too (production holds one, from 2026-10-31, with no message or writing).
+`save_requests`, its guard and its grants stay.
 
 **Roles on Neon.** Both roles were made with SQL (`milton_guide_worker` by Drizzle 0003,
 `milton_guide_runtime` at the 2026-11-07 cutover), and Neon's API lists them among the
@@ -804,11 +806,13 @@ branch roles because its `neon` extension forwards role DDL to the control plane
 extension forwards `DROP ROLE`, also from inside 015's `DO` block, when the transaction
 commits, and fails the transaction if the control plane refuses
 ([`pgxn/neon/neon_ddl_handler.c`](https://github.com/neondatabase/neon/blob/main/pgxn/neon/neon_ddl_handler.c)),
-so a SQL drop keeps the API's list in step and no API delete is needed. The one gap it
-documents: a commit that fails after the forward. A compute start recreates every role the
+so a SQL drop keeps the API's list in step and no API delete is needed. The gap it
+documents: it forwards before PostgreSQL commits, so a commit that fails (or whose outcome
+is uncertain) after the forward can leave the control plane without roles PostgreSQL kept. A compute start recreates every role the
 control plane still lists, as a `neon_superuser` member
 ([`compute_tools/src/spec_apply.rs`](https://github.com/neondatabase/neon/blob/main/compute_tools/src/spec_apply.rs)),
-so step 3 checks the API's list before anything else.
+so step 3 compares the two lists after every 015 attempt, failed or not, before anything
+else.
 
 After 0013, `005-app-roles.sql` names dropped tables and fails, so it is never rerun; its
 other grants stay in place. A fresh install applies the owner files through 015 before 0013
@@ -836,14 +840,17 @@ Each step needs Peter's go; the release coordinator runs it:
 
 2. As `neondb_owner`:
    `psql -X -v ON_ERROR_STOP=1 -f server/migrations/015-drop-guide-roles.sql` (one
-   transaction; rerunning converges). If it fails, it changed nothing: its error names what
-   a role still holds or owns (another database's grant, an owned object). Resolve that and
-   rerun it; do not go on to 0013 until it succeeds.
-3. Check: `SELECT rolname FROM pg_roles WHERE rolname LIKE 'milton_guide%';` returns no rows,
+   transaction; rerunning converges). If it fails, PostgreSQL rolled it back, but Neon's
+   control plane may already have recorded the drops: do step 3's comparison before any
+   compute restart. Its error names what a role still holds or owns (another database's
+   grant, an owned object); resolve that and rerun it, and do not go on to 0013 until it
+   succeeds.
+3. After every 015 attempt, failed, uncertain or successful, compare the two lists. On
+   success, `SELECT rolname FROM pg_roles WHERE rolname LIKE 'milton_guide%';` returns no rows,
    and the branch's role list in the Neon console or API (`GET
 /projects/{project_id}/branches/{branch_id}/roles`) no longer shows either role. If the
-   two disagree, stop and resolve it with Neon before 0013, and do not restart the compute
-   meanwhile.
+   two disagree (after a failed attempt too), stop and resolve it with Neon before 0013, and
+   do not restart the compute meanwhile.
 4. As `neondb_owner`: `bun run --cwd server db:migrate` applies `0013_drop_old_writing`
    (journal 14 entries). Each drop locks its table exclusively and, for a foreign key to
    `users`, `users` too until commit, so every request waits for it. Its 5 s lock limit
@@ -854,7 +861,7 @@ Each step needs Peter's go; the release coordinator runs it:
 5. Check as the owner. The first query returns no rows; the second returns
    `milton_save_request_guard`, `milton_user_id_guard` and `prune_usage_calls`; the third
    returns 0; the fourth lists what is left, for the record (every `error` a code the memo
-   code stores):
+   code stores, except the known `compiler_input_limit` receipt above):
 
    ```sql
    SELECT relname FROM pg_class WHERE relnamespace = 'public'::regnamespace
@@ -872,7 +879,8 @@ Each step needs Peter's go; the release coordinator runs it:
    run passes, and app, MCP and admit logs show no `permission denied` or
    `store_unavailable`.
 
-Rollback: if 015 or 0013 fails, its transaction rolls back and changes nothing; fix the cause
+Rollback: if 0013 fails, its transaction rolls back and changes nothing; if 015 fails,
+PostgreSQL rolls it back, and step 3's comparison settles Neon's list. Fix the cause
 and rerun. After 015 alone, nothing serving needs the roles, so there is nothing to roll
 back. Once 0013 has committed, the pre-migration snapshot is the only rollback; there is no
 down script.

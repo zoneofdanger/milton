@@ -138,14 +138,21 @@ export const memoInput = z
           z.strictObject({ text: oneLine(200) }),
         ]),
       )
-      .min(1)
       .max(10)
+      // An empty list, as some clients send for none, is read as omitted.
+      .transform((tweaks) => (tweaks.length ? tweaks : undefined))
       .optional()
       .describe(
         'Only when the final differs from the first draft: each habit the person made you change, one line each with when it applies ("vendor replies: no warm-up opener"). Skip one-off facts they added. When it is the same change, reuse a served tweak\'s id with {tweak_id}; {text} adds one only when none fits.',
       ),
     context: memoContextInput,
     ...kindFields,
+    // null, as some clients send for none, is read as omitted.
+    kind_id: id
+      .nullable()
+      .transform((kind) => kind ?? undefined)
+      .optional()
+      .describe(kindFields.kind_id.description!),
     report_id: id
       .optional()
       .describe("The report_id of the get_report read before this draft."),

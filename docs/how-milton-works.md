@@ -202,7 +202,7 @@ Files: `server/src/store/save.ts`, `server/src/store/score.ts`, `server/src/mcp-
 - Tier at save: final-only and edit memos are `own`; a drafted memo with a kept first draft is `untouched` when the final equals it, else `steered`; with the first draft missing, it is `steered` when rounds is above 0, else `untouched`.
 - The change score is normalized token Levenshtein (words and single punctuation marks) from the first draft to the final over the longer token count, from 0 to 1, comparing only the middle after a shared prefix and suffix; it is computed only for a kept first draft and not when that middle exceeds 20 million token pairs.
 - A save whose final, first-draft state and first draft match a memo on file returns `unchanged` with that memo, adding nothing.
-- `kind_id` must name one of the account's kinds (`invalid_kind`); `new_kind` reuses a kind with that label in any letter case, else creates one; sending both is refused.
+- `kind_id` must name one of the account's kinds (`invalid_kind`); a memo's `kind_id: null` is read as omitted, before the input is hashed; `new_kind` reuses a kind with that label in any letter case, else creates one; sending both is refused.
 - `report_id` must be one of the account's served reports (`invalid_report`); the memo stores that report's served tweak ids.
 - With Keep memos off, a memo with a first draft (kept or missing) is refused with `memos_off`; a final-only memo still saves.
 - A saved memo's result carries `memo` (`memo_id`, tier, kind, rounds, change to three decimals and its tweaks) and `receipt`: "Kept memo: <kind, or medium without one>, <n rounds, or "your words">, tweaks: <up to three, "; "-joined>", with "and N more" past three.
@@ -215,7 +215,7 @@ Files: `server/src/store/save.ts`, `server/src/store/score.ts`, `server/src/mcp-
 Files: `server/src/store/save.ts`, `server/src/store/score.ts`, `server/src/store/tps.ts`.
 
 - A tweak is one line of at most 200 characters on one account, with the AI and time it came from.
-- A memo cites at most 10 tweaks, and only when its final differs from its first draft; tweaks on a memo whose final equals its first draft are refused.
+- A memo cites at most 10 tweaks, and only when its final differs from its first draft; tweaks on a memo whose final equals its first draft are refused. An empty `tweaks` list is read as omitted, before the input is hashed.
 - `{tweak_id}` must name one of the account's tweaks (`invalid_tweak`).
 - `{text}` is normalized (Unicode NFC, lower case, collapsed spaces, trailing punctuation dropped) and reuses the account's tweak with that form, else is added; text of only punctuation is refused. A tweak named twice in one memo is cited once.
 - Each memo-and-tweak pair is one citation; a tweak's count is its citations.

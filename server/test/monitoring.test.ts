@@ -65,6 +65,7 @@ const MINIMUMS: [RegExp, { duration: number; window: number }][] = [
   [/^startup failures/, { duration: 0, window: 900 }],
   [/^gate: /, { duration: 0, window: 300 }],
   [/^milton-e2e-daily: ≥ 1 failed/, { duration: 0, window: 86400 }],
+  [/^milton-e2e-daily: no execution for 13 h/, { duration: 46800, window: 0 }],
 ];
 
 test("page policies email only the ops channel, once per incident, and auto-close", () => {

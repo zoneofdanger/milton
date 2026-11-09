@@ -53,7 +53,8 @@ export const accountDeletion = async (ctx: PageContext): Promise<Response> => {
       <>
         <p>
           Deleting your Milton account cannot be undone.{" "}
-          <a href="/download">Download TPS.md</a> first to keep a copy.
+          <a href="/download">Download TPS.md</a> first to keep your cover
+          sheet, tweaks and finals; it leaves out first drafts.
         </p>
         <p>
           Your memos, tweaks, cover sheet, receipts and usage counters are
@@ -174,6 +175,8 @@ export const memoSettings = async (ctx: PageContext): Promise<Response> => {
           </p>
         </>,
         400,
+        null,
+        { wide: true },
       );
     await store.deleteAllMemos();
     return back("deleted");
@@ -184,6 +187,7 @@ export const memoSettings = async (ctx: PageContext): Promise<Response> => {
   ]);
   const chrome = {
     account: { csrf: csrfField, email: user.email, billing },
+    wide: true,
   };
   if (url.pathname === "/account/memos/delete")
     return page(
@@ -192,7 +196,8 @@ export const memoSettings = async (ctx: PageContext): Promise<Response> => {
         <p>
           This deletes every memo, every tweak and every kind on your account.
           Your cover sheet stays. It cannot be undone.{" "}
-          <a href="/download">Download TPS.md</a> first to keep a copy.
+          <a href="/download">Download TPS.md</a> first to keep your cover
+          sheet, tweaks and finals; it leaves out first drafts.
         </p>
         <form method="post" action="/account/memos/delete">
           {csrfField()}

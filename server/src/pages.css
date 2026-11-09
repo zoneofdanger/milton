@@ -22,6 +22,16 @@ main {
 .page-body {
   max-width: 38rem;
 }
+/* Memo, memo settings and confirmation pages use the shell's full width and
+   wrap their prose evenly; verbatim writing (pre.memo-text) keeps its lines. */
+.page-body-wide {
+  max-width: none;
+}
+.page-body-wide :is(p, li, dd),
+.tps-form :is(.applies, .sheet-meta, .small-note),
+.sheet-meta {
+  text-wrap: pretty;
+}
 .page-body h1 {
   margin: var(--space-8) 0 var(--space-6);
 }

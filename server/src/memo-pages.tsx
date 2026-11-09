@@ -569,7 +569,7 @@ const notFound = (ctx: MemoPageContext, message: string) =>
     </>,
     404,
     null,
-    chrome(ctx),
+    { ...chrome(ctx), wide: true },
   );
 
 /** The full memo: both texts word for word, its context and its tweaks. */
@@ -678,7 +678,7 @@ function memoPage(ctx: MemoPageContext, m: FullMemo) {
     </>,
     200,
     null,
-    chrome(ctx),
+    { ...chrome(ctx), wide: true },
   );
 }
 

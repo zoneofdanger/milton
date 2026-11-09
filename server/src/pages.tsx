@@ -111,7 +111,11 @@ export function page(
   content: Child,
   status = 200,
   head: Child = null,
-  { account, sheet = false }: { account?: Account; sheet?: boolean } = {},
+  {
+    account,
+    sheet = false,
+    wide = false,
+  }: { account?: Account; sheet?: boolean; wide?: boolean } = {},
 ) {
   const document = (
     <html lang="en">
@@ -162,7 +166,7 @@ export function page(
             {sheet ? (
               content
             ) : (
-              <div class="page-body">
+              <div class={wide ? "page-body page-body-wide" : "page-body"}>
                 <h1>{title}</h1>
                 {content}
               </div>

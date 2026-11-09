@@ -1934,6 +1934,8 @@ test("Keep memos turns off and on, and Delete all memos asks first, then keeps t
     const confirm = await (await fixture.send("/account/memos/delete")).text();
     expect(confirm).toContain('<input type="hidden" name="confirm"');
     expect(confirm).toContain("Your cover sheet stays.");
+    // The download it offers as a backup leaves out first drafts; say so.
+    expect(confirm).toContain("it leaves out first drafts");
     expect(
       (await fixture.send("/account/memos/delete", { confirm: "yes" })).status,
     ).toBe(400);

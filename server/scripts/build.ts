@@ -29,6 +29,4 @@ const cloud = await Bun.build({
 });
 if (!cloud.success)
   throw new Error("Bundling the Cloud Run entrypoint failed.");
-console.log(
-  "Bundled app/MCP and end-to-end check entrypoints.",
-);
+console.log("Bundled app/MCP and end-to-end check entrypoints.");

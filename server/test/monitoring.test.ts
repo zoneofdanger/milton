@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   DEFINITIONS_DIR,
@@ -35,11 +35,13 @@ type Policy = {
 
 const seconds = (d: string) => Number(d.replace(/s$/, ""));
 const pendingDir = join(DEFINITIONS_DIR, "pending");
+// Empty once every pending definition is applied; git keeps no empty folder.
+const pendingFiles = existsSync(pendingDir) ? readdirSync(pendingDir) : [];
 const policies = [
   ...loadDefinitions()
     .filter((d) => d.kind === "policy")
     .map((d) => d.body),
-  ...readdirSync(pendingDir).map((f) =>
+  ...pendingFiles.map((f) =>
     JSON.parse(readFileSync(join(pendingDir, f), "utf8")),
   ),
 ] as Policy[];
@@ -61,7 +63,6 @@ const MINIMUMS: [RegExp, { duration: number; window: number }][] = [
   [/^startup failures/, { duration: 0, window: 900 }],
   [/^gate: /, { duration: 0, window: 300 }],
   [/^milton-e2e-daily: ≥ 1 failed/, { duration: 0, window: 86400 }],
-  [/^milton-e2e-daily: no execution for 26 h/, { duration: 93600, window: 0 }],
 ];
 
 test("page policies email only the ops channel, once per incident, and auto-close", () => {
@@ -116,7 +117,7 @@ test("every condition holds at least its stated duration and window", () => {
 test("no definition names another notification channel or type", () => {
   const files = [
     ...readdirSync(DEFINITIONS_DIR).filter((f) => f.endsWith(".json")),
-    ...readdirSync(pendingDir).map((f) => join("pending", f)),
+    ...pendingFiles.map((f) => join("pending", f)),
   ];
   for (const f of files) {
     const text = readFileSync(join(DEFINITIONS_DIR, f), "utf8");

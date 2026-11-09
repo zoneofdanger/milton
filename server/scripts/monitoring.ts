@@ -7,7 +7,7 @@
 //
 //   bun server/scripts/monitoring.ts            # plan against production
 //   bun server/scripts/monitoring.ts --apply    # release coordinator only
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 export const PROJECT = "milton-510506";
@@ -282,9 +282,10 @@ async function main(argv: string[]) {
     policies: await api.list(`${MONITORING}/alertPolicies`, "alertPolicies"),
   };
   const actions = plan(defs, live, emailChannel);
-  const pending = readdirSync(join(DEFINITIONS_DIR, "pending")).filter((f) =>
-    f.endsWith(".json"),
-  );
+  const pendingDir = join(DEFINITIONS_DIR, "pending");
+  const pending = existsSync(pendingDir)
+    ? readdirSync(pendingDir).filter((f) => f.endsWith(".json"))
+    : [];
 
   console.log(
     `${apply ? "Applying" : "Plan (dry run)"} for ${PROJECT}, channel ${EMAIL_CHANNEL}:`,

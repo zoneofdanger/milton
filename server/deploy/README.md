@@ -25,6 +25,12 @@ one-time procedures are in git history; the last full version is at commit 492b9
 
 ## Release record: deletion fences Stripe, Stripe reads off the lock, guide pilot parked, deletion links, UserInfo binding, private admission service, session token drop, e2e fix, MCP next steps, guards (2026-11-08, PRs #58–#66, #68–#72)
 
+- **e2e alert (2026-11-09 07:25Z):** `milton-e2e-daily` applied with its failure condition
+  only (≥ 1 failed execution in 24 h). The API refused the 26 h no-execution condition
+  ("Durations longer than 23h30m are not supported"), and a metric-absence condition looks
+  back at most a day in all (alignment period plus duration), so a missed daily run does
+  not page yet; open decision under Alerts. `monitoring.ts` and its test now accept a
+  missing `pending/` folder. Plan after apply: 13 unchanged; no open incident.
 - **#72 (Peter's wording and go), `02f8138`:** the privacy page's plainer account-deletion
   paragraph (shared registrations stay when another account also approved them; the
   fingerprint covers deleted and erased ones), live on www.meetmilton.com. Text only.
@@ -137,9 +143,9 @@ one-time procedures are in git history; the last full version is at commit 492b9
 - **Daily check (Peter's go):** `milton-e2e-daily` on that image passed 14/14
   (`milton-e2e-daily-qzn4p`); scheduler `milton-e2e-daily` created paused, URL checked
   (`…/jobs/milton-e2e-daily:run`), resumed at `7 14 * * *` UTC (first run 2026-11-09 14:07Z).
-  The job moves with each app/MCP image. Its alert (`pending/milton-e2e-daily.policy.json`)
-  is applied after 2026-11-09 07:16Z, when the 07:15Z failure of the first run leaves its
-  24-hour window; applying it earlier would email a stale failure.
+  The job moves with each app/MCP image. Its alert (`milton-e2e-daily.policy.json`) was
+  applied 2026-11-09 07:25Z, after the 07:15Z failure of the first run left its 24-hour
+  window; applying it earlier would have emailed a stale failure.
 - **#60 + #61 (milton-qa; Astra's last findings fixed, deltas read by milton-qa), `1a82fde`:**
   propagation, isolation and deletion integration groups (served change: the
   behavior-preserving `cloudRequests` extraction), and the migration guards in CI (numbering,
@@ -1165,6 +1171,7 @@ the two no-execution ones, during the real incident noted below.
 | same                                             | no `milton-auth-mail` execution for 20 min                                                                                        | Catches a broken trigger, which fails no execution. Would have fired once, 11-07 07:43Z, during the real two-hour `:run` → `un` incident.                                                                                                                             |
 | same                                             | no `milton-auth-maint` execution for 45 min                                                                                       | Three missed 15-minute runs: a broken maintenance trigger, which fails no execution. 7-day longest gap otherwise 31 min. Would have fired once, 11-07 08:09Z, in the same incident. With this, deleting `milton-auth-jobs-errors-log` loses no coverage.              |
 | `milton-instance-start` (page)                   | `milton-startup-failures` ≥ 3 in a rolling 15 min, per service                                                                    | Cloud Run system log lines `Default STARTUP TCP probe failed …` and `Container called exit(N).` (N ≠ 0); a failed start writes both. 30-day worst: 2 (auth, 11-07 08:30Z, one failed start that recovered in 8 s).                                                    |
+| `milton-e2e-daily` (page)                        | ≥ 1 failed `milton-e2e-daily` execution in 24 h                                                                                   | The check runs once a day, so one failure is the signal. A missed run is not covered (below).                                                                                                                                                                         |
 | `milton-release-gate` (gate)                     | per service or job, rolling 5 min: any 5xx; any ERROR entry; any failed `milton-auth-*` execution; any startup failure; ≥ 10 429s | Fast and loud by design; emails no one. 429 needs 10: MCP had a 48-request 429 burst on 11-07 10:55Z.                                                                                                                                                                 |
 
 The startup signal is the log-based metric, not `run.googleapis.com/container/completed_probe_count`:
@@ -1180,13 +1187,15 @@ route and refuses unauthenticated probes, and a failing admission is a failing s
 which auth answers with 503 and milton-auth's 5xx condition pages (its documentation
 points at milton-admit). No new condition, so no added cost.
 
-**Pending:** [monitoring/pending/milton-e2e-daily.policy.json](monitoring/pending/milton-e2e-daily.policy.json)
-pages on ≥ 1 failed execution of the Cloud Run job `milton-e2e-daily` in 24 h, or none for
-26 h. The script ignores `pending/`; move the file up a directory once the job exists (the
-job exits non-zero on failure), then plan and apply.
+**Not covered: a daily run that never happens.** `milton-e2e-daily` pages on a failed
+execution only. A metric-absence condition can look back at most one day in total
+(alignment period plus duration; the API refuses durations over 23h30m), shorter than a
+daily run plus margin, so a paused or deleted scheduler or a job that never starts goes
+unnoticed. Options, undecided: a PromQL `absent_over_time(…[26h])` condition (unverified
+against Cloud Run system metrics), or a run twice a day so a 23h30m absence fits.
 
 Cost: free until no sooner than 2027-09-01, then $0.35 per non-uptime condition per month
-(22 applied, about $7.70; $8.40 with the end-to-end policy) plus $0.50 per million points.
+(23 applied, about $8.05) plus $0.50 per million points.
 Uptime checks run about 78k times a month against a free million. Stripe's webhook-failure
 emails and Neon's compute alerts are Dashboard settings, not these policies.
 

@@ -51,7 +51,15 @@ export async function bundleFixture(
       },
     );
     assert.equal(delivery.status, 0, "compiled delivery closure must run");
-    assert(delivery.stdout.includes(args.length ? "claimed: 0" : "Dry run:"));
+    // One JSON line, which Cloud Logging stores as jsonPayload for the
+    // milton-auth-mail-failed and -throttled log metrics.
+    assert(
+      args.length
+        ? delivery.stdout.includes(
+            '{"message":"auth_mail_pass","claimed":0,"sent":0,"retry":0,"failed":0,"throttled":0}\n',
+          )
+        : delivery.stdout.includes("Dry run:"),
+    );
   }
   const child = spawn(
     process.execPath,

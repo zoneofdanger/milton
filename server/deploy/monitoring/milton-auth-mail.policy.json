@@ -1,0 +1,59 @@
+{
+  "displayName": "milton-auth-mail",
+  "documentation": {
+    "content": "**Auth mail is failing or throttled.** Each `milton-auth-mail` pass logs one JSON line, `{\"message\":\"auth_mail_pass\",\"claimed\":…,\"sent\":…,\"retry\":…,\"failed\":…,\"throttled\":…}`; the log metrics `milton-auth-mail-failed` and `milton-auth-mail-throttled` count passes with a failed or throttled send. One email per incident; it closes 30 minutes after the condition clears.\n\nCheck first:\n1. The passes: `gcloud logging read 'resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"milton-auth-mail\" AND jsonPayload.message=\"auth_mail_pass\" AND (jsonPayload.failed>0 OR jsonPayload.throttled>0)' --project=milton-510506 --freshness=2h --limit=20`. Compare `failed` and `throttled` with `sent`.\n2. Failed with nothing sent is configuration: the Resend API key revoked or rotated, `notifications.meetmilton.com` no longer verified at Resend, or a bad `AUTH_MAIL_FROM`/`AUTH_MAIL_REPLY_TO` on the job; or `AUTH_SECRET` differing between the service and the job (every message undecryptable). Compare their images and secret versions: `gcloud run jobs describe milton-auth-mail --project=milton-510506 --region=us-east4` and `gcloud run services describe milton-auth --project=milton-510506 --region=us-east4`. A release that moved one but not the other is the usual cause. One failed among sends is likely one address Resend refused, or a deadline missed after a pause; watch for a repeat.\n3. Throttled: a pass stops at its first 429 and sets the shared pause from Retry-After (60 s to 24 h). Read the pause and the pending/expired counts with the prepared read-only procedure in apps/auth/README.md, \"Throttle inspection and recovery\", and Resend's usage page: a 60-second rate-limit pause clears itself; a daily or monthly quota pause lasts until it lifts, and messages expire 15 minutes after acceptance, so people must ask for a new link afterwards. Paused passes report 0 claimed and 0 throttled, so this alert closing is not evidence that delivery resumed.\n\nBaseline (production, 2026-11-07 07:22Z to 2026-11-09 07:37Z, all the history since native mail started, about 2 days, not 7): 2,778 passes; 1 pass claimed anything (1 claimed, 1 sent); 0 retry, 0 failed, 0 throttled; at most 1 claimed per pass.\n\nThresholds:\n- 1 or more passes with a failed send in a rolling 15 minutes. Reason: failed is terminal (a non-429 4xx from Resend, a missed deadline or an undecryptable message), so that person never gets the link, and its likely causes (a revoked key, a bad From/Reply-To, a changed secret) fail every later message too; the baseline is 0. One address Resend refuses can open it alone, which is acceptable at one email per incident on the sign-in path.\n- 1 or more passes with a throttled send in a rolling 15 minutes. Reason: a Resend 429 pauses all auth mail for at least 60 s and up to 24 h, and the paused passes after it report nothing, so the first throttled pass is the only signal; the baseline is 0.\n\nBacktest: neither condition would have fired in the baseline (0 failed, 0 throttled). The metrics count only the JSON line released with them; the earlier text lines (`auth_mail_pass { claimed: 0, … }`) are not counted.\n",
+    "mimeType": "text/markdown"
+  },
+  "userLabels": {
+    "tier": "page"
+  },
+  "conditions": [
+    {
+      "displayName": "milton-auth-mail: ≥ 1 failed send in 15 min",
+      "conditionThreshold": {
+        "filter": "metric.type = \"logging.googleapis.com/user/milton-auth-mail-failed\" AND resource.type = \"cloud_run_job\" AND resource.labels.job_name = \"milton-auth-mail\"",
+        "aggregations": [
+          {
+            "alignmentPeriod": "900s",
+            "perSeriesAligner": "ALIGN_DELTA",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "groupByFields": ["resource.label.job_name"]
+          }
+        ],
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 0,
+        "duration": "0s",
+        "trigger": {
+          "count": 1
+        }
+      }
+    },
+    {
+      "displayName": "milton-auth-mail: ≥ 1 throttled send in 15 min",
+      "conditionThreshold": {
+        "filter": "metric.type = \"logging.googleapis.com/user/milton-auth-mail-throttled\" AND resource.type = \"cloud_run_job\" AND resource.labels.job_name = \"milton-auth-mail\"",
+        "aggregations": [
+          {
+            "alignmentPeriod": "900s",
+            "perSeriesAligner": "ALIGN_DELTA",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "groupByFields": ["resource.label.job_name"]
+          }
+        ],
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 0,
+        "duration": "0s",
+        "trigger": {
+          "count": 1
+        }
+      }
+    }
+  ],
+  "combiner": "OR",
+  "enabled": true,
+  "notificationChannels": ["milton-ops-email"],
+  "alertStrategy": {
+    "autoClose": "1800s",
+    "notificationPrompts": ["OPENED"]
+  }
+}

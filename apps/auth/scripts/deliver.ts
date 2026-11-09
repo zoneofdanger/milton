@@ -22,7 +22,14 @@ if (process.argv[2] !== "--apply" || process.argv.length !== 3) {
       idleTimeoutMillis: 1000,
     });
     await checkRuntimeRole(pool, "milton_auth_runtime");
-    console.log("auth_mail_pass", await deliverMail(pool, config));
+    // One JSON line: Cloud Logging stores it as jsonPayload, which the
+    // milton-auth-mail-failed and -throttled log metrics count.
+    console.log(
+      JSON.stringify({
+        message: "auth_mail_pass",
+        ...(await deliverMail(pool, config)),
+      }),
+    );
   } catch (error) {
     console.error("auth_mail_pass", safeError(error));
     process.exitCode = 1;

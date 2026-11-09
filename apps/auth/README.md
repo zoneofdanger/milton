@@ -185,7 +185,7 @@ Delivery expires at the earlier of original native expiry and15 minutes after ac
 
 ### Throttle inspection and recovery (prepared, not enabled)
 
-Prepare a count-only alert on `auth_mail_pass` with `throttled > 0` in any delivery pass, and a prepared operator check of the shared pause and aggregate pending/expired counts below. A paused pass can report zero claimed/throttled, so silence after the first429 is not evidence of recovery. Do not add message bodies, recipients, proof URLs or credentials to logs. No alert or schedule is enabled here.
+Each pass logs one JSON line, `{"message":"auth_mail_pass","claimed":…,"sent":…,"retry":…,"failed":…,"throttled":…}` (counts only), which Cloud Logging stores as `jsonPayload`. The page policy `milton-auth-mail` ([server/deploy/monitoring](../../server/deploy/monitoring/milton-auth-mail.policy.json)) emails on any pass with `failed > 0` or `throttled > 0`, through the log metrics `milton-auth-mail-failed` and `milton-auth-mail-throttled`; the prepared operator check of the shared pause and aggregate pending/expired counts is below. A paused pass can report zero claimed/throttled, so silence after the first429 is not evidence of recovery. Do not add message bodies, recipients, proof URLs or credentials to logs.
 
 The24-hour cap is an operational safeguard aligned with Resend's documented daily quota reset at midnight UTC. Resend also documents429 for monthly quota exhaustion and request rate limits; the cap does not establish this account's plan/quota or guarantee vendor recovery. Persistent monthly exhaustion requires operator reconciliation before resuming delivery. See [Resend errors](https://resend.com/docs/api-reference/errors).
 

@@ -54,6 +54,8 @@ const MINIMUMS: [RegExp, { duration: number; window: number }][] = [
   [/ ERROR logs: ≥ 10 in 15 min/, { duration: 300, window: 900 }],
   [/ instances: > 8 for 15 min/, { duration: 900, window: 60 }],
   [/^milton-auth-mail: ≥ 5 failed/, { duration: 0, window: 900 }],
+  [/^milton-auth-mail: ≥ 1 failed send/, { duration: 0, window: 900 }],
+  [/^milton-auth-mail: ≥ 1 throttled send/, { duration: 0, window: 900 }],
   [/^milton-auth-maint: ≥ 2 failed/, { duration: 0, window: 2700 }],
   [/^milton-auth-mail: no execution for 20 min/, { duration: 1200, window: 0 }],
   [
@@ -70,6 +72,7 @@ test("page policies email only the ops channel, once per incident, and auto-clos
   expect(page.map((p) => p.displayName).sort()).toEqual([
     "milton-app",
     "milton-auth",
+    "milton-auth-mail",
     "milton-e2e-daily",
     "milton-instance-start",
     "milton-jobs",

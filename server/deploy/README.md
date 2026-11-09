@@ -205,6 +205,16 @@ and move traffic with `update-traffic`).
   sends under the new one; rolling the job back to an older image fails, as `failed`, any
   message the new image queued in the previous 15 minutes, so roll back service and job
   together. Check: reply to one real verification email and see it reach support.
+- **Mail alert (after the image is on `milton-auth-mail`):** the job now logs each pass as
+  one JSON line (`{"message":"auth_mail_pass",…}`), not the old text line. Once a pass has
+  run on the new image, confirm it parsed:
+  `gcloud logging read 'resource.type="cloud_run_job" AND resource.labels.job_name="milton-auth-mail" AND jsonPayload.message="auth_mail_pass"' --project=milton-510506 --freshness=10m --limit=1`
+  returns an entry; and that the metric filters' numeric comparison selects nothing today:
+  the same read with `AND (jsonPayload.failed>0 OR jsonPayload.throttled>0)` returns none.
+  Then `bun server/scripts/monitoring.ts` (plan: create the log metrics
+  `milton-auth-mail-failed` and `milton-auth-mail-throttled` and the page policy
+  `milton-auth-mail`, the rest unchanged) and `--apply`; a second plan is all unchanged.
+  Applying before the image only means the metrics count nothing until it lands.
 - **Turnstile (separate go from Peter at release):** off until both
   `AUTH_TURNSTILE_SITE_KEY` and `AUTH_TURNSTILE_SECRET_KEY` are in auth's environment; the
   image starts with neither. To turn it on: create the widget for hostname
@@ -1204,6 +1214,8 @@ the two no-execution ones, during the real incident noted below.
 | same                                             | `milton-auth-maint` ≥ 2 failed executions in 45 min                                                                               | Two consecutive 15-minute runs; 84 succeeded and 0 failed in 7 days.                                                                                                                                                                                                  |
 | same                                             | no `milton-auth-mail` execution for 20 min                                                                                        | Catches a broken trigger, which fails no execution. Would have fired once, 11-07 07:43Z, during the real two-hour `:run` → `un` incident.                                                                                                                             |
 | same                                             | no `milton-auth-maint` execution for 45 min                                                                                       | Three missed 15-minute runs: a broken maintenance trigger, which fails no execution. 7-day longest gap otherwise 31 min. Would have fired once, 11-07 08:09Z, in the same incident. With this, deleting `milton-auth-jobs-errors-log` loses no coverage.              |
+| `milton-auth-mail` (page)                        | ≥ 1 delivery pass with a failed send (`milton-auth-mail-failed`) in a rolling 15 min                                              | Failed is terminal (a non-429 4xx from Resend, a missed deadline or an undecryptable message); its likely causes (revoked key, bad From/Reply-To, changed secret) fail every later message. Baseline 2,778 passes, 0 failed (11-07 07:22Z to 11-09 07:37Z).           |
+| same                                             | ≥ 1 delivery pass with a throttled send (`milton-auth-mail-throttled`) in a rolling 15 min                                        | A 429 pauses all auth mail for 60 s to 24 h and paused passes report nothing, so the first is the only signal. Baseline 0 throttled. Neither would have fired; the metrics count only the JSON pass line released with them.                                          |
 | `milton-instance-start` (page)                   | `milton-startup-failures` ≥ 3 in a rolling 15 min, per service                                                                    | Cloud Run system log lines `Default STARTUP TCP probe failed …` and `Container called exit(N).` (N ≠ 0); a failed start writes both. 30-day worst: 2 (auth, 11-07 08:30Z, one failed start that recovered in 8 s).                                                    |
 | `milton-e2e-daily` (page)                        | ≥ 1 failed `milton-e2e-daily` execution in 24 h                                                                                   | The check runs once a day, so one failure is the signal. A missed run is not covered (below).                                                                                                                                                                         |
 | `milton-release-gate` (gate)                     | per service or job, rolling 5 min: any 5xx; any ERROR entry; any failed `milton-auth-*` execution; any startup failure; ≥ 10 429s | Fast and loud by design; emails no one. 429 needs 10: MCP had a 48-request 429 burst on 11-07 10:55Z.                                                                                                                                                                 |

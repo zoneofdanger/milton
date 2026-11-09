@@ -19,6 +19,7 @@ export const fixtureConfig = (overrides: Partial<Config> = {}): Config => ({
   AUTH_GITHUB_CLIENT_SECRET: secret(),
   AUTH_RESEND_API_KEY: "fictional-not-sent",
   AUTH_MAIL_FROM: "auth@notifications.meetmilton.com",
+  AUTH_MAIL_REPLY_TO: "support@meetmilton.com",
   PORT: 19911,
   ...overrides,
 });

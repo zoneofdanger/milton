@@ -1,0 +1,10 @@
+{
+  "name": "milton-auth-mail-long-pause",
+  "description": "milton-auth-mail throttles (Resend 429s) that set a shared delivery pause longer than 900 s, the 15-minute delivery lifetime, so queued mail would expire unsent: the job's JSON line {\"message\":\"auth_mail_pause\",\"seconds\":N} (apps/auth/src/mail-log.ts) with N > 900. Read by milton-auth-mail.",
+  "filter": "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"milton-auth-mail\" AND jsonPayload.message=\"auth_mail_pause\" AND jsonPayload.seconds>900",
+  "metricDescriptor": {
+    "metricKind": "DELTA",
+    "valueType": "INT64",
+    "unit": "1"
+  }
+}

@@ -704,3 +704,981 @@ test("static assets cache by content version and keep the other security headers
     for (const [name, value] of Object.entries(SECURITY_HEADERS))
       expect(r.headers.get(name)).toBe(value);
 });
+
+describe("auth mail queueing", () => {
+  type State = import("../src/adapter.ts").RequestState;
+  // A pool that records each statement; take_rate admits three per key.
+  const queue = () => {
+    const calls: { text: string; values: unknown[] }[] = [];
+    const hits = new Map<unknown, number>();
+    const pool = {
+      query: async (text: string, values: unknown[] = []) => {
+        calls.push({ text, values });
+        if (!text.includes("take_rate")) return { rows: [] };
+        hits.set(values[0], (hits.get(values[0]) ?? 0) + 1);
+        return { rows: [{ allowed: hits.get(values[0])! <= 3 }] };
+      },
+    } as unknown as import("pg").Pool;
+    // Per accept_mail call: whether it queued a message (a payload).
+    const queued = () =>
+      calls
+        .filter((c) => c.text.includes("accept_mail"))
+        .map((c) => c.values[6] !== null);
+    return { pool, calls, queued };
+  };
+  const state = (to?: string, kind: "verify" | "reset" = "reset"): State => ({
+    path: "/request-password-reset",
+    cleanupPath: false,
+    revokePath: false,
+    users: new Map(),
+    credentials: new Map(),
+    admissions: new Map(),
+    ...(to
+      ? {
+          mail: {
+            kind,
+            to,
+            url: "https://auth.meetmilton.com/api/auth/reset-password/fictional",
+            user: "fictional-user",
+            incarnation: "fictional-incarnation",
+            generation: "fictional-generation",
+            proofExpiresAt: new Date(Date.now() + 3600000).toISOString(),
+          },
+        }
+      : {}),
+  });
+
+  test("mail domain lookup: MX, null MX, A/AAAA fallback, and fail open", async () => {
+    const { mailDomain } = await import("../src/mail-domain.ts");
+    type Resolver = import("../src/mail-domain.ts").MailResolver;
+    // A string answer is the resolver error code it throws.
+    const answer = (v: unknown) => async () => {
+      if (typeof v === "string") throw Object.assign(new Error(v), { code: v });
+      return v;
+    };
+    const resolver = (mx: unknown, a: unknown = "ENODATA", aaaa = a) =>
+      ({
+        resolveMx: answer(mx),
+        resolve4: answer(a),
+        resolve6: answer(aaaa),
+        cancel: () => {},
+      }) as unknown as Resolver;
+    const mx = (exchange: string) => [{ exchange, priority: 0 }];
+    const cases: [Resolver, import("../src/mail-domain.ts").MailDomain][] = [
+      [resolver(mx("mx.example.com")), "deliverable"],
+      [resolver(mx("")), "undeliverable"],
+      [resolver(mx(".")), "undeliverable"],
+      [resolver("ENOTFOUND"), "undeliverable"],
+      [resolver("ENODATA", ["192.0.2.1"], "ENODATA"), "deliverable"],
+      [resolver("ENODATA", "ENODATA", ["2001:db8::1"]), "deliverable"],
+      [resolver("ENODATA"), "undeliverable"],
+      [resolver("ESERVFAIL"), "unknown"],
+      [resolver("ETIMEOUT"), "unknown"],
+      [resolver("ECONNREFUSED"), "unknown"],
+      [resolver("ENODATA", "ESERVFAIL", "ENODATA"), "unknown"],
+    ];
+    for (const [r, expected] of cases)
+      expect(await mailDomain("example.com", r)).toBe(expected);
+    // A lookup that never answers is cancelled at the deadline and sends.
+    let cancelled = false;
+    const hang = {
+      resolveMx: () => new Promise(() => {}),
+      cancel: () => {
+        cancelled = true;
+      },
+    } as unknown as Resolver;
+    expect(await mailDomain("example.com", hang, 20)).toBe("unknown");
+    expect(cancelled).toBe(true);
+    expect(await mailDomain("", resolver(mx("")))).toBe("unknown");
+  });
+
+  test("mail to an undeliverable domain commits the no-op receipt, logging only a domain digest", async () => {
+    const { acceptMail } = await import("../src/mail.ts");
+    const { domainDigest } = await import("../src/mail-domain.ts");
+    const config = fixtureConfig();
+    const { pool, queued } = queue();
+    const looked: string[] = [];
+    const domain = async (d: string) => {
+      looked.push(d);
+      return d === "no-mail.example"
+        ? ("undeliverable" as const)
+        : d === "dns-down.example"
+          ? ("unknown" as const)
+          : ("deliverable" as const);
+    };
+    const logs: unknown[][] = [];
+    const log = spyOn(console, "log").mockImplementation((...a) => {
+      logs.push(a);
+    });
+    try {
+      await acceptMail(pool, config, state("person@No-Mail.example."), {
+        domain,
+      });
+      // An unknown address still looks its domain up, so both take as long.
+      await acceptMail(pool, config, state(), {
+        domain,
+        requested: "nobody@no-mail.example",
+      });
+      await acceptMail(pool, config, state("person@example.com"), { domain });
+      // DNS failing answers "unknown": the message is sent.
+      await acceptMail(pool, config, state("person@dns-down.example"), {
+        domain,
+      });
+      await acceptMail(pool, config, state("e2e@milton-test.invalid"), {
+        domain,
+      });
+    } finally {
+      log.mockRestore();
+    }
+    expect(queued()).toEqual([false, false, true, true, false]);
+    expect(looked).toEqual([
+      "no-mail.example",
+      "no-mail.example",
+      "example.com",
+      "dns-down.example",
+    ]);
+    expect(logs.map((l) => JSON.parse(String(l[0])))).toEqual([
+      {
+        message: "auth_mail_skipped",
+        reason: "undeliverable_domain",
+        kind: "reset",
+        domain: domainDigest("no-mail.example"),
+      },
+    ]);
+    expect(JSON.stringify(logs)).not.toContain("no-mail");
+  });
+
+  test("each address gets at most 3 messages of a kind an hour; the fourth commits the no-op receipt", async () => {
+    const { acceptMail } = await import("../src/mail.ts");
+    const config = fixtureConfig();
+    const { pool, calls, queued } = queue();
+    const domain = async () => "deliverable" as const;
+    const logs: string[] = [];
+    const log = spyOn(console, "log").mockImplementation((line) => {
+      logs.push(String(line));
+    });
+    try {
+      for (const to of [
+        "person@example.com",
+        "Person@Example.com",
+        "person@example.com",
+        "person@example.com",
+      ])
+        await acceptMail(pool, config, state(to), { domain });
+      await acceptMail(pool, config, state("person@example.com", "verify"), {
+        domain,
+      });
+    } finally {
+      log.mockRestore();
+    }
+    // The verify message has its own bucket.
+    expect(queued()).toEqual([true, true, true, false, true]);
+    const takes = calls.filter((c) => c.text.includes("take_rate"));
+    expect(takes.map((c) => c.values.slice(1))).toEqual(
+      Array(5).fill([3600, 3]),
+    );
+    const keys = takes.map((c) => c.values[0]);
+    expect(new Set(keys.slice(0, 4)).size).toBe(1);
+    expect(keys[4]).not.toBe(keys[0]);
+    expect(String(keys[0])).toMatch(/^[0-9a-f]{64}$/);
+    expect(logs.map((l) => JSON.parse(l))).toEqual([
+      { message: "auth_mail_skipped", reason: "account_cap", kind: "reset" },
+    ]);
+    expect(logs.join()).not.toContain("person");
+  });
+
+  test("requests that send nothing never spend an address's bucket", async () => {
+    const { acceptMail } = await import("../src/mail.ts");
+    const config = fixtureConfig();
+    const { pool, calls, queued } = queue();
+    const domain = async () => "deliverable" as const;
+    // Before the account exists: verification asks native sends nothing for.
+    for (let n = 0; n < 5; n++)
+      await acceptMail(pool, config, state(), {
+        domain,
+        kind: "verify",
+        requested: "new@example.com",
+      });
+    // Its first real message still goes out.
+    await acceptMail(pool, config, state("new@example.com", "verify"), {
+      domain,
+    });
+    expect(queued()).toEqual([false, false, false, false, false, true]);
+    const keys = calls
+      .filter((c) => c.text.includes("take_rate"))
+      .map((c) => c.values[0]);
+    // The no-mail takes share one key that is not the address's own.
+    expect(new Set(keys.slice(0, 5)).size).toBe(1);
+    expect(keys[5]).not.toBe(keys[0]);
+  });
+
+  test("every generic outcome runs the same acceptance statements", async () => {
+    const { acceptMail } = await import("../src/mail.ts");
+    const config = fixtureConfig();
+    const domain = async (d: string) =>
+      d === "no-mail.example"
+        ? ("undeliverable" as const)
+        : ("deliverable" as const);
+    const sequence = async (
+      run: (pool: import("pg").Pool) => Promise<void>,
+    ) => {
+      const { pool, calls } = queue();
+      await run(pool);
+      return calls.map((c) => c.text);
+    };
+    const quiet = spyOn(console, "log").mockImplementation(() => {});
+    const outcomes: Record<string, string[]> = {};
+    try {
+      const reset = { domain, kind: "reset" as const };
+      outcomes.sent = await sequence((pool) =>
+        acceptMail(pool, config, state("person@example.com"), reset),
+      );
+      outcomes.capped = await sequence(async (pool) => {
+        for (let n = 0; n < 4; n++)
+          await acceptMail(pool, config, state("person@example.com"), reset);
+      }).then((all) => all.slice(-2));
+      // No account, or one native sends nothing for (verified, social-only).
+      outcomes.unknown = await sequence((pool) =>
+        acceptMail(pool, config, state(), {
+          ...reset,
+          requested: "nobody@example.com",
+        }),
+      );
+      outcomes.undeliverable = await sequence((pool) =>
+        acceptMail(pool, config, state("person@no-mail.example"), reset),
+      );
+      outcomes.reserved = await sequence((pool) =>
+        acceptMail(pool, config, state("e2e@milton-test.invalid"), reset),
+      );
+    } finally {
+      quiet.mockRestore();
+    }
+    for (const statements of Object.values(outcomes))
+      expect(statements).toEqual(outcomes.sent!);
+    expect(
+      outcomes.sent!.map((t) => t.match(/milton_guard\.\w+/)?.[0]),
+    ).toEqual(["milton_guard.take_rate", "milton_guard.accept_mail"]);
+  });
+
+  test("a slow domain lookup holds none of the four native slots", async () => {
+    const { createProvider } = await import("../src/provider.ts");
+    const pool = {
+      on: () => pool,
+      query: async (text: string) =>
+        text.includes("with g as")
+          ? { rows: [{ allowed: [true, true] }] }
+          : { rows: [] },
+    } as unknown as import("pg").Pool;
+    let release = () => {};
+    const held = new Promise<void>((r) => (release = r));
+    let lookups = 0;
+    const service = createProvider(fixtureConfig(), {
+      pool,
+      boundaries: {
+        mailDomain: async () => (lookups++, await held, "deliverable"),
+      },
+    });
+    // Native answers at once; each reset then waits on its lookup.
+    service.provider.handler = async () => Response.json({ status: true });
+    const call = (path: string, method = "POST") =>
+      service.handler(
+        new Request("https://auth.meetmilton.com/api/auth" + path, {
+          method,
+          headers: {
+            origin: "https://auth.meetmilton.com",
+            ...(method === "POST"
+              ? { "content-type": "application/json" }
+              : {}),
+          },
+          ...(method === "POST"
+            ? { body: JSON.stringify({ email: "person@slow.example" }) }
+            : {}),
+        }),
+        "127.0.0.1",
+      );
+    // Five resets in turn, each started once the one before is in its lookup.
+    const waiting: Promise<Response>[] = [];
+    for (let n = 1; n <= 5; n++) {
+      waiting.push(call("/request-password-reset"));
+      while (lookups < n) await new Promise((r) => setTimeout(r, 1));
+    }
+    expect((await call("/ok", "GET")).status).toBe(200);
+    release();
+    for (const r of await Promise.all(waiting)) expect(r.status).toBe(200);
+  });
+
+  test("delivery logs one line per failed or throttled send, none for a sent one", async () => {
+    const { acceptMail, deliverMail } = await import("../src/mail.ts");
+    const { pauseLine, problemLine } = await import("../src/mail-log.ts");
+    const config = fixtureConfig();
+    const accepted = queue();
+    await acceptMail(accepted.pool, config, state("person@example.com"), {
+      domain: async () => "deliverable",
+    });
+    const [id, kind, user, incarnation, generation, proof, payload] =
+      accepted.calls.find((c) => c.text.includes("accept_mail"))!
+        .values as string[];
+    const job = {
+      state: "pending",
+      id,
+      lease: "fictional-lease",
+      kind,
+      origin_user: user,
+      incarnation,
+      generation,
+      proof_expires_at: new Date(proof!),
+      expires_at: new Date(Date.now() + 900000),
+    };
+    // Claims hand out each job once; an unreadable payload fails to open.
+    const jobs = [
+      { ...job, payload },
+      { ...job, payload: "$ba$1$unreadable" },
+      { ...job, payload },
+    ];
+    const pool = {
+      query: async (text: string) =>
+        text.includes("claim_mail")
+          ? { rows: jobs.length ? [jobs.shift()] : [] }
+          : { rows: [{ done: true }] },
+    } as unknown as import("pg").Pool;
+    const statuses = [200, 429];
+    const logs: string[] = [];
+    const log = spyOn(console, "log").mockImplementation((line) => {
+      logs.push(String(line));
+    });
+    try {
+      // The 429 asks for an hour's pause.
+      const counts = await deliverMail(pool, config, async () => {
+        const status = statuses.shift()!;
+        return new Response(null, {
+          status,
+          headers: status === 429 ? { "retry-after": "3600" } : {},
+        });
+      });
+      expect(counts).toEqual({
+        claimed: 3,
+        sent: 1,
+        retry: 0,
+        failed: 1,
+        throttled: 1,
+      });
+    } finally {
+      log.mockRestore();
+    }
+    expect(logs).toEqual([
+      problemLine("failed"),
+      problemLine("throttled"),
+      pauseLine(3600),
+    ]);
+  });
+
+  test("auth mail replies to the support address; the text is unchanged", async () => {
+    const { acceptMail, openMail } = await import("../src/mail.ts");
+    const env = Object.fromEntries(
+      Object.entries(fixtureConfig()).map(([k, v]) => [k, String(v)]),
+    );
+    delete env.AUTH_MAIL_REPLY_TO;
+    expect(readConfig(env).AUTH_MAIL_REPLY_TO).toBe("support@meetmilton.com");
+    expect(
+      readConfig({ ...env, AUTH_MAIL_REPLY_TO: "help@meetmilton.com" })
+        .AUTH_MAIL_REPLY_TO,
+    ).toBe("help@meetmilton.com");
+    for (const bad of ["", "support", "support@meetmilton.com, x@evil.example"])
+      expect(() => readConfig({ ...env, AUTH_MAIL_REPLY_TO: bad })).toThrow(
+        "invalid_auth_configuration",
+      );
+    const config = fixtureConfig();
+    const { pool, calls } = queue();
+    const s = state("person@example.com");
+    await acceptMail(pool, config, s, { domain: async () => "deliverable" });
+    const [id, kind, user, incarnation, generation, proof, payload] =
+      calls.find((c) => c.text.includes("accept_mail"))!.values as string[];
+    const message = await openMail(config.AUTH_SECRET, {
+      state: "pending",
+      id: id!,
+      lease: "fictional-lease",
+      kind: kind as "reset",
+      origin_user: user!,
+      incarnation: incarnation!,
+      generation: generation!,
+      proof_expires_at: new Date(proof!),
+      expires_at: new Date(Date.now() + 900000),
+      payload: payload!,
+    });
+    expect(message).toEqual({
+      from: "Milton <auth@notifications.meetmilton.com>",
+      to: ["person@example.com"],
+      reply_to: "support@meetmilton.com",
+      subject: "Reset your Milton password",
+      text: `Set a new password: ${s.mail!.url}\n\nIf you did not request this, ignore this message.`,
+    });
+  });
+});
+
+describe("Turnstile on sign-up", () => {
+  const keys = {
+    AUTH_TURNSTILE_SITE_KEY: "0x4AAAAAAAfictional",
+    AUTH_TURNSTILE_SECRET_KEY: "fictional-turnstile-secret",
+  };
+  const SITEVERIFY =
+    "https://challenges.cloudflare.com/turnstile/v0/siteverify";
+
+  test("is off unless both keys are set, and the site key is a plain token", () => {
+    const env = Object.fromEntries(
+      Object.entries(fixtureConfig()).map(([k, v]) => [k, String(v)]),
+    );
+    expect(readConfig(env).AUTH_TURNSTILE_SITE_KEY).toBeUndefined();
+    expect(readConfig({ ...env, ...keys }).AUTH_TURNSTILE_SITE_KEY).toBe(
+      keys.AUTH_TURNSTILE_SITE_KEY,
+    );
+    for (const partial of [
+      { AUTH_TURNSTILE_SITE_KEY: keys.AUTH_TURNSTILE_SITE_KEY },
+      { AUTH_TURNSTILE_SECRET_KEY: keys.AUTH_TURNSTILE_SECRET_KEY },
+      { ...keys, AUTH_TURNSTILE_SITE_KEY: 'x" onload="y' },
+      { ...keys, AUTH_TURNSTILE_SECRET_KEY: "" },
+    ])
+      expect(() => readConfig({ ...env, ...partial })).toThrow(
+        "invalid_auth_configuration",
+      );
+  });
+
+  test("the server verifies the token with siteverify and fails closed", async () => {
+    const { createProvider } = await import("../src/provider.ts");
+    // Rate statements admit; any other query is native's sign-up work,
+    // reached only once the captcha passes, and is refused.
+    let nativeWork = 0;
+    const pool = {
+      on: () => pool,
+      query: async (text: string) => {
+        if (text.includes("with g as"))
+          return { rows: [{ allowed: [true, true] }] };
+        if (text.includes("milton_guard.take_rate"))
+          return { rows: [{ allowed: true }] };
+        nativeWork++;
+        throw new Error("fixture_database_refused");
+      },
+      connect: async () => {
+        nativeWork++;
+        throw new Error("fixture_database_refused");
+      },
+    } as unknown as import("pg").Pool;
+    // Siteverify's answer for each fictional token: [status, body], or a
+    // thrown network failure.
+    const answers: Record<string, [number, unknown] | "network"> = {
+      "fictional-pass": [
+        200,
+        { success: true, hostname: "auth.meetmilton.com", action: "signup" },
+      ],
+      "fictional-invalid": [
+        200,
+        { success: false, "error-codes": ["invalid-input-response"] },
+      ],
+      "fictional-reused": [
+        200,
+        { success: false, "error-codes": ["timeout-or-duplicate"] },
+      ],
+      "fictional-elsewhere": [
+        200,
+        { success: true, hostname: "evil.example", action: "signup" },
+      ],
+      "fictional-other-action": [
+        200,
+        { success: true, hostname: "auth.meetmilton.com", action: "login" },
+      ],
+      "fictional-internal": [
+        200,
+        { success: false, "error-codes": ["internal-error"] },
+      ],
+      "fictional-bad-secret": [
+        200,
+        { success: false, "error-codes": ["invalid-input-secret"] },
+      ],
+      "fictional-no-codes": [200, { success: false }],
+      "fictional-5xx": [502, {}],
+      "fictional-network": "network",
+      // Malformed answers: a 503, never read as a refusal.
+      "fictional-no-success": [
+        200,
+        { "error-codes": ["invalid-input-response"] },
+      ],
+      "fictional-success-string": [
+        200,
+        { success: "true", hostname: "auth.meetmilton.com", action: "signup" },
+      ],
+      "fictional-mixed-codes": [
+        200,
+        { success: false, "error-codes": ["invalid-input-response", 7] },
+      ],
+      "fictional-codes-string": [
+        200,
+        { success: false, "error-codes": "invalid-input-response" },
+      ],
+      "fictional-array": [200, []],
+      "fictional-reflected": [
+        200,
+        { success: false, "error-codes": ["fictional-reflected-token"] },
+      ],
+    };
+    const verified: { body: Record<string, unknown>; init: RequestInit }[] = [];
+    const fetch = async (input: string | URL | Request, init?: RequestInit) => {
+      expect(String(input)).toBe(SITEVERIFY);
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      verified.push({ body, init: init! });
+      const answer = answers[String(body.response)]!;
+      if (answer === "network") throw new TypeError("fetch failed");
+      return Response.json(answer[1], { status: answer[0] });
+    };
+    const quiet = spyOn(console, "error").mockImplementation(() => {});
+    const signUp = async (
+      service: ReturnType<typeof createProvider>,
+      token?: string,
+    ) => {
+      nativeWork = 0;
+      const r = await service.handler(
+        new Request("https://auth.meetmilton.com/api/auth/sign-up/email", {
+          method: "POST",
+          headers: {
+            origin: "https://auth.meetmilton.com",
+            "content-type": "application/json",
+            ...(token ? { "x-captcha-response": token } : {}),
+          },
+          body: JSON.stringify({
+            email: "person@example.com",
+            password: "Fictional sign-up password",
+            name: "Fictional",
+          }),
+        }),
+        "127.0.0.1",
+      );
+      const body = (await r.json()) as { code?: string; error?: string };
+      return [r.status, body.code ?? body.error, nativeWork > 0];
+    };
+    try {
+      const guarded = createProvider(fixtureConfig(keys), {
+        pool,
+        boundaries: { fetch },
+      });
+      expect(await signUp(guarded)).toEqual([400, "captcha_required", false]);
+      expect(await signUp(guarded, "x".repeat(2049))).toEqual([
+        403,
+        "captcha_refused",
+        false,
+      ]);
+      // A bad token, or a good one for another host or action: refused.
+      for (const token of [
+        "fictional-invalid",
+        "fictional-reused",
+        "fictional-elsewhere",
+        "fictional-other-action",
+      ])
+        expect(await signUp(guarded, token)).toEqual([
+          403,
+          "captcha_refused",
+          false,
+        ]);
+      // Cloudflare failing, or misconfigured: a retry, never let through.
+      for (const token of [
+        "fictional-internal",
+        "fictional-bad-secret",
+        "fictional-no-codes",
+        "fictional-5xx",
+        "fictional-network",
+        "fictional-no-success",
+        "fictional-success-string",
+        "fictional-mixed-codes",
+        "fictional-codes-string",
+        "fictional-array",
+        "fictional-reflected",
+      ])
+        expect(await signUp(guarded, token)).toEqual([
+          503,
+          "captcha_unavailable",
+          false,
+        ]);
+      // Logs carry only Cloudflare's documented code names or fixed labels.
+      const logged = quiet.mock.calls.filter((c) => c[0] === "auth_turnstile");
+      expect(logged.map((c) => c[1])).toEqual([
+        { codes: ["internal-error"] },
+        { codes: ["invalid-input-secret"] },
+        { codes: ["malformed"] },
+        { codes: ["http_error"] },
+        { codes: ["network"] },
+        { codes: ["malformed"] },
+        { codes: ["malformed"] },
+        { codes: ["malformed"] },
+        { codes: ["malformed"] },
+        { codes: ["malformed"] },
+        { codes: ["other"] },
+      ]);
+      // A passing token reaches native's sign-up (here, a refused database).
+      expect((await signUp(guarded, "fictional-pass"))[2]).toBe(true);
+      // Only the secret and token: no remoteip, and a bounded wait.
+      const last = verified.at(-1)!;
+      expect(last.body).toEqual({
+        secret: keys.AUTH_TURNSTILE_SECRET_KEY,
+        response: "fictional-pass",
+      });
+      expect(last.init.signal).toBeInstanceOf(AbortSignal);
+      expect(last.init.redirect).toBe("error");
+      // Without the keys, sign-up needs no token and siteverify is never called.
+      const calls = verified.length;
+      expect(
+        (
+          await signUp(
+            createProvider(fixtureConfig(), { pool, boundaries: { fetch } }),
+          )
+        )[2],
+      ).toBe(true);
+      expect(verified.length).toBe(calls);
+    } finally {
+      quiet.mockRestore();
+    }
+  });
+
+  test("siteverify is reached only with a well-formed email and inside a 3-per-10-s network bucket", async () => {
+    const { createProvider } = await import("../src/provider.ts");
+    // The gate statement's verdicts; a test sets the network sign-up
+    // bucket's (the last) to false.
+    let signupAllowed = true;
+    const statements: { text: string; values: unknown[] }[] = [];
+    const pool = {
+      on: () => pool,
+      query: async (text: string, values: unknown[] = []) => {
+        statements.push({ text, values });
+        if (text.includes("with g as"))
+          return { rows: [{ allowed: [true, true, signupAllowed] }] };
+        return { rows: [{ allowed: true }] };
+      },
+    } as unknown as import("pg").Pool;
+    let verifications = 0;
+    const service = createProvider(fixtureConfig(keys), {
+      pool,
+      boundaries: {
+        fetch: async () => {
+          verifications++;
+          return Response.json({
+            success: false,
+            "error-codes": ["invalid-input-response"],
+          });
+        },
+      },
+    });
+    const signUp = async (body: unknown) => {
+      const r = await service.handler(
+        new Request("https://auth.meetmilton.com/api/auth/sign-up/email", {
+          method: "POST",
+          headers: {
+            origin: "https://auth.meetmilton.com",
+            "content-type": "application/json",
+            "x-captcha-response": "fictional-token",
+          },
+          body: JSON.stringify(body),
+        }),
+        "203.0.113.7",
+      );
+      return [r.status, ((await r.json()) as { error?: string }).error];
+    };
+    // No well-formed email: refused before the database and Cloudflare.
+    for (const body of [
+      {},
+      { email: 7 },
+      { email: "not-an-address" },
+      { email: "x".repeat(320) + "@example.com" },
+    ])
+      expect(await signUp(body)).toEqual([400, "invalid_email"]);
+    expect([statements.length, verifications]).toEqual([0, 0]);
+    // The gate takes the network's sign-up bucket: 3 in 10 s.
+    expect(await signUp({ email: "person@example.com" })).toEqual([
+      403,
+      "captcha_refused",
+    ]);
+    const values = statements[0]!.values;
+    const at = values.findIndex(
+      (v, i) => values[i + 1] === 10 && values[i + 2] === 3,
+    );
+    expect(String(values[at])).toMatch(/^[0-9a-f]{64}$/);
+    signupAllowed = false;
+    expect(await signUp({ email: "person@example.com" })).toEqual([
+      429,
+      "rate_limited",
+    ]);
+    expect(verifications).toBe(1);
+  });
+
+  test("with Turnstile on, the wrapper's bucket is the only sign-up limit; off, native's stays", async () => {
+    const { createProvider } = await import("../src/provider.ts");
+    // Native's own rate statement is the plain take_rate call; record its
+    // window and max.
+    const nativeRules: unknown[][] = [];
+    const pool = {
+      on: () => pool,
+      query: async (text: string, values: unknown[] = []) => {
+        if (text.includes("with g as"))
+          return { rows: [{ allowed: [true, true, true] }] };
+        if (text.startsWith("select milton_guard.take_rate($1,$2,$3)")) {
+          nativeRules.push(values.slice(1));
+          return { rows: [{ allowed: true }] };
+        }
+        throw new Error("fixture_database_refused");
+      },
+      connect: async () => {
+        throw new Error("fixture_database_refused");
+      },
+    } as unknown as import("pg").Pool;
+    const fetch = async () =>
+      Response.json({
+        success: true,
+        hostname: "auth.meetmilton.com",
+        action: "signup",
+      });
+    const quiet = spyOn(console, "error").mockImplementation(() => {});
+    const signUp = (service: ReturnType<typeof createProvider>) =>
+      service.handler(
+        new Request("https://auth.meetmilton.com/api/auth/sign-up/email", {
+          method: "POST",
+          headers: {
+            origin: "https://auth.meetmilton.com",
+            "content-type": "application/json",
+            "x-captcha-response": "fictional-pass",
+          },
+          body: JSON.stringify({
+            email: "person@example.com",
+            password: "Fictional sign-up password",
+            name: "Fictional",
+          }),
+        }),
+        "127.0.0.1",
+      );
+    try {
+      await signUp(
+        createProvider(fixtureConfig(keys), { pool, boundaries: { fetch } }),
+      );
+      expect(nativeRules).toEqual([]);
+      await signUp(createProvider(fixtureConfig(), { pool }));
+      expect(nativeRules).toEqual([[10, 3]]);
+    } finally {
+      quiet.mockRestore();
+    }
+  });
+
+  test("a siteverify call that never answers is abandoned at 5 s", async () => {
+    const { createProvider } = await import("../src/provider.ts");
+    const pool = {
+      on: () => pool,
+      query: async (text: string) =>
+        text.includes("with g as")
+          ? { rows: [{ allowed: [true, true, true] }] }
+          : { rows: [{ allowed: true }] },
+    } as unknown as import("pg").Pool;
+    // An injected clock: each deadline fires after 1/100 of its length, and
+    // the length asked for is recorded.
+    const deadlines: number[] = [];
+    const timeout = spyOn(AbortSignal, "timeout").mockImplementation(
+      (ms: number) => {
+        deadlines.push(ms);
+        const c = new AbortController();
+        setTimeout(
+          () => c.abort(new DOMException("deadline", "TimeoutError")),
+          ms / 100,
+        );
+        return c.signal;
+      },
+    );
+    let aborted = false;
+    const service = createProvider(fixtureConfig(keys), {
+      pool,
+      boundaries: {
+        // Never answers; rejects only when its signal aborts.
+        fetch: (_input, init) =>
+          new Promise<Response>((_resolve, reject) =>
+            init!.signal!.addEventListener("abort", () => {
+              aborted = true;
+              reject(init!.signal!.reason);
+            }),
+          ),
+      },
+    });
+    const quiet = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const started = Date.now();
+      const r = await service.handler(
+        new Request("https://auth.meetmilton.com/api/auth/sign-up/email", {
+          method: "POST",
+          headers: {
+            origin: "https://auth.meetmilton.com",
+            "content-type": "application/json",
+            "x-captcha-response": "fictional-token",
+          },
+          body: JSON.stringify({ email: "person@example.com" }),
+        }),
+        "127.0.0.1",
+      );
+      expect([r.status, ((await r.json()) as { error: string }).error]).toEqual(
+        [503, "captcha_unavailable"],
+      );
+      expect(deadlines).toEqual([5000]);
+      expect(aborted).toBe(true);
+      expect(Date.now() - started).toBeLessThan(1000);
+      expect(
+        quiet.mock.calls.filter((c) => c[0] === "auth_turnstile")[0]![1],
+      ).toEqual({ codes: ["timeout"] });
+    } finally {
+      timeout.mockRestore();
+      quiet.mockRestore();
+    }
+  });
+
+  test("siteverify waits hold no native slot and have their own bound of four", async () => {
+    const { createProvider } = await import("../src/provider.ts");
+    const pool = {
+      on: () => pool,
+      query: async (text: string) =>
+        text.includes("with g as")
+          ? { rows: [{ allowed: [true, true] }] }
+          : { rows: [{ allowed: true }] },
+    } as unknown as import("pg").Pool;
+    let release = () => {};
+    const held = new Promise<void>((r) => (release = r));
+    let waiting = 0;
+    const service = createProvider(fixtureConfig(keys), {
+      pool,
+      boundaries: {
+        fetch: async () => {
+          waiting++;
+          await held;
+          return Response.json({
+            success: false,
+            "error-codes": ["internal-error"],
+          });
+        },
+      },
+    });
+    service.provider.handler = async () => Response.json({ ok: true });
+    const call = (path: string, init: RequestInit = {}) =>
+      service.handler(
+        new Request("https://auth.meetmilton.com/api/auth" + path, {
+          ...init,
+          headers: {
+            origin: "https://auth.meetmilton.com",
+            "content-type": "application/json",
+            "x-captcha-response": "fictional-held",
+          },
+        }),
+        "127.0.0.1",
+      );
+    const signUp = () =>
+      call("/sign-up/email", {
+        method: "POST",
+        body: JSON.stringify({ email: "person@example.com" }),
+      });
+    const quiet = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const held4: Promise<Response>[] = [];
+      for (let n = 1; n <= 4; n++) {
+        held4.push(signUp());
+        while (waiting < n) await new Promise((r) => setTimeout(r, 1));
+      }
+      // A fifth verification waits for none; sign-in and the rest still work.
+      const fifth = await signUp();
+      expect([fifth.status, (await fifth.json()).error]).toEqual([
+        429,
+        "busy_retry",
+      ]);
+      expect(waiting).toBe(4);
+      for (let n = 0; n < 5; n++) expect((await call("/ok")).status).toBe(200);
+      release();
+      for (const r of await Promise.all(held4)) expect(r.status).toBe(503);
+    } finally {
+      quiet.mockRestore();
+    }
+  });
+
+  test("the widget and its CSP are on the sign-up page only, and the form passes its token", async () => {
+    const { rmSync } = await import("node:fs");
+    const { createApp } = await import("../src/app.tsx");
+    const { SECURITY_HEADERS } = await import("../src/http.ts");
+    const assets = await versionedAssets();
+    const seen: Request[] = [];
+    const app = (turnstileSiteKey?: string) =>
+      createApp(
+        {
+          turnstileSiteKey,
+          handler: async (request: Request) => {
+            seen.push(request);
+            return request.headers.get("x-captcha-response") ===
+              "fictional-down"
+              ? Response.json({ error: "captcha_unavailable" }, { status: 503 })
+              : Response.json({ ok: true });
+          },
+        } as unknown as import("../src/provider.ts").AuthService,
+        assets,
+      );
+    const on = app(keys.AUTH_TURNSTILE_SITE_KEY),
+      off = app();
+    rmSync(assets, { recursive: true, force: true });
+    const page = async (a: typeof on, path: string) => {
+      const r = await a.request("https://auth.meetmilton.com" + path);
+      return [await r.text(), r.headers.get("content-security-policy")!];
+    };
+    const base = SECURITY_HEADERS["content-security-policy"];
+    const [signup, csp] = await page(on, "/signup");
+    expect(signup).toContain(
+      '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async="" defer=""></script>',
+    );
+    expect(signup).toContain(
+      `<div class="cf-turnstile" data-sitekey="${keys.AUTH_TURNSTILE_SITE_KEY}" data-action="signup"></div>`,
+    );
+    expect(csp).toBe(
+      base.replace(
+        "script-src 'self';",
+        "script-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com;",
+      ),
+    );
+    for (const [html, policy] of [
+      await page(on, "/login"),
+      await page(off, "/signup"),
+    ]) {
+      expect(html).not.toContain("challenges.cloudflare.com");
+      expect(html).not.toContain("cf-turnstile");
+      expect(policy).toBe(base);
+    }
+    const r = await on.request("https://auth.meetmilton.com/form/signup", {
+      method: "POST",
+      headers: {
+        origin: "https://auth.meetmilton.com",
+        "content-type": "application/x-www-form-urlencoded",
+        "x-captcha-response": "fictional-forged",
+      },
+      body: new URLSearchParams({
+        name: "Fictional",
+        email: "person@example.com",
+        password: "Fictional sign-up password",
+        "cf-turnstile-response": "fictional-widget-token",
+      }).toString(),
+    });
+    expect(r.status).toBe(303);
+    const forwarded = seen.at(-1)!;
+    expect(forwarded.headers.get("x-captcha-response")).toBe(
+      "fictional-widget-token",
+    );
+    expect(Object.keys(await forwarded.json())).not.toContain(
+      "cf-turnstile-response",
+    );
+    // Turnstile unreachable: the form says so, not "could not confirm the outcome".
+    const down = await on.request("https://auth.meetmilton.com/form/signup", {
+      method: "POST",
+      headers: {
+        origin: "https://auth.meetmilton.com",
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        email: "person@example.com",
+        "cf-turnstile-response": "fictional-down",
+      }).toString(),
+    });
+    expect(down.status).toBe(503);
+    expect(await down.text()).toContain(
+      "could not run its check that you are a person. Nothing was created.",
+    );
+  });
+});

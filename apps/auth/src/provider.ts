@@ -23,6 +23,7 @@ import type { DBFieldAttribute } from "@better-auth/core/db";
 import { PostgresDialect } from "kysely";
 import pg from "pg";
 import { decodeJwt } from "jose";
+import { z } from "zod";
 import {
   AUTH_ORIGIN,
   APP_ORIGIN,
@@ -34,6 +35,7 @@ import {
 } from "./config.ts";
 import { credentialAdapter, transport, type RequestState } from "./adapter.ts";
 import { acceptMail, stashMail } from "./mail.ts";
+import { mailDomain, type MailDomain } from "./mail-domain.ts";
 import { admissionClient } from "./admission.ts";
 import { validPassword } from "./password.ts";
 import {
@@ -49,6 +51,8 @@ export type Boundaries = {
     init?: RequestInit,
   ) => Promise<Response>;
   beforeMailStash?: (state: RequestState) => void;
+  /** Whether DNS says a domain takes mail; real DNS (mailDomain) by default. */
+  mailDomain?: (domain: string) => Promise<MailDomain>;
 };
 /** Any https client metadata URL on a DNS name. The plugin also refuses
  * private hosts, and fetchClientMetadataResource pins public addresses. */
@@ -74,6 +78,28 @@ const ACCOUNT_DELETING = {
   message: "This Milton account is being deleted.",
 };
 const accountDeleting = () => new APIError("FORBIDDEN", ACCOUNT_DELETING);
+// What a Turnstile-guarded sign-up must carry. The 320-character ceiling is
+// the wrapper's own, not native's (Better Auth's z.email() sets none): it
+// matches mail capture's bound on a recipient and RFC 5321's path limits.
+const signUpEmail = z.email().max(320);
+const TURNSTILE_SITEVERIFY =
+  "https://challenges.cloudflare.com/turnstile/v0/siteverify";
+// How long one siteverify call may take, connection and body included.
+const TURNSTILE_TIMEOUT_MS = 5000;
+// Cloudflare's siteverify codes that mean the token itself is bad.
+const TOKEN_ERRORS = new Set([
+  "missing-input-response",
+  "invalid-input-response",
+  "timeout-or-duplicate",
+]);
+// Every code Cloudflare documents for siteverify; only these are logged.
+const CLOUDFLARE_CODES = new Set([
+  ...TOKEN_ERRORS,
+  "missing-input-secret",
+  "invalid-input-secret",
+  "bad-request",
+  "internal-error",
+]);
 const hash = (v: string) => createHash("sha256").update(v).digest("hex");
 export function createProvider(
   config: Config,
@@ -422,6 +448,11 @@ export function createProvider(
       customRules: {
         // Password guessing per address (Better Auth's default).
         "/sign-in/*": { window: 10, max: 3 },
+        // With Turnstile on, the wrapper takes this same limit before
+        // siteverify, so native's would only be a second, offset window.
+        ...(config.AUTH_TURNSTILE_SECRET_KEY
+          ? { "/sign-up/email": false as const }
+          : {}),
         "/sign-up/*": { window: 10, max: 3 },
         "/change-password": { window: 10, max: 3 },
         // Each sends mail (Better Auth's default).
@@ -640,6 +671,79 @@ export function createProvider(
     ],
   });
   let inFlight = 0;
+  // Cloudflare Turnstile on email sign-up, verified here rather than by
+  // Better Auth's captcha plugin, which waits up to 10 s inside a native slot,
+  // answers every success:false (Cloudflare's internal-error too) as a bad
+  // token, and sends a /64 for IPv6. At most four verifications wait at once
+  // per process, each at most 5 s. Only Cloudflare's token codes refuse (403);
+  // anything else (another code, a malformed answer, a non-2xx, a network
+  // failure or timeout) is a retryable 503: fail closed. No remoteip is sent: this
+  // process knows only an IPv6 client's /64, and it is optional.
+  let verifying = 0;
+  const networkFetch = options.boundaries?.fetch ?? fetch;
+  async function turnstile(secret: string, token: string | null) {
+    if (!token) return json({ error: "captcha_required" }, 400);
+    // Cloudflare's own bound on a token.
+    if (token.length > 2048) return json({ error: "captcha_refused" }, 403);
+    if (verifying >= 4) return json({ error: "busy_retry" }, 429);
+    verifying++;
+    // What is logged: Cloudflare's documented code names, "other" for any
+    // other code, or one fixed label. Never the token, the secret or text
+    // the response chose.
+    let codes: string[];
+    try {
+      const r = await networkFetch(TURNSTILE_SITEVERIFY, {
+        method: "POST",
+        redirect: "error",
+        signal: AbortSignal.timeout(TURNSTILE_TIMEOUT_MS),
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ secret, response: token }),
+      });
+      if (!r.ok) {
+        codes = ["http_error"];
+        await r.body?.cancel();
+      } else {
+        // The documented shape, strictly: success a boolean; on failure,
+        // error-codes an array of strings. Anything else is malformed.
+        const v: unknown = await r.json().catch(() => null);
+        const o =
+          v && typeof v === "object" && !Array.isArray(v)
+            ? (v as Record<string, unknown>)
+            : {};
+        const reported = o["error-codes"];
+        if (o.success === true)
+          return o.hostname === new URL(AUTH_ORIGIN).hostname &&
+            o.action === "signup"
+            ? undefined
+            : json({ error: "captcha_refused" }, 403);
+        if (
+          o.success !== false ||
+          !Array.isArray(reported) ||
+          !reported.every((c) => typeof c === "string")
+        )
+          codes = ["malformed"];
+        else if (
+          reported.length &&
+          reported.every((c) => TOKEN_ERRORS.has(c as string))
+        )
+          return json({ error: "captcha_refused" }, 403);
+        else
+          codes = (reported as string[]).map((c) =>
+            CLOUDFLARE_CODES.has(c) ? c : "other",
+          );
+      }
+    } catch (error) {
+      codes = [
+        error instanceof Error && error.name === "TimeoutError"
+          ? "timeout"
+          : "network",
+      ];
+    } finally {
+      verifying--;
+    }
+    console.error("auth_turnstile", { codes: [...new Set(codes)].slice(0, 7) });
+    return json({ error: "captcha_unavailable" }, 503);
+  }
   // The peer keys the network rate limits, so every caller names the client.
   async function handler(request: Request, peer: string): Promise<Response> {
     const denied = guardRequest(request);
@@ -751,6 +855,12 @@ export function createProvider(
     // limit too, before any database work.
     if (Buffer.byteLength(source) > 16384)
       return json({ error: "request_too_large" }, 413);
+    // With Turnstile on, a sign-up reaches siteverify only with an email the
+    // per-email bucket keys, so an empty body cannot skip that bucket.
+    const turnstileOn =
+      path === "/sign-up/email" && !!config.AUTH_TURNSTILE_SECRET_KEY;
+    if (turnstileOn && !signUpEmail.safeParse(body.email).success)
+      return json({ error: "invalid_email" }, 400);
     if (inFlight >= 4) return json({ error: "busy_retry" }, 429);
     inFlight++;
     acquired = true;
@@ -801,6 +911,9 @@ export function createProvider(
       scoped.push([rate("revoke:" + JSON.stringify([caller, ip])), 60, 30]);
     if (bearer)
       scoped.push([rate("userinfo:" + JSON.stringify([bearer, ip])), 60, 60]);
+    // Native's own sign-up limit (3 in 10 s per network) applies only after
+    // siteverify, so the gate takes the same limit first.
+    if (turnstileOn) scoped.push([rate("turnstile:" + ip), 10, 3]);
     // The app proves itself by its client secret (token, introspection,
     // revocation) or by one of its own access tokens (UserInfo), each
     // compared with native's stored SHA-256/base64url hash in this same
@@ -835,6 +948,20 @@ export function createProvider(
       const allowed = taken.rows[0]?.allowed;
       if (!Array.isArray(allowed) || !allowed.every((a) => a === true))
         return json({ error: "rate_limited" }, 429);
+      if (turnstileOn) {
+        // Siteverify can take seconds, so it waits in its own bound, not in
+        // a native slot; the slot is taken again only once it passes.
+        inFlight--;
+        acquired = false;
+        const refused = await turnstile(
+          config.AUTH_TURNSTILE_SECRET_KEY!,
+          request.headers.get("x-captcha-response"),
+        );
+        if (refused) return refused;
+        if (inFlight >= 4) return json({ error: "busy_retry" }, 429);
+        inFlight++;
+        acquired = true;
+      }
       if (
         path === "/oauth2/userinfo" &&
         !(await liveBinding(bearer, bearer ? stored(bearer) : ""))
@@ -855,6 +982,7 @@ export function createProvider(
         "x-real-ip",
         "x-client-ip",
         "x-milton-transport-ip",
+        "x-captcha-response",
       ])
         headers.delete(k);
       headers.set("x-milton-transport-ip", ip);
@@ -929,8 +1057,20 @@ export function createProvider(
               response.status === 400 &&
               ((await response.clone().json()) as { code?: string }).code ===
                 "EMAIL_ALREADY_VERIFIED"));
-        if (generic || requestState.mail)
-          await acceptMail(pool, config, requestState);
+        if (generic || requestState.mail) {
+          // Native work is done, and the domain lookup can wait up to 2 s on
+          // a name an attacker serves, so acceptance holds no native slot.
+          // Its two statements are still bounded by the pool.
+          if (acquired) {
+            inFlight--;
+            acquired = false;
+          }
+          await acceptMail(pool, config, requestState, {
+            domain: options.boundaries?.mailDomain ?? ((d) => mailDomain(d)),
+            requested: typeof body.email === "string" ? body.email : undefined,
+            kind: path === "/request-password-reset" ? "reset" : "verify",
+          });
+        }
         if (generic)
           return json({
             message:
@@ -1016,6 +1156,14 @@ export function createProvider(
       if (acquired) inFlight--;
     }
   }
-  return { provider, pool, handler };
+  return {
+    provider,
+    pool,
+    handler,
+    /** Set only when Turnstile guards sign-up; the page renders its widget. */
+    turnstileSiteKey: config.AUTH_TURNSTILE_SECRET_KEY
+      ? config.AUTH_TURNSTILE_SITE_KEY
+      : undefined,
+  };
 }
 export type AuthService = ReturnType<typeof createProvider>;

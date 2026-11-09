@@ -51,7 +51,14 @@ export async function bundleFixture(
       },
     );
     assert.equal(delivery.status, 0, "compiled delivery closure must run");
-    assert(delivery.stdout.includes(args.length ? "claimed: 0" : "Dry run:"));
+    // The compiled job's pass line, one JSON object (src/mail-log.ts).
+    assert(
+      args.length
+        ? delivery.stdout.includes(
+            '{"message":"auth_mail_pass","claimed":0,"sent":0,"retry":0,"failed":0,"throttled":0}\n',
+          )
+        : delivery.stdout.includes("Dry run:"),
+    );
   }
   const child = spawn(
     process.execPath,

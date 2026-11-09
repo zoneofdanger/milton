@@ -1,0 +1,59 @@
+{
+  "displayName": "milton-auth-mail",
+  "documentation": {
+    "content": "**Auth mail is failing or throttled.** `milton-auth-mail` logs one JSON line per send that ends failed or throttled, `{\"message\":\"auth_mail_send\",\"outcome\":\"failed\"|\"throttled\"}`, one per throttle with the pause it sets, `{\"message\":\"auth_mail_pause\",\"seconds\":N}`, and one per pass, `{\"message\":\"auth_mail_pass\",\"claimed\":…,\"sent\":…,\"retry\":…,\"failed\":…,\"throttled\":…}`. The log metric `milton-auth-mail-problems` counts the send lines; `milton-auth-mail-long-pause` counts pauses over 900 s. One email per incident; it closes 30 minutes after the condition clears.\n\nCheck first:\n1. The sends and passes: `gcloud logging read 'resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"milton-auth-mail\" AND jsonPayload.message=(\"auth_mail_send\" OR \"auth_mail_pass\")' --project=milton-510506 --freshness=2h --limit=50`. Compare failed and throttled with sent.\n2. Failed with nothing sent is configuration: the Resend API key revoked or rotated, `notifications.meetmilton.com` no longer verified at Resend, or a bad `AUTH_MAIL_FROM`/`AUTH_MAIL_REPLY_TO` on the job; or `AUTH_SECRET` differing between the service and the job (every message undecryptable). Compare their images and secret versions: `gcloud run jobs describe milton-auth-mail --project=milton-510506 --region=us-east4` and `gcloud run services describe milton-auth --project=milton-510506 --region=us-east4`. A release that moved one but not the other is the usual cause.\n3. Throttled: a pass stops at its first 429 and sets the shared pause from Retry-After (60 s to 24 h). Read the pause and the pending/expired counts with the prepared read-only procedure in apps/auth/README.md, \"Throttle inspection and recovery\", and Resend's usage page: a short rate-limit pause clears itself; a daily or monthly quota pause lasts until it lifts, and messages expire 15 minutes after acceptance, so people must ask for a new link afterwards. Paused passes report 0 claimed and 0 throttled, so this alert closing is not evidence that delivery resumed.\n\nBaseline (production, 2026-11-07 07:22Z to 2026-11-09 07:37Z, all the history since native mail started, about 2 days, not 7): 2,778 passes; 1 pass claimed anything (1 claimed, 1 sent); 0 retry, 0 failed, 0 throttled; at most 1 claimed per pass.\n\nThresholds:\n- 3 or more failed or throttled sends, combined, in a rolling 15 minutes (Peter's decision, 2026-11-09). Reason: Peter asked not to be spammed, and one blip should not page; a sustained key, sender or throttle problem crosses 3 within a quarter-hour. Failed is terminal (a non-429 4xx from Resend, a missed deadline or an undecryptable message), and a revoked key, a bad From/Reply-To or a changed secret fails every message after it. A short 429 pause that recurs crosses 3 too.\n- 1 or more throttles in a rolling 15 minutes that set a delivery pause over 15 minutes, the delivery lifetime. Reason: that is an outage of real people's mail, not a blip, so one event pages: every queued message expires unsent before the pause ends, and the passes after it claim nothing and log nothing else. This covers a daily or monthly Resend quota, whose single 429 never reaches the first threshold.\n\nNot covered: a single failed send to one address.\n\nBacktest: no send or pause line exists before this release; the baseline had 0 failed and 0 throttled sends, so neither would have fired.\n",
+    "mimeType": "text/markdown"
+  },
+  "userLabels": {
+    "tier": "page"
+  },
+  "conditions": [
+    {
+      "displayName": "milton-auth-mail: ≥ 3 failed or throttled sends in 15 min",
+      "conditionThreshold": {
+        "filter": "metric.type = \"logging.googleapis.com/user/milton-auth-mail-problems\" AND resource.type = \"cloud_run_job\" AND resource.labels.job_name = \"milton-auth-mail\"",
+        "aggregations": [
+          {
+            "alignmentPeriod": "900s",
+            "perSeriesAligner": "ALIGN_DELTA",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "groupByFields": ["resource.label.job_name"]
+          }
+        ],
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 2,
+        "duration": "0s",
+        "trigger": {
+          "count": 1
+        }
+      }
+    },
+    {
+      "displayName": "milton-auth-mail: a delivery pause over 15 min",
+      "conditionThreshold": {
+        "filter": "metric.type = \"logging.googleapis.com/user/milton-auth-mail-long-pause\" AND resource.type = \"cloud_run_job\" AND resource.labels.job_name = \"milton-auth-mail\"",
+        "aggregations": [
+          {
+            "alignmentPeriod": "900s",
+            "perSeriesAligner": "ALIGN_DELTA",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "groupByFields": ["resource.label.job_name"]
+          }
+        ],
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 0,
+        "duration": "0s",
+        "trigger": {
+          "count": 1
+        }
+      }
+    }
+  ],
+  "combiner": "OR",
+  "enabled": true,
+  "notificationChannels": ["milton-ops-email"],
+  "alertStrategy": {
+    "autoClose": "1800s",
+    "notificationPrompts": ["OPENED"]
+  }
+}

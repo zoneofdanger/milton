@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import {
   makeSignature,
   symmetricEncrypt,
@@ -9,6 +9,8 @@ import type pg from "pg";
 import { AUTH_ORIGIN, type Config } from "./config.ts";
 import type { RequestState } from "./adapter.ts";
 import { reservedRecipient } from "./recipient.ts";
+import { addressDomain, domainDigest, type MailDomain } from "./mail-domain.ts";
+import { pauseLine, problemLine } from "./mail-log.ts";
 
 // Native getCryptoKey (used by makeSignature) imports an HMAC signing key.
 // Symmetric utilities instead accept a versioned SecretConfig. No bare-hex fallback.
@@ -76,10 +78,18 @@ export function stashMail(
     s.mailFault = true;
   }
 }
-function body(config: Pick<Config, "AUTH_MAIL_FROM">, m: NativeMail) {
+function body(
+  config: Pick<Config, "AUTH_MAIL_FROM"> &
+    Partial<Pick<Config, "AUTH_MAIL_REPLY_TO">>,
+  m: NativeMail,
+) {
   return {
     from: `Milton <${config.AUTH_MAIL_FROM}>`,
     to: [m.to],
+    // Resend's field. A message queued before Reply-To existed has none.
+    ...(config.AUTH_MAIL_REPLY_TO
+      ? { reply_to: config.AUTH_MAIL_REPLY_TO }
+      : {}),
     subject:
       m.kind === "verify"
         ? "Verify your Milton email"
@@ -87,17 +97,86 @@ function body(config: Pick<Config, "AUTH_MAIL_FROM">, m: NativeMail) {
     text: `${m.kind === "verify" ? "Verify your email" : "Set a new password"}: ${m.url}\n\nIf you did not request this, ignore this message.`,
   };
 }
+export type MailChecks = {
+  /** mailDomain in production; tests inject an answer. */
+  domain: (domain: string) => Promise<MailDomain>;
+  /** The request's own `email` and the kind its path sends, used when no
+   * message was captured. */
+  requested?: string;
+  kind?: NativeMail["kind"];
+};
 export async function acceptMail(
   pool: pg.Pool,
   config: Config,
   s: RequestState,
+  checks: MailChecks,
 ) {
   if (s.mailFault || (s.mailExpected && !s.mail))
     throw new Error("native_mail_capture_failed");
-  // A reserved recipient's message commits the same no-op receipt an unknown
-  // address does, so the public answer is the same and nothing is queued.
-  const id = randomUUID(),
-    m = s.mail && !reservedRecipient(s.mail.to) ? s.mail : undefined;
+  // A reserved recipient's message, or one to a domain DNS says takes no mail
+  // (null MX, NXDOMAIN, or no MX, A or AAAA), commits the same no-op receipt
+  // an unknown address does, so the public answer is the same and nothing is
+  // queued. The domain is looked up whether or not a message was captured, so
+  // an unknown address's answer waits for the same lookup; DNS failing sends.
+  const address = s.mail?.to ?? checks.requested;
+  const domain =
+    address && !reservedRecipient(address) ? addressDomain(address) : "";
+  const reachable =
+    !domain || (await checks.domain(domain)) !== "undeliverable";
+  let m = s.mail && !reservedRecipient(s.mail.to) ? s.mail : undefined;
+  if (m && !reachable) {
+    console.log(
+      JSON.stringify({
+        message: "auth_mail_skipped",
+        reason: "undeliverable_domain",
+        kind: m.kind,
+        domain: domainDigest(domain),
+      }),
+    );
+    m = undefined;
+  }
+  // At most 3 messages of a kind an hour per address (lowercased), however
+  // many networks ask: a person needs a couple of resends at most. Keyed by
+  // the address, not the account, so a sign-up's first message counts the
+  // moment it is queued and a deleted, recreated account starts no fresh
+  // count. A fixed window from the first take, so a boundary can admit 6 in
+  // just over an hour. Every outcome runs the same take, so each answers
+  // after the same statements and the round trip reveals no account state:
+  // a message about to be queued takes its address's bucket, and an outcome
+  // that sends nothing (no account, already verified, a skipped domain) takes
+  // one shared stand-in bucket, so asking for nothing never spends a real
+  // address's allowance and cannot suppress its first message.
+  const kind = s.mail?.kind ?? checks.kind;
+  const taken =
+    address && kind
+      ? await pool.query<{ allowed: boolean }>(
+          "select milton_guard.take_rate($1,$2,$3) as allowed",
+          [
+            createHmac("sha256", config.AUTH_RATE_SECRET)
+              .update(
+                m
+                  ? "mail:" + JSON.stringify([m.kind, m.to.toLowerCase()])
+                  : "mail-none",
+              )
+              .digest("hex"),
+            3600,
+            3,
+          ],
+        )
+      : undefined;
+  if (m) {
+    if (taken?.rows[0]?.allowed !== true) {
+      console.log(
+        JSON.stringify({
+          message: "auth_mail_skipped",
+          reason: "account_cap",
+          kind: m.kind,
+        }),
+      );
+      m = undefined;
+    }
+  }
+  const id = randomUUID();
   const payload = m
     ? await symmetricEncrypt({
         key: await key(config.AUTH_SECRET),
@@ -152,8 +231,18 @@ export async function openMail(secret: string, job: MailJob) {
     !m.body ||
     typeof m.body.from !== "string" ||
     m.body.from.length > 400 ||
+    (m.body.reply_to !== undefined &&
+      (typeof m.body.reply_to !== "string" || m.body.reply_to.length > 254)) ||
     JSON.stringify(m.body) !==
-      JSON.stringify(body({ AUTH_MAIL_FROM: m.body.from.slice(8, -1) }, m))
+      JSON.stringify(
+        body(
+          {
+            AUTH_MAIL_FROM: m.body.from.slice(8, -1),
+            AUTH_MAIL_REPLY_TO: m.body.reply_to,
+          },
+          m,
+        ),
+      )
   )
     throw new Error("invalid_mail_binding");
   return m.body;
@@ -232,6 +321,11 @@ export async function deliverMail(
     );
     if (!finished.rows[0]?.done) throw new Error("mail_lease_lost");
     counts[outcome]++;
+    if (outcome === "failed" || outcome === "throttled")
+      console.log(problemLine(outcome));
+    // The pause finish_mail just set: later passes claim nothing until it
+    // ends, so this is the only sign of a long one.
+    if (outcome === "throttled") console.log(pauseLine(defer));
     if (outcome === "throttled") break;
   }
   return counts;

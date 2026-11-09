@@ -12,7 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { decodeJwt, jwtVerify, createLocalJWKSet } from "jose";
-import { randomUUID, createHash, randomBytes } from "node:crypto";
+import { randomUUID, createHash, createHmac, randomBytes } from "node:crypto";
 import pg from "pg";
 import { bundleFixture } from "./bundle-fixture.ts";
 import { httpFixture } from "./http-fixture.ts";
@@ -37,7 +37,13 @@ const admissions: Record<string, unknown>[] = [];
 let admitStatus = 204;
 let onAdmit: ((subject: string) => void) | undefined;
 const mail: { to: string; url: string; kind: "reset" | "verify" }[] = [];
+// No real DNS: no-mail.example stands for a domain that takes no mail.
+const mailDomain = async (domain: string) =>
+  domain === "no-mail.example"
+    ? ("undeliverable" as const)
+    : ("deliverable" as const);
 const boundaries = {
+  mailDomain,
   fetch: async (input: string | URL | Request, init?: RequestInit) => {
     if (
       String(input) ===
@@ -326,9 +332,11 @@ try {
     deliverMail(authPool, config, async (_input, init) => {
       const message = JSON.parse(String(init?.body)) as {
         to: string[];
+        reply_to: string;
         text: string;
         subject: string;
       };
+      assert.equal(message.reply_to, "support@meetmilton.com");
       mail.push({
         to: message.to[0]!,
         url: message.text.split("\n")[0]!.split(": ").slice(1).join(": "),
@@ -2270,6 +2278,7 @@ try {
     const noNetwork = createProvider(config, {
       pool: authPool,
       boundaries: {
+        mailDomain,
         fetch: async () => {
           providerCalls++;
           throw new Error("request_delivery_forbidden");
@@ -2397,6 +2406,7 @@ try {
       const faulty = createProvider(config, {
         pool: authPool,
         boundaries: {
+          mailDomain,
           beforeMailStash: (s) => {
             if (fault === "missing") s.users.clear();
             else if (fault === "duplicate")
@@ -2489,6 +2499,174 @@ try {
       return new Response(null, { status: 200 });
     });
     assert.deepEqual([reservedPass.claimed, reservedSends], [0, 0]);
+    // A sign-up, then a reset, at a domain DNS says takes no mail answer
+    // exactly as any does and queue only the no-op receipt.
+    for (const path of ["/sign-up/email", "/request-password-reset"]) {
+      const reply = await post(
+        noNetwork.handler,
+        path,
+        "mail-new@no-mail.example",
+      );
+      assert.equal(reply.status, 200);
+      assert.equal(await reply.text(), neutral);
+      const receipt = await last();
+      assert.deepEqual(
+        [receipt.state, receipt.payload],
+        ["noop", null],
+        `an undeliverable domain queues no message (${path})`,
+      );
+    }
+    // The fourth reset in an hour for one address, each from its own network,
+    // answers the same and queues only the no-op receipt.
+    await clearRates();
+    const queuedResets: boolean[] = [];
+    for (const n of [1, 2, 3, 4]) {
+      const reply = await noNetwork.handler(
+        new Request(ISSUER + "/request-password-reset", {
+          method: "POST",
+          headers: { origin: AUTH_ORIGIN, "content-type": "application/json" },
+          body: JSON.stringify({ email: known }),
+        }),
+        `192.0.2.${n}`,
+      );
+      assert.equal(reply.status, 200);
+      assert.equal(await reply.text(), neutral);
+      queuedResets.push((await last()).payload !== null);
+    }
+    assert.deepEqual(queuedResets, [true, true, true, false]);
+    // With Turnstile on, only a token siteverify (faked; no network) passes
+    // creates the account and queues its verification.
+    let verifications = 0;
+    const guarded = createProvider(
+      {
+        ...config,
+        AUTH_TURNSTILE_SITE_KEY: "fictional-site-key",
+        AUTH_TURNSTILE_SECRET_KEY: "fictional-turnstile-secret",
+      },
+      {
+        pool: authPool,
+        boundaries: {
+          mailDomain,
+          fetch: async (input, init) => {
+            assert.equal(
+              String(input),
+              "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+            );
+            const { response } = JSON.parse(String(init?.body));
+            verifications++;
+            return Response.json(
+              response === "fictional-pass"
+                ? {
+                    success: true,
+                    hostname: "auth.meetmilton.com",
+                    action: "signup",
+                  }
+                : { success: false, "error-codes": ["invalid-input-response"] },
+            );
+          },
+        },
+      },
+    );
+    {
+      for (const [token, status, created] of [
+        [undefined, 400, false],
+        ["fictional-fail", 403, false],
+        ["fictional-pass", 200, true],
+      ] as const) {
+        await clearRates();
+        const address = `turnstile-${token ?? "none"}@example.com`;
+        const reply = await guarded.handler(
+          new Request(ISSUER + "/sign-up/email", {
+            method: "POST",
+            headers: {
+              origin: AUTH_ORIGIN,
+              "content-type": "application/json",
+              ...(token ? { "x-captcha-response": token } : {}),
+            },
+            body: JSON.stringify({
+              email: address,
+              password: probePassword,
+              name: "Fictional mail",
+            }),
+          }),
+          TEST_PEER,
+        );
+        assert.equal(reply.status, status);
+        if (created) assert.equal(await reply.text(), neutral);
+        const users = await p.owner.query(
+          'select id from milton_auth."user" where email=$1',
+          [address],
+        );
+        assert.equal(users.rows.length, created ? 1 : 0);
+        if (created) {
+          const job = await last();
+          assert.equal(job.origin_user, users.rows[0].id);
+          assert.equal(job.state, "pending");
+        }
+      }
+      // One network reaches siteverify at most 3 times in 10 s, whatever
+      // addresses it names; the fourth is refused before Cloudflare.
+      await clearRates();
+      const before = verifications;
+      const statuses: number[] = [];
+      for (const n of [1, 2, 3, 4]) {
+        const reply = await guarded.handler(
+          new Request(ISSUER + "/sign-up/email", {
+            method: "POST",
+            headers: {
+              origin: AUTH_ORIGIN,
+              "content-type": "application/json",
+              "x-captcha-response": "fictional-fail",
+            },
+            body: JSON.stringify({
+              email: `turnstile-burst-${n}@example.com`,
+              password: probePassword,
+              name: "Fictional mail",
+            }),
+          }),
+          "192.0.2.77",
+        );
+        statuses.push(reply.status);
+      }
+      assert.deepEqual(statuses, [403, 403, 403, 429]);
+      assert.equal(verifications - before, 3);
+      // One effective sign-up limit (round 3): three sign-ups enter at 0 s
+      // and pass siteverify at 4 s, so a native bucket would open 4 s after
+      // the wrapper's. At 10 s the wrapper's window has reopened, and nothing
+      // else refuses: a fourth gets in, and only the wrapper's limit (3 a
+      // window) refuses after that.
+      await clearRates();
+      const burst = (n: number) =>
+        guarded.handler(
+          new Request(ISSUER + "/sign-up/email", {
+            method: "POST",
+            headers: {
+              origin: AUTH_ORIGIN,
+              "content-type": "application/json",
+              "x-captcha-response": "fictional-pass",
+            },
+            body: JSON.stringify({
+              email: `turnstile-window-${n}@example.com`,
+              password: probePassword,
+              name: "Fictional mail",
+            }),
+          }),
+          "192.0.2.78",
+        );
+      const at0: number[] = [];
+      for (const n of [1, 2, 3]) at0.push((await burst(n)).status);
+      assert.deepEqual(at0, [200, 200, 200]);
+      const outer = createHmac("sha256", config.AUTH_RATE_SECRET)
+        .update("turnstile:192.0.2.78")
+        .digest("hex");
+      await p.owner.query(
+        "update milton_guard.rate_bucket set started_at=started_at-case when key=$1 then interval '10 seconds' else interval '6 seconds' end",
+        [outer],
+      );
+      const at10: number[] = [];
+      for (const n of [4, 5, 6, 7]) at10.push((await burst(n)).status);
+      assert.deepEqual(at10, [200, 200, 200, 429]);
+    }
     // L-1: issue and encrypt the original native proof on a clock 30s ahead
     // of PostgreSQL, without editing the proof, envelope or stored job later.
     await clearJobs();

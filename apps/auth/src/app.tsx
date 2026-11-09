@@ -12,6 +12,8 @@ import {
   json,
   loadBalancerClient,
   SECURITY_HEADERS,
+  TURNSTILE_CSP,
+  TURNSTILE_SCRIPT,
 } from "./http.ts";
 import {
   Page as Shell,
@@ -33,7 +35,7 @@ export function createApp(
     Shell({ ...props, assets: statics });
   const app = new Hono<{
     Bindings: HttpBindings;
-    Variables: { staticAsset: boolean };
+    Variables: { staticAsset: boolean; turnstile: boolean };
   }>();
   app.use("*", async (c, next) => {
     const denied = guardRequest(c.req.raw);
@@ -42,7 +44,10 @@ export function createApp(
     for (const [k, v] of Object.entries(SECURITY_HEADERS))
       // A served static asset keeps its own Cache-Control (immutable when the
       // URL's version matches, otherwise no-cache); all else stays no-store.
-      if (k !== "cache-control" || !c.get("staticAsset")) c.header(k, v);
+      // Only the page rendering the Turnstile widget widens the CSP.
+      if (k === "content-security-policy" && c.get("turnstile"))
+        c.header(k, TURNSTILE_CSP);
+      else if (k !== "cache-control" || !c.get("staticAsset")) c.header(k, v);
   });
   const peer = (c: Parameters<typeof getConnInfo>[0]) => {
     const client = loadBalancerClient(c.req.header("x-forwarded-for") ?? null);
@@ -126,13 +131,18 @@ export function createApp(
       </Page>,
     ),
   );
-  app.get("/signup", (c) =>
-    c.html(
-      <Page title="Create your account">
-        <SignIn signup query={oauthQuery(c.req.url)} />
+  app.get("/signup", (c) => {
+    const siteKey = auth.turnstileSiteKey;
+    if (siteKey) c.set("turnstile", true);
+    return c.html(
+      <Page
+        title="Create your account"
+        script={siteKey ? TURNSTILE_SCRIPT : undefined}
+      >
+        <SignIn signup query={oauthQuery(c.req.url)} turnstile={siteKey} />
       </Page>,
-    ),
-  );
+    );
+  });
   app.get("/verify", (c) =>
     c.html(
       <Page title="Verify your email" notice={notice(c.req.query("notice"))}>
@@ -257,6 +267,13 @@ export function createApp(
     const headers = new Headers(c.req.raw.headers);
     headers.set("content-type", "application/json");
     headers.delete("content-length");
+    // The Turnstile widget's form field becomes the header the wrapper's
+    // siteverify check reads; a header the browser sent is never forwarded.
+    const captchaToken = f.get("cf-turnstile-response");
+    delete body["cf-turnstile-response"];
+    headers.delete("x-captcha-response");
+    if (action === "signup" && captchaToken)
+      headers.set("x-captcha-response", captchaToken);
     const response = await auth.handler(
       new Request(AUTH_ORIGIN + "/api/auth" + path, {
         method: "POST",
@@ -296,6 +313,12 @@ export function createApp(
         FAILED_TO_UNLINK_LAST_ACCOUNT:
           "Keep at least one working sign-in method.",
         rate_limited: "Too many attempts. Wait a minute and try again.",
+        captcha_required:
+          "Milton could not confirm you are a person. Try again; the check runs on the sign-up page.",
+        captcha_refused:
+          "Milton could not confirm you are a person. Try again; the check runs on the sign-up page.",
+        captcha_unavailable:
+          "Milton could not run its check that you are a person. Nothing was created. Try again shortly, or continue with Google or GitHub.",
         busy_retry: "Milton is busy. Try again shortly.",
       };
       const retry =
@@ -309,12 +332,14 @@ export function createApp(
       return c.html(
         <Page title="Please try again">
           <p role="alert">
-            {response.status === 503
-              ? "Milton could not confirm the outcome. Try signing in or request a new link before repeating a security change."
-              : (messages[key] ??
-                (response.status === 429
-                  ? "Too many attempts. Wait a minute and try again."
-                  : "This request could not be completed. Check your details or request a new link."))}
+            {key === "captcha_unavailable"
+              ? messages[key]
+              : response.status === 503
+                ? "Milton could not confirm the outcome. Try signing in or request a new link before repeating a security change."
+                : (messages[key] ??
+                  (response.status === 429
+                    ? "Too many attempts. Wait a minute and try again."
+                    : "This request could not be completed. Check your details or request a new link."))}
           </p>
           <a href={retry}>Try again</a>
           <p>

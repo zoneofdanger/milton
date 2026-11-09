@@ -145,7 +145,7 @@ try {
   // Every writing migration the journal lists, in order, so a new one's tables
   // exist here too. Production applied the owner grant files before 0013 dropped
   // the old writing tables that 005-app-roles.sql names, so the entries from 0013
-  // on run after those files (below), as they did there.
+  // on run after those files and 015 (below), in the release's order.
   const journal = JSON.parse(
     readFileSync(new URL("./drizzle/meta/_journal.json", sourceRoot), "utf8"),
   ) as { entries: { tag: string }[] };
@@ -268,19 +268,9 @@ try {
   await owner.query(
     "GRANT milton_guide_worker TO milton_guide_runtime WITH INHERIT TRUE",
   );
-  // 0013 drops the old writing tables and wipes every save receipt, with rows in
-  // them as production has; 015 then drops both guide roles. Every later step
-  // runs on that schema.
-  for (const statement of [
-    "INSERT INTO instruction_cards(user_id,id) VALUES($1,'legacy-card')",
-    "INSERT INTO sample_kinds(user_id,id,report,label) VALUES($1,'legacy-kind','email','fictional legacy note')",
-    "INSERT INTO samples(user_id,id,client_json) VALUES($1,'legacy-sample','{}')",
-    "INSERT INTO guide_accounts(user_id) VALUES($1)",
-    `INSERT INTO save_requests(user_id,request_id,input_hash,result_json) VALUES($1,gen_random_uuid()::text,repeat('a',64),'{"status":"saved"}')`,
-  ])
-    await owner.query(statement, ["m_00000000-0000-4000-8000-000000000001"]);
-  for (const { tag } of journal.entries.slice(dropAt)) await writing(tag);
-  // Applied twice: rerunning 015 converges.
+  // 015 drops both guide roles first; then 0013 drops the old writing tables,
+  // with rows in them as production has, and the old store's receipts. Every
+  // later step runs on that schema. Applied twice: rerunning 015 converges.
   for (let n = 0; n < 2; n++)
     await owner.query(
       readFileSync(
@@ -288,6 +278,17 @@ try {
         "utf8",
       ),
     );
+  for (const statement of [
+    "INSERT INTO instruction_cards(user_id,id) VALUES($1,'legacy-card')",
+    "INSERT INTO sample_kinds(user_id,id,report,label) VALUES($1,'legacy-kind','email','fictional legacy note')",
+    "INSERT INTO samples(user_id,id,client_json) VALUES($1,'legacy-sample','{}')",
+    "INSERT INTO guide_accounts(user_id) VALUES($1)",
+    // An old store's receipt, which 0013 deletes, and a memo-era one it keeps.
+    `INSERT INTO save_requests(user_id,request_id,input_hash,result_json) VALUES($1,gen_random_uuid()::text,repeat('a',64),'{"status":"saved","request_id":"r","version":"v"}')`,
+    `INSERT INTO save_requests(user_id,request_id,input_hash,result_json) VALUES($1,gen_random_uuid()::text,repeat('a',64),'{"status":"saved","request_id":"r","forgotten":["m"]}')`,
+  ])
+    await owner.query(statement, ["m_00000000-0000-4000-8000-000000000001"]);
+  for (const { tag } of journal.entries.slice(dropAt)) await writing(tag);
   assert.deepEqual(
     (
       await owner.query(
@@ -304,10 +305,10 @@ try {
       functions:
         "milton_save_request_guard,milton_user_id_guard,prune_usage_calls",
       guide_roles: 0,
-      receipts: 0,
+      receipts: 1,
       users: 1,
     },
-    "0013 and 015 leave no old writing table, function, receipt or guide role",
+    "015 and 0013 leave no old writing table, function, old-store receipt or guide role",
   );
   const poolConfig = (service: string): pg.PoolConfig => ({
     host: "127.0.0.1",

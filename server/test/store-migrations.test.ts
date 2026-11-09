@@ -939,7 +939,7 @@ test("0012 adds empty memo tables the legacy group cannot reach; 014 grants the 
   }
 });
 
-test("0013 drops the old writing tables, their sequence and functions, and every receipt; a replayed memo save then answers unchanged", async () => {
+test("0013 drops the old writing tables, their sequence and functions, and the old store's receipts; memo receipts stay, so replays never undo a forget or a later correction", async () => {
   const folder = new URL("../drizzle/", import.meta.url).pathname;
   const scratch = await mkdtemp(join(tmpdir(), "milton-0013-"));
   const pg = new PGlite();
@@ -962,8 +962,8 @@ test("0013 drops the old writing tables, their sequence and functions, and every
       );
     await through("0012_memos");
     await migrate(drizzle(pg), { migrationsFolder: scratch });
-    // Production's shape before 0013: rows in the old tables, and a memo saved
-    // since #76 with its receipt.
+    // Production's shape before 0013: rows in the old tables and the old
+    // store's receipts, as save.ts before #76 wrote them.
     await seedUsers(pg, "kept");
     await pg.exec(
       "INSERT INTO sample_kinds(user_id,id,report,label) VALUES ('kept','kind','email','Fictional kind'); INSERT INTO instruction_cards(user_id,id) VALUES ('kept','card'); INSERT INTO guide_accounts(user_id) VALUES ('kept')",
@@ -977,13 +977,91 @@ test("0013 drops the old writing tables, their sequence and functions, and every
       { version: 1, summary: "Fictional note" },
       "Fictional sample.",
     );
+    const oldReceipt = async (outcome: Record<string, unknown>) => {
+      const id = crypto.randomUUID();
+      await pg.query(
+        "INSERT INTO save_requests(user_id,request_id,input_hash,result_json) VALUES ('kept',$1,repeat('a',64),$2::jsonb)",
+        [id, JSON.stringify({ request_id: id, ...outcome })],
+      );
+      return id;
+    };
+    for (const outcome of [
+      { status: "saved", version: "v2" },
+      {
+        status: "saved",
+        version: "v3",
+        samples_retired: [{ id: "s", reason: "replaced" }],
+      },
+      { status: "unchanged", version: "v3" },
+      { status: "conflict", version: "v3" },
+      {
+        status: "failed",
+        error: "baseline_unknown",
+        message: '"Fictional rule" in email starts with "Baseline: "',
+      },
+      { status: "failed", error: "sample_conflict", message: "Fictional." },
+    ])
+      await oldReceipt(outcome);
+    // An old refusal with a code the memo code also stores is indistinguishable
+    // from a memo-era one, and stays.
+    const shared = await oldReceipt({
+      status: "failed",
+      error: "request_too_large",
+      message: "The save request is too large. Nothing was changed.",
+    });
+    // The memo code's receipts: a memo saved then forgotten, a memo whose
+    // context was corrected twice, a refusal and a cover sheet line.
     const store = fixtureStore(storeDatabase(pg), "kept");
-    const save = memoSave();
-    const saved = await store.saveMemo(save);
-    expect(saved.status).toBe("saved");
+    const forgottenSave = memoSave({ final: "Fictional forgotten final." });
+    const forgottenMemo = (await store.saveMemo(forgottenSave)).memo!.memo_id;
+    const forget = {
+      request_id: crypto.randomUUID(),
+      forget_memos: [forgottenMemo],
+    };
+    expect((await store.saveMemo(forget)).status).toBe("saved");
+    const correctedSave = memoSave();
+    const corrected = (await store.saveMemo(correctedSave)).memo!.memo_id;
+    const correction = (summary: string) => ({
+      request_id: crypto.randomUUID(),
+      memo_context: {
+        memo_id: corrected,
+        context: { summary, medium: "chat" as const },
+      },
+    });
+    const first = correction("first fictional correction");
+    const second = correction("second fictional correction");
+    expect((await store.saveMemo(first)).status).toBe("saved");
+    expect((await store.saveMemo(second)).status).toBe("saved");
+    const refused = memoSave({ kind_id: "not-a-kind" });
+    expect((await store.saveMemo(refused)).status).toBe("failed");
+    const line = {
+      request_id: crypto.randomUUID(),
+      cover_sheet: { add: "Fictional line.", expected_version: 0 },
+    };
+    expect((await store.saveMemo(line)).status).toBe("saved");
     const receipts = async () =>
-      (await pg.query("SELECT count(*)::int AS n FROM save_requests")).rows;
-    expect(await receipts()).toEqual([{ n: 1 }]);
+      (
+        await pg.query<{ request_id: string }>(
+          "SELECT request_id FROM save_requests ORDER BY request_id",
+        )
+      ).rows.map((r) => r.request_id);
+    const memoEra = [
+      forgottenSave.request_id,
+      forget.request_id,
+      correctedSave.request_id,
+      first.request_id,
+      second.request_id,
+      refused.request_id,
+      line.request_id,
+    ];
+    // What their replays return before 0013.
+    const replays = async () => [
+      await store.saveMemo(forgottenSave),
+      await store.saveMemo(first),
+    ];
+    const replayed = await replays();
+    // Six old-store receipts, the shared refusal and the memo-era ones.
+    expect(await receipts()).toHaveLength(6 + 1 + memoEra.length);
     await through("0013_drop_old_writing");
     await migrate(drizzle(pg), { migrationsFolder: scratch });
     await migrate(drizzle(current), { migrationsFolder: scratch });
@@ -1020,17 +1098,19 @@ test("0013 drops the old writing tables, their sequence and functions, and every
         )
       ).rows,
     ).toEqual([]);
-    expect(await receipts()).toEqual([{ n: 0 }]);
-    // The memo stays; its replay finds the same words and saves nothing new.
-    const replayed = await store.saveMemo(save);
-    expect(replayed).toMatchObject({
-      status: "unchanged",
-      memo: { memo_id: saved.memo!.memo_id },
-    });
+    // The old store's receipts are gone; every memo-era one and the shared
+    // refusal stay.
+    expect(await receipts()).toEqual([...memoEra, shared].sort());
+    // Replays return the stored outcomes: the forgotten memo is not saved
+    // again, and the first correction does not undo the second.
+    expect(await replays()).toEqual(replayed);
     expect(
-      (await pg.query("SELECT count(*)::int AS n FROM memos")).rows,
-    ).toEqual([{ n: 1 }]);
-    expect(await receipts()).toEqual([{ n: 1 }]);
+      (
+        await pg.query(
+          "SELECT id,summary FROM memos WHERE user_id='kept' ORDER BY id",
+        )
+      ).rows,
+    ).toEqual([{ id: corrected, summary: "second fictional correction" }]);
   } finally {
     await current.close();
     await pg.close();

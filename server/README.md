@@ -126,14 +126,17 @@ This command explicitly reads `.dev.vars`, unless a release sets `MILTON_OWNER_D
 the instruction-position sequence, seven guard functions and triggers, the `milton_runtime`
 role and its grants/default privileges, and the singleton `store_config` seed. Authenticated native admission creates or finds the exact identity's account; a new account starts with an empty cover sheet and no memos.
 Fresh installs apply every migration in `drizzle/` in order, with the owner files through
-014 between `0012` and `0013` (005 grants on tables 0013 drops) and 015 after `0013`.
+015 between `0012` and `0013` (005 grants on tables 0013 drops; 015 runs first, as in the
+release).
 `0012_memos` adds the memo, kind, tweak, citation, served-report, cover sheet and Keep
 memos tables, and owner file `migrations/014-memos-roles.sql` grants them (see "Runtime
 role"). `0013_drop_old_writing` drops the tables of the writing that memos replaced (cards,
 samples, kinds, accepted changes, the guide tables), their sequence and the eight functions
-only they used, and deletes every save receipt; owner file
-`migrations/015-drop-guide-roles.sql` then drops the cluster-level `milton_guide_worker`
-and `milton_guide_runtime` roles. After 0013, `005-app-roles.sql` is never rerun.
+only they used, and deletes the old store's save receipts (it keeps every receipt the memo
+code wrote, so memo-era replays still return their outcome); owner file
+`migrations/015-drop-guide-roles.sql`, applied just before it, drops the cluster-level
+`milton_guide_worker` and `milton_guide_runtime` roles. After 0013, `005-app-roles.sql`
+is never rerun.
 Reads take no lock and invoke no model; a report read records which tweaks it served.
 
 The baseline requires an empty database; direct baseline use on a populated old database

@@ -14,9 +14,10 @@ const root = new URL("../../", import.meta.url);
 const read = (path: string) => readFileSync(new URL(path, root), "utf8");
 
 /** A fresh schema from all three tracks, applied as a fresh install applies them:
- * Drizzle through 0012, native auth, the owner files through 014, then the rest of
- * Drizzle and of the owner files. 005-app-roles.sql grants on tables 0013 drops, so
- * it runs before 0013, as it did in production (server/README.md). */
+ * Drizzle through 0012, native auth, the owner files (through 015), then the rest of
+ * Drizzle. 005-app-roles.sql grants on tables 0013 drops, so it runs before 0013, as
+ * it did in production, and 015 runs before 0013 as the release does
+ * (server/README.md). */
 async function freshSchema() {
   const pg = new PGlite();
   const drizzleFolder = new URL("server/drizzle/", root).pathname;
@@ -42,12 +43,9 @@ async function freshSchema() {
     await pg.exec(read(`apps/auth/migrations/${name}.up.sql`));
   // 007-role-timeouts sets role options in the database named milton.
   await pg.exec("CREATE DATABASE milton");
-  const owners = readdirSync(new URL("server/migrations/", root)).sort();
-  for (const file of owners.filter((f) => f < "015"))
+  for (const file of readdirSync(new URL("server/migrations/", root)).sort())
     await pg.exec(read(`server/migrations/${file}`));
   await migrate(drizzle(pg), { migrationsFolder: drizzleFolder });
-  for (const file of owners.filter((f) => f >= "015"))
-    await pg.exec(read(`server/migrations/${file}`));
   return pg;
 }
 const schema = freshSchema();

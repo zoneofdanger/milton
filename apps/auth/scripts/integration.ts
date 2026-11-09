@@ -332,9 +332,11 @@ try {
     deliverMail(authPool, config, async (_input, init) => {
       const message = JSON.parse(String(init?.body)) as {
         to: string[];
+        reply_to: string;
         text: string;
         subject: string;
       };
+      assert.equal(message.reply_to, "support@meetmilton.com");
       mail.push({
         to: message.to[0]!,
         url: message.text.split("\n")[0]!.split(": ").slice(1).join(": "),

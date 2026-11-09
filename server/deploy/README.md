@@ -198,6 +198,13 @@ and move traffic with `update-traffic`).
   resolve public DNS (the default metadata resolver does). After release, a sign-up at a
   domain with a null MX logs `auth_mail_skipped` (`undeliverable_domain`) in milton-auth's
   log, and a fourth reset for one address in an hour logs `account_cap`.
+- **Reply-To:** nothing to configure: `AUTH_MAIL_REPLY_TO` defaults to
+  `support@meetmilton.com` (set it only to change that). It is bound into each encrypted
+  message, so the mail job must run the same image as the service: update
+  `milton-auth-mail` in the same step. A message the old image queued (no Reply-To) still
+  sends under the new one; rolling the job back to an older image fails, as `failed`, any
+  message the new image queued in the previous 15 minutes, so roll back service and job
+  together. Check: reply to one real verification email and see it reach support.
 - **Turnstile (separate go from Peter at release):** off until both
   `AUTH_TURNSTILE_SITE_KEY` and `AUTH_TURNSTILE_SECRET_KEY` are in auth's environment; the
   image starts with neither. To turn it on: create the widget for hostname

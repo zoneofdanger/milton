@@ -888,6 +888,48 @@ describe("auth mail queueing", () => {
     ]);
     expect(logs.join()).not.toContain("person");
   });
+
+  test("auth mail replies to the support address; the text is unchanged", async () => {
+    const { acceptMail, openMail } = await import("../src/mail.ts");
+    const env = Object.fromEntries(
+      Object.entries(fixtureConfig()).map(([k, v]) => [k, String(v)]),
+    );
+    delete env.AUTH_MAIL_REPLY_TO;
+    expect(readConfig(env).AUTH_MAIL_REPLY_TO).toBe("support@meetmilton.com");
+    expect(
+      readConfig({ ...env, AUTH_MAIL_REPLY_TO: "help@meetmilton.com" })
+        .AUTH_MAIL_REPLY_TO,
+    ).toBe("help@meetmilton.com");
+    for (const bad of ["", "support", "support@meetmilton.com, x@evil.example"])
+      expect(() => readConfig({ ...env, AUTH_MAIL_REPLY_TO: bad })).toThrow(
+        "invalid_auth_configuration",
+      );
+    const config = fixtureConfig();
+    const { pool, calls } = queue();
+    const s = state("person@example.com");
+    await acceptMail(pool, config, s, { domain: async () => "deliverable" });
+    const [id, kind, user, incarnation, generation, proof, payload] =
+      calls.find((c) => c.text.includes("accept_mail"))!.values as string[];
+    const message = await openMail(config.AUTH_SECRET, {
+      state: "pending",
+      id: id!,
+      lease: "fictional-lease",
+      kind: kind as "reset",
+      origin_user: user!,
+      incarnation: incarnation!,
+      generation: generation!,
+      proof_expires_at: new Date(proof!),
+      expires_at: new Date(Date.now() + 900000),
+      payload: payload!,
+    });
+    expect(message).toEqual({
+      from: "Milton <auth@notifications.meetmilton.com>",
+      to: ["person@example.com"],
+      reply_to: "support@meetmilton.com",
+      subject: "Reset your Milton password",
+      text: `Set a new password: ${s.mail!.url}\n\nIf you did not request this, ignore this message.`,
+    });
+  });
 });
 
 describe("Turnstile on sign-up", () => {

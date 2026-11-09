@@ -77,10 +77,18 @@ export function stashMail(
     s.mailFault = true;
   }
 }
-function body(config: Pick<Config, "AUTH_MAIL_FROM">, m: NativeMail) {
+function body(
+  config: Pick<Config, "AUTH_MAIL_FROM"> &
+    Partial<Pick<Config, "AUTH_MAIL_REPLY_TO">>,
+  m: NativeMail,
+) {
   return {
     from: `Milton <${config.AUTH_MAIL_FROM}>`,
     to: [m.to],
+    // Resend's field. A message queued before Reply-To existed has none.
+    ...(config.AUTH_MAIL_REPLY_TO
+      ? { reply_to: config.AUTH_MAIL_REPLY_TO }
+      : {}),
     subject:
       m.kind === "verify"
         ? "Verify your Milton email"
@@ -204,8 +212,18 @@ export async function openMail(secret: string, job: MailJob) {
     !m.body ||
     typeof m.body.from !== "string" ||
     m.body.from.length > 400 ||
+    (m.body.reply_to !== undefined &&
+      (typeof m.body.reply_to !== "string" || m.body.reply_to.length > 254)) ||
     JSON.stringify(m.body) !==
-      JSON.stringify(body({ AUTH_MAIL_FROM: m.body.from.slice(8, -1) }, m))
+      JSON.stringify(
+        body(
+          {
+            AUTH_MAIL_FROM: m.body.from.slice(8, -1),
+            AUTH_MAIL_REPLY_TO: m.body.reply_to,
+          },
+          m,
+        ),
+      )
   )
     throw new Error("invalid_mail_binding");
   return m.body;

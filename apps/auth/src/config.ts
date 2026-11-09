@@ -51,6 +51,9 @@ const schema = z.object({
   AUTH_MAIL_FROM: z
     .email()
     .refine((v) => v.endsWith("@notifications.meetmilton.com")),
+  // Replies to auth mail go here, not to the sending address, which takes no
+  // mail. One public address, the same everywhere, so it has a default.
+  AUTH_MAIL_REPLY_TO: z.email().max(254).default("support@meetmilton.com"),
   // Cloudflare Turnstile on email sign-up, on only with both keys. The site
   // key is public and rendered into the page, so it is a plain token.
   AUTH_TURNSTILE_SITE_KEY: z

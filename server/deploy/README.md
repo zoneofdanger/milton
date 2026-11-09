@@ -695,6 +695,72 @@ customer:
 Rollback: code to the previous revision, which runs on 0011; the pre-migration snapshot is
 0011's rollback, and there is no down script.
 
+## Memos and tweaks (pending release: Drizzle 0012, owner file 014, PR #76)
+
+0012 adds seven tables (`memos`, `memo_kinds`, `tweaks`, `tweak_citations`,
+`served_reports`, `cover_sheets`, `memo_settings`), each cascading from `users`, and revokes
+the legacy `milton_runtime` group's default grants on them. It alters no existing table,
+function, trigger or grant, so the serving code runs on it unchanged. 014 grants the app and
+MCP runtimes exactly what the new code uses; neither can change a memo's words. The new code
+reads and writes only the new tables: from the moment it serves, rules, samples and the
+fixed reports are no longer served or saved, and nothing is migrated (spec, Peter
+2026-11-09). The old tables keep their rows until the follow-up drop (below). At preparation
+(2026-11-09) production held two real accounts: Peter's (16 samples, 43 cover sheet rule
+cards) and one other (1 card), plus the test accounts.
+
+Rehearsed by `check-auth-integration.ts` (applies 0012 and 014 on PostgreSQL 18; PR CI
+`integration`). Each step needs Peter's go; the release coordinator runs it:
+
+1. Snapshot production and record its name.
+2. As `neondb_owner`: `bun run --cwd server db:migrate` applies `0012_memos` (journal 13
+   entries). Its foreign keys to `users` briefly block writes to `users` (sign-ups,
+   deletions) until it commits; it sets a 5 s lock limit, so on a lock timeout it rolls back
+   whole and is simply rerun.
+3. As `neondb_owner`, at once:
+   `psql -X -v ON_ERROR_STOP=1 -f server/migrations/014-memos-roles.sql` (one transaction;
+   rerunning converges).
+4. Check as the owner: the seven tables exist and are empty, and the grants match 014:
+
+   ```sql
+   SELECT r, t, has_table_privilege(r, 'public.' || t, 'SELECT') AS sel,
+     has_table_privilege(r, 'public.' || t, 'INSERT') AS ins,
+     has_table_privilege(r, 'public.' || t, 'DELETE') AS del,
+     has_column_privilege(r, 'public.memos', 'final', 'UPDATE') AS can_reword_memo
+   FROM unnest(ARRAY['milton_app_runtime','milton_mcp_runtime']) r,
+     unnest(ARRAY['memos','memo_kinds','tweaks','tweak_citations','served_reports',
+       'cover_sheets','memo_settings']) t ORDER BY 1, 2;
+   ```
+
+   `can_reword_memo` is `f` on every row. Then `check-runtime-role.ts` prints `ok` for app
+   and MCP.
+
+5. Release one server image to `milton-admit` (digest in [admit.service.json](admit.service.json)),
+   `milton-app` and `milton-mcp` (`--no-traffic` tag, then `update-traffic`), and move
+   `milton-e2e-daily` to it in the same step: the new check expects three tools and the old
+   one fails against the new MCP, and the daily alert pages after 13 hours without a pass.
+6. Verify: health ×3, MCP 401 unauthenticated, forms probe, one manual
+   `milton-e2e-daily` run (steps below), and no `permission denied` or `store_unavailable`
+   in app or MCP logs. Peter opens his TPS page. Connected AIs see the new tools only after
+   they reconnect.
+7. Peter tells live accounts their writing was reset; the other account's notice is his
+   to send (drafted for him, never sent for him).
+
+Rollback: code only, to the revisions under "Now serving" before this release; they never
+name the new tables, so 0012 and 014 stay. Memos saved meanwhile stay in the new tables,
+invisible to the old code, and old-table writes resume. The snapshot is 0012's rollback only
+before the new code serves; there is no down script.
+
+**Follow-up drop and wipe (separate PR, separate go from Peter on the day).** Once this
+release serves, the builder prepares the migration that names #76 in `-- code-stopped-by:`,
+deletes every `save_requests` row and drops `accepted_changes`, `instruction_card_versions`,
+`instruction_cards`, `sample_versions`, `samples`, `sample_kinds`, `report_guides`,
+`guide_accounts`, `guide_spend`, `guide_budget_lock`, the sequence
+`instruction_card_position` and their eight guard functions (PR #76's description lists
+them). Snapshot first. After it: `005-app-roles.sql` names dropped tables, so it is not rerun
+as is; drop the cluster-level `milton_guide_worker` role and `milton_guide_runtime` login;
+receipts saved between this release and the drop are lost, so a replayed memo save then
+returns `unchanged`.
+
 ## Test account and daily check
 
 `e2e@milton-test.invalid` is a fictional account that holds nothing but what the daily
@@ -819,31 +885,32 @@ body), each request bounded at 15 s:
    sent, so another account's key supplied by mistake is never authenticated or marked
    used. It reports `key_days_left` and, under 30, `warning: key_expires_within_30_days` at
    severity `WARNING` without failing.
-4. `mcp_connect`: initialize with the key; `tools/list` must list exactly the four tools.
-   `safety_gate`, before any write: the cover sheet must hold no rule, no report a rule,
-   and every served sample must carry the check's marker (kind `e2e check`, summary
-   `Milton e2e check, run …`), fewer than eight per report. Anything else stops the run
-   with `account_holds_foreign_data`, having written nothing.
-5. `retire_leftovers`: retires marked samples a crashed run left, reporting the count.
-6. `baseline`: the account must now be empty; its version and reports are the baseline.
-7. `save_sample`, `fresh_read`: `create_memo` files a fictional sample marked with this run;
-   a new MCP session's `get_report` must serve exactly that text and context.
-8. `revise_sample`, `fresh_read_revision`: a revision through `sample_id`; a new session
-   must serve revision 2 and not the old text.
-9. `retire_sample`, `cleanup`: `retire_samples` removes it; a new session must read an
-   empty account with the baseline's version and reports.
+4. `mcp_connect`: initialize with the key; `tools/list` must list exactly `create_memo`,
+   `get_cover_sheet` and `get_report`.
+   `safety_gate`, before any write: the cover sheet must be empty with no tweaks, and every
+   memo must be one of the check's (kind `e2e check`, summary `Milton e2e check, run …`), at
+   most five. Anything else stops the run with `account_holds_foreign_data`, having written
+   nothing.
+5. `forget_leftovers`: forgets marked memos a crashed run left, reporting the count.
+6. `baseline`: the account must now be empty; its cover sheet version is the baseline.
+7. `save_memo`: `create_memo` saves a fictional final-only memo marked with this run; it
+   must come back as kind `e2e check`, tier `own`, receipt `Kept memo: e2e check, your words.`
+8. `fresh_read`: a new MCP session's `get_report` must serve exactly that memo, its
+   situation line and its words.
+9. `forget_memo`, `cleanup`: `forget_memos` removes it; a new session must read an empty
+   account (no memos, no tweaks, an empty report) with the baseline's version.
 
 Exit 0 only when every step passed; otherwise the last line names the failing step and a
 fixed error code, and the exit is 1. Renew the key before it expires: sign in to the app as
 the test account with the file's password, create a new 365-day read-and-save key, replace
 `E2E_CONNECTION_KEY` and revoke the old one.
 
-**Footprint per run**, measured on the rehearsal (`check-auth-integration.ts` asserts it).
-Immutable rows that stay as long as the account: 1 `samples`, 3 `sample_versions` (save,
-revision, retirement), 3 `save_requests` receipts and 3 `accepted_changes` records, about
-10 small rows a day, some 3,700 a year; one `sample_kinds` row on the first run only; no
-rule cards. A crashed run's retirement adds one more of each receipt and record. Pruned:
-11 `usage_calls` rows (deleted after 90 days). Short-lived auth rows: one native session
+**Footprint per run**, measured on the rehearsal (`auth-integration.ts` asserts it). No memo
+stays: the run saves one and forgets it. Rows that stay as long as the account: 2
+`save_requests` receipts (save, forget) and 3 `served_reports` (three reads), about 10 small
+rows a day; one `memo_kinds` row on the first run only; no cover sheet, tweak or citation. A
+crashed run's leftover forget adds one more receipt. Pruned: 8 `usage_calls` rows (deleted
+after 90 days). Short-lived auth rows: one native session
 (7 days), one app session (1 hour), one admission correlation (1 day), the app's code-flow
 token and binding rows, all removed by expiry, later sign-ins and the maintenance job; at most about eight native sessions are live at once,
 under the 64-per-user cap. The key's `last_used_at` is updated. Nothing is mailed and
@@ -940,9 +1007,13 @@ wanted. Alert delivery to Peter is unverified until milton-duo sends a test noti
 
 **Cost.** About a minute of one vCPU a day, inside Cloud Run's free tier; the writes above.
 
-## Optional guide worker
+## Guide pilot (removed by PR #76)
 
-The default-off private guide pilot has separate [operations and capability instructions](guides.md). No guide job, schedule, provider key or account enrollment is provisioned by its build. It is parked: Drizzle 0010 drops its sample-version trigger and keeps every guide row (applied 2026-11-08, PR #66). [Parked state and resume](guides.md#parked-state-and-resume) gives the steps.
+The parked guide pilot's worker, enrollment script, provider, switch and image copy are gone
+with PR #76 (its runbook, `guides.md`, too; it is in git history). No guide job, schedule,
+provider key or enrollment was ever provisioned in production. Its tables and the
+`milton_guide_worker` role and `milton_guide_runtime` login go with the follow-up drop
+([Memos and tweaks](#memos-and-tweaks-pending-release-drizzle-0012-owner-file-014-pr-76)).
 
 ## Cloud resources
 
@@ -1355,8 +1426,8 @@ restore needs Peter's go.
    name such as `restore-<date>`. ⚠ `restore_snapshot` finalizes by default when it creates a
    branch, which moves production's compute onto it: always pass `finalize: false` until
    step 4.
-3. Verify the new branch (it gets a read-write compute): row counts of `users`, `samples`,
-   `sample_versions`, `connection_keys`, `usage_calls`, `trial_accounts`,
+3. Verify the new branch (it gets a read-write compute): row counts of `users`, `memos`,
+   `cover_sheets`, `connection_keys`, `usage_calls`, `trial_accounts`,
    `milton_auth."user"` and the Drizzle journal, and `compare_database_schema` against
    production (expect an empty diff unless a migration ran since). Writes made after the
    restore point are what the restore will lose; list them for Peter.
@@ -1598,8 +1669,8 @@ and inside a private temporary directory outside the repository (`umask 077`).
 
    - Refusals with `psql`, with the login in the environment and never a URL on the
      command line: in `PGUSER=milton_app PGPASSWORD="$MILTON_APP_PASSWORD" psql`,
-     `BEGIN; ALTER TABLE samples DISABLE TRIGGER samples_guard; ROLLBACK;` fails with
-     `must be owner of table samples`, `DELETE FROM save_requests WHERE false;` fails
+     `UPDATE memos SET final = final WHERE false;` fails with
+     `permission denied for table memos`, `DELETE FROM save_requests WHERE false;` fails
      with `permission denied for table save_requests`, and
      `SELECT 1 FROM drizzle.__drizzle_migrations;` fails with
      `permission denied for schema drizzle`.
@@ -1615,7 +1686,7 @@ and inside a private temporary directory outside the repository (`umask 077`).
 8. Verify as the new role: canonical health, MCP discovery and unauthenticated 401; an
    authenticated `get_cover_sheet` returns 200 with an unchanged version (a read; it
    also appends one `usage_calls` row); and a save. With Peter's go, a
-   `create_memo` that resends one existing cover rule verbatim returns `unchanged`: it
+   `create_memo` whose `cover_sheet` adds a line already on the sheet returns `unchanged`: it
    claims and stores a receipt as `milton_app` and changes no memo. A save that changes
    memos runs only when Peter directs one. Check the logs for `store_unavailable` or
    `permission denied`.

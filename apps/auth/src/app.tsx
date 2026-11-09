@@ -301,7 +301,7 @@ export function createApp(
       const key = String(data.error ?? data.code ?? "");
       const messages: Record<string, string> = {
         password_policy:
-          "Use 15–128 Unicode characters and avoid common passwords. Spaces are preserved.",
+          "Use 8–128 Unicode characters and avoid common passwords. Spaces are preserved.",
         EMAIL_NOT_VERIFIED:
           "Verify your email before signing in. You can request a new verification email.",
         INVALID_EMAIL_OR_PASSWORD:

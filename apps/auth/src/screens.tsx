@@ -98,6 +98,9 @@ export function Input({
         type={type}
         autocomplete={autocomplete}
         required={required}
+        // A new password's floor, so the browser flags a short one before
+        // submitting (it counts code units; the server counts characters).
+        minlength={autocomplete === "new-password" ? 8 : undefined}
         maxlength={type === "password" ? 256 : 320}
       />
     </label>
@@ -149,7 +152,7 @@ export function SignIn({
         />
         {signup ? (
           <p class="hint" id="password-policy">
-            Use 15–128 Unicode characters. Spaces are welcome. Common passwords
+            Use 8–128 Unicode characters. Spaces are welcome. Common passwords
             are refused. Equivalent Unicode forms share a password.
           </p>
         ) : null}
@@ -208,8 +211,8 @@ export function ResetForm({ token }: { token: string }) {
           autocomplete="new-password"
         />
         <p class="hint">
-          Use 15–128 Unicode characters. Spaces are preserved; equivalent
-          Unicode forms share a password.
+          Use 8–128 Unicode characters. Spaces are preserved; equivalent Unicode
+          forms share a password.
         </p>
         <button type="submit">Set password</button>
       </form>
@@ -369,7 +372,7 @@ export function Security({
               autocomplete="new-password"
             />
             <p class="hint">
-              15–128 Unicode characters. Other sessions and all AI connections
+              8–128 Unicode characters. Other sessions and all AI connections
               end.
             </p>
             <button disabled={!fresh}>Change password</button>

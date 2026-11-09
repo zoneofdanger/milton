@@ -5,7 +5,13 @@ import { fixtureConfig } from "./fixture-config.ts";
 describe("auth product boundaries", () => {
   test("native NFKC policy has predictable Unicode bounds without trimming", () => {
     expect(validPassword(" password with spaces ")).toBe(true);
-    expect(validPassword("a".repeat(14))).toBe(false);
+    expect(validPassword("Kx9 mQ2v")).toBe(true);
+    expect(validPassword("Kx9 mQ2")).toBe(false);
+    expect(validPassword("🔒🌲🔒🌲🔒🌲🔒")).toBe(false);
+    expect(validPassword("aaaaaaaa")).toBe(false);
+    for (const common of ["password", "Password1", "12345678", "iloveyou"])
+      expect(validPassword(common)).toBe(false);
+    expect(validPassword("ｐａｓｓｗｏｒｄ")).toBe(false);
     expect(validPassword("a".repeat(129))).toBe(false);
     expect(validPassword("𝔄".repeat(128))).toBe(false);
     expect(validPassword("🔒🌲".repeat(64))).toBe(true);

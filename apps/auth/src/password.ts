@@ -11,13 +11,23 @@ const common = new Set([
   "qwertyuiopasdfgh",
   "letmeinletmein123",
   "correct horse battery staple",
+  "password",
+  "password1",
+  "password123",
+  "12345678",
+  "123456789",
+  "1234567890",
+  "qwerty123",
+  "qwertyuiop",
+  "iloveyou",
+  "1q2w3e4r",
 ]);
 export function validPassword(value: unknown): value is string {
   if (typeof value !== "string" || value.length > 512) return false;
   const normalized = value.normalize("NFKC");
   const sizes = [Array.from(value).length, Array.from(normalized).length];
   return (
-    sizes.every((n) => n >= 15 && n <= 128) &&
+    sizes.every((n) => n >= 8 && n <= 128) &&
     !common.has(normalized.toLowerCase()) &&
     !blocked.has(
       createHash("sha256").update(normalized.toLowerCase()).digest("hex"),

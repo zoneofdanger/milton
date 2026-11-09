@@ -397,7 +397,7 @@ export function createProvider(
     },
     emailAndPassword: {
       enabled: true,
-      minPasswordLength: 15,
+      minPasswordLength: 8,
       maxPasswordLength: 256,
       requireEmailVerification: true,
       autoSignIn: false,
@@ -531,7 +531,7 @@ export function createProvider(
             throw new APIError("BAD_REQUEST", {
               error: "password_policy",
               message:
-                "Use 15–128 Unicode characters; avoid common passwords. Spaces are preserved.",
+                "Use 8–128 Unicode characters; avoid common passwords. Spaces are preserved.",
             });
         }
         if (

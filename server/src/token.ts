@@ -64,11 +64,7 @@ export function createAccessTokenVerifier(
         authorization,
       );
     if (!match || match[1]!.length > 16384)
-      throw new AuthError(
-        "invalid_token",
-        "Reconnect your assistant to Milton.",
-        401,
-      );
+      throw new AuthError("invalid_token", "Reconnect your AI to Milton.", 401);
     try {
       // Signature verification is followed by live immutable binding status in
       // the HTTP handler, on every request, independently of this JWKS cache.
@@ -110,7 +106,7 @@ export function createAccessTokenVerifier(
       )
         throw new AuthError(
           "invalid_token",
-          "Reconnect your assistant to Milton.",
+          "Reconnect your AI to Milton.",
           401,
         );
       return {
@@ -141,7 +137,7 @@ export function createAccessTokenVerifier(
       )
         throw new AuthError(
           "invalid_token",
-          "Reconnect your assistant to Milton.",
+          "Reconnect your AI to Milton.",
           401,
         );
       throw new AuthError(

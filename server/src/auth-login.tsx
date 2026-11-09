@@ -52,7 +52,7 @@ export const signInRoutes = async (ctx: PageContext): Promise<Response> => {
       "Signed out",
       <>
         <p>
-          This browser is signed out of Milton. Your connected assistants stay
+          This browser is signed out of Milton. Your connected AIs stay
           connected.
         </p>
         <p>
@@ -99,8 +99,8 @@ export const signInRoutes = async (ctx: PageContext): Promise<Response> => {
       "Make your agents write like you.",
       <>
         <p>
-          Keep writing examples you approve, ready for connected assistants to
-          use in your next email or message.
+          Keep writing examples you approve, ready for connected AIs to use in
+          your next email or message.
         </p>
         <p>
           <a class="button" href="/login">

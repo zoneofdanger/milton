@@ -72,7 +72,7 @@ export function reportSetup(documents: Documents, report: ReportId) {
       ) +
       "\n```\nThis illustrates the save shape, not permission to save this fictional text. Reuse kind_id instead of new_kind when a kind fits; never send both.",
     `5. If the person wants another writing task: Ask what the next real ${firstEmail ? "email or DM" : task} should accomplish. Read the relevant report with that intent, then draft using its examples and the cover sheet. If examples are skipped, help with the real draft without claiming to know the voice. No need to fill all five reports or accumulate rules before drafting.`,
-    "6. Offer the standing instruction separately: Before writing anything for me, call Milton's get_cover_sheet, then get_report for the matching report. Offer to add it where this assistant supports standing instructions, only after separate consent; otherwise show where the person can paste it. Setup completion does not guarantee the assistant follows the instruction.",
+    "6. Offer the standing instruction separately: Before writing anything for me, call Milton's get_cover_sheet, then get_report for the matching report. Offer to add it where this AI supports standing instructions, only after separate consent; otherwise show where the person can paste it. Setup completion does not guarantee the AI follows the instruction.",
   ].join("\n\n");
 }
 /** Keep list_reports compact; a report with guidance needs no setup hint. */

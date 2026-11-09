@@ -21,18 +21,18 @@ See [guide operations](server/deploy/guides.md) for bounds, consent and service 
 
 ## How it works
 
-- **Tell Milton how you write.** Your connected assistant sends rules, corrections,
-  removals and approved samples with `create_memo`. The assistant names the report for
+- **Tell Milton how you write.** Your connected AI sends rules, corrections,
+  removals and approved samples with `create_memo`. The AI names the report for
   each new rule and sends its exact approved wording; Milton stores it as sent, with no
   model rewrite. Rules a save does not name remain unchanged. Samples are stored exactly
   as you approved them.
 - **Read the cover sheet, then the report that fits.** `get_cover_sheet` returns the
   rules true of all your writing and an index of five reports: email, chat, post,
   document, and speech. `get_report` returns one report, samples first, then rules;
-  `list_reports` returns all five. Reads make no model call. Assistants decide when to read and
+  `list_reports` returns all five. Reads make no model call. AIs decide when to read and
   apply them; Milton does not guarantee their adherence.
 - **See what's on file.** The app shows your current cover sheet and reports and
-  downloads them as `TPS.md`. New accounts start empty. Connect your assistant,
+  downloads them as `TPS.md`. New accounts start empty. Connect your AI,
   paste something you wrote and ask it to clean it up. Older examples are optional;
   each exact sample needs retention approval before saving. Samples work without rules.
 - **Keep the filing internal.** Each rule is an instruction card that keeps its
@@ -45,45 +45,45 @@ The hosted service is at [meetmilton.com](https://meetmilton.com), in early acce
 ## Get started
 
 1. Sign in at [app.meetmilton.com](https://app.meetmilton.com/login) with Google or GitHub.
-2. Add `https://mcp.meetmilton.com/mcp` in your assistant's MCP or connector settings,
+2. Add `https://mcp.meetmilton.com/mcp` in your AI's MCP or connector settings,
    then complete sign-in and approve the connection. Availability depends on the
-   assistant and your plan.
-3. Ask your assistant to read your Milton cover sheet and relevant reports, preserving
+   AI and your plan.
+3. Ask your AI to read your Milton cover sheet and relevant reports, preserving
    existing guidance. An empty account offers setup once. Paste something you wrote
    and ask it to clean it up, or ask directly to add older examples. Candidate lookup
-   needs your request and access your assistant already has. Review each proposed
+   needs your request and access your AI already has. Review each proposed
    sample body and useful non-private context with private details replaced by
    placeholders, then approve exactly what it may keep. Milton needs no inbox connection.
-4. For another writing task, give your assistant the facts for the next email or DM.
+4. For another writing task, give your AI the facts for the next email or DM.
    It reads the relevant report and drafts. You can skip examples and still get help.
    Approving a draft or edit does not approve saving it; retention needs a separate yes.
 
-Use **Connect an assistant** above the cover sheet for the connection address and a
+Use **Connect an AI** above the cover sheet for the connection address and a
 prompt to copy. It starts expanded for empty accounts and stays available after
 your first save.
-To change your rules later, tell your connected assistant what to add, correct,
+To change your rules later, tell your connected AI what to add, correct,
 or remove. A successful save updates the internal memos and the reports together.
 
-Your assistant also makes two offers while drafting with you. When you approve a
+Your AI also makes two offers while drafting with you. When you approve a
 draft or edit, it asks once whether to save it as a sample, quoted
 exactly as approved. When you make the same correction twice, it proposes a short
 rule. Nothing is saved until you say yes, and a no is final for that draft.
 
-For every rule correction or removal, your assistant submits exact before/after
+For every rule correction or removal, your AI submits exact before/after
 replacements copied from the current report. Milton applies that wording without a
-model rewrite and leaves the surrounding text unchanged. The assistant still needs
+model rewrite and leaves the surrounding text unchanged. The AI still needs
 to preserve your intended scope and conditions; literal editing does not decide
 what you meant. Missing, repeated or overlapping matches leave the report unchanged.
 
 Approved samples keep a stable ID. Revising their text, context or classification adds
 a complete immutable revision; removing one retires it explicitly. Reports and the
 TPS.md download show current active revisions. There is no history or restore screen.
-Assistants revise through `sample.sample_id`; `replaces` is no longer accepted.
+AIs revise through `sample.sample_id`; `replaces` is no longer accepted.
 
-Milton supplies usage instructions when your assistant connects, plus descriptions
+Milton supplies usage instructions when your AI connects, plus descriptions
 for all four tools and their arguments. These explain when to read the cover sheet
 and reports, how to run first setup, and how to save or recover an uncertain request. Clients decide how
-to present that guidance to their models. If your assistant needs a persistent
+to present that guidance to their models. If your AI needs a persistent
 reminder, add this to its custom instructions or project setup file:
 
 > Before writing for me, read my Milton cover sheet and the reports that fit the
@@ -92,7 +92,7 @@ reminder, add this to its custom instructions or project setup file:
 ### Optional session capture
 
 Capture starts off. To opt in for **this conversation only**, tell your connected
-assistant:
+AI:
 
 > For this conversation, at task completion, save explicit reusable standing
 > instructions I give you to Milton. Compare my current Milton rules first and save only
@@ -108,15 +108,15 @@ To turn it off, say:
 > you to save. Keep the instructions already on file.
 
 Opt-in lasts only for the current conversation; repeat it in a new conversation
-or another assistant if wanted. Connecting Milton or approving a first draft does
-not enable capture. These on/off instructions stay with the assistant and are not
+or another AI if wanted. Connecting Milton or approving a first draft does
+not enable capture. These on/off instructions stay with the AI and are not
 saved to Milton. Stopping capture does not undo saves already submitted.
 
 This uses the same MCP tools, with no hook or plugin prerequisite. Capture is
-best effort: the assistant must call the tools, and Milton cannot inspect the
+best effort: the AI must call the tools, and Milton cannot inspect the
 conversation or guarantee a save before the session closes. Client tool approvals
 still apply; silent or nonblocking operation depends on the client. These are
-assistant instructions, not a server-enforced consent setting. Cross-client capture
+AI instructions, not a server-enforced consent setting. Cross-client capture
 reliability has not yet been evaluated.
 
 ## What is here

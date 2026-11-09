@@ -92,7 +92,7 @@ function validateMcpTransport(
   return null;
 }
 const invalidKey = () =>
-  new AuthError("invalid_token", "Reconnect your assistant to Milton.", 401);
+  new AuthError("invalid_token", "Reconnect your AI to Milton.", 401);
 const keyLookupBusy = () =>
   new AuthError("server_busy", "Milton is busy. Try again shortly.", 503);
 class KeyAttemptsLimited extends AuthError {
@@ -311,7 +311,7 @@ export function createMiltonHandler(
               )
                 throw new AuthError(
                   "insufficient_scope",
-                  "Reconnect this assistant with the permission this action needs.",
+                  "Reconnect this AI with the permission this action needs.",
                   403,
                 );
             },

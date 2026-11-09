@@ -220,7 +220,7 @@ export const nextSteps: Record<string, NextStep> = {
   ),
   assistant_required: step(
     "tell_user",
-    "Only a connected assistant can save; tell the person and don't retry.",
+    "Only a connected AI can save; tell the person and don't retry.",
   ),
   connection_key_limit: step(
     "tell_user",

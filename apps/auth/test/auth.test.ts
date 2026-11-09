@@ -5,7 +5,13 @@ import { fixtureConfig } from "./fixture-config.ts";
 describe("auth product boundaries", () => {
   test("native NFKC policy has predictable Unicode bounds without trimming", () => {
     expect(validPassword(" password with spaces ")).toBe(true);
-    expect(validPassword("a".repeat(14))).toBe(false);
+    expect(validPassword("Kx9 mQ2v")).toBe(true);
+    expect(validPassword("Kx9 mQ2")).toBe(false);
+    expect(validPassword("🔒🌲🔒🌲🔒🌲🔒")).toBe(false);
+    expect(validPassword("aaaaaaaa")).toBe(false);
+    for (const common of ["password", "Password1", "12345678", "iloveyou"])
+      expect(validPassword(common)).toBe(false);
+    expect(validPassword("ｐａｓｓｗｏｒｄ")).toBe(false);
     expect(validPassword("a".repeat(129))).toBe(false);
     expect(validPassword("𝔄".repeat(128))).toBe(false);
     expect(validPassword("🔒🌲".repeat(64))).toBe(true);
@@ -355,6 +361,142 @@ test("the security page's session lookup takes each client's own network bucket"
   quiet.mockRestore();
   // Client A's second load is refused; client B's first is still allowed.
   expect(decisions).toEqual([true, false, true]);
+});
+
+test("a refused password form stays on its page, keeping email and reset token, never the password", async () => {
+  const { rmSync } = await import("node:fs");
+  const { createApp } = await import("../src/app.tsx");
+  const assets = await versionedAssets();
+  const refusal = (status: number, body: Record<string, string>) =>
+    Response.json(body, { status });
+  const app = createApp(
+    {
+      pool: {
+        query: async (text: string) => ({
+          rows: text.includes("milton_auth.account")
+            ? [{ id: "fictional-method", providerId: "credential" }]
+            : [],
+        }),
+      },
+      handler: async (request: Request) => {
+        const path = new URL(request.url).pathname;
+        if (path === "/api/auth/get-session")
+          return Response.json({
+            user: { id: "u", email: "person@example.com", emailVerified: true },
+            session: { id: "s", createdAt: new Date().toISOString() },
+          });
+        const body = (await request.json()) as Record<string, string>;
+        if (path === "/api/auth/sign-in/email")
+          return refusal(401, { code: "INVALID_EMAIL_OR_PASSWORD" });
+        if (path === "/api/auth/change-password")
+          return refusal(429, { error: "rate_limited" });
+        if (body.token === "fictional-spent")
+          return refusal(400, { code: "INVALID_TOKEN" });
+        if (body.token === "fictional-unknown")
+          return refusal(503, { error: "busy_retry" });
+        return refusal(400, { error: "password_policy" });
+      },
+    } as unknown as import("../src/provider.ts").AuthService,
+    assets,
+  );
+  rmSync(assets, { recursive: true, force: true });
+  const post = async (action: string, fields: Record<string, string>) => {
+    const r = await app.request("https://auth.meetmilton.com/form/" + action, {
+      method: "POST",
+      headers: {
+        origin: "https://auth.meetmilton.com",
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams(fields).toString(),
+    });
+    return [r.status, await r.text()] as const;
+  };
+  const secret = "Fictional typed secret";
+  const query = "sig=fictional-sig&client_id=fictional-client";
+  const cases: {
+    action: string;
+    fields: Record<string, string>;
+    status: number;
+    title: string;
+    message: string;
+  }[] = [
+    {
+      action: "signup",
+      fields: { name: "Fictional", email: "person@example.com" },
+      status: 400,
+      title: "Create your account",
+      message: "Use 8–128 Unicode characters",
+    },
+    {
+      action: "signin",
+      fields: { email: "person@example.com", oauth_query: query },
+      status: 400,
+      title: "Sign in",
+      message: "The email or password could not be verified.",
+    },
+    {
+      action: "reset",
+      fields: { token: "fictional-reset-token" },
+      status: 400,
+      title: "Set a new password",
+      message: "Use 8–128 Unicode characters",
+    },
+    {
+      action: "change",
+      fields: { currentPassword: secret },
+      status: 429,
+      title: "Account security",
+      message: "Too many attempts.",
+    },
+  ];
+  for (const c of cases) {
+    const password = c.action === "signup" || c.action === "signin";
+    const [status, html] = await post(c.action, {
+      ...c.fields,
+      [password ? "password" : "newPassword"]: secret,
+    });
+    expect(status).toBe(c.status);
+    expect(html).toContain(`<title>${c.title} · Milton</title>`);
+    expect(html).toContain(`<form method="post" action="/form/${c.action}">`);
+    expect(html).toMatch(new RegExp(`role="alert"[^>]*>${c.message}`));
+    expect(html).not.toContain(secret);
+  }
+  const [, signup] = await post("signup", {
+    name: "Fictional",
+    email: "person@example.com",
+    password: secret,
+  });
+  expect(signup).toContain(
+    'name="name" type="text" autocomplete="name" value="Fictional"',
+  );
+  expect(signup).toContain('value="person@example.com"');
+  const [, signin] = await post("signin", {
+    email: "person@example.com",
+    password: secret,
+    oauth_query: query,
+  });
+  expect(signin).toContain(
+    'name="oauth_query" value="sig=fictional-sig&amp;client_id=fictional-client"',
+  );
+  const [, reset] = await post("reset", {
+    token: "fictional-reset-token",
+    newPassword: secret,
+  });
+  expect(reset).toContain('name="token" value="fictional-reset-token"');
+  // A dead link still points to a new request; 503 keeps its own wording.
+  const [spentStatus, spent] = await post("reset", {
+    token: "fictional-spent",
+    newPassword: secret,
+  });
+  expect(spentStatus).toBe(400);
+  expect(spent).toContain("<title>Please try again · Milton</title>");
+  expect(spent).toContain('<a href="/forgot-password">Try again</a>');
+  const [busyStatus, busy] = await post("reset", {
+    token: "fictional-unknown",
+    newPassword: secret,
+  });
+  expect(busyStatus).toBe(503);
+  expect(busy).toContain("Milton could not confirm the outcome.");
 });
 
 describe("OAuth profile refusals before database access", () => {

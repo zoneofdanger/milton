@@ -15,6 +15,7 @@ export function Page({
   title,
   children,
   notice,
+  alert,
   refresh,
   assets,
   script,
@@ -22,6 +23,8 @@ export function Page({
   title: string;
   children: Child;
   notice?: string;
+  /** Why the form below refused its last submission. */
+  alert?: string;
   refresh?: string;
   assets: StaticAssets;
   /** One external script, such as Turnstile's on the sign-up page. */
@@ -66,6 +69,11 @@ export function Page({
                 {notice}
               </p>
             ) : null}
+            {alert ? (
+              <p role="alert" class="notice">
+                {alert}
+              </p>
+            ) : null}
             {children}
           </div>
           <footer>
@@ -83,12 +91,15 @@ export function Input({
   type = "text",
   autocomplete,
   required = true,
+  value,
 }: {
   name: string;
   label: string;
   type?: string;
   autocomplete?: string;
   required?: boolean;
+  /** What the person typed before a refusal; a password is never refilled. */
+  value?: string;
 }) {
   return (
     <label>
@@ -97,7 +108,11 @@ export function Input({
         name={name}
         type={type}
         autocomplete={autocomplete}
+        value={type === "password" ? undefined : value}
         required={required}
+        // A new password's floor, so the browser flags a short one before
+        // submitting (it counts code units; the server counts characters).
+        minlength={autocomplete === "new-password" ? 8 : undefined}
         maxlength={type === "password" ? 256 : 320}
       />
     </label>
@@ -107,11 +122,16 @@ export function SignIn({
   signup = false,
   query = "",
   turnstile,
+  name,
+  email,
 }: {
   signup?: boolean;
   query?: string;
   /** The Turnstile site key, when the widget guards sign-up. */
   turnstile?: string;
+  /** The name and email typed before a refusal. */
+  name?: string;
+  email?: string;
 }) {
   return (
     <>
@@ -134,12 +154,15 @@ export function SignIn({
       <p class="divider">Or use your email</p>
       <form method="post" action={signup ? "/form/signup" : "/form/signin"}>
         <input type="hidden" name="oauth_query" value={query} />
-        {signup ? <Input name="name" label="Name" autocomplete="name" /> : null}
+        {signup ? (
+          <Input name="name" label="Name" autocomplete="name" value={name} />
+        ) : null}
         <Input
           name="email"
           label="Email"
           type="email"
           autocomplete="username"
+          value={email}
         />
         <Input
           name="password"
@@ -149,7 +172,7 @@ export function SignIn({
         />
         {signup ? (
           <p class="hint" id="password-policy">
-            Use 15–128 Unicode characters. Spaces are welcome. Common passwords
+            Use 8–128 Unicode characters. Spaces are welcome. Common passwords
             are refused. Equivalent Unicode forms share a password.
           </p>
         ) : null}
@@ -208,8 +231,8 @@ export function ResetForm({ token }: { token: string }) {
           autocomplete="new-password"
         />
         <p class="hint">
-          Use 15–128 Unicode characters. Spaces are preserved; equivalent
-          Unicode forms share a password.
+          Use 8–128 Unicode characters. Spaces are preserved; equivalent Unicode
+          forms share a password.
         </p>
         <button type="submit">Set password</button>
       </form>
@@ -369,7 +392,7 @@ export function Security({
               autocomplete="new-password"
             />
             <p class="hint">
-              15–128 Unicode characters. Other sessions and all AI connections
+              8–128 Unicode characters. Other sessions and all AI connections
               end.
             </p>
             <button disabled={!fresh}>Change password</button>

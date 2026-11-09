@@ -2,7 +2,7 @@
 
 Source: https://raw.githubusercontent.com/danielmiessler/SecLists/c205c36a445bff37f8e58a9ec829105cd4975c58/Passwords/Common-Credentials/xato-net-10-million-passwords-100000.txt
 
-Input SHA256: 1472aafa2561df5e3293aee252aee3ca660c12b399a283cf808bb01b39be388b. 100000 public entries; 70 distinct normalized/lowercase SHA256 values in the allowed 15–128-code-point range. Candidates never leave auth. This is a common-password list, not an exhaustive compromise check. Refresh as a reviewed source change; no runtime download.
+Input SHA256: 1472aafa2561df5e3293aee252aee3ca660c12b399a283cf808bb01b39be388b. 100000 public entries; 70 distinct normalized/lowercase SHA256 values of 15–128 code points (the rule when the list was built; shorter common passwords are in the inline list in `src/password.ts`). Candidates never leave auth. This is a common-password list, not an exhaustive compromise check. Refresh as a reviewed source change; no runtime download.
 
 MIT License
 

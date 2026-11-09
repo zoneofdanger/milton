@@ -524,6 +524,25 @@ try {
   );
   const resetToken = tokenOf(reset.url);
   assert(resetToken);
+  // A refused password leaves the token unspent, so the same link can retry.
+  const refusedReset = await call("/reset-password", {
+    token: resetToken,
+    newPassword: "Short 7",
+  });
+  assert.equal(refusedReset.status, 400);
+  assert.equal(
+    ((await refusedReset.json()) as { error?: string }).error,
+    "password_policy",
+  );
+  assert.equal(
+    (
+      await p.owner.query(
+        "select count(*)::int n from milton_auth.verification where identifier like 'reset-password:%'",
+      )
+    ).rows[0].n,
+    resetRowsBeforeGet,
+    "a refused reset password must not consume proof",
+  );
   assert.equal(
     (
       await call("/reset-password", {

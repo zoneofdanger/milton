@@ -24,9 +24,10 @@ reports, memos) and plain text on security screens and anything an assistant rea
       through exact_edits, a fresh-chat read, and the web download through the hosted service.
       Each actual draft needs Peter's approval before an account write. Saves are model-free
       since 2026-11-02; rerun after the first newcomer test account exists.
-- [ ] #33 (site, high, founder, blocked: the save-the-whole-trail feature, not yet specced)
+- [ ] #33 (site, high, founder)
       **Record the HN demo clip as an asciinema time-lapse.** Peter postponed the launch about a
-      week (2026-11-09) to build the trail feature first; record this right after it ships, and
+      week (2026-11-09) to build the trail feature first. It shipped as memos on 2026-11-09
+      (#76), so this is unblocked; record it now, and
       re-check the scenes against what the feature saves. Shape (about 50-75 s, one real run on a
       test account, each tool with its own CLAUDE_CONFIG_DIR / CODEX_HOME so Peter's real Milton
       connection is never used): Day 1 in Claude Code, a fictional "Sam" asks "Reply to my

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import {
   makeSignature,
   symmetricEncrypt,
@@ -123,6 +123,31 @@ export async function acceptMail(
       }),
     );
     m = undefined;
+  }
+  // At most 3 messages of a kind an hour per address (lowercased), however
+  // many networks ask: a person needs a couple of resends at most. Keyed by
+  // the address, not the account, so a sign-up's first message counts the
+  // moment it is queued and a deleted, recreated account starts no fresh
+  // count. A fixed window from the first take, so a boundary can admit 6 in
+  // just over an hour. Only a message that would be queued takes it.
+  if (m) {
+    const key = createHmac("sha256", config.AUTH_RATE_SECRET)
+      .update("mail:" + JSON.stringify([m.kind, m.to.toLowerCase()]))
+      .digest("hex");
+    const taken = await pool.query<{ allowed: boolean }>(
+      "select milton_guard.take_rate($1,$2,$3) as allowed",
+      [key, 3600, 3],
+    );
+    if (taken.rows[0]?.allowed !== true) {
+      console.log(
+        JSON.stringify({
+          message: "auth_mail_skipped",
+          reason: "account_cap",
+          kind: m.kind,
+        }),
+      );
+      m = undefined;
+    }
   }
   const id = randomUUID();
   const payload = m

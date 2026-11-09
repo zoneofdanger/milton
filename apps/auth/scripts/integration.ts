@@ -2514,6 +2514,24 @@ try {
         `an undeliverable domain queues no message (${path})`,
       );
     }
+    // The fourth reset in an hour for one address, each from its own network,
+    // answers the same and queues only the no-op receipt.
+    await clearRates();
+    const queuedResets: boolean[] = [];
+    for (const n of [1, 2, 3, 4]) {
+      const reply = await noNetwork.handler(
+        new Request(ISSUER + "/request-password-reset", {
+          method: "POST",
+          headers: { origin: AUTH_ORIGIN, "content-type": "application/json" },
+          body: JSON.stringify({ email: known }),
+        }),
+        `192.0.2.${n}`,
+      );
+      assert.equal(reply.status, 200);
+      assert.equal(await reply.text(), neutral);
+      queuedResets.push((await last()).payload !== null);
+    }
+    assert.deepEqual(queuedResets, [true, true, true, false]);
     // L-1: issue and encrypt the original native proof on a clock 30s ahead
     // of PostgreSQL, without editing the proof, envelope or stored job later.
     await clearJobs();

@@ -847,4 +847,45 @@ describe("auth mail queueing", () => {
     ]);
     expect(JSON.stringify(logs)).not.toContain("no-mail");
   });
+
+  test("each address gets at most 3 messages of a kind an hour; the fourth commits the no-op receipt", async () => {
+    const { acceptMail } = await import("../src/mail.ts");
+    const config = fixtureConfig();
+    const { pool, calls, queued } = queue();
+    const domain = async () => "deliverable" as const;
+    const logs: string[] = [];
+    const log = spyOn(console, "log").mockImplementation((line) => {
+      logs.push(String(line));
+    });
+    try {
+      for (const to of [
+        "person@example.com",
+        "Person@Example.com",
+        "person@example.com",
+        "person@example.com",
+      ])
+        await acceptMail(pool, config, state(to), { domain });
+      await acceptMail(pool, config, state("person@example.com", "verify"), {
+        domain,
+      });
+    } finally {
+      log.mockRestore();
+    }
+    // The pool admits three takes in all, so the verify message is capped
+    // too here; its bucket is still its own key.
+    expect(queued()).toEqual([true, true, true, false, false]);
+    const takes = calls.filter((c) => c.text.includes("take_rate"));
+    expect(takes.map((c) => c.values.slice(1))).toEqual(
+      Array(5).fill([3600, 3]),
+    );
+    const keys = takes.map((c) => c.values[0]);
+    expect(new Set(keys.slice(0, 4)).size).toBe(1);
+    expect(keys[4]).not.toBe(keys[0]);
+    expect(String(keys[0])).toMatch(/^[0-9a-f]{64}$/);
+    expect(logs.map((l) => JSON.parse(l))).toEqual([
+      { message: "auth_mail_skipped", reason: "account_cap", kind: "reset" },
+      { message: "auth_mail_skipped", reason: "account_cap", kind: "verify" },
+    ]);
+    expect(logs.join()).not.toContain("person");
+  });
 });

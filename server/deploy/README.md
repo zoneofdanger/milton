@@ -25,6 +25,11 @@ one-time procedures are in git history; the last full version is at commit 492b9
 
 ## Release record: deletion fences Stripe, Stripe reads off the lock, guide pilot parked, deletion links, UserInfo binding, private admission service, session token drop, e2e fix, MCP next steps, guards (2026-11-08, PRs #58–#66, #68–#72)
 
+- **e2e twice a day (Peter's go, 2026-11-09 07:50Z):** scheduler `milton-e2e-daily` moved
+  to `7 2,14 * * *` UTC, and its policy gained "no execution for 13 h" (alignment 1 h, so
+  14 h in all, inside the one-day absence limit). One manual run, `milton-e2e-daily-9lgrq`,
+  passed at 07:53Z so the new condition did not fire on the gap since 11-08 22:39Z. Plan
+  after apply: 13 unchanged; no open incident.
 - **DMARC (Peter's go, 2026-11-09):** Cloudflare DMARC Management enabled for
   meetmilton.com; it wrote `_dmarc.meetmilton.com TXT "v=DMARC1; p=none;
 rua=mailto:<prefix>@dmarc-reports.cloudflare.net"` (reports in the Cloudflare dashboard;
@@ -749,8 +754,9 @@ with them but the scheduler's invoker. Project `milton-510506`, region `us-east4
 - **Identity.** Its own service account, `milton-e2e@`, with `secretAccessor` on its own
   secret only: no database URL, no other secret, no project role. The check uses only the
   public HTTPS endpoints.
-- **Schedule.** Daily at 14:07 UTC (`7 14 * * *`): off the maintenance job's quarter-hour
-  starts (`*/15`) and inside a quiet hour.
+- **Schedule.** Twice a day at 02:07 and 14:07 UTC (`7 2,14 * * *`; daily at 14:07 until
+  2026-11-09, Peter's go): off the maintenance job's quarter-hour starts (`*/15`). Twelve
+  hours apart, so the 13-hour missed-run alert fits the API's one-day absence limit.
 
 Each command touches production; run them only with Peter's go. Create the identity and the
 secret from the provisioned file, which is never printed (`--data-file` reads it):
@@ -802,10 +808,10 @@ gcloud scheduler jobs create http milton-e2e-daily \
   --max-retry-attempts=0 --attempt-deadline=30s \
   --description='Milton daily end-to-end check on the fictional test account'
 gcloud scheduler jobs pause milton-e2e-daily --project=milton-510506 --location=us-east4
-gcloud scheduler jobs update http milton-e2e-daily --project=milton-510506 --location=us-east4 --schedule='7 14 * * *'
+gcloud scheduler jobs update http milton-e2e-daily --project=milton-510506 --location=us-east4 --schedule='7 2,14 * * *'
 gcloud scheduler jobs describe milton-e2e-daily --project=milton-510506 --location=us-east4 \
   --format='value(state,schedule,httpTarget.uri)'
-# required: PAUSED  7 14 * * *  …/jobs/milton-e2e-daily:run   (the URL must end in :run)
+# required: PAUSED  7 2,14 * * *  …/jobs/milton-e2e-daily:run   (the URL must end in :run)
 gcloud scheduler jobs resume milton-e2e-daily --project=milton-510506 --location=us-east4
 ```
 
@@ -1176,7 +1182,8 @@ the two no-execution ones, during the real incident noted below.
 | same                                             | no `milton-auth-mail` execution for 20 min                                                                                        | Catches a broken trigger, which fails no execution. Would have fired once, 11-07 07:43Z, during the real two-hour `:run` → `un` incident.                                                                                                                             |
 | same                                             | no `milton-auth-maint` execution for 45 min                                                                                       | Three missed 15-minute runs: a broken maintenance trigger, which fails no execution. 7-day longest gap otherwise 31 min. Would have fired once, 11-07 08:09Z, in the same incident. With this, deleting `milton-auth-jobs-errors-log` loses no coverage.              |
 | `milton-instance-start` (page)                   | `milton-startup-failures` ≥ 3 in a rolling 15 min, per service                                                                    | Cloud Run system log lines `Default STARTUP TCP probe failed …` and `Container called exit(N).` (N ≠ 0); a failed start writes both. 30-day worst: 2 (auth, 11-07 08:30Z, one failed start that recovered in 8 s).                                                    |
-| `milton-e2e-daily` (page)                        | ≥ 1 failed `milton-e2e-daily` execution in 24 h                                                                                   | The check runs once a day, so one failure is the signal. A missed run is not covered (below).                                                                                                                                                                         |
+| `milton-e2e-daily` (page)                        | ≥ 1 failed `milton-e2e-daily` execution in 24 h                                                                                   | Each run is a full end-to-end pass, so one failure is the signal.                                                                                                                                                                                                     |
+| same                                             | no `milton-e2e-daily` execution for 13 h                                                                                          | Runs are 12 hours apart, plus an hour of margin; alignment plus duration (14 h) stays inside the API's one-day absence limit.                                                                                                                                         |
 | `milton-release-gate` (gate)                     | per service or job, rolling 5 min: any 5xx; any ERROR entry; any failed `milton-auth-*` execution; any startup failure; ≥ 10 429s | Fast and loud by design; emails no one. 429 needs 10: MCP had a 48-request 429 burst on 11-07 10:55Z.                                                                                                                                                                 |
 
 The startup signal is the log-based metric, not `run.googleapis.com/container/completed_probe_count`:
@@ -1192,15 +1199,15 @@ route and refuses unauthenticated probes, and a failing admission is a failing s
 which auth answers with 503 and milton-auth's 5xx condition pages (its documentation
 points at milton-admit). No new condition, so no added cost.
 
-**Not covered: a daily run that never happens.** `milton-e2e-daily` pages on a failed
-execution only. A metric-absence condition can look back at most one day in total
-(alignment period plus duration; the API refuses durations over 23h30m), shorter than a
-daily run plus margin, so a paused or deleted scheduler or a job that never starts goes
-unnoticed. Options, undecided: a PromQL `absent_over_time(…[26h])` condition (unverified
-against Cloud Run system metrics), or a run twice a day so a 23h30m absence fits.
+**Missed runs.** A metric-absence condition can look back at most one day in total
+(alignment period plus duration; the API refuses durations over 23h30m), so the 26-hour
+window a daily run needed was refused. The check now runs every 12 hours, and the policy
+pages after 13 hours with no execution. An absence condition needs one data point after
+it is created or changed: after editing it, run the job once if the last run is more than
+about 12 hours old, or it fires on the stale gap.
 
 Cost: free until no sooner than 2027-09-01, then $0.35 per non-uptime condition per month
-(23 applied, about $8.05) plus $0.50 per million points.
+(24 applied, about $8.40) plus $0.50 per million points.
 Uptime checks run about 78k times a month against a free million. Stripe's webhook-failure
 emails and Neon's compute alerts are Dashboard settings, not these policies.
 

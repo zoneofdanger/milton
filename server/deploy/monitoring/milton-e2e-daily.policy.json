@@ -1,7 +1,7 @@
 {
   "displayName": "milton-e2e-daily",
   "documentation": {
-    "content": "**The daily end-to-end check failed.** Cloud Run job `milton-e2e-daily` exits non-zero when a real end-to-end path fails. One email per incident; it closes 30 minutes after the condition clears.\n\nCheck first:\n1. `gcloud run jobs executions list --job=milton-e2e-daily --project=milton-510506 --region=us-east4 --limit=3`, then that execution's logs: they name the failed step.\n\nThresholds:\n- 1 or more failed executions in 24 hours. Reason: the check runs once a day, so one failure is the signal.\n\nThis policy does not page when the job never runs: a metric-absence condition looks back at most 24 hours (alignment period plus duration), less than the daily run interval plus margin. See server/deploy/README.md, Alerts.\n",
+    "content": "**The end-to-end check failed or did not run.** Cloud Run job `milton-e2e-daily` runs at 02:07 and 14:07 UTC and exits non-zero when a real end-to-end path fails. One email per incident; it closes 30 minutes after the condition clears.\n\nCheck first:\n1. `gcloud run jobs executions list --job=milton-e2e-daily --project=milton-510506 --region=us-east4 --limit=3`, then that execution's logs: they name the failed step.\n2. If it did not run: its Cloud Scheduler trigger `milton-e2e-daily` (state ENABLED, schedule `7 2,14 * * *`, URI ending in `:run`).\n\nThresholds:\n- 1 or more failed executions in 24 hours. Reason: each run is a full end-to-end pass, so one failure is the signal.\n- No execution for 13 hours. Reason: runs are 12 hours apart, plus an hour of margin; with the 1-hour alignment period it stays inside the API's one-day limit for absence conditions.\n",
     "mimeType": "text/markdown"
   },
   "userLabels": {
@@ -23,6 +23,24 @@
         "comparison": "COMPARISON_GT",
         "thresholdValue": 0,
         "duration": "0s",
+        "trigger": {
+          "count": 1
+        }
+      }
+    },
+    {
+      "displayName": "milton-e2e-daily: no execution for 13 h",
+      "conditionAbsent": {
+        "filter": "metric.type = \"run.googleapis.com/job/completed_execution_count\" AND resource.type = \"cloud_run_job\" AND resource.labels.job_name = \"milton-e2e-daily\"",
+        "aggregations": [
+          {
+            "alignmentPeriod": "3600s",
+            "perSeriesAligner": "ALIGN_DELTA",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "groupByFields": ["resource.label.job_name"]
+          }
+        ],
+        "duration": "46800s",
         "trigger": {
           "count": 1
         }

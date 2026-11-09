@@ -25,6 +25,11 @@ one-time procedures are in git history; the last full version is at commit 492b9
 
 ## Release record: deletion fences Stripe, Stripe reads off the lock, guide pilot parked, deletion links, UserInfo binding, private admission service, session token drop, e2e fix, MCP next steps, guards (2026-11-08, PRs #58–#66, #68–#72)
 
+- **DMARC (Peter's go, 2026-11-09):** Cloudflare DMARC Management enabled for
+  meetmilton.com; it wrote `_dmarc.meetmilton.com TXT "v=DMARC1; p=none;
+  rua=mailto:<prefix>@dmarc-reports.cloudflare.net"` (reports in the Cloudflare dashboard;
+  `notifications.` inherits it). Move to `p=quarantine` only after about two weeks of
+  clean reports and once nothing else sends as @meetmilton.com.
 - **e2e alert (2026-11-09 07:25Z):** `milton-e2e-daily` applied with its failure condition
   only (≥ 1 failed execution in 24 h). The API refused the 26 h no-execution condition
   ("Durations longer than 23h30m are not supported"), and a metric-absence condition looks

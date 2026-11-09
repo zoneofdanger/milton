@@ -17,3 +17,9 @@ export const passLine = (counts: PassCounts) =>
  * milton-auth-mail-problems counts these for the milton-auth-mail page. */
 export const problemLine = (outcome: "failed" | "throttled") =>
   JSON.stringify({ message: "auth_mail_send", outcome });
+
+/** One line per throttle: the shared pause it sets, in seconds (60 to
+ * 86,400). The log metric milton-auth-mail-long-pause counts those over
+ * 900, the delivery lifetime, for the milton-auth-mail page. */
+export const pauseLine = (seconds: number) =>
+  JSON.stringify({ message: "auth_mail_pause", seconds });

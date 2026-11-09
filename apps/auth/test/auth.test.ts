@@ -1009,7 +1009,7 @@ describe("auth mail queueing", () => {
 
   test("delivery logs one line per failed or throttled send, none for a sent one", async () => {
     const { acceptMail, deliverMail } = await import("../src/mail.ts");
-    const { problemLine } = await import("../src/mail-log.ts");
+    const { pauseLine, problemLine } = await import("../src/mail-log.ts");
     const config = fixtureConfig();
     const accepted = queue();
     await acceptMail(accepted.pool, config, state("person@example.com"), {
@@ -1047,8 +1047,13 @@ describe("auth mail queueing", () => {
       logs.push(String(line));
     });
     try {
+      // The 429 asks for an hour's pause.
       const counts = await deliverMail(pool, config, async () => {
-        return new Response(null, { status: statuses.shift()! });
+        const status = statuses.shift()!;
+        return new Response(null, {
+          status,
+          headers: status === 429 ? { "retry-after": "3600" } : {},
+        });
       });
       expect(counts).toEqual({
         claimed: 3,
@@ -1060,7 +1065,11 @@ describe("auth mail queueing", () => {
     } finally {
       log.mockRestore();
     }
-    expect(logs).toEqual([problemLine("failed"), problemLine("throttled")]);
+    expect(logs).toEqual([
+      problemLine("failed"),
+      problemLine("throttled"),
+      pauseLine(3600),
+    ]);
   });
 
   test("auth mail replies to the support address; the text is unchanged", async () => {

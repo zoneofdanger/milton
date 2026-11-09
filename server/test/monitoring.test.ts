@@ -58,6 +58,10 @@ const MINIMUMS: [RegExp, { duration: number; window: number }][] = [
     /^milton-auth-mail: ≥ 3 failed or throttled sends/,
     { duration: 0, window: 900 },
   ],
+  [
+    /^milton-auth-mail: a delivery pause over 15 min/,
+    { duration: 0, window: 900 },
+  ],
   [/^milton-auth-maint: ≥ 2 failed/, { duration: 0, window: 2700 }],
   [/^milton-auth-mail: no execution for 20 min/, { duration: 1200, window: 0 }],
   [
@@ -217,7 +221,10 @@ test("the auth mail alert counts the delivery job's own failed and throttled lin
   // A sent or retried send writes no line.
   expect(lines.map((l) => l.outcome)).toEqual(["failed", "throttled"]);
   const policy = policies.find((p) => p.displayName === "milton-auth-mail")!;
-  expect(policy.conditions).toHaveLength(1);
+  expect(policy.conditions.map((c) => c.displayName)).toEqual([
+    "milton-auth-mail: ≥ 3 failed or throttled sends in 15 min",
+    "milton-auth-mail: a delivery pause over 15 min",
+  ]);
   const threshold = policy.conditions[0]!.conditionThreshold as unknown as {
     filter: string;
     comparison: string;
@@ -235,6 +242,49 @@ test("the auth mail alert counts the delivery job's own failed and throttled lin
   ]);
   expect(threshold.duration).toBe("0s");
   expect(threshold.aggregations).toEqual([
+    {
+      alignmentPeriod: "900s",
+      perSeriesAligner: "ALIGN_DELTA",
+      crossSeriesReducer: "REDUCE_SUM",
+      groupByFields: ["resource.label.job_name"],
+    },
+  ]);
+});
+
+test("one delivery pause longer than the 15-minute delivery lifetime pages", async () => {
+  const { pauseLine } = await import("../../apps/auth/src/mail-log.ts");
+  const metric = loadDefinitions().find(
+    (d) => d.kind === "metric" && d.key === "milton-auth-mail-long-pause",
+  )!.body as { filter: string };
+  const line = JSON.parse(pauseLine(3600)) as Record<string, unknown>;
+  expect(Object.keys(line)).toEqual(["message", "seconds"]);
+  expect(line.seconds).toBe(3600);
+  // Over 900 s: longer than any queued message lives, so they would expire.
+  expect(metric.filter).toBe(
+    'resource.type="cloud_run_job" AND resource.labels.job_name="milton-auth-mail"' +
+      ` AND jsonPayload.message="${String(line.message)}" AND jsonPayload.seconds>900`,
+  );
+  const condition = policies
+    .find((p) => p.displayName === "milton-auth-mail")!
+    .conditions.find(
+      (c) => c.displayName === "milton-auth-mail: a delivery pause over 15 min",
+    )!.conditionThreshold as unknown as {
+    filter: string;
+    comparison: string;
+    thresholdValue: number;
+    duration: string;
+    aggregations: Record<string, unknown>[];
+  };
+  expect(condition.filter).toBe(
+    'metric.type = "logging.googleapis.com/user/milton-auth-mail-long-pause" AND resource.type = "cloud_run_job" AND resource.labels.job_name = "milton-auth-mail"',
+  );
+  // One event pages: GT 0 over 15 minutes.
+  expect([
+    condition.comparison,
+    condition.thresholdValue,
+    condition.duration,
+  ]).toEqual(["COMPARISON_GT", 0, "0s"]);
+  expect(condition.aggregations).toEqual([
     {
       alignmentPeriod: "900s",
       perSeriesAligner: "ALIGN_DELTA",

@@ -10,7 +10,7 @@ import { AUTH_ORIGIN, type Config } from "./config.ts";
 import type { RequestState } from "./adapter.ts";
 import { reservedRecipient } from "./recipient.ts";
 import { addressDomain, domainDigest, type MailDomain } from "./mail-domain.ts";
-import { problemLine } from "./mail-log.ts";
+import { pauseLine, problemLine } from "./mail-log.ts";
 
 // Native getCryptoKey (used by makeSignature) imports an HMAC signing key.
 // Symmetric utilities instead accept a versioned SecretConfig. No bare-hex fallback.
@@ -323,6 +323,9 @@ export async function deliverMail(
     counts[outcome]++;
     if (outcome === "failed" || outcome === "throttled")
       console.log(problemLine(outcome));
+    // The pause finish_mail just set: later passes claim nothing until it
+    // ends, so this is the only sign of a long one.
+    if (outcome === "throttled") console.log(pauseLine(defer));
     if (outcome === "throttled") break;
   }
   return counts;

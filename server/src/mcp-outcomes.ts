@@ -1,11 +1,6 @@
 import { z } from "zod";
 
-const toolNames = [
-  "get_cover_sheet",
-  "get_report",
-  "list_reports",
-  "create_memo",
-] as const;
+const toolNames = ["get_cover_sheet", "get_report", "create_memo"] as const;
 export type ToolCall = {
   tool: (typeof toolNames)[number] | "unknown";
   outcome: "read" | "saved" | "unchanged" | "conflict" | "refused" | "failed";
@@ -46,12 +41,14 @@ export const loggedErrorCodes = new Set([
   "request_id_reused",
   "save_outcome_unknown",
   "assistant_required",
-  "edit_conflict",
-  "move_conflict",
-  "sample_conflict",
-  "baseline_unknown",
-  "card_heading",
-  "tps_body_limit",
+  "memos_off",
+  "invalid_report",
+  "invalid_tweak",
+  "invalid_memo",
+  "line_not_found",
+  "cover_sheet_limit",
+  "cover_sheet_empty",
+  "tweak_exists",
   "card_version_conflict",
   "unique_violation",
   "check_violation",
@@ -123,25 +120,37 @@ export const nextSteps: Record<string, NextStep> = {
   version_conflict: rereadAll,
   card_version_conflict: rereadAll,
   unique_violation: rereadAll,
-  edit_conflict: step(
-    "reread",
-    "Reread the report and copy each before verbatim so it occurs once, within one rule, without overlaps; save with a new request_id.",
-  ),
-  move_conflict: step(
-    "reread",
-    "Reread the report and copy each move's before verbatim from one rule this save keeps; save with a new request_id.",
-  ),
-  sample_conflict: step(
-    "reread",
-    "Reread get_report and fix what message names; a new example stays new and a revision keeps its id; ask the person if unclear. Use a new request_id.",
-  ),
-  sample_version_conflict: step(
-    "reread",
-    "Reread get_report for the sample's current revision, then save with a new request_id.",
-  ),
   invalid_kind: step(
     "reread",
-    "Reread get_report and use a kind_id from its kinds, or omit it (a save may use new_kind); a save needs a new request_id.",
+    "Reread get_report and use a kind_id from its kinds, or send new_kind instead; a save needs a new request_id.",
+  ),
+  invalid_tweak: step(
+    "reread",
+    "Use a tweak_id from the latest get_report's tweaks, or send the tweak as text; save with a new request_id.",
+  ),
+  invalid_report: step(
+    "fix_input",
+    "Send the report_id from this conversation's latest get_report, or leave report_id out; save with a new request_id.",
+  ),
+  invalid_memo: step(
+    "reread",
+    "Use a memo_id from a saved result or get_report's examples; if unsure which memo, ask the person.",
+  ),
+  line_not_found: step(
+    "reread",
+    "Reread get_cover_sheet and copy the whole line exactly; if it isn't there, tell the person. Use a new request_id.",
+  ),
+  memos_off: step(
+    "tell_user",
+    "The person turned off Keep memos: don't save drafts or offer to. Save writing only when they ask you to remember it.",
+  ),
+  cover_sheet_limit: step(
+    "ask_user",
+    "Ask the person which cover sheet lines to shorten or remove, then save with a new request_id.",
+  ),
+  cover_sheet_empty: step(
+    "tell_user",
+    "Tell the person they can clear the cover sheet on their TPS page; an AI can only remove lines.",
   ),
   // Arguments to correct.
   invalid_input: fixArguments,
@@ -149,7 +158,7 @@ export const nextSteps: Record<string, NextStep> = {
   check_violation: fixArguments,
   unknown_tool: step(
     "fix_input",
-    "Call one of the tools Milton lists: get_cover_sheet, get_report, list_reports or create_memo.",
+    "Call one of the tools Milton lists: get_cover_sheet, get_report or create_memo.",
   ),
   request_id_reused: step(
     "fix_input",
@@ -157,24 +166,12 @@ export const nextSteps: Record<string, NextStep> = {
   ),
   request_too_large: step(
     "fix_input",
-    "Split the change into smaller saves, each with its own request_id; never cut approved wording.",
+    "Save the memo again with the final alone: send first_draft_missing instead of first_draft, with a new request_id.",
   ),
-  memo_body_limit: step(
-    "fix_input",
-    "Shorten text, the save's purpose, and save with a new request_id; if an approved rule or sample is too long, tell the person.",
-  ),
-  // Fixes that change approved text or need the person's choice.
-  card_heading: step(
-    "ask_user",
-    "Rules can't contain Markdown heading lines. Ask the person to approve wording without one, then save with a new request_id.",
-  ),
-  baseline_unknown: step(
-    "ask_user",
-    'Ask the person to approve the rule without the "Baseline: " prefix, then save with a new request_id.',
-  ),
-  tps_body_limit: step(
-    "ask_user",
-    "The report is full and nothing changed. Ask the person which rules or samples to remove or shorten.",
+  // Codes only the TPS page meets.
+  tweak_exists: step(
+    "tell_user",
+    "Another tweak already says that; tell the person and don't retry.",
   ),
   // Transient failures.
   store_unavailable: retryOnce,
@@ -231,6 +228,10 @@ export const nextSteps: Record<string, NextStep> = {
   // Store invariants and configuration a correct call never meets (Milton
   // derives descriptions and reasons itself).
   configuration: unavailableNow,
+  // The writing tables before memos keep these triggers until their drop; no
+  // code writes those tables, so none can fire.
+  sample_version_conflict: unavailableNow,
+  memo_body_limit: unavailableNow,
   memo_description_limit: unavailableNow,
   memo_reason_limit: unavailableNow,
   card_version_is_immutable: unavailableNow,

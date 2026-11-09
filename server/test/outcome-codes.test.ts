@@ -47,7 +47,7 @@ test("every MCP error code has its own next step from the closed set", async () 
     "server_busy",
     "request_too_large",
     "subscription_required",
-    "edit_conflict",
+    "memos_off",
   ])
     expect(codes).toContain(code);
   expect([...codes].filter((code) => !Object.hasOwn(nextSteps, code))).toEqual(
@@ -65,11 +65,11 @@ test("every MCP error code has its own next step from the closed set", async () 
   }
   // A result carries its code and next; a conflict names its code; an unknown
   // code still gets a next step.
-  expect(withNext({ error: "edit_conflict", message: "m" })).toEqual({
-    error: "edit_conflict",
+  expect(withNext({ error: "invalid_kind", message: "m" })).toEqual({
+    error: "invalid_kind",
     message: "m",
-    code: "edit_conflict",
-    next: nextSteps.edit_conflict!,
+    code: "invalid_kind",
+    next: nextSteps.invalid_kind!,
   });
   expect(withNext({ status: "conflict", request_id: "r" })).toMatchObject({
     code: "version_conflict",

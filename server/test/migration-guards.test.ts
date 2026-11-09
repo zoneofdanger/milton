@@ -134,7 +134,10 @@ test("a new migration is numbered above main's highest, and the journal runs in 
   const generated =
     (when: number, tag = "0001_next") =>
     (files: Files) => {
-      files.set(`server/drizzle/${tag}.sql`, "SELECT 1;");
+      files.set(
+        `server/drizzle/${tag}.sql`,
+        "SET LOCAL lock_timeout = '5s';\n--> statement-breakpoint\nSELECT 1;",
+      );
       files.set(`server/drizzle/meta/${tag.slice(0, 4)}_snapshot.json`, "{}");
       files.set(
         "server/drizzle/meta/_journal.json",
@@ -142,6 +145,19 @@ test("a new migration is numbered above main's highest, and the journal runs in 
       );
     };
   expect(locked(generated(101))).toEqual([]);
+  // A new Drizzle migration bounds its lock waits first: Neon drops the limits
+  // a client passes at connect.
+  expect(
+    locked((files) => {
+      generated(101)(files);
+      files.set(
+        "server/drizzle/0001_next.sql",
+        "-- Adds a reference to users.\nALTER TABLE t ADD COLUMN u text REFERENCES users(id);",
+      );
+    }),
+  ).toEqual([
+    "server/drizzle/0001_next.sql must start with SET LOCAL lock_timeout = '5s'; (as 0008 onward do): Neon drops the limits a client passes at connect, so without it a lock that isn't free queues requests behind this migration",
+  ]);
   expect(locked(generated(100))).toEqual([
     "server/drizzle/meta/_journal.json: 0001_next's when (100) is not after 0000_baseline's (100); migration timestamps must strictly increase",
   ]);

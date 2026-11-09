@@ -5,6 +5,12 @@
 -- writing tables stay until the follow-up drop, which names this release's PR in its
 -- code-stopped-by line. Grants: migrations/014-memos-roles.sql, applied by the owner
 -- in the same release. Rollback is the pre-migration snapshot; there is no down script.
+-- The foreign keys to users take SHARE ROW EXCLUSIVE on users until commit. Lock
+-- limits are set inside the migration's transaction, because Neon drops the limits a
+-- client passes at connect: a lock not free within 5 s fails this migration instead of
+-- queueing requests behind it.
+SET LOCAL lock_timeout = '5s';
+--> statement-breakpoint
 CREATE TABLE "cover_sheets" (
 	"user_id" text NOT NULL,
 	"version" integer NOT NULL,

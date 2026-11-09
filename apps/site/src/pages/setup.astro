@@ -45,17 +45,17 @@ import AssistantSetup from "../components/AssistantSetup.astro";
   </div>
   <div id="standing-line" class="standing">
     <p>
-      Setup separately offers a line for your AI’s standing instructions, asking
-      it to read Milton before writing:
+      Every setup adds a line to your AI’s standing instructions, asking it to
+      read Milton before writing:
     </p>
     <blockquote>
       Before writing anything for me, call Milton's get_cover_sheet, then
       get_report.
     </blockquote>
     <p>
-      Your AI may add it only with your separate consent, or you can paste it
-      yourself; each AI below says where it goes. This is a reminder, not a
-      guarantee. Ask “Did you get that memo?” and verify a successful read.
+      Your AI shows it and adds it once you approve, or you paste it yourself;
+      each AI below says where it goes. This is a reminder, not a guarantee. Ask
+      “Did you get that memo?” and verify a successful read.
     </p>
   </div>
   <nav class="clients" aria-label="Choose your AI">
@@ -93,9 +93,9 @@ import AssistantSetup from "../components/AssistantSetup.astro";
       </a>
     </p>
     <p>
-      Keep <a href="#standing-line">the standing line</a> in your profile
-      preferences, a project’s instructions, or a memory. One entry also covers
-      Claude Duet.
+      As part of setup, add <a href="#standing-line">the standing line</a> to
+      your profile preferences, a project’s instructions, or a memory. One entry
+      also covers Claude Duet.
     </p>
   </section>
   <section id="claude-duet" aria-labelledby="claude-duet-heading">
@@ -155,8 +155,8 @@ import AssistantSetup from "../components/AssistantSetup.astro";
       before signing up for a different plan.
     </p>
     <p>
-      Keep <a href="#standing-line">the standing line</a> in your custom
-      instructions or a memory.
+      As part of setup, add <a href="#standing-line">the standing line</a> to
+      your custom instructions or a memory.
     </p>
   </section>
   <section id="grok-bot" aria-labelledby="grok-bot-heading">
@@ -189,9 +189,9 @@ import AssistantSetup from "../components/AssistantSetup.astro";
       .
     </p>
     <p>
-      If Grok Bot has standing instructions or memory, keep{" "}
-      <a href="#standing-line">the standing line</a> there. Otherwise, ask “Did
-      you get that memo?” each time.
+      If Grok Bot has standing instructions or memory, add{" "}
+      <a href="#standing-line">the standing line</a> there as part of setup.
+      Otherwise, ask “Did you get that memo?” each time.
     </p>
   </section>
   <section id="muse" aria-labelledby="muse-heading">
@@ -228,9 +228,9 @@ import AssistantSetup from "../components/AssistantSetup.astro";
       </a>
     </p>
     <p>
-      If Muse has standing instructions or memory, keep{" "}
-      <a href="#standing-line">the standing line</a> there. Otherwise, ask “Did
-      you get that memo?” each time.
+      If Muse has standing instructions or memory, add{" "}
+      <a href="#standing-line">the standing line</a> there as part of setup.
+      Otherwise, ask “Did you get that memo?” each time.
     </p>
   </section>
   <section id="claude-code" aria-labelledby="claude-code-heading">
@@ -245,9 +245,9 @@ import AssistantSetup from "../components/AssistantSetup.astro";
       </a>
     </p>
     <p>
-      <a href="#standing-line">The standing line</a> lives in CLAUDE.md in your
-      home directory (<code>~/.claude/CLAUDE.md</code>), so it covers every
-      project. Claude Code adds it during setup once you approve.
+      Setup adds <a href="#standing-line">the standing line</a> to CLAUDE.md in
+      your home directory (<code>~/.claude/CLAUDE.md</code>), so it covers every
+      project. Claude Code adds it once you approve.
     </p>
   </section>
   <section id="codex" aria-labelledby="codex-heading">
@@ -262,9 +262,10 @@ codex mcp login milton`}</code></pre>
       <a href="https://developers.openai.com/codex/mcp">Codex’s MCP guide ↗</a>
     </p>
     <p>
-      <a href="#standing-line">The standing line</a> lives in AGENTS.md in your
-      Codex home directory (<code>~/.codex/AGENTS.md</code>), so it covers every
-      project. Codex adds it during setup once you approve.
+      Setup adds <a href="#standing-line">the standing line</a> to AGENTS.md in
+      your Codex home directory (<code>~/.codex/AGENTS.md</code>), so it covers
+      every project. Codex adds it once you approve. Without it, Codex often
+      doesn’t read Milton.
     </p>
   </section>
   <section id="cursor" aria-labelledby="cursor-heading">
@@ -278,8 +279,8 @@ codex mcp login milton`}</code></pre>
       </a>
     </p>
     <p>
-      Paste <a href="#standing-line">the standing line</a> into User Rules in
-      Cursor’s settings, so it covers every project.
+      As part of setup, paste <a href="#standing-line">the standing line</a>
+      into User Rules in Cursor’s settings, so it covers every project.
     </p>
   </section>
   <section id="first-preference" aria-labelledby="first-heading">

@@ -286,9 +286,9 @@ Files: `server/src/store/setup.ts`, `packages/theme/setup-prompt.ts`.
 - The AI helps with a real task first: it reads `get_report` for that task, saves the memo when the person accepts the final, and tells them its receipt.
 - It offers to keep a few pieces the person wrote and pastes, each a final-only memo with context and a kind; only their own writing, skipping automated, forwarded and other people's text and anything holding secrets.
 - It offers to start the cover sheet with lines the person gives, in their words, never suggested from their writing.
-- It offers the standing instruction separately, adding it only after the person agrees.
+- Every setup includes the standing instruction: the AI shows it and asks on its own, adding it only after the person agrees, or shows where to paste it.
 - The script carries one fictional final-only memo as a JSON example.
-- The shared setup prompt (the site widget and the app's empty state) asks the AI to connect, read what is on file, help with a real task, keep the accepted final as a memo with a one-line receipt, optionally keep pasted writing and cover sheet lines, and never wait on any of it.
+- The shared setup prompt (the site widget and the app's empty state) asks the AI to connect, read what is on file, help with a real task, keep the accepted final as a memo with a one-line receipt, optionally keep pasted writing and cover sheet lines, show the standing line and add it once the person says yes, and never wait on any of it.
 
 ## Sign-in and accounts
 

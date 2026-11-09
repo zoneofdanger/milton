@@ -25,7 +25,7 @@ export const setupScript = [
   "2. Help with a real task now: ask what they're writing next, or invite them to paste something they wrote to clean up. Read get_report with that task's intent first. When they accept the final, save the memo as the server instructions say, and tell them its one-line receipt.",
   "3. Offer to keep a few pieces they wrote and like: emails, DMs or posts they paste. Save each as its own memo with only final, context and a kind (no first_draft, mode, rounds or tweaks). Use only their own writing; skip automated, forwarded and other people's text, and anything holding secrets.",
   '4. Offer to start the cover sheet: ask for a few short lines every draft should follow, such as "no em dashes" or "sign off –P", and add each line they give you, in their words, with cover_sheet. Don\'t suggest lines from their writing.',
-  '5. Offer the standing instruction separately: "Before writing anything for me, call Milton\'s get_cover_sheet, then get_report." Add it where this AI supports standing instructions only after they agree; otherwise show where they can paste it.',
+  '5. Every setup includes the standing instruction: "Before writing anything for me, call Milton\'s get_cover_sheet, then get_report." Show it and ask on its own; add it where this AI supports standing instructions only after they agree, otherwise show where they can paste it.',
   "A pasted memo (fictional; replace it with the person's own writing):\n```json\n" +
     example +
     "\n```",

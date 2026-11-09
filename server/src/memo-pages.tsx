@@ -131,7 +131,7 @@ export function connectSteps(empty: boolean, mcpUrl: string) {
             <a href="https://www.meetmilton.com/setup">
               Setup instructions for your AI
             </a>
-            . Follow the guide to connect Milton and optionally add a standing
+            . Follow the guide to connect Milton and add the standing
             instruction.
           </p>
           <pre class="setup-copy">

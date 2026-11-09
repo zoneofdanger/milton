@@ -1283,6 +1283,76 @@ describe("Turnstile on sign-up", () => {
     }
   });
 
+  test("siteverify is reached only with a well-formed email and inside a 3-per-10-s network bucket", async () => {
+    const { createProvider } = await import("../src/provider.ts");
+    // The gate statement's verdicts; a test sets the network sign-up
+    // bucket's (the last) to false.
+    let signupAllowed = true;
+    const statements: { text: string; values: unknown[] }[] = [];
+    const pool = {
+      on: () => pool,
+      query: async (text: string, values: unknown[] = []) => {
+        statements.push({ text, values });
+        if (text.includes("with g as"))
+          return { rows: [{ allowed: [true, true, signupAllowed] }] };
+        return { rows: [{ allowed: true }] };
+      },
+    } as unknown as import("pg").Pool;
+    let verifications = 0;
+    const service = createProvider(fixtureConfig(keys), {
+      pool,
+      boundaries: {
+        fetch: async () => {
+          verifications++;
+          return Response.json({
+            success: false,
+            "error-codes": ["invalid-input-response"],
+          });
+        },
+      },
+    });
+    const signUp = async (body: unknown) => {
+      const r = await service.handler(
+        new Request("https://auth.meetmilton.com/api/auth/sign-up/email", {
+          method: "POST",
+          headers: {
+            origin: "https://auth.meetmilton.com",
+            "content-type": "application/json",
+            "x-captcha-response": "fictional-token",
+          },
+          body: JSON.stringify(body),
+        }),
+        "203.0.113.7",
+      );
+      return [r.status, ((await r.json()) as { error?: string }).error];
+    };
+    // No well-formed email: refused before the database and Cloudflare.
+    for (const body of [
+      {},
+      { email: 7 },
+      { email: "not-an-address" },
+      { email: "x".repeat(320) + "@example.com" },
+    ])
+      expect(await signUp(body)).toEqual([400, "invalid_email"]);
+    expect([statements.length, verifications]).toEqual([0, 0]);
+    // The gate takes the network's sign-up bucket: 3 in 10 s.
+    expect(await signUp({ email: "person@example.com" })).toEqual([
+      403,
+      "captcha_refused",
+    ]);
+    const values = statements[0]!.values;
+    const at = values.findIndex(
+      (v, i) => values[i + 1] === 10 && values[i + 2] === 3,
+    );
+    expect(String(values[at])).toMatch(/^[0-9a-f]{64}$/);
+    signupAllowed = false;
+    expect(await signUp({ email: "person@example.com" })).toEqual([
+      429,
+      "rate_limited",
+    ]);
+    expect(verifications).toBe(1);
+  });
+
   test("siteverify waits hold no native slot and have their own bound of four", async () => {
     const { createProvider } = await import("../src/provider.ts");
     const pool = {

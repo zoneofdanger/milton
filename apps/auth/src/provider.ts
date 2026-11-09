@@ -23,6 +23,7 @@ import type { DBFieldAttribute } from "@better-auth/core/db";
 import { PostgresDialect } from "kysely";
 import pg from "pg";
 import { decodeJwt } from "jose";
+import { z } from "zod";
 import {
   AUTH_ORIGIN,
   APP_ORIGIN,
@@ -77,6 +78,8 @@ const ACCOUNT_DELETING = {
   message: "This Milton account is being deleted.",
 };
 const accountDeleting = () => new APIError("FORBIDDEN", ACCOUNT_DELETING);
+// What a Turnstile-guarded sign-up must carry (native's 320-character ceiling).
+const signUpEmail = z.email().max(320);
 const TURNSTILE_SITEVERIFY =
   "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 // Cloudflare's siteverify codes that mean the token itself is bad.
@@ -816,6 +819,12 @@ export function createProvider(
     // limit too, before any database work.
     if (Buffer.byteLength(source) > 16384)
       return json({ error: "request_too_large" }, 413);
+    // With Turnstile on, a sign-up reaches siteverify only with an email the
+    // per-email bucket keys, so an empty body cannot skip that bucket.
+    const turnstileOn =
+      path === "/sign-up/email" && !!config.AUTH_TURNSTILE_SECRET_KEY;
+    if (turnstileOn && !signUpEmail.safeParse(body.email).success)
+      return json({ error: "invalid_email" }, 400);
     if (inFlight >= 4) return json({ error: "busy_retry" }, 429);
     inFlight++;
     acquired = true;
@@ -866,6 +875,9 @@ export function createProvider(
       scoped.push([rate("revoke:" + JSON.stringify([caller, ip])), 60, 30]);
     if (bearer)
       scoped.push([rate("userinfo:" + JSON.stringify([bearer, ip])), 60, 60]);
+    // Native's own sign-up limit (3 in 10 s per network) applies only after
+    // siteverify, so the gate takes the same limit first.
+    if (turnstileOn) scoped.push([rate("turnstile:" + ip), 10, 3]);
     // The app proves itself by its client secret (token, introspection,
     // revocation) or by one of its own access tokens (UserInfo), each
     // compared with native's stored SHA-256/base64url hash in this same
@@ -900,13 +912,13 @@ export function createProvider(
       const allowed = taken.rows[0]?.allowed;
       if (!Array.isArray(allowed) || !allowed.every((a) => a === true))
         return json({ error: "rate_limited" }, 429);
-      if (path === "/sign-up/email" && config.AUTH_TURNSTILE_SECRET_KEY) {
+      if (turnstileOn) {
         // Siteverify can take seconds, so it waits in its own bound, not in
         // a native slot; the slot is taken again only once it passes.
         inFlight--;
         acquired = false;
         const refused = await turnstile(
-          config.AUTH_TURNSTILE_SECRET_KEY,
+          config.AUTH_TURNSTILE_SECRET_KEY!,
           request.headers.get("x-captcha-response"),
         );
         if (refused) return refused;

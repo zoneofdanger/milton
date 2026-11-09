@@ -2536,6 +2536,7 @@ try {
     assert.deepEqual(queuedResets, [true, true, true, false]);
     // With Turnstile on, only a token siteverify (faked; no network) passes
     // creates the account and queues its verification.
+    let verifications = 0;
     const guarded = createProvider(
       {
         ...config,
@@ -2552,6 +2553,7 @@ try {
               "https://challenges.cloudflare.com/turnstile/v0/siteverify",
             );
             const { response } = JSON.parse(String(init?.body));
+            verifications++;
             return Response.json(
               response === "fictional-pass"
                 ? {
@@ -2602,6 +2604,32 @@ try {
           assert.equal(job.state, "pending");
         }
       }
+      // One network reaches siteverify at most 3 times in 10 s, whatever
+      // addresses it names; the fourth is refused before Cloudflare.
+      await clearRates();
+      const before = verifications;
+      const statuses: number[] = [];
+      for (const n of [1, 2, 3, 4]) {
+        const reply = await guarded.handler(
+          new Request(ISSUER + "/sign-up/email", {
+            method: "POST",
+            headers: {
+              origin: AUTH_ORIGIN,
+              "content-type": "application/json",
+              "x-captcha-response": "fictional-fail",
+            },
+            body: JSON.stringify({
+              email: `turnstile-burst-${n}@example.com`,
+              password: probePassword,
+              name: "Fictional mail",
+            }),
+          }),
+          "192.0.2.77",
+        );
+        statuses.push(reply.status);
+      }
+      assert.deepEqual(statuses, [403, 403, 403, 429]);
+      assert.equal(verifications - before, 3);
     }
     // L-1: issue and encrypt the original native proof on a clock 30s ahead
     // of PostgreSQL, without editing the proof, envelope or stored job later.

@@ -1,4 +1,3 @@
-import type { SampleContext } from "./sample-context";
 import { sql } from "drizzle-orm";
 import {
   pgTable,
@@ -15,6 +14,7 @@ import {
   index,
   check,
   customType,
+  doublePrecision,
 } from "drizzle-orm/pg-core";
 
 const tsvector = customType<{ data: string }>({ dataType: () => "tsvector" });
@@ -261,6 +261,9 @@ export const saveRequests = pgTable(
   ],
 );
 
+// The writing tables before memos: rules (cards), samples, kinds per report,
+// accepted changes and the parked guide pilot. No code reads or writes them
+// since memos; the follow-up drop migration removes them.
 // Stable instruction identities and append-only, account-scoped content history.
 export const instructionCards = pgTable(
   "instruction_cards",
@@ -392,7 +395,7 @@ export const sampleVersions = pgTable(
     version: integer("version").notNull(),
     report: text("report").notNull(),
     kindId: text("kind_id").notNull(),
-    context: jsonb("context").$type<SampleContext>().notNull(),
+    context: jsonb("context").notNull(),
     body: text("body").notNull(),
     retired: boolean("retired").notNull().default(false),
     retireReason: text("retire_reason"),
@@ -580,3 +583,223 @@ export const guideBudgetLock = pgTable(
   },
   (t) => [check("guide_budget_singleton", sql`${t.singleton} = 1`)],
 );
+
+const oneLineCheck = (column: unknown, max: number) =>
+  sql`char_length(${column}) BETWEEN 1 AND ${sql.raw(String(max))} AND ${column} = btrim(${column}) AND ${column} !~ '[[:cntrl:]]'`;
+const MEDIA = sql.raw(`('email','chat','post','document','speech')`);
+
+// A personal label for a kind of writing ("vendor decline"), shared by every
+// memo of the account. Labels are unique per account regardless of case and
+// never change; rows leave only with their account.
+export const memoKinds = pgTable(
+  "memo_kinds",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    id: text("id").notNull(),
+    label: text("label").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.id] }),
+    uniqueIndex("memo_kinds_label").on(t.userId, sql`lower(${t.label})`),
+    check("memo_kinds_label_check", oneLineCheck(t.label, 60)),
+  ],
+);
+// One piece of writing the person settled on: the AI's first draft exactly as
+// shown (or none, for writing the person gave; or missing, when the AI no
+// longer had it verbatim), the accepted final, and its context. The words
+// never change; only the context columns are updatable. tier and change are
+// set at save, without a model.
+export const memos = pgTable(
+  "memos",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    id: text("id").notNull(),
+    kindId: text("kind_id"),
+    medium: text("medium").notNull(),
+    summary: text("summary").notNull(),
+    audience: text("audience"),
+    purpose: text("purpose"),
+    // draft or edit; NULL for writing the person gave (no first draft).
+    mode: text("mode"),
+    firstDraft: text("first_draft"),
+    // kept: first_draft holds it; missing: the AI no longer had it; none: the
+    // person gave the writing.
+    firstDraftState: text("first_draft_state").notNull(),
+    final: text("final").notNull(),
+    rounds: integer("rounds"),
+    // Normalized token Levenshtein, first draft to final, over the longer.
+    change: doublePrecision("change"),
+    // own: the person's words; steered: a drafted final that differs from
+    // its first draft; untouched: a drafted final equal to it.
+    tier: text("tier").notNull(),
+    // The get_report read before the draft, and the tweak ids it served.
+    reportId: text("report_id"),
+    servedTweakIds: text("served_tweak_ids")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    clientJson: text("client_json").notNull(),
+    requestId: text("request_id").notNull(),
+    createdAt: createdAt(),
+    contextUpdatedAt: timestamp("context_updated_at", { withTimezone: true }),
+    search: tsvector("search").generatedAlwaysAs(
+      sql`to_tsvector('english'::regconfig, summary || ' ' || coalesce(purpose, '') || ' ' || coalesce(audience, '') || ' ' || final)`,
+    ),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.id] }),
+    foreignKey({
+      name: "memos_kind_fk",
+      columns: [t.userId, t.kindId],
+      foreignColumns: [memoKinds.userId, memoKinds.id],
+    }).onDelete("cascade"),
+    index("memos_by_user").on(t.userId, t.createdAt),
+    check("memos_id", sql`${t.id} ~ '^[0-9a-f-]{36}$'`),
+    check("memos_medium", sql`${t.medium} IN ${MEDIA}`),
+    check("memos_summary", oneLineCheck(t.summary, 200)),
+    check(
+      "memos_audience",
+      sql`${t.audience} IS NULL OR (${oneLineCheck(t.audience, 100)})`,
+    ),
+    check(
+      "memos_purpose",
+      sql`${t.purpose} IS NULL OR (${oneLineCheck(t.purpose, 100)})`,
+    ),
+    check(
+      "memos_first_draft",
+      sql`${t.firstDraftState} IN ('kept','missing','none') AND (${t.firstDraft} IS NOT NULL) = (${t.firstDraftState} = 'kept') AND (${t.mode} IS NULL) = (${t.firstDraftState} = 'none') AND (${t.rounds} IS NULL) = (${t.firstDraftState} = 'none') AND (${t.change} IS NULL OR ${t.firstDraftState} = 'kept')`,
+    ),
+    check(
+      "memos_mode",
+      sql`${t.mode} IS NULL OR ${t.mode} IN ('draft','edit')`,
+    ),
+    check(
+      "memos_words",
+      sql`btrim(${t.final}) <> '' AND octet_length(${t.final}) <= 262144 AND (${t.firstDraft} IS NULL OR octet_length(${t.firstDraft}) <= 262144)`,
+    ),
+    check(
+      "memos_rounds",
+      sql`${t.rounds} IS NULL OR ${t.rounds} BETWEEN 0 AND 1000`,
+    ),
+    check(
+      "memos_change",
+      sql`${t.change} IS NULL OR (${t.change} >= 0 AND ${t.change} <= 1)`,
+    ),
+    check("memos_tier", sql`${t.tier} IN ('own','steered','untouched')`),
+    check(
+      "memos_served",
+      sql`cardinality(${t.servedTweakIds}) <= 10 AND (${t.reportId} IS NOT NULL OR cardinality(${t.servedTweakIds}) = 0)`,
+    ),
+    check(
+      "memos_client_object",
+      sql`jsonb_typeof(${t.clientJson}::jsonb)='object'`,
+    ),
+    check("memos_request_id", sql`length(${t.requestId}) = 36`),
+  ],
+);
+// One line about what the person made an AI change. Matched through the memos
+// that cite it; its count is its number of citations. The person can reword
+// it; norm (case, spacing and trailing punctuation folded) keeps one tweak per
+// wording, so an exact repeat reuses it.
+export const tweaks = pgTable(
+  "tweaks",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    id: text("id").notNull(),
+    text: text("text").notNull(),
+    norm: text("norm").notNull(),
+    clientJson: text("client_json").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.id] }),
+    unique("tweaks_norm").on(t.userId, t.norm),
+    check("tweaks_text", oneLineCheck(t.text, 200)),
+    check("tweaks_norm_check", sql`${t.norm} <> ''`),
+    check(
+      "tweaks_client_object",
+      sql`jsonb_typeof(${t.clientJson}::jsonb)='object'`,
+    ),
+  ],
+);
+// One row per memo and tweak it taught. Forgetting a memo deletes its rows; a
+// tweak left with none is deleted in the same transaction.
+export const tweakCitations = pgTable(
+  "tweak_citations",
+  {
+    userId: text("user_id").notNull(),
+    memoId: text("memo_id").notNull(),
+    tweakId: text("tweak_id").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.memoId, t.tweakId] }),
+    foreignKey({
+      name: "tweak_citations_memo_fk",
+      columns: [t.userId, t.memoId],
+      foreignColumns: [memos.userId, memos.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "tweak_citations_tweak_fk",
+      columns: [t.userId, t.tweakId],
+      foreignColumns: [tweaks.userId, tweaks.id],
+    }).onDelete("cascade"),
+    index("tweak_citations_by_tweak").on(t.userId, t.tweakId),
+  ],
+);
+// Each get_report an AI read: its id and the tweak ids it served, so a memo
+// saved after it records what was served without the AI reporting it.
+export const servedReports = pgTable(
+  "served_reports",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    id: text("id").notNull(),
+    tweakIds: text("tweak_ids").array().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.id] }),
+    check("served_reports_tweaks", sql`cardinality(${t.tweakIds}) <= 10`),
+  ],
+);
+// The person's own voice guide, append-only: the highest version is current,
+// and every save carries the version it read.
+export const coverSheets = pgTable(
+  "cover_sheets",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    text: text("text").notNull(),
+    actorJson: text("actor_json").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.version] }),
+    check("cover_sheets_version", sql`${t.version} > 0`),
+    check("cover_sheets_text", sql`char_length(${t.text}) <= 1500`),
+    check(
+      "cover_sheets_actor",
+      sql`jsonb_typeof(${t.actorJson}::jsonb)='object'`,
+    ),
+  ],
+);
+// The account's "Keep memos" switch; no row reads as on.
+export const memoSettings = pgTable("memo_settings", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  keepMemos: boolean("keep_memos").notNull().default(true),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});

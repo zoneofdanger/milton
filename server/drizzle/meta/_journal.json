@@ -85,6 +85,13 @@
       "when": 1794170568104,
       "tag": "0011_stripe_revision",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1794219321714,
+      "tag": "0012_memos",
+      "breakpoints": true
     }
   ]
 }

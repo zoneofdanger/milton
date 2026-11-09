@@ -156,7 +156,7 @@ export function createApp(
   );
   app.get("/consent", (c) =>
     c.html(
-      <Page title="Connect an assistant">
+      <Page title="Connect an AI">
         <Consent query={new URL(c.req.url).searchParams} />
       </Page>,
     ),
@@ -166,7 +166,7 @@ export function createApp(
       <Page title="Connection needs a retry">
         <p>
           Milton could not finish checking this account. Start the connection
-          again from your assistant.
+          again from your AI.
         </p>
         <a href="/login">Sign in</a>
       </Page>,

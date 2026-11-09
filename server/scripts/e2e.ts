@@ -138,8 +138,22 @@ async function mcpSession(origins: Origins, key: string, fetcher: Fetch) {
 }
 type Session = Awaited<ReturnType<typeof mcpSession>>;
 
-const leftover = (e: Report["examples"][number]) =>
-  e.kind === KIND && e.tier === "own";
+/** This check's own leftovers in a report: its kind, the person's own words,
+ * and a summary carrying the run marker. The summary is read from each
+ * example's Situation line, in served order; a memo of the kind without the
+ * marker is the person's and is never forgotten. */
+const leftovers = (listed: Report) => {
+  const situations = [
+    ...listed.text.matchAll(/^## \d+\. .*\nSituation: (.*)$/gm),
+  ].map((m) => m[1]!);
+  if (situations.length !== listed.examples.length) return [];
+  return listed.examples.filter(
+    (e, i) =>
+      e.kind === KIND &&
+      e.tier === "own" &&
+      situations[i]!.startsWith(`${MARKER}, run `),
+  );
+};
 const quoted = (body: string) => body.replace(/^/gm, "> ");
 
 export async function runE2E(options: {
@@ -213,11 +227,12 @@ export async function runE2E(options: {
 
     // Nothing is written until the account holds only this check's marked
     // leftovers: no cover sheet, no tweaks, and every memo one of this
-    // check's (a few small ones all fit in one report).
+    // check's, by kind and run marker (a few small ones all fit in one
+    // report).
     step = "safety_gate";
     const cover = await first.cover();
     const listed = await first.report();
-    const stale = listed.examples.filter(leftover);
+    const stale = leftovers(listed);
     if (
       cover.text !== "" ||
       cover.tweaks !== 0 ||

@@ -3724,6 +3724,32 @@ try {
     [0, foreignBefore],
     "a foreign key makes no MCP request and is never touched",
   );
+  // A memo of the check's kind without the run marker is the person's, not a
+  // leftover: the gate refuses and forgets nothing.
+  const unmarked = (
+    await testKeyCall("create_memo", {
+      request_id: randomUUID(),
+      memo: {
+        final: "Fictional note someone filed under the check's kind.",
+        context: {
+          summary: "Fictional notes on the e2e check",
+          medium: "document",
+        },
+        new_kind: "e2e check",
+      },
+    })
+  ).memo.memo_id as string;
+  const beforeUnmarked = await footprint();
+  await assert.rejects(
+    check(),
+    (e) => e instanceof CheckError && e.code === "account_holds_foreign_data",
+  );
+  assert.equal(
+    grew(beforeUnmarked, await footprint()).memos,
+    0,
+    "an unmarked memo of the check's kind is not forgotten",
+  );
+  await testSave({ forget_memos: [unmarked] });
   // Foreign data (a cover sheet line nobody marked) refuses before any save;
   // only the gate's own report read is recorded.
   await testSave({
@@ -3747,7 +3773,7 @@ try {
     error: "account_holds_foreign_data",
   });
   pass(
-    "e2e check: browser sign-in, MCP key, safety gate, a marked memo saved, read fresh and forgotten, restored baseline; bounded per-run footprint; leftovers forgotten; expiring key warns; foreign data refused without saving",
+    "e2e check: browser sign-in, MCP key, safety gate, a marked memo saved, read fresh and forgotten, restored baseline; bounded per-run footprint; marked leftovers forgotten; expiring key warns; an unmarked memo of its kind and other foreign data refused without saving",
   );
   stage = "test account exempt from trials and billing";
   // Trials stay on. The test account's access never depends on a trial: repeated

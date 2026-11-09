@@ -131,7 +131,9 @@ test("every StoreError code and every live trigger refusal is logged or mapped",
     ).rows)
       for (const match of definition.matchAll(/MESSAGE\s*=\s*'([a-z_]+)'/g))
         messages.add(match[1]!);
-    expect(messages.size).toBeGreaterThan(10);
+    // The receipt and user-id guards' codes (0013 dropped the old writing
+    // tables' guards).
+    expect(messages.size).toBeGreaterThanOrEqual(3);
     expect([...messages].filter((code) => !known(code))).toEqual([]);
   } finally {
     await local.dispose();

@@ -143,7 +143,9 @@ try {
     "REVOKE ALL ON DATABASE milton FROM PUBLIC; GRANT CONNECT ON DATABASE milton TO milton_auth_runtime,milton_app_runtime,milton_mcp_runtime,milton_guide_runtime; REVOKE CREATE ON SCHEMA public FROM PUBLIC; CREATE SCHEMA drizzle; CREATE TABLE drizzle.__drizzle_migrations(id serial,hash text,created_at bigint)",
   );
   // Every writing migration the journal lists, in order, so a new one's tables
-  // exist here too.
+  // exist here too. Production applied the owner grant files before 0013 dropped
+  // the old writing tables that 005-app-roles.sql names, so the entries from 0013
+  // on run after those files (below), as they did there.
   const journal = JSON.parse(
     readFileSync(new URL("./drizzle/meta/_journal.json", sourceRoot), "utf8"),
   ) as { entries: { tag: string }[] };
@@ -154,10 +156,15 @@ try {
       .sort(),
     "the journal lists every writing migration file",
   );
-  for (const { tag: migration } of journal.entries)
-    await owner.query(
-      readFileSync(new URL(`./drizzle/${migration}.sql`, sourceRoot), "utf8"),
+  const dropAt = journal.entries.findIndex(
+    (e) => e.tag === "0013_drop_old_writing",
+  );
+  assert.ok(dropAt > 0, "the journal lists the old writing tables' drop");
+  const writing = (tag: string) =>
+    owner.query(
+      readFileSync(new URL(`./drizzle/${tag}.sql`, sourceRoot), "utf8"),
     );
+  for (const { tag } of journal.entries.slice(0, dropAt)) await writing(tag);
   const authOwner = new pg.Pool({
     host: root,
     port,
@@ -257,9 +264,50 @@ try {
     );
     assert.deepEqual(await roleTimeouts(), timeouts);
   }
-  // The guide job's plain login holds only main's NOLOGIN guide capability.
+  // The guide job's plain login held only main's NOLOGIN guide capability.
   await owner.query(
     "GRANT milton_guide_worker TO milton_guide_runtime WITH INHERIT TRUE",
+  );
+  // 0013 drops the old writing tables and wipes every save receipt, with rows in
+  // them as production has; 015 then drops both guide roles. Every later step
+  // runs on that schema.
+  for (const statement of [
+    "INSERT INTO instruction_cards(user_id,id) VALUES($1,'legacy-card')",
+    "INSERT INTO sample_kinds(user_id,id,report,label) VALUES($1,'legacy-kind','email','fictional legacy note')",
+    "INSERT INTO samples(user_id,id,client_json) VALUES($1,'legacy-sample','{}')",
+    "INSERT INTO guide_accounts(user_id) VALUES($1)",
+    `INSERT INTO save_requests(user_id,request_id,input_hash,result_json) VALUES($1,gen_random_uuid()::text,repeat('a',64),'{"status":"saved"}')`,
+  ])
+    await owner.query(statement, ["m_00000000-0000-4000-8000-000000000001"]);
+  for (const { tag } of journal.entries.slice(dropAt)) await writing(tag);
+  // Applied twice: rerunning 015 converges.
+  for (let n = 0; n < 2; n++)
+    await owner.query(
+      readFileSync(
+        new URL("./migrations/015-drop-guide-roles.sql", sourceRoot),
+        "utf8",
+      ),
+    );
+  assert.deepEqual(
+    (
+      await owner.query(
+        `SELECT
+          (SELECT count(*) FROM pg_class WHERE relnamespace='public'::regnamespace AND relname IN ('accepted_changes','instruction_card_versions','instruction_cards','instruction_card_position','sample_versions','samples','sample_kinds','report_guides','guide_accounts','guide_spend','guide_budget_lock'))::int old_relations,
+          (SELECT string_agg(proname,',' ORDER BY proname) FROM pg_proc WHERE pronamespace='public'::regnamespace) functions,
+          (SELECT count(*) FROM pg_roles WHERE rolname LIKE 'milton_guide%')::int guide_roles,
+          (SELECT count(*) FROM save_requests)::int receipts,
+          (SELECT count(*) FROM users)::int users`,
+      )
+    ).rows[0],
+    {
+      old_relations: 0,
+      functions:
+        "milton_save_request_guard,milton_user_id_guard,prune_usage_calls",
+      guide_roles: 0,
+      receipts: 0,
+      users: 1,
+    },
+    "0013 and 015 leave no old writing table, function, receipt or guide role",
   );
   const poolConfig = (service: string): pg.PoolConfig => ({
     host: "127.0.0.1",
@@ -758,14 +806,10 @@ try {
     "tweaks.norm",
     "tweaks.text",
   ]);
-  for (const role of [
-    "milton_auth_runtime",
-    "milton_guide_runtime",
-    "milton_runtime",
-  ])
+  for (const role of ["milton_auth_runtime", "milton_runtime"])
     assert.deepEqual(await privileges(role), [], role);
   // Connection keys (006): app creates, lists and revokes without reading a
-  // hash; MCP reads and records last use only; auth and the guide get nothing.
+  // hash; MCP reads and records last use only; auth gets nothing.
   const keyPrivileges = async (role: string) =>
     (
       await owner.query<{ p: string }>(
@@ -810,11 +854,7 @@ try {
       "table:SELECT",
     ].sort(),
   );
-  for (const role of [
-    "milton_auth_runtime",
-    "milton_guide_runtime",
-    "milton_runtime",
-  ])
+  for (const role of ["milton_auth_runtime", "milton_runtime"])
     assert.deepEqual(await keyPrivileges(role), [], role);
   // 0009 and 011: only the owner marks a test account. No runtime login can
   // set users.test_account, by UPDATE or at INSERT; app still creates accounts.
@@ -822,7 +862,6 @@ try {
     "milton_app_runtime",
     "milton_mcp_runtime",
     "milton_auth_runtime",
-    "milton_guide_runtime",
   ])
     assert.deepEqual(
       (
@@ -861,7 +900,7 @@ try {
     await appPool.query("DELETE FROM users WHERE id=$1", [created]);
   }
   // Native 007: one narrow SECURITY DEFINER status function with a fixed path,
-  // EXECUTE for MCP and app only, never PUBLIC, auth or the guide.
+  // EXECUTE for MCP and app only, never PUBLIC or auth.
   const keyStatus = "milton_guard.connection_key_status(text,text,text)";
   const keyStatusShape = async () =>
     (
@@ -872,14 +911,12 @@ try {
         app: boolean;
         mcp: boolean;
         auth: boolean;
-        guide: boolean;
       }>(
         `SELECT p.prosecdef definer,p.proconfig config,
           EXISTS(SELECT 1 FROM aclexplode(p.proacl) a WHERE a.grantee=0) public,
           has_function_privilege('milton_app_runtime',p.oid,'EXECUTE') app,
           has_function_privilege('milton_mcp_runtime',p.oid,'EXECUTE') mcp,
-          has_function_privilege('milton_auth_runtime',p.oid,'EXECUTE') auth,
-          has_function_privilege('milton_guide_runtime',p.oid,'EXECUTE') guide
+          has_function_privilege('milton_auth_runtime',p.oid,'EXECUTE') auth
           FROM pg_proc p WHERE p.oid=to_regprocedure($1)`,
         [keyStatus],
       )
@@ -891,7 +928,6 @@ try {
     app: true,
     mcp: true,
     auth: false,
-    guide: false,
   };
   assert.deepEqual(await keyStatusShape(), keyStatusGrants);
   {
@@ -4604,28 +4640,6 @@ try {
         "INSERT INTO memo_settings(user_id,keep_memos) VALUES($1,false)",
         [alder.userId],
       );
-      // Rows in the writing tables memos replaced, as accounts filed before
-      // memos still hold them until the follow-up drop: no code writes them
-      // now, and erasure must still remove them.
-      for (const statement of [
-        "INSERT INTO instruction_cards(user_id,id) VALUES($1,'legacy-card')",
-        `INSERT INTO instruction_card_versions(user_id,card_id,version,description,body,report,reason,actor_json)
-          VALUES($1,'legacy-card',1,'Fictional','Fictional legacy rule.','cover','Fixture','{}')`,
-        `INSERT INTO accepted_changes(user_id,request_id,operation,request_json,actor_json,transformation_json,affected_json,before_tps,after_tps,before_source,after_source)
-          VALUES($1,gen_random_uuid()::text,'save_memo','{}','{}','{}','[]',repeat('a',64),repeat('b',64),repeat('c',64),repeat('d',64))`,
-        "INSERT INTO sample_kinds(user_id,id,report,label) VALUES($1,'legacy-kind','email','fictional legacy note')",
-        "INSERT INTO samples(user_id,id,client_json) VALUES($1,'legacy-sample','{}')",
-        `INSERT INTO sample_versions(user_id,sample_id,version,report,kind_id,context,body,actor_json,request_id)
-          VALUES($1,'legacy-sample',1,'email','legacy-kind','{"version":1,"summary":"Fictional legacy note"}',$2,'{}',gen_random_uuid()::text)`,
-        "INSERT INTO guide_accounts(user_id) VALUES($1)",
-        "INSERT INTO report_guides(user_id,report) VALUES($1,'email')",
-      ])
-        await owner.query(
-          statement,
-          statement.includes("$2")
-            ? [alder.userId, `Fictional ${alder.marker} legacy sample.`]
-            : [alder.userId],
-        );
       const authCookie = (s: Side) =>
         [...s.cookies]
           .filter(([k, v]) => k.startsWith("auth.meetmilton.com\t") && v)

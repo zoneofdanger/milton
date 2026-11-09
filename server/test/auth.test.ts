@@ -2077,7 +2077,7 @@ test("an unrecognized database failure logs its class and code once, never its m
     // Already typed: no second line.
     databaseFailure(failure);
     // A mapped trigger refusal is an answer, not a failure.
-    databaseFailure({ code: "P0001", message: "sample_version_is_immutable" });
+    databaseFailure({ code: "P0001", message: "save_receipt_is_immutable" });
     expect(logged).toHaveBeenCalledTimes(1);
     const line = String(logged.mock.calls[0]![0]);
     expect(JSON.parse(line)).toEqual({

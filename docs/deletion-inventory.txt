@@ -18,12 +18,6 @@
 
 public.users | deleted | id status | Writing erasure deletes the row; every public table below marked deleted cascades from it.
 public.identities | deleted | provider subject user_id | Cascades from users.
-public.accepted_changes | deleted | actor_json affected_json after_source after_tps before_source before_tps operation request_id request_json transformation_json user_id | Cascades from users.
-public.instruction_cards | deleted | id user_id | Cascades from users.
-public.instruction_card_versions | deleted | actor_json body card_id description details_json reason report user_id | Cascades from instruction_cards.
-public.sample_kinds | deleted | id label report user_id | Cascades from users.
-public.samples | deleted | client_json id user_id | Cascades from users.
-public.sample_versions | deleted | actor_json body context kind_id provenance report request_id retire_reason sample_id search user_id | Cascades from samples.
 public.memos | deleted | audience client_json final first_draft first_draft_state id kind_id medium mode purpose report_id request_id search served_tweak_ids summary tier user_id | Cascades from users; forgetting a memo or "Delete all memos" removes it first.
 public.memo_kinds | deleted | id label user_id | Cascades from users; "Delete all memos" removes them first.
 public.tweaks | deleted | client_json id norm text user_id | Cascades from users; a tweak left with no citations is deleted with the memo that last cited it.
@@ -34,11 +28,8 @@ public.memo_settings | deleted | user_id | Cascades from users.
 public.save_requests | deleted | input_hash request_id result_json source_hash user_id | Cascades from users.
 public.trial_accounts | deleted | stripe_customer_id stripe_subscription_id subscription_status user_id | Cascades from users, after Stripe cancellation.
 public.usage_calls | deleted | tool user_id | Cascades from users.
-public.report_guides | deleted | guide_text lease_token reason report status user_id | Cascades from users.
-public.guide_accounts | deleted | opt_in_reference user_id | Cascades from users.
 public.connection_keys | deleted | generation id incarnation issuer name scope secret_hash subject user_id | Cascades from users.
 public.assistant_disconnects | hidden | client_id provider subject | No foreign key to users: outlives the account so a later account for the same identity stays disconnected.
-public.guide_spend | hidden | account_key id | Content-free spend entries (account_key is a SHA-256 of the account ID) outlive accounts so deletion cannot reset caps.
 public.store_config | not-personal | limits_json | Service limits.
 public.stripe_events | not-personal | id payload_sha256 type | Event ID, type and body hash, never the payload.
 milton_app.session | deleted | binding email generation incarnation issuer sid subject token_hash | Deleted with the writing (server/src/auth-lifecycle.ts).

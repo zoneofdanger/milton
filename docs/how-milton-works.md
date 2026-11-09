@@ -158,7 +158,7 @@ Files: `server/src/mcp.ts`, `server/src/mcp-tools.ts`.
   unexpected-failure step. The SDK's plain-text argument refusals become such bodies,
   `invalid_arguments` with the SDK's text as `message`.
 - Memo codes get their own steps: `request_too_large` resaves the memo with the final alone (`first_draft_missing`); `memos_off` stops saving drafts, saving only writing the person asks to remember; `invalid_kind`, `invalid_tweak`, `invalid_memo` and `line_not_found` reread for a valid id or the exact line; `invalid_report` sends the latest `report_id` or none; `cover_sheet_limit` asks the person what to shorten; `cover_sheet_empty` points them to the TPS page; `tweak_exists`, met only on the TPS page, is reported without retrying.
-- Codes from the old writing tables' triggers (cards and samples) stay in the table as unavailable-now steps; nothing writes those tables, so none can fire.
+- The store's own refusals, a receipt or user id change, are unavailable-now steps; a correct call never meets them.
 - A scope refusal also carries `required_permission`, `read` or `read_write`: what the
   attempted action needed (a save needs `read_write`, anything else `read`), and its
   `next` names that permission.
@@ -456,7 +456,7 @@ Files: `server/drizzle/`, `server/src/store/schema.ts`, `server/src/store/databa
 - The memo tables (0012) check each column's shape: medium, one-line summary, audience and purpose; the first-draft state matching the first draft and mode; non-blank words up to 256 KiB; rounds 0 to 1000; change 0 to 1; the tier; and at most 10 served tweaks, only with a report id. Kind labels are unique per account in any letter case, tweak forms unique per account, and cover sheet versions positive and at most 1,500 characters.
 - Owner file `014-memos-roles.sql` lets MCP insert, read and delete memos and update only their context columns, insert kinds, served reports and cover sheet versions, insert and delete tweaks and citations, and read the Keep memos switch; app reads them, deletes memos, kinds, citations and tweaks, rewords tweaks, appends cover sheet versions and sets the switch. Neither can change a memo's words.
 - Account erasure cascades every memo, kind, tweak, citation, served report, cover sheet version and switch row.
-- The old writing tables (cards, card versions, accepted changes, sample kinds, samples, sample versions and the guide tables) keep their guards and rows, unread, until a follow-up migration drops them.
+- 0013 drops the old writing tables (cards, card versions, accepted changes, sample kinds, samples, sample versions and the guide tables) with their guards and sequence, and deletes every save receipt; owner file `015-drop-guide-roles.sql` drops the guide roles. A replayed memo save then finds the same words and answers `unchanged`.
 - A receipt is written once with its outcome and cannot change.
 - History has no size cap. History rows never shrink short of account deletion, so the
   lifetime cap that refused every save once an account reached it is gone (0030), with

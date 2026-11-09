@@ -168,7 +168,7 @@ export function keysSection(
 
 const backLink = (
   <p>
-    <a href="/assistants#connection-keys">Back to Connected assistants</a>
+    <a href="/assistants#connection-keys">Back to Connected AIs</a>
   </p>
 );
 const methodNotAllowed = () =>

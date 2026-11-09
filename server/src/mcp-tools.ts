@@ -55,7 +55,7 @@ export const reportInput = z.strictObject({
 /** The refusal for a get_report call with no intent, as from a client still
  * holding the schema before intent existed. */
 export const missingIntent =
-  'get_report needs intent: situation, one line on what you are writing, to whom and why (or why you are reading, such as "confirming what is on file"), plus kind_id and relevant context when known; reconnect your assistant if it has no intent field. Nothing was read.';
+  'get_report needs intent: situation, one line on what you are writing, to whom and why (or why you are reading, such as "confirming what is on file"), plus kind_id and relevant context when known; reconnect your AI if it has no intent field. Nothing was read.';
 /** The refusal for a get_report intent that is present but malformed: each
  * limit it broke, and no reconnect hint, since the client has the field. */
 export function malformedIntent(intent: unknown) {

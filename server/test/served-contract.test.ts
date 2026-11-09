@@ -106,6 +106,8 @@ test("setup helps with pasted writing first, preserves optional guidance and ser
     "Do not connect an inbox, request Gmail permissions, bulk import or save unseen text",
     "Setup permission authorizes this conversation only",
     "Offer the standing instruction separately",
+    "where this AI supports standing instructions",
+    "does not guarantee the AI follows the instruction",
     "only after separate consent",
     "Verify an actual successful read",
     "No need to fill all five reports or accumulate rules before drafting",
@@ -448,6 +450,9 @@ test("the refusal, both reminders and the instructions give the one link, true f
     action: "tell_user",
     text: "Tell the person Milton is paused until they subscribe and give message's link once; don't retry, and continue other work.",
   });
+  expect(nextSteps.assistant_required.text).toBe(
+    "Only a connected AI can save; tell the person and don't retry.",
+  );
 });
 
 test("sample contexts are bounded, extensible and complete replacements have explicit clearing semantics", () => {

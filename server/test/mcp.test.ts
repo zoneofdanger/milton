@@ -314,7 +314,7 @@ test("get_report requires an intent: without a well-formed one it refuses, sayin
     // to reconnect, and tell it the tool list changed.
     const missing = await refused({ report_id: "email" });
     expect(missing).toContain(
-      "reconnect your assistant if it has no intent field",
+      "reconnect your AI if it has no intent field",
     );
     expect(missing).toContain('"confirming what is on file"');
     expect(changed).toBe(1);

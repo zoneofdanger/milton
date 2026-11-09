@@ -57,7 +57,7 @@ export const accountDeletion = async (ctx: PageContext): Promise<Response> => {
         <p>
           Your rules, approved samples, report history, receipts and usage
           counters are deleted. Your subscription ends immediately, with no
-          refund. Connected assistants lose access, and your sign-in methods and
+          refund. Connected AIs lose access, and your sign-in methods and
           browser sessions are removed after cleanup finishes.
         </p>
         <p>
@@ -112,7 +112,7 @@ export const accountDeletion = async (ctx: PageContext): Promise<Response> => {
     <>
       <p role="status">
         Your Milton account and sign-in have been deleted. Your writing is
-        erased, your subscription has ended, and connected assistants have lost
+        erased, your subscription has ended, and connected AIs have lost
         access.
       </p>
       <p>

@@ -38,7 +38,7 @@ function billingNote(
   );
   if (status?.status === "expired")
     return banner(
-      "Assistant reads and saves are paused until you subscribe for $5.01/month. Your rules and samples are still here to view and download.",
+      "AI reads and saves are paused until you subscribe for $5.01/month. Your rules and samples are still here to view and download.",
     );
   const days = status?.days_left;
   if (status?.status !== "trial" || days === undefined || days > 7) return null;
@@ -77,18 +77,18 @@ const randomComment = () =>
 export function connectSteps(empty: boolean, mcpUrl: string) {
   return (
     <section class="connect-steps" id="connect" aria-labelledby="connect-h">
-      <h2 id="connect-h">Connect an assistant</h2>
+      <h2 id="connect-h">Connect an AI</h2>
       <ol class="setup-steps">
         <li>
-          <h3>Add Milton in your assistant’s settings.</h3>
+          <h3>Add Milton in your AI’s settings.</h3>
           <p>
             Use this address in its MCP or connector settings, then complete
             sign-in and approve the connection. Availability depends on your
-            assistant and plan.
+            AI and plan.
           </p>
           <p>
             <a href="https://www.meetmilton.com/setup">
-              Setup instructions for your assistant
+              Setup instructions for your AI
             </a>
             . Follow the guide to connect Milton and optionally add a standing
             instruction.
@@ -99,7 +99,7 @@ export function connectSteps(empty: boolean, mcpUrl: string) {
         </li>
         <li>
           <h3>Start the conversation.</h3>
-          <p>Once connected, copy this prompt into your assistant:</p>
+          <p>Once connected, copy this prompt into your AI:</p>
           <blockquote class="setup-copy">
             <p>
               {empty
@@ -239,10 +239,10 @@ function sheet({ docs, email, date, comment }: SheetView) {
           <p class="empty-placeholder">No writing samples on file yet.</p>
           <p>
             <a href="/assistants#connect">Follow the setup steps</a> to connect
-            an assistant, then paste something you wrote and ask it to clean it
+            an AI, then paste something you wrote and ask it to clean it
             up; older examples are optional.
           </p>
-          <p>Once connected, copy this prompt into your assistant:</p>
+          <p>Once connected, copy this prompt into your AI:</p>
           <blockquote class="setup-copy">
             <p>{SETUP_PROMPT}</p>
           </blockquote>
@@ -359,7 +359,7 @@ function current(
       {notice}
       {!view.docs.is_empty && !assistantPaused && (
         <p class="small-note sheet-meta">
-          Give a connected assistant the facts for your next email or DM and ask
+          Give a connected AI the facts for your next email or DM and ask
           it to use what’s on file. You can also approve a writing sample.
         </p>
       )}

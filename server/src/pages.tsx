@@ -33,7 +33,7 @@ export function billingItem(status?: TrialStatus): BillingItem | undefined {
 }
 const links = [
   ["report", "/", "Cover sheet"],
-  ["assistants", "/assistants", "Connected assistants"],
+  ["assistants", "/assistants", "Connected AIs"],
   [null, "/download", "Download TPS.md"],
 ] as const;
 function accountMenu({ csrf, email, billing }: Account) {
@@ -41,7 +41,7 @@ function accountMenu({ csrf, email, billing }: Account) {
   return (
     <div class="header-actions">
       <a class="button header-cta" href="/assistants">
-        Connect an assistant
+        Connect an AI
       </a>
       <button
         type="button"
@@ -78,7 +78,7 @@ function accountMenu({ csrf, email, billing }: Account) {
           </button>
         </form>
         <p class="small-note" id="signout-note">
-          Signing out of this browser does not disconnect your assistants.
+          Signing out of this browser does not disconnect your AIs.
         </p>
         <a class="menu-item" href="/account/security">
           Sign-in and security
@@ -212,7 +212,7 @@ export function navigation(target: string) {
   } catch {
     throw new AuthError(
       "auth_unavailable",
-      "The sign-in destination is unavailable. Restart from your assistant.",
+      "The sign-in destination is unavailable. Restart from your AI.",
       503,
     );
   }

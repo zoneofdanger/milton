@@ -66,7 +66,7 @@ export function createAccessTokenVerifier(
     if (!match || match[1]!.length > 16384)
       throw new AuthError(
         "invalid_token",
-        "Reconnect your assistant to Milton.",
+        "Reconnect your AI to Milton.",
         401,
       );
     try {
@@ -110,7 +110,7 @@ export function createAccessTokenVerifier(
       )
         throw new AuthError(
           "invalid_token",
-          "Reconnect your assistant to Milton.",
+          "Reconnect your AI to Milton.",
           401,
         );
       return {
@@ -141,7 +141,7 @@ export function createAccessTokenVerifier(
       )
         throw new AuthError(
           "invalid_token",
-          "Reconnect your assistant to Milton.",
+          "Reconnect your AI to Milton.",
           401,
         );
       throw new AuthError(

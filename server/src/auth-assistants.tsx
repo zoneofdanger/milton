@@ -75,28 +75,28 @@ export const assistants = async (ctx: PageContext): Promise<Response> => {
     ctx.accountBilling(user),
   );
   return page(
-    "Connected assistants",
+    "Connected AIs",
     <>
       {connectSteps(false, config.resource)}
       <p>
-        Each assistant has the access you chose. Disconnecting ends its current
-        access immediately. To use it again, reconnect from the assistant.
+        Each AI has the access you chose. Disconnecting ends its current
+        access immediately. To use it again, reconnect from the AI.
       </p>
       {pending.map((op) => (
         <section>{retry(op)}</section>
       ))}
       {full && (
         <p>
-          This connection list is incomplete. Disconnect a listed assistant and
+          This connection list is incomplete. Disconnect a listed AI and
           reload; if none is listed, sign-in session cleanup is needed before
-          all assistants can be shown.
+          all AIs can be shown.
         </p>
       )}
       {listed.length === 0 ? (
         <p>
           {full
-            ? "No assistants are shown in this part of the list."
-            : "No assistants are connected."}
+            ? "No AIs are shown in this part of the list."
+            : "No AIs are connected."}
         </p>
       ) : (
         <ul class="assistant-list">

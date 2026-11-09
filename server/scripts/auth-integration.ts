@@ -61,13 +61,6 @@ import { fingerprintKeyCheck } from "../src/auth-admission";
 import { hash } from "../src/auth-oidc";
 import { appActive } from "../src/auth-authority";
 import { checkProductRuntimeRole } from "./check-runtime-role";
-import {
-  guideWorkerRoleAllowed,
-  setGuideEnrollment,
-} from "../src/guides/store";
-import { runGuideWorker } from "../src/guides/worker";
-import { resumeGuides } from "../src/guides/resume";
-import type { GuideProvider } from "../src/guides/provider";
 import { connections, lifecycle } from "../src/auth-lifecycle";
 import { ensureSubscription } from "../src/billing";
 import type { SessionUser } from "../src/auth-session";
@@ -230,11 +223,12 @@ try {
         "utf8",
       ),
     );
-  // 009, 010 and 011: rerunning converges too.
+  // 009, 010, 011 and 014: rerunning converges too.
   for (const file of [
     "009-usage-calls-roles.sql",
     "010-usage-retention-roles.sql",
     "011-test-account-roles.sql",
+    "014-memos-roles.sql",
   ])
     for (let n = 0; n < 2; n++)
       await owner.query(
@@ -691,74 +685,87 @@ try {
   }
   assert(await checkProductRuntimeRole(postgresDatabase(url("app")), "app"));
   assert(await checkProductRuntimeRole(postgresDatabase(url("mcp")), "mcp"));
-  // Sample revisions and guides: app/MCP read, MCP appends, nothing else widens.
+  // Memos (014): exactly the privileges its file grants, and no runtime can
+  // change a memo's words.
+  const memoTables = [
+    "memos",
+    "memo_kinds",
+    "tweaks",
+    "tweak_citations",
+    "served_reports",
+    "cover_sheets",
+    "memo_settings",
+  ];
   const privileges = async (role: string) =>
     (
       await owner.query<{ p: string }>(
-        `SELECT t||':'||p p FROM unnest(ARRAY['samples','sample_versions','guide_accounts','report_guides','guide_spend','guide_budget_lock']) t,
+        `SELECT t||':'||p p FROM unnest($2::text[]) t,
           unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE','TRUNCATE']) p
           WHERE has_table_privilege($1,'public.'||t,p) ORDER BY 1`,
-        [role],
+        [role, memoTables],
       )
     ).rows.map((r) => r.p);
-  const reads = [
-    "guide_accounts:SELECT",
-    "report_guides:SELECT",
-    "sample_versions:SELECT",
-    "samples:SELECT",
-  ];
-  assert.deepEqual(await privileges("milton_app_runtime"), reads);
-  assert.deepEqual(
-    await privileges("milton_mcp_runtime"),
-    [...reads, "sample_versions:INSERT", "samples:INSERT"].sort(),
-  );
-  assert.deepEqual(await privileges("milton_auth_runtime"), []);
-  const guideDb = postgresDatabase(url("guide"));
-  assert.equal(await guideWorkerRoleAllowed(guideDb), true);
-  assert.equal(
-    await guideWorkerRoleAllowed(postgresDatabase(url("mcp"))),
-    false,
-  );
-  for (const statement of [
-    "SELECT * FROM public.identities",
-    "SELECT * FROM milton_auth.session",
-    "SELECT * FROM milton_auth.jwks",
-    "SELECT * FROM milton_app.session",
-    "SELECT * FROM neon_auth.retained",
-  ])
-    await assert.rejects(
-      guideDb.query(sql.raw(statement)),
-      (e) => e instanceof StoreError,
-    );
-  const idle: GuideProvider = {
-    count: () => assert.fail("no enrolled guide work"),
-    generate: () => assert.fail("no enrolled guide work"),
-  };
-  assert.equal(await runGuideWorker(guideDb, idle), 0);
-  await owner.query("GRANT milton_mcp_runtime TO milton_guide_runtime");
-  assert.equal(await guideWorkerRoleAllowed(guideDb), false);
-  await owner.query("REVOKE milton_mcp_runtime FROM milton_guide_runtime");
-  // Resuming the parked pilot (deploy/guides.md) is owner-only: CREATE TRIGGER
-  // needs ownership of sample_versions, so every runtime login is refused and
-  // changes nothing. The owner restores the trigger; it is dropped again so the
-  // rest runs parked, as production does.
-  const guideTrigger = async () =>
+  const columnUpdates = async (role: string) =>
     (
-      await owner.query(
-        "SELECT count(*)::int n FROM pg_trigger WHERE tgname='report_guide_source'",
+      await owner.query<{ c: string }>(
+        `SELECT t||'.'||a.attname c FROM unnest($2::text[]) t
+          JOIN pg_attribute a ON a.attrelid=('public.'||t)::regclass AND a.attnum>0 AND NOT a.attisdropped
+          WHERE has_column_privilege($1,'public.'||t,a.attname,'UPDATE') ORDER BY 1`,
+        [role, memoTables],
       )
-    ).rows[0].n;
-  assert.equal(await guideTrigger(), 0);
-  for (const service of ["app", "mcp", "guide", "auth"])
-    await assert.rejects(
-      resumeGuides(postgresDatabase(url(service))),
-      (e) => e instanceof StoreError,
-      service,
-    );
-  assert.equal(await guideTrigger(), 0);
-  await resumeGuides(ownerDb);
-  assert.equal(await guideTrigger(), 1);
-  await owner.query("DROP TRIGGER report_guide_source ON sample_versions");
+    ).rows.map((r) => r.c);
+  assert.deepEqual(await privileges("milton_mcp_runtime"), [
+    "cover_sheets:INSERT",
+    "cover_sheets:SELECT",
+    "memo_kinds:INSERT",
+    "memo_kinds:SELECT",
+    "memo_settings:SELECT",
+    "memos:DELETE",
+    "memos:INSERT",
+    "memos:SELECT",
+    "served_reports:INSERT",
+    "served_reports:SELECT",
+    "tweak_citations:DELETE",
+    "tweak_citations:INSERT",
+    "tweak_citations:SELECT",
+    "tweaks:DELETE",
+    "tweaks:INSERT",
+    "tweaks:SELECT",
+  ]);
+  assert.deepEqual(await columnUpdates("milton_mcp_runtime"), [
+    "memos.audience",
+    "memos.context_updated_at",
+    "memos.kind_id",
+    "memos.medium",
+    "memos.purpose",
+    "memos.summary",
+  ]);
+  assert.deepEqual(await privileges("milton_app_runtime"), [
+    "cover_sheets:INSERT",
+    "cover_sheets:SELECT",
+    "memo_kinds:DELETE",
+    "memo_kinds:SELECT",
+    "memo_settings:INSERT",
+    "memo_settings:SELECT",
+    "memos:DELETE",
+    "memos:SELECT",
+    "tweak_citations:DELETE",
+    "tweak_citations:SELECT",
+    "tweaks:DELETE",
+    "tweaks:SELECT",
+  ]);
+  assert.deepEqual(await columnUpdates("milton_app_runtime"), [
+    "memo_settings.keep_memos",
+    "memo_settings.updated_at",
+    "tweaks.norm",
+    "tweaks.text",
+  ]);
+  for (const role of [
+    "milton_auth_runtime",
+    "milton_guide_runtime",
+    "milton_runtime",
+  ])
+    assert.deepEqual(await privileges(role), [], role);
   // Connection keys (006): app creates, lists and revokes without reading a
   // hash; MCP reads and records last use only; auth and the guide get nothing.
   const keyPrivileges = async (role: string) =>
@@ -1627,7 +1634,7 @@ try {
   stage = "MCP tools/list";
   const list = await rpc(grant.access_token, "tools/list");
   assert.equal(list.status, 200, "actual native JWT profile and MCP role");
-  assert.equal((await result(list)).result.tools?.length, 4);
+  assert.equal((await result(list)).result.tools?.length, 3);
   stage = "MCP cover sheet";
   const read = await result(
     await rpc(grant.access_token, "tools/call", {
@@ -1637,33 +1644,65 @@ try {
   );
   assert.equal(read.result.isError, undefined);
   const cover = JSON.parse(read.result.content![0]!.text) as {
-    version: string;
+    version: number;
   };
-  stage = "MCP save";
-  const save = await result(
+  stage = "MCP report";
+  const served = await result(
     await rpc(grant.access_token, "tools/call", {
-      name: "create_memo",
+      name: "get_report",
       arguments: {
-        text: "Keep fictional measurements explicit.",
-        rules: [
-          { report: "cover", text: "Keep fictional measurements explicit." },
-        ],
-        sample: {
-          report: "email",
-          new_kind: "fictional note",
-          context: { version: 1, summary: "Fictional pickup note" },
-          text: "Collect the fictional trays on Saturday.",
+        intent: {
+          situation: "arranging a fictional pickup",
+          medium: "email",
+          audience: "a neighbor",
+          purpose: "arrange a pickup",
         },
-        expected_version: cover.version,
-        request_id: crypto.randomUUID(),
       },
     }),
   );
-  assert.equal(
-    save.result.isError,
-    undefined,
-    "real-role model-free writing save",
-  );
+  assert.equal(served.result.isError, undefined, "real-role report read");
+  const reportId = (
+    JSON.parse(served.result.content![0]!.text) as { report_id: string }
+  ).report_id;
+  stage = "MCP save";
+  // A memo with a new kind and a tweak, citing the report it was drafted
+  // from, then a cover sheet line: every memo table the MCP role writes.
+  for (const change of [
+    {
+      memo: {
+        final: "Collect the fictional trays on Saturday.",
+        first_draft: "Hi! Hope you're well. Collect the fictional trays.",
+        mode: "draft",
+        rounds: 1,
+        new_kind: "fictional note",
+        tweaks: [{ text: "pickup notes: no warm-up opener" }],
+        context: { summary: "Fictional pickup note", medium: "email" },
+      },
+      report_id: reportId,
+    },
+    {
+      cover_sheet: {
+        add: "Keep fictional measurements explicit.",
+        expected_version: cover.version,
+      },
+    },
+  ]) {
+    const save = await result(
+      await rpc(grant.access_token, "tools/call", {
+        name: "create_memo",
+        arguments: { ...change, request_id: crypto.randomUUID() },
+      }),
+    );
+    assert.equal(
+      save.result.isError,
+      undefined,
+      "real-role model-free memo save",
+    );
+    assert.equal(
+      (JSON.parse(save.result.content![0]!.text) as { status: string }).status,
+      "saved",
+    );
+  }
   stage = "MCP usage alongside the work";
   // As the real MCP role: each admitted call appended one row (drained here
   // only so a slow first connection cannot flake this check), and the role
@@ -1674,7 +1713,7 @@ try {
   ).rows as { user_id: string; tool: string }[];
   assert.deepEqual(
     usage.map((r) => r.tool),
-    ["get_cover_sheet", "create_memo"],
+    ["get_cover_sheet", "get_report", "create_memo", "create_memo"],
   );
   const usageUser = usage[0]!.user_id;
   for (const statement of [
@@ -1877,7 +1916,6 @@ try {
       }),
       { issuer: "fixture", clientId: "fictional-saver" },
     );
-    const version = (await saver.readTpsReport()).version;
     const deletion = await owner.connect();
     let saved: unknown, lockedA: unknown, usageSettled: unknown;
     let landedDuringSave: string[] = [],
@@ -1890,12 +1928,11 @@ try {
       pauseSave = true;
       const saving = saver
         .saveMemo({
-          text: "Keep fictional measurements explicit.",
-          rules: [
-            { report: "cover", text: "Keep fictional measurements explicit." },
-          ],
           request_id: randomUUID(),
-          expected_version: version,
+          cover_sheet: {
+            add: "Keep fictional measurements explicit.",
+            expected_version: 0,
+          },
         })
         .then((outcome) => outcome.status);
       await saveLocked;
@@ -1959,7 +1996,7 @@ try {
   );
   const roList = await rpc(readGrant.access_token, "tools/list");
   assert.equal(roList.status, 200);
-  assert.equal((await result(roList)).result.tools?.length, 3);
+  assert.equal((await result(roList)).result.tools?.length, 2);
   assert.equal(
     (
       await rpc(readGrant.access_token, "tools/call", {
@@ -1992,7 +2029,7 @@ try {
     200,
   );
   pass(
-    "actual native controlled code/refresh grant reaches scoped product MCP: four/three tools and model-free save",
+    "actual native controlled code/refresh grant reaches scoped product MCP: three/two tools, a report and model-free memo and cover sheet saves",
   );
   // Connection keys against real native authority (native 007): created through
   // the app from a fresh session, checked by the real MCP role on every call.
@@ -3518,12 +3555,12 @@ try {
   const footprint = async () =>
     (
       await owner.query(
-        `select (select count(*) from samples where user_id=$1)::int samples,
-          (select count(*) from sample_versions where user_id=$1)::int versions,
-          (select count(*) from sample_kinds where user_id=$1)::int kinds,
+        `select (select count(*) from memos where user_id=$1)::int memos,
+          (select count(*) from memo_kinds where user_id=$1)::int kinds,
+          (select count(*) from tweaks where user_id=$1)::int tweaks,
+          (select count(*) from cover_sheets where user_id=$1)::int covers,
+          (select count(*) from served_reports where user_id=$1)::int reports,
           (select count(*) from save_requests where user_id=$1)::int receipts,
-          (select count(*) from accepted_changes where user_id=$1)::int changes,
-          (select count(*) from instruction_cards where user_id=$1)::int cards,
           (select count(*) from usage_calls where user_id=$1)::int usage`,
         [provisioned.userId],
       )
@@ -3549,14 +3586,16 @@ try {
     }
     return grew(counted, await footprint());
   };
+  // A run leaves no memo behind: it saves one and forgets it. Its receipts
+  // (save, forget) and served-report records (three reads) stay.
   const perRun = {
-    samples: 1,
-    versions: 3,
+    memos: 0,
     kinds: 0,
-    receipts: 3,
-    changes: 3,
-    cards: 0,
-    usage: 11,
+    tweaks: 0,
+    covers: 0,
+    reports: 3,
+    receipts: 2,
+    usage: 8,
   };
   // First run: the kind is made once; every later run reuses it.
   assert.deepEqual(await check(), { ...perRun, kinds: 1 });
@@ -3568,13 +3607,11 @@ try {
       "key_owner",
       "mcp_connect",
       "safety_gate",
-      "retire_leftovers",
+      "forget_leftovers",
       "baseline",
-      "save_sample",
+      "save_memo",
       "fresh_read",
-      "revise_sample",
-      "fresh_read_revision",
-      "retire_sample",
+      "forget_memo",
       "cleanup",
       "done",
     ].map((step) => [step, true]),
@@ -3596,9 +3633,9 @@ try {
     !printed.includes(values.E2E_PASSWORD!) &&
       !printed.includes(values.E2E_CONNECTION_KEY!.slice(26)) &&
       !printed.includes("tide table"),
-    "lines carry no password, key or sample body",
+    "lines carry no password, key or memo text",
   );
-  // A crashed run's marked leftover is retired first and reported, and a key
+  // A crashed run's marked leftover is forgotten first and reported, and a key
   // under 30 days from expiry warns without failing.
   const testKeyCall = async (name: string, args: object) =>
     JSON.parse(
@@ -3618,26 +3655,26 @@ try {
       (
         await testKeyCall("create_memo", {
           request_id: randomUUID(),
-          expected_version: (await testKeyCall("get_cover_sheet", {})).version,
           ...args,
         })
       ).status,
       "saved",
     );
   await testSave({
-    text: "Fictional crashed-run leftover.",
-    sample: {
-      report: "document",
+    memo: {
+      final: "Fictional leftover the crashed run saved.",
+      context: {
+        summary: "Milton e2e check, run crashed0",
+        medium: "document",
+      },
       new_kind: "e2e check",
-      context: { version: 1, summary: "Milton e2e check, run crashed0" },
-      text: "Fictional leftover the crashed run filed.",
     },
   });
   await owner.query(
     "update connection_keys set expires_at=now()+interval '20 days' where user_id=$1",
     [provisioned.userId],
   );
-  assert.equal((await check()).versions, 4, "leftover retired, then the run");
+  assert.equal((await check()).memos, -1, "leftover forgotten, then the run");
   const owned = checkLines.find((l) => l.step === "key_owner")!;
   assert.deepEqual(
     [owned.severity, owned.warning, owned.key_days_left],
@@ -3645,7 +3682,7 @@ try {
   );
   assert.equal(checkLines.find((l) => l.step === "safety_gate")!.leftovers, 1);
   assert.equal(
-    checkLines.find((l) => l.step === "retire_leftovers")!.retired,
+    checkLines.find((l) => l.step === "forget_leftovers")!.forgotten,
     1,
   );
   assert.equal(checkLines.at(-1)!.step, "done");
@@ -3687,10 +3724,10 @@ try {
     [0, foreignBefore],
     "a foreign key makes no MCP request and is never touched",
   );
-  // Foreign data (a rule nobody marked) refuses before any write.
+  // Foreign data (a cover sheet line nobody marked) refuses before any save;
+  // only the gate's own report read is recorded.
   await testSave({
-    text: "Fictional foreign rule.",
-    rules: [{ report: "cover", text: "Fictional foreign rule." }],
+    cover_sheet: { add: "Fictional foreign line.", expected_version: 0 },
   });
   const held = await footprint();
   await assert.rejects(
@@ -3699,8 +3736,8 @@ try {
   );
   assert.deepEqual(
     { ...grew(held, await footprint()), usage: 0 },
-    { ...perRun, samples: 0, versions: 0, receipts: 0, changes: 0, usage: 0 },
-    "refused without writing",
+    { ...perRun, reports: 1, receipts: 0, usage: 0 },
+    "refused without saving",
   );
   assert.deepEqual(checkLines.at(-1), {
     ...checkLines.at(-1),
@@ -3710,7 +3747,7 @@ try {
     error: "account_holds_foreign_data",
   });
   pass(
-    "e2e check: browser sign-in, MCP key, safety gate, save, fresh reads, revision, retirement and restored baseline; bounded per-run footprint; leftovers retired; expiring key warns; foreign data refused without writing",
+    "e2e check: browser sign-in, MCP key, safety gate, a marked memo saved, read fresh and forgotten, restored baseline; bounded per-run footprint; leftovers forgotten; expiring key warns; foreign data refused without saving",
   );
   stage = "test account exempt from trials and billing";
   // Trials stay on. The test account's access never depends on a trial: repeated
@@ -3743,8 +3780,10 @@ try {
     for (let n = 0; n < 3; n++) await signedIn();
     assert.deepEqual(await trialRow(), []);
     await testSave({
-      text: "Fictional rule after 31 days.",
-      rules: [{ report: "cover", text: "Fictional rule after 31 days." }],
+      memo: {
+        final: "Fictional memo after 31 days.",
+        context: { summary: "Fictional note after 31 days", medium: "chat" },
+      },
     });
     await owner.query(
       "insert into trial_accounts(user_id,started_at) values($1,now()-interval '31 days')",
@@ -3757,10 +3796,13 @@ try {
       [testUser],
     );
     await testSave({
-      text: "Fictional rule after an ended status.",
-      rules: [
-        { report: "cover", text: "Fictional rule after an ended status." },
-      ],
+      memo: {
+        final: "Fictional memo after an ended status.",
+        context: {
+          summary: "Fictional note after an ended status",
+          medium: "chat",
+        },
+      },
     });
     await owner.query(
       "update trial_accounts set subscription_status='trialing',trial_end=now()+interval '12 hours' where user_id=$1",
@@ -3994,12 +4036,15 @@ try {
       });
       syncBuiltinESMExports();
     };
-    const intent = { situation: "confirming what is on file" };
-    const reportIds = ["email", "chat", "post", "document", "speech"] as const;
+    const intent = {
+      situation: "declining a fictional vendor's meeting request",
+      medium: "email",
+      audience: "a vendor",
+      purpose: "decline",
+    } as const;
     const surfaceNames = [
       "get_cover_sheet",
-      "list_reports",
-      ...reportIds.map((id) => `get_report ${id}` as const),
+      "get_report",
       "download",
       "web",
     ] as const;
@@ -4136,103 +4181,138 @@ try {
     type Side = typeof alder | typeof birch;
     const both = [alder, birch];
     const other = (s: Side) => (s === alder ? birch : alder);
+    // The latest report each account was served, by its report_id.
+    const lastReport = new Map<Side, string>();
     const surfaces = async (s: Side): Promise<Surfaces> => {
+      const { report_id, ...report } = JSON.parse(
+        await readTool(s.key, "get_report", { intent }),
+      ) as { report_id: string };
+      lastReport.set(s, report_id);
       const seen = {
         get_cover_sheet: await readTool(s.key, "get_cover_sheet"),
-        list_reports: await readTool(s.key, "list_reports"),
+        // Every read is served under a fresh report_id; the rest is what it
+        // served.
+        get_report: JSON.stringify(report),
       } as Surfaces;
-      for (const report_id of reportIds)
-        seen[`get_report ${report_id}`] = await readTool(s.key, "get_report", {
-          report_id,
-          intent,
-        });
       const download = await s.browser.go(PRODUCTION.app + "/download");
       assert.equal(download.status, 200, "TPS.md download");
       seen.download = await download.text();
       const web = await s.browser.follow(PRODUCTION.app + "/tps-report");
-      assert.equal(web.status, 200, "web report");
+      assert.equal(web.status, 200, "web TPS page");
       seen.web = web.html;
       return seen;
     };
-    // What the assistant surfaces and the download serve, byte for byte (the
-    // web report also prints a random joke).
+    // What the AI surfaces and the download serve, byte for byte (the web
+    // page also prints a random joke).
     const served = (seen: Surfaces) =>
       JSON.stringify(
         surfaceNames.filter((s) => s !== "web").map((s) => seen[s]),
       );
-    const status = (text: string) => {
-      try {
-        return (JSON.parse(text) as { status?: string }).status;
-      } catch {
-        return undefined;
-      }
+    type Outcome = {
+      status?: string;
+      error?: string;
+      memo?: {
+        memo_id: string;
+        kind_id?: string;
+        tweaks: { tweak_id: string }[];
+      };
     };
-    const saveAs = async (s: Side, args: object) =>
-      status(
+    const save = async (s: Side, args: object) =>
+      JSON.parse(
         (
           await callTool(s.key, "create_memo", {
             request_id: randomUUID(),
-            expected_version: (
-              JSON.parse(await readTool(s.key, "get_cover_sheet")) as {
-                version: string;
-              }
-            ).version,
             ...args,
           })
         ).text,
-      );
-    const cover: Surface[] = ["get_cover_sheet", "download", "web"];
-    const report: Surface[] = [
-      "get_report email",
-      "list_reports",
+      ) as Outcome;
+    const coverLine = async (
+      s: Side,
+      change: { add: string } | { remove: string },
+    ) =>
+      save(s, {
+        cover_sheet: {
+          ...change,
+          expected_version: (
+            JSON.parse(await readTool(s.key, "get_cover_sheet")) as {
+              version: number;
+            }
+          ).version,
+        },
+      });
+    // Where each kind of filed text shows: a cover sheet line everywhere; a
+    // final in the report and TPS.md; a memo's summary and its tweaks also on
+    // the web page.
+    const cover: Surface[] = [
+      "get_cover_sheet",
+      "get_report",
       "download",
       "web",
     ];
-    const gone = (m: string) => `Close fictional emails with ${m} email gone.`;
-    const sampleOne = (m: string, age: "old" | "new") => ({
-      summary: `${m} summary ${age}`,
-      text: `Fictional ${m} sample ${age}: the ladder hangs in the barn.`,
-    });
-    const sampleTwo = (m: string) => ({
-      summary: `${m} summary two`,
-      text: `Fictional ${m} sample two: the gate sticks after rain.`,
+    const final: Surface[] = ["get_report", "download"];
+    const listed: Surface[] = ["get_report", "download", "web"];
+    const line = (m: string, age: "old" | "new") =>
+      `Sign fictional notes with ${m} cover ${age}.`;
+    const drafted = (
+      m: string,
+      n: "one" | "two",
+      body: string,
+      tweak: string,
+    ) => ({
+      memo: {
+        final: `Fictional ${m} memo ${n}: ${body}`,
+        first_draft: `Hi! Hope you are well. Fictional ${m} draft ${n}.`,
+        mode: "draft",
+        rounds: 1,
+        new_kind: "fictional note",
+        tweaks: [{ text: `${m} tweak ${n}: ${tweak}` }],
+        context: {
+          summary: `${m} summary ${n === "one" ? "old" : "two"}`,
+          medium: "email",
+          audience: "a vendor",
+          purpose: "decline",
+        },
+      },
     });
     // Each filed text and the surfaces that must show it.
     const filed = (m: string): [string, Surface[]][] => [
       [`${m} cover old`, cover],
-      [`${m} email old`, report],
-      [`${m} email gone`, report],
-      [`${m} sample old`, report],
-      [`${m} summary old`, report],
-      [`${m} sample two`, report],
-      [`${m} summary two`, report],
+      [`${m} memo one`, final],
+      [`${m} summary old`, listed],
+      [`${m} tweak one`, listed],
+      [`${m} memo two`, final],
+      [`${m} summary two`, listed],
+      [`${m} tweak two`, listed],
     ];
+    // After a line replaced, memo one's context corrected and memo two
+    // forgotten (with the tweak only it cited).
     const edited = (m: string): [string, Surface[]][] => [
       [`${m} cover new`, cover],
-      [`${m} email new`, report],
-      [`${m} sample new`, report],
-      [`${m} summary new`, report],
+      [`${m} memo one`, final],
+      [`${m} summary new`, listed],
+      [`${m} tweak one`, listed],
+    ];
+    const removed = (m: string) => [
+      `${m} cover old`,
+      `${m} summary old`,
+      `${m} memo two`,
+      `${m} summary two`,
+      `${m} tweak two`,
     ];
     // Every miss at once, as surface and text, so a failure names them all.
-    // Each report's text belongs to that report alone: get_report for any
-    // other report never shows it.
     const shows = (
       seen: Surfaces,
       texts: [string, Surface[]][],
       when: string,
     ) =>
       assert.deepEqual(
-        texts.flatMap(([text, where]) => [
-          ...where
+        texts.flatMap(([text, where]) =>
+          where
             .filter((s) => !seen[s].includes(text))
             .map((s) => `missing from ${s}: ${text}`),
-          ...reportIds
-            .map((id) => `get_report ${id}` as const)
-            .filter((s) => !where.includes(s) && seen[s].includes(text))
-            .map((s) => `misplaced in ${s}: ${text}`),
-        ]),
+        ),
         [],
-        `${when}: each surface shows the text it should, and only there`,
+        `${when}: each surface shows the text it should`,
       );
     const never = (seen: Surfaces, texts: string[], when: string) =>
       assert.deepEqual(
@@ -4254,152 +4334,135 @@ try {
         when + " isolation",
       );
     };
+    const ids = new Map<
+      Side,
+      { one: string; two: string; kind: string; tweak: string }
+    >();
     for (const s of both) {
       const m = s.marker;
       assert.equal(
-        await saveAs(s, {
-          text: "File fictional propagation rules and a sample.",
-          rules: [
-            {
-              report: "cover",
-              text: `Sign fictional notes with ${m} cover old.`,
-            },
-            {
-              report: "email",
-              text: `Open fictional emails with ${m} email old.`,
-            },
-            { report: "email", text: gone(m) },
-          ],
-          sample: {
-            report: "email",
-            new_kind: "fictional note",
-            context: { version: 1, summary: sampleOne(m, "old").summary },
-            text: sampleOne(m, "old").text,
-          },
-        }),
+        (await coverLine(s, { add: line(m, "old") })).status,
         "saved",
       );
-      assert.equal(
-        await saveAs(s, {
-          text: "File a second fictional sample.",
-          sample: {
-            report: "email",
-            new_kind: "fictional note",
-            context: { version: 1, summary: sampleTwo(m).summary },
-            text: sampleTwo(m).text,
-          },
-        }),
-        "saved",
+      const one = await save(
+        s,
+        drafted(m, "one", "the ladder hangs in the barn.", "no warm-up opener"),
       );
+      const two = await save(
+        s,
+        drafted(m, "two", "the gate sticks after rain.", "name the day"),
+      );
+      assert.deepEqual([one.status, two.status], ["saved", "saved"]);
+      ids.set(s, {
+        one: one.memo!.memo_id,
+        two: two.memo!.memo_id,
+        kind: one.memo!.kind_id!,
+        tweak: one.memo!.tweaks[0]!.tweak_id,
+      });
     }
     for (const s of both) {
       const seen = await surfaces(s);
       shows(seen, filed(s.marker), "filed");
       isolated(s, seen, "filed");
     }
-    const ids = new Map<Side, { one: string; two: string; kind: string }>();
     for (const s of both) {
       const m = s.marker;
-      const email = JSON.parse(
-        await readTool(s.key, "get_report", { report_id: "email", intent }),
-      ) as {
-        samples: {
-          id: string;
-          kind_id: string;
-          context: { summary: string };
-        }[];
-      };
-      const find = (summary: string) =>
-        email.samples.find((x) => x.context.summary === summary)!;
-      const one = find(sampleOne(m, "old").summary),
-        two = find(sampleTwo(m).summary);
-      ids.set(s, { one: one.id, two: two.id, kind: one.kind_id });
-      assert.equal(
-        await saveAs(s, {
-          text: "Correct the fictional rules exactly.",
-          exact_edits: [
-            { before: `${m} cover old`, after: `${m} cover new` },
-            { before: `${m} email old`, after: `${m} email new` },
-            { before: gone(m), after: "" },
-          ],
-        }),
-        "saved",
-      );
-      assert.equal(
-        await saveAs(s, {
-          text: "Revise one fictional sample and retire the other.",
-          sample: {
-            report: "email",
-            kind_id: one.kind_id,
-            sample_id: one.id,
-            context: { version: 1, summary: sampleOne(m, "new").summary },
-            text: sampleOne(m, "new").text,
+      const own = ids.get(s)!;
+      for (const outcome of [
+        await coverLine(s, { add: line(m, "new") }),
+        await coverLine(s, { remove: line(m, "old") }),
+        await save(s, {
+          memo_context: {
+            memo_id: own.one,
+            context: {
+              summary: `${m} summary new`,
+              medium: "email",
+              audience: "a vendor",
+              purpose: "decline",
+            },
           },
-          retire_samples: [two.id],
         }),
-        "saved",
-      );
+        await save(s, { forget_memos: [own.two] }),
+      ])
+        assert.equal(outcome.status, "saved");
     }
     const settled = new Map<Side, Surfaces>();
     for (const s of both) {
       const seen = await surfaces(s);
       shows(seen, edited(s.marker), "edited");
-      never(
-        seen,
-        filed(s.marker).map(([text]) => text),
-        "edited",
-      );
+      never(seen, removed(s.marker), "edited");
       isolated(s, seen, "edited");
       settled.set(s, seen);
     }
     pass(
-      "over loopback HTTP to the production app, auth and MCP wrappers: an exact edit, a rule removal, a sample revision and a retirement reach get_cover_sheet, list_reports, get_report (each report), the TPS.md download and the web report: the old text is gone from all, the new text shows in its own report only",
+      "over loopback HTTP to the production app, auth and MCP wrappers: a cover sheet line replaced, a memo's context corrected and a memo forgotten reach get_cover_sheet, get_report, the TPS.md download and the web TPS page: the old text is gone from all, the new text shows where it belongs",
     );
     stage = "isolation: one account's key and session cannot address another's";
     {
-      // Alder's key aims at Birch's rule text, sample and kind; Alder's session
-      // names Birch's account. Nothing lands, nothing leaks, and both accounts
-      // still serve exactly what they did.
+      // Alder's key aims at Birch's memo, kind, tweak, report and cover sheet
+      // line; Alder's session names Birch's account and memo. Nothing lands,
+      // nothing leaks, and both accounts still serve exactly what they did.
       const target = ids.get(birch)!;
-      for (const args of [
-        {
-          text: "Edit a rule on file elsewhere.",
-          exact_edits: [
-            {
-              before: `${birch.marker} cover new`,
-              after: "Fictional takeover.",
+      const context = {
+        summary: "Fictional takeover",
+        medium: "email",
+      };
+      const takeover = { final: "Fictional takeover.", context };
+      for (const [args, error] of [
+        [{ memo_context: { memo_id: target.one, context } }, "invalid_memo"],
+        [{ forget_memos: [target.one] }, "invalid_memo"],
+        [{ memo: { ...takeover, kind_id: target.kind } }, "invalid_kind"],
+        [
+          {
+            memo: {
+              ...takeover,
+              first_draft: "Fictional takeover draft.",
+              mode: "draft",
+              rounds: 1,
+              tweaks: [{ tweak_id: target.tweak }],
             },
-          ],
-        },
-        {
-          text: "Revise a sample on file elsewhere.",
-          sample: {
-            report: "email",
-            kind_id: target.kind,
-            sample_id: target.one,
-            context: { version: 1, summary: "Fictional takeover" },
-            text: "Fictional takeover.",
           },
-        },
-        {
-          text: "Retire a sample on file elsewhere.",
-          retire_samples: [target.one],
-        },
-      ])
-        assert.notEqual(
-          await saveAs(alder, args),
-          "saved",
-          "a save never reaches another account's rules or samples",
+          "invalid_tweak",
+        ],
+        [
+          { memo: takeover, report_id: lastReport.get(birch)! },
+          "invalid_report",
+        ],
+      ] as const) {
+        const outcome = await save(alder, args);
+        assert.deepEqual(
+          [outcome.status, outcome.error],
+          ["failed", error],
+          "a save never reaches another account's memos, kinds, tweaks or reports",
         );
+      }
+      const foreignLine = await coverLine(alder, {
+        remove: line(birch.marker, "new"),
+      });
+      assert.deepEqual(
+        [foreignLine.status, foreignLine.error],
+        ["failed", "line_not_found"],
+        "a save never removes another account's cover sheet line",
+      );
       const aimed = await callTool(alder.key, "get_report", {
-        report_id: "email",
         intent: { ...intent, kind_id: target.kind },
       });
+      assert.deepEqual(
+        [aimed.isError, (JSON.parse(aimed.text) as Outcome).error],
+        [true, "invalid_kind"],
+        "another account's kind is refused on read",
+      );
       assert(
         !aimed.text.includes(birch.marker),
         "another account's kind serves nothing of it",
       );
-      for (const path of ["/download", "/tps-report"]) {
+      const memoPath = `/tps/memo/${target.one}`;
+      const own = await birch.browser.follow(PRODUCTION.app + memoPath);
+      assert(
+        own.status === 200 && own.html.includes(`${birch.marker} memo one`),
+        "the memo page shows its own account's memo",
+      );
+      for (const path of ["/download", "/tps-report", memoPath]) {
         const page = await alder.browser.follow(
           `${PRODUCTION.app}${path}?user=${birch.userId}&subject=${birch.subject}`,
         );
@@ -4419,7 +4482,7 @@ try {
       }
     }
     pass(
-      "two accounts' reads (four tools, TPS.md, web) never show each other's markers, ids or emails, before or after edits and retirements; one account's key cannot edit, revise, retire or read another's rules, samples or kind, and its session cannot name another account",
+      "two accounts' reads (three tools, TPS.md, web) never show each other's markers, ids or emails, before or after a forget and a context edit; one account's key cannot correct, forget, cite or read another's memos, kind, tweaks, report or cover sheet, and its session cannot name another account or open its memo",
     );
     stage = "account deletion leaves nothing of the account";
     {
@@ -4508,13 +4571,35 @@ try {
             .filter(([, found]) => Object.keys(found).length),
         );
       };
-      // What these flows leave empty: the operator's guide enrollment; an
-      // assistant connected through native OAuth (its client, consent and
-      // tokens); a password-reset mail (its mail job and reset proof).
-      await setGuideEnrollment(ownerDb, alder.userId, {
-        enabled: true,
-        optInReference: "fictional-propagation-consent",
-      });
+      // What these flows leave empty: the Keep memos switch; an AI connected
+      // through native OAuth (its client, consent and tokens); a
+      // password-reset mail (its mail job and reset proof).
+      await owner.query(
+        "INSERT INTO memo_settings(user_id,keep_memos) VALUES($1,false)",
+        [alder.userId],
+      );
+      // Rows in the writing tables memos replaced, as accounts filed before
+      // memos still hold them until the follow-up drop: no code writes them
+      // now, and erasure must still remove them.
+      for (const statement of [
+        "INSERT INTO instruction_cards(user_id,id) VALUES($1,'legacy-card')",
+        `INSERT INTO instruction_card_versions(user_id,card_id,version,description,body,report,reason,actor_json)
+          VALUES($1,'legacy-card',1,'Fictional','Fictional legacy rule.','cover','Fixture','{}')`,
+        `INSERT INTO accepted_changes(user_id,request_id,operation,request_json,actor_json,transformation_json,affected_json,before_tps,after_tps,before_source,after_source)
+          VALUES($1,gen_random_uuid()::text,'save_memo','{}','{}','{}','[]',repeat('a',64),repeat('b',64),repeat('c',64),repeat('d',64))`,
+        "INSERT INTO sample_kinds(user_id,id,report,label) VALUES($1,'legacy-kind','email','fictional legacy note')",
+        "INSERT INTO samples(user_id,id,client_json) VALUES($1,'legacy-sample','{}')",
+        `INSERT INTO sample_versions(user_id,sample_id,version,report,kind_id,context,body,actor_json,request_id)
+          VALUES($1,'legacy-sample',1,'email','legacy-kind','{"version":1,"summary":"Fictional legacy note"}',$2,'{}',gen_random_uuid()::text)`,
+        "INSERT INTO guide_accounts(user_id) VALUES($1)",
+        "INSERT INTO report_guides(user_id,report) VALUES($1,'email')",
+      ])
+        await owner.query(
+          statement,
+          statement.includes("$2")
+            ? [alder.userId, `Fictional ${alder.marker} legacy sample.`]
+            : [alder.userId],
+        );
       const authCookie = (s: Side) =>
         [...s.cookies]
           .filter(([k, v]) => k.startsWith("auth.meetmilton.com\t") && v)
@@ -4738,10 +4823,10 @@ try {
         ).status;
       assert.equal(await userInfo(), 200, "the assistant's token works");
       const assistantTools = () => toolsWith(grant.access_token);
-      assert.equal(await assistantTools(), 4, "the assistant reaches MCP");
+      assert.equal(await assistantTools(), 3, "the assistant reaches MCP");
       assert.equal(
         await toolsWith(birchGrant.access_token),
-        4,
+        3,
         "Birch's assistant reaches MCP",
       );
       assert.equal(
@@ -4781,7 +4866,7 @@ try {
         "every account table and column holds rows of it before deletion, so the checks below are not vacuous",
       );
       assert(
-        found["public.sample_versions.body"]?.marker &&
+        found["public.memos.final"]?.marker &&
           found['milton_auth."user".email']?.email,
         "before deletion the scan finds the account's text and email",
       );
@@ -4984,7 +5069,7 @@ try {
       // Birch can authorize it again.
       assert.equal(
         await toolsWith(birchGrant.access_token),
-        4,
+        3,
         "Birch's assistant still reaches MCP",
       );
       const refreshed = await oidc.refreshTokenGrant(
@@ -4994,12 +5079,12 @@ try {
       );
       assert.equal(
         await toolsWith(refreshed.access_token),
-        4,
+        3,
         "Birch's refreshed token reaches MCP",
       );
       assert.equal(
         await toolsWith((await connect(birch, shared)).access_token),
-        4,
+        3,
         "Birch reconnects the cleared registration",
       );
       assert.deepEqual(outbound, [], "no request left the machine");

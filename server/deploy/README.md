@@ -23,7 +23,22 @@ This runbook keeps only the latest release record. Earlier release records and a
 one-time procedures are in git history; the last full version is at commit 492b96a
 (`git show 492b96a:server/deploy/README.md`).
 
-## Release record: deletion fences Stripe, Stripe reads off the lock, guide pilot parked, deletion links, UserInfo binding, private admission service, session token drop, e2e fix, MCP next steps, guards (2026-11-08, PRs #58–#66, #68–#74)
+## Release record: deletion fences Stripe, Stripe reads off the lock, guide pilot parked, deletion links, UserInfo binding, private admission service, session token drop, e2e fix, MCP next steps, guards (2026-11-08, PRs #58–#66, #68–#75)
+
+- **#75 (Peter's go; milton-qa), `e616331`:** sign-in mail hardening: a DNS check skips
+  domains that cannot take mail, a per-address cap of 3 per kind per hour, Reply-To
+  `support@meetmilton.com`, JSON mail-job logs and the `milton-auth-mail` page policy.
+  Turnstile stays off (no keys). No migration. Auth image
+  `sha256:51a8d3e3d2bcf5a254779ae80e3bcd71c47806f14af73b24a9b693638fb6d05d`:
+  `milton-auth-00018-hcv` at 10:20:10Z (traffic moved by `update-traffic`), then
+  `milton-auth-mail` and `milton-auth-maint` by 10:20:15Z. First JSON `auth_mail_pass` at
+  10:21:31Z; `monitoring.ts --apply` created `milton-auth-mail-problems`,
+  `milton-auth-mail-long-pause` and the `milton-auth-mail` policy, and a second plan was 16
+  unchanged. Live: health and `/api/auth/ok` 200, `/login`, `/signup` and
+  `/forgot-password` 200, no warnings from the new revision or errors from either job.
+  Gate at 10:30Z: clean; no auth request reached an older revision after 10:21Z. Checks: PR
+  CI green on `ef4e84d`, main CI green on `e616331`. Not yet checked: a reply to a real
+  verification email reaching support.
 
 - **#74 (Peter's word change and go; milton-say-ai; milton-designer ACCEPT), `74f6153`:**
   "AI", not "assistant", in everything people and AIs read: site, privacy and terms (dated
@@ -193,6 +208,9 @@ rua=mailto:<prefix>@dmarc-reports.cloudflare.net"` (reports in the Cloudflare da
   the owner password reset, Neon autoscaling and the budget, daily snapshots
   (11:00 UTC, 14 days; first `snap-silent-feather-b84f2kwj`).
 
+Since #75: auth `milton-auth-00018-hcv` and both auth jobs on image `sha256:51a8d3e3…`;
+rollback the service to `milton-auth-00017-swp` and both jobs to image `sha256:b129db3d…`
+together (a job on the older image fails mail the new one queued in the last 15 minutes).
 Since #74: app/MCP `milton-*-sayai-74f6153`, admit `milton-admit-00004-q7h` and auth
 `milton-auth-00017-swp`; rollback, in any order (text only), to app `milton-app-race-778a1a1`,
 MCP `milton-mcp-park-f735701`, admit `milton-admit-00003-rmr` and auth `milton-auth-00016-q4c`.
@@ -211,7 +229,7 @@ rollback (its sign-in writes the dropped column). MCP never touches sessions; it
 is unchanged. See [Drop the app session's access-token column](#drop-the-app-sessions-access-token-column-owner-file-013).
 Earlier records: git history (`git log -p server/deploy/README.md`).
 
-## Auth mail hardening (pending release)
+## Auth mail hardening (released 2026-11-09, PR #75)
 
 Code only: no migration, no new table (the per-address cap is a `take_rate` bucket in
 `milton_guard.rate_bucket`). One auth image carries all of it; build, then deploy it to
@@ -1288,7 +1306,7 @@ it is created or changed: after editing it, run the job once if the last run is 
 about 12 hours old, or it fires on the stale gap.
 
 Cost: free until no sooner than 2027-09-01, then $0.35 per non-uptime condition per month
-(24 applied, about $8.40) plus $0.50 per million points.
+(26 applied, about $9.10) plus $0.50 per million points.
 Uptime checks run about 78k times a month against a free million. Stripe's webhook-failure
 emails and Neon's compute alerts are Dashboard settings, not these policies.
 
@@ -1427,7 +1445,7 @@ gcloud run revisions list --service=milton-app --project=milton-510506 --region=
 ```
 
 Now serving (2026-11-09): app `milton-app-sayai-74f6153`, MCP `milton-mcp-sayai-74f6153`,
-admission `milton-admit-00004-q7h` and auth `milton-auth-00017-swp` (source `74f6153`). The
+admission `milton-admit-00004-q7h` (source `74f6153`), and auth `milton-auth-00018-hcv` (source `e616331`). The
 release record above gives the image and rollback revisions.
 
 Roll back only affected services, preserve ingress/IAM, then repeat the canonical

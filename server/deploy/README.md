@@ -23,7 +23,24 @@ This runbook keeps only the latest release record. Earlier release records and a
 one-time procedures are in git history; the last full version is at commit 492b96a
 (`git show 492b96a:server/deploy/README.md`).
 
-## Release record: deletion fences Stripe, Stripe reads off the lock, guide pilot parked, deletion links, UserInfo binding, private admission service, session token drop, e2e fix, MCP next steps, guards (2026-11-08, PRs #58–#66, #68–#75, #77)
+## Release record: deletion fences Stripe, Stripe reads off the lock, guide pilot parked, deletion links, UserInfo binding, private admission service, session token drop, e2e fix, MCP next steps, guards (2026-11-08, PRs #58–#66, #68–#77)
+
+- **#76 (Peter's go; milton-memos; Astra FAIL, four fixes, delta PASS), `bdac60f`:** memos
+  and tweaks replace rules and samples, and the guide pilot is removed. Snapshot
+  `snap-holy-cloud-b8jmn8q3` at 22:24:49Z. Drizzle `0012_memos` with `db:migrate` at
+  22:24:59Z (journal 13), owner file 014 with `psql` at 22:25:11Z; check: the seven tables
+  empty, grants as 014, `can_reword_memo` f on all 14 rows, `check-runtime-role` ok for app
+  and MCP. Old tables kept (44 rule cards, 34 samples, all accounts) until the follow-up drop.
+  Server image `sha256:b29524412dfee440627cc2f7487317fadae4e64b597bf89fec2ce8494c4c8060`
+  (pinned build file without the removed `guide-worker.js` line): admit
+  `milton-admit-00005-vp2` at 22:26:22Z, app and MCP `milton-*-memos-bdac60f` at 22:26:36Z
+  and 22:26:53Z, `milton-e2e-daily` at 22:26:55Z. Live: health 200 ×3, app home 200, MCP 401
+  unauthenticated, forms probe PASS, `milton-e2e-daily-gxtx8` passed every new step
+  (footprint memos 0, kinds 1, reports 3), a real-account `get_cover_sheet` read the empty
+  new sheet, no `permission denied` or `store_unavailable` in app, MCP or admit logs; the
+  site serves the new privacy, terms and setup pages. Gate at 22:39Z: clean; no request reached an older revision after 22:28Z; no error lines. Checks: PR CI green
+  on `208fae3`, main CI green on `bdac60f`. Open: Peter opens his TPS page; AIs reconnect;
+  the other account's notice (drafted, Peter sends).
 
 - **#77 (Peter's request and go), `77f7d10`:** passwords are 8–128 characters (was 15)
   with ten obvious ones added to the inline common list; a larger list or a breach API
@@ -221,6 +238,10 @@ rua=mailto:<prefix>@dmarc-reports.cloudflare.net"` (reports in the Cloudflare da
   the owner password reset, Neon autoscaling and the budget, daily snapshots
   (11:00 UTC, 14 days; first `snap-silent-feather-b84f2kwj`).
 
+Since #76: app/MCP `milton-*-memos-bdac60f`, admit `milton-admit-00005-vp2` and
+`milton-e2e-daily` on image `sha256:b2952441…`; rollback, code only (0012 and 014 stay), to
+app/MCP `milton-*-sayai-74f6153` and admit `milton-admit-00004-q7h`, and the daily job to
+image `sha256:73b1ae07…` with them (each check fails against the other MCP).
 Since #77: auth `milton-auth-00019-p4f` and both auth jobs on image `sha256:dc55298e…`;
 rollback the service to `milton-auth-00018-hcv` and both jobs to image `sha256:51a8d3e3…`.
 Since #75: auth `milton-auth-00018-hcv` and both auth jobs on image `sha256:51a8d3e3…`;
@@ -695,7 +716,7 @@ customer:
 Rollback: code to the previous revision, which runs on 0011; the pre-migration snapshot is
 0011's rollback, and there is no down script.
 
-## Memos and tweaks (pending release: Drizzle 0012, owner file 014, PR #76)
+## Memos and tweaks (released 2026-11-09: Drizzle 0012, owner file 014, PR #76)
 
 0012 adds seven tables (`memos`, `memo_kinds`, `tweaks`, `tweak_citations`,
 `served_reports`, `cover_sheets`, `memo_settings`), each cascading from `users`, and revokes
@@ -1013,7 +1034,7 @@ The parked guide pilot's worker, enrollment script, provider, switch and image c
 with PR #76 (its runbook, `guides.md`, too; it is in git history). No guide job, schedule,
 provider key or enrollment was ever provisioned in production. Its tables and the
 `milton_guide_worker` role and `milton_guide_runtime` login go with the follow-up drop
-([Memos and tweaks](#memos-and-tweaks-pending-release-drizzle-0012-owner-file-014-pr-76)).
+([Memos and tweaks](#memos-and-tweaks-released-2026-11-09-drizzle-0012-owner-file-014-pr-76)).
 
 ## Cloud resources
 
@@ -1530,8 +1551,8 @@ references. Inspect revision readiness before selecting a recorded revision:
 gcloud run revisions list --service=milton-app --project=milton-510506 --region=us-east4
 ```
 
-Now serving (2026-11-09): app `milton-app-sayai-74f6153`, MCP `milton-mcp-sayai-74f6153`,
-admission `milton-admit-00004-q7h` (source `74f6153`), and auth `milton-auth-00019-p4f` (source `77f7d10`). The
+Now serving (2026-11-09): app `milton-app-memos-bdac60f`, MCP `milton-mcp-memos-bdac60f`,
+admission `milton-admit-00005-vp2` (source `bdac60f`), and auth `milton-auth-00019-p4f` (source `77f7d10`). The
 release record above gives the image and rollback revisions.
 
 Roll back only affected services, preserve ingress/IAM, then repeat the canonical

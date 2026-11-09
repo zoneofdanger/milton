@@ -114,7 +114,7 @@ export function browserPages(config: RuntimeConfig) {
           ) : url.pathname.startsWith("/assistants") ||
             failure.code === "reconnect_incomplete" ? (
             <p>
-              <a href="/assistants">Connected assistants</a>
+              <a href="/assistants">Connected AIs</a>
             </p>
           ) : url.pathname === "/account/delete" &&
             failure.code !== "account_unavailable" ? (

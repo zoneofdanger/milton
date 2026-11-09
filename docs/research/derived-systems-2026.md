@@ -68,7 +68,7 @@ In production:
 
 ## What would justify rebuilding
 
-- **Retrieval:** reports measured approaching an assistant's context limit, plus a
+- **Retrieval:** reports measured approaching an AI's context limit, plus a
   held-out test where a retrieved subset matches or beats the full report on drafting
   behavior.
 - **Graph or conflict detection:** real saves that repeatedly duplicate or contradict

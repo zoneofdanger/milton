@@ -62,7 +62,7 @@ No person judged the drafts or edited them to a sendable state. The test therefo
 
 ## Implication for Milton
 
-Keep approved samples as the default evidence. This run gives no reason to require a generated guide during setup. A person may still find a short, corrected guide useful, and the connected assistant can create one on request without moving generation into Milton's server.
+Keep approved samples as the default evidence. This run gives no reason to require a generated guide during setup. A person may still find a short, corrected guide useful, and the connected AI can create one on request without moving generation into Milton's server.
 
 Before changing that default, repeat with more writers and briefs, multiple independent generations, and a blinded human review or actual editing-time measurement. PG is likely familiar to the models; the email and DM tests are transfers from essays rather than examples of his real correspondence. The guide-only condition was not tested.
 

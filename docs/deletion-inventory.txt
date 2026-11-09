@@ -9,7 +9,7 @@
 # or listed here but gone. Classes:
 #   deleted       account deletion removes the row
 #   hidden        kept after deletion (until it expires, or for a stated purpose),
-#                 never served to an assistant or shown on a page
+#                 never served to an AI or shown on a page
 #   retained      kept with no link to any account, so deletion cannot remove it,
 #                 and may hold personal data someone entered; the reason says how long
 #   not-personal  holds nothing about a person

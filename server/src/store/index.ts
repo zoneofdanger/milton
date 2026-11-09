@@ -227,7 +227,7 @@ const activeAccount = (provider: string, subject: string | SQL) => sql`
 const noAccount = () =>
   new StoreError(
     "account_unavailable",
-    "Sign in to Milton before connecting your assistant.",
+    "Sign in to Milton before connecting your AI.",
     403,
   );
 

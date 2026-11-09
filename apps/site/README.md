@@ -4,7 +4,7 @@ The public site is a static Astro app with a home page, `/setup`, `/privacy` and
 `/terms`. It uses the shared theme, fonts, folder mark and printer favicon from
 `packages/theme`.
 It has no server, database or environment variables. A small browser script handles
-copying the public setup prompt and dismissing its disclosure; assistant links and
+copying the public setup prompt and dismissing its disclosure; AI links and
 manual prompt selection still work without JavaScript.
 
 From the repository root:

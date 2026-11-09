@@ -116,7 +116,7 @@ export function compiledMemos(
       if (!actor)
         throw new StoreError(
           "assistant_required",
-          "Save memos through your connected assistant.",
+          "Save memos through your connected AI.",
           403,
         );
       return runSave(

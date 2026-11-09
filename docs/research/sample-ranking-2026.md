@@ -25,14 +25,14 @@ Each returned eight samples from the report the task belongs to.
   terms joined by OR, then newest, then id. This is what shipped.
 - **C, embeddings.** Cosine similarity with gemini-embedding-001, 3,072 dimensions.
 - **D, embeddings plus labels.** Label overlap first, then cosine.
-- **E, assistant picks.** The assistant reads an index of id, date, and context line, with no
+- **E, AI picks.** The AI reads an index of id, date, and context line, with no
   bodies, and returns eight ids.
 - **F, mixed picks.** E, asked for five closest and three that differ in audience or purpose.
 - **G, four samples.** E's first four picks.
 - **H, two stages.** B shortlists twenty, then E picks eight from those.
 
-Retrieval never saw ground truth. A model labeled each sample blind, as a saving assistant would,
-and labeled each intent line blind, as a reading assistant would. Ground truth was used only for
+Retrieval never saw ground truth. A model labeled each sample blind, as a saving AI would,
+and labeled each intent line blind, as a reading AI would. Ground truth was used only for
 scoring.
 
 ## Measures
@@ -97,9 +97,9 @@ There were two reasons. B's 0.87 left little room for a +0.15 precision win, and
 risen sharply with no measurable change in drafts. Precision here means label matching, so it
 tends to favor the methods that read labels.
 
-## Does an assistant make a second call?
+## Does an AI make a second call?
 
-A menu design (method E) only works if the assistant fetches what it picked. A local stub server
+A menu design (method E) only works if the AI fetches what it picked. A local stub server
 served rules plus an index first, then bodies on request, to fresh Claude Code runs on Sonnet 5.5.
 
 | Runs                                     | First read | Second call before drafting |
@@ -108,7 +108,7 @@ served rules plus an index first, then bodies on request, to fresh Claude Code r
 | Prompted, tool description only          | 10 of 10   | 10 of 10                    |
 | Unprompted, result carries a `next` line | 10 of 10   | 10 of 10                    |
 
-Assistants asked for two to eight samples, often fewer than eight, which the G result suggests
+AIs asked for two to eight samples, often fewer than eight, which the G result suggests
 would hurt. The unprompted runs are weak evidence: Milton's were the only tools present, and it was
 a stub. Nothing here covers ChatGPT or any other client. Hiding things behind a menu is known to
 be risky: GBrain saw hidden-tool tasks fall from 96.9% to 46.9% with a shorter tool list, and from
@@ -128,7 +128,7 @@ means tokens, round 2's corpus cost about $0.04. Cost is not the objection.
 
 Plain to vague cost B 0.259 nP@8 [0.205, 0.314] and D 0.186 [0.138, 0.234] in round 2. Most of B's
 loss comes from losing the labels: a blind model recovered both labels on only 9% of vague lines,
-against 95% of plain ones. So the useful thing to ask of assistants is specific: name the audience
+against 95% of plain ones. So the useful thing to ask of AIs is specific: name the audience
 and the purpose. The served text does this.
 
 ## Limits

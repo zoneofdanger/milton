@@ -87,7 +87,7 @@ Files: `server/src/handler.ts`, `server/src/token.ts`, `server/src/mcp.ts`,
 - Each request looks up the active writing account by exact verified issuer and subject (a key's lookup requires it too); MCP never provisions an account. That lookup is the request's account check, so the store is built without a query and `initialize`, `tools/list` and notifications make no store query; each tool call's read and save check the account again.
 - Each request builds a fresh stateless MCP server, with no sessions or subscriptions.
 - Global instructions require retrieval before writing or editing for or as the person; only new drafts get the sample/rule conformity check before display. Edits preserve source wording and style outside the request over conflicting samples/rules; guidance never widens scope, and only specific unresolved conflicts are flagged. Requested transformations retain their scope, and changes are briefly listed. These are behavioral instructions, not server enforcement.
-- After draft or edit approval, assistants display an exact placeholder-safe body and useful non-private context, then offer once to retain that proposal; one yes approves the displayed proposal. Every sample save requires that display, without silently redacting after approval or changing the working edit for retention. Change lists are excluded, refusal is final for that text, and only changed text/context requires renewed approval. Edits do not imply standing rules.
+- After draft or edit approval, AIs display an exact placeholder-safe body and useful non-private context, then offer once to retain that proposal; one yes approves the displayed proposal. Every sample save requires that display, without silently redacting after approval or changing the working edit for retention. Change lists are excluded, refusal is final for that text, and only changed text/context requires renewed approval. Edits do not imply standing rules.
 - Both instruction variants stay under 3,500 characters and hold the workflow and consent
   rules, including never sending transcripts, secrets or others' private details or filing
   capture consent; error handling lives in each error result's `next`, and save fields and
@@ -96,7 +96,7 @@ Files: `server/src/handler.ts`, `server/src/token.ts`, `server/src/mcp.ts`,
   instructions: read `get_cover_sheet`, then the matching `get_report`, before writing or
   editing for the person.
 - Session capture requires explicit opt-in for the current conversation; connection, draft or edit approval, quoted text and another conversation are not consent.
-- Each assistant's (account and OAuth client) first tool call after a server process starts
+- Each AI's (account and OAuth client) first tool call after a server process starts
   carries `notifications/tools/list_changed` ahead of its result, as does every
   `get_report` refused for a missing intent, so clients holding tool schemas from before
   a release refresh them; the announced set is per process and in memory.
@@ -174,9 +174,9 @@ Files: `server/src/store/compiled.ts`, `server/src/store/snapshot.ts`,
 - A read takes no lock and writes nothing: one statement loads the latest card versions,
   the active samples and whether the account is active, so a save shows whole or not at
   all.
-- Assistant reads are blocked once an account reads as expired, but the person's own web
+- AI reads are blocked once an account reads as expired, but the person's own web
   view is not.
-- An assistant read is two queries (that statement and the trial gate) and opens no
+- An AI read is two queries (that statement and the trial gate) and opens no
   database connection; the web view's is one.
 - The web view reads no store limits and makes no account check of its own: its
   account lookup and that statement each require an active account.
@@ -219,7 +219,7 @@ not at all.
 
 - The input schema is strict: 1 to 100 rules, up to 500 edits, moves, or sample removals, a
   UUID request ID, and a version.
-- Only assistants can save, so a save through the web app's store is refused with
+- Only AIs can save, so a save through the web app's store is refused with
   `assistant_required`.
 - Input is hashed, and the same request ID with the same input replays the original
   result.
@@ -274,7 +274,7 @@ not at all.
 
 - Publishing checks the assembled documents against their size limits and answers with
   their new approved-source fingerprint; while the guide trigger is installed (not while parked, 0010), sample changes durably invalidate guides in the same transaction.
-- An audit row records the request, assistant, before and after versions, and affected
+- An audit row records the request, AI, before and after versions, and affected
   cards.
 - The receipt is written last, once, with the outcome.
 
@@ -340,13 +340,13 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
 - Account security routes to native UI; destructive deletion requires authoritative native freshness, exact typed confirmation and retention of current guarded verified-identity fingerprints.
 - App persists lifecycle UUID, original account/subject/incarnation/client and requester association before first native/remote attempt; retries never select current/recreated targets.
 - Disconnect commits native original-binding refusal before bounded cleanup; a failed or unfinished step answers 503 with a retry page re-posting the same operation, as deletion does; reconnect creates a new binding and never revives an old token.
-- Native UserInfo answers only while the token's binding is live, the same `binding_status` check MCP and the app make on every call: after the rate gate the auth wrapper reads a JWT's binding, subject, client (`azp`), scopes, incarnation and generation (native then verifies its signature) or looks an opaque token up by its stored hash; a missing, revoked or superseded binding gets 401 `invalid_token` with no claims and native is not called, a database failure 503, so a disconnect or a begun deletion ends an assistant token's UserInfo at once rather than at its expiry.
+- Native UserInfo answers only while the token's binding is live, the same `binding_status` check MCP and the app make on every call: after the rate gate the auth wrapper reads a JWT's binding, subject, client (`azp`), scopes, incarnation and generation (native then verifies its signature) or looks an opaque token up by its stored hash; a missing, revoked or superseded binding gets 401 `invalid_token` with no claims and native is not called, a database failure 503, so a disconnect or a begun deletion ends an AI token's UserInfo at once rather than at its expiry.
 - Deletion saves the current verified-identity fingerprints as it starts, then commits refusal, then Stripe cancellation, then writing erasure (which records no identity of its own), and finally bounded native cleanup; unknown inventory/cascade shape leaves a retryable incomplete operation.
 - Native cleanup deletes the account's sign-in grant bindings in the same step as the native user, after its codes, tokens, consents, sessions and sign-in methods (at most 256 rows, the per-user cap `bind_flow` enforces), so no partial run leaves a user or credential without its binding; every code, token, session or consent that named a missing binding is refused (each gate looks the binding up strictly), and the deletion record keeps `bind_flow` from making a new one.
-- Consenting to an anonymous assistant registration writes a durable link from the account to it (`milton_guard.client_link`, native 008); disconnects, token and consent purges and binding expiry leave it, and the native user cannot be deleted while it exists. Deletion takes each link under the registration's lock: a registration no other account is linked to is deleted with its dependents, and one that is keeps working for them with its name and contacts cleared. Either way the SHA-256 of its client ID goes into `milton_guard.cleared_client` (no foreign key, kept indefinitely), and a trigger empties name and contacts on any later insert or update under that client ID, so neither a metadata-document refresh nor a rediscovered registration brings them back. Neither Milton nor its pages show a client name (consent shows the client ID, Connected assistants its host), so a cleared one changes no page. Native 008 backfills links from existing consents, consented bindings and native's disconnect records, each matched to the user's recorded identity incarnation; a record for another incarnation counts as a deleted original identity's. It applies the same rule to registrations a deleted identity's remaining binding or disconnect record names, then drops deleted identities' unreferenced bindings. It first locks every runtime table it writes in one statement that never waits (55P03 if any is in use; run it again), so no service transaction or cleanup can deadlock with it; it can still wait on another owner session (the ledger, owner DDL), which the runbook rules out. Writes to those tables wait until it commits. Kept indefinitely: registrations no account ever authorized, and ones whose only authorization before 008 left no consent, binding or disconnect record (revoked by the assistant or left to expire, then pruned); `public.assistant_disconnects` has had no writer since native auth, so it names no native registration.
+- Consenting to an anonymous AI registration writes a durable link from the account to it (`milton_guard.client_link`, native 008); disconnects, token and consent purges and binding expiry leave it, and the native user cannot be deleted while it exists. Deletion takes each link under the registration's lock: a registration no other account is linked to is deleted with its dependents, and one that is keeps working for them with its name and contacts cleared. Either way the SHA-256 of its client ID goes into `milton_guard.cleared_client` (no foreign key, kept indefinitely), and a trigger empties name and contacts on any later insert or update under that client ID, so neither a metadata-document refresh nor a rediscovered registration brings them back. Neither Milton nor its pages show a client name (consent shows the client ID, Connected AIs its host), so a cleared one changes no page. Native 008 backfills links from existing consents, consented bindings and native's disconnect records, each matched to the user's recorded identity incarnation; a record for another incarnation counts as a deleted original identity's. It applies the same rule to registrations a deleted identity's remaining binding or disconnect record names, then drops deleted identities' unreferenced bindings. It first locks every runtime table it writes in one statement that never waits (55P03 if any is in use; run it again), so no service transaction or cleanup can deadlock with it; it can still wait on another owner session (the ledger, owner DDL), which the runbook rules out. Writes to those tables wait until it commits. Kept indefinitely: registrations no account ever authorized, and ones whose only authorization before 008 left no consent, binding or disconnect record (revoked by the AI or left to expire, then pruned); `public.assistant_disconnects` has had no writer since native auth, so it names no native registration.
 - Writing and original-incarnation app credentials are never erased before Stripe cancellation succeeds; incomplete deletion never claims completion.
 - Native refusal and the progress billing reads commit in one transaction. Once they do, nothing links a Stripe customer to the account (the link reads the deletion while holding the billing row); a customer Stripe made for a refused link is deleted at Stripe straight away, best effort (a failure is only logged), unless the row already holds it under the same idempotency key, when it is the deletion's to end. Stripe cancellation reads the customer holding that same row, so it waits for an enrolment in flight, and the erase ends any customer still linked, holding the row, before erasing, so an account is never erased with a live customer. Checkout reads the deletion again once its session is open, a finished deletion and an erased account included, and expires it (best effort) with a 409; a deletion that begins after that read still deletes the customer, and whether Stripe then refuses to complete the open session is not verified at Stripe.
-- Browser logout removes local authority and navigates through fixed-client native RP logout with exact return and native confirmation, leaving offline assistant grants independent; "Switch account" adds the one fixed logout `state` native echoes back, and only that exact single value sends the signed-out return on to a fresh sign-in (`prompt=login`).
+- Browser logout removes local authority and navigates through fixed-client native RP logout with exact return and native confirmation, leaving offline AI grants independent; "Switch account" adds the one fixed logout `state` native echoes back, and only that exact single value sends the signed-out return on to a fresh sign-in (`prompt=login`).
 
 ## Web app
 
@@ -367,7 +367,7 @@ Files: `server/src/pages.tsx`, `server/src/memo-pages.tsx`, `server/src/auth.tsx
 - Each view makes one structured read; a failed read fails the page, with no plain-text fallback.
 - `/download` returns the complete writing export as `TPS.md`; the web report labels
   its sample count as shown, explains its newest-eight-per-report limit and links to
-  the complete download, including when assistant access is paused.
+  the complete download, including when AI access is paused.
 - `/assistants` lists bounded live native connections grouped by client and read/write access, and original incomplete disconnects; a full native page explicitly reports incomplete listing.
 - `/assistants` also lists every active connection key (name, access, created, last used, expiry; never-expiring keys say "Never expires"; keys a security change stopped say so), then under "Expired keys" the 20 most recently expired, never a secret or hash.
 - Creating a key takes a name (1–60 characters, one line), Read only (default) or Read and save, and 30, 90 (default) or 365 days or Never; it needs the form's CSRF/Origin checks and a sign-in within 5 minutes.
@@ -400,14 +400,14 @@ Files: `server/src/store/index.ts`, `server/src/store/trials.ts`,
 - Past that grace, canceled, unpaid, incomplete, incomplete_expired, and paused read as
   expired.
 - No row, no status, or a status Milton does not know reads as early access, so a Stripe
-  outage never cuts off a connected assistant, and reads never call Stripe.
+  outage never cuts off a connected AI, and reads never call Stripe.
 - A test account (`users.test_account`) is permanently exempt from trials and billing,
   checked explicitly on each path: it always reads as early access, sign-in starts no
   subscription for it, checkout and the portal answer 409, no path gives it a trial row or
   status, the webhook never writes its row and no trial notice is offered.
 - A trial notice is claimed once per stage, 7 days and 1 day before `trial_end`, only
   while trialing, and carries the one link, the signed-in app home.
-- Expired accounts are blocked for assistants with a refusal carrying that link, while the
+- Expired accounts are blocked for AIs with a refusal carrying that link, while the
   web view and download stay open.
 - The three Stripe settings are all or nothing: any one set means all three must be valid,
   or the app fails at startup.

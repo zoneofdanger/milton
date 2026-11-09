@@ -94,11 +94,11 @@ rua=mailto:<prefix>@dmarc-reports.cloudflare.net"` (reports in the Cloudflare da
   0010 (`milton-e2e-daily-zznm9`, `-46mf5`). Checks on the merge (`5b14877`, same tree): CI
   green. Gate at 21:32Z (from 21:19Z, covering 0010): clean.
 - **#68 (Peter's go and wording; milton-qa), `6fd0330`:** deletion removes the account's
-  sign-in grant bindings and the assistant registrations only it approved (native 008, see
-  [its section](#deletion-removes-sign-in-grants-and-assistant-registrations-applied-2026-11-08-native-008-pr-68)).
+  sign-in grant bindings and the AI registrations only it approved (native 008, see
+  [its section](#deletion-removes-sign-in-grants-and-ai-registrations-applied-2026-11-08-native-008-pr-68)).
   No auth image: #68 changes no runtime code. Snapshot `snap-morning-frog-b8rqnt3c` at
   21:12:28Z; 008 at 21:12:52Z on the first attempt (ledger 001–008); the leftover-binding
-  check returned 0; one link backfilled, for the one assistant registration (the other
+  check returned 0; one link backfilled, for the one AI registration (the other
   registration is the app's own sign-in client, which nobody consents to and deletion never
   touches), nothing cleared; runtime audits `ok` for app and MCP; an e2e sign-in passed
   (`milton-e2e-daily-zfq9v`). The privacy page (dated November 8, 2026, Peter's sentence on
@@ -491,10 +491,10 @@ A failed migration's rollback is the pre-migration snapshot, used only before an
 reads the column serves; there is no down script. Every recorded app/MCP revision runs on
 either schema, so rolling code back never needs it.
 
-## Deletion removes sign-in grants and assistant registrations (applied 2026-11-08: native 008, PR #68)
+## Deletion removes sign-in grants and AI registrations (applied 2026-11-08: native 008, PR #68)
 
 Native 008 adds `milton_guard.client_link` (account, registration), written by
-`consent_gate` whenever an account consents to an assistant registration, and
+`consent_gate` whenever an account consents to an AI registration, and
 `milton_guard.cleared_client` (SHA-256 of each cleared or deleted registration's client
 ID, no foreign key) with the `keep_cleared` insert-and-update trigger, and replaces
 `consent_gate` and `cleanup_operation`: a deletion's cleanup now also takes the account's
@@ -546,7 +546,7 @@ bindings it scans, and is unmeasured. Rehearse on a disposable branch or databas
 
 Untraceable and kept as they are: a registration whose only authorizations before 008,
 by a live or a deleted account, left no consent, binding or disconnect record by the time
-008 runs (the assistant revoked its own grant, or the grant expired unused, and
+008 runs (the AI revoked its own grant, or the grant expired unused, and
 maintenance pruned both). `public.assistant_disconnects` cannot help: nothing has written
 it since native auth (commit `bcb59e7`), so it names no native registration. Rollback is
 the pre-migration snapshot; there is no down script.
@@ -762,7 +762,7 @@ body), each request bounded at 15 s:
 1. `secrets`: the email must end `.invalid` and the key be well formed.
 2. `sign_in`: app `/login`, the auth sign-in page and form, the code flow; the app must show
    "Signed in as" this email.
-3. `key_owner`, before any MCP request: Connected assistants must show this email and list
+3. `key_owner`, before any MCP request: Connected AIs must show this email and list
    this key's public id, or the run stops with `key_not_on_account` and the key is never
    sent, so another account's key supplied by mistake is never authenticated or marked
    used. It reports `key_days_left` and, under 30, `warning: key_expires_within_30_days` at

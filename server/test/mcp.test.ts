@@ -313,9 +313,7 @@ test("get_report requires an intent: without a well-formed one it refuses, sayin
     // A client holding the old schema sends no intent: say what to send and
     // to reconnect, and tell it the tool list changed.
     const missing = await refused({ report_id: "email" });
-    expect(missing).toContain(
-      "reconnect your assistant if it has no intent field",
-    );
+    expect(missing).toContain("reconnect your AI if it has no intent field");
     expect(missing).toContain('"confirming what is on file"');
     expect(changed).toBe(1);
     // A malformed intent names the limit it broke, without the reconnect hint.

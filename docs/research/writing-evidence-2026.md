@@ -43,7 +43,7 @@ The models tested date from 2024 to early 2026.
 ## What this means for the quiz
 
 - Samples carry what people cannot report, so the paste comes first.
-- Picks earn their place by overriding assistant defaults. Whether they add anything on top of a
+- Picks earn their place by overriding AI defaults. Whether they add anything on top of a
   sample is an open question.
 - Satisfaction during setup is weak evidence that the voice matches.
 - Treat self-judgment as secondary in any evaluation. Prefer checks on the text itself.

@@ -117,8 +117,8 @@ export function SignIn({
     <>
       <p>
         {signup
-          ? "Create your Milton sign-in. Verify your email before connecting an assistant."
-          : "Sign in to open your writing or connect an assistant."}
+          ? "Create your Milton sign-in. Verify your email before connecting an AI."
+          : "Sign in to open your writing or connect an AI."}
       </p>
       <div class="social">
         {["google", "github"].map((provider) => (
@@ -196,8 +196,8 @@ export function ResetForm({ token }: { token: string }) {
   return (
     <>
       <p>
-        Set a new password. This ends existing browser sessions and assistant
-        connections. Reconnect assistants after signing in again.
+        Set a new password. This ends existing browser sessions and AI
+        connections. Reconnect AIs after signing in again.
       </p>
       <form method="post" action="/form/reset">
         <input type="hidden" name="token" value={token} />
@@ -225,20 +225,20 @@ export function Consent({ query }: { query: URLSearchParams }) {
   if (!requested.includes("milton:read"))
     return (
       <p>
-        This assistant request is missing reading permission. Start a new
-        connection from your assistant.
+        This AI’s request is missing reading permission. Start a new connection
+        from your AI.
       </p>
     );
   const read = requested.filter((s) => s !== "milton:write").join(" ");
   return (
     <>
       <p>
-        The assistant{" "}
+        The AI{" "}
         <strong class="identifier">
           {query.get("client_id") ?? "Unknown client"}
         </strong>{" "}
-        is asking to connect to your writing. Check that this is the assistant
-        you intended.
+        is asking to connect to your writing. Check that this is the AI you
+        intended.
       </p>
       <form method="post" action="/form/consent">
         <input type="hidden" name="oauth_query" value={query.toString()} />
@@ -269,9 +269,8 @@ export function Consent({ query }: { query: URLSearchParams }) {
           </p>
         ) : null}
         <p>
-          Writing permission lets an assistant use the save tool. You still
-          approve the exact text of every memo. You can disconnect an assistant
-          in Milton.
+          Writing permission lets an AI use the save tool. You still approve the
+          exact text of every memo. You can disconnect an AI in Milton.
         </p>
         <div class="actions">
           <button name="accept" value="true" type="submit">
@@ -283,8 +282,7 @@ export function Consent({ query }: { query: URLSearchParams }) {
         </div>
       </form>
       <p class="hint">
-        Expired or interrupted request? Start the connection again from your
-        assistant.
+        Expired or interrupted request? Start the connection again from your AI.
       </p>
     </>
   );
@@ -340,7 +338,7 @@ export function Security({
       </ul>
       <p>
         Removing a method requires another working method, ends browser sessions
-        and disconnects assistants. Your writing stays with this account.
+        and disconnects AIs. Your writing stays with this account.
       </p>
       <div class="actions">
         {["google", "github"]
@@ -371,8 +369,8 @@ export function Security({
               autocomplete="new-password"
             />
             <p class="hint">
-              15–128 Unicode characters. Other sessions and all assistant
-              connections end.
+              15–128 Unicode characters. Other sessions and all AI connections
+              end.
             </p>
             <button disabled={!fresh}>Change password</button>
           </form>
@@ -410,8 +408,8 @@ export function Security({
         </button>
       </form>
       <p>
-        Ending browser sessions leaves offline assistants connected. Manage
-        assistant connections and account deletion in{" "}
+        Ending browser sessions leaves AIs with offline access connected. Manage
+        AI connections and account deletion in{" "}
         <a href="https://app.meetmilton.com/account">Milton</a>.
       </p>
       <form method="post" action="/form/signout">

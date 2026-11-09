@@ -1522,7 +1522,7 @@ test("disconnect ends only a listed connection: another one is refused and start
     expect(retry.status).toBe(303);
     expect(retry.headers.get("Location")).toBe(appOrigin + "/assistants");
     const after = await listing();
-    expect(after).toContain("No assistants are connected.");
+    expect(after).toContain("No AIs are connected.");
     expect(after).not.toContain("Disconnect cleanup is incomplete");
     // The other person's connection is untouched.
     expect(
@@ -1578,9 +1578,9 @@ test("trial reminders stay outside TPS and expired accounts retain web view and 
     const expired = await fixture.send("/tps-report");
     expect(expired.status).toBe(200);
     const html = await expired.text();
-    expect(html).toContain("Assistant reads and saves are paused until");
+    expect(html).toContain("AI reads and saves are paused until");
     expect(html).not.toContain('action="/billing');
-    expect(html).not.toContain("ask a connected assistant to save");
+    expect(html).not.toContain("ask a connected AI to save");
     expect(html).toContain("Be concise.");
     const download = await fixture.send("/download");
     expect(download.status).toBe(200);
@@ -1831,7 +1831,7 @@ test("a live session whose account is closing refuses its pages with account_una
       const response = await fixture.send(path);
       expect(response.status).toBe(403);
       expect(await response.text()).toContain(
-        "Sign in to Milton before connecting your assistant.",
+        "Sign in to Milton before connecting your AI.",
       );
     }
   } finally {
@@ -1894,7 +1894,7 @@ test("report bullets keep complete text parity and the download needs no layout 
   ])
     expect(html).toContain(`<dt>${label}:</dt><dd class="fill">${value}</dd>`);
   expect(html).toContain(
-    "Give a connected assistant the facts for your next email or DM and ask it to use what’s on file. You can also approve a writing sample.</p>",
+    "Give a connected AI the facts for your next email or DM and ask it to use what’s on file. You can also approve a writing sample.</p>",
   );
   expect(html).not.toContain("Memo updates");
   expect(html).toContain(

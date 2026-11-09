@@ -142,7 +142,7 @@ export const memoInput = z
       .max(10)
       .optional()
       .describe(
-        'Only when the final differs from the first draft: what the person made you change and why, one line each with its condition ("vendor replies: no warm-up opener"). {tweak_id} reuses a served tweak; {text} adds one only when none fits.',
+        'Only when the final differs from the first draft: each habit the person made you change, one line each with when it applies ("vendor replies: no warm-up opener"). Skip one-off facts they added. When it is the same change, reuse a served tweak\'s id with {tweak_id}; {text} adds one only when none fits.',
       ),
     context: memoContextInput,
     ...kindFields,

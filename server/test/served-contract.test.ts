@@ -43,6 +43,7 @@ test("the served text uses one word for each thing and describes the memo workfl
     "Show the receipt word for word, however long",
     "send first_draft_missing instead of rebuilding it",
     "Reuse a served tweak's id",
+    'never "when requested". Skip one-off facts they added and changes you made unasked.',
     "Kept memo: vendor decline, 2 rounds, tweaks: no warm-up opener.",
     "A correction during a draft is a tweak, not a cover sheet line",
     "Never add tweaks or your own inferences, or offer to",
@@ -68,6 +69,10 @@ test("the served text uses one word for each thing and describes the memo workfl
   ).toBe(
     "Kept memo: vendor reply, 1 round, tweaks: state the trial duration; no warm-up opener.",
   );
+  // The tweaks field says the same: habits, not one-off facts; reuse served ids.
+  const tweaksField = memoInput.shape.tweaks.description ?? "";
+  expect(tweaksField).toContain("Skip one-off facts they added");
+  expect(tweaksField).toContain("reuse a served tweak's id");
   expect(readOnlyInstructions).toContain("read only");
   expect(readOnlyInstructions).not.toContain("create_memo");
 });

@@ -982,6 +982,62 @@ describe("auth mail queueing", () => {
     for (const r of await Promise.all(waiting)) expect(r.status).toBe(200);
   });
 
+  test("delivery logs one line per failed or throttled send, none for a sent one", async () => {
+    const { acceptMail, deliverMail } = await import("../src/mail.ts");
+    const { problemLine } = await import("../src/mail-log.ts");
+    const config = fixtureConfig();
+    const accepted = queue();
+    await acceptMail(accepted.pool, config, state("person@example.com"), {
+      domain: async () => "deliverable",
+    });
+    const [id, kind, user, incarnation, generation, proof, payload] =
+      accepted.calls.find((c) => c.text.includes("accept_mail"))!
+        .values as string[];
+    const job = {
+      state: "pending",
+      id,
+      lease: "fictional-lease",
+      kind,
+      origin_user: user,
+      incarnation,
+      generation,
+      proof_expires_at: new Date(proof!),
+      expires_at: new Date(Date.now() + 900000),
+    };
+    // Claims hand out each job once; an unreadable payload fails to open.
+    const jobs = [
+      { ...job, payload },
+      { ...job, payload: "$ba$1$unreadable" },
+      { ...job, payload },
+    ];
+    const pool = {
+      query: async (text: string) =>
+        text.includes("claim_mail")
+          ? { rows: jobs.length ? [jobs.shift()] : [] }
+          : { rows: [{ done: true }] },
+    } as unknown as import("pg").Pool;
+    const statuses = [200, 429];
+    const logs: string[] = [];
+    const log = spyOn(console, "log").mockImplementation((line) => {
+      logs.push(String(line));
+    });
+    try {
+      const counts = await deliverMail(pool, config, async () => {
+        return new Response(null, { status: statuses.shift()! });
+      });
+      expect(counts).toEqual({
+        claimed: 3,
+        sent: 1,
+        retry: 0,
+        failed: 1,
+        throttled: 1,
+      });
+    } finally {
+      log.mockRestore();
+    }
+    expect(logs).toEqual([problemLine("failed"), problemLine("throttled")]);
+  });
+
   test("auth mail replies to the support address; the text is unchanged", async () => {
     const { acceptMail, openMail } = await import("../src/mail.ts");
     const env = Object.fromEntries(

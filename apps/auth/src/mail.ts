@@ -10,6 +10,7 @@ import { AUTH_ORIGIN, type Config } from "./config.ts";
 import type { RequestState } from "./adapter.ts";
 import { reservedRecipient } from "./recipient.ts";
 import { addressDomain, domainDigest, type MailDomain } from "./mail-domain.ts";
+import { problemLine } from "./mail-log.ts";
 
 // Native getCryptoKey (used by makeSignature) imports an HMAC signing key.
 // Symmetric utilities instead accept a versioned SecretConfig. No bare-hex fallback.
@@ -313,6 +314,8 @@ export async function deliverMail(
     );
     if (!finished.rows[0]?.done) throw new Error("mail_lease_lost");
     counts[outcome]++;
+    if (outcome === "failed" || outcome === "throttled")
+      console.log(problemLine(outcome));
     if (outcome === "throttled") break;
   }
   return counts;

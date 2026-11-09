@@ -1,0 +1,10 @@
+{
+  "name": "milton-auth-mail-problems",
+  "description": "milton-auth-mail sends that ended failed (a non-429 4xx from Resend, a missed delivery deadline or an undecryptable message) or throttled (a Resend 429): one JSON line each, {\"message\":\"auth_mail_send\",\"outcome\":\"failed\"|\"throttled\"} (apps/auth/src/mail-log.ts). Read by milton-auth-mail.",
+  "filter": "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"milton-auth-mail\" AND jsonPayload.message=\"auth_mail_send\" AND jsonPayload.outcome=(\"failed\" OR \"throttled\")",
+  "metricDescriptor": {
+    "metricKind": "DELTA",
+    "valueType": "INT64",
+    "unit": "1"
+  }
+}

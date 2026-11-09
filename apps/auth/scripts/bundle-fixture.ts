@@ -51,8 +51,7 @@ export async function bundleFixture(
       },
     );
     assert.equal(delivery.status, 0, "compiled delivery closure must run");
-    // One JSON line, which Cloud Logging stores as jsonPayload for the
-    // milton-auth-mail-failed and -throttled log metrics.
+    // The compiled job's pass line, one JSON object (src/mail-log.ts).
     assert(
       args.length
         ? delivery.stdout.includes(

@@ -54,8 +54,10 @@ const MINIMUMS: [RegExp, { duration: number; window: number }][] = [
   [/ ERROR logs: ≥ 10 in 15 min/, { duration: 300, window: 900 }],
   [/ instances: > 8 for 15 min/, { duration: 900, window: 60 }],
   [/^milton-auth-mail: ≥ 5 failed/, { duration: 0, window: 900 }],
-  [/^milton-auth-mail: ≥ 1 failed send/, { duration: 0, window: 900 }],
-  [/^milton-auth-mail: ≥ 1 throttled send/, { duration: 0, window: 900 }],
+  [
+    /^milton-auth-mail: ≥ 3 failed or throttled sends/,
+    { duration: 0, window: 900 },
+  ],
   [/^milton-auth-maint: ≥ 2 failed/, { duration: 0, window: 2700 }],
   [/^milton-auth-mail: no execution for 20 min/, { duration: 1200, window: 0 }],
   [
@@ -190,5 +192,54 @@ test("a second apply plans no change, and only the named legacy policies are del
   expect(diff({ filter: 'a = "x y"' }, { filter: 'a="x y"' })).toEqual([]);
   expect(diff({ filter: 'a = "x y"' }, { filter: 'a = "xy"' })).toEqual([
     "filter",
+  ]);
+});
+
+test("the auth mail alert counts the delivery job's own failed and throttled lines, 3 in 15 min", async () => {
+  const { problemLine } = await import("../../apps/auth/src/mail-log.ts");
+  const defs = loadDefinitions();
+  const metric = defs.find(
+    (d) => d.kind === "metric" && d.key === "milton-auth-mail-problems",
+  )!.body as { filter: string };
+  // The filter reads exactly the fields the job writes, as jsonPayload.
+  const lines = (["failed", "throttled"] as const).map(
+    (o) => JSON.parse(problemLine(o)) as Record<string, string>,
+  );
+  expect(lines.map((l) => Object.keys(l))).toEqual([
+    ["message", "outcome"],
+    ["message", "outcome"],
+  ]);
+  expect(metric.filter).toBe(
+    'resource.type="cloud_run_job" AND resource.labels.job_name="milton-auth-mail"' +
+      ` AND jsonPayload.message="${lines[0]!.message}"` +
+      ` AND jsonPayload.outcome=("${lines[0]!.outcome}" OR "${lines[1]!.outcome}")`,
+  );
+  // A sent or retried send writes no line.
+  expect(lines.map((l) => l.outcome)).toEqual(["failed", "throttled"]);
+  const policy = policies.find((p) => p.displayName === "milton-auth-mail")!;
+  expect(policy.conditions).toHaveLength(1);
+  const threshold = policy.conditions[0]!.conditionThreshold as unknown as {
+    filter: string;
+    comparison: string;
+    thresholdValue: number;
+    duration: string;
+    aggregations: Record<string, unknown>[];
+  };
+  expect(threshold.filter).toBe(
+    'metric.type = "logging.googleapis.com/user/milton-auth-mail-problems" AND resource.type = "cloud_run_job" AND resource.labels.job_name = "milton-auth-mail"',
+  );
+  // 3 or more in a rolling 15 minutes: GT 2, summed over the window.
+  expect([threshold.comparison, threshold.thresholdValue]).toEqual([
+    "COMPARISON_GT",
+    2,
+  ]);
+  expect(threshold.duration).toBe("0s");
+  expect(threshold.aggregations).toEqual([
+    {
+      alignmentPeriod: "900s",
+      perSeriesAligner: "ALIGN_DELTA",
+      crossSeriesReducer: "REDUCE_SUM",
+      groupByFields: ["resource.label.job_name"],
+    },
   ]);
 });

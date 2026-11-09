@@ -889,6 +889,53 @@ describe("auth mail queueing", () => {
     expect(logs.join()).not.toContain("person");
   });
 
+  test("a slow domain lookup holds none of the four native slots", async () => {
+    const { createProvider } = await import("../src/provider.ts");
+    const pool = {
+      on: () => pool,
+      query: async (text: string) =>
+        text.includes("with g as")
+          ? { rows: [{ allowed: [true, true] }] }
+          : { rows: [] },
+    } as unknown as import("pg").Pool;
+    let release = () => {};
+    const held = new Promise<void>((r) => (release = r));
+    let lookups = 0;
+    const service = createProvider(fixtureConfig(), {
+      pool,
+      boundaries: {
+        mailDomain: async () => (lookups++, await held, "deliverable"),
+      },
+    });
+    // Native answers at once; each reset then waits on its lookup.
+    service.provider.handler = async () => Response.json({ status: true });
+    const call = (path: string, method = "POST") =>
+      service.handler(
+        new Request("https://auth.meetmilton.com/api/auth" + path, {
+          method,
+          headers: {
+            origin: "https://auth.meetmilton.com",
+            ...(method === "POST"
+              ? { "content-type": "application/json" }
+              : {}),
+          },
+          ...(method === "POST"
+            ? { body: JSON.stringify({ email: "person@slow.example" }) }
+            : {}),
+        }),
+        "127.0.0.1",
+      );
+    // Five resets in turn, each started once the one before is in its lookup.
+    const waiting: Promise<Response>[] = [];
+    for (let n = 1; n <= 5; n++) {
+      waiting.push(call("/request-password-reset"));
+      while (lookups < n) await new Promise((r) => setTimeout(r, 1));
+    }
+    expect((await call("/ok", "GET")).status).toBe(200);
+    release();
+    for (const r of await Promise.all(waiting)) expect(r.status).toBe(200);
+  });
+
   test("auth mail replies to the support address; the text is unchanged", async () => {
     const { acceptMail, openMail } = await import("../src/mail.ts");
     const env = Object.fromEntries(

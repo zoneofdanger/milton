@@ -949,11 +949,19 @@ export function createProvider(
               response.status === 400 &&
               ((await response.clone().json()) as { code?: string }).code ===
                 "EMAIL_ALREADY_VERIFIED"));
-        if (generic || requestState.mail)
+        if (generic || requestState.mail) {
+          // Native work is done, and the domain lookup can wait up to 2 s on
+          // a name an attacker serves, so acceptance holds no native slot.
+          // Its two statements are still bounded by the pool.
+          if (acquired) {
+            inFlight--;
+            acquired = false;
+          }
           await acceptMail(pool, config, requestState, {
             domain: options.boundaries?.mailDomain ?? ((d) => mailDomain(d)),
             requested: typeof body.email === "string" ? body.email : undefined,
           });
+        }
         if (generic)
           return json({
             message:

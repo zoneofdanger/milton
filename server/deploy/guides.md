@@ -69,7 +69,7 @@ sign-in schemas:
 | users, trial_accounts, samples, sample_versions, sample_kinds, guide_accounts | SELECT                    |
 | report_guides, guide_budget_lock                                              | SELECT, UPDATE            |
 | guide_spend                                                                   | SELECT, INSERT, UPDATE    |
-| identities, assistant disconnects, cards, auth/credential tables              | None                      |
+| identities, AI disconnects, cards, auth/credential tables                     | None                      |
 
 Do not grant this role to an auth service. Do not give the worker runtime/auth membership,
 auth URLs, OAuth credentials, cookie secrets, signing keys or account mutation privileges.
@@ -118,7 +118,7 @@ completion from reusing a pre-disable epoch snapshot. Zero active samples clear 
 valid insufficient evidence is a completed no-guide result whose reason survives exact-source reuse. Nonempty changes/failures retain
 last successful stale text with explicit versions/reason. Off hides future presentation;
 completed text may remain stored until deletion, and exact-source completed results may be
-reused on re-enable. Content already read by another assistant cannot be retracted.
+reused on re-enable. Content already read by another AI cannot be retracted.
 
 ## Input, output and spending
 

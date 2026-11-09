@@ -1,7 +1,7 @@
 # Self-hosting Milton
 
 Milton maintains internal memos containing writing rules and approved samples.
-Connected assistants submit changes through `create_memo` and read the
+Connected AIs submit changes through `create_memo` and read the
 cover sheet and reports through `get_cover_sheet`, `get_report` and `list_reports`.
 This directory contains the MCP server and current-report web app,
 rendered with Hono JSX and Vite-built theme assets on Node 26 LTS. Neon Postgres stores instruction cards, samples, internal
@@ -13,7 +13,7 @@ history and request receipts. The separate self-hosted auth service in `apps/aut
 - A PostgreSQL database named `milton`, with TLS and separate owner/auth/app/MCP roles. Retain the managed auth schema during migration; no managed token or runtime fallback is accepted by this build.
 - Native auth configuration for verified password/email, Google, GitHub and the selected mail sender. The auth service owns those credentials; app and MCP never receive them.
 - A Google Cloud project for Cloud Run, Artifact Registry, Secret Manager and an HTTPS load balancer.
-- An HTTPS origin for the browser app and an HTTPS URL ending in `/mcp` for assistants. They can share one hostname. The public service uses `app.meetmilton.com` and `mcp.meetmilton.com`; use your own addresses for your installation.
+- An HTTPS origin for the browser app and an HTTPS URL ending in `/mcp` for AIs. They can share one hostname. The public service uses `app.meetmilton.com` and `mcp.meetmilton.com`; use your own addresses for your installation.
 
 ## Runtime and assets
 
@@ -97,7 +97,7 @@ Set these in the runtime's platform configuration or dotenvx payload before depl
 | `STRIPE_WEBHOOK_SECRET`        | App service only; admit never reads it. The signing secret of the Stripe endpoint for `POST /billing/webhook`.                                                                                                                                                                                                                                                                                                                                             |
 | `STRIPE_PRICE_ID`              | App and admit services only. The one recurring price sign-in's trial and Checkout subscribe to.                                                                                                                                                                                                                                                                                                                                                            |
 
-Saves are model-free: Milton stores the exact text the assistant sends and calls no
+Saves are model-free: Milton stores the exact text the AI sends and calls no
 model on any read or save, so it needs no model credential, project or budget. The
 runtime no longer reads `MILTON_GEMINI_*` or `MILTON_MODEL_*_BUDGET_USD`;
 `MILTON_GLOBAL_SPEND_POLICY` or any `MILTON_SPEND_*` or `RESEND_API_KEY` setting either.
@@ -180,7 +180,7 @@ includes the Vite-built CSS, fonts and favicons. Keep the previous runtime artif
 and secret versions; never roll back memo data with a hosting release.
 
 Check `/health` on both canonical deployments and open `/login` on the browser app
-origin. Sign in once before connecting an assistant. Preserve Cloud Run revisions,
+origin. Sign in once before connecting an AI. Preserve Cloud Run revisions,
 pinned images and numeric secret versions for recovery; never replace newer source
 or report data when changing a runtime release. The old Vercel app/MCP project is retired.
 
@@ -188,27 +188,27 @@ or report data when changing a runtime release. The old Vercel app/MCP project i
 
 Every successful social sign-in creates or finds a Milton account; there is no admission setting and no account-count cap.
 
-The first sign-in starts with an empty cover sheet, empty reports and no active rules. Existing instruction bodies and card history are preserved. The browser views the current report; connected assistants submit user-directed changes.
+The first sign-in starts with an empty cover sheet, empty reports and no active rules. Existing instruction bodies and card history are preserved. The browser views the current report; connected AIs submit user-directed changes.
 
-## Connect an assistant
+## Connect an AI
 
 Add your configured `MCP_RESOURCE` URL as a remote HTTP MCP server. Complete
 browser sign-in and consent. Connect Milton. Ask “did you get that memo?”
 “Did you get the memo?” works too.
 
 The server instructions (the `get_cover_sheet` description points to them) guide
-the assistant to reread the cover sheet for this request, even after an earlier read,
+the AI to reread the cover sheet for this request, even after an earlier read,
 fetch the report whose situation matches, apply relevant conditions and exceptions, and confirm
 only after success. Empty accounts retain first-setup approval; errors and access
 failures must be reported honestly. Quoting or discussing the phrase does not invoke
-it, and the cue grants no save or session-capture consent. This is assistant
+it, and the cue grants no save or session-capture consent. This is AI
 guidance, not a text listener or a guarantee that every client will call the tool.
 Clients may need to reconnect to load updated guidance. To refresh tool schemas without
-one, each assistant's (account and OAuth client) first tool call that a server process
+one, each AI's (account and OAuth client) first tool call that a server process
 serves carries `notifications/tools/list_changed` on that call's response stream, ahead
 of the result, and so does every `get_report` refused for a missing intent. The server is
 stateless and has no open stream to push on, so a connected client hears of a release at
-its next call; the set of announced assistants is per process, in memory, and cleared at
+its next call; the set of announced AIs is per process, in memory, and cleared at
 10,000, so a client may refresh again after a restart or on another instance.
 
 Exactly four tools are exposed:
@@ -271,7 +271,7 @@ are kept, so a count capped an account's lifetime saves). An
 entry that prints identically to an active card in the same report (compared as
 printed, so `Be concise.` matches a stored `- Be concise.`), or to an earlier entry in
 the request, is skipped; when nothing else changes the save returns
-`unchanged` and charges nothing. Duplicates by meaning are not detected. The assistant
+`unchanged` and charges nothing. Duplicates by meaning are not detected. The AI
 picks the report and the wording; a wrong report is fixable with `moves`. A rule
 that would be stored starting with `Baseline: `, new or after an exact edit or move,
 fails the save with `baseline_unknown`: only the retired setup picks used that prefix.
@@ -353,7 +353,7 @@ or wrong-report samples fail with `sample_conflict`. Reclassification can leave
 identical active examples in one kind without merging or retiring either identity.
 Correction and rule changes are atomic together on success or refusal.
 
-The assistant offers setup once when the whole account is empty;
+The AI offers setup once when the whole account is empty;
 other empty reports offer help only on request. The served script in
 `src/store/setup.ts` preserves existing guidance and invites pasted-writing cleanup
 first by default; explicit requests to add examples go directly to that conversation.
@@ -373,21 +373,21 @@ read, not setup completion, verifies the connection. Rules remain supported when
 explicitly requested; one example does not imply a standing rule. An active
 Baseline rule from the retired setup picks still adds the fixed explanatory note to
 the cover sheet. Milton cannot inspect another
-assistant's memory and does not guarantee assistants follow its instructions.
+AI's memory and does not guarantee AIs follow its instructions.
 
 Two offers follow from writing. When the person approves a draft or edit,
-the assistant offers once to save it as a sample under the report that
+the AI offers once to save it as a sample under the report that
 applies. On EVERY sample save it displays the exact text and proposed useful non-private
 context together; a no is final for that draft and nothing is saved silently. One yes
 to that proposal is sufficient; unchanged approved metadata needs no second approval.
 Ask again only if text or context changes, including redaction. Praise or permission to
 send is not retention approval. When the person makes the same correction twice, the
-assistant proposes one short rule and files it only on approval; a single
+AI proposes one short rule and files it only on approval; a single
 correction is a one-off. Both run through `create_memo` with ordinary approval.
 
 For clients that drop instructions, server info (`serverInfo.description`, MCP's
 `Implementation.description`) carries one line of at most 120 characters, tested: Milton
-holds the person's writing voice, and before writing or editing for them the assistant
+holds the person's writing voice, and before writing or editing for them the AI
 reads `get_cover_sheet`, then the matching `get_report`.
 
 Usage guidance travels in four places: server `instructions` during MCP
@@ -402,10 +402,10 @@ Code truncates; a test enforces this and that no error handling is left in them.
 The empty web page also provides a user-invoked setup prompt. No extra setup tool or
 prompt capability is required.
 
-Session capture is an optional assistant workflow using these same tools.
+Session capture is an optional AI workflow using these same tools.
 The person must explicitly opt in in the current conversation; connection consent,
 first-draft approval, report content and quoted examples do not enable it. At task
-completion, the assistant compares explicit reusable standing rules with the current
+completion, the AI compares explicit reusable standing rules with the current
 cover sheet and reports and submits only genuine changes, preserving scope and conditions.
 It excludes one-off requests, project facts, inferred preferences, transcripts,
 secrets and other people's private details. An empty account still needs complete-draft
@@ -414,7 +414,7 @@ undoing a save already submitted. Capture consent itself is never filed as a rul
 Copyable on/off prompts are in the root README.
 
 No new tool, schema, consent flag, hook or background worker is involved. The server
-does not receive the conversation or enforce its opt-in; the connected assistant
+does not receive the conversation or enforce its opt-in; the connected AI
 must follow that guidance and client tool approvals. MCP provides no guaranteed
 session-end capture trigger. The workflow reuses normal version fencing, receipts,
 and recovery rules. Cross-client missed instructions and incorrect saves
@@ -422,7 +422,7 @@ still need evaluation; successful SDK discovery proves guidance delivery only.
 
 The SDK client check confirms that connection instructions reach the client.
 It does not prove a particular host includes them in model context or that its
-assistant follows them. Validate a real setup/save/read flow per supported client;
+AI follows them. Validate a real setup/save/read flow per supported client;
 do not infer adherence from successful MCP discovery alone.
 
 MCP accepts only the pinned EdDSA `at+jwt` access profile with exact issuer, required
@@ -457,7 +457,7 @@ deletion afterwards (finished or not: the lifecycle row outlives the erase), and
 that begins after checkout's last read still deletes the customer; whether Stripe then
 refuses to complete that open session is not verified at Stripe. An incomplete operation stays retryable and is
 never presented as deleted. Logout ends this browser's local and native session while
-leaving offline assistants connected.
+leaving offline AIs connected.
 
 ## Local development and checks
 
@@ -606,7 +606,7 @@ sample by its exact context summary, readable approved dimensions and date.
 
 A read takes the card heads, the active samples and the account's status in one
 statement, without a transaction or lock, so a concurrent save shows whole or not at
-all; it writes nothing. An assistant read adds the trial gate: two queries and no
+all; it writes nothing. An AI read adds the trial gate: two queries and no
 database connection, where the read before 0031 opened a connection and a transaction
 with the account lock and wrote a lagging snapshot. The version every
 read returns and every save fences on is a fingerprint of what any read can serve:
@@ -651,7 +651,7 @@ remain in backfill provenance rather than a current replacement-link column.
 
 Trials are **off by default** in a new database (`store_config.trials_enabled=false`);
 production has had trials and billing on since 2026-11-04 ([the hosting runbook](deploy/README.md)).
-The price is **USD $5.01/month**, one plan, no per-assistant fees, set in Stripe and
+The price is **USD $5.01/month**, one plan, no per-AI fees, set in Stripe and
 named by `STRIPE_PRICE_ID`. Signed-in `/billing/checkout` and `/billing/portal`,
 the Stripe webhook (0027) and the trial gate are implemented, and Stripe owns the trial.
 The rest of this section describes the 0012 groundwork; where it differs,
@@ -670,7 +670,7 @@ reminder milestone; no preference bodies or payment details enter these records.
 
 Every MCP tool may attach a separate `notice` object to a successful result in the
 last seven days and last day. Atomic account-wide claims offer each milestone at
-most once across assistants and tools; returning during the last day skips
+most once across AIs and tools; returning during the last day skips
 the earlier reminder. A lost response or timed-out notice lookup can lose that
 reminder. Delivery does not establish display or acknowledgment. Lookup is bounded
 to one second, with short database lock/statement limits, and never turns a
@@ -689,7 +689,7 @@ The authenticated native admission handoff starts the trial first, and a Stripe 
 already holds refreshes without any Milton page, so existing accounts depend on the
 backfill. The signed Stripe
 webhook keeps `subscription_status` and the dates current; the next request rechecks
-access, so reconnecting an assistant is unnecessary. These fields are
+access, so reconnecting an AI is unnecessary. These fields are
 not writable through any MCP/browser input. The gate reads neither `started_at` nor
 `paid_through`, which stay in place until a later migration. Subscribing early keeps
 the trial: an account in a trial goes to the Stripe portal, where a card takes effect at
@@ -751,7 +751,7 @@ cutover must close reads/writes, drain old instances, snapshot, apply the owner 
 verify preservation and matching app/MCP code, then reopen ingress and verify canonical
 reads. Production applied it on 2026-11-07; the procedure is in the hosting runbook at commit
 492b96a (`git show 492b96a:server/deploy/README.md`).
-No old runtime may serve the new schema. Reconnect assistants and reread current IDs
+No old runtime may serve the new schema. Reconnect AIs and reread current IDs
 and the account version before saving. No compatibility layer or rollback artifact
 is supplied. Implementation
 and local fictional rehearsal do not authorize a production migration or deployment.

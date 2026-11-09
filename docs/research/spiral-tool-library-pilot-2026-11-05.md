@@ -38,7 +38,7 @@ Develop an argument from those facts. Do not invent statistics, sources, quotati
 
 All four essays cover the maintenance tradeoff, learning from borrowing, and the risk of choosing the wrong initial tools. None presents a named external source or a purported quotation. The twenty/sixty quantities come from the brief.
 
-The following is an editorial assessment by the same assistant that wrote the Milton draft. It is not an independent or blind judgment, and it assigns no numerical voice score.
+The following is an editorial assessment by the same AI that wrote the Milton draft. It is not an independent or blind judgment, and it assigns no numerical voice score.
 
 - **Milton:** orderly and cautious, with the reliability argument and selection caveat preserved. Phrases such as “a smaller set of possibilities” are more abstract than the tool examples in Spiral. The ending connects growth to jobs finished rather than inventory size.
 - **Spiral 1:** more emphatic and conversational, with concrete hypothetical tools and an assertive closing. The shift from sixty different tools to “a lot of drills” changes the scenario, and “most of which were probably fine when they arrived” adds an unsupported implication about condition. The pressure-washer and saw examples are explicitly hypothetical; introducing them is not itself a violation of the brief.

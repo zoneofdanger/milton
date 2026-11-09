@@ -6,15 +6,15 @@ This note combines public product claims, a directly observed Styles dashboard, 
 
 ## Competitive scope and sources
 
-Milton stores and retrieves approved examples and exact rules; the connected assistant performs the writing. Spiral supplies its own writing process through its web app and generation tools. The useful comparison is the resulting writing and the effort required from the person.
+Milton stores and retrieves approved examples and exact rules; the connected AI performs the writing. Spiral supplies its own writing process through its web app and generation tools. The useful comparison is the resulting writing and the effort required from the person.
 
 - Spiral's [site and FAQ](https://writewithspiral.com/) describe samples, stylometry, editorial prompting, workspaces, and multiple drafts.
 - Its [agent documentation](https://writewithspiral.com/agents) exposes generation, personalization, and humanization tools. Writing tools require a paid plan, while setup tools can work on free accounts. Access through MCP is therefore not a unique Milton feature.
-- At the time checked, [pricing](https://writewithspiral.com/#pricing) listed Personal at $15/month and the wider Every bundle at $30/month. The approximately $5 Milton hypothesis should be compared with the $15 standalone product for someone already paying for an assistant.
+- At the time checked, [pricing](https://writewithspiral.com/#pricing) listed Personal at $15/month and the wider Every bundle at $30/month. The approximately $5 Milton hypothesis should be compared with the $15 standalone product for someone already paying for an AI.
 - Onboarding replies supplied by the user describe separate contextual styles and global Writing Rules, but no editor for an individual inferred observation. These are chatbot claims; the direct UI observation established the sample cards and analysis panel, not every claimed editing behavior.
 - Free credits ran out during the initial exploration before a comparison draft was obtained. The user subsequently supplied a second style-guide output from another account and three writing drafts. The quota amount, reset policy, and precise credit consumption were not measured.
 
-The proposed audience is people who want ordinary emails and messages to sound right inside an assistant they already use. The hypothesis that they need less than Spiral's full workflow is untested. So is an 80–90% value or quality claim.
+The proposed audience is people who want ordinary emails and messages to sound right inside an AI they already use. The hypothesis that they need less than Spiral's full workflow is untested. So is an 80–90% value or quality claim.
 
 ## Shared sample set
 
@@ -43,7 +43,7 @@ A plausible sequence is:
 
 No part of this small-input workflow requires fine-tuning a model. That does not establish which model Spiral uses or whether other product paths involve additional processing.
 
-Spiral's [public FAQ](https://writewithspiral.com/#faq) describes using the same underlying models as other assistants, configured with its own editorial prompting.
+Spiral's [public FAQ](https://writewithspiral.com/#faq) describes using the same underlying models as other AIs, configured with its own editorial prompting.
 
 ## Dashboard numbers reproduced exactly
 
@@ -99,7 +99,7 @@ The user supplied guide A after the first three-essay setup and guide B after ad
 
 This is evidence of different generated prescriptions under intended matching inputs. It is not a controlled estimate of randomness: exact imported bytes, insertion order, intermediate guide regeneration, account defaults, model choice, and prompt versions were not held constant or independently recorded. An incremental guide-update process is another plausible source of differences.
 
-For Milton, the consequence is practical: an assistant can propose analysis, while exact approved guidance can remain stable until the person changes it. This does not establish that either guide produces better or worse drafts.
+For Milton, the consequence is practical: an AI can propose analysis, while exact approved guidance can remain stable until the person changes it. This does not establish that either guide produces better or worse drafts.
 
 ## A plausible reconstruction prompt
 
@@ -134,9 +134,9 @@ This could plausibly produce the observed type of output in one ordinary model c
 
 ## What this means for Milton
 
-A connected assistant can already read Milton's samples and perform this analysis on request. The analytical generation can happen in the assistant the person uses, while Milton remains storage and retrieval.
+A connected AI can already read Milton's samples and perform this analysis on request. The analytical generation can happen in the AI the person uses, while Milton remains storage and retrieval.
 
-The meaningful product question is whether an approved, derived guide helps that assistant write better than the original samples alone. A guide can compress useful patterns, but can also add unsupported restrictions. Nothing in this reconstruction authorizes saving inferred rules automatically or changing Milton's model-free storage behavior.
+The meaningful product question is whether an approved, derived guide helps that AI write better than the original samples alone. A guide can compress useful patterns, but can also add unsupported restrictions. Nothing in this reconstruction authorizes saving inferred rules automatically or changing Milton's model-free storage behavior.
 
 A [ten-brief A/B pilot](pg-style-guide-ablation-2026-11-05.md) now compares samples alone with samples plus the fixed second Spiral guide. The model judge preferred samples alone overall on five briefs and the guide condition on four, with one unclear result. This establishes no clear overall benefit in that small run. Guide-only drafting, human editing effort, and reviewed-guide variants remain untested. No derived guide was saved to Milton by this experiment.
 

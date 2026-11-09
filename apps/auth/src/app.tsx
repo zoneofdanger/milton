@@ -267,8 +267,8 @@ export function createApp(
     const headers = new Headers(c.req.raw.headers);
     headers.set("content-type", "application/json");
     headers.delete("content-length");
-    // The Turnstile widget's form field becomes the header native's captcha
-    // plugin reads; a header the browser sent is never forwarded instead.
+    // The Turnstile widget's form field becomes the header the wrapper's
+    // siteverify check reads; a header the browser sent is never forwarded.
     const captchaToken = f.get("cf-turnstile-response");
     delete body["cf-turnstile-response"];
     headers.delete("x-captcha-response");

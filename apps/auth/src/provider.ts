@@ -82,11 +82,21 @@ const accountDeleting = () => new APIError("FORBIDDEN", ACCOUNT_DELETING);
 const signUpEmail = z.email().max(320);
 const TURNSTILE_SITEVERIFY =
   "https://challenges.cloudflare.com/turnstile/v0/siteverify";
+// How long one siteverify call may take, connection and body included.
+const TURNSTILE_TIMEOUT_MS = 5000;
 // Cloudflare's siteverify codes that mean the token itself is bad.
 const TOKEN_ERRORS = new Set([
   "missing-input-response",
   "invalid-input-response",
   "timeout-or-duplicate",
+]);
+// Every code Cloudflare documents for siteverify; only these are logged.
+const CLOUDFLARE_CODES = new Set([
+  ...TOKEN_ERRORS,
+  "missing-input-secret",
+  "invalid-input-secret",
+  "bad-request",
+  "internal-error",
 ]);
 const hash = (v: string) => createHash("sha256").update(v).digest("hex");
 export function createProvider(
@@ -659,8 +669,8 @@ export function createProvider(
   // answers every success:false (Cloudflare's internal-error too) as a bad
   // token, and sends a /64 for IPv6. At most four verifications wait at once
   // per process, each at most 5 s. Only Cloudflare's token codes refuse (403);
-  // anything else (another code, none, a non-2xx, a network failure or
-  // timeout) is a retryable 503: fail closed. No remoteip is sent: this
+  // anything else (another code, a malformed answer, a non-2xx, a network
+  // failure or timeout) is a retryable 503: fail closed. No remoteip is sent: this
   // process knows only an IPv6 client's /64, and it is optional.
   let verifying = 0;
   const networkFetch = options.boundaries?.fetch ?? fetch;
@@ -670,42 +680,61 @@ export function createProvider(
     if (token.length > 2048) return json({ error: "captcha_refused" }, 403);
     if (verifying >= 4) return json({ error: "busy_retry" }, 429);
     verifying++;
-    let codes: string[] = [];
+    // What is logged: Cloudflare's documented code names, "other" for any
+    // other code, or one fixed label. Never the token, the secret or text
+    // the response chose.
+    let codes: string[];
     try {
       const r = await networkFetch(TURNSTILE_SITEVERIFY, {
         method: "POST",
         redirect: "error",
-        signal: AbortSignal.timeout(5000),
+        signal: AbortSignal.timeout(TURNSTILE_TIMEOUT_MS),
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ secret, response: token }),
       });
-      const v: unknown = r.ok ? await r.json() : null;
       if (!r.ok) {
-        codes = [`http_${r.status}`];
+        codes = ["http_error"];
         await r.body?.cancel();
-      } else if (v && typeof v === "object") {
-        const { success, hostname, action } = v as Record<string, unknown>;
-        const reported = (v as Record<string, unknown>)["error-codes"];
-        if (success === true)
-          return hostname === new URL(AUTH_ORIGIN).hostname &&
-            action === "signup"
+      } else {
+        // The documented shape, strictly: success a boolean; on failure,
+        // error-codes an array of strings. Anything else is malformed.
+        const v: unknown = await r.json().catch(() => null);
+        const o =
+          v && typeof v === "object" && !Array.isArray(v)
+            ? (v as Record<string, unknown>)
+            : {};
+        const reported = o["error-codes"];
+        if (o.success === true)
+          return o.hostname === new URL(AUTH_ORIGIN).hostname &&
+            o.action === "signup"
             ? undefined
             : json({ error: "captcha_refused" }, 403);
-        codes = Array.isArray(reported)
-          ? reported.filter((c): c is string => typeof c === "string")
-          : [];
-        if (codes.length && codes.every((c) => TOKEN_ERRORS.has(c)))
+        if (
+          o.success !== false ||
+          !Array.isArray(reported) ||
+          !reported.every((c) => typeof c === "string")
+        )
+          codes = ["malformed"];
+        else if (
+          reported.length &&
+          reported.every((c) => TOKEN_ERRORS.has(c as string))
+        )
           return json({ error: "captcha_refused" }, 403);
+        else
+          codes = (reported as string[]).map((c) =>
+            CLOUDFLARE_CODES.has(c) ? c : "other",
+          );
       }
-    } catch {
-      codes = ["network"];
+    } catch (error) {
+      codes = [
+        error instanceof Error && error.name === "TimeoutError"
+          ? "timeout"
+          : "network",
+      ];
     } finally {
       verifying--;
     }
-    // Cloudflare's fixed code names only: never the token or the secret.
-    console.error("auth_turnstile", {
-      codes: codes.filter((c) => /^[a-z0-9_-]{1,40}$/.test(c)).slice(0, 5),
-    });
+    console.error("auth_turnstile", { codes: [...new Set(codes)].slice(0, 7) });
     return json({ error: "captcha_unavailable" }, 503);
   }
   // The peer keys the network rate limits, so every caller names the client.

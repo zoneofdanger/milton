@@ -1187,6 +1187,28 @@ describe("Turnstile on sign-up", () => {
       "fictional-no-codes": [200, { success: false }],
       "fictional-5xx": [502, {}],
       "fictional-network": "network",
+      // Malformed answers: a 503, never read as a refusal.
+      "fictional-no-success": [
+        200,
+        { "error-codes": ["invalid-input-response"] },
+      ],
+      "fictional-success-string": [
+        200,
+        { success: "true", hostname: "auth.meetmilton.com", action: "signup" },
+      ],
+      "fictional-mixed-codes": [
+        200,
+        { success: false, "error-codes": ["invalid-input-response", 7] },
+      ],
+      "fictional-codes-string": [
+        200,
+        { success: false, "error-codes": "invalid-input-response" },
+      ],
+      "fictional-array": [200, []],
+      "fictional-reflected": [
+        200,
+        { success: false, "error-codes": ["fictional-reflected-token"] },
+      ],
     };
     const verified: { body: Record<string, unknown>; init: RequestInit }[] = [];
     const fetch = async (input: string | URL | Request, init?: RequestInit) => {
@@ -1252,12 +1274,33 @@ describe("Turnstile on sign-up", () => {
         "fictional-no-codes",
         "fictional-5xx",
         "fictional-network",
+        "fictional-no-success",
+        "fictional-success-string",
+        "fictional-mixed-codes",
+        "fictional-codes-string",
+        "fictional-array",
+        "fictional-reflected",
       ])
         expect(await signUp(guarded, token)).toEqual([
           503,
           "captcha_unavailable",
           false,
         ]);
+      // Logs carry only Cloudflare's documented code names or fixed labels.
+      const logged = quiet.mock.calls.filter((c) => c[0] === "auth_turnstile");
+      expect(logged.map((c) => c[1])).toEqual([
+        { codes: ["internal-error"] },
+        { codes: ["invalid-input-secret"] },
+        { codes: ["malformed"] },
+        { codes: ["http_error"] },
+        { codes: ["network"] },
+        { codes: ["malformed"] },
+        { codes: ["malformed"] },
+        { codes: ["malformed"] },
+        { codes: ["malformed"] },
+        { codes: ["malformed"] },
+        { codes: ["other"] },
+      ]);
       // A passing token reaches native's sign-up (here, a refused database).
       expect((await signUp(guarded, "fictional-pass"))[2]).toBe(true);
       // Only the secret and token: no remoteip, and a bounded wait.
@@ -1351,6 +1394,73 @@ describe("Turnstile on sign-up", () => {
       "rate_limited",
     ]);
     expect(verifications).toBe(1);
+  });
+
+  test("a siteverify call that never answers is abandoned at 5 s", async () => {
+    const { createProvider } = await import("../src/provider.ts");
+    const pool = {
+      on: () => pool,
+      query: async (text: string) =>
+        text.includes("with g as")
+          ? { rows: [{ allowed: [true, true, true] }] }
+          : { rows: [{ allowed: true }] },
+    } as unknown as import("pg").Pool;
+    // An injected clock: each deadline fires after 1/100 of its length, and
+    // the length asked for is recorded.
+    const deadlines: number[] = [];
+    const timeout = spyOn(AbortSignal, "timeout").mockImplementation(
+      (ms: number) => {
+        deadlines.push(ms);
+        const c = new AbortController();
+        setTimeout(
+          () => c.abort(new DOMException("deadline", "TimeoutError")),
+          ms / 100,
+        );
+        return c.signal;
+      },
+    );
+    let aborted = false;
+    const service = createProvider(fixtureConfig(keys), {
+      pool,
+      boundaries: {
+        // Never answers; rejects only when its signal aborts.
+        fetch: (_input, init) =>
+          new Promise<Response>((_resolve, reject) =>
+            init!.signal!.addEventListener("abort", () => {
+              aborted = true;
+              reject(init!.signal!.reason);
+            }),
+          ),
+      },
+    });
+    const quiet = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const started = Date.now();
+      const r = await service.handler(
+        new Request("https://auth.meetmilton.com/api/auth/sign-up/email", {
+          method: "POST",
+          headers: {
+            origin: "https://auth.meetmilton.com",
+            "content-type": "application/json",
+            "x-captcha-response": "fictional-token",
+          },
+          body: JSON.stringify({ email: "person@example.com" }),
+        }),
+        "127.0.0.1",
+      );
+      expect([r.status, ((await r.json()) as { error: string }).error]).toEqual(
+        [503, "captcha_unavailable"],
+      );
+      expect(deadlines).toEqual([5000]);
+      expect(aborted).toBe(true);
+      expect(Date.now() - started).toBeLessThan(1000);
+      expect(
+        quiet.mock.calls.filter((c) => c[0] === "auth_turnstile")[0]![1],
+      ).toEqual({ codes: ["timeout"] });
+    } finally {
+      timeout.mockRestore();
+      quiet.mockRestore();
+    }
   });
 
   test("siteverify waits hold no native slot and have their own bound of four", async () => {

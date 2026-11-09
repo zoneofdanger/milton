@@ -1,5 +1,5 @@
-// The tool contract served to assistants beside mcp.ts: every input schema,
-// the read envelopes and refusals, and the tool runner over a TenantStore.
+// The tool contract served to AIs beside mcp.ts: every input schema, the read
+// envelopes and refusals, and the tool runner over a TenantStore.
 import { z } from "zod";
 import type { TenantStore } from "./store";
 import { withNext } from "./mcp-outcomes";
@@ -7,218 +7,213 @@ import { StoreError } from "./store/errors";
 import { utf8Bytes } from "./store/limits";
 import { subscriptionRequired } from "./store/trials";
 import { usageWithin, type CallUsage, type ToolName } from "./store/usage";
-import {
-  FILINGS,
-  REPORT_IDS,
-  resolveReportId,
-  type Documents,
-  type ReportDocument,
-} from "./store/reports";
-import {
-  contextDimensions,
-  oneLine,
-  sampleContextInput,
-} from "./store/sample-context";
-import { reportSetup, setupHint } from "./store/setup";
+import { MEDIA, type CoverSheetRead, type ReportRead } from "./store/memos";
+import { setupScript } from "./store/setup";
+
+/** One trimmed line of at most `max` characters, with no control characters. */
+export const oneLine = (max: number) =>
+  z
+    .string()
+    .trim()
+    .min(1)
+    .max(max)
+    .refine((v) => v.isWellFormed() && !/[\p{Cc}]/u.test(v));
+const id = z.string().min(1).max(64);
+const medium = z
+  .enum(MEDIA)
+  .describe("email, chat (DMs, texts, Slack), post, document or speech.");
 
 export const coverSheetInput = z.strictObject({});
 export const intentInput = z
   .strictObject({
     situation: oneLine(200).describe(
-      'One line on what you are writing, to whom and why, such as "declining a client\'s request for a discount". When not drafting, why you are reading, such as "confirming what is on file".',
+      'One line on what you are writing, to whom and why, such as "declining a vendor\'s meeting request". When not drafting, why you are reading, such as "confirming what is on file".',
     ),
-    kind_id: z
-      .string()
-      .min(1)
-      .max(256)
+    medium,
+    audience: oneLine(100).describe(
+      'Who it is for, in generic words, such as "a vendor" or "my team".',
+    ),
+    purpose: oneLine(100).describe(
+      'What it should do, such as "decline" or "ask for a review".',
+    ),
+    kind_id: id
       .optional()
       .describe(
-        "An existing personal kind from get_report.kinds, which lists every kind with an active sample in this report regardless of intent or sample selection. Prefer it and fill sparse matches with broader examples; invalid or foreign ids are refused. Never create a kind on read.",
-      ),
-    context: contextDimensions
-      .optional()
-      .describe(
-        "Relevant known purposes, medium, audience, interaction, whole/excerpt scope and language, using the same dimensions as sample context.",
+        "A kind_id from get_report's kinds when one fits. Never invent one on read.",
       ),
   })
   .describe(
-    "What the read is for. The report serves the eight samples that best fit it.",
+    "What this report is for. Audience and purpose are required: a vague intent gets worse examples and tweaks.",
   );
-export const reportInput = z.strictObject({
-  report_id: z
-    .enum([...REPORT_IDS, "doc"])
-    .describe(
-      "email, chat, post, document (doc is accepted), or speech: the writing situation the task matches.",
-    ),
-  intent: intentInput,
-});
+export const reportInput = z.strictObject({ intent: intentInput });
 /** The refusal for a get_report call with no intent, as from a client still
- * holding the schema before intent existed. */
+ * holding an older schema. */
 export const missingIntent =
-  'get_report needs intent: situation, one line on what you are writing, to whom and why (or why you are reading, such as "confirming what is on file"), plus kind_id and relevant context when known; reconnect your AI if it has no intent field. Nothing was read.';
+  "get_report needs intent: situation (one line on what you are writing, to whom and why), medium, audience and purpose, plus kind_id when known; reconnect your AI if it has no intent field. Nothing was read.";
 /** The refusal for a get_report intent that is present but malformed: each
  * limit it broke, and no reconnect hint, since the client has the field. */
 export function malformedIntent(intent: unknown) {
   const issues = intentInput.safeParse(intent).error?.issues ?? [];
   const broken = new Set(
-    issues.map((issue) =>
-      issue.path[0] === "situation"
+    issues.map((issue) => {
+      const field = String(issue.path[0] ?? "");
+      return field === "situation"
         ? "situation must be one line of at most 200 characters"
-        : "intent takes situation, optional kind_id and bounded context dimensions",
-    ),
+        : field === "medium"
+          ? "medium is one of email, chat, post, document or speech"
+          : field === "audience" || field === "purpose"
+            ? `${field} is required: one line of at most 100 characters`
+            : "intent takes situation, medium, audience, purpose and an optional kind_id";
+    }),
   );
   return `get_report intent: ${[...broken].join("; ")}. Nothing was read.`;
 }
-export const listReportsInput = z.strictObject({});
 
-const text = z
+/** A memo's words: up to the 256 KiB request cap, well formed, with no NUL. */
+const words = z
   .string()
-  .max(131072)
+  .max(262144)
   .refine(
-    (v) => v.isWellFormed() && !v.includes("\0") && utf8Bytes(v) <= 131072,
+    (v) =>
+      v.trim().length > 0 &&
+      v.isWellFormed() &&
+      !v.includes("\0") &&
+      utf8Bytes(v) <= 262144,
   );
-export const oneKind = "A sample needs kind_id or new_kind, not both.";
+export const memoContextInput = z
+  .strictObject({
+    summary: oneLine(200).describe(
+      'One placeholder-safe line on the situation and the text being replied to, such as "decline Thursday meeting from a vendor; their email asked for a 30-min call". Never the quoted text itself.',
+    ),
+    medium,
+    audience: oneLine(100).optional().describe('Generic, such as "a vendor".'),
+    purpose: oneLine(100).optional().describe('Such as "decline".'),
+  })
+  .describe("The memo's context. Omitted optional fields stay empty.");
+const kindFields = {
+  kind_id: id
+    .optional()
+    .describe("A kind_id from get_report's kinds when one fits."),
+  new_kind: oneLine(60)
+    .optional()
+    .describe(
+      "Only when no listed kind fits: a short label such as vendor decline. A label already on file, in any letter case, reuses that kind.",
+    ),
+};
+export const memoInput = z
+  .strictObject({
+    final: words.describe(
+      "The version the person accepted, exactly, hand edits included.",
+    ),
+    first_draft: words
+      .optional()
+      .describe(
+        "Your first version exactly as you showed it; in edit mode, your first edit of their text. Never rebuilt.",
+      ),
+    first_draft_missing: z
+      .literal(true)
+      .optional()
+      .describe(
+        "Send instead of first_draft when you no longer have it verbatim.",
+      ),
+    mode: z
+      .enum(["draft", "edit"])
+      .optional()
+      .describe(
+        "draft when you wrote it, edit when you edited the person's text. Required with a first draft.",
+      ),
+    rounds: z
+      .number()
+      .int()
+      .min(0)
+      .max(1000)
+      .optional()
+      .describe(
+        "How many times you redrafted after the first draft. Required with a first draft.",
+      ),
+    tweaks: z
+      .array(
+        z.union([
+          z.strictObject({ tweak_id: id }),
+          z.strictObject({ text: oneLine(200) }),
+        ]),
+      )
+      .min(1)
+      .max(10)
+      .optional()
+      .describe(
+        'Only when the final differs from the first draft: each habit the person made you change, one line each with when it applies ("vendor replies: no warm-up opener"). Skip one-off facts they added. When it is the same change, reuse a served tweak\'s id with {tweak_id}; {text} adds one only when none fits.',
+      ),
+    context: memoContextInput,
+    ...kindFields,
+    report_id: id
+      .optional()
+      .describe("The report_id of the get_report read before this draft."),
+  })
+  .describe(
+    'One accepted final. Omit first_draft, first_draft_missing, mode, rounds and tweaks for writing the person gave you to keep (setup pastes, "remember this email").',
+  );
+export const coverSheetChangeInput = z
+  .strictObject({
+    add: oneLine(300)
+      .optional()
+      .describe("One exact line the person asked you to add."),
+    remove: z
+      .string()
+      .min(1)
+      .max(1500)
+      .optional()
+      .describe(
+        "One exact existing line the person asked you to remove, copied verbatim.",
+      ),
+    expected_version: z
+      .number()
+      .int()
+      .min(0)
+      .describe("The version from the latest get_cover_sheet."),
+  })
+  .refine((v) => (v.add === undefined) !== (v.remove === undefined), {
+    message: "cover_sheet takes add or remove, not both.",
+  });
+export const memoContextChangeInput = z.strictObject({
+  memo_id: id,
+  context: memoContextInput,
+  ...kindFields,
+});
+
+export const oneChange =
+  "Send exactly one of memo, cover_sheet, forget_memos or memo_context.";
 export const saveMemoInput = z
   .strictObject({
-    text: text
-      .refine((v) => v.trim().length > 0)
-      .describe(
-        "What this save does and why, in a sentence. Milton records it with the save and never stores it as a rule.",
-      ),
-    rules: z
-      .array(
-        z.strictObject({
-          report: z
-            .enum([...FILINGS, "doc"])
-            .describe(
-              "The report the rule belongs to, or cover for a rule true of all writing.",
-            ),
-          text: text
-            .refine((v) => v.trim().length > 0)
-            .describe(
-              "The rule exactly as the person approved it, with its conditions and exceptions. Milton stores these bytes unchanged.",
-            ),
-        }),
-      )
-      .min(1)
-      .max(100)
-      .optional()
-      .describe(
-        "New rules, one entry each. A rule already on file in that report with the same text is skipped.",
-      ),
-    exact_edits: z
-      .array(
-        z.strictObject({
-          before: text.min(1),
-          after: text,
-        }),
-      )
-      .min(1)
-      .max(500)
-      .optional()
-      .describe(
-        "Corrections and removals of existing rules, sent as Corrections in the server instructions says. All edits use the original snapshot. Preserve complete conditions, subjects and scope.",
-      ),
-    moves: z
-      .array(
-        z.strictObject({
-          before: text.min(1),
-          report: z.enum([...FILINGS, "doc"]),
-        }),
-      )
-      .min(1)
-      .max(500)
-      .optional()
-      .describe(
-        "Optional moves of existing rules, only when the person asks to change where a rule applies. before is copied verbatim from the rule and occurs exactly once across all rules; report is the destination report, or cover for the cover sheet. The rule keeps its exact text.",
-      ),
-    sample: z
-      .strictObject({
-        report: z
-          .enum([...REPORT_IDS, "doc"])
-          .describe("The report this writing belongs to."),
-        kind_id: z
-          .string()
-          .min(1)
-          .max(256)
-          .optional()
-          .describe(
-            "The kind_id of an existing kind in this report, from get_report samples. Reuse one whenever it fits.",
-          ),
-        new_kind: oneLine(60)
-          .optional()
-          .describe(
-            "Only when no listed kind fits: a label of one or two words, such as follow-up email. A label already used in this report, in any letter case, files under that kind. Send kind_id or new_kind, not both.",
-          ),
-        sample_id: z
-          .string()
-          .min(1)
-          .max(256)
-          .optional()
-          .describe(
-            "Stable id of an active sample the person approved revising. Omit for a new example; include complete approved text, context and classification.",
-          ),
-        context: sampleContextInput,
-        text: text
-          .refine((v) => v.trim().length > 0)
-          .describe(
-            "The approved writing exactly as the person approved it. Milton stores it unchanged.",
-          ),
-      })
-      .refine((v) => (v.kind_id === undefined) !== (v.new_kind === undefined), {
-        message: oneKind,
-      })
-      .optional()
-      .describe(
-        "Optional approved sample to file under a report, offered once when the person approves a draft and sent only after they say yes. Every approved sample stays; a report read serves the eight that best fit its intent. Use sample_id to append a complete revision, or retire_samples to remove an example. Only retirement is reported in samples_retired. A new example identical in body, report/kind and complete context files nothing; revisions never merge identities.",
-      ),
-    sample_context: z
-      .strictObject({
-        report: z.enum([...REPORT_IDS, "doc"]),
-        sample_id: z.string().min(1).max(256),
-        kind_id: z
-          .string()
-          .min(1)
-          .max(256)
-          .optional()
-          .describe(
-            "Optional existing kind in the same report; omit to preserve classification.",
-          ),
-        context: sampleContextInput,
-      })
-      .optional()
-      .describe(
-        "Correct an active sample after approval of the complete replacement context and classification. Omitted optional context fields are deliberately cleared. Appends a complete revision with unchanged body and stable id; the approval date and recency advance. Reclassification preserves separate identities even when their text matches. Cannot combine with sample or retire_samples. An identical replacement is unchanged.",
-      ),
-    retire_samples: z
-      .array(z.string().min(1).max(256))
-      .min(1)
-      .max(500)
-      .optional()
-      .describe(
-        "Optional ids of active samples the person asked to remove, from get_report samples.",
-      ),
     request_id: z
       .uuid()
       .describe(
-        "A new UUID for a new logical save. Reuse this UUID and the exact original arguments only to recover that request's uncertain outcome.",
+        "A new UUID for each new save. Reuse it with exactly the same arguments only to recover an uncertain outcome.",
       ),
-    expected_version: z
-      .string()
-      .regex(/^[a-f0-9]{64}$/)
+    memo: memoInput.optional(),
+    cover_sheet: coverSheetChangeInput.optional(),
+    forget_memos: z
+      .array(id)
+      .min(1)
+      .max(100)
+      .optional()
+      .describe("Ids of memos the person asked you to forget."),
+    memo_context: memoContextChangeInput
+      .optional()
       .describe(
-        "Copy the opaque version from the latest get_cover_sheet or get_report result. Never invent a version.",
+        "A corrected context and kind for one memo; its words never change.",
       ),
   })
   .refine(
     (v) =>
-      v.sample_context === undefined ||
-      (v.sample === undefined && v.retire_samples === undefined),
-    {
-      message: "sample_context cannot combine with sample or retire_samples.",
-    },
+      [v.memo, v.cover_sheet, v.forget_memos, v.memo_context].filter(
+        (part) => part !== undefined,
+      ).length === 1,
+    { message: oneChange },
   );
 export type SaveMemoInput = z.infer<typeof saveMemoInput>;
+export type MemoInput = z.infer<typeof memoInput>;
+export type MemoContextInput = z.infer<typeof memoContextInput>;
 
 type ToolResult = {
   content: [{ type: "text"; text: string }];
@@ -240,65 +235,26 @@ export function storeResult(value: object, isError = false): ToolResult {
     ...(isError ? { isError } : {}),
   };
 }
-/** The cover sheet envelope: rules true of all writing, the version every save
- * fences on, and the fixed index. `is_empty` means the whole account is empty.
- * While the account has no guidance, `setup` offers sample-first onboarding. */
-export function coverSheet(documents: Documents & { version: string }) {
+/** The cover sheet envelope. While the account is empty, setup carries the
+ * onboarding script. */
+export function coverSheet(read: CoverSheetRead) {
   return {
-    text: documents.cover,
-    version: documents.version,
-    is_empty: documents.is_empty,
-    reports: documents.index,
-    ...(documents.is_empty ? { setup: reportSetup(documents, "email") } : {}),
+    text: read.text,
+    version: read.version,
+    memos: read.memos,
+    tweaks: read.tweaks,
+    keep_memos: read.keep_memos,
+    is_empty: read.is_empty,
+    ...(read.is_empty ? { setup: setupScript } : {}),
   };
 }
-/** Served samples without their bodies (those stay in text), in served order, so
- * an assistant can name a sample to revise or remove and read its approved
- * context and match evidence. */
-const sampleIndex = (report: ReportDocument) =>
-  report.samples.map((s) => ({
-    id: s.id,
-    kind_id: s.kind_id,
-    kind: s.kind,
-    context: s.context,
-    date: s.date,
-    revision: s.revision,
-    ...(s.match ? { match: s.match } : {}),
-  }));
-/** Optional setup, served only while a report has no rules or samples. */
-const setupField = (documents: Documents, id: (typeof REPORT_IDS)[number]) => {
-  const setup = reportSetup(documents, id);
-  return setup === undefined ? {} : { setup };
-};
-export const reportEnvelope = (
-  documents: Documents & { version: string },
-  id: (typeof REPORT_IDS)[number],
-) => {
-  const report = documents.reports.find((r) => r.id === id)!;
-  return {
-    report_id: id,
-    text: report.body,
-    ...(report.guide ? { guide: report.guide } : {}),
-    version: documents.version,
-    is_empty: report.is_empty,
-    kinds: report.kinds,
-    samples: sampleIndex(report),
-    selection:
-      "Up to eight: requested kind, purpose overlap, matching context dimensions, situation text, then newest. Sparse matches include broader examples; match lists exact signals. Unknown scope stays unknown; excerpts do not establish whole-work structure.",
-    ...setupField(documents, id),
-  };
-};
-export const reportList = (documents: Documents & { version: string }) => ({
-  reports: documents.reports.map((r) => ({
-    report_id: r.id,
-    text: r.body,
-    ...(r.guide ? { guide: r.guide } : {}),
-    is_empty: r.is_empty,
-    samples: sampleIndex(r),
-    // A one-line pointer, so the list stays small; get_report serves the block.
-    ...(r.is_empty ? { setup: setupHint(r.id) } : {}),
-  })),
-  version: documents.version,
+export const reportEnvelope = (report: ReportRead) => ({
+  report_id: report.report_id,
+  text: report.text,
+  is_empty: report.is_empty,
+  examples: report.examples,
+  tweaks: report.tweaks,
+  kinds: report.kinds,
 });
 
 export function createStoreMemoTools(
@@ -311,7 +267,7 @@ export function createStoreMemoTools(
     return {
       ...read,
       permission:
-        "Read only. To save approved writing guidance, reconnect with Read and write.",
+        "Read only. To save memos, the person reconnects with Read and write.",
     };
   }
   async function withNotice<T extends object>(value: T) {
@@ -360,35 +316,18 @@ export function createStoreMemoTools(
       run("get_cover_sheet", async (call) =>
         storeResult(
           await withNotice(
-            permission(coverSheet(await store.readDocuments(undefined, call))),
+            permission(coverSheet(await store.readCoverSheet(call))),
           ),
         ),
       ),
     get_report: (input: z.infer<typeof reportInput>) =>
-      run("get_report", async (call) => {
-        const report = resolveReportId(input.report_id)!;
-        return storeResult(
+      run("get_report", async (call) =>
+        storeResult(
           await withNotice(
-            permission(
-              reportEnvelope(
-                await store.readDocuments({ ...input.intent, report }, call),
-                report,
-              ),
-            ),
+            reportEnvelope(await store.readReport(input.intent, call)),
           ),
-        );
-      }),
-    list_reports: () =>
-      run("list_reports", async (call) => {
-        const list = reportList(await store.readDocuments(undefined, call));
-        return storeResult(
-          await withNotice(
-            options.readOnly
-              ? { ...list, reports: list.reports.map(permission) }
-              : list,
-          ),
-        );
-      }),
+        ),
+      ),
     create_memo: (input: SaveMemoInput) =>
       run("create_memo", async (call) => {
         if (options.readOnly)
@@ -397,7 +336,7 @@ export function createStoreMemoTools(
               error: "insufficient_scope",
               required_permission: "read_write",
               message:
-                "This connection is read only. Reconnect with Read and write to save approved guidance.",
+                "This connection is read only. Reconnect with Read and write to save memos.",
             },
             true,
           );

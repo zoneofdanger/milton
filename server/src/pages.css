@@ -22,6 +22,16 @@ main {
 .page-body {
   max-width: 38rem;
 }
+/* Memo, memo settings and confirmation pages use the shell's full width and
+   wrap their prose evenly; verbatim writing (pre.memo-text) keeps its lines. */
+.page-body-wide {
+  max-width: none;
+}
+.page-body-wide :is(p, li, dd),
+.tps-form :is(.applies, .sheet-meta, .small-note),
+.sheet-meta {
+  text-wrap: pretty;
+}
 .page-body h1 {
   margin: var(--space-8) 0 var(--space-6);
 }
@@ -404,15 +414,10 @@ main > nav + .tps-form {
   font: italic var(--text-body) / var(--leading-label) var(--font-form);
   color: var(--muted);
 }
-.sub-label {
-  margin: var(--space-5) 0 var(--space-2);
-  font: var(--text-body) / var(--leading-label) var(--font-form);
-}
-.ruled {
+.score-lines {
   list-style: none;
   margin: 0;
   padding: 0;
-  counter-reset: rule;
 }
 .line {
   display: flex;
@@ -423,14 +428,6 @@ main > nav + .tps-form {
   padding: var(--space-2) 0 3px;
   border-bottom: 1px solid var(--sheet-rule);
 }
-.ruled > .line {
-  counter-increment: rule;
-}
-.ruled > .line::before {
-  content: counter(rule) ".";
-  min-width: var(--space-6);
-  font: var(--text-body) / var(--leading-label) var(--font-form);
-}
 .typed {
   min-width: 0;
   font: var(--text-small) / var(--leading-body) var(--font-mono);
@@ -440,68 +437,118 @@ main > nav + .tps-form {
 .comment {
   font-style: italic;
 }
-.form-sample {
+/* The cover sheet's form fills the sheet's width. */
+.cover-form {
+  justify-items: stretch;
+  margin-top: var(--space-3);
+}
+.cover-form label {
+  font-family: var(--font-sans);
+}
+.cover-form textarea {
+  width: 100%;
+  font: var(--text-small) / var(--leading-body) var(--font-mono);
+  resize: vertical;
+}
+.cover-form button {
+  justify-self: start;
+}
+.memo-list,
+.tweak-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.memo-row,
+.tweak-row {
+  padding: var(--space-3) 0;
   border-bottom: 1px solid var(--sheet-rule);
 }
-.form-sample > summary {
-  display: grid;
-  grid-template-columns: var(--space-6) minmax(0, 1fr) auto;
-  align-items: start;
-  min-height: var(--touch-target);
-  gap: var(--space-2) var(--space-3);
-  padding: var(--space-3) 0;
-  list-style: none;
-  cursor: pointer;
+.memo-row p,
+.tweak-row p {
+  margin: 0 0 var(--space-2);
 }
-.form-sample > summary::-webkit-details-marker {
-  display: none;
-}
-.form-sample > summary::before {
-  content: "▸";
-  grid-column: 1;
-  grid-row: 1;
-  font: var(--text-body) / var(--leading-label) var(--font-form);
-}
-.form-sample[open] > summary::before {
-  content: "▾";
-}
-.form-sample .typed {
-  grid-column: 2 / 4;
-  grid-row: 1;
-}
-.sample-meta {
+.memo-head {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2) var(--space-3);
-  grid-column: 2;
-  grid-row: 2;
-  min-width: 0;
-  overflow-wrap: anywhere;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0 var(--space-3);
 }
-.form-sample .labels,
-.form-sample .date {
-  color: var(--muted);
-  font: var(--text-caption) var(--font-mono);
+.memo-head .report-counts {
+  margin: 0;
 }
-.form-sample > summary::after {
-  content: "show";
-  grid-column: 3;
-  grid-row: 2;
-  color: var(--muted);
+.memo-label {
+  font: 600 var(--text-body) / var(--leading-label) var(--font-form);
+}
+.memo-tweaks {
+  font-size: var(--text-small);
+}
+.tweak-label {
   font: italic var(--text-small) / var(--leading-label) var(--font-form);
 }
-.form-sample[open] > summary::after {
-  content: "hide";
+/* Row actions: a link and small buttons that wrap on a phone. */
+.memo-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  margin-top: var(--space-2);
+  font-family: var(--font-sans);
+  font-size: var(--text-small);
 }
-.form-sample pre,
+.memo-actions form {
+  margin: 0;
+}
+button.compact {
+  min-height: var(--touch-target);
+  padding: 0 var(--space-4);
+}
+.tweak-reword summary {
+  display: inline-flex;
+  align-items: center;
+  padding-block: 0;
+  text-decoration: underline;
+  text-underline-offset: 0.25em;
+}
+/* Open, the reword form takes its own line below Delete. */
+.tweak-reword[open] {
+  flex-basis: 100%;
+}
+.tweak-reword form {
+  margin-top: var(--space-2);
+}
+.tweak-reword label {
+  width: min(100%, 28rem);
+}
+/* The full memo page. */
+.memo-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  gap: var(--space-3) var(--space-6);
+  margin: 0 0 var(--space-4);
+  font-size: var(--text-small);
+}
+.memo-facts dt {
+  color: var(--muted);
+}
+.memo-facts dd {
+  margin: 0;
+}
+.page-body .memo-text,
+[role="alert"] .memo-text {
+  padding: var(--space-4);
+  border: 1px dashed var(--input);
+  background: var(--surface);
+}
+.memo-tweak-list {
+  margin: 0 0 var(--space-4);
+  padding-left: var(--space-6);
+}
 .form-section > pre {
   padding: var(--space-4);
   border: 1px dashed var(--hairline);
   background: var(--ground);
-}
-.form-sample pre {
-  /* Aligned with the description: the disclosure column plus the gap. */
-  margin: var(--space-2) 0 var(--space-4) calc(var(--space-6) + var(--space-3));
 }
 .form-empty {
   margin-top: var(--space-8);
@@ -539,9 +586,6 @@ main > nav + .tps-form {
   .header-cta {
     padding-inline: var(--space-4);
   }
-  .form-sample pre {
-    margin-left: 0;
-  }
   .form-subtitle {
     font-size: var(--text-body);
     letter-spacing: 0.2em;
@@ -567,12 +611,4 @@ main > nav + .tps-form {
   .form-section h3 {
     break-after: avoid;
   }
-}
-
-.report-guide p {
-  text-wrap: pretty;
-  overflow-wrap: anywhere;
-}
-.report-guide .guide-tendency {
-  font: var(--text-small) / var(--leading-body) var(--font-mono);
 }

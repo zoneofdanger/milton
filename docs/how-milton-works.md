@@ -71,8 +71,8 @@ Files: `server/src/handler.ts`, `server/src/token.ts`, `server/src/mcp.ts`,
 - JOSE checks EdDSA at+jwt against the exact configured issuer and MCP audience; native's fixed implicit UserInfo audience is allowed only with openid, and JWKS keys cache for 10 minutes.
 - Tokens require matching client_id/azp, supported scopes and original binding/incarnation/generation; ID/session JWTs and confirmation/DPoP are refused.
 - Every call checks live immutable native binding status, in the statement that looks up the account; invalid/inactive is 401, real status/key outage is 503, with no stale-positive fallback, and a bad binding refuses before scope and scope before the account.
-- All three reads require milton:read; create_memo requires read+write, including direct calls. Read grants list three tools; write grants list four.
-- Read-only setup explains reconnecting for saves; scope never establishes approval of memo text.
+- Both reads require milton:read; create_memo requires read+write, including direct calls. Read grants list two tools; write grants list three.
+- A read-only connection is told to ask the person to reconnect with Read and write to save memos, and never offers a save.
 - A bad token gets a 401 that points the client to the sign-in metadata.
 - A Bearer value starting with `mk_` is a connection key; every other value takes the native token path unchanged.
 - A key must be exactly `mk_` + 22-character id + `_` + 43-character secret in canonical base64url; it is looked up by id and its secret's SHA-256 compared in constant time.
@@ -80,22 +80,22 @@ Files: `server/src/handler.ts`, `server/src/token.ts`, `server/src/mcp.ts`,
 - Every key call asks native `milton_guard.connection_key_status` (native 007) whether that binding is still current, the native user verified and no deletion begun; a recovery, credential or method change, or a begun deletion stops the key for good, even while the writing account is still active.
 - A malformed, unknown, wrong, revoked or expired key, one whose account is not active, or one whose native binding is no longer current gets the same 401 and challenge as a bad token, with no reason; a failed status lookup is a 503, never an acceptance.
 - Before any database access, a process limits each source (the client address Google's load balancer appends as the second-to-last `X-Forwarded-For` entry, IPv4-mapped IPv6 as IPv4, other IPv6 by /64, else one shared `unknown` source; never the first entry) to a 5-token bucket refilled at 10 a minute in a 10,000-source LRU, where a lookup reserves a token, a failure keeps it, a success is refunded to 0.1, and an empty bucket gets 429 with `Retry-After` without a slot; lets each source run at most 3 key lookups at once, however far its bucket refills (a 4th gets 429 with `Retry-After: 1` without a slot; these counts sit outside the bucket LRU, so eviction never forgets a running lookup); and runs at most 8 key lookups at once (beyond that a quick 503 with `Retry-After: 1`). Limits are per instance (at most 3).
-- A read key lists three tools and is refused `create_memo` (403); a read-and-save key lists four. Key saves are attributed to the key's id.
+- A read key lists two tools and is refused `create_memo` (403); a read-and-save key lists three. Key saves are attributed to the key's id.
 - Keys pass the same trial and billing gates as OAuth calls.
 - A key's last use is recorded at most once a minute; failing to record it never fails the call.
 - Tool-call logs for key calls carry the key's public id, never its secret.
 - Each request looks up the active writing account by exact verified issuer and subject (a key's lookup requires it too); MCP never provisions an account. That lookup is the request's account check, so the store is built without a query and `initialize`, `tools/list` and notifications make no store query; each tool call's read and save check the account again.
 - Each request builds a fresh stateless MCP server, with no sessions or subscriptions.
-- Global instructions require retrieval before writing or editing for or as the person; only new drafts get the sample/rule conformity check before display. Edits preserve source wording and style outside the request over conflicting samples/rules; guidance never widens scope, and only specific unresolved conflicts are flagged. Requested transformations retain their scope, and changes are briefly listed. These are behavioral instructions, not server enforcement.
-- After draft or edit approval, AIs display an exact placeholder-safe body and useful non-private context, then offer once to retain that proposal; one yes approves the displayed proposal. Every sample save requires that display, without silently redacting after approval or changing the working edit for retention. Change lists are excluded, refusal is final for that text, and only changed text/context requires renewed approval. Edits do not imply standing rules.
-- Both instruction variants stay under 3,500 characters and hold the workflow and consent
-  rules, including never sending transcripts, secrets or others' private details or filing
-  capture consent; error handling lives in each error result's `next`, and save fields and
-  the other capture exclusions in `create_memo`'s description.
+- Global instructions require `get_cover_sheet`, then `get_report` with an intent, before writing or editing for or as the person, and set precedence: what the person says now, then the cover sheet, then tweaks, then examples. Edits change only what was requested and keep the person's other words, length, tone, greeting and sign-off; guidance never widens scope, and changes are briefly listed. These are behavioral instructions, not server enforcement.
+- The instructions tell the AI to save a memo with `create_memo`, without asking, when the person accepts a final (approves it, says it's done or they'll send it, or copies it to use), untouched finals included; to send the first draft exactly as first shown, or `first_draft_missing`; and to skip abandoned drafts, writing not in the person's own voice, saves the person declines and, with `keep_memos` false, anything they didn't ask it to remember.
+- Tweaks are one line per change with its condition, reusing a served tweak's id; the AI never sends secrets, the person's correction messages or other people's text, and summarizes the situation in `context.summary`.
+- After a saved memo the AI tells the person its one-line receipt, with no question; a failed save is reported.
+- The cover sheet changes only on the person's words ("remember …", "add to my cover sheet"); the AI never adds tweaks or its own inferences, and a correction during a draft is a tweak.
+- Both instruction variants stay under 3,500 characters; error handling lives in each
+  error result's `next`, and the save fields in `create_memo`'s description.
 - Server info carries a description of at most 120 characters for clients that drop
   instructions: read `get_cover_sheet`, then the matching `get_report`, before writing or
   editing for the person.
-- Session capture requires explicit opt-in for the current conversation; connection, draft or edit approval, quoted text and another conversation are not consent.
 - Each AI's (account and OAuth client) first tool call after a server process starts
   carries `notifications/tools/list_changed` ahead of its result, as does every
   `get_report` refused for a missing intent, so clients holding tool schemas from before
@@ -103,7 +103,7 @@ Files: `server/src/handler.ts`, `server/src/token.ts`, `server/src/mcp.ts`,
 - There is no daily call allowance. A `tools/call` is admitted after access, scope and
   the store limits (the request's access statement), the input schema, the `get_report`
   intent and `kind_id`, and the trial and billing gate, right before the tool's own work
-  (the snapshot read, or a save's decision under its account lock). Every refusal
+  (the read, or a save's decision under its account lock). Every refusal
   before that, `subscription_required` included, records nothing, and replaying a save
   receipt is not admitted. Admission is tracked per tool call, so calls sharing a
   request or a server are recorded independently.
@@ -126,8 +126,7 @@ LOCKED`) and inserts only those accounts' rows, so it holds key shares only on a
   when its statement fails, or when the process exits (the 8 s shutdown bound or a
   crash) with rows still queued.
 - The row's foreign key cascades from `users`, so account erasure removes it. Writers
-  (saves, key creation, and the six guard triggers on cards, card versions, accepted
-  changes, sample kinds, samples and sample versions, since `0007`) lock the account
+  (saves, the TPS page's changes and key creation) lock the account
   `FOR NO KEY UPDATE`, which the row's key-share check does not wait on; sign-in,
   eligibility, lifecycle and deletion lock `FOR UPDATE`, so a row for an account being
   deleted is skipped, then dropped, and never outlives the account.
@@ -140,25 +139,26 @@ LOCKED`) and inserts only those accounts' rows, so it holds key shares only on a
   text or identity.
 - The tool name is read early, so calls refused before dispatch are still logged.
 
-## The four tools
+## The three tools
 
 Files: `server/src/mcp.ts`, `server/src/mcp-tools.ts`.
 
-- `get_cover_sheet` returns the cover rules, version, report index, and `is_empty`, plus
-  the optional setup script while the whole account has no rules or samples.
+- Exactly three tools: `get_cover_sheet`, `get_report` and `create_memo`. `list_reports` is gone, with no alias.
 - `get_cover_sheet` takes no arguments and refuses any argument it is sent.
-- `get_report` returns one report's text, sample list, version and a personal `kinds` index (`{kind_id, kind}`, ascending ID) from every active sample in that report before the eight-sample selection, independent of intent, plus setup while the report has no rules or samples.
-- `doc` is accepted as an alias for `document`.
-- `list_reports` returns all five reports, with a one-line setup hint instead of the full
-  script, only for reports with no rules or samples.
-- `create_memo` saves rules, edits, moves and sample changes together or not at all; context correction cannot combine with sample insertion or retirement.
-- A save is checked against the limits it read at its start; lowering a limit mid-save does not roll that save back.
+- `get_cover_sheet` returns `text` (the cover sheet), `version` (an integer, 0 before any), `memos` and `tweaks` (counts), `keep_memos` and `is_empty` (no cover sheet text and no memos), plus the setup script in `setup` while empty; a read-only connection gets a `permission` line instead of `setup`.
+- `get_report` requires `intent`: `situation` (one line, at most 200 characters), `medium` (`email`, `chat`, `post`, `document` or `speech`), `audience` and `purpose` (one line, at most 100 characters each) and an optional `kind_id`.
+- A `get_report` with no intent is refused with what to send and a reconnect hint; a malformed intent is refused with each limit it broke and no hint. Nothing is read either way.
+- A `kind_id` the account does not have is refused (`invalid_kind`) without creating a kind.
+- `get_report` returns `report_id`, `text`, `is_empty`, `examples` (`{memo_id, kind_id?, kind?, medium, tier, date}` in served order), `tweaks` (`{tweak_id, text, memos}`) and `kinds` (every kind on the account as `{kind_id, kind}`, by label).
+- `create_memo` takes a UUID `request_id` and exactly one of `memo`, `cover_sheet`, `forget_memos` or `memo_context`; `memo.report_id` names the `get_report` read before the draft.
 - Every error result and every MCP HTTP refusal body keeps `error` and `message` and adds
   `code` (the `error`, or `version_conflict` for a stale-version conflict) and `next`:
   `{action, text}`, the action one of `retry`, `reread`, `fix_input`, `ask_user` or
   `tell_user`, from the one table in `mcp-outcomes.ts`; an unknown code gets the
   unexpected-failure step. The SDK's plain-text argument refusals become such bodies,
   `invalid_arguments` with the SDK's text as `message`.
+- Memo codes get their own steps: `request_too_large` resaves the memo with the final alone (`first_draft_missing`); `memos_off` stops saving drafts, saving only writing the person asks to remember; `invalid_kind`, `invalid_tweak`, `invalid_memo` and `line_not_found` reread for a valid id or the exact line; `invalid_report` sends the latest `report_id` or none; `cover_sheet_limit` asks the person what to shorten; `cover_sheet_empty` points them to the TPS page; `tweak_exists`, met only on the TPS page, is reported without retrying.
+- Codes from the old writing tables' triggers (cards and samples) stay in the table as unavailable-now steps; nothing writes those tables, so none can fire.
 - A scope refusal also carries `required_permission`, `read` or `read_write`: what the
   attempted action needed (a save needs `read_write`, anything else `read`), and its
   `next` names that permission.
@@ -168,136 +168,127 @@ Files: `server/src/mcp.ts`, `server/src/mcp-tools.ts`.
 
 ## Reads
 
-Files: `server/src/store/compiled.ts`, `server/src/store/snapshot.ts`,
-`server/src/store/cards.ts`.
+Files: `server/src/store/compiled.ts`, `server/src/store/memos.ts`.
 
-- A read takes no lock and writes nothing: one statement loads the latest card versions,
-  the active samples and whether the account is active, so a save shows whole or not at
-  all.
+- `get_cover_sheet` is one statement: whether the account is active, the current cover sheet, the memo and tweak counts and the Keep memos switch. It takes no lock and writes nothing.
+- `get_report` is two statements outside a transaction: one loads the account and kind checks, the cover sheet, the kinds, every memo's ranking fields (not its words) and its citations, and every tweak's count; the second records the served report and fetches the chosen finals. A memo forgotten between them is left out.
+- `get_report` writes one `served_reports` row (its `report_id` and served tweak ids); no other read writes.
 - AI reads are blocked once an account reads as expired, but the person's own web
   view is not.
-- An AI read is two queries (that statement and the trial gate) and opens no
-  database connection; the web view's is one.
+- An AI read first passes the trial gate, whose statement also checks the account and the intent's kind, so those refuse before the gate; reads open no transaction and take no lock.
 - The web view reads no store limits and makes no account check of its own: its
-  account lookup and that statement each require an active account.
+  account lookup and each read require an active account.
 
-## Assembling documents
+## Assembling reports
 
-Files: `server/src/store/reports.ts`, `server/src/store/compiled.ts`.
+Files: `server/src/store/memos.ts`.
 
-- Reports are fixed in code: email, chat, post, document, and speech.
-- Cards print as bullets in insertion order, and an older stored `- ` is not doubled.
-- A report is its heading, "Applies when…", selected samples as quotes, and then rules.
-- `get_report` requires intent (situation, optional personal `kind_id` and context dimensions); invalid or foreign kinds are refused without creating one.
-- One snapshot computes full-text rank; deterministic selection prefers requested kind, purpose overlap count, exact dimension match count, situation rank over summary/body, newest, then ascending ID, filling up to eight with broader examples and reporting exact match signals; a sample that would take the report past its size cap (as saves measure it) is skipped for the next best.
-- Unknown scope stays unknown; excerpts do not establish whole-work structure, and report text, app and complete export show approved summary and dimensions.
-- Without intent (`list_reports`, the web page), a report serves its newest eight.
-- The cover sheet prints a note explaining `Baseline:` whenever any active rule has that
-  prefix.
-- `TPS.md` is the cover sheet plus every non-empty report, with all its active approved
-  samples in newest-first order (then descending id on a timestamp tie);
-  retired samples and superseded revisions stay excluded.
-- `is_empty` means no rules and no samples anywhere.
-- The approved-source version is a fingerprint of the rules and samples: a hash of the user, the cover
-  sheet, and each report's text (newest eight) with every active sample's ID, kind and sample revision, so
-  it is the same for every intent. The same cards and samples
-  always give the same version; derived guide text, status and enrollment do not affect it.
-- A client holding a version from before fingerprints (a revision hash) conflicts once
-  on its next save, rereads, and saves on the new version.
+- A report ranks every memo by requested kind, medium match, tier (your words before steered), word overlap of purpose and audience with the intent (stopwords dropped), full-text rank of the situation (any word) against summary, purpose, audience and final, newest, then id.
+- Examples fill by rank: never untouched finals, never finals over 128 KiB, at most 3 steered finals, within a 32 KiB budget; a block that would pass the budget is skipped for the next, and the top one is always served.
+- A block's size is counted before its words are fetched, as an upper bound: its header, its words and a `> ` per line.
+- Tweaks come from the 10 best-ranked memos that cite any tweak, ordered by their best memo's rank, then citation count, then id, at most 10.
+- The text is `# Cover sheet` (when not blank), then `# Examples` (each `## n. kind · medium · tier label · date`, a Situation line, an Audience · Purpose line when known, and the final quoted with `>`), then `# Your tweaks` (one bullet per tweak with its memo count).
+- With no example and no tweak, `is_empty` is true and the text ends with a fixed line telling the AI to write from the cover sheet and the request and not to claim to know the person's voice.
+- Tier labels in report text are "your words" and "steered by you"; kind labels appear in example headers.
+- `TPS.md` is the cover sheet, the tweaks with counts (most cited first), then every memo's final grouped by medium, newest first, each under its kind and date with its summary; first drafts are not in it.
+
+## Memos
+
+Files: `server/src/store/save.ts`, `server/src/store/score.ts`, `server/src/mcp-tools.ts`.
+
+- A memo holds medium, a one-line summary (at most 200 characters), optional audience and purpose (at most 100), an optional kind, mode (`draft` or `edit`; none for writing the person gave), the first draft and its state (`kept`, `missing` or `none`), the final, rounds, the change score, the tier, the `report_id` with the tweak ids it served, the AI (issuer and client), the request ID and its times.
+- With `first_draft` or `first_draft_missing`, `mode` and `rounds` (0 to 1000) are required; with neither, the memo is final-only and takes no mode, rounds or tweaks; both together are refused. Shape problems are refused before any database work.
+- A final or first draft is non-blank, well formed, has no NUL and is at most 256 KiB.
+- Tier at save: final-only and edit memos are `own`; a drafted memo with a kept first draft is `untouched` when the final equals it, else `steered`; with the first draft missing, it is `steered` when rounds is above 0, else `untouched`.
+- The change score is normalized token Levenshtein (words and single punctuation marks) from the first draft to the final over the longer token count, from 0 to 1, comparing only the middle after a shared prefix and suffix; it is computed only for a kept first draft and not when that middle exceeds 20 million token pairs.
+- A save whose final, first-draft state and first draft match a memo on file returns `unchanged` with that memo, adding nothing.
+- `kind_id` must name one of the account's kinds (`invalid_kind`); `new_kind` reuses a kind with that label in any letter case, else creates one; sending both is refused.
+- `report_id` must be one of the account's served reports (`invalid_report`); the memo stores that report's served tweak ids.
+- With Keep memos off, a memo with a first draft (kept or missing) is refused with `memos_off`; a final-only memo still saves.
+- A saved memo's result carries `memo` (`memo_id`, tier, kind, rounds, change to three decimals and its tweaks) and `receipt`: "Kept memo: <kind, or medium without one>, <n rounds, or "your words">, tweaks: <up to three, "; "-joined>", with "and N more" past three.
+- `forget_memos` takes 1 to 100 ids and deletes those memos, their citations and every tweak left with none; when none is the account's, it is refused with `invalid_memo`. The result lists the ids forgotten.
+- `memo_context` replaces a memo's medium, summary, audience and purpose (an omitted optional field clears) and, when sent, its kind; the words never change. The same context returns `unchanged`; an unknown memo is `invalid_memo`.
+- When the instructions say to save (acceptance, untouched finals included) and what to leave out is AI guidance; Milton cannot see the conversation.
+
+## Tweaks
+
+Files: `server/src/store/save.ts`, `server/src/store/score.ts`, `server/src/store/tps.ts`.
+
+- A tweak is one line of at most 200 characters on one account, with the AI and time it came from.
+- A memo cites at most 10 tweaks, and only when its final differs from its first draft; tweaks on a memo whose final equals its first draft are refused.
+- `{tweak_id}` must name one of the account's tweaks (`invalid_tweak`).
+- `{text}` is normalized (Unicode NFC, lower case, collapsed spaces, trailing punctuation dropped) and reuses the account's tweak with that form, else is added; text of only punctuation is refused. A tweak named twice in one memo is cited once.
+- Each memo-and-tweak pair is one citation; a tweak's count is its citations.
+- The TPS page deletes a tweak with its citations, or rewords it in place, keeping its id and citations; a wording another tweak already has is refused with `tweak_exists`.
+
+## Cover sheet
+
+Files: `server/src/store/save.ts`, `server/src/store/tps.ts`, `server/src/store/memos.ts`.
+
+- An account has one current cover sheet, at most 1,500 characters. Every change appends a version (from 1) recording whether an AI (its issuer and client) or the person made it; nothing is overwritten.
+- `cover_sheet` from an AI carries `expected_version` and either `add` (one line, at most 300 characters) or `remove` (one whole existing line, copied exactly).
+- A stale `expected_version` returns `conflict` with the current version and text.
+- Adding a line already present is `unchanged`; removing a line not present is `line_not_found`; a removal that would leave it blank is `cover_sheet_empty`.
+- A change past 1,500 characters is refused with `cover_sheet_limit`.
+- The TPS page's form sends the whole text with the version it showed: line endings become `\n`, trailing whitespace is trimmed, the same fence applies, it may empty the cover sheet, and the same text is `unchanged`.
+- The cover sheet is `get_cover_sheet`'s text and the first part of every report.
+
+## Scoreboard
+
+Files: `server/src/store/score.ts`, `server/src/store/tps.ts`.
+
+- The TPS page computes it on read, with no model, from memos with a kept first draft and a change score.
+- Draft and edit memos are scored apart.
+- Below 10 memos of a mode, it shows only the count.
+- From 10, it shows the medians of rounds and change and the share accepted as-is (final equal to the first draft) for the latest 5 against the first 5.
+- From 60, it compares the last 30 days with the 30 before.
 
 ## Saves
 
 Files: `server/src/store/compiled.ts`, `server/src/store/save.ts`,
-`server/src/store/snapshot.ts`, `server/src/store/accounts.ts`,
-`server/src/store/provenance.ts`, `server/src/exact-edits.ts`.
+`server/src/store/accounts.ts`.
 
 A save runs in one transaction under the account lock: replay or gates, then
-validation, the writes, publishing and the receipt, which commits with its result or
-not at all.
+the change and the receipt, which commits with its result or not at all.
 
 ### Admit
 
-- The input schema is strict: 1 to 100 rules, up to 500 edits, moves, or sample removals, a
-  UUID request ID, and a version.
-- Only AIs can save, so a save through the web app's store is refused with
+- The input schema is strict, and a save's shape is checked before any database work; those refusals write no receipt.
+- Only AIs can call `create_memo`, so a save through the web app's store is refused with
   `assistant_required`.
 - Input is hashed, and the same request ID with the same input replays the original
   result.
 - The same request ID with different input is refused.
 - A concurrent save of the same request waits on the account lock, then replays.
-- A stale `expected_version` returns `conflict` with the current version.
-- A request with no rules, edits, moves, or sample changes is refused, but only after
-  replay, so an older receipt still recovers.
-- Oversized input fails, and that decision is stored on the receipt so it replays.
 - Trial refusals write no receipt, so the same request can succeed later.
+- A request over 256 KiB fails with `request_too_large`, and that decision is stored on the receipt so it replays.
 - If the commit's acknowledgment is lost, Milton looks up the receipt under the account
   lock: present, it returns the stored outcome; absent, nothing was written and the
   store error stands. Only when that lookup fails too does it return
   `save_outcome_unknown`.
 
-### Validate
-
-- An edit's `before` must occur exactly once across rules as printed, and within one rule.
-- All edits resolve against the same original snapshot, and overlaps are refused.
-- Emptying a rule through an edit retires it.
-- Moves quote a rule once, each rule moves once per save, and a removed rule cannot move.
-- A change cannot leave two identical rules in one report.
-- New rules already on file are skipped silently.
-- No save files a rule starting `Baseline: ` or keeps that prefix on a changed or moved rule; an existing one can still be retired or edited to drop the prefix.
-- Rule text cannot contain Markdown headings, because Milton prints those.
-- Each rule and each assembled report has a size cap.
-
 ### Apply
 
-- Validation and writes run after a savepoint; a refusal or failure rolls back to it,
-  so nothing changes and the receipt stores the failure. A transient or unknown
-  database error (`store_unavailable`) rolls back the whole save instead, with no
-  receipt or charge, so the same request can succeed on retry.
-- Rule changes append new versions, so nothing is overwritten.
-- An edit plus a move on the same rule produces one version.
-- Moving a rule to the report it is already in changes nothing.
-- A new rule's description is its first non-blank line, cut to its byte cap, and
-  descriptions are never printed.
-- Omitting a rule never removes it, and a no-op save returns `unchanged`.
-- A new example identical in body, report/kind and complete context files nothing; different context can justify a separate identity, and revisions never merge identities.
-- Kinds match by label, ignoring case.
-- A `kind_id` must name a kind in the same report.
-- Each sample requires context `version: 1` and a useful one-line summary; optional purposes, medium, audience, interaction, whole/excerpt scope, language and register use fixed keys and bounded open vocabulary, leaving unknowns absent.
-- `sample_context` appends a complete approved revision, preserving body and stable ID and optionally reclassifying within the report; omitted optional context fields clear.
-- Every changed sample snapshot advances its revision and fences all saves even outside the served eight; identical revisions append nothing, and request retries replay deterministically.
-- `sample.sample_id` revises an active identity with complete approved body, context and report/kind; omission creates an identity plus revision one, and `replaces` is no longer accepted.
-- Approval date and all sample recency ordering use latest revision time, including metadata changes; original creation time and actor remain on the stable identity.
-- Each sample removal must name an active sample, listed once.
-- Every approved sample stays until explicit `retire_samples` appends an inactive complete snapshot; `samples_retired` reports retired stable IDs, while reads/app/exports show only latest active revisions with stable ID and revision metadata.
-
-### Publish
-
-- Publishing checks the assembled documents against their size limits and answers with
-  their new approved-source fingerprint; while the guide trigger is installed (not while parked, 0010), sample changes durably invalidate guides in the same transaction.
-- An audit row records the request, AI, before and after versions, and affected
-  cards.
+- The change runs after a savepoint; a refusal rolls back to it, so nothing changes and
+  the receipt stores the refusal. A transient or unknown database error
+  (`store_unavailable`) rolls back the whole save instead, with no receipt, so the same
+  request can succeed on retry.
+- A memo, its new kind, its new tweaks and its citations are written together.
 - The receipt is written last, once, with the outcome.
 
 ## First setup
 
-Files: `server/src/store/setup.ts`.
+Files: `server/src/store/setup.ts`, `packages/theme/setup-prompt.ts`.
 
-- Setup invites pasted-writing cleanup by default; explicit requests to add or import examples go directly to that conversation, with examples optional. Reads assemble text without saving.
-- Setup is offered once when `get_cover_sheet.is_empty` says the whole account is empty; a declined offer is not repeated.
-- A report carries optional help only while it has no rules or samples; other empty reports run setup only on request.
-- Existing rules and samples are preserved; sample-only and rules-only guidance are usable.
-- Candidate lookup requires the person's request and already authorized access; pasted examples also work.
-- The shared setup prompt connects and reads existing guidance, then invites a scoped edit with a separate change list; both edited text and older examples are displayed as placeholder-safe proposals before exact retention approval. Candidate lookup needs the person's request and existing authorized access; automated, forwarded and third-party text is excluded even on populated accounts.
-- Automated, forwarded and third-party text are excluded; a sent item is not assumed to represent the person's voice.
-- Proposed samples replace private details with placeholders before exact retention approval; excerpts are explicit and approved text is never silently changed.
-- Every sample save shows exact text and proposed useful non-private context for one retention approval; unchanged approved metadata needs no second approval, and the save uses an existing or concise new personal kind, version fence, idempotency and readback.
-- Setup consent authorizes conversation, not inbox access, account changes, transcript import or saving unseen text.
-- Setup verifies a successful read before the cleanup task and helps without requiring samples or rules; optional whole-account examples and the next task use emails or DMs, filed under email or chat. Other report scripts keep optional examples and tasks matching their report; skipping examples never blocks writing or makes a voice claim.
-- Draft or edit approval, approval to send or praise is not retention approval; one yes covers the displayed text and context, and changed text or context, including redaction, requires renewed approval.
-- The sample approval step includes the approved-edit one-time offer and excludes the change list; another writing task is requested only if the person wants one.
-- Rules remain available on request; a sample never implies a standing rule or turns its facts into preferences.
-- Setup no longer generates Baseline rules; existing ones keep serving with the cover-sheet note.
-- A standing instruction is offered separately and changed only with separate consent; a successful read verifies the connection, not future compliance.
+- Setup is served while `get_cover_sheet.is_empty` says the account has no cover sheet and no memos; the AI offers it once, a request to set up Milton accepts it, and a declined offer is not repeated.
+- Setup never blocks a writing task, never reads an inbox, connects mail or imports anything the person didn't paste.
+- The connection is confirmed only after a successful `get_cover_sheet` read.
+- The AI helps with a real task first: it reads `get_report` for that task, saves the memo when the person accepts the final, and tells them its receipt.
+- It offers to keep a few pieces the person wrote and pastes, each a final-only memo with context and a kind; only their own writing, skipping automated, forwarded and other people's text and anything holding secrets.
+- It offers to start the cover sheet with lines the person gives, in their words, never suggested from their writing.
+- Every setup includes the standing instruction: the AI shows it and asks on its own, adding it only after the person agrees, or shows where to paste it.
+- The script carries one fictional final-only memo as a JSON example.
+- The shared setup prompt (the site widget and the app's empty state) asks the AI to connect, read what is on file, help with a real task, keep the accepted final as a memo with a one-line receipt, optionally keep pasted writing and cover sheet lines, show the standing line and add it once the person says yes, and never wait on any of it.
 
 ## Sign-in and accounts
 
@@ -352,24 +343,23 @@ Files: `server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-lo
 
 ## Web app
 
-Files: `server/src/pages.tsx`, `server/src/memo-pages.tsx`, `server/src/auth.tsx`,
-`server/src/auth-session.tsx`, `server/src/auth-assistants.tsx`.
+Files: `server/src/pages.tsx`, `server/src/memo-pages.tsx`, `server/src/store/tps.ts`,
+`server/src/auth.tsx`, `server/src/auth-session.tsx`, `server/src/auth-assistants.tsx`.
 
 - Pages run no scripts, under a strict CSP, and are not cached; they link content-versioned assets and preload Geist and the Latin JetBrains Mono subset.
 - A page route that fails shows "Unable to continue" at the error's status, with a link back
   where one applies.
 - An unknown error there reads as a 503 and is logged.
-- The home page shows a marketing page signed out and the cover sheet signed in.
-- `/tps-report` shows the same cover sheet as the signed-in home page.
-- The cover sheet renders as a TPS form filed by Milton, with counted section links,
-  report counts and subheadings, exact sample descriptions above wrapping metadata,
-  native sample disclosures, rules, and a random joke comment.
-- Both empty-app setup paragraphs lead with pasted-writing cleanup and optional older examples beside the shared prompt; populated accounts point to the next email or DM.
-- Empty reports remain optional later uses; sample-only reports never show an unfinished setup state.
+- The home page shows a marketing page signed out and the TPS page signed in.
+- `/tps-report` shows the same TPS page as the signed-in home page.
+- The TPS page reads in one statement: the cover sheet and its version, the Keep memos switch, the newest 200 memos, every tweak with its count (most cited first) and the scoreboard.
+- Each listed memo shows its time, AI, medium, kind, summary, audience, purpose, mode, rounds, change, tier, the tweaks its report served (those still on file) and the tweaks it taught; its first draft and final load only when that memo is opened.
+- `/tps/memo/<id>` shows one memo in full (first draft or why there is none, final, context, served and taught tweaks, Forget); another account's or an unknown id is a 404.
+- `/account/memos` holds the Keep memos switch; "Delete all memos" asks on its own page (`/account/memos/delete`) and runs only with the confirming field.
+- Every TPS page change is a POST with the CSRF and Origin checks, then redirects back with a notice.
+- Every TPS page change runs in its own transaction under the account lock: the cover sheet form, forgetting one memo, Delete all memos (every memo, tweak and kind, not the cover sheet), deleting or rewording a tweak, and the Keep memos switch.
 - Each view makes one structured read; a failed read fails the page, with no plain-text fallback.
-- `/download` returns the complete writing export as `TPS.md`; the web report labels
-  its sample count as shown, explains its newest-eight-per-report limit and links to
-  the complete download, including when AI access is paused.
+- `/download` returns the complete writing export as `TPS.md`, including when AI access is paused.
 - `/assistants` lists bounded live native connections grouped by client and read/write access, and original incomplete disconnects; a full native page explicitly reports incomplete listing.
 - `/assistants` also lists every active connection key (name, access, created, last used, expiry; never-expiring keys say "Never expires"; keys a security change stopped say so), then under "Expired keys" the 20 most recently expired, never a secret or hash.
 - Creating a key takes a name (1–60 characters, one line), Read only (default) or Read and save, and 30, 90 (default) or 365 days or Never; it needs the form's CSRF/Origin checks and a sign-in within 5 minutes.
@@ -383,7 +373,7 @@ Files: `server/src/pages.tsx`, `server/src/memo-pages.tsx`, `server/src/auth.tsx
 - With billing configured, the account menu on every signed-in page offers Add a card in a
   trial, Subscribe when expired, and Manage billing when paid; early access shows nothing.
 - If the status read fails, the page still renders, with no billing item.
-- A note above the report shows only in a trial's last 7 days or when expired, with the same
+- A note above the TPS page shows only in a trial's last 7 days or when expired, with the same
   button; it shows nothing when paid or earlier in a trial.
 - Without billing configured there are no buttons.
 
@@ -392,10 +382,8 @@ Files: `server/src/pages.tsx`, `server/src/memo-pages.tsx`, `server/src/auth.tsx
 Files: `server/src/store/index.ts`, `server/src/store/trials.ts`,
 `server/src/store/billing.ts`, `server/src/billing.tsx`, `server/src/config.ts`.
 
-- Limits live in a single `store_config` row and are validated on read.
-- Each account gets 10,000 attempted MCP calls per UTC day; rule and sample text is capped
-  at 128 KiB, and a save takes up to 100 rules and 500 edits, moves, or sample removals
-  (0032).
+- Limits live in a single `store_config` row and are validated on read; invalid limits refuse every MCP call and sign-in, but no memo bound reads them.
+- Memo bounds are fixed in code: a 256 KiB request, finals and first drafts up to 256 KiB, a 1,500-character cover sheet, 200-character summaries and tweaks, 10 tweaks per memo and 100 memos forgotten per save.
 - Trials are switched by `trials_enabled`, and when off, everyone is early access.
 - With trials on, access follows the Stripe subscription status held on the trial row:
   trialing reads as trial, active as paid, and past_due as paid for 3 days from the renewal.
@@ -465,13 +453,11 @@ Files: `server/src/store/index.ts`, `server/src/store/trials.ts`,
 
 Files: `server/drizzle/`, `server/src/store/schema.ts`, `server/src/store/database.ts`.
 
-- Card versions must be sequential, and they cannot be changed or deleted while the card
-  exists.
-- Kind identities, sample identities and complete revisions are immutable; database guards serialize sequential appends on the account lock, refuse changes to inactive samples, enforce tenant/classification references and cascade account hard deletion.
-- Forward migration `0002_sample_versions` maps linear replacement chains to root IDs, retains known snapshots and legacy provenance, keeps retired/consolidated leaves inactive, and leaves accepted-change evidence intact; unavailable context history is not invented.
-- Migration refuses cycles, branches and invalid tenant/report/lifecycle parents before destructive changes; this breaking schema/API upgrade requires an authorized closed-ingress cutover with compatible app/MCP code.
+- The memo tables (0012) check each column's shape: medium, one-line summary, audience and purpose; the first-draft state matching the first draft and mode; non-blank words up to 256 KiB; rounds 0 to 1000; change 0 to 1; the tier; and at most 10 served tweaks, only with a report id. Kind labels are unique per account in any letter case, tweak forms unique per account, and cover sheet versions positive and at most 1,500 characters.
+- Owner file `014-memos-roles.sql` lets MCP insert, read and delete memos and update only their context columns, insert kinds, served reports and cover sheet versions, insert and delete tweaks and citations, and read the Keep memos switch; app reads them, deletes memos, kinds, citations and tweaks, rewords tweaks, appends cover sheet versions and sets the switch. Neither can change a memo's words.
+- Account erasure cascades every memo, kind, tweak, citation, served report, cover sheet version and switch row.
+- The old writing tables (cards, card versions, accepted changes, sample kinds, samples, sample versions and the guide tables) keep their guards and rows, unread, until a follow-up migration drops them.
 - A receipt is written once with its outcome and cannot change.
-- Audit rows are immutable and must reference real card versions.
 - History has no size cap. History rows never shrink short of account deletion, so the
   lifetime cap that refused every save once an account reached it is gone (0030), with
   the `retained_bytes` counter it read; 0006 drops the generated `payload_bytes` columns
@@ -485,14 +471,12 @@ Files: `server/drizzle/`, `server/src/store/schema.ts`, `server/src/store/databa
 - Native 007 adds only `milton_guard.connection_key_status(subject, incarnation, generation)`: SECURITY DEFINER, fixed `pg_catalog, pg_temp` path, false on NULL or any mismatch, no PUBLIC/auth/guide EXECUTE and no table grants; MCP and app may execute it. Without it, every key is refused.
 - The native auth migrator applies each migration file and its ledger row in one transaction under an advisory lock, so a crash leaves both or neither; a file that commits or rolls back the transaction itself fails after running and gets no ledger row.
 - `stripe_events` keeps each event's ID, type, and body hash, never the payload.
-- The database holds cards and their immutable versions; the obsolete memo tables and
-  the unused card-version `legacy` flag are removed by the cleanup.
 - Fresh installs use one Drizzle baseline; a populated older database refuses it.
 - Distinct app/MCP roles have explicit writing grants, no inherited owner/group/DDL/TEMP privileges and no native secret reads; app-only session/flow/lifecycle/eligibility storage is denied to MCP/auth.
 - The runtime role can read and lock the `store_config` row but cannot change its settings.
 - PostgreSQL connection, query, transaction-control and close failures become store errors: known triggers and constraints get clean coded responses, unknown failures log only class/code, and callback errors survive rollback/close unchanged.
 - The store opens only a database named `milton`, over TLS.
-- Runtime queries borrow bounded direct PostgreSQL TLS connections from one process pool per URL (at most 40, waiting at most 5 s for one); a connection idle over 30 s by the wall clock, whose last command, BEGIN, COMMIT or ROLLBACK failed, or with a query or transaction unfinished when its operation ends, is closed instead of reused, and that operation's later calls refuse; transactions keep one connection; the server's 20 s statement and 10 s lock limits come from the app/MCP role settings (`007-role-timeouts`), since Neon drops the same options passed at connect; app/MCP close the pools on SIGTERM after in-flight requests, and the guide job when it ends.
+- Runtime queries borrow bounded direct PostgreSQL TLS connections from one process pool per URL (at most 40, waiting at most 5 s for one); a connection idle over 30 s by the wall clock, whose last command, BEGIN, COMMIT or ROLLBACK failed, or with a query or transaction unfinished when its operation ends, is closed instead of reused, and that operation's later calls refuse; transactions keep one connection; the server's 20 s statement and 10 s lock limits come from the app/MCP role settings (`007-role-timeouts`), since Neon drops the same options passed at connect; app/MCP close the pools on SIGTERM after in-flight requests.
 - A signed-in page runs its independent reads at once, each borrowing its own connection (at most 4 per request, on `/assistants`); no operation borrows while holding one, so a full pool makes reads wait, never deadlock.
 
 ## Static site
@@ -501,7 +485,7 @@ Files: `apps/site/`.
 
 - Astro builds static pages and copies shared fonts from the theme.
 - Every static page, including 404, shows the same shared footer navigation.
-- `/for-agents` serves a static product briefing, alternatives, tools, approval rules, export, price, evidence limits and an optional first writing task in the initial HTML.
+- `/for-agents` serves a static product briefing, alternatives, the three tools, when memos are saved, export, price, evidence limits and an optional first writing task in the initial HTML.
 - The hero demo shows one fictional cleanup request with illustrative plain-AI and
   Milton outputs; build-time ordered word matching computes words kept from the
   displayed strings, ignoring case and punctuation except normalized internal
@@ -528,36 +512,12 @@ Files: `packages/theme/`, `server/scripts/`, `scripts/check-migrations.ts`,
 - `migrate.ts` applies writing migrations only as neondb_owner; explicit --app-auth applies app-only migration005 after native004 as an approved app migration owner, with no runtime startup migration.
 - It takes the owner connection from `MILTON_OWNER_DATABASE_URL` for a release, otherwise
   from `server/.dev.vars`, and never from an inherited `DATABASE_URL`.
-- `check-mcp` holds the SDK client check `mcp.test.ts` runs: the instructions, exactly four tools, and a read, without saving.
+- `check-mcp` holds the SDK client check `mcp.test.ts` runs: the instructions, exactly three tools, and a read, without saving.
 - The isolated check-auth-integration builds actual product modules with production minification under Node26/PG18 and mocks only external boundaries.
 - `check-runtime-role` audits selected NOINHERIT app/MCP roles, ownership, DDL/TEMP, native/app credential/function boundaries and the role's own 20 s statement / 10 s lock timeouts.
 - `probe-forms` confirms a signed-out form post passes CSRF.
-- `e2e.ts` checks a deployment end to end on the test account only: a browser sign-in (following redirects, Continue pages and native's JSON redirects, which native sends because Node's fetch always says `Sec-Fetch-Mode: cors`, only to the app and auth origins) that must show the account and list the key's public id before the key is sent anywhere, an MCP connection with that key listing four tools, then a gate before any write (nothing on file but this check's marked leftovers, which it retires first), a marked fictional sample saved, read fresh, revised by `sample_id`, read fresh and retired, and a final read equal to the run's start. One JSON line per step with no secret or sample body; a key under 30 days from expiry warns; exit 0 only when every step passes, and 1 for a refusal, a failed step, a crash or a run past 240 s.
-- `build.ts` builds the CSS with Vite, versions the public assets by content hash, and bundles the Cloud Run, guide worker and end-to-end check (`e2e.js`, the `milton-e2e-daily` job) entries with Bun, minified except identifiers, with source maps the image leaves out.
+- `e2e.ts` checks a deployment end to end on the test account only: a browser sign-in (following redirects, Continue pages and native's JSON redirects, which native sends because Node's fetch always says `Sec-Fetch-Mode: cors`, only to the app and auth origins) that must show the account and list the key's public id before the key is sent anywhere, an MCP connection with that key listing exactly the three tools, then a gate before any write (no cover sheet, no tweaks, and at most 5 memos, every one this check's own: kind `e2e check`, your words), forgetting those leftovers, an empty baseline, a marked fictional final-only memo saved (tier `own`, receipt `Kept memo: e2e check, your words.`), read fresh by a new session with its summary and quoted final as the only example, forgotten, and a final read equal to the baseline (empty, same cover sheet version, no memos, tweaks or examples). One JSON line per step with no secret or memo text; a key under 30 days from expiry warns; exit 0 only when every step passes, and 1 for a refusal, a failed step, a crash or a run past 240 s.
+- `build.ts` builds the CSS with Vite, versions the public assets by content hash, and bundles the Cloud Run and end-to-end check (`e2e.js`, the `milton-e2e-daily` job) entries with Bun, minified except identifiers, with source maps the image leaves out.
 - `dev.ts` serves the app on loopback and rebuilds the CSS on change.
 - CI runs the migration guards, types, tests, formatting, and both integration suites on PostgreSQL 18, holds no secrets, and does not deploy.
 - `check-migrations` compares with main: a new migration is numbered above main's highest in its track with its own number, Drizzle journal entries run in order with strictly increasing `when`, every migration file and snapshot matches its hash in `scripts/released-migrations.sha256` (main's never change), and a new drop, truncate or rename of a table, column, view, schema, type or function names its merged code-stopped-by PR (comments and strings skipped; a `DO` block, `EXECUTE` (top level or in a function body), or a function body that drops, truncates or renames, needs that or a `no-drop-or-rename` reason). Without origin/main it checks only the lock and journal; in CI that fails.
-
-## Optional report guides
-
-Files: `server/src/guides/`, `server/src/guide-worker.ts`, `server/scripts/guide-enrollment.ts`, `server/drizzle/0003_report_guides.sql`, `server/drizzle/0010_park_guides.sql`.
-
-- Parked (2026-11-07): reads include guide state only when the process sets `MILTON_GUIDES=on`; off, no read sends guide SQL. 0010 drops the sample-version trigger and keeps the function, tables, rows and grants; the owner-only `guide-enrollment.ts resume` (`resumeGuides`) recreates the trigger and re-queues every report with active samples (clearing the rest).
-
-- Operator-only enrollment defaults off and records explicit processing consent plus an epoch that advances on every off/on transition; app/MCP have no enrollment or consent write privilege.
-- Guide eligibility requires enrollment, an active account and an active subscription or an unexpired trial; missing/unknown billing is ineligible.
-- When installed, a sample-revision trigger advances report source versions and marks durable work in the sample transaction, including while disabled; classification moves invalidate both reports; rules and unchanged saves do not.
-- Zero active samples immediately clears the guide and fences old work; nonempty changes retain the last successful stale guide with source/current versions and a reason.
-- A finite sequential worker claims at most five reports per run with a 150-second lease, checks eligibility before provider processing/spend/activation and permits two attempts per source/epoch.
-- All active originals and complete approved classification/context go in one generation; rules, prior guides and retired revisions are excluded; input is never sampled, truncated or batched.
-- Versioned prompting treats samples as untrusted evidence; the fixed Anthropic Opus 5.5 adapter runs at low effort (thinking cannot be disabled; thinking blocks are ignored, never shown or stored), no tools, standard_only generation (omitted from token counting) and a 90-second combined provider deadline.
-- Fully serialized input has a conservative 180,000-byte preflight limit and must fit 200,000 provider-counted input tokens; output is limited to 16,000 tokens including thinking, eight evidence-linked tendencies and 6,000 rendered characters.
-- Each generation reserves the full 200,000 input + 16,000 output tokens at $4/M input and $20/M output; the singleton lock applies conservative $20/month, $5/day global and $2/day account UTC admission bounds, while unknown outcomes retain reservations.
-- Content-free spend entries outlive account deletion; recognized usage settles exactly once upward or downward under the same budget lock, even after output failure, without allowing deletion/churn to reset admission bounds; usage-derived costs are not invoiced costs or guarantees over unrelated usage/provider billing anomalies.
-- Completion locks the report row enrollment also updates before evaluating its source/epoch/lease fence in a fresh statement; valid insufficient evidence clears old text and retains its reason on exact-source reuse, while invalid/unfinished/refused output fails without a paid repair loop.
-- Expired claims recover within the attempt bound; oversize, budget-limited and exhausted work has terminal status rather than indefinite preparation.
-- Both MCP report envelopes carry the same optional self-contained derived guide block with status, freshness and precedence; off/ineligible responses keep their prior shape and the four tool inputs stay unchanged.
-- The report page shows read-only tendencies/applicability and plain queued/updating/unavailable reasons only while eligible, retaining the stale explanation; source versions remain in MCP metadata, evidence references validate without entering displayed text, and requested edit scope/explicit rules retain precedence.
-- Approved-source limits, expected_version and exports exclude derived guides and status; saves and reads never call a model.
-- Account deletion cascades guides/enrollment/work; late completion never creates an account or guide row; disabled completed results are reusable only for the exact current source.
-- The guide worker uses the runtimes' direct TLS adapter, a distinct login holding only the guide capability, a provider-only secret payload and no identity, credential, signing-key or session access; app/MCP only read guide state and auth receives no guide capability.

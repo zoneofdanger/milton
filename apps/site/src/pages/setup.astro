@@ -16,14 +16,13 @@ import AssistantSetup from "../components/AssistantSetup.astro";
   <p>
     Paste something you wrote and ask your AI to “clean this up.” It should fix
     what you asked, keep the rest in your words, and briefly list the changes.
-    You can get help before saving any examples or rules.
+    You get help right away; nothing has to be on file first.
   </p>
   <p>
-    If you approve the edit, your AI can offer to keep it as a sample. It shows
-    the exact text and useful context with private details replaced by
-    placeholders, then asks what Milton may keep. Older emails or DMs are
-    optional. Milton does not read your inbox; your AI can find candidates only
-    with access you already granted it and when you ask.
+    When you accept the final, your AI keeps it as a memo and tells you in one
+    line. You can also paste a few emails or DMs you wrote and like, and give it
+    a few lines for your cover sheet, in your words. Both are optional. Milton
+    never reads your inbox.
   </p>
   <p>
     Milton connects through MCP, a standard that lets AIs use tools. You need a
@@ -46,17 +45,17 @@ import AssistantSetup from "../components/AssistantSetup.astro";
   </div>
   <div id="standing-line" class="standing">
     <p>
-      Setup separately offers a line for your AI’s standing instructions, asking
-      it to read Milton before writing:
+      Every setup includes a line for your AI’s standing instructions, asking it
+      to read Milton before writing:
     </p>
     <blockquote>
       Before writing anything for me, call Milton's get_cover_sheet, then
-      get_report for the matching report.
+      get_report.
     </blockquote>
     <p>
-      Your AI may add it only with your separate consent, or you can paste it
-      yourself; each AI below says where it goes. This is a reminder, not a
-      guarantee. Ask “Did you get that memo?” and verify a successful read.
+      Your AI shows it and adds it once you approve, or you paste it yourself;
+      each AI below says where it goes. This is a reminder, not a guarantee. Ask
+      “Did you get that memo?” and verify a successful read.
     </p>
   </div>
   <nav class="clients" aria-label="Choose your AI">
@@ -94,9 +93,9 @@ import AssistantSetup from "../components/AssistantSetup.astro";
       </a>
     </p>
     <p>
-      Keep <a href="#standing-line">the standing line</a> in your profile
-      preferences, a project’s instructions, or a memory. One entry also covers
-      Claude Duet.
+      As part of setup, add <a href="#standing-line">the standing line</a> to
+      your profile preferences, a project’s instructions, or a memory. One entry
+      also covers Claude Duet.
     </p>
   </section>
   <section id="claude-duet" aria-labelledby="claude-duet-heading">
@@ -143,21 +142,21 @@ import AssistantSetup from "../components/AssistantSetup.astro";
       </li>
       <li>
         Make Milton available in your conversation before asking ChatGPT to read
-        or save rules and samples.
+        your cover sheet or keep memos.
       </li>
     </ol>
     <p>
       Custom MCP access depends on your plan and workspace settings. You need
-      both read and write tools; a search-only connection won’t save rules and
-      samples. If the option is missing, check the{" "}
+      both read and write tools; a search-only connection won’t keep memos. If
+      the option is missing, check the{" "}
       <a href="https://developers.openai.com/plugins/build/app-quickstart">
         official connection guide ↗
       </a>{" "}
       before signing up for a different plan.
     </p>
     <p>
-      Keep <a href="#standing-line">the standing line</a> in your custom
-      instructions or a memory.
+      As part of setup, add <a href="#standing-line">the standing line</a> to
+      your custom instructions or a memory.
     </p>
   </section>
   <section id="grok-bot" aria-labelledby="grok-bot-heading">
@@ -168,8 +167,8 @@ import AssistantSetup from "../components/AssistantSetup.astro";
     </p>
     <blockquote>
       Add Milton as a remote MCP server at https://mcp.meetmilton.com/mcp. Use
-      OAuth browser sign-in, then list its tools. Do not save or change rules
-      and samples during setup.
+      OAuth browser sign-in, then list its tools. Don’t save memos or change my
+      cover sheet during setup.
     </blockquote>
     <ol>
       <li>Complete the browser sign-in using your Milton account.</li>
@@ -178,7 +177,7 @@ import AssistantSetup from "../components/AssistantSetup.astro";
       </li>
       <li>
         Confirm the Bot reads your current cover sheet. Once connected, use the{" "}
-        <a href="#first-preference">save and read examples below</a>.
+        <a href="#first-preference">first steps below</a>.
       </li>
     </ol>
     <p>
@@ -190,9 +189,9 @@ import AssistantSetup from "../components/AssistantSetup.astro";
       .
     </p>
     <p>
-      If Grok Bot has standing instructions or memory, keep{" "}
-      <a href="#standing-line">the standing line</a> there. Otherwise, ask “Did
-      you get that memo?” each time.
+      If Grok Bot has standing instructions or memory, add{" "}
+      <a href="#standing-line">the standing line</a> there as part of setup.
+      Otherwise, ask “Did you get that memo?” each time.
     </p>
   </section>
   <section id="muse" aria-labelledby="muse-heading">
@@ -202,8 +201,8 @@ import AssistantSetup from "../components/AssistantSetup.astro";
     <blockquote>
       Create a Custom Connector named Milton for the remote MCP server at
       https://mcp.meetmilton.com/mcp. It uses Streamable HTTP and OAuth browser
-      sign-in. List its tools after connecting. Do not save or change rules and
-      samples during setup.
+      sign-in. List its tools after connecting. Don’t save memos or change my
+      cover sheet during setup.
     </blockquote>
     <ol>
       <li>
@@ -216,7 +215,7 @@ import AssistantSetup from "../components/AssistantSetup.astro";
       </li>
       <li>
         Once the connection works, use the{" "}
-        <a href="#first-preference">save and read examples below</a>.
+        <a href="#first-preference">first steps below</a>.
       </li>
     </ol>
     <p>
@@ -229,9 +228,9 @@ import AssistantSetup from "../components/AssistantSetup.astro";
       </a>
     </p>
     <p>
-      If Muse has standing instructions or memory, keep{" "}
-      <a href="#standing-line">the standing line</a> there. Otherwise, ask “Did
-      you get that memo?” each time.
+      If Muse has standing instructions or memory, add{" "}
+      <a href="#standing-line">the standing line</a> there as part of setup.
+      Otherwise, ask “Did you get that memo?” each time.
     </p>
   </section>
   <section id="claude-code" aria-labelledby="claude-code-heading">
@@ -246,9 +245,9 @@ import AssistantSetup from "../components/AssistantSetup.astro";
       </a>
     </p>
     <p>
-      <a href="#standing-line">The standing line</a> lives in CLAUDE.md in your
-      home directory (<code>~/.claude/CLAUDE.md</code>), so it covers every
-      project. Claude Code adds it during setup once you approve.
+      Setup adds <a href="#standing-line">the standing line</a> to CLAUDE.md in
+      your home directory (<code>~/.claude/CLAUDE.md</code>), so it covers every
+      project. Claude Code adds it once you approve.
     </p>
   </section>
   <section id="codex" aria-labelledby="codex-heading">
@@ -263,9 +262,10 @@ codex mcp login milton`}</code></pre>
       <a href="https://developers.openai.com/codex/mcp">Codex’s MCP guide ↗</a>
     </p>
     <p>
-      <a href="#standing-line">The standing line</a> lives in AGENTS.md in your
-      Codex home directory (<code>~/.codex/AGENTS.md</code>), so it covers every
-      project. Codex adds it during setup once you approve.
+      Setup adds <a href="#standing-line">the standing line</a> to AGENTS.md in
+      your Codex home directory (<code>~/.codex/AGENTS.md</code>), so it covers
+      every project. Codex adds it once you approve. Without it, Codex often
+      doesn’t read Milton.
     </p>
   </section>
   <section id="cursor" aria-labelledby="cursor-heading">
@@ -279,40 +279,39 @@ codex mcp login milton`}</code></pre>
       </a>
     </p>
     <p>
-      Paste <a href="#standing-line">the standing line</a> into User Rules in
-      Cursor’s settings, so it covers every project.
+      As part of setup, paste <a href="#standing-line">the standing line</a>
+      into User Rules in Cursor’s settings, so it covers every project.
     </p>
   </section>
   <section id="first-preference" aria-labelledby="first-heading">
     <h2 id="first-heading">Start with your own words.</h2>
     <p>
       New accounts start empty. Once connected, paste a real email or DM you
-      wrote and ask your AI to clean it up. It reads what you have on file and
-      should change only what you asked. You choose the final text. If you
-      approve the edit, your AI may offer once to keep the edited body as a
-      sample, with its change list left out.
+      wrote and ask your AI to clean it up, or ask for a new draft. It reads
+      what you have on file and should change only what you asked. You choose
+      the final text.
     </p>
     <p>
-      Older examples are optional. Paste a few emails or DMs you like, or ask
-      your AI to find candidates using access it already has. Milton needs no
-      inbox connection or Gmail permissions. Your AI should exclude automated,
-      forwarded and other people’s text, show you the exact proposed samples and
-      useful non-private context with private details replaced, and save each
-      only after your retention approval.
+      When you accept a final, by approving it, saying it’s done, or copying it
+      to send, your AI keeps it as a memo without asking: its first draft, your
+      final, one-line tweaks for what you made it change, and a one-line summary
+      of the situation. It tells you in one line, such as “Kept memo: vendor
+      decline, 2 rounds, tweaks: no warm-up opener.” Whether that line shows
+      depends on your AI app. Next time, any connected AI gets the finals that
+      match and the tweaks you keep making.
     </p>
     <p>
-      Already have rules or examples? Keep them. Approved samples work with zero
-      rules. Add more only when useful; there is no quiz or requirement to fill
-      five reports. Rules are still supported when you ask for them.
+      Pasting older writing is optional. Paste a few emails or DMs you wrote and
+      like, and your AI keeps each as a memo. Milton needs no inbox connection
+      or Gmail permissions. Your AI should use only your own writing, skipping
+      automated, forwarded and other people’s text.
     </p>
     <p>
-      Need a new draft? Tell your AI what the next email or DM should
-      accomplish. It reads the relevant report and drafts with what is on file.
-      You can skip examples and get help with the draft. If you approve the
-      final version, your AI may offer once to keep it as a sample. Approval of
-      a draft or edit, praise, or permission to send is separate from approval
-      to keep it. <a href="https://app.meetmilton.com/">Open Milton</a> to check
-      what was saved.
+      Your cover sheet is your own voice guide: a few hard lines every draft
+      follows, like “no em dashes” or “sign off –P.” Say “remember …” or “add to
+      my cover sheet” and your AI adds your exact words. It never adds lines of
+      its own. <a href="https://app.meetmilton.com/">Open Milton</a> to see your
+      memos, edit your cover sheet, forget a memo or turn off Keep memos.
     </p>
     <p>In your next conversation, ask:</p>
     <blockquote>“Did you get that memo?”</blockquote>
@@ -323,10 +322,10 @@ codex mcp login milton`}</code></pre>
       requests a read, not a save.
     </p>
     <p>
-      The standing instruction asks your AI to read your cover sheet and the
-      relevant report before writing. Check that it actually does. All connected
-      AIs can read the whole report, so keep private project context in its own
-      tools.
+      The standing instruction asks your AI to read your cover sheet and its
+      report before writing. Check that it actually does. Every connected AI can
+      read your cover sheet and the finals in its reports, so keep private
+      project context in its own tools.
     </p>
   </section>
   <section aria-labelledby="help-heading">

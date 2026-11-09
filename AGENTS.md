@@ -1,22 +1,26 @@
 # Milton: instructions for agents
 
-Milton keeps how a person writes: a cover sheet of rules for all their writing and five
-reports (email, chat, post, document, speech), each holding approved samples and rules,
-served to connected assistants through an MCP server with four tools (`get_cover_sheet`,
-`get_report`, `list_reports`, `create_memo`). Saves are model-free: rules are stored as
-sent, samples as approved, corrections by exact edits. [SPEC.md](SPEC.md) is the plan,
-the [README](README.md) says what is here, and [TODO.md](TODO.md) is the backlog.
+Milton keeps how a person writes and serves it to their connected AIs through an MCP
+server with three tools (`get_cover_sheet`, `get_report`, `create_memo`). The person
+writes a short cover sheet, their own voice guide. When they accept a final, their AI
+saves a memo: its first draft, the final and the tweaks (one line per change the person
+made it make). For each draft Milton assembles a report: the cover sheet, the
+best-matching finals as examples, then the tweaks those memos taught. Saves and reads
+are model-free: Milton stores what it is sent and counts. [SPEC.md](SPEC.md) is the
+plan, the [README](README.md) says what is here, and [TODO.md](TODO.md) is the backlog.
 
 ## Stop first
 
-- **Everything saved is served to outside assistants** (claude.ai, ChatGPT, Claude Code,
+- **Everything saved is served to outside AIs** (claude.ai, ChatGPT, Claude Code,
   Codex, Muse and others). Never put employers, investors, customers, secrets or other
-  people's private details in a rule, a sample, a fixture, a commit message or a log.
-- **Rules and samples change only through the person.** Assistants save through
-  `create_memo` after the person approves the exact text; Milton never rewrites. Never
-  save to Peter's account on your own initiative. The repository holds no rules.
-- **Peter's rules live on the server** at `https://mcp.meetmilton.com/mcp`. Read them
-  there, never from files.
+  people's private details in a memo, a tweak, a cover sheet line, a fixture, a commit
+  message or a log.
+- **Memos and the cover sheet belong to the person.** Their AI saves a memo when they
+  accept a final and changes the cover sheet only in their words; Milton never rewrites
+  what it is sent. Never save to Peter's account on your own initiative. The repository
+  holds none of his writing.
+- **Peter's cover sheet and memos live on the server** at
+  `https://mcp.meetmilton.com/mcp`. Read them there, never from files.
 - **Publishing requires authorization.** Builders may commit/push their assigned task
   branch and open one PR. Only the designated release coordinator, currently
   `milton-duo`, lands/merges and pushes main or deletes landed task branches.

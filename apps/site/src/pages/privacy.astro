@@ -13,8 +13,8 @@ import SiteLayout from "../layouts/SiteLayout.astro";
   </p>
   <p>
     Milton is operated by Zone of Danger, LLC (“we”). Milton keeps the writing
-    you approved, word for word. It never rewrites a rule or a sample, and it
-    never reads your inbox. The details follow.
+    your AI sends it, word for word: your memos and your cover sheet. It never
+    rewrites them, and it never reads your inbox. The details follow.
   </p>
 
   <h2>What Milton stores</h2>
@@ -23,13 +23,13 @@ import SiteLayout from "../layouts/SiteLayout.astro";
     of Google or GitHub accounts you use to sign in or link; password hashes if
     you use a password; sign-in sessions, email verification and password reset
     records, AI permissions and access tokens, and security rate-limit records;
-    the writing rules you ask your AIs to save; the samples of your writing you
-    approve for saving, stored exactly as approved, including any names they
-    contain; each rule and sample you saved, with its versions and which AI
-    saved it; request receipts used to prevent duplicate saves; internal records
-    of accepted changes, including the exact submitted rules, edits or samples,
-    authorship and affected versions; connected AIs and the AIs you disconnect;
-    counts of tool calls you make each day; and your billing record: your Stripe
+    your memos (described below), with which AI saved each one and when; your
+    tweaks and how many memos cite each; your cover sheet and every earlier
+    version of it, with whether you or an AI made each change; a record of which
+    tweaks each report served; request receipts used to prevent duplicate saves,
+    which can include a memo’s kind and tweaks or your cover sheet’s text;
+    whether Keep memos is on; connected AIs and the AIs you disconnect; counts
+    of tool calls you make each day; and your billing record: your Stripe
     customer and subscription IDs, the subscription’s status, its trial and
     billing period dates, and which trial reminders have been sent.
   </p>
@@ -37,12 +37,11 @@ import SiteLayout from "../layouts/SiteLayout.astro";
   <h2>How we use it</h2>
   <p>
     Only to run Milton: to sign you in, verify your email, help you recover and
-    secure your account, store your rules, retain their internal history,
-    prepare the cover sheet and reports for the AIs you connect, and run your
-    trial and subscription. Accepted-change records remain with your internal
-    history until account deletion. Your data is encrypted at rest by our
-    database provider. We do not sell your data, show ads, or use your rules or
-    samples to train AI models.
+    secure your account, store your memos and cover sheet, assemble reports for
+    the AIs you connect, show you your TPS page and scoreboard, and run your
+    trial and subscription. Your data is encrypted at rest by our database
+    provider. We do not sell your data, show ads, or use your memos or cover
+    sheet to train AI models.
   </p>
   <p>
     Email/password sign-in requires a verified email address. If you use a
@@ -53,16 +52,16 @@ import SiteLayout from "../layouts/SiteLayout.astro";
     link.
   </p>
 
-  <h2>Who can see your rules and samples</h2>
+  <h2>Who can see your memos</h2>
   <p>
-    You and the AIs you connect receive your current cover sheet and reports,
-    samples included. Once an AI has read them, its handling of that content is
-    governed by the terms and privacy policy of that AI’s provider, not ours.
-    Rules and samples are stored exactly as your AI sends them; Ordinary saves
-    and reads do not send them to an AI model. If you explicitly opt into the
-    private guide pilot, the background processing described below sends
-    approved samples to Anthropic. Milton does not collect your AI
-    conversations. The service providers below process data to operate Milton.
+    You see everything on your TPS page. The AIs you connect receive your cover
+    sheet and reports: for each draft, the finals that best match it and your
+    tweaks. First drafts are shown only to you. Once an AI has read them, its
+    handling of that content is governed by the terms and privacy policy of that
+    AI’s provider, not ours. Memos and your cover sheet are stored exactly as
+    your AI sends them; saves and reads do not send them to an AI model. Milton
+    does not collect your AI conversations; it receives only what your AI sends.
+    The service providers below process data to operate Milton.
   </p>
   <p>
     You can disconnect an AI at any time from Connected AIs in the Milton app.
@@ -71,40 +70,31 @@ import SiteLayout from "../layouts/SiteLayout.astro";
     approve access.
   </p>
 
-  <h2>Samples</h2>
+  <h2>Memos</h2>
   <p style="text-wrap:pretty">
-    A sample is saved only after you say yes to a specific piece of writing, and
-    it is stored exactly as you approved it. Milton does not remove names or
-    other details from it; you decide what to save. Saving a new sample keeps
-    your existing samples unless you ask to replace or remove them. You can ask
-    your AI to replace or remove a sample. Removed or replaced samples leave
-    future reports and current downloads, but remain in your internal history
-    until account deletion. This does not erase copies an AI already received.
+    A memo holds the first draft your AI showed you, when it still has it
+    exactly; the final you accepted; the tweaks your AI wrote for what you made
+    it change; and a one-line summary of the situation, with its medium,
+    audience, purpose, kind and how many rounds it took. By default your AI
+    keeps a memo when you accept a final, without asking; it can also keep
+    writing you paste or ask it to remember. Milton stores it exactly as sent.
+    Whether your AI tells you in one line that it kept a memo depends on the AI
+    app you use. Your AI is told to summarize other people’s text, such as an
+    email you are replying to, rather than send it, and never to send secrets;
+    Milton cannot check what an AI sends, and it does not remove names or other
+    details.
   </p>
-
-  <h2>Optional derived guides</h2>
-  <p>
-    Guides are off by default. For eligible accounts that explicitly opt in,
-    Milton sends every active approved sample in a report, with its approved
-    classification and context, to Anthropic to infer writing tendencies. Rules,
-    retired sample revisions and earlier guides are excluded. The resulting
-    guide is an interpretation, shown to you and the AIs you connect; your
-    approved writing stays unchanged. A stale guide can still reflect a sample
-    that was corrected or removed until its update succeeds. Removing all active
-    samples clears the guide immediately. Guides are excluded from your
-    download.
-  </p>
-  <p>
-    Anthropic’s standard API policy deletes inputs and outputs within 30 days,
-    with exceptions for policy enforcement, legal requirements and contractual
-    terms. This pilot does not promise zero data retention. See{" "}
-    <a href="https://privacy.claude.com/en/articles/7996866-how-long-do-you-store-my-organization-s-data">
-      Anthropic’s retention policy
-    </a>
-    . Disabling participation hides guides on future reads; it cannot retract
-    copies already received by an AI. Completed guides may remain stored while
-    disabled, until account deletion. Milton keeps one current guide per report,
-    without a guide history archive.
+  <p style="text-wrap:pretty">
+    Memos are kept until you forget them, choose Delete all memos, or delete
+    your account; there is no timer. On your TPS page you can forget a memo,
+    which also removes tweaks only it taught; delete all memos, which removes
+    every memo, tweak and kind but keeps your cover sheet; delete or reword a
+    tweak; and turn off Keep memos, which stops your AI keeping drafts while
+    still letting you ask it to remember something. You can also ask your AI to
+    forget a memo. Earlier versions of your cover sheet, and receipts of past
+    saves, remain until account deletion. None of this erases copies an AI
+    already received. Writing saved before memos is no longer served to AIs or
+    shown, and will be deleted.
   </p>
 
   <h2>Where it is kept</h2>
@@ -165,23 +155,23 @@ import SiteLayout from "../layouts/SiteLayout.astro";
     Choose Delete account in the Milton app. Deletion blocks account and AI
     access. If you have a Stripe customer, deletion deletes it at Stripe first,
     which ends any subscription immediately, with no refund. Milton then removes
-    your rules, samples, derived guides and pending guide work, internal memos
-    and their history, your cover sheet and reports, request receipts,
-    accepted-change records, usage counts and billing record, and the app’s
-    sign-in sessions and credentials. When you delete your account, Milton’s
-    sign-in service also deletes your sign-in profile, password hashes, linked
-    sign-in methods, sessions, and every AI connection you approved. An AI
-    registration that only you approved is deleted; one that another account
-    also approved stays, with its name and contact details erased. We keep only
-    a one-way fingerprint of each deleted or erased registration’s ID, so its
-    details stay erased if it registers again. Any registration approved before
-    November 8, 2026 that can no longer be linked to an account remains as
-    registered. If account cleanup is incomplete, the app offers a retry;
-    deletion is confirmed only when that cleanup finishes. Unused password reset
-    links stop working when account security changes or deletion starts, as well
-    as when they expire. Verification links expire after one hour; remaining
-    verification records become eligible for cleanup one day after expiry and
-    can remain until cleanup reaches them. The limited records below remain.
+    your memos, tweaks and kinds, your cover sheet and its earlier versions,
+    records of served reports, any writing saved before memos, request receipts,
+    usage counts and billing record, and the app’s sign-in sessions and
+    credentials. When you delete your account, Milton’s sign-in service also
+    deletes your sign-in profile, password hashes, linked sign-in methods,
+    sessions, and every AI connection you approved. An AI registration that only
+    you approved is deleted; one that another account also approved stays, with
+    its name and contact details erased. We keep only a one-way fingerprint of
+    each deleted or erased registration’s ID, so its details stay erased if it
+    registers again. Any registration approved before November 8, 2026 that can
+    no longer be linked to an account remains as registered. If account cleanup
+    is incomplete, the app offers a retry; deletion is confirmed only when that
+    cleanup finishes. Unused password reset links stop working when account
+    security changes or deletion starts, as well as when they expire.
+    Verification links expire after one hour; remaining verification records
+    become eligible for cleanup one day after expiry and can remain until
+    cleanup reaches them. The limited records below remain.
   </p>
   <p>These records remain after deletion:</p>
   <ul>
@@ -204,8 +194,8 @@ import SiteLayout from "../layouts/SiteLayout.astro";
       trial fingerprints remain consistent.
     </li>
     <li>
-      Content-free guide spending records (amount, time and a one-way account
-      fingerprint), so deletion cannot reset pilot spending limits.
+      Content-free spending records from a retired writing-guide test (amount,
+      time and a one-way account fingerprint).
     </li>
     <li>Stripe keeps past invoices and payment records.</li>
   </ul>

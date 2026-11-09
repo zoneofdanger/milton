@@ -1,10 +1,8 @@
 import type { PGlite } from "@electric-sql/pglite";
 import { sql } from "drizzle-orm";
-import type { SampleContext } from "../src/store/sample-context";
-import type { ReportId } from "../src/store/reports";
 import { compiledMemos } from "../src/store/compiled";
-import type { StoreDatabase, StoreSession } from "../src/store/database";
-import { cardHeadsJson, type CardHead } from "../src/store/cards";
+import type { StoreDatabase } from "../src/store/database";
+import type { MemoInput, SaveMemoInput } from "../src/mcp-tools";
 import { requireActiveAccount } from "../src/store/accounts";
 import { readLimits } from "../src/store/limits";
 import {
@@ -14,15 +12,6 @@ import {
   type TenantStore,
   type VerifiedStoreAuth,
 } from "../src/store";
-
-// Every card's head version, in position order.
-export async function cardHeads(tx: StoreSession, userId: string) {
-  return (
-    await tx.query<{ heads: CardHead[] }>(
-      sql`SELECT (${cardHeadsJson(userId)}) AS heads`,
-    )
-  )[0]!.heads;
-}
 
 // Runs `inside` at the start of every transaction, while it is open. A request
 // started meanwhile waits for it, as on the account lock.
@@ -64,90 +53,38 @@ export const seedUsers = (pg: PGlite, ...ids: string[]) =>
     ids,
   );
 
-// A user's store as a fixture assistant sees it.
+// A user's store as a fixture AI sees it.
 export const fixtureStore = (
   db: StoreDatabase,
   userId: string,
   clientId = "fixture",
 ) => compiledMemos(db, userId, { issuer: "fixture", clientId });
 
-// The same store with the parked guide pilot's reads switched on.
-export const guideStore = (db: StoreDatabase, userId: string) =>
-  compiledMemos(
-    db,
-    userId,
-    { issuer: "fixture", clientId: "fixture" },
-    undefined,
-    undefined,
-    true,
-  );
-
-// One current rule, with a stable identity and its first immutable version.
-export const seedRule = async (
-  pg: PGlite,
-  userId: string,
-  id: string,
-  body: string,
-  options: {
-    description?: string;
-    report?: ReportId | "cover";
-    archived?: boolean;
-  } = {},
-) => {
-  await pg.query("INSERT INTO instruction_cards(user_id,id) VALUES ($1,$2)", [
-    userId,
-    id,
-  ]);
-  await pg.query(
-    `INSERT INTO instruction_card_versions(user_id,card_id,version,description,body,report,archived,reason,actor_json)
-    VALUES ($1,$2,1,$3,$4,$5,$6,'Fixture','{}')`,
-    [
-      userId,
-      id,
-      options.description ?? "Fictional instruction",
-      body,
-      options.report ?? "cover",
-      options.archived ?? false,
-    ],
-  );
+// A memo as an AI saves it: fictional words and context, a fresh request id.
+export const memoSave = (
+  memo: Partial<MemoInput> = {},
+  rest: Partial<SaveMemoInput> = {},
+): SaveMemoInput => ({
+  request_id: crypto.randomUUID(),
+  memo: {
+    final: "Thanks for thinking of us. We'll pass this quarter.\n\n–P",
+    context: {
+      summary: "decline a vendor's meeting request",
+      medium: "email",
+      audience: "a vendor",
+      purpose: "decline",
+    },
+    ...memo,
+  },
+  ...rest,
+});
+// An intent for get_report, fictional.
+export const vendorIntent = {
+  situation: "declining a vendor's meeting request",
+  medium: "email" as const,
+  audience: "a vendor",
+  purpose: "decline",
 };
-
-// An approved sample's identity plus immutable snapshots, with fictional provenance.
-export async function seedSample(
-  pg: PGlite,
-  userId: string,
-  id: string,
-  report: ReportId,
-  kindId: string,
-  context: SampleContext,
-  body: string,
-  options: { createdAt?: string; retired?: boolean } = {},
-) {
-  await pg.query(
-    "INSERT INTO samples(user_id,id,client_json,created_at) VALUES ($1,$2,'{}',coalesce($3::timestamptz,clock_timestamp()))",
-    [userId, id, options.createdAt ?? null],
-  );
-  await pg.query(
-    `INSERT INTO sample_versions(user_id,sample_id,version,report,kind_id,context,body,actor_json,request_id,created_at)
-    VALUES ($1,$2,1,$3,$4,$5::jsonb,$6,'{}',$7,coalesce($8::timestamptz,clock_timestamp()))`,
-    [
-      userId,
-      id,
-      report,
-      kindId,
-      JSON.stringify(context),
-      body,
-      crypto.randomUUID(),
-      options.createdAt ?? null,
-    ],
-  );
-  if (options.retired)
-    await pg.query(
-      `INSERT INTO sample_versions(user_id,sample_id,version,report,kind_id,context,body,retired,retire_reason,actor_json,request_id)
-      SELECT user_id,sample_id,2,report,kind_id,context,body,true,'removed','{}',$3 FROM sample_versions WHERE user_id=$1 AND sample_id=$2`,
-      [userId, id, crypto.randomUUID()],
-    );
-}
 
 // An account's store, refused once the account is not active: the limits and
 // account checks a request makes before building it with tenantStore.

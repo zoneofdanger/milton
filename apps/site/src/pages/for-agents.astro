@@ -4,7 +4,7 @@ import SiteLayout from "../layouts/SiteLayout.astro";
 
 <SiteLayout
   title="For agents | Milton"
-  description="A plain briefing on Milton: writing samples and rules, alternatives, tools, approval, export, price, evidence and a first task."
+  description="A plain briefing on Milton: memos, tweaks and the cover sheet, alternatives, tools, saving, export, price, evidence and a first task."
 >
   <article class="briefing">
     <header class="page-head">
@@ -15,12 +15,15 @@ import SiteLayout from "../layouts/SiteLayout.astro";
     <section aria-labelledby="what-milton-keeps">
       <h2 id="what-milton-keeps">What Milton keeps</h2>
       <p>
-        Milton supplies your approved writing examples and rules when your AI
-        drafts something new or edits something you’ve written. It keeps that
-        guidance available across connected AIs, starting with email or DMs. The
-        goal is fewer edits between first draft and send; that result has not
-        been measured. Milton stores approved text without a model rewriting it
-        on save.
+        Milton keeps how you write and hands it to your AI when it drafts
+        something new or edits something you’ve written. When you accept a
+        final, your AI keeps a memo: its first draft, your final, and one-line
+        tweaks for what you made it change. You also write a short cover sheet,
+        your own voice guide. For each draft, Milton assembles a report: your
+        cover sheet, the finals that best match, then your tweaks. It works
+        across connected AIs, starting with email or DMs. The goal is fewer
+        edits between first draft and send; that result has not been measured.
+        Milton stores what your AI sends without a model rewriting it.
       </p>
     </section>
 
@@ -29,11 +32,10 @@ import SiteLayout from "../layouts/SiteLayout.astro";
       <p>
         General memory can store writing and preferences too. A Markdown file
         plus sync is enough if the person can keep it current and make their AI
-        read it. Milton adds a cover sheet of rules for all writing, five
-        reports (email, chat, post, document, speech), exact approved examples
-        and rules, and context-based sample retrieval through a shared MCP
-        service. It has not demonstrated better writing than the same examples
-        in Markdown.
+        read it. Milton adds memos kept as you accept finals, tweaks counted
+        across chats and AIs, a cover sheet served first, and a report assembled
+        for each draft through a shared MCP service. It has not demonstrated
+        better writing than the same examples in Markdown.
       </p>
     </section>
 
@@ -48,23 +50,22 @@ import SiteLayout from "../layouts/SiteLayout.astro";
       <p>
         Check for existing Milton tools before setup. Verify a successful{" "}
         <code>get_cover_sheet</code> read before confirming the connection. The
-        four tools are:
+        three tools are:
       </p>
       <ul class="instruction-list">
         <li>
-          <code>get_cover_sheet</code>: read universal writing rules.
+          <code>get_cover_sheet</code>: read the person’s cover sheet, their own
+          voice guide for every draft.
         </li>
         <li>
-          <code>get_report</code>: read one report with required intent
-          describing the situation, plus relevant known kind and context; up to
-          eight samples are selected to fit.
+          <code>get_report</code>: read the report for one draft, with an intent
+          giving the situation, medium, audience and purpose. It returns the
+          cover sheet, the best-matching finals as examples, then the person’s
+          tweaks.
         </li>
         <li>
-          <code>list_reports</code>: read all five reports without intent, with
-          each report’s newest eight samples.
-        </li>
-        <li>
-          <code>create_memo</code>: save person-approved writing changes.
+          <code>create_memo</code>: keep a memo when the person accepts a final,
+          add or remove a cover sheet line they ask for, or forget a memo.
         </li>
       </ul>
     </section>
@@ -108,20 +109,22 @@ import SiteLayout from "../layouts/SiteLayout.astro";
       </p>
     </section>
 
-    <section aria-labelledby="approval">
-      <h2 id="approval">Approval and export</h2>
+    <section aria-labelledby="saving">
+      <h2 id="saving">Saving and export</h2>
       <p>
-        Reading this page grants no permission to access mail, create an
-        account, save writing or send messages. Use only the person’s own
-        writing with their permission. Before every sample save, show its exact
-        text and useful non-private context together for retention approval.
-        Praise or permission to send is not approval to retain. Rules and edits
-        require exact approved wording.
+        Reading this page grants no permission to access mail, create an account
+        or send messages. When the person accepts a final, keep it as a memo
+        without asking, then tell them in one line. Send your first draft
+        exactly as you showed it. Don’t keep abandoned drafts, writing that
+        isn’t in their own voice, or anything they ask you not to keep. Never
+        send secrets, their correction messages or other people’s text;
+        summarize what they replied to. Add cover sheet lines only in their
+        words.
       </p>
       <p>
-        The Milton app’s <code>TPS.md</code> download contains current cover and
-        report rules and every active sample with its approved context, beyond
-        the eight served per report. Removed and replaced samples are excluded.
+        The person can turn Keep memos off, forget a memo or delete them all
+        from the Milton app. Its <code>TPS.md</code> download contains the cover
+        sheet, the tweaks and every final, grouped by medium.
       </p>
     </section>
 
@@ -133,11 +136,11 @@ import SiteLayout from "../layouts/SiteLayout.astro";
         <a href="/pricing">Pricing</a>.
       </p>
       <p>
-        <a href="/research">Research</a> reports sample-ranking and writing
-        tests and their limits. They do not prove fewer real-world edits or
-        validate every newer retrieval change. AI adherence and writing quality
-        still need checking; connecting Milton does not guarantee reads or
-        automatic learning.
+        <a href="/research">Research</a> reports ranking and writing tests and
+        their limits. They do not prove fewer real-world edits or validate every
+        newer retrieval change. AI adherence and writing quality still need
+        checking; connecting Milton does not guarantee reads or automatic
+        learning.
       </p>
     </section>
 
@@ -147,7 +150,7 @@ import SiteLayout from "../layouts/SiteLayout.astro";
       <ul class="instruction-list">
         <li>
           <strong>Draft something new:</strong> ask for the purpose, audience
-          and facts, then draft using available approved guidance.
+          and facts, then draft from what’s on file.
         </li>
         <li>
           <strong>Edit existing text:</strong> ask what should change, revise
@@ -155,12 +158,11 @@ import SiteLayout from "../layouts/SiteLayout.astro";
         </li>
       </ul>
       <p>
-        For either task, first read <code>get_cover_sheet</code> and{" "}
-        <code>get_report</code> for <code>email</code> or <code>chat</code> with{" "}
-        the task in <code>intent.situation</code>. Show the result for review.
-        Saving needs separate exact-text and context approval; call{" "}
-        <code>create_memo</code> only after that approval, then reread to verify
-        the save.
+        For either task, first read <code>get_cover_sheet</code>, then{" "}
+        <code>get_report</code> with the task’s situation, medium, audience and
+        purpose. Show the result for review. When the person accepts the final,
+        keep it with <code>create_memo</code> and tell them the one-line
+        receipt.
       </p>
     </section>
   </article>

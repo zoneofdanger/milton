@@ -35,12 +35,11 @@ import {
 } from "./billing";
 import {
   compiledMemos,
-  type CompiledReport,
-  type Documents,
   type SaveMemoInput,
   type SaveOutcome,
 } from "./compiled";
-import type { ReportIntent } from "./reports";
+import type { CoverSheetRead, ReportIntent, ReportRead } from "./memos";
+import { tpsStore } from "./tps";
 import { parseLimits, readLimits } from "./limits";
 import { recordToolUsage, type CallUsage } from "./usage";
 import {
@@ -68,8 +67,6 @@ export type { StripeSubscriptionState } from "./billing";
 
 export interface StoreBindings {
   DATABASE_URL?: string;
-  /** Reads include the parked guide pilot's state; off unless MILTON_GUIDES=on. */
-  guides?: boolean;
   // Private dependency injection for the embedded fixture; never populated from a request.
   storeDatabase?: StoreDatabase;
 }
@@ -362,18 +359,15 @@ export function connectionKeysForAccount(
 }
 
 export interface TenantStore {
-  /** The app's origin, for the one link served to assistants. */
+  /** The app's origin, for the one link served to AIs. */
   appOrigin: string;
   trialNotice?(): Promise<TrialNotice | undefined>;
-  readTpsReport(): Promise<CompiledReport>;
-  /** The cover sheet and the five reports at one version, assembled on read;
-   * with an intent, that report serves the eight samples ranked for it. */
-  /** `call`, when given, is the tool call this read serves: once admitted,
-   * its usage row is appended alongside the read (see recordToolUsage). */
-  readDocuments(
-    intent?: ReportIntent,
-    call?: CallUsage,
-  ): Promise<Documents & { version: string }>;
+  /** `call`, when given, is the tool call this read or save serves: once
+   * admitted, its usage row is appended alongside the work (see
+   * recordToolUsage). */
+  readCoverSheet(call?: CallUsage): Promise<CoverSheetRead>;
+  /** The report for one draft, recording the tweaks it served. */
+  readReport(intent: ReportIntent, call?: CallUsage): Promise<ReportRead>;
   saveMemo(input: SaveMemoInput, call?: CallUsage): Promise<SaveOutcome>;
 }
 
@@ -384,10 +378,10 @@ export interface TenantStore {
  * A call is admitted once access, scope and limits were checked (before the
  * store was built), the SDK validated the input, and the read or save checked
  * its remaining input (a read's kind_id) and the trial gate, right before the
- * tool's own work (the snapshot read, or the save's decision under its account
- * lock; a replayed save is not admitted). Admission starts that call's usage
- * append, which runs alongside the work on its own connection; the request
- * never waits on it inside a transaction (see recordToolUsage). */
+ * tool's own work (the read, or the save's decision under its account lock; a
+ * replayed save is not admitted). Admission starts that call's usage append,
+ * which runs alongside the work on its own connection; the request never
+ * waits on it inside a transaction (see recordToolUsage). */
 export function tenantStore(
   bindings: StoreBindings & { appOrigin: string },
   auth: AssistantAuth,
@@ -420,7 +414,6 @@ export function tenantStore(
         /* Usage never fails a call. */
       }
     },
-    bindings.guides === true,
   );
   return {
     appOrigin: bindings.appOrigin,
@@ -438,33 +431,23 @@ export function tenantStore(
         return claimTrialNotice(tx, userId, bindings.appOrigin);
       });
     },
-    readTpsReport: compiled.getTpsReport,
-    readDocuments: compiled.readDocuments,
+    readCoverSheet: compiled.readCoverSheet,
+    readReport: compiled.readReport,
     saveMemo: compiled.saveMemo,
   };
 }
 
-// The web app reads with the person's own session: no assistant, so no saves and
-// no recorded usage. It reads no limits (they bound only saves) and
-// makes no separate account check: the lookup behind `auth` required an active
-// account, and every read's snapshot statement refuses one that is not.
+// The web app reads and changes memos with the person's own session: no AI,
+// so no create_memo and no recorded usage. It reads no limits and makes no
+// separate account check: the lookup behind `auth` required an active
+// account, and every read and change refuses one that is not.
 export function personStoreForCurrentRequest(
   bindings: StoreBindings,
   auth: VerifiedStoreAuth,
 ) {
   const db = database(bindings);
-  const compiled = compiledMemos(
-    db,
-    auth.userId,
-    undefined,
-    undefined,
-    undefined,
-    bindings.guides === true,
-  );
   return {
-    readTpsReport: compiled.getTpsReport,
-    readDocuments: compiled.readDocuments,
-    exportTpsReport: compiled.exportTpsReport,
+    ...tpsStore(db, auth.userId),
     trialStatus: () => trialStatus(db, auth.userId),
   };
 }

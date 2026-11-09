@@ -349,6 +349,21 @@ export function checkMigrations({
         );
     });
   }
+  // A new Drizzle migration bounds its lock waits first (0008 onward): the
+  // migrator runs each file in one transaction, and Neon drops the limits a
+  // client passes at connect.
+  for (const [path, text] of files)
+    if (
+      trackOf(path)?.dir === "server/drizzle" &&
+      path.endsWith(".sql") &&
+      isNew(path) &&
+      !((first) =>
+        /^SET LOCAL lock_timeout = ''$/i.test(first?.code ?? "") &&
+        /^\d+s$/.test(first?.bodies[0] ?? ""))(sqlCode(text).statements[0])
+    )
+      fail(
+        `${path} must start with SET LOCAL lock_timeout = '5s'; (as 0008 onward do): Neon drops the limits a client passes at connect, so without it a lock that isn't free queues requests behind this migration`,
+      );
   const native = [...files.keys()]
     .filter(
       (p) => p.startsWith("apps/auth/migrations/") && p.endsWith(".up.sql"),

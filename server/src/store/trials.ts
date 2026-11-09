@@ -92,7 +92,7 @@ export async function trialStatus(
 export function subscriptionRequired(appOrigin?: string) {
   return new StoreError(
     "subscription_required",
-    "Milton is paused until you subscribe for $5.01/month. Your rules and samples stay available to view and download." +
+    "Milton is paused until you subscribe for $5.01/month. Your memos and cover sheet stay available to view and download." +
       (appOrigin ? ` Subscribe at ${appOrigin}/` : ""),
     402,
     { retryable: false },

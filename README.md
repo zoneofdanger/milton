@@ -3,42 +3,41 @@
 **Make your agents write like you.**
 
 You bring what you want to say. Milton helps your AI write emails and messages in
-your voice, using examples you approve. Start with messages you have already written;
-keep the drafts you want your AI to learn from. Rules and all five reports remain supported.
+your voice. Every time you accept a final, your AI keeps a memo: its first draft, your
+final, and the tweaks between them ("no warm-up opener in vendor replies"). Next time,
+in any AI you connect, Milton hands it your cover sheet, the finals that best match the
+draft and the tweaks you keep making.
 
 I built Milton because I was tired of telling Claude to stop using em dashes for the 100th time.
 
 Milton is named after Milton Waddams in Office Space, the collator: he keeps things in order and
 hands over the right one.
 
-A default-off private pilot can add a read-only guide inferred from every active
-approved sample in each report. It requires explicit processing opt-in and an eligible
-paid subscription or unexpired trial. A separate background worker sends those samples
-and their approved context to Anthropic; saves still preserve exact approved source.
-Guides are labeled interpretations, with freshness and failure status. Rules and requested
-edit scope take precedence. Downloads contain approved rules and samples only.
-See [guide operations](server/deploy/guides.md) for bounds, consent and service isolation.
-
 ## How it works
 
-- **Tell Milton how you write.** Your connected AI sends rules, corrections,
-  removals and approved samples with `create_memo`. The AI names the report for
-  each new rule and sends its exact approved wording; Milton stores it as sent, with no
-  model rewrite. Rules a save does not name remain unchanged. Samples are stored exactly
-  as you approved them.
-- **Read the cover sheet, then the report that fits.** `get_cover_sheet` returns the
-  rules true of all your writing and an index of five reports: email, chat, post,
-  document, and speech. `get_report` returns one report, samples first, then rules;
-  `list_reports` returns all five. Reads make no model call. AIs decide when to read and
-  apply them; Milton does not guarantee their adherence.
-- **See what's on file.** The app shows your current cover sheet and reports and
-  downloads them as `TPS.md`. New accounts start empty. Connect your AI,
-  paste something you wrote and ask it to clean it up. Older examples are optional;
-  each exact sample needs retention approval before saving. Samples work without rules.
-- **Keep the filing internal.** Each rule is an instruction card that keeps its
-  version history internally. The cover sheet and reports are a current snapshot
-  with a version, not a second history or restore interface. A save updates the
-  memos and the reports together.
+- **Write a short cover sheet.** It's your own voice guide: hard lines every draft
+  follows, such as "no em dashes" or "sign off –P". Tell your AI "remember …" or "add to
+  my cover sheet" and it adds your exact line, or edit it on your TPS page. It's capped
+  at 1,500 characters.
+- **Accept a final; your AI keeps a memo.** When you approve a draft, say it's done or
+  copy it to use, your AI saves a memo with `create_memo` without asking and tells you
+  in one line ("Kept memo: vendor decline, 2 rounds, tweaks: no warm-up opener."). A
+  memo is the AI's first draft exactly as shown, your final, one-line tweaks for what
+  you made it change, and a one-line summary of the situation. Writing you paste, or ask
+  it to remember, is a memo with only a final. Milton stores what the AI sends, with no
+  model.
+- **Each draft gets its own report.** Before writing, your AI reads `get_cover_sheet`,
+  then `get_report` with the situation, medium, audience and purpose. Milton ranks your
+  memos and returns the cover sheet, the best-matching finals as examples (your own
+  words first, at most three AI drafts you steered, never untouched AI drafts), then
+  the tweaks those memos taught. Reads make no model call. AIs decide when to read and
+  how to apply them; Milton does not guarantee their adherence.
+- **See and control what's on file.** Your TPS page shows the cover sheet, your memos
+  (newest first, with their rounds, the tweaks served and the tweaks taught), your
+  tweaks with counts and a scoreboard of how much your first drafts change. You can
+  forget a memo, delete or reword a tweak, turn **Keep memos** off, delete all memos,
+  and download everything as `TPS.md`. Memos are kept until you forget them, delete all
+  memos or delete your account.
 
 The hosted service is at [meetmilton.com](https://meetmilton.com), in early access.
 
@@ -48,80 +47,31 @@ The hosted service is at [meetmilton.com](https://meetmilton.com), in early acce
 2. Add `https://mcp.meetmilton.com/mcp` in your AI's MCP or connector settings,
    then complete sign-in and approve the connection. Availability depends on the
    AI and your plan.
-3. Ask your AI to read your Milton cover sheet and relevant reports, preserving
-   existing guidance. An empty account offers setup once. Paste something you wrote
-   and ask it to clean it up, or ask directly to add older examples. Candidate lookup
-   needs your request and access your AI already has. Review each proposed
-   sample body and useful non-private context with private details replaced by
-   placeholders, then approve exactly what it may keep. Milton needs no inbox connection.
-4. For another writing task, give your AI the facts for the next email or DM.
-   It reads the relevant report and drafts. You can skip examples and still get help.
-   Approving a draft or edit does not approve saving it; retention needs a separate yes.
+3. Ask your AI to read your Milton cover sheet. An empty account offers setup once:
+   help with something you're writing now, keep a few pieces you paste, and start
+   your cover sheet in your words. Milton needs no inbox connection, and none of
+   this has to happen before your AI helps.
+4. For the next email or DM, give your AI the facts. It reads the report for that
+   draft and writes. When you accept the final, it keeps the memo.
 
-Use **Connect an AI** above the cover sheet for the connection address and a
-prompt to copy. It starts expanded for empty accounts and stays available after
-your first save.
-To change your rules later, tell your connected AI what to add, correct,
-or remove. A successful save updates the internal memos and the reports together.
+Use **Connect an AI** on your TPS page for the connection address and a prompt to
+copy. It starts expanded for empty accounts and stays available after your first memo.
 
-Your AI also makes two offers while drafting with you. When you approve a
-draft or edit, it asks once whether to save it as a sample, quoted
-exactly as approved. When you make the same correction twice, it proposes a short
-rule. Nothing is saved until you say yes, and a no is final for that draft.
-
-For every rule correction or removal, your AI submits exact before/after
-replacements copied from the current report. Milton applies that wording without a
-model rewrite and leaves the surrounding text unchanged. The AI still needs
-to preserve your intended scope and conditions; literal editing does not decide
-what you meant. Missing, repeated or overlapping matches leave the report unchanged.
-
-Approved samples keep a stable ID. Revising their text, context or classification adds
-a complete immutable revision; removing one retires it explicitly. Reports and the
-TPS.md download show current active revisions. There is no history or restore screen.
-AIs revise through `sample.sample_id`; `replaces` is no longer accepted.
-
-Milton supplies usage instructions when your AI connects, plus descriptions
-for all four tools and their arguments. These explain when to read the cover sheet
-and reports, how to run first setup, and how to save or recover an uncertain request. Clients decide how
-to present that guidance to their models. If your AI needs a persistent
+Milton supplies usage instructions when your AI connects, plus descriptions for all
+three tools and their arguments. These explain when to read, when to keep a memo, how
+to write tweaks, how to run first setup, and how to recover an uncertain save. Clients
+decide how to present that guidance to their models. If your AI needs a persistent
 reminder, add this to its custom instructions or project setup file:
 
-> Before writing for me, read my Milton cover sheet and the reports that fit the
-> task, and apply them. Save changes to Milton only when I ask.
+> Before writing anything for me, call Milton's get_cover_sheet, then get_report.
 
-### Optional session capture
-
-Capture starts off. To opt in for **this conversation only**, tell your connected
-AI:
-
-> For this conversation, at task completion, save explicit reusable standing
-> instructions I give you to Milton. Compare my current Milton rules first and save only
-> genuine additions, corrections or requested removals. Preserve their scope and
-> conditions. Skip one-off requests, project facts and inferred preferences. Send
-> only the extracted instructions, not our conversation or private details.
-> If Milton is empty, show me the complete first draft and wait for approval.
-> Stop capture when I ask.
-
-To turn it off, say:
-
-> Stop Milton session capture. From now on, save only changes I explicitly ask
-> you to save. Keep the instructions already on file.
-
-Opt-in lasts only for the current conversation; repeat it in a new conversation
-or another AI if wanted. Connecting Milton or approving a first draft does
-not enable capture. These on/off instructions stay with the AI and are not
-saved to Milton. Stopping capture does not undo saves already submitted.
-
-This uses the same MCP tools, with no hook or plugin prerequisite. Capture is
-best effort: the AI must call the tools, and Milton cannot inspect the
-conversation or guarantee a save before the session closes. Client tool approvals
-still apply; silent or nonblocking operation depends on the client. These are
-AI instructions, not a server-enforced consent setting. Cross-client capture
-reliability has not yet been evaluated.
+Saving on acceptance is AI guidance, not a server-enforced setting: the AI must call
+the tool, and Milton cannot see the conversation. Whether the one-line receipt shows
+depends on the client.
 
 ## What is here
 
-- [`server/`](server/): the Hono MCP server and web app, with Vite-built assets and Node 26 LTS runtimes. Its three services (app, MCP and self-hosted auth with verified password/email, Google and GitHub) are live on Cloud Run; memos remain in PostgreSQL. Its README and [hosting runbook](server/deploy/README.md) describe operation, release and rollback.
+- [`server/`](server/): the Hono MCP server and web app, with Vite-built assets and Node 26 LTS runtimes. Its three services (app, MCP and self-hosted auth with verified password/email, Google and GitHub) are live on Cloud Run; memos are kept in PostgreSQL. Its README and [hosting runbook](server/deploy/README.md) describe operation, release and rollback.
 - [`apps/site`](apps/site/): the Astro page behind `meetmilton.com`.
 - [`packages/theme`](packages/theme/): Milton's design tokens, stylesheets, and contrast check.
 - [`design/`](design/): Milton's portrait.

@@ -3,7 +3,6 @@ import { brotliDecompressSync, gunzipSync } from "node:zlib";
 import { sql } from "drizzle-orm";
 import { createMiltonApp } from "../src/index";
 import { navigation, page } from "../src/pages";
-import { COVER_COMMENTS, memoPages } from "../src/memo-pages";
 import {
   resolveIdentityAccount,
   lookupIdentityAccount,
@@ -11,7 +10,7 @@ import {
   StoreError,
 } from "../src/store";
 import { localAsset } from "../src/assets";
-import { seedRule, seedSample, storeForCurrentRequest } from "./store-fixtures";
+import { fixtureStore, memoSave, vendorIntent } from "./store-fixtures";
 import { localStore, openTransactions } from "./local-store";
 
 import {
@@ -100,13 +99,16 @@ async function memoPageFixture() {
     subject: "page-fixes",
   });
   const store = await personStoreForCurrentRequest(local.env, account);
-  const author = await storeForCurrentRequest(local.env, account, {
-    issuer,
-    clientId: "fixture",
-  });
+  // An AI connected through a client whose id names its host.
+  const author = fixtureStore(
+    local.db,
+    account.userId,
+    "https://ai.example/client",
+  );
   const app = appFor(local.config);
   return {
     app,
+    userId: account.userId,
     store,
     author,
     db: local.db,
@@ -1036,12 +1038,12 @@ const operationIn = (html: string) =>
 async function deletionFixture() {
   const { stripe, billing } = fakeStripe();
   const fixture = await accountFixture({ billing });
-  const { db, pg } = fixture.local;
+  const { db } = fixture.local;
   const { userId } = await lookupIdentityAccount(fixture.local.env, {
     provider: issuer,
     subject: "account",
   });
-  await seedRule(pg, userId, "fictional-rule", "Fictional rule.");
+  await fixtureStore(db, userId).saveMemo(memoSave());
   await db.query(
     sql`INSERT INTO trial_accounts(user_id,started_at,stripe_customer_id) VALUES(${userId},now(),'cus_fixture')`,
   );
@@ -1049,11 +1051,8 @@ async function deletionFixture() {
   const remains = async () => ({
     account: (await db.query(sql`SELECT 1 FROM users WHERE id=${userId}`))
       .length,
-    writing: (
-      await db.query(
-        sql`SELECT 1 FROM instruction_cards WHERE user_id=${userId}`,
-      )
-    ).length,
+    writing: (await db.query(sql`SELECT 1 FROM memos WHERE user_id=${userId}`))
+      .length,
     sessions: (await db.query(sql`SELECT 1 FROM milton_app.session`)).length,
     customer: (
       await db.query<{ customer: string | null }>(
@@ -1539,15 +1538,11 @@ test("disconnect ends only a listed connection: another one is refused and start
 test("trial reminders stay outside TPS and expired accounts retain web view and download", async () => {
   const fixture = await memoPageFixture();
   try {
-    const first = await fixture.store.readTpsReport();
-    const saved = await fixture.author.saveMemo({
-      text: "Be concise.",
-      rules: [{ report: "cover", text: "Be concise." }],
-      expected_version: first.version,
-      request_id: crypto.randomUUID(),
-    });
+    const saved = await fixture.author.saveMemo(
+      memoSave({ final: "Be concise." }),
+    );
     expect(saved.status).toBe("saved");
-    const report = await fixture.store.readTpsReport();
+    const exported = await fixture.store.exportTps();
     expect(await (await fixture.send("/")).text()).not.toContain(
       "Milton subscription",
     );
@@ -1567,7 +1562,7 @@ test("trial reminders stay outside TPS and expired accounts retain web view and 
     expect(warned).toContain("days left in your Milton trial");
     // Without billing configured there is nothing to press.
     expect(warned).not.toContain('action="/billing');
-    // Page views do not consume an assistant's reminder milestone.
+    // Page views do not consume an AI's reminder milestone.
     expect(
       (await fixture.db.query(sql`SELECT notice_stage FROM trial_accounts`))[0]!
         .notice_stage,
@@ -1579,245 +1574,391 @@ test("trial reminders stay outside TPS and expired accounts retain web view and 
     expect(expired.status).toBe(200);
     const html = await expired.text();
     expect(html).toContain("AI reads and saves are paused until");
+    expect(html).toContain("Your memos, tweaks and cover sheet are still here");
     expect(html).not.toContain('action="/billing');
-    expect(html).not.toContain("ask a connected AI to save");
-    expect(html).toContain("Be concise.");
+    expect(html).not.toContain("it keeps a memo here");
+    expect(html).toContain("decline a vendor&#39;s meeting request");
     const download = await fixture.send("/download");
     expect(download.status).toBe(200);
-    expect(await download.text()).toBe(report.text);
-    expect(await fixture.store.readTpsReport()).toEqual(report);
+    expect(await download.text()).toBe(exported);
   } finally {
     await fixture.dispose();
   }
 });
 
-test("web shows only current TPS, escaped, and downloads it", async () => {
+// A second account in the same store, with a memo and a tweak of its own.
+async function otherAccount(
+  fixture: Awaited<ReturnType<typeof memoPageFixture>>,
+) {
+  const bindings = { storeDatabase: fixture.db, appOrigin };
+  const identity = { provider: issuer, subject: "page-alpha" };
+  await resolveIdentityAccount(bindings, identity);
+  const { userId } = await lookupIdentityAccount(bindings, identity);
+  const saved = await fixtureStore(fixture.db, userId).saveMemo(
+    memoSave({
+      first_draft: "Alpha's first draft.",
+      final: "Alpha's final.",
+      mode: "draft",
+      rounds: 1,
+      tweaks: [{ text: "alpha signs as Ada" }],
+    }),
+  );
+  return {
+    userId,
+    memo: saved.memo!.memo_id,
+    tweak: saved.memo!.tweaks[0]!.tweak_id,
+  };
+}
+
+test("the TPS page lists memos newest first, escaped, opens each only for its own account, and downloads TPS.md", async () => {
   const fixture = await memoPageFixture();
   try {
     const empty = await (await fixture.send("/")).text();
-    expect(empty).toContain("No writing samples on file yet.");
+    expect(empty).toContain("No memos on file yet.");
     expect(empty).toContain('href="/assistants#connect"');
-    expect(
-      (
-        await fixture.app(
-          new Request(appOrigin + "/download", {
-            method: "PUT",
-            headers: { Host: "localhost:3001" },
-          }),
-        )
-      ).status,
-    ).toBe(405);
-    const first = await fixture.author.readTpsReport();
-    const body =
-      "Lead with the answer.\n\nUnless clarification is needed, keep the reply brief. <script>alert('fixture')</script>";
-    const outcome = await fixture.author.saveMemo({
-      text: "Add a fictional rule.",
-      rules: [{ report: "cover", text: body }],
-      expected_version: first.version,
-      request_id: crypto.randomUUID(),
-    });
-    expect(outcome.status).toBe("saved");
-    const html = await (await fixture.send("/tps-report")).text();
-    expect(html).toContain("&lt;script&gt;");
-    expect(html).not.toContain("<script>");
-    for (const font of ["geist-latin-variable", "jetbrains-mono-latin"])
+    expect(empty).toContain('<form method="post" action="/tps/cover-sheet"');
+    for (const [path, method] of [
+      ["/download", "PUT"],
+      ["/download", "POST"],
+      ["/tps/forget", "GET"],
+      ["/tps/memo/" + crypto.randomUUID(), "POST"],
+    ] as const)
       expect(
-        html.split(`<link rel="preload" href="/fonts/${font}.woff2?v=`),
-      ).toHaveLength(2);
-    expect(html).toContain('<ol class="ruled">');
-    expect(html).toContain(
-      '<li class="line"><span class="typed">Lead with the answer.\n\nUnless clarification is needed, keep the reply brief. &lt;script&gt;',
+        (
+          await fixture.app(
+            new Request(appOrigin + path, {
+              method,
+              headers: { Host: "localhost:3001" },
+            }),
+          )
+        ).status,
+      ).toBe(405);
+    const steered = await fixture.author.saveMemo(
+      memoSave({
+        first_draft: "Hi! Hope you're well. <script>alert('draft')</script>",
+        final: "No, thanks. <script>alert('final')</script>\n\n–P",
+        mode: "draft",
+        rounds: 2,
+        tweaks: [{ text: "no warm-up opener <b>" }],
+        new_kind: "vendor decline",
+      }),
     );
-    for (const absent of [
-      "Version history",
-      "Restore",
-      "Archive",
-      "Your memos",
-      "<textarea",
-      "writes today",
+    const report = await fixture.author.readReport(vendorIntent);
+    const untouched = await fixture.author.saveMemo(
+      memoSave({
+        first_draft: "Same.",
+        final: "Same.",
+        mode: "draft",
+        rounds: 0,
+        report_id: report.report_id,
+      }),
+    );
+    const own = await fixture.author.saveMemo(
+      memoSave({ final: "My own words & more." }),
+    );
+    const [a, b, c] = [steered, untouched, own].map((s) => s.memo!.memo_id) as [
+      string,
+      string,
+      string,
+    ];
+    const alpha = await otherAccount(fixture);
+    const html = await (await fixture.send("/tps-report")).text();
+    expect(html).not.toContain("<script>");
+    expect(html).toContain("Email · vendor decline");
+    expect(html).toContain("ai.example · 2 rounds · steered by you");
+    expect(html).toContain("ai.example · 0 rounds · accepted untouched");
+    expect(html).toContain("ai.example · your words");
+    expect(html).toContain(
+      '<span class="tweak-label">Taught:</span> <span class="typed">no warm-up opener &lt;b&gt;</span>',
+    );
+    expect(html).toContain(
+      '<span class="tweak-label">Served:</span> <span class="typed">no warm-up opener &lt;b&gt;</span>',
+    );
+    expect(html).toContain(
+      "First drafts: 2 scored memos so far. 8 more to start the scoreboard.",
+    );
+    // Newest first.
+    const at = (id: string) => html.indexOf(`href="/tps/memo/${id}"`);
+    expect(at(c)).toBeGreaterThan(0);
+    expect(at(c)).toBeLessThan(at(b));
+    expect(at(b)).toBeLessThan(at(a));
+    for (const foreign of ["Alpha", "alpha signs", alpha.memo, alpha.userId])
+      expect(html).not.toContain(foreign);
+    const full = await fixture.send(`/tps/memo/${a}`);
+    expect(full.status).toBe(200);
+    const memo = await full.text();
+    for (const text of [
+      "Hi! Hope you&#39;re well. &lt;script&gt;alert(&#39;draft&#39;)&lt;/script&gt;",
+      "No, thanks. &lt;script&gt;alert(&#39;final&#39;)&lt;/script&gt;\n\n–P",
+      "decline a vendor&#39;s meeting request",
+      "Drafted by your AI",
+      `<input type="hidden" name="memo" value="${a}"/>`,
     ])
-      expect(html).not.toContain(absent);
+      expect(memo).toContain(text);
+    expect(memo).not.toContain("<script>");
+    expect(await (await fixture.send(`/tps/memo/${c}`)).text()).toContain(
+      "Your own writing: there’s no first draft.",
+    );
+    for (const path of [
+      `/tps/memo/${alpha.memo}`,
+      `/tps/memo/${crypto.randomUUID()}`,
+      "/tps/memo/not-a-memo",
+    ]) {
+      const missing = await fixture.send(path);
+      expect([path, missing.status]).toEqual([path, 404]);
+      expect(await missing.text()).not.toContain("Alpha");
+    }
     const download = await fixture.send("/download");
+    expect(download.headers.get("Content-Type")).toBe(
+      "text/markdown; charset=utf-8",
+    );
     expect(download.headers.get("Content-Disposition")).toBe(
       'attachment; filename="TPS.md"',
     );
-    expect(await download.text()).toBe("- " + body);
+    expect(download.headers.get("Cache-Control")).toBe("no-store");
+    const text = await download.text();
+    expect(text).toBe(await fixture.store.exportTps());
+    expect(text).toContain("> No, thanks. <script>alert('final')</script>");
+    expect(text).not.toContain("Alpha");
   } finally {
     await fixture.dispose();
   }
 }, 30000);
 
-test("pages stay capped and download includes every active sample, only for the session account", async () => {
-  // The browser session belongs to page-fixes; a second account shares the store.
+test("the cover sheet form saves on the version it showed, never overwrites a newer one, and needs a same-origin CSRF form", async () => {
   const fixture = await memoPageFixture();
+  const version = (html: string) =>
+    /name="expected_version" value="(\d+)"/.exec(html)![1]!;
   try {
-    const bindings = { storeDatabase: fixture.db, appOrigin };
-    const identity = { provider: issuer, subject: "page-alpha" };
-    await resolveIdentityAccount(bindings, identity);
-    const alpha = await lookupIdentityAccount(bindings, identity);
-    const alphaAuthor = await storeForCurrentRequest(bindings, alpha, {
-      issuer,
-      clientId: "fixture",
+    expect(version(await (await fixture.send("/")).text())).toBe("0");
+    const saved = await fixture.send("/tps/cover-sheet", {
+      text: "\r\nNo em dashes.\r\nSign off –P  ",
+      expected_version: "0",
     });
-    const alphaRule = await alphaAuthor.saveMemo({
-      text: "- Alpha signs as Ada.",
-      rules: [{ report: "email", text: "- Alpha signs as Ada." }],
-      expected_version: (await alphaAuthor.readTpsReport()).version,
-      request_id: crypto.randomUUID(),
+    expect(saved.status).toBe(303);
+    expect(saved.headers.get("Location")).toBe(
+      appOrigin + "/?done=cover-saved#cover-sheet",
+    );
+    expect((await fixture.store.read()).cover_sheet).toEqual({
+      text: "\nNo em dashes.\nSign off –P",
+      version: 1,
     });
-    expect(alphaRule.status).toBe("saved");
-    const alphaSample = await alphaAuthor.saveMemo({
-      text: "Keep this approved email.",
-      expected_version: alphaRule.version!,
-      request_id: crypto.randomUUID(),
-      sample: {
-        report: "email",
-        new_kind: "follow-up",
-        context: { version: 1 as const, summary: "alpha context" },
-        text: "Alpha sample body.",
-      },
-    });
-    expect(alphaSample.status).toBe("saved");
-    const rules = [
-      {
-        report: "cover",
-        text: "Beta keeps it brief.\n  Keep this exception & <tag>.  ",
-      },
-      {
-        report: "email",
-        text: "Preserve email wording.\nIncluding this line.",
-      },
-      { report: "chat", text: "Preserve chat wording." },
-      { report: "post", text: "Keep this report with rules alone." },
-    ] as const;
+    const shown = await (await fixture.send("/?done=cover-saved")).text();
+    expect(shown).toContain('<p role="status">Cover sheet saved.</p>');
+    // HTML drops a textarea's first newline, so the leading blank line stays.
+    expect(shown).toContain(">\n\nNo em dashes.\nSign off –P</textarea>");
+    expect(version(shown)).toBe("1");
+    // An AI adds a line meanwhile; the page's version 1 is now stale.
     expect(
       (
         await fixture.author.saveMemo({
-          text: "Beta keeps it brief.",
-          rules: [...rules],
-          expected_version: (await fixture.store.readTpsReport()).version,
           request_id: crypto.randomUUID(),
+          cover_sheet: { add: "US spelling", expected_version: 1 },
         })
       ).status,
     ).toBe("saved");
-    const beta = await lookupIdentityAccount(bindings, {
-      provider: issuer,
-      subject: "page-fixes",
+    const stale = await fixture.send("/tps/cover-sheet", {
+      text: "Mine <b>",
+      expected_version: "1",
     });
-    const expected = new Map<string, string[]>();
-    for (const report of ["email", "chat"] as const) {
-      await fixture.db
-        .query(sql`INSERT INTO sample_kinds(user_id,id,report,label)
-        VALUES (${beta.userId},${report},${report},'fictional note')`);
-      const bodies = Array.from(
-        { length: 10 },
-        (_, n) =>
-          `Fictional ${report} sample ${n}: <tag> & *verbatim*.${n === 0 ? "\n\n  Keep the oldest sample's spacing.  " : ""}`,
-      );
-      for (const [n, body] of bodies.entries())
-        await seedSample(
-          fixture.pg,
-          beta.userId,
-          `${report}-${n}`,
-          report,
-          report,
-          { version: 1, summary: `${report} context ${n}` },
-          body,
-          { createdAt: `2026-01-0${1 + Math.floor(n / 2)}T00:00:00Z` },
-        );
-      const replacement = `Fictional ${report} replacement: exact & approved.`;
-      expect(
-        await fixture.author.saveMemo({
-          text: "Fictional audit detail, outside the export.",
-          expected_version: (await fixture.store.readTpsReport()).version,
-          request_id: crypto.randomUUID(),
-          retire_samples: [`${report}-1`],
-          sample: {
-            report,
-            kind_id: report,
-            sample_id: `${report}-2`,
-            context: {
-              version: 1 as const,
-              summary: `${report} replacement context`,
-            },
-            text: replacement,
-          },
-        }),
-      ).toMatchObject({ status: "saved" });
-      expected.set(report, [
-        replacement,
-        ...[9, 8, 7, 6, 5, 4, 3, 0].map((n) => bodies[n]!),
-      ]);
+    expect(stale.status).toBe(409);
+    const conflict = await stale.text();
+    expect(conflict).toContain("Your cover sheet changed elsewhere");
+    expect(conflict).toContain("Mine &lt;b&gt;");
+    expect(conflict).toContain("US spelling</textarea>");
+    expect(version(conflict)).toBe("2");
+    const current = (await fixture.store.read()).cover_sheet;
+    expect(current.version).toBe(2);
+    expect(current.text).toContain("US spelling");
+    const long = await fixture.send("/tps/cover-sheet", {
+      text: "x".repeat(1501),
+      expected_version: "2",
+    });
+    expect(long.status).toBe(422);
+    expect(await long.text()).toContain("over its 1,500-character limit");
+    const refused = [
+      await fixture.send(
+        "/tps/cover-sheet",
+        { text: "Foreign.", expected_version: "2" },
+        { Origin: "https://evil.example" },
+      ),
+      await fixture.send(
+        "/tps/cover-sheet",
+        new URLSearchParams({ text: "No CSRF.", expected_version: "2" }),
+      ),
+    ];
+    for (const response of refused) {
+      expect(response.status).toBe(403);
+      expect(await response.text()).toContain("Reload the page");
     }
-    const own = await fixture.store.readTpsReport();
-    const documents = await fixture.store.readDocuments();
-    for (const [report, bodies] of expected) {
-      expect(
-        documents.reports
-          .find((r) => r.id === report)!
-          .samples.map((s) => s.body),
-      ).toEqual(bodies.slice(0, 8));
-      expect(own.text).not.toContain("Keep the oldest sample's spacing.");
-    }
-    const [card] = await fixture.db.query<{ id: string }>(
-      sql`SELECT card_id AS id FROM instruction_card_versions WHERE user_id=${alpha.userId} AND report='email'`,
+    expect((await fixture.store.read()).cover_sheet).toEqual(current);
+  } finally {
+    await fixture.dispose();
+  }
+}, 30000);
+
+test("forget, tweak delete and reword change only the session account's memos and tweaks", async () => {
+  const fixture = await memoPageFixture();
+  try {
+    const alpha = await otherAccount(fixture);
+    const saved = await fixture.author.saveMemo(
+      memoSave({
+        first_draft: "Hi! Long draft.",
+        final: "Short.",
+        mode: "draft",
+        rounds: 1,
+        tweaks: [{ text: "no opener" }, { text: "two sentences" }],
+      }),
     );
-    for (const query of [
-      "",
-      `?user=${alpha.userId}`,
-      "?user=page-alpha",
-      `?id=${card!.id}`,
-      `?version=${alphaSample.version}`,
-      `?user_id=${alpha.userId}&subject=page-alpha&report=email`,
-    ])
-      for (const path of ["/", "/tps-report", "/download"]) {
-        const response = await fixture.send(path + query);
-        expect(response.status).toBe(200);
-        const text = await response.text();
-        if (path === "/download") {
-          expect(response.headers.get("Content-Type")).toBe(
-            "text/markdown; charset=utf-8",
-          );
-          expect(response.headers.get("Content-Disposition")).toBe(
-            'attachment; filename="TPS.md"',
-          );
-          expect(response.headers.get("Cache-Control")).toBe("no-store");
-          expect(response.headers.get("X-Content-Type-Options")).toBe(
-            "nosniff",
-          );
-          expect(text.match(/^Approved,/gm)).toHaveLength(18);
-          for (const rule of rules) expect(text).toContain("- " + rule.text);
-          expect(text).not.toContain("# Document");
-          expect(text).not.toContain("# Speech");
-          for (const [report, bodies] of expected) {
-            let previous = -1;
-            for (const body of bodies) {
-              const position = text.indexOf("> " + body.split("\n")[0]!);
-              expect(position).toBeGreaterThan(previous);
-              previous = position;
-            }
-            expect(text).toContain(
-              `Approved, ${report} context 0, 2026-01-01:\n> Fictional ${report} sample 0: <tag> & *verbatim*.\n>\n>   Keep the oldest sample's spacing.  `,
-            );
-            for (const n of [1, 2])
-              expect(text).not.toContain(`Fictional ${report} sample ${n}:`);
-          }
-          expect(text).not.toContain("Fictional audit detail");
-          expect(text).not.toContain(beta.userId);
-        } else {
-          expect(text).toContain("Beta keeps it brief.");
-          expect(text).not.toContain("Keep the oldest sample&#39;s spacing.");
-          expect(text).not.toContain("Keep the oldest sample's spacing.");
-        }
-        for (const foreign of [
-          "Alpha signs as Ada",
-          "Alpha sample body",
-          "alpha context",
-          alpha.userId,
-        ])
-          expect(text).not.toContain(foreign);
-      }
-    expect(await fixture.store.readTpsReport()).toEqual(own);
+    const memo = saved.memo!.memo_id;
+    const [opener, sentences] = saved.memo!.tweaks.map((t) => t.tweak_id) as [
+      string,
+      string,
+    ];
+    const alphaRead = async () =>
+      (
+        await fixture.db.query(
+          sql`SELECT (SELECT count(*) FROM memos WHERE user_id=${alpha.userId}) AS memos,
+            (SELECT string_agg(text,',') FROM tweaks WHERE user_id=${alpha.userId}) AS tweaks`,
+        )
+      )[0];
+    const before = await alphaRead();
+    await fixture.send("/");
+    for (const [path, fields] of [
+      ["/tps/tweaks/reword", { tweak: alpha.tweak, text: "taken over" }],
+      ["/tps/tweaks/delete", { tweak: alpha.tweak }],
+      ["/tps/forget", { memo: alpha.memo }],
+      ["/tps/forget", { memo: "not-a-memo" }],
+    ] as const)
+      expect([path, (await fixture.send(path, fields)).status]).toEqual([
+        path,
+        404,
+      ]);
+    expect(await alphaRead()).toEqual(before);
+    const reworded = await fixture.send("/tps/tweaks/reword", {
+      tweak: opener,
+      text: "No warm-up opener <i>",
+    });
+    expect(reworded.status).toBe(303);
+    expect(reworded.headers.get("Location")).toBe(
+      appOrigin + "/?done=tweak-reworded#tweaks",
+    );
+    expect((await fixture.store.read()).tweaks).toContainEqual({
+      id: opener,
+      text: "No warm-up opener <i>",
+      memos: 1,
+    });
+    const page = await (await fixture.send("/?done=tweak-reworded")).text();
+    expect(page).toContain("Tweak reworded.");
+    expect(page).toContain("No warm-up opener &lt;i&gt;");
+    const taken = await fixture.send("/tps/tweaks/reword", {
+      tweak: sentences,
+      text: "no warm-up opener <i>.",
+    });
+    expect(taken.status).toBe(409);
+    expect(await taken.text()).toContain("Another tweak already says that.");
+    expect(
+      (await fixture.send("/tps/tweaks/delete", { tweak: sentences })).status,
+    ).toBe(303);
+    expect((await fixture.store.read()).tweaks.map((t) => t.id)).toEqual([
+      opener,
+    ]);
+    const forgot = await fixture.send("/tps/forget", { memo });
+    expect(forgot.status).toBe(303);
+    expect(forgot.headers.get("Location")).toBe(
+      appOrigin + "/?done=forgot#memos",
+    );
+    const view = await fixture.store.read();
+    expect(view.memos).toEqual([]);
+    expect(view.tweaks).toEqual([]);
+    expect(await alphaRead()).toEqual(before);
+  } finally {
+    await fixture.dispose();
+  }
+}, 30000);
+
+test("Keep memos turns off and on, and Delete all memos asks first, then keeps the cover sheet and other accounts", async () => {
+  const fixture = await memoPageFixture();
+  try {
+    const alpha = await otherAccount(fixture);
+    const settings = await (await fixture.send("/account/memos")).text();
+    expect(settings).toContain("Turn off Keep memos");
+    const off = await fixture.send("/account/memos", { keep: "off" });
+    expect(off.status).toBe(303);
+    expect(off.headers.get("Location")).toBe(
+      appOrigin + "/account/memos?done=off",
+    );
+    expect((await fixture.store.read()).keep_memos).toBe(false);
+    expect(
+      await (await fixture.send("/account/memos?done=off")).text(),
+    ).toContain("Turn on Keep memos");
+    expect(await (await fixture.send("/")).text()).toContain(
+      "Keep memos is off",
+    );
+    expect(
+      (await fixture.send("/account/memos", { keep: "maybe" })).status,
+    ).toBe(400);
+    expect(
+      (
+        await fixture.send(
+          "/account/memos",
+          { keep: "on" },
+          { Origin: "https://evil.example" },
+        )
+      ).status,
+    ).toBe(403);
+    expect((await fixture.store.read()).keep_memos).toBe(false);
+    expect((await fixture.send("/account/memos", { keep: "on" })).status).toBe(
+      303,
+    );
+    expect((await fixture.store.read()).keep_memos).toBe(true);
+
+    await fixture.author.saveMemo(
+      memoSave({
+        first_draft: "Draft.",
+        final: "Final.",
+        mode: "draft",
+        rounds: 1,
+        tweaks: [{ text: "be brief" }],
+        new_kind: "vendor decline",
+      }),
+    );
+    await fixture.author.saveMemo({
+      request_id: crypto.randomUUID(),
+      cover_sheet: { add: "Sign off –P", expected_version: 0 },
+    });
+    const counts = (userId: string) =>
+      fixture.db.query(
+        sql`SELECT (SELECT count(*) FROM memos WHERE user_id=${userId})::int AS memos,
+          (SELECT count(*) FROM tweaks WHERE user_id=${userId})::int AS tweaks,
+          (SELECT count(*) FROM memo_kinds WHERE user_id=${userId})::int AS kinds,
+          (SELECT count(*) FROM cover_sheets WHERE user_id=${userId})::int AS covers`,
+      );
+    const confirm = await (await fixture.send("/account/memos/delete")).text();
+    expect(confirm).toContain('<input type="hidden" name="confirm"');
+    expect(confirm).toContain("Your cover sheet stays.");
+    // The download it offers as a backup leaves out first drafts; say so.
+    expect(confirm).toContain("it leaves out first drafts");
+    expect(
+      (await fixture.send("/account/memos/delete", { confirm: "yes" })).status,
+    ).toBe(400);
+    expect(await counts(fixture.userId)).toEqual([
+      { memos: 1, tweaks: 1, kinds: 1, covers: 1 },
+    ]);
+    const deleted = await fixture.send("/account/memos/delete", {
+      confirm: "delete all memos",
+    });
+    expect(deleted.status).toBe(303);
+    expect(deleted.headers.get("Location")).toBe(
+      appOrigin + "/account/memos?done=deleted",
+    );
+    expect(await counts(fixture.userId)).toEqual([
+      { memos: 0, tweaks: 0, kinds: 0, covers: 1 },
+    ]);
+    expect(await counts(alpha.userId)).toEqual([
+      { memos: 1, tweaks: 1, kinds: 0, covers: 0 },
+    ]);
+    expect((await fixture.store.read()).cover_sheet.text).toBe("Sign off –P");
   } finally {
     await fixture.dispose();
   }
@@ -1827,7 +1968,7 @@ test("a live session whose account is closing refuses its pages with account_una
   const fixture = await memoPageFixture();
   try {
     await fixture.db.query(sql`UPDATE users SET status='deleting'`);
-    for (const path of ["/", "/tps-report", "/assistants"]) {
+    for (const path of ["/", "/tps-report", "/assistants", "/account/memos"]) {
       const response = await fixture.send(path);
       expect(response.status).toBe(403);
       expect(await response.text()).toContain(
@@ -1838,171 +1979,6 @@ test("a live session whose account is closing refuses its pages with account_una
     await fixture.dispose();
   }
 }, 30000);
-
-test("report bullets keep complete text parity and the download needs no layout read", async () => {
-  const bodies = [
-    "  Keep fictional units explicit.\n\nUnless a condition applies, preserve <tag> & wording.  ",
-    "Do the second instruction after the first.\nKeep this exception attached.\n",
-  ];
-  const report = {
-    text: bodies.join("\n\n"),
-    version: "a".repeat(64),
-    is_empty: false,
-  };
-  const base = { exportTpsReport: async () => report.text };
-  const emptyReport = (id: string, title: string) => ({
-    id,
-    title,
-    when: "fictional",
-    body: `# ${title}\n\nApplies when fictional.`,
-    is_empty: true,
-    samples: [],
-    rules: [],
-  });
-  const exact = {
-    version: report.version,
-    cover: bodies.join("\n\n"),
-    cover_rules: bodies,
-    index: [],
-    reports: [emptyReport("email", "Email")],
-    full: report.text,
-    is_empty: false,
-  };
-  // The date and comment are fixed here; a request uses today and a random one.
-  const options = {
-    now: () => new Date("2026-11-02T12:00:00Z"),
-    comment: () => COVER_COMMENTS[2],
-  };
-  const render = (
-    readDocuments: () => Promise<typeof exact>,
-    path = "/tps-report",
-  ) =>
-    memoPages(
-      new Request(appOrigin + path),
-      { ...base, readDocuments: readDocuments as never },
-      () => "",
-      "you@example.com",
-      options,
-    );
-  const html = await (await render(async () => exact)).text();
-  for (const [label, value] of [
-    ["Prepared for", "you@example.com"],
-    ["Date", "2026-11-02 UTC"],
-    ["Reports", "None"],
-    ["Rules", "2"],
-    ["Samples shown", "0"],
-  ])
-    expect(html).toContain(`<dt>${label}:</dt><dd class="fill">${value}</dd>`);
-  expect(html).toContain(
-    "Give a connected AI the facts for your next email or DM and ask it to use what’s on file. You can also approve a writing sample.</p>",
-  );
-  expect(html).not.toContain("Memo updates");
-  expect(html).toContain(
-    '<p class="line typed comment">Red stapler located. Returned to owner.</p>',
-  );
-  expect(html).toContain(
-    '<ol class="ruled"><li class="line"><span class="typed">  Keep fictional units explicit.\n\nUnless a condition applies, preserve &lt;tag&gt; &amp; wording.  </span></li><li class="line"><span class="typed">Do the second instruction after the first.\nKeep this exception attached.\n</span></li></ol>',
-  );
-  // A multi-line compiler-era rule drops its stored dash, as in MCP and TPS.md.
-  expect(
-    await (
-      await render(async () => ({
-        ...exact,
-        cover_rules: ["- Fictional older rule.\nIts second line."],
-      }))
-    ).text(),
-  ).toContain(
-    '<ol class="ruled"><li class="line"><span class="typed">Fictional older rule.\nIts second line.</span></li></ol>',
-  );
-  expect(
-    html.indexOf('<h1 aria-label="T.P.S. Report, cover sheet">'),
-  ).toBeLessThan(html.indexOf('<ol class="ruled">'));
-  let lookups = 0;
-  const download = await render(async () => {
-    lookups++;
-    throw new Error("Download must not need layout");
-  }, "/download");
-  expect(new Uint8Array(await download.arrayBuffer())).toEqual(
-    new TextEncoder().encode(report.text),
-  );
-  expect(lookups).toBe(0);
-  const renderTitled = (rules = ["- One.", "- Two\nlines."]) =>
-    memoPages(
-      new Request(appOrigin + "/tps-report"),
-      {
-        ...base,
-        readDocuments: (async () => ({
-          ...exact,
-          cover: "",
-          cover_rules: [],
-          reports: [
-            {
-              ...emptyReport("email", "Email"),
-              is_empty: false,
-              samples: [
-                {
-                  id: "s",
-                  report: "email",
-                  kind_id: "k",
-                  kind: "follow-up",
-                  context: {
-                    version: 1 as const,
-                    summary: "after a call",
-                    audience: { relationship: "client" },
-                    purposes: ["follow up"],
-                  },
-                  revision: 1,
-                  body: "Hi <there>,\n\nThanks.",
-                  date: "2026-11-02",
-                },
-              ],
-              rules,
-            },
-            emptyReport("chat", "Chat"),
-          ],
-        })) as never,
-      },
-      () => "",
-    );
-  const titledPage = await (await renderTitled()).text();
-  const emailSection =
-    titledPage.match(
-      /<section class="form-section"><h2 id="report-email">Email<\/h2>([\s\S]*?)<\/section>/,
-    )?.[1] ?? "";
-  // Keep exact text and sample/rule order within the same report section.
-  let offset = 0;
-  for (const fragment of [
-    '<p class="report-counts">1 sample · 2 rules</p>',
-    '<p class="applies">Applies when fictional.</p>',
-    '<h3 class="sub-label">Approved samples (1)</h3>',
-    '<details class="form-sample">',
-    "<summary>",
-    '<span class="typed">after a call</span>',
-    '<span class="labels">purposes: follow up; audience relationship: client</span>',
-    '<span class="date">2026-11-02</span>',
-    "</summary>",
-    '<pre class="memo-text"><span>Hi &lt;there&gt;,\n\nThanks.</span></pre>',
-    "</details>",
-    '<h3 class="sub-label">Rules (2)</h3>',
-    '<ol class="ruled">',
-    '<li class="line"><span class="typed">One.</span></li>',
-    '<li class="line"><span class="typed">Two\nlines.</span></li>',
-    "</ol>",
-  ]) {
-    const remaining = emailSection.slice(offset);
-    expect(remaining).toContain(fragment);
-    offset += remaining.indexOf(fragment) + fragment.length;
-  }
-  expect(titledPage).not.toContain("Not set up yet");
-  expect(titledPage).toContain(
-    "Other reports are available whenever you need them.",
-  );
-  const sampleOnly = await (await renderTitled([])).text();
-  expect(sampleOnly).toContain("1 sample · 0 rules");
-  expect(sampleOnly).toContain("Hi &lt;there&gt;,\n\nThanks.");
-  expect(sampleOnly).not.toContain("Not set up yet");
-  expect(sampleOnly).not.toContain("set up my email report");
-});
 
 test("the MCP host redirects browser paths to the app host unchanged", async () => {
   const { createMcpApp } = await import("../src/index");
@@ -2480,73 +2456,3 @@ test("checkout's live read never lands over a newer write, an empty one included
     await fixture.dispose();
   }
 }, 30000);
-
-test("report guides show readable tendencies and status without internal diagnostics", async () => {
-  const { assembleDocuments } = await import("../src/store/reports");
-  const documents = {
-    ...assembleDocuments(
-      [
-        {
-          id: "fictional-rule",
-          version: 1,
-          description: "Fictional rule",
-          body: "Use plain words.",
-          archived: false,
-          report: "email",
-        },
-      ],
-      [],
-    ),
-    version: "a".repeat(64),
-  };
-  const report = {
-    text: documents.full,
-    version: documents.version,
-    is_empty: false,
-  };
-  for (const [status, reason, expected] of [
-    ["queued", "lease_expired", "queued"],
-    ["running", "preparing", "Updating"],
-    ["failed", "attempts_exhausted", "unavailable"],
-    ["failed", "provider_or_output_failed", "unavailable"],
-    ["unavailable", "input_too_large", "too long"],
-    ["unavailable", "budget_limit", "spending limit"],
-  ]) {
-    documents.reports[0]!.guide = {
-      derived: true,
-      text: "Open with the collection update.\nApplies: Short pickup notes.",
-      source_version: 123,
-      current_version: 456,
-      stale: true,
-      status: status!,
-      reason: reason!,
-      precedence: "Explicit rules and requested edit scope win.",
-    };
-    const response = await memoPages(
-      new Request(appOrigin + "/tps-report"),
-      {
-        readDocuments: async () => documents,
-        exportTpsReport: async () => report.text,
-      },
-      () => null,
-      "writer@example.invalid",
-      {
-        now: () => new Date("2026-11-06T00:00:00Z"),
-        comment: () => "Fictional UI check.",
-      },
-    );
-    const html = await response.text(),
-      start = html.indexOf('<div class="report-guide">');
-    expect(start).toBeGreaterThanOrEqual(0);
-    const guide = html.slice(start, html.indexOf("</div>", start));
-    expect(guide).toContain(expected!);
-    expect(guide).toContain("Open with the collection update.");
-    expect(guide).toContain("Short pickup notes.");
-    expect(guide).toContain(
-      "may still reflect samples that were removed or corrected",
-    );
-    expect(guide).not.toMatch(
-      /123|456|version|Evidence:|lease|attempt|recovery|<button|<input|<textarea|<select/i,
-    );
-  }
-});

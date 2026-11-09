@@ -23,7 +23,6 @@ ENV NODE_ENV=production
 WORKDIR /repo
 COPY server/package.json ./server/package.json
 COPY --from=build /repo/server/dist/cloud-run.js ./server/dist/cloud-run.js
-COPY --from=build /repo/server/dist/guide-worker.js ./server/dist/guide-worker.js
 COPY --from=build /repo/server/dist/e2e.js ./server/dist/e2e.js
 COPY --from=build /repo/server/public ./server/public
 USER node

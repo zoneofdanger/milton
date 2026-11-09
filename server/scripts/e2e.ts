@@ -1,10 +1,10 @@
 /** The daily end-to-end check, safe against production because it touches only
  * the fictional test account (test-account.ts). It signs in as a browser does,
  * connects to MCP with the account's connection key, refuses to write unless the
- * account holds nothing but this check's own marked leftovers, then saves, reads
- * fresh, revises, retires and confirms the account is back where the run began.
- * One JSON line per step on stdout (`step`, `ok`, `ms`, `severity`), never a
- * password, key, cookie or sample body. Exit 0 only when every step passed. */
+ * account holds nothing but this check's own marked leftovers, then saves a
+ * marked final-only memo, reads it fresh, forgets it and confirms the account is
+ * back where the run began. One JSON line per step on stdout (`step`, `ok`,
+ * `ms`, `severity`), never a password, key, cookie or memo text. Exit 0 only when every step passed. */
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -22,19 +22,23 @@ import {
   type Origins,
 } from "./e2e-http";
 
-/** Every sample this check writes carries the marker in its context summary and
+/** Every memo this check writes carries the marker in its context summary and
  * files under this kind, so a crashed run's leftovers are recognized. */
 export const MARKER = "Milton e2e check";
 export const KIND = "e2e check";
-const REPORT = "document";
-const INTENT = { situation: "confirming what is on file" };
+const INTENT = {
+  situation: "confirming what is on file",
+  medium: "document",
+  audience: "the Milton e2e check",
+  purpose: "check",
+};
 /** The whole run's bound: past it the process exits 1. */
 export const RUN_MS = 240_000;
 /** The check warns, without failing, when the key has fewer days left. */
 export const KEY_WARN_DAYS = 30;
-/** A report serves eight samples; at eight the rest cannot be seen. */
-const SERVED = 8;
-const TOOLS = ["create_memo", "get_cover_sheet", "get_report", "list_reports"];
+/** More leftovers than this means something other than crashed runs. */
+const MAX_LEFTOVERS = 5;
+const TOOLS = ["create_memo", "get_cover_sheet", "get_report"];
 
 type Severity = "INFO" | "WARNING" | "ERROR";
 export type Line = {
@@ -62,16 +66,17 @@ export async function readSecrets(path: string) {
   return { email, password, key, keyId: parsed[1]! };
 }
 
+type Cover = {
+  text: string;
+  version: number;
+  memos: number;
+  tweaks: number;
+  is_empty: boolean;
+};
 type Report = {
   report_id: string;
   text: string;
-  samples: {
-    id: string;
-    kind_id: string;
-    kind: string;
-    context: { version: 1; summary: string };
-    revision: number;
-  }[];
+  examples: { memo_id: string; kind?: string; tier: string }[];
 };
 
 /** One MCP connection with the key: initialize, then calls, each bounded. */
@@ -116,21 +121,14 @@ async function mcpSession(origins: Origins, key: string, fetcher: Fetch) {
       (await client.listTools(undefined, { timeout: REQUEST_MS })).tools
         .map((t) => t.name)
         .sort(),
-    cover: () =>
-      call<{ text: string; version: string; is_empty: boolean }>(
-        "get_cover_sheet",
-      ),
-    reports: () => call<{ reports: Report[]; version: string }>("list_reports"),
-    report: () =>
-      call<Report & { version: string }>("get_report", {
-        report_id: REPORT,
-        intent: INTENT,
-      }),
+    cover: () => call<Cover>("get_cover_sheet"),
+    report: () => call<Report>("get_report", { intent: INTENT }),
     save: async (args: object) => {
       const outcome = await call<{
         status: string;
-        version?: string;
-        samples_retired?: { id: string }[];
+        memo?: { memo_id: string; tier: string; kind?: string };
+        receipt?: string;
+        forgotten?: string[];
       }>("create_memo", { request_id: randomUUID(), ...args });
       if (outcome.status !== "saved") fail(`create_memo_${outcome.status}`);
       return outcome;
@@ -140,15 +138,22 @@ async function mcpSession(origins: Origins, key: string, fetcher: Fetch) {
 }
 type Session = Awaited<ReturnType<typeof mcpSession>>;
 
-const leftover = (s: Report["samples"][number]) =>
-  s.kind === KIND && s.context.summary.startsWith(MARKER + ", run ");
-/** A report body is its heading, its when line, one paragraph per served sample
- * (each starts "Approved, ") and then one bullet per rule. */
-const holdsRules = (r: Report) =>
-  r.text
-    .split("\n\n")
-    .slice(2)
-    .some((p) => !p.startsWith("Approved, "));
+/** This check's own leftovers in a report: its kind, the person's own words,
+ * and a summary carrying the run marker. The summary is read from each
+ * example's Situation line, in served order; a memo of the kind without the
+ * marker is the person's and is never forgotten. */
+const leftovers = (listed: Report) => {
+  const situations = [
+    ...listed.text.matchAll(/^## \d+\. .*\nSituation: (.*)$/gm),
+  ].map((m) => m[1]!);
+  if (situations.length !== listed.examples.length) return [];
+  return listed.examples.filter(
+    (e, i) =>
+      e.kind === KIND &&
+      e.tier === "own" &&
+      situations[i]!.startsWith(`${MARKER}, run `),
+  );
+};
 const quoted = (body: string) => body.replace(/^/gm, "> ");
 
 export async function runE2E(options: {
@@ -221,115 +226,79 @@ export async function runE2E(options: {
     done({ tools: TOOLS.length });
 
     // Nothing is written until the account holds only this check's marked
-    // leftovers.
+    // leftovers: no cover sheet, no tweaks, and every memo one of this
+    // check's, by kind and run marker (a few small ones all fit in one
+    // report).
     step = "safety_gate";
     const cover = await first.cover();
-    const listed = await first.reports();
-    const stale = listed.reports.flatMap((r) => r.samples.filter(leftover));
+    const listed = await first.report();
+    const stale = leftovers(listed);
     if (
       cover.text !== "" ||
-      listed.reports.some(
-        (r) =>
-          holdsRules(r) ||
-          r.samples.length >= SERVED ||
-          !r.samples.every(leftover),
-      )
+      cover.tweaks !== 0 ||
+      cover.memos > MAX_LEFTOVERS ||
+      stale.length !== cover.memos ||
+      stale.length !== listed.examples.length
     )
       fail("account_holds_foreign_data");
     done({ leftovers: stale.length });
 
-    step = "retire_leftovers";
+    step = "forget_leftovers";
     if (stale.length)
-      await first.save({
-        text: "Retire samples a crashed Milton e2e check left behind.",
-        retire_samples: stale.map((s) => s.id),
-        expected_version: cover.version,
-      });
-    done({ retired: stale.length });
+      await first.save({ forget_memos: stale.map((e) => e.memo_id) });
+    done({ forgotten: stale.length });
 
     step = "baseline";
     const start = await first.cover();
-    const startReports = await first.reports();
-    if (!start.is_empty) fail("account_not_empty");
+    if (!start.is_empty || start.memos !== 0) fail("account_not_empty");
     done();
 
-    step = "save_sample";
+    step = "save_memo";
     const summary = `${MARKER}, run ${run}`;
-    const body = `Fictional note for the ${MARKER}, run ${run}: the tide table is taped inside the shed door.`;
-    await first.save({
-      text: "File a fictional sample for the Milton e2e check.",
-      sample: {
-        report: REPORT,
+    const final = `Fictional note for the ${MARKER}, run ${run}: the tide table is taped inside the shed door.`;
+    const saved = await first.save({
+      memo: {
+        final,
+        context: { summary, medium: INTENT.medium },
         new_kind: KIND,
-        context: { version: 1, summary },
-        text: body,
       },
-      expected_version: start.version,
     });
+    if (
+      saved.memo?.tier !== "own" ||
+      saved.memo.kind !== KIND ||
+      saved.receipt !== `Kept memo: ${KIND}, your words.`
+    )
+      fail("memo_not_saved_as_sent");
     done({ run });
 
     step = "fresh_read";
-    const saved = await (await session()).report();
-    const sample = saved.samples[0];
+    const fresh = await (await session()).report();
+    const example = fresh.examples[0];
     if (
-      saved.samples.length !== 1 ||
-      !sample ||
-      sample.kind !== KIND ||
-      sample.revision !== 1 ||
-      Object.keys(sample.context).length !== 2 ||
-      sample.context.version !== 1 ||
-      sample.context.summary !== summary ||
-      !saved.text.includes(quoted(body))
+      fresh.examples.length !== 1 ||
+      example?.memo_id !== saved.memo.memo_id ||
+      !fresh.text.includes(`Situation: ${summary}`) ||
+      !fresh.text.includes(quoted(final))
     )
-      fail("sample_not_served_exactly");
+      fail("memo_not_served_exactly");
     done();
 
-    step = "revise_sample";
-    const revised = body.replace("shed door.", "shed door, next to the hose.");
-    await first.save({
-      text: "Revise the fictional Milton e2e check sample.",
-      sample: {
-        report: REPORT,
-        kind_id: sample.kind_id,
-        sample_id: sample.id,
-        context: { version: 1, summary },
-        text: revised,
-      },
-      expected_version: saved.version,
-    });
-    done();
-
-    step = "fresh_read_revision";
-    const reread = await (await session()).report();
-    const current = reread.samples[0];
-    if (
-      reread.samples.length !== 1 ||
-      current?.id !== sample.id ||
-      current.revision !== 2 ||
-      !reread.text.includes(quoted(revised)) ||
-      reread.text.includes(quoted(body))
-    )
-      fail("revision_not_served");
-    done();
-
-    step = "retire_sample";
-    const retired = await first.save({
-      text: "Retire the fictional Milton e2e check sample.",
-      retire_samples: [sample.id],
-      expected_version: reread.version,
-    });
-    if (!retired.samples_retired?.some((s) => s.id === sample.id))
-      fail("sample_not_retired");
+    step = "forget_memo";
+    const forgotten = await first.save({ forget_memos: [example.memo_id] });
+    if (!forgotten.forgotten?.includes(example.memo_id))
+      fail("memo_not_forgotten");
     done();
 
     step = "cleanup";
     const last = await session();
     const end = await last.cover();
-    const endReports = await last.reports();
+    const endReport = await last.report();
     if (
       !end.is_empty ||
       end.version !== start.version ||
-      JSON.stringify(endReports) !== JSON.stringify(startReports)
+      end.memos !== 0 ||
+      end.tweaks !== 0 ||
+      endReport.examples.length !== 0
     )
       fail("baseline_not_restored");
     done();

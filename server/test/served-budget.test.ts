@@ -5,24 +5,19 @@ import { stubStore } from "../scripts/check-mcp";
 import { createMiltonServer } from "../src/mcp";
 
 // Characters per served tool description, read and kept by every assistant at
-// connect. Each budget is the size on 2026-11-08 plus 10-15% headroom, so growth
+// connect. Each budget is the size on 2026-11-09 (memos) plus 10-15% headroom, so growth
 // beyond that is a deliberate edit here, made with the description change.
 const BUDGETS: Record<
   "readWrite" | "readOnly",
   { tools: Record<string, number>; total: number }
 > = {
   readWrite: {
-    tools: {
-      get_cover_sheet: 850,
-      get_report: 1800,
-      list_reports: 550,
-      create_memo: 3450,
-    },
-    total: 6600, // 6,005 served
+    tools: { get_cover_sheet: 570, get_report: 860, create_memo: 1900 },
+    total: 3300, // 2,982 served
   },
   readOnly: {
-    tools: { get_cover_sheet: 450, get_report: 600, list_reports: 375 },
-    total: 1400, // 1,263 served
+    tools: { get_cover_sheet: 330, get_report: 510 },
+    total: 830, // 745 served
   },
 };
 
@@ -38,6 +33,11 @@ test("each served tool description, and all of them together, stays within its b
       await server.connect(serverTransport);
       await client.connect(clientTransport);
       const tools = (await client.listTools()).tools;
+      // One word for each thing (SPEC.md): never the retired names.
+      for (const tool of tools)
+        expect(tool.description).not.toMatch(
+          /\b(assistants?|samples?|trails?|lessons?|rules?)\b/i,
+        );
       const sizes = Object.fromEntries(
         tools.map((tool) => [tool.name, tool.description?.length ?? 0]),
       );

@@ -27,7 +27,7 @@ one-time procedures are in git history; the last full version is at commit 492b9
 
 - **DMARC (Peter's go, 2026-11-09):** Cloudflare DMARC Management enabled for
   meetmilton.com; it wrote `_dmarc.meetmilton.com TXT "v=DMARC1; p=none;
-  rua=mailto:<prefix>@dmarc-reports.cloudflare.net"` (reports in the Cloudflare dashboard;
+rua=mailto:<prefix>@dmarc-reports.cloudflare.net"` (reports in the Cloudflare dashboard;
   `notifications.` inherits it). Move to `p=quarantine` only after about two weeks of
   clean reports and once nothing else sends as @meetmilton.com.
 - **e2e alert (2026-11-09 07:25Z):** `milton-e2e-daily` applied with its failure condition

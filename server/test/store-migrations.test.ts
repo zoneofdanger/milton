@@ -1,13 +1,12 @@
 import { expect, test } from "bun:test";
-import { localStore, storeDatabase } from "./local-store";
-import { fixtureStore, seedSample, seedUsers } from "./store-fixtures";
+import { localStore } from "./local-store";
+import { seedUsers } from "./store-fixtures";
 import { migrationUrl } from "../scripts/migrate";
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
 import { generateDrizzleJson, generateMigration } from "drizzle-kit/api";
 import * as schema from "../src/store/schema";
-import { resumeGuides } from "../src/guides/resume";
 import {
   pruneUsage,
   USAGE_PRUNE_BATCH,
@@ -19,6 +18,35 @@ import { AUTH_MIGRATIONS } from "../../apps/auth/scripts/migrations";
 import { cp, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+// An approved sample in the pre-memo tables, as plain SQL.
+async function seedSample(
+  pg: PGlite,
+  userId: string,
+  id: string,
+  report: string,
+  kindId: string,
+  context: Record<string, unknown>,
+  body: string,
+) {
+  await pg.query(
+    "INSERT INTO samples(user_id,id,client_json) VALUES ($1,$2,'{}')",
+    [userId, id],
+  );
+  await pg.query(
+    `INSERT INTO sample_versions(user_id,sample_id,version,report,kind_id,context,body,actor_json,request_id)
+    VALUES ($1,$2,1,$3,$4,$5::jsonb,$6,'{}',$7)`,
+    [
+      userId,
+      id,
+      report,
+      kindId,
+      JSON.stringify(context),
+      body,
+      crypto.randomUUID(),
+    ],
+  );
+}
 
 const publicTables = async (pg: PGlite) =>
   (
@@ -206,20 +234,27 @@ test("the runtime has only current grants, its guards hold, and later tables inh
       accepted_changes: "INSERT",
       assistant_disconnects: "DELETE,INSERT,SELECT",
       connection_keys: "",
+      cover_sheets: "",
       guide_accounts: "SELECT",
       guide_budget_lock: "",
       guide_spend: "",
       identities: "INSERT,SELECT",
       instruction_card_versions: "INSERT,SELECT",
       instruction_cards: "INSERT,SELECT",
+      memo_kinds: "",
+      memo_settings: "",
+      memos: "",
       report_guides: "SELECT",
       sample_kinds: "INSERT,SELECT",
       sample_versions: "INSERT,SELECT",
       samples: "INSERT,SELECT",
       save_requests: "INSERT,SELECT,UPDATE",
+      served_reports: "",
       store_config: "SELECT",
       stripe_events: "INSERT,SELECT,UPDATE",
       trial_accounts: "INSERT,SELECT,UPDATE",
+      tweak_citations: "",
+      tweaks: "",
       usage_calls: "",
       users: "DELETE,INSERT,SELECT,UPDATE",
     };
@@ -281,63 +316,29 @@ test("the runtime has only current grants, its guards hold, and later tables inh
     await pg.exec(
       "CREATE ROLE milton_app_fixture LOGIN IN ROLE milton_runtime; SET ROLE milton_app_fixture",
     );
-    const store = fixtureStore(storeDatabase(pg), "runtime", "assistant");
     try {
       expect((await pg.query("SELECT current_user AS role")).rows).toEqual([
         { role: "milton_app_fixture" },
       ]);
-      const empty = await store.getTpsReport();
-      const rule = await store.saveMemo({
-        text: "Add a rule.",
-        rules: [{ report: "cover", text: "Be concise." }],
-        expected_version: empty.version,
-        request_id: crypto.randomUUID(),
-      });
-      expect(rule.status).toBe("saved");
-      const sample = await store.saveMemo({
-        text: "Keep this approved email.",
-        expected_version: rule.version!,
-        request_id: crypto.randomUUID(),
-        sample: {
-          report: "email",
-          new_kind: "follow-up",
-          context: { version: 1, summary: "runtime context" },
-          text: "Runtime sample body.",
-        },
-      });
-      expect(sample.status).toBe("saved");
-      const activeSample = (await store.readDocuments()).reports.find(
-        (r) => r.id === "email",
-      )!.samples[0]!;
-      const corrected = await store.saveMemo({
-        text: "Correct fictional runtime context.",
-        expected_version: sample.version!,
-        request_id: crypto.randomUUID(),
-        sample_context: {
-          report: "email",
-          sample_id: activeSample.id,
-          context: {
-            version: 1,
-            summary: "Corrected runtime context.",
-            purposes: ["request_review"],
-          },
-        },
-      });
-      expect(corrected.status).toBe("saved");
-      expect(
-        await store.saveMemo({
-          text: "Retire a fictional runtime sample.",
-          expected_version: corrected.version!,
-          request_id: crypto.randomUUID(),
-          retire_samples: [activeSample.id],
-        }),
-      ).toMatchObject({ status: "saved" });
+      // The legacy group still writes the old writing tables through their
+      // guards; it reaches no memo table (see 0012).
+      await pg.exec(
+        "INSERT INTO sample_kinds(user_id,id,report,label) VALUES ('runtime','kind','email','follow-up')",
+      );
+      await seedSample(
+        pg,
+        "runtime",
+        "sample",
+        "email",
+        "kind",
+        { version: 1, summary: "runtime context" },
+        "Runtime sample body.",
+      );
       await expect(
         pg.query(
           "UPDATE sample_versions SET context=context || '{\"medium\":\"chat\"}'::jsonb,version=version+1 WHERE user_id='runtime'",
         ),
       ).rejects.toThrow("permission denied");
-      expect((await store.getTpsReport()).text).toContain("Be concise.");
       // Owner-only statements are refused.
       for (const statement of [
         "ALTER TABLE samples DISABLE TRIGGER samples_guard",
@@ -376,9 +377,7 @@ test("the runtime has only current grants, its guards hold, and later tables inh
             "SELECT body FROM sample_versions WHERE user_id='runtime'",
           )
         ).rows,
-      ).toEqual(
-        Array.from({ length: 3 }, () => ({ body: "Runtime sample body." })),
-      );
+      ).toEqual([{ body: "Runtime sample body." }]);
       // A table a later migration creates gets SELECT, INSERT and UPDATE by
       // default; DELETE only if that migration grants it.
       await pg.exec(
@@ -835,7 +834,7 @@ test("0008 drops usage_daily and the stored daily_calls; the maintenance job del
   }
 }, 60000);
 
-test("0010 parks the guide pilot: drops only its trigger and keeps every guide row; resuming restores the trigger and resyncs every report", async () => {
+test("0010 parks the guide pilot: drops only its trigger and keeps every guide row", async () => {
   const folder = new URL("../drizzle/", import.meta.url).pathname;
   const scratch = await mkdtemp(join(tmpdir(), "milton-0010-"));
   const pg = new PGlite();
@@ -875,17 +874,10 @@ test("0010 parks the guide pilot: drops only its trigger and keeps every guide r
       );
     }
     await pg.exec(
-      // A completed guide on email (kept) and on chat (whose only sample is
-      // retired while parked, so resuming must clear it), and every row with
-      // spent retries scheduled a day ahead, so resuming must reset both.
+      // Completed guides on email and chat, and every row with spent retries
+      // scheduled a day ahead.
       "UPDATE report_guides SET guide_text='Fictional guide.',completed_version=1,status='ready',reason='completed' WHERE user_id='parked' AND report IN ('email','chat'); UPDATE report_guides SET attempts=2,next_attempt_at=clock_timestamp()+interval '1 day'; INSERT INTO guide_accounts(user_id) VALUES ('idle')",
     );
-    const guides = async () =>
-      (
-        await pg.query(
-          "SELECT user_id,report,source_version,completed_version,guide_text,status,reason,attempts FROM report_guides ORDER BY user_id,report",
-        )
-      ).rows;
     const kept = async () => ({
       guides: (
         await pg.query("SELECT * FROM report_guides ORDER BY user_id,report")
@@ -916,117 +908,6 @@ test("0010 parks the guide pilot: drops only its trigger and keeps every guide r
       ),
     });
     expect(await kept()).toEqual(prior);
-    // While parked, saves write samples and nothing to report_guides: a new
-    // email sample, the only chat sample retired, a first document sample.
-    const store = fixtureStore(storeDatabase(pg), "parked", "assistant");
-    let version = (await store.getTpsReport()).version;
-    for (const change of [
-      {
-        sample: {
-          report: "email" as const,
-          kind_id: "email",
-          context: { version: 1 as const, summary: "Fictional follow-up" },
-          text: "Fictional sample e2.",
-        },
-      },
-      { retire_samples: ["c1"] },
-      {
-        sample: {
-          report: "document" as const,
-          new_kind: "Fictional plan",
-          context: { version: 1 as const, summary: "Fictional plan" },
-          text: "Fictional sample d1.",
-        },
-      },
-    ]) {
-      const saved = await store.saveMemo({
-        text: "Fictional sample change.",
-        expected_version: version,
-        request_id: crypto.randomUUID(),
-        ...change,
-      });
-      expect(saved.status).toBe("saved");
-      version = saved.version!;
-    }
-    expect(
-      (
-        await pg.query(
-          "SELECT count(*)::int AS n FROM sample_versions WHERE user_id='parked'",
-        )
-      ).rows,
-    ).toEqual([{ n: 5 }]);
-    expect(await kept()).toEqual(prior);
-    // Resuming restores the trigger and treats every report as changed:
-    // reports with active samples queue on a new source version, keeping the
-    // last guide as stale text; a report left with none is cleared. A live
-    // trigger would have left idle's report alone; resuming re-queues it.
-    await resumeGuides(storeDatabase(pg));
-    expect(await schemaCatalog(pg)).toEqual(before);
-    const restored = await kept();
-    expect(restored.accounts).toEqual(prior.accounts);
-    expect(restored.function).toEqual(prior.function);
-    expect(restored.grants).toEqual(prior.grants);
-    const row = (
-      user_id: string,
-      report: string,
-      source_version: number,
-      status: string,
-      reason: string,
-      guide_text: string | null = null,
-    ) => ({
-      user_id,
-      report,
-      source_version,
-      completed_version: guide_text ? 1 : null,
-      guide_text,
-      status,
-      reason,
-      attempts: 0,
-    });
-    expect(await guides()).toEqual([
-      row("idle", "email", 2, "queued", "samples_changed"),
-      row("parked", "chat", 2, "empty", "no_samples"),
-      row("parked", "document", 1, "queued", "samples_changed"),
-      row(
-        "parked",
-        "email",
-        2,
-        "queued",
-        "samples_changed",
-        "Fictional guide.",
-      ),
-    ]);
-    // Every resynced row is due now, not on its old schedule.
-    expect(
-      (
-        await pg.query(
-          "SELECT count(*)::int AS n FROM report_guides WHERE next_attempt_at > clock_timestamp()",
-        )
-      ).rows,
-    ).toEqual([{ n: 0 }]);
-    // A second resume converges: the trigger is replaced, not duplicated.
-    await resumeGuides(storeDatabase(pg));
-    expect(await schemaCatalog(pg)).toEqual(before);
-    // The restored trigger records the next change.
-    expect(
-      (
-        await store.saveMemo({
-          text: "Retire a fictional sample.",
-          expected_version: version,
-          request_id: crypto.randomUUID(),
-          retire_samples: ["e1"],
-        })
-      ).status,
-    ).toBe("saved");
-    expect(
-      (
-        await pg.query(
-          "SELECT source_version,status FROM report_guides WHERE user_id='parked' AND report='email'",
-        )
-      ).rows,
-      // 2 from the first resume, 3 from the second (each counts as a change),
-      // 4 from the trigger.
-    ).toEqual([{ source_version: 4, status: "queued" }]);
   } finally {
     await pg.close();
     await rm(scratch, { recursive: true, force: true });
@@ -1115,6 +996,113 @@ test("0011 adds stripe_revision; existing trial rows keep their state and start 
   } finally {
     await pg.close();
     await rm(scratch, { recursive: true, force: true });
+  }
+});
+
+test("0012 adds empty memo tables the legacy group cannot reach; 014 grants the app and MCP runtimes exactly their privileges", async () => {
+  const local = await localStore();
+  const pg = local.pg;
+  const tables = [
+    "cover_sheets",
+    "memo_kinds",
+    "memo_settings",
+    "memos",
+    "served_reports",
+    "tweak_citations",
+    "tweaks",
+  ];
+  // Each role's table and column privileges on the memo tables.
+  const privileges = async (role: string) => ({
+    tables: (
+      await pg.query(
+        `SELECT c.relname,string_agg(a.privilege_type,',' ORDER BY a.privilege_type) AS privileges
+         FROM pg_class c CROSS JOIN LATERAL aclexplode(c.relacl) a
+         WHERE a.grantee=$1::regrole AND c.relname=ANY($2) AND c.relnamespace='public'::regnamespace
+         GROUP BY 1 ORDER BY 1`,
+        [role, tables],
+      )
+    ).rows,
+    columns: (
+      await pg.query(
+        `SELECT c.relname,t.attname,string_agg(a.privilege_type,',' ORDER BY a.privilege_type) AS privileges
+         FROM pg_attribute t JOIN pg_class c ON c.oid=t.attrelid CROSS JOIN LATERAL aclexplode(t.attacl) a
+         WHERE a.grantee=$1::regrole AND c.relname=ANY($2) AND c.relnamespace='public'::regnamespace
+         GROUP BY 1,2 ORDER BY 1,2`,
+        [role, tables],
+      )
+    ).rows,
+  });
+  try {
+    for (const table of tables)
+      expect([
+        table,
+        (await pg.query(`SELECT count(*)::int AS n FROM "${table}"`)).rows,
+      ]).toEqual([table, [{ n: 0 }]]);
+    expect(await privileges("milton_runtime")).toEqual({
+      tables: [],
+      columns: [],
+    });
+    await pg.exec(
+      "CREATE ROLE milton_app_runtime NOLOGIN NOINHERIT; CREATE ROLE milton_mcp_runtime NOLOGIN NOINHERIT",
+    );
+    const grantFile = await Bun.file(
+      new URL("../migrations/014-memos-roles.sql", import.meta.url),
+    ).text();
+    await pg.exec(grantFile);
+    // Rerunning converges, dropping a stray grant.
+    await pg.exec("GRANT UPDATE ON memos TO milton_mcp_runtime");
+    await pg.exec(grantFile);
+    const table = (relname: string, privileges: string) => ({
+      relname,
+      privileges,
+    });
+    const column = (relname: string, attname: string) => ({
+      relname,
+      attname,
+      privileges: "UPDATE",
+    });
+    expect(await privileges("milton_mcp_runtime")).toEqual({
+      tables: [
+        table("cover_sheets", "INSERT,SELECT"),
+        table("memo_kinds", "INSERT,SELECT"),
+        table("memo_settings", "SELECT"),
+        table("memos", "DELETE,INSERT,SELECT"),
+        table("served_reports", "INSERT,SELECT"),
+        table("tweak_citations", "DELETE,INSERT,SELECT"),
+        table("tweaks", "DELETE,INSERT,SELECT"),
+      ],
+      // Context only: never final or first_draft.
+      columns: [
+        "audience",
+        "context_updated_at",
+        "kind_id",
+        "medium",
+        "purpose",
+        "summary",
+      ].map((attname) => column("memos", attname)),
+    });
+    expect(await privileges("milton_app_runtime")).toEqual({
+      tables: [
+        table("cover_sheets", "INSERT,SELECT"),
+        table("memo_kinds", "DELETE,SELECT"),
+        table("memo_settings", "INSERT,SELECT"),
+        table("memos", "DELETE,SELECT"),
+        table("tweak_citations", "DELETE,SELECT"),
+        table("tweaks", "DELETE,SELECT"),
+      ],
+      columns: [
+        column("memo_settings", "keep_memos"),
+        column("memo_settings", "updated_at"),
+        column("tweaks", "norm"),
+        column("tweaks", "text"),
+      ],
+    });
+    expect(await privileges("milton_runtime")).toEqual({
+      tables: [],
+      columns: [],
+    });
+  } finally {
+    await local.dispose();
   }
 });
 

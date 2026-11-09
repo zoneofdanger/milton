@@ -12,7 +12,7 @@ import {
 } from "../scripts/backfill-subscriptions";
 import { linkStripeCustomer } from "../src/store/billing";
 import { localStore, openTransactions } from "./local-store";
-import { fixtureStore } from "./store-fixtures";
+import { fixtureStore, memoSave, vendorIntent } from "./store-fixtures";
 import { billingAccount } from "../src/store/billing";
 
 const appOrigin = "http://localhost:3001";
@@ -232,28 +232,36 @@ test("the gate follows the subscription status: unknown or missing is allowed, p
     expect(await status()).toBe("expired");
     // An assistant read refuses it, with or without a caller watching the gate.
     await expect(
-      fixtureStore(local.db, userId).readDocuments(),
+      fixtureStore(local.db, userId).readCoverSheet(),
     ).rejects.toMatchObject({ code: "subscription_required" });
-    // So does an assistant save, with no caller watching the gate: no card,
-    // no version, no evidence and no receipt.
+    await expect(
+      fixtureStore(local.db, userId).readReport(vendorIntent),
+    ).rejects.toMatchObject({ code: "subscription_required" });
+    // So does an assistant save, with no caller watching the gate: no memo,
+    // no cover sheet, no served report and no receipt.
     const writes = async () =>
       (
         await local.db.query<{ n: number }>(
-          sql`SELECT (SELECT count(*) FROM instruction_cards WHERE user_id=${userId})
-            + (SELECT count(*) FROM instruction_card_versions WHERE user_id=${userId})
-            + (SELECT count(*) FROM accepted_changes WHERE user_id=${userId})
+          sql`SELECT (SELECT count(*) FROM memos WHERE user_id=${userId})
+            + (SELECT count(*) FROM cover_sheets WHERE user_id=${userId})
+            + (SELECT count(*) FROM served_reports WHERE user_id=${userId})
             + (SELECT count(*) FROM save_requests WHERE user_id=${userId}) AS n`,
         )
       )[0]!.n;
     const before = Number(await writes());
-    await expect(
-      fixtureStore(local.db, userId).saveMemo({
-        text: "Fictional rule.",
-        rules: [{ report: "cover", text: "Keep fictional dates exact." }],
+    for (const save of [
+      memoSave(),
+      {
         request_id: crypto.randomUUID(),
-        expected_version: "a".repeat(64),
-      }),
-    ).rejects.toMatchObject({ code: "subscription_required" });
+        cover_sheet: {
+          add: "Keep fictional dates exact.",
+          expected_version: 0,
+        },
+      },
+    ])
+      await expect(
+        fixtureStore(local.db, userId).saveMemo(save),
+      ).rejects.toMatchObject({ code: "subscription_required" });
     expect(Number(await writes())).toBe(before);
     // A trial_end in the past never expires a trial: Stripe's status decides.
     await set("trialing");

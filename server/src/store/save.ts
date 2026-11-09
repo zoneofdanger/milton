@@ -1,54 +1,55 @@
+// One create_memo save, one transaction: replay a known request ID, or check
+// the gates, then save a memo, change the cover sheet, forget memos or correct
+// one memo's context, and write the receipt with its result. A receipt commits
+// with the change or not at all, so a stored receipt always holds the outcome.
 import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
-import { headingLine, type CardHead } from "./cards";
-import type { SaveMemoInput } from "./compiled";
+import type { MemoContextInput, MemoInput, SaveMemoInput } from "../mcp-tools";
 import {
   databaseFailure,
   type StoreDatabase,
   type StoreSession,
 } from "./database";
 import { StoreError } from "./errors";
-import { exactEditsProposal, exactMoves } from "../exact-edits";
 import { MAX_REQUEST_BYTES } from "../http";
-import { readLimits, reportCap, utf8Bytes, type StoreLimits } from "./limits";
-import { recordAcceptedChange } from "./provenance";
-import { BASELINE, bullet, FILINGS, ruleText, type Documents } from "./reports";
-import { applySampleChanges } from "./samples";
+import { utf8Bytes } from "./limits";
 import { requireActiveAccount } from "./accounts";
-import { hash, readSnapshot, type Snapshot } from "./snapshot";
+import { COVER_SHEET_CHARS, coverSheetJson, keepMemos } from "./memos";
+import { change, normalizeTweak, tier } from "./score";
+import { createHash } from "node:crypto";
 import { assertTrialAccess, type TrialStatus } from "./trials";
 
-const retiredSample = z.object({
-  id: z.string(),
-  reason: z.enum(["replaced", "removed", "evicted"]),
-});
+export const hash = (value: unknown) =>
+  createHash("sha256").update(JSON.stringify(value)).digest("hex");
+
+const savedTweak = z.object({ tweak_id: z.string(), text: z.string() });
 const outcomeSchema = z.object({
   status: z.enum(["saved", "unchanged", "conflict", "failed"]),
   request_id: z.string(),
-  version: z.string().optional(),
-  question: z.string().optional(),
   error: z.string().optional(),
   /** A StoreError's client-facing message; never raw internal text. */
   message: z.string().optional(),
-  samples_retired: z.array(retiredSample).optional(),
+  memo: z
+    .object({
+      memo_id: z.string(),
+      tier: z.enum(["own", "steered", "untouched"]),
+      kind_id: z.string().optional(),
+      kind: z.string().optional(),
+      rounds: z.number().optional(),
+      change: z.number().optional(),
+      tweaks: z.array(savedTweak),
+    })
+    .optional(),
+  /** The one line the AI tells the person after a saved memo. */
+  receipt: z.string().optional(),
+  cover_sheet: z.object({ version: z.number(), text: z.string() }).optional(),
+  forgotten: z.array(z.string()).optional(),
 });
 export type SaveOutcome = z.infer<typeof outcomeSchema>;
 type Receipt = { input_hash: string; result_json: unknown };
-/** The assistant a save is attributed to. */
-type Actor = { issuer: string; clientId: string };
-/** One save's input, known once it is parsed and the assistant is known. */
-type Save = {
-  userId: string;
-  actor: Actor;
-  input: SaveMemoInput;
-  result: (
-    status: SaveOutcome["status"],
-    rest?: Partial<SaveOutcome>,
-  ) => SaveOutcome;
-};
-
-const nameTheReport = "Name the report and send the rule's text in rules.";
+/** The AI a save is attributed to. */
+export type Actor = { issuer: string; clientId: string };
 
 async function receipt(tx: StoreSession, userId: string, id: string) {
   return (
@@ -58,33 +59,29 @@ async function receipt(tx: StoreSession, userId: string, id: string) {
   )[0];
 }
 
-function checkSize(documents: Documents, limits: StoreLimits) {
-  // Every source byte is preserved; only headings, when lines, sample context
-  // and quoting, and blank lines are added. Each body has its own cap.
-  const cap = reportCap(limits);
-  if (
-    utf8Bytes(documents.cover) > cap ||
-    documents.reports.some((r) => utf8Bytes(r.body) > cap) ||
-    utf8Bytes(documents.full) > 1572864
-  )
-    throw new StoreError(
-      "tps_body_limit",
-      "A report exceeds its size limit. Nothing was truncated or published.",
-      422,
-    );
+/** What a memo's shape gets wrong, checked before any database work, or
+ * undefined. Only the first draft decides the rest: with one (or
+ * first_draft_missing), mode and rounds are required; without, writing the
+ * person gave, none of mode, rounds or tweaks. */
+export function memoShapeProblem(memo: MemoInput): string | undefined {
+  if (memo.kind_id !== undefined && memo.new_kind !== undefined)
+    return "A memo takes kind_id or new_kind, not both.";
+  const drafted =
+    memo.first_draft !== undefined || memo.first_draft_missing === true;
+  if (memo.first_draft !== undefined && memo.first_draft_missing)
+    return "Send first_draft or first_draft_missing, not both.";
+  if (!drafted)
+    return memo.mode !== undefined ||
+      memo.rounds !== undefined ||
+      memo.tweaks !== undefined
+      ? "Writing the person gave you (no first_draft) takes no mode, rounds or tweaks; for a draft you wrote, send first_draft, or first_draft_missing if you no longer have it verbatim."
+      : undefined;
+  if (memo.mode === undefined || memo.rounds === undefined)
+    return "With a first draft, send mode (draft or edit) and rounds (your redrafts after the first draft).";
+  if (memo.tweaks !== undefined && memo.first_draft === memo.final)
+    return "The final equals the first draft, so this memo teaches no tweaks; omit tweaks.";
+  return undefined;
 }
-
-/** One save, one transaction: replay a known request ID, or check the gates,
- * the version and the size limits, apply and publish every change, and write
- * the receipt with its result. A receipt commits with the changes or not at
- * all, so a stored receipt always holds the outcome. */
-/** The refusal for a rule that would be stored with the retired setup prefix. */
-export const baselineRefusal = (text: string, report: string) =>
-  new StoreError(
-    "baseline_unknown",
-    `"${describe(text, 120)}" in ${report} starts with "Baseline: ", a prefix only the retired setup picks used. Send the rule in the person's own words without "Baseline: "; an existing Baseline rule can still be retired, or edited to drop the prefix. Nothing was changed.`,
-    422,
-  );
 
 export async function runSave(
   db: StoreDatabase,
@@ -97,19 +94,10 @@ export async function runSave(
   gated?: (status: TrialStatus) => void,
 ): Promise<SaveOutcome> {
   const inputHash = hash(input);
-  // Every save is exact: the caller sends the bytes, and no model rewrites them.
-  const structured =
-    input.rules !== undefined ||
-    input.exact_edits !== undefined ||
-    input.moves !== undefined ||
-    input.sample !== undefined ||
-    input.sample_context !== undefined ||
-    input.retire_samples !== undefined;
   const result = (
     status: SaveOutcome["status"],
     rest: Partial<SaveOutcome> = {},
   ): SaveOutcome => ({ status, request_id: input.request_id, ...rest });
-  const save: Save = { userId, actor, input, result };
   const unknown = () =>
     new StoreError(
       "save_outcome_unknown",
@@ -125,62 +113,49 @@ export async function runSave(
         409,
       );
     const stored = outcomeSchema.safeParse(existing.result_json);
-    // Unreadable only for a claim a revision before 0029 left open (0029
-    // deletes those; the same request then runs as a new save) or a retired
-    // model-era outcome.
+    // Unreadable only for an outcome stored before memos.
     if (!stored.success) throw unknown();
     return stored.data;
   };
   try {
     return await db.transaction(async (tx) => {
-      // Saves take only the account lock; store_config is read unlocked. A
-      // concurrent save of the same request waits here, then replays.
+      // Saves take only the account lock. A concurrent save of the same
+      // request waits here, then replays.
       await requireActiveAccount(tx, userId, { lock: true });
       const existing = await receipt(tx, userId, input.request_id);
       if (existing) return replay(existing);
-      // After replay, so a receipt from before exact-only saves still recovers.
-      if (!structured)
-        throw new StoreError("invalid_input", nameTheReport, 400);
       // Account gates answer without a receipt, so the same request can
       // succeed once the gate opens.
-      // Always awaited: with no callback, `gated?.(…)` would skip its argument.
       const status = await assertTrialAccess(tx, userId);
       gated?.(status);
       // Admitted here, after replay and every gate: a save that records an
-      // outcome (saved, unchanged, conflict or failed) is admitted, a replay
-      // of it is not. Its usage append runs on another connection, and this
-      // transaction never waits on it; the account lock (FOR NO KEY UPDATE)
-      // does not block that append's foreign-key check.
+      // outcome is admitted, a replay of it is not. Its usage append runs on
+      // another connection, and this transaction never waits on it; the
+      // account lock (FOR NO KEY UPDATE) does not block that append's
+      // foreign-key check.
       admit?.();
-      const current = await readSnapshot(tx, userId);
       const decide = async (): Promise<SaveOutcome> => {
-        if (input.expected_version !== current.version)
-          return result("conflict", { version: current.version });
-        const limits = await readLimits(tx);
         if (utf8Bytes(JSON.stringify(input)) > MAX_REQUEST_BYTES)
           return result("failed", {
             error: "request_too_large",
             message: "The save request is too large. Nothing was changed.",
           });
-        if (utf8Bytes(input.text) > limits.body_bytes)
-          return result("failed", {
-            error: "memo_body_limit",
-            message: "The submitted memo is too large. Nothing was changed.",
-          });
-        // A refusal or failure while applying undoes every change it made,
-        // and the receipt stores it, so the same request replays it. A
-        // transient or unknown failure (store_unavailable: a timeout, deadlock
-        // or lost connection) instead rolls back the whole save, receipt and
-        // charge included, so the same request can succeed on retry.
+        // A refusal while applying undoes every change it made, and the
+        // receipt stores it, so the same request replays it. A transient or
+        // unknown failure (store_unavailable: a timeout, deadlock or lost
+        // connection) instead rolls back the whole save, receipt included,
+        // so the same request can succeed on retry.
         await tx.query(sql`SAVEPOINT apply`);
         try {
-          return await applySave(save, tx, current, limits);
+          const save = { tx, userId, actor, input, result };
+          if (input.memo) return await saveMemo(save, input.memo);
+          if (input.cover_sheet) return await saveCoverSheet(save);
+          if (input.forget_memos) return await forgetMemos(save);
+          return await correctContext(save, input.memo_context!);
         } catch (error) {
           const failure = databaseFailure(error);
           if (failure.code === "store_unavailable") throw failure;
           await tx.query(sql`ROLLBACK TO SAVEPOINT apply`);
-          // databaseFailure yields only StoreErrors, whose messages are
-          // written for clients; unknown errors carry its generic message.
           return result("failed", {
             error: failure.code,
             message: failure.message,
@@ -212,274 +187,337 @@ export async function runSave(
   }
 }
 
-type Head = CardHead;
+type Save = {
+  tx: StoreSession;
+  userId: string;
+  actor: Actor;
+  input: SaveMemoInput;
+  result: (
+    status: SaveOutcome["status"],
+    rest?: Partial<SaveOutcome>,
+  ) => SaveOutcome;
+};
+const client = (actor: Actor) =>
+  JSON.stringify({ issuer: actor.issuer, client_id: actor.clientId });
 
-/** A card's description, derived without a model: the first non-blank line,
- * trimmed and cut to fit the byte cap. Descriptions are never printed. */
-function describe(body: string, maxBytes: number) {
-  const line =
-    body
-      .split(/\r\n|\r|\n/)
-      .map((l) => l.trim())
-      .find(Boolean) ?? "";
-  if (utf8Bytes(line) <= maxBytes) return line;
-  let cut = "";
-  for (const char of line) {
-    if (utf8Bytes(cut + char + "…") > maxBytes) break;
-    cut += char;
+/** The kind a save names: an existing kind_id, or new_kind matched by label
+ * in any letter case, created when none matches. */
+async function resolveKind(
+  tx: StoreSession,
+  userId: string,
+  kind: { kind_id?: string; new_kind?: string },
+): Promise<{ id: string; label: string } | undefined> {
+  if (kind.kind_id !== undefined) {
+    const [found] = await tx.query<{ id: string; label: string }>(
+      sql`SELECT id,label FROM memo_kinds WHERE user_id=${userId} AND id=${kind.kind_id}`,
+    );
+    if (!found)
+      throw new StoreError(
+        "invalid_kind",
+        "kind_id must name one of the person's kinds from get_report's kinds, or send new_kind. Nothing was changed.",
+        400,
+      );
+    return found;
   }
-  return cut.trimEnd() + "…";
+  if (kind.new_kind === undefined) return undefined;
+  const [found] = await tx.query<{ id: string; label: string }>(
+    sql`SELECT id,label FROM memo_kinds WHERE user_id=${userId} AND lower(label)=lower(${kind.new_kind})`,
+  );
+  if (found) return found;
+  const id = randomUUID();
+  await tx.query(
+    sql`INSERT INTO memo_kinds(user_id,id,label) VALUES (${userId},${id},${kind.new_kind})`,
+  );
+  return { id, label: kind.new_kind };
 }
 
-/** Validate and apply, inside the save's transaction: resolve the exact edits
- * and moves against the locked snapshot, refuse collisions and limit breaches,
- * then write every card and sample change and publish. */
-async function applySave(
-  save: Save,
-  tx: StoreSession,
-  current: Snapshot,
-  limits: StoreLimits,
-): Promise<SaveOutcome> {
-  const { userId, actor, input, result } = save;
-  // Every anchor resolves against the locked snapshot.
-  const cards = current.active.map((h) => ({
-    id: h.id,
-    description: h.description,
-    text: h.body,
-  }));
-  const { updates, retire } = exactEditsProposal(
-    cards,
-    input.exact_edits ?? [],
+/** The one-line receipt the AI repeats: "Kept memo: vendor decline, 2
+ * rounds, tweaks: no warm-up opener." */
+export function receiptLine(memo: {
+  label: string;
+  rounds?: number;
+  tweaks: string[];
+}) {
+  const shown = memo.tweaks.slice(0, 3);
+  const more = memo.tweaks.length - shown.length;
+  return `Kept memo: ${[
+    memo.label,
+    memo.rounds === undefined
+      ? "your words"
+      : `${memo.rounds} round${memo.rounds === 1 ? "" : "s"}`,
+    ...(shown.length
+      ? [`tweaks: ${shown.join("; ")}${more ? ` and ${more} more` : ""}`]
+      : []),
+  ].join(", ")}.`;
+}
+
+async function saveMemo(save: Save, memo: MemoInput): Promise<SaveOutcome> {
+  const { tx, userId, actor, input, result } = save;
+  const state =
+    memo.first_draft !== undefined
+      ? "kept"
+      : memo.first_draft_missing
+        ? "missing"
+        : "none";
+  const [account] = await tx.query<{ keep: boolean }>(
+    sql`SELECT ${keepMemos(userId)} AS keep`,
   );
-  const moves = exactMoves(
-    cards,
-    (input.moves ?? []).map((m) => ({
-      before: m.before,
-      report: m.report === "doc" ? "document" : m.report,
-    })),
+  if (!account!.keep && state !== "none")
+    throw new StoreError(
+      "memos_off",
+      "The person turned off Keep memos, so drafts are not kept. Nothing was saved.",
+      409,
+    );
+  const kind = await resolveKind(tx, userId, memo);
+  let served: string[] = [];
+  if (input.report_id !== undefined) {
+    const [report] = await tx.query<{ tweak_ids: string[] }>(
+      sql`SELECT tweak_ids FROM served_reports WHERE user_id=${userId} AND id=${input.report_id}`,
+    );
+    if (!report)
+      throw new StoreError(
+        "invalid_report",
+        "report_id must come from one of this person's get_report results. Nothing was saved.",
+        400,
+      );
+    served = report.tweak_ids;
+  }
+  // The same words already on file: a repeated save keeps one memo, so its
+  // tweaks are not counted twice.
+  const [same] = await tx.query<{ id: string }>(
+    sql`SELECT id FROM memos WHERE user_id=${userId} AND final=${memo.final}
+      AND first_draft_state=${state} AND first_draft IS NOT DISTINCT FROM ${memo.first_draft ?? null}
+      ORDER BY created_at LIMIT 1`,
   );
-  // The active rules as this save leaves them: edits, removals and moves
-  // applied. A changed rule may not end up printing identically to another
-  // in its report, because neither could then be targeted; an untouched
-  // identical pair does not block the save. Rules compare as printed, so a
-  // bare rule and its compiler-era "- " twin are the same rule.
-  const retiring = new Set(retire);
-  const edited = new Map(updates.map((u) => [u.id, u.text]));
-  const movedTo = new Map(moves.map((m) => [m.id, m.report]));
-  const key = (report: string, body: string) =>
-    JSON.stringify([report, bullet(body)]);
-  const after = current.active
-    .filter((h) => !retiring.has(h.id))
-    .map((h) => {
-      const report = movedTo.get(h.id) ?? h.report;
-      const body = edited.get(h.id) ?? h.body;
-      return {
-        report,
-        body,
-        key: key(report, body),
-        changed: report !== h.report || body !== h.body,
-      };
+  if (same)
+    return result("unchanged", {
+      memo: await memoSummary(tx, userId, same.id),
     });
-  const counts = new Map<string, number>();
-  for (const card of after)
-    counts.set(card.key, (counts.get(card.key) ?? 0) + 1);
-  const collision = after.find(
-    (card) => card.changed && counts.get(card.key)! > 1,
-  );
-  if (collision)
-    throw new StoreError(
-      "edit_conflict",
-      `This save would leave two identical rules in ${collision.report === "cover" ? "the cover sheet" : `the ${collision.report} report`}: "${describe(collision.body, 120)}". Change the wording or remove one of them. Nothing was changed.`,
-      409,
-    );
-  // A rule that prints like a rule in the same report after this save, or
-  // an earlier entry in this request, is skipped.
-  const onFile = new Set(after.map((card) => card.key));
-  const creates: { report: (typeof FILINGS)[number]; text: string }[] = [];
-  for (const rule of input.rules ?? []) {
-    const report = rule.report === "doc" ? "document" : rule.report;
-    const printed = key(report, rule.text);
-    if (onFile.has(printed)) continue;
-    onFile.add(printed);
-    creates.push({ report, text: rule.text });
+  // Tweaks: reused ids must be the account's; new text reuses an exact match
+  // after normalizing, or is added.
+  const ids: string[] = [];
+  const texts = new Map<string, string>();
+  for (const ref of memo.tweaks ?? []) {
+    if ("tweak_id" in ref) {
+      const [found] = await tx.query<{ id: string; text: string }>(
+        sql`SELECT id,text FROM tweaks WHERE user_id=${userId} AND id=${ref.tweak_id}`,
+      );
+      if (!found)
+        throw new StoreError(
+          "invalid_tweak",
+          `tweak_id ${JSON.stringify(ref.tweak_id.slice(0, 64))} is not one of this person's tweaks. Nothing was saved.`,
+          400,
+        );
+      if (!texts.has(found.id))
+        (ids.push(found.id), texts.set(found.id, found.text));
+      continue;
+    }
+    const norm = normalizeTweak(ref.text);
+    if (!norm)
+      throw new StoreError(
+        "invalid_input",
+        "A tweak needs words, not only punctuation. Nothing was saved.",
+        400,
+      );
+    const [found] = await tx.query<{ id: string; text: string }>(sql`
+      WITH added AS (
+        INSERT INTO tweaks(user_id,id,text,norm,client_json)
+        VALUES (${userId},${randomUUID()},${ref.text},${norm},${client(actor)})
+        ON CONFLICT (user_id,norm) DO NOTHING RETURNING id,text)
+      SELECT id,text FROM added
+      UNION ALL SELECT id,text FROM tweaks WHERE user_id=${userId} AND norm=${norm}
+      LIMIT 1`);
+    if (!texts.has(found!.id))
+      (ids.push(found!.id), texts.set(found!.id, found!.text));
   }
-  // Only the retired setup picks filed the "Baseline: " prefix, so no rule
-  // gains or keeps it through this save, whether filed new or changed by an
-  // exact edit or a move. Retiring one, or removing its prefix, still works.
-  const prefixed = [
-    ...creates,
-    ...after
-      .filter((card) => card.changed)
-      .map((card) => ({ report: card.report, text: card.body })),
-  ].find((rule) => ruleText(rule.text).startsWith(BASELINE));
-  if (prefixed !== undefined)
-    throw baselineRefusal(prefixed.text, prefixed.report);
-  const attribution = JSON.stringify({
-    kind: "assistant",
-    issuer: actor.issuer,
-    client_id: actor.clientId,
+  const memoTier = tier({
+    state,
+    mode: memo.mode,
+    firstDraft: memo.first_draft,
+    final: memo.final,
+    rounds: memo.rounds,
   });
-  const known = new Map(current.active.map((h) => [h.id, h]));
-  // A rule cannot be moved and retired at once, including by an exact
-  // edit that empties it.
-  if (moves.some((m) => retire.includes(m.id)))
-    throw new StoreError(
-      "move_conflict",
-      "A rule this save removes cannot also move. Nothing was changed.",
-      409,
-    );
-  if (
-    [...updates, ...creates].some((m) => utf8Bytes(m.text) > limits.body_bytes)
-  )
-    throw new StoreError(
-      "memo_body_limit",
-      "A rule exceeds its size limit. Nothing was changed.",
-      422,
-    );
-  // Milton prints each report's heading; one inside card text would repeat.
-  if (
-    creates.some((m) => headingLine.test(m.text)) ||
-    updates.some(
-      (m) => known.get(m.id)?.body !== m.text && headingLine.test(m.text),
-    )
-  )
-    throw new StoreError(
-      "card_heading",
-      "Instruction text cannot contain Markdown headings; Milton adds each report's heading. Nothing was changed.",
-      422,
-    );
-  // Moving a rule to where it already is changes nothing.
-  const moveTo = new Map(
-    moves
-      .filter((m) => known.get(m.id)!.report !== m.report)
-      .map((m) => [m.id, m.report]),
-  );
-  const samples = await applySampleChanges(
-    tx,
-    userId,
-    input,
-    current,
-    attribution,
-  );
-  const unchanged =
-    !samples.changed &&
-    moveTo.size === 0 &&
-    creates.length === 0 &&
-    retire.length === 0 &&
-    updates.every((m) => known.get(m.id)?.body === m.text);
-  if (unchanged) return result("unchanged", { version: current.version });
-  // Every new card, then every new version, each in one statement whose rows
-  // keep this order; the row triggers check each row.
-  const newCards: string[] = [];
-  const versions: {
-    h: Pick<Head, "id" | "version" | "description" | "body" | "report">;
-    archived: boolean;
-    kind: string;
-  }[] = [];
-  const append = (
-    h: Pick<Head, "id" | "version" | "description" | "body" | "report">,
-    archived: boolean,
-    kind: string,
-  ) => {
-    versions.push({ h, archived, kind });
-  };
-  // Only explicit targets get new history rows. Omission preserves bytes,
-  // descriptions, reports and versions; it never means retirement. A
-  // rule both edited and moved gets one version carrying both.
-  for (const memo of updates) {
-    const old = known.get(memo.id)!;
-    if (old.body === memo.text) continue;
-    append(
-      {
-        ...old,
-        body: memo.text,
-        report: moveTo.get(memo.id) ?? old.report,
-      },
-      false,
-      "update",
-    );
-    moveTo.delete(memo.id);
-  }
-  for (const [id, report] of moveTo)
-    append({ ...known.get(id)!, report }, false, "move");
-  for (const memo of creates) {
-    const id = randomUUID();
-    newCards.push(id);
-    append(
-      {
-        id,
-        version: 0,
-        description: describe(
-          memo.text,
-          Math.min(limits.description_bytes, 500),
-        ),
-        body: memo.text,
-        report: memo.report,
-      },
-      false,
-      "create",
-    );
-  }
-  for (const id of retire) append(known.get(id)!, true, "archive");
-  // One array parameter per column, so a save's size never meets the
-  // statement's parameter limit. ORDER BY the ordinality keeps the rows (and
-  // the positions nextval gives new cards) in this order.
-  if (newCards.length)
-    await tx.query(sql`INSERT INTO instruction_cards(user_id,id)
-      SELECT ${userId}::text,c.id FROM unnest(${sql.param(newCards)}::text[]) WITH ORDINALITY AS c(id,ord) ORDER BY c.ord`);
-  if (versions.length)
-    await tx.query(sql`INSERT INTO instruction_card_versions(user_id,card_id,version,description,body,archived,report,reason,actor_json,details_json)
-      SELECT ${userId}::text,v.card_id,v.version,v.description,v.body,v.archived,v.report,'Filed memo',${attribution}::text,v.details_json
-      FROM unnest(${sql.param(versions.map((v) => v.h.id))}::text[],
-        ${sql.param(versions.map((v) => v.h.version + 1))}::int[],
-        ${sql.param(versions.map((v) => v.h.description))}::text[],
-        ${sql.param(versions.map((v) => v.h.body))}::text[],
-        ${sql.param(versions.map((v) => v.archived))}::boolean[],
-        ${sql.param(versions.map((v) => v.h.report))}::text[],
-        ${sql.param(versions.map((v) => JSON.stringify({ kind: v.kind, request_id: input.request_id })))}::text[])
-        WITH ORDINALITY AS v(card_id,version,description,body,archived,report,details_json,ord)
-      ORDER BY v.ord`);
-  return publishSave(save, tx, current, samples.retired, attribution, limits);
+  const score =
+    memo.first_draft !== undefined
+      ? change(memo.first_draft, memo.final)
+      : undefined;
+  const id = randomUUID();
+  await tx.query(sql`INSERT INTO memos(user_id,id,kind_id,medium,summary,audience,purpose,mode,
+      first_draft,first_draft_state,final,rounds,change,tier,report_id,served_tweak_ids,client_json,request_id)
+    VALUES (${userId},${id},${kind?.id ?? null},${memo.context.medium},${memo.context.summary},
+      ${memo.context.audience ?? null},${memo.context.purpose ?? null},${memo.mode ?? null},
+      ${memo.first_draft ?? null},${state},${memo.final},${memo.rounds ?? null},${score ?? null},
+      ${memoTier},${input.report_id ?? null},${sql.param(served)}::text[],${client(actor)},${input.request_id})`);
+  if (ids.length)
+    await tx.query(sql`INSERT INTO tweak_citations(user_id,memo_id,tweak_id)
+      SELECT ${userId}::text,${id}::text,t FROM unnest(${sql.param(ids)}::text[]) AS t`);
+  const tweaks = ids.map((tweak_id) => ({
+    tweak_id,
+    text: texts.get(tweak_id)!,
+  }));
+  return result("saved", {
+    memo: {
+      memo_id: id,
+      tier: memoTier,
+      ...(kind ? { kind_id: kind.id, kind: kind.label } : {}),
+      ...(memo.rounds !== undefined ? { rounds: memo.rounds } : {}),
+      ...(score !== undefined
+        ? { change: Math.round(score * 1000) / 1000 }
+        : {}),
+      tweaks,
+    },
+    receipt: receiptLine({
+      label: kind?.label ?? memo.context.medium,
+      rounds: memo.rounds,
+      tweaks: tweaks.map((t) => t.text),
+    }),
+  });
 }
 
-/** Publish: check the assembled documents against their size limits, record
- * the accepted change and answer with the new version. Nothing is stored
- * beyond the cards and samples; reads assemble the documents. */
-async function publishSave(
-  save: Save,
+/** A memo already on file, as a saved result describes one. */
+async function memoSummary(tx: StoreSession, userId: string, id: string) {
+  const [row] = await tx.query<{
+    tier: "own" | "steered" | "untouched";
+    kind_id: string | null;
+    kind: string | null;
+    rounds: number | null;
+    change: number | null;
+    tweaks: { tweak_id: string; text: string }[];
+  }>(sql`SELECT m.tier,m.kind_id,k.label AS kind,m.rounds,m.change,
+      (SELECT coalesce(json_agg(json_build_object('tweak_id',t.id,'text',t.text) ORDER BY t.id),'[]'::json)
+        FROM tweak_citations c JOIN tweaks t ON t.user_id=c.user_id AND t.id=c.tweak_id
+        WHERE c.user_id=m.user_id AND c.memo_id=m.id) AS tweaks
+    FROM memos m LEFT JOIN memo_kinds k ON k.user_id=m.user_id AND k.id=m.kind_id
+    WHERE m.user_id=${userId} AND m.id=${id}`);
+  return {
+    memo_id: id,
+    tier: row!.tier,
+    ...(row!.kind_id ? { kind_id: row!.kind_id, kind: row!.kind ?? "" } : {}),
+    ...(row!.rounds !== null ? { rounds: row!.rounds } : {}),
+    ...(row!.change !== null
+      ? { change: Math.round(row!.change * 1000) / 1000 }
+      : {}),
+    tweaks: row!.tweaks,
+  };
+}
+
+/** The cover sheet's lines, as add and remove see them. */
+export const coverLines = (text: string) =>
+  text === "" ? [] : text.split("\n");
+export const coverSheetLimit = (length: number) =>
+  new StoreError(
+    "cover_sheet_limit",
+    `The cover sheet would be ${length.toLocaleString("en-US")} characters, over its ${COVER_SHEET_CHARS.toLocaleString("en-US")}-character limit. Nothing was changed.`,
+    422,
+  );
+
+async function saveCoverSheet(save: Save): Promise<SaveOutcome> {
+  const { tx, userId, actor, input, result } = save;
+  const change = input.cover_sheet!;
+  const [row] = await tx.query<{
+    cover: { version: number; text: string } | null;
+  }>(sql`SELECT ${coverSheetJson(userId)} AS cover`);
+  const current = {
+    version: row!.cover?.version ?? 0,
+    text: row!.cover?.text ?? "",
+  };
+  if (change.expected_version !== current.version)
+    return result("conflict", { cover_sheet: current });
+  const lines = coverLines(current.text);
+  let next: string[];
+  if (change.add !== undefined) {
+    if (lines.includes(change.add))
+      return result("unchanged", { cover_sheet: current });
+    next = [...lines, change.add];
+  } else {
+    if (!lines.includes(change.remove!))
+      throw new StoreError(
+        "line_not_found",
+        "remove must be one whole line copied exactly from the current cover sheet. Nothing was changed.",
+        409,
+      );
+    next = lines.filter((l) => l !== change.remove);
+    if (!next.some((l) => l.trim()))
+      throw new StoreError(
+        "cover_sheet_empty",
+        "An AI can't empty the cover sheet; the person can clear it on their TPS page. Nothing was changed.",
+        409,
+      );
+  }
+  const text = next.join("\n");
+  if (text.length > COVER_SHEET_CHARS) throw coverSheetLimit(text.length);
+  const version = current.version + 1;
+  await tx.query(sql`INSERT INTO cover_sheets(user_id,version,text,actor_json)
+    VALUES (${userId},${version},${text},${JSON.stringify({ kind: "ai", ...JSON.parse(client(actor)) })})`);
+  return result("saved", { cover_sheet: { version, text } });
+}
+
+/** Deletes memos and, through the citations' cascade, what they taught; a
+ * tweak left with no citation goes too. Shared with the TPS page. */
+export async function deleteMemos(
   tx: StoreSession,
-  before: Snapshot,
-  retired: z.infer<typeof retiredSample>[],
-  attribution: string,
-  limits: StoreLimits,
+  userId: string,
+  ids: string[] | "all",
 ) {
-  const { userId, input, result } = save;
-  const updated = await readSnapshot(tx, userId);
-  checkSize(updated.documents, limits);
-  await recordAcceptedChange(tx, {
-    userId,
-    requestId: input.request_id,
-    operation: "save_memo",
-    request: {
-      text: input.text,
-      ...(input.rules ? { rules: input.rules } : {}),
-      ...(input.exact_edits ? { exact_edits: input.exact_edits } : {}),
-      ...(input.moves ? { moves: input.moves } : {}),
-      ...(input.sample ? { sample: input.sample } : {}),
-      ...(input.sample_context ? { sample_context: input.sample_context } : {}),
-      ...(input.retire_samples ? { retire_samples: input.retire_samples } : {}),
-    },
-    actor: JSON.parse(attribution),
-    transformation: { pipeline: "exact:v1" },
-    before: before.heads,
-    after: updated.heads,
-    beforeTps: before.version,
-    afterTps: updated.version,
-    beforeSource: before.fingerprint,
-    afterSource: updated.fingerprint,
-  });
-  return result("saved", {
-    version: updated.version,
-    ...(retired.length ? { samples_retired: retired } : {}),
-  });
+  const gone = await tx.query<{ id: string }>(
+    ids === "all"
+      ? sql`DELETE FROM memos WHERE user_id=${userId} RETURNING id`
+      : sql`DELETE FROM memos WHERE user_id=${userId} AND id=ANY(${sql.param(ids)}::text[]) RETURNING id`,
+  );
+  if (gone.length)
+    await tx.query(sql`DELETE FROM tweaks t WHERE t.user_id=${userId}
+      AND NOT EXISTS(SELECT 1 FROM tweak_citations c WHERE c.user_id=t.user_id AND c.tweak_id=t.id)`);
+  return gone.map((m) => m.id).sort();
+}
+
+async function forgetMemos(save: Save): Promise<SaveOutcome> {
+  const { tx, userId, input, result } = save;
+  const forgotten = await deleteMemos(tx, userId, [
+    ...new Set(input.forget_memos!),
+  ]);
+  if (!forgotten.length)
+    throw new StoreError(
+      "invalid_memo",
+      "None of those ids is one of this person's memos. Nothing was changed.",
+      404,
+    );
+  return result("saved", { forgotten });
+}
+
+async function correctContext(
+  save: Save,
+  change: {
+    memo_id: string;
+    context: MemoContextInput;
+    kind_id?: string;
+    new_kind?: string;
+  },
+): Promise<SaveOutcome> {
+  const { tx, userId, result } = save;
+  if (change.kind_id !== undefined && change.new_kind !== undefined)
+    throw new StoreError(
+      "invalid_input",
+      "memo_context takes kind_id or new_kind, not both. Nothing was changed.",
+      400,
+    );
+  const kind = await resolveKind(tx, userId, change);
+  const c = change.context;
+  const [row] = await tx.query<{ changed: boolean | null }>(sql`
+    WITH old AS (SELECT * FROM memos WHERE user_id=${userId} AND id=${change.memo_id} FOR UPDATE),
+    updated AS (
+      UPDATE memos m SET medium=${c.medium},summary=${c.summary},audience=${c.audience ?? null},
+        purpose=${c.purpose ?? null},kind_id=${kind ? kind.id : sql`m.kind_id`},context_updated_at=clock_timestamp()
+      FROM old WHERE m.user_id=old.user_id AND m.id=old.id
+        AND (old.medium,old.summary,old.audience,old.purpose,old.kind_id) IS DISTINCT FROM
+          (${c.medium},${c.summary},${c.audience ?? null}::text,${c.purpose ?? null}::text,${kind ? kind.id : sql`old.kind_id`})
+      RETURNING 1)
+    SELECT EXISTS(SELECT 1 FROM updated) AS changed FROM old`);
+  if (!row)
+    throw new StoreError(
+      "invalid_memo",
+      "memo_id is not one of this person's memos. Nothing was changed.",
+      404,
+    );
+  const memo = await memoSummary(tx, userId, change.memo_id);
+  return result(row.changed ? "saved" : "unchanged", { memo });
 }

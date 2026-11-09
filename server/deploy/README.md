@@ -23,7 +23,20 @@ This runbook keeps only the latest release record. Earlier release records and a
 one-time procedures are in git history; the last full version is at commit 492b96a
 (`git show 492b96a:server/deploy/README.md`).
 
-## Release record: deletion fences Stripe, Stripe reads off the lock, guide pilot parked, deletion links, UserInfo binding, private admission service, session token drop, e2e fix, MCP next steps, guards (2026-11-08, PRs #58–#66, #68–#75)
+## Release record: deletion fences Stripe, Stripe reads off the lock, guide pilot parked, deletion links, UserInfo binding, private admission service, session token drop, e2e fix, MCP next steps, guards (2026-11-08, PRs #58–#66, #68–#75, #77)
+
+- **#77 (Peter's request and go), `77f7d10`:** passwords are 8–128 characters (was 15)
+  with ten obvious ones added to the inline common list; a larger list or a breach API
+  was declined as over-engineered. A refused sign-up, sign-in, reset or password change
+  re-renders its own form with the message and what was typed (never the password), so
+  a refused reset keeps its link. No migration. Auth image
+  `sha256:dc55298e668a85c2d126870435264a1aef883afa903fc43bf779fe2e5fdc7165`:
+  `milton-auth-00019-p4f` at 17:15:28Z (traffic moved by `update-traffic`), mail and
+  maintenance jobs by 17:15:33Z. Live: health, `/api/auth/ok`, `/login`, `/signup`,
+  `/forgot-password` and `/reset-password` 200; sign-up and reset show the 8–128 rule and
+  `minlength="8"`; `milton-e2e-daily-kzqmn` passed. Gate at 17:25Z: clean; no auth
+  request reached an older revision after 17:16Z; no errors from the revision or jobs.
+  Checks: PR CI green on `2234657`. Not checked live: a refused form end to end.
 
 - **#75 (Peter's go; milton-qa), `e616331`:** sign-in mail hardening: a DNS check skips
   domains that cannot take mail, a per-address cap of 3 per kind per hour, Reply-To
@@ -208,6 +221,8 @@ rua=mailto:<prefix>@dmarc-reports.cloudflare.net"` (reports in the Cloudflare da
   the owner password reset, Neon autoscaling and the budget, daily snapshots
   (11:00 UTC, 14 days; first `snap-silent-feather-b84f2kwj`).
 
+Since #77: auth `milton-auth-00019-p4f` and both auth jobs on image `sha256:dc55298e…`;
+rollback the service to `milton-auth-00018-hcv` and both jobs to image `sha256:51a8d3e3…`.
 Since #75: auth `milton-auth-00018-hcv` and both auth jobs on image `sha256:51a8d3e3…`;
 rollback the service to `milton-auth-00017-swp` and both jobs to image `sha256:b129db3d…`
 together (a job on the older image fails mail the new one queued in the last 15 minutes).
@@ -1445,7 +1460,7 @@ gcloud run revisions list --service=milton-app --project=milton-510506 --region=
 ```
 
 Now serving (2026-11-09): app `milton-app-sayai-74f6153`, MCP `milton-mcp-sayai-74f6153`,
-admission `milton-admit-00004-q7h` (source `74f6153`), and auth `milton-auth-00018-hcv` (source `e616331`). The
+admission `milton-admit-00004-q7h` (source `74f6153`), and auth `milton-auth-00019-p4f` (source `77f7d10`). The
 release record above gives the image and rollback revisions.
 
 Roll back only affected services, preserve ingress/IAM, then repeat the canonical

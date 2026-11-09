@@ -12,7 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { decodeJwt, jwtVerify, createLocalJWKSet } from "jose";
-import { randomUUID, createHash, randomBytes } from "node:crypto";
+import { randomUUID, createHash, createHmac, randomBytes } from "node:crypto";
 import pg from "pg";
 import { bundleFixture } from "./bundle-fixture.ts";
 import { httpFixture } from "./http-fixture.ts";
@@ -2630,6 +2630,42 @@ try {
       }
       assert.deepEqual(statuses, [403, 403, 403, 429]);
       assert.equal(verifications - before, 3);
+      // One effective sign-up limit (round 3): three sign-ups enter at 0 s
+      // and pass siteverify at 4 s, so a native bucket would open 4 s after
+      // the wrapper's. At 10 s the wrapper's window has reopened, and nothing
+      // else refuses: a fourth gets in, and only the wrapper's limit (3 a
+      // window) refuses after that.
+      await clearRates();
+      const burst = (n: number) =>
+        guarded.handler(
+          new Request(ISSUER + "/sign-up/email", {
+            method: "POST",
+            headers: {
+              origin: AUTH_ORIGIN,
+              "content-type": "application/json",
+              "x-captcha-response": "fictional-pass",
+            },
+            body: JSON.stringify({
+              email: `turnstile-window-${n}@example.com`,
+              password: probePassword,
+              name: "Fictional mail",
+            }),
+          }),
+          "192.0.2.78",
+        );
+      const at0: number[] = [];
+      for (const n of [1, 2, 3]) at0.push((await burst(n)).status);
+      assert.deepEqual(at0, [200, 200, 200]);
+      const outer = createHmac("sha256", config.AUTH_RATE_SECRET)
+        .update("turnstile:192.0.2.78")
+        .digest("hex");
+      await p.owner.query(
+        "update milton_guard.rate_bucket set started_at=started_at-case when key=$1 then interval '10 seconds' else interval '6 seconds' end",
+        [outer],
+      );
+      const at10: number[] = [];
+      for (const n of [4, 5, 6, 7]) at10.push((await burst(n)).status);
+      assert.deepEqual(at10, [200, 200, 200, 429]);
     }
     // L-1: issue and encrypt the original native proof on a clock 30s ahead
     // of PostgreSQL, without editing the proof, envelope or stored job later.

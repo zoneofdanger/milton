@@ -1405,6 +1405,62 @@ describe("Turnstile on sign-up", () => {
     expect(verifications).toBe(1);
   });
 
+  test("with Turnstile on, the wrapper's bucket is the only sign-up limit; off, native's stays", async () => {
+    const { createProvider } = await import("../src/provider.ts");
+    // Native's own rate statement is the plain take_rate call; record its
+    // window and max.
+    const nativeRules: unknown[][] = [];
+    const pool = {
+      on: () => pool,
+      query: async (text: string, values: unknown[] = []) => {
+        if (text.includes("with g as"))
+          return { rows: [{ allowed: [true, true, true] }] };
+        if (text.startsWith("select milton_guard.take_rate($1,$2,$3)")) {
+          nativeRules.push(values.slice(1));
+          return { rows: [{ allowed: true }] };
+        }
+        throw new Error("fixture_database_refused");
+      },
+      connect: async () => {
+        throw new Error("fixture_database_refused");
+      },
+    } as unknown as import("pg").Pool;
+    const fetch = async () =>
+      Response.json({
+        success: true,
+        hostname: "auth.meetmilton.com",
+        action: "signup",
+      });
+    const quiet = spyOn(console, "error").mockImplementation(() => {});
+    const signUp = (service: ReturnType<typeof createProvider>) =>
+      service.handler(
+        new Request("https://auth.meetmilton.com/api/auth/sign-up/email", {
+          method: "POST",
+          headers: {
+            origin: "https://auth.meetmilton.com",
+            "content-type": "application/json",
+            "x-captcha-response": "fictional-pass",
+          },
+          body: JSON.stringify({
+            email: "person@example.com",
+            password: "Fictional sign-up password",
+            name: "Fictional",
+          }),
+        }),
+        "127.0.0.1",
+      );
+    try {
+      await signUp(
+        createProvider(fixtureConfig(keys), { pool, boundaries: { fetch } }),
+      );
+      expect(nativeRules).toEqual([]);
+      await signUp(createProvider(fixtureConfig(), { pool }));
+      expect(nativeRules).toEqual([[10, 3]]);
+    } finally {
+      quiet.mockRestore();
+    }
+  });
+
   test("a siteverify call that never answers is abandoned at 5 s", async () => {
     const { createProvider } = await import("../src/provider.ts");
     const pool = {

@@ -231,11 +231,26 @@ and move traffic with `update-traffic`).
   variable); deploy `milton-auth` with that pinned version. The mail and maintenance jobs
   do not need it. Then load `/signup` (the widget renders, no CSP error in the console)
   and complete one real sign-up; milton-auth's log should have no `auth_turnstile` line
-  (each one is a siteverify failure, logged with Cloudflare's code names; `http_*`,
-  `network` or a secret code mean egress or the secret, not visitors). Turning it off is
-  deploying without the keys. Before it
-  goes on, update the privacy page (Cloudflare receives the visitor's IP and browser
-  signals); Peter has the wording.
+  (each one is a siteverify failure, logged with Cloudflare's code names or a fixed label;
+  `http_error`, `network`, `timeout` or a secret code mean egress or the secret, not
+  visitors). Turning it off is deploying without the keys.
+  - **Privacy page, same release:** in the release that turns Turnstile on, and not before,
+    publish this text on the privacy page (`apps/site/src/pages/privacy.astro`) exactly as
+    Peter approved it (2026-11-09), so it describes visits to `/signup`, including people
+    who leave or choose Google/GitHub:
+
+    > When you visit our sign-up page, Cloudflare Turnstile checks that you are a person;
+    > Cloudflare receives your IP address and signals from your browser for that check.
+    > Before sending a verification or reset email, the sign-in service checks your email
+    > domain's DNS records, sending DNS only the domain, not your address.
+
+  - **Per-network limit:** with Turnstile on, email sign-up takes 3 in 10 s per client
+    network, from the address Google's load balancer appends to `X-Forwarded-For`.
+    Checked 2026-11-09 (read-only): `auth.meetmilton.com` resolves to the Google load
+    balancer (35.227.244.36, `server: Google Frontend`, no `cf-ray`), so it is not proxied
+    by Cloudflare and the limit sees each real client. If auth is ever proxied through
+    Cloudflare, that address becomes Cloudflare's, and every visitor behind one Cloudflare
+    edge would share the limit: derive the client from Cloudflare's header first.
 
 ## Runtime role timeouts (applied 2026-11-07, TODO #29)
 

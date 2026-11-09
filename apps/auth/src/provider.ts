@@ -78,7 +78,9 @@ const ACCOUNT_DELETING = {
   message: "This Milton account is being deleted.",
 };
 const accountDeleting = () => new APIError("FORBIDDEN", ACCOUNT_DELETING);
-// What a Turnstile-guarded sign-up must carry (native's 320-character ceiling).
+// What a Turnstile-guarded sign-up must carry. The 320-character ceiling is
+// the wrapper's own, not native's (Better Auth's z.email() sets none): it
+// matches mail capture's bound on a recipient and RFC 5321's path limits.
 const signUpEmail = z.email().max(320);
 const TURNSTILE_SITEVERIFY =
   "https://challenges.cloudflare.com/turnstile/v0/siteverify";
@@ -446,6 +448,11 @@ export function createProvider(
       customRules: {
         // Password guessing per address (Better Auth's default).
         "/sign-in/*": { window: 10, max: 3 },
+        // With Turnstile on, the wrapper takes this same limit before
+        // siteverify, so native's would only be a second, offset window.
+        ...(config.AUTH_TURNSTILE_SECRET_KEY
+          ? { "/sign-up/email": false as const }
+          : {}),
         "/sign-up/*": { window: 10, max: 3 },
         "/change-password": { window: 10, max: 3 },
         // Each sends mail (Better Auth's default).

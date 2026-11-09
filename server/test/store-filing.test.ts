@@ -63,6 +63,38 @@ test("a memo keeps both drafts word for word, scores the change, sets its tier a
   }
 });
 
+test("a resave of words already on file is unchanged, keeps the first memo's kind and adds no kind", async () => {
+  const local = await localStore();
+  try {
+    await seedUsers(local.pg, "resave");
+    const store = fixtureStore(local.db, "resave");
+    const first = await store.saveMemo(
+      memoSave({ new_kind: "vendor decline" }),
+    );
+    expect(first.memo!.kind).toBe("vendor decline");
+    const again = await store.saveMemo(
+      memoSave({ new_kind: "fictional relabel" }),
+    );
+    expect(again).toMatchObject({
+      status: "unchanged",
+      memo: {
+        memo_id: first.memo!.memo_id,
+        kind_id: first.memo!.kind_id,
+        kind: "vendor decline",
+      },
+    });
+    expect((await store.readReport(vendorIntent)).kinds).toEqual([
+      { kind_id: first.memo!.kind_id!, kind: "vendor decline" },
+    ]);
+    // An unknown kind_id is still refused, even with words already on file.
+    expect(
+      await store.saveMemo(memoSave({ kind_id: crypto.randomUUID() })),
+    ).toMatchObject({ status: "failed", error: "invalid_kind" });
+  } finally {
+    await local.dispose();
+  }
+});
+
 test("tiers come from the memo's source; shapes that contradict it are refused before any write", async () => {
   expect(tier({ state: "none", final })).toBe("own");
   expect(tier({ state: "kept", mode: "edit", firstDraft: draft, final })).toBe(

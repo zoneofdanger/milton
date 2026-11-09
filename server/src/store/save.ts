@@ -271,7 +271,13 @@ async function saveMemo(save: Save, memo: MemoInput): Promise<SaveOutcome> {
       "The person turned off Keep memos, so drafts are not kept. Nothing was saved.",
       409,
     );
-  const kind = await resolveKind(tx, userId, memo);
+  // A named kind_id is checked first; a new_kind is made only for a memo
+  // actually saved, after the duplicate check, so an unchanged resave adds no
+  // kind that nothing files under.
+  const named =
+    memo.kind_id !== undefined
+      ? await resolveKind(tx, userId, { kind_id: memo.kind_id })
+      : undefined;
   let served: string[] = [];
   if (memo.report_id !== undefined) {
     const [report] = await tx.query<{ tweak_ids: string[] }>(
@@ -296,6 +302,8 @@ async function saveMemo(save: Save, memo: MemoInput): Promise<SaveOutcome> {
     return result("unchanged", {
       memo: await memoSummary(tx, userId, same.id),
     });
+  const kind =
+    named ?? (await resolveKind(tx, userId, { new_kind: memo.new_kind }));
   // Tweaks: reused ids must be the account's; new text reuses an exact match
   // after normalizing, or is added.
   const ids: string[] = [];

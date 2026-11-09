@@ -713,7 +713,9 @@ Rehearsed by `check-auth-integration.ts` (applies 0012 and 014 on PostgreSQL 18;
 
 1. Snapshot production and record its name.
 2. As `neondb_owner`: `bun run --cwd server db:migrate` applies `0012_memos` (journal 13
-   entries).
+   entries). Its foreign keys to `users` briefly block writes to `users` (sign-ups,
+   deletions) until it commits; it sets a 5 s lock limit, so on a lock timeout it rolls back
+   whole and is simply rerun.
 3. As `neondb_owner`, at once:
    `psql -X -v ON_ERROR_STOP=1 -f server/migrations/014-memos-roles.sql` (one transaction;
    rerunning converges).

@@ -32,7 +32,7 @@ export function billingItem(status?: TrialStatus): BillingItem | undefined {
     return { action: "portal", label: "Manage billing" };
 }
 const links = [
-  ["report", "/", "Cover sheet"],
+  ["report", "/", "TPS report"],
   ["assistants", "/assistants", "Connected AIs"],
   [null, "/download", "Download TPS.md"],
 ] as const;
@@ -80,6 +80,9 @@ function accountMenu({ csrf, email, billing }: Account) {
         <p class="small-note" id="signout-note">
           Signing out of this browser does not disconnect your AIs.
         </p>
+        <a class="menu-item" href="/account/memos">
+          Memo settings
+        </a>
         <a class="menu-item" href="/account/security">
           Sign-in and security
         </a>

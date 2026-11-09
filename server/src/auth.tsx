@@ -2,13 +2,17 @@
 import type { RuntimeConfig } from "./config";
 import { isLoopback } from "./config";
 import { StoreError } from "./store";
-import { isMemoRoute } from "./memo-pages";
+import { isMemoRoute, memoMethod } from "./memo-pages";
 import { AuthError } from "./token";
 import { page } from "./pages";
 import { pageContext } from "./auth-session";
 import { assistants } from "./auth-assistants";
 import { connectionKeyRoutes, isKeyRoute } from "./auth-keys";
-import { accountDeletion } from "./auth-account";
+import {
+  accountDeletion,
+  isMemoSettingsRoute,
+  memoSettings,
+} from "./auth-account";
 import { signInRoutes } from "./auth-login";
 import { logUnexpected } from "./error-log";
 import { billingRoutes } from "./billing";
@@ -20,18 +24,16 @@ export function browserPages(config: RuntimeConfig) {
     const ctx = pageContext(config, request, secure, csrfName);
     const { url, cookies, renderMemos } = ctx;
     const perform = async (): Promise<Response> => {
-      if (
-        isMemoRoute(url.pathname) &&
-        url.pathname !== "/" &&
-        request.method !== "GET"
-      )
-        return page(
-          "Method not allowed",
-          <p>Use the page's controls to continue.</p>,
-          405,
-        );
-      if (isMemoRoute(url.pathname) && url.pathname !== "/")
+      const memo = memoMethod(url.pathname);
+      if (memo && url.pathname !== "/") {
+        if (request.method !== memo)
+          return page(
+            "Method not allowed",
+            <p>Use the page's controls to continue.</p>,
+            405,
+          );
         return renderMemos();
+      }
       if (
         url.pathname === "/assistants" ||
         url.pathname === "/assistants/disconnect"
@@ -39,6 +41,7 @@ export function browserPages(config: RuntimeConfig) {
         return assistants(ctx);
       if (isKeyRoute(url.pathname)) return connectionKeyRoutes(ctx);
       if (url.pathname === "/account/delete") return accountDeletion(ctx);
+      if (isMemoSettingsRoute(url.pathname)) return memoSettings(ctx);
       if (
         url.pathname === "/billing/checkout" ||
         url.pathname === "/billing/portal"
@@ -121,10 +124,15 @@ export function browserPages(config: RuntimeConfig) {
             <p>
               <a href="/account/delete">Back to account deletion</a>
             </p>
+          ) : isMemoSettingsRoute(url.pathname) &&
+            failure.code !== "account_unavailable" ? (
+            <p>
+              <a href="/account/memos">Back to memo settings</a>
+            </p>
           ) : (
             isMemoRoute(url.pathname) && (
               <p>
-                <a href="/tps-report">View current report</a>
+                <a href="/">Back to your TPS report</a>
               </p>
             )
           )}

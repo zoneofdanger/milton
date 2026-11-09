@@ -167,7 +167,11 @@ export function pageContext(
     const user = signedInUser ?? (await signedIn());
     const verified = await account(user);
     const store = await personStoreForCurrentRequest(config, verified);
-    return memoPages(request, store, csrfField, user.email, {
+    return memoPages(request, store, {
+      csrf: csrfField,
+      readForm,
+      appOrigin: config.appOrigin,
+      email: user.email,
       billing: !!config.billing,
     });
   };

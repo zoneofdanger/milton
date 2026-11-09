@@ -23,7 +23,23 @@ This runbook keeps only the latest release record. Earlier release records and a
 one-time procedures are in git history; the last full version is at commit 492b96a
 (`git show 492b96a:server/deploy/README.md`).
 
-## Release record: deletion fences Stripe, Stripe reads off the lock, guide pilot parked, deletion links, UserInfo binding, private admission service, session token drop, e2e fix, MCP next steps, guards (2026-11-08, PRs #58–#66, #68–#72)
+## Release record: deletion fences Stripe, Stripe reads off the lock, guide pilot parked, deletion links, UserInfo binding, private admission service, session token drop, e2e fix, MCP next steps, guards (2026-11-08, PRs #58–#66, #68–#74)
+
+- **#74 (Peter's word change and go; milton-say-ai; milton-designer ACCEPT), `74f6153`:**
+  "AI", not "assistant", in everything people and AIs read: site, privacy and terms (dated
+  2026-11-09; the provider-terms wording kept on Peter's go), app pages, sign-in pages and
+  MCP served text. Identifiers, routes and error codes unchanged. No migration. Server image
+  `sha256:73b1ae07e9b527208593a04a08a2dfef8d8e95e5616d18bab29234c2ec90c2b4`: admit
+  `milton-admit-00004-q7h` at 08:57:59Z (from [admit.service.json](admit.service.json)), app
+  and MCP `milton-*-sayai-74f6153` at 08:58:37Z and 08:58:51Z, and the daily job; auth image
+  `sha256:b129db3db83d494014bd32c082c61d3b986b7cfcd200a13732e248611e5faa22`:
+  `milton-auth-00017-swp` at 08:58:14Z (traffic moved by `update-traffic`), mail and
+  maintenance jobs too (`AUTH_ADMISSION_URL` kept). Live: health 200 ×3, app home 200, MCP
+  401 unauthenticated, admit 403 without a token, UserInfo 401 on a junk token, forms probe
+  PASS, `milton-e2e-daily-9nzmk` passed with its sign-in admitted (204, 165 ms), privacy
+  shows the new date and wording. Gate at 09:09Z: clean; no request reached an older
+  revision after 09:00Z. Checks: PR CI green on `2862bb9`, main CI green on `74f6153`.
+  Connected AIs may keep showing the old tool wording until they reconnect.
 
 - **e2e twice a day (Peter's go, 2026-11-09 07:50Z):** scheduler `milton-e2e-daily` moved
   to `7 2,14 * * *` UTC, and its policy gained "no execution for 13 h" (alignment 1 h, so
@@ -177,6 +193,9 @@ rua=mailto:<prefix>@dmarc-reports.cloudflare.net"` (reports in the Cloudflare da
   the owner password reset, Neon autoscaling and the budget, daily snapshots
   (11:00 UTC, 14 days; first `snap-silent-feather-b84f2kwj`).
 
+Since #74: app/MCP `milton-*-sayai-74f6153`, admit `milton-admit-00004-q7h` and auth
+`milton-auth-00017-swp`; rollback, in any order (text only), to app `milton-app-race-778a1a1`,
+MCP `milton-mcp-park-f735701`, admit `milton-admit-00003-rmr` and auth `milton-auth-00016-q4c`.
 Since #71: app `milton-app-race-778a1a1`, admit `milton-admit-00003-rmr` and auth
 `milton-auth-00016-q4c`; rollback, in any order, to `milton-app-srl-7ffc5cf`,
 `milton-admit-00002-ws6` and `milton-auth-00020-hef` (code only; the erase step then no longer
@@ -1345,8 +1364,8 @@ references. Inspect revision readiness before selecting a recorded revision:
 gcloud run revisions list --service=milton-app --project=milton-510506 --region=us-east4
 ```
 
-Now serving (2026-11-08): app `milton-app-race-778a1a1`, admission `milton-admit-00003-rmr`
-and auth `milton-auth-00016-q4c` (source `778a1a1`), and MCP `milton-mcp-park-f735701` (source `f735701`). The
+Now serving (2026-11-09): app `milton-app-sayai-74f6153`, MCP `milton-mcp-sayai-74f6153`,
+admission `milton-admit-00004-q7h` and auth `milton-auth-00017-swp` (source `74f6153`). The
 release record above gives the image and rollback revisions.
 
 Roll back only affected services, preserve ingress/IAM, then repeat the canonical

@@ -165,9 +165,9 @@ included, so the same request can succeed. The web app's own session cannot call
 
 The memo tables ship additively: the old writing tables (cards, card versions, accepted
 changes, sample kinds, samples, sample versions, guides) stay, unread by the new code,
-until a follow-up migration drops them and wipes that writing. That migration names
-the merged PR that stopped reading them in `code-stopped-by`, and milton-duo runs it
-from the runbook after a snapshot. It keeps accounts, sign-ins, connection keys,
+until a follow-up migration (0013) drops them and wipes that writing and every save
+receipt. That migration names the merged PR that stopped reading them (#76) in
+`code-stopped-by`, and milton-duo runs it from the runbook after a snapshot. It keeps accounts, sign-ins, connection keys,
 trials, Stripe state and the end-to-end test account. Every account starts with an
 empty cover sheet and no memos and gets the setup offer again; the release note tells
 live accounts their writing was reset. There are no compatibility shims or rollback

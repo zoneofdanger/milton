@@ -10,7 +10,7 @@ landed and the item is still open), `blocked: <why or #id>`. A bolded headline o
 or fewer states the task; one item is one landing. **A section heading and its preamble are
 shared context for every item beneath it.**
 
-**next-id: 33.** Ids are never reused, so this counter survives deleting the newest item.
+**next-id: 34.** Ids are never reused, so this counter survives deleting the newest item.
 
 ## MVP
 
@@ -24,6 +24,24 @@ reports, memos) and plain text on security screens and anything an assistant rea
       through exact_edits, a fresh-chat read, and the web download through the hosted service.
       Each actual draft needs Peter's approval before an account write. Saves are model-free
       since 2026-11-02; rerun after the first newcomer test account exists.
+- [ ] #33 (site, high, founder, blocked: the save-the-whole-trail feature, not yet specced)
+      **Record the HN demo clip as an asciinema time-lapse.** Peter postponed the launch about a
+      week (2026-11-09) to build the trail feature first; record this right after it ships, and
+      re-check the scenes against what the feature saves. Shape (about 50-75 s, one real run on a
+      test account, each tool with its own CLAUDE_CONFIG_DIR / CODEX_HOME so Peter's real Milton
+      connection is never used): Day 1 in Claude Code, a fictional "Sam" asks "Reply to my
+      manager. He needs me in on Saturday. I can't."; the first draft is generic, Sam makes three
+      fixes and approves, the AI offers to save, Sam says yes. Card: "# Two weeks and 9 approved
+      drafts later" (real samples from earlier real sessions, not seeded text). Day 14 in Codex
+      (or Muse): "Tell the team the printer says PC LOAD LETTER again."; the first draft is
+      approved unedited. Close: "# Did you get the memo? Your AI already did." then
+      "# meetmilton.com · 30-day free trial, no card". Say "AI", not "assistant". ⚠ Never show
+      Sam asking "Did you get the memo?": the homepage promises the AI reads Milton unprompted.
+      Original names only, no film characters. Label it "real run, typing automated, pauses
+      trimmed" (asciinema idle limit) and disclose a best-of-N take. Record only after the
+      real-assistant tests show unprompted reads and fewer first-draft edits as samples grow.
+      Peter approves Sam's samples. Check the .cast for tokens and home-folder paths before
+      publishing; self-host asciinema-player; put the one-line setup command under the player.
 
 ## After the MVP
 

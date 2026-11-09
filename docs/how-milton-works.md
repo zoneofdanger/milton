@@ -150,7 +150,7 @@ Files: `server/src/mcp.ts`, `server/src/mcp-tools.ts`.
 - A `get_report` with no intent is refused with what to send and a reconnect hint; a malformed intent is refused with each limit it broke and no hint. Nothing is read either way.
 - A `kind_id` the account does not have is refused (`invalid_kind`) without creating a kind.
 - `get_report` returns `report_id`, `text`, `is_empty`, `examples` (`{memo_id, kind_id?, kind?, medium, tier, date}` in served order), `tweaks` (`{tweak_id, text, memos}`) and `kinds` (every kind on the account as `{kind_id, kind}`, by label).
-- `create_memo` takes a UUID `request_id` and exactly one of `memo`, `cover_sheet`, `forget_memos` or `memo_context`; `report_id` goes only with `memo`.
+- `create_memo` takes a UUID `request_id` and exactly one of `memo`, `cover_sheet`, `forget_memos` or `memo_context`; `memo.report_id` names the `get_report` read before the draft.
 - Every error result and every MCP HTTP refusal body keeps `error` and `message` and adds
   `code` (the `error`, or `version_conflict` for a stale-version conflict) and `next`:
   `{action, text}`, the action one of `retry`, `reread`, `fix_input`, `ask_user` or

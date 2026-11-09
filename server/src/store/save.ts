@@ -273,9 +273,9 @@ async function saveMemo(save: Save, memo: MemoInput): Promise<SaveOutcome> {
     );
   const kind = await resolveKind(tx, userId, memo);
   let served: string[] = [];
-  if (input.report_id !== undefined) {
+  if (memo.report_id !== undefined) {
     const [report] = await tx.query<{ tweak_ids: string[] }>(
-      sql`SELECT tweak_ids FROM served_reports WHERE user_id=${userId} AND id=${input.report_id}`,
+      sql`SELECT tweak_ids FROM served_reports WHERE user_id=${userId} AND id=${memo.report_id}`,
     );
     if (!report)
       throw new StoreError(
@@ -350,7 +350,7 @@ async function saveMemo(save: Save, memo: MemoInput): Promise<SaveOutcome> {
     VALUES (${userId},${id},${kind?.id ?? null},${memo.context.medium},${memo.context.summary},
       ${memo.context.audience ?? null},${memo.context.purpose ?? null},${memo.mode ?? null},
       ${memo.first_draft ?? null},${state},${memo.final},${memo.rounds ?? null},${score ?? null},
-      ${memoTier},${input.report_id ?? null},${sql.param(served)}::text[],${client(actor)},${input.request_id})`);
+      ${memoTier},${memo.report_id ?? null},${sql.param(served)}::text[],${client(actor)},${input.request_id})`);
   if (ids.length)
     await tx.query(sql`INSERT INTO tweak_citations(user_id,memo_id,tweak_id)
       SELECT ${userId}::text,${id}::text,t FROM unnest(${sql.param(ids)}::text[]) AS t`);

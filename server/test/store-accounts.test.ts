@@ -801,10 +801,12 @@ test("account deletion removes every tenant row, waits for an in-flight save and
     const served = await gone.store.readReport(vendorIntent);
     expect(
       (
-        await gone.store.saveMemo({
-          ...steered("Leaving"),
-          report_id: served.report_id,
-        })
+        await gone.store.saveMemo(
+          (({ memo, ...save }) => ({
+            ...save,
+            memo: { ...memo!, report_id: served.report_id },
+          }))(steered("Leaving")),
+        )
       ).status,
     ).toBe("saved");
     await personStoreForCurrentRequest(local.env, gone.auth).setKeepMemos(true);

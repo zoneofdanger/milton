@@ -1677,8 +1677,8 @@ try {
         new_kind: "fictional note",
         tweaks: [{ text: "pickup notes: no warm-up opener" }],
         context: { summary: "Fictional pickup note", medium: "email" },
+        report_id: reportId,
       },
-      report_id: reportId,
     },
     {
       cover_sheet: {
@@ -4425,7 +4425,7 @@ try {
           "invalid_tweak",
         ],
         [
-          { memo: takeover, report_id: lastReport.get(birch)! },
+          { memo: { ...takeover, report_id: lastReport.get(birch)! } },
           "invalid_report",
         ],
       ] as const) {

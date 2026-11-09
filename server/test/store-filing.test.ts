@@ -298,10 +298,13 @@ test("a report serves tweaks from the ten best-matching memos that cite one, and
     expect(report.tweaks).toHaveLength(10);
     expect(report.tweaks.map((t) => t.text)).not.toContain("tweak 11");
     const saved = await store.saveMemo(
-      memoSave(
-        { first_draft: "a", final: "b", mode: "draft", rounds: 1 },
-        { report_id: report.report_id },
-      ),
+      memoSave({
+        first_draft: "a",
+        final: "b",
+        mode: "draft",
+        rounds: 1,
+        report_id: report.report_id,
+      }),
     );
     expect(
       (
@@ -313,7 +316,7 @@ test("a report serves tweaks from the ten best-matching memos that cite one, and
     ).toEqual(report.tweaks.map((t) => t.tweak_id));
     expect(
       await store.saveMemo(
-        memoSave({ final: "c" }, { report_id: crypto.randomUUID() }),
+        memoSave({ final: "c", report_id: crypto.randomUUID() }),
       ),
     ).toMatchObject({ status: "failed", error: "invalid_report" });
   } finally {

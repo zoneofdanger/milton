@@ -39,7 +39,7 @@ Agents use three tools.
   date, in served order), `tweaks` (`{tweak_id, text, memos}`) and `kinds` (every kind
   on the account).
 - `create_memo` takes a UUID `request_id` and exactly one of `memo` (with an optional
-  `report_id` from the read before the draft), `cover_sheet`, `forget_memos` or
+  `memo.report_id` from the read before the draft), `cover_sheet`, `forget_memos` or
   `memo_context`.
 
 Precedence when guidance disagrees: what the person says now, then the cover sheet,

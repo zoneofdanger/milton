@@ -146,6 +146,9 @@ export const memoInput = z
       ),
     context: memoContextInput,
     ...kindFields,
+    report_id: id
+      .optional()
+      .describe("The report_id of the get_report read before this draft."),
   })
   .describe(
     'One accepted final. Omit first_draft, first_draft_missing, mode, rounds and tweaks for writing the person gave you to keep (setup pastes, "remember this email").',
@@ -188,11 +191,6 @@ export const saveMemoInput = z
         "A new UUID for each new save. Reuse it with exactly the same arguments only to recover an uncertain outcome.",
       ),
     memo: memoInput.optional(),
-    report_id: id
-      .optional()
-      .describe(
-        "With memo: the report_id of the get_report read before this draft.",
-      ),
     cover_sheet: coverSheetChangeInput.optional(),
     forget_memos: z
       .array(id)
@@ -212,10 +210,7 @@ export const saveMemoInput = z
         (part) => part !== undefined,
       ).length === 1,
     { message: oneChange },
-  )
-  .refine((v) => v.report_id === undefined || v.memo !== undefined, {
-    message: "report_id goes with memo.",
-  });
+  );
 export type SaveMemoInput = z.infer<typeof saveMemoInput>;
 export type MemoInput = z.infer<typeof memoInput>;
 export type MemoContextInput = z.infer<typeof memoContextInput>;

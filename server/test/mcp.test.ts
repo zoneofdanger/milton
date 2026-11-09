@@ -171,9 +171,14 @@ test("an SDK client receives instructions, discovers the three tools, and reads 
       "forget_memos",
       "memo",
       "memo_context",
-      "report_id",
       "request_id",
     ]);
+    // report_id travels inside memo, where AIs put it (fidelity recheck: 6
+    // of 20 Claude first saves sent it there and were refused).
+    const memoSchema = (
+      save.inputSchema.properties as Record<string, { properties?: object }>
+    ).memo!;
+    expect(Object.keys(memoSchema.properties ?? {})).toContain("report_id");
     // What a memo may hold, and what it never holds (spec, "Contract changes").
     for (const field of [
       "save one when the person accepts a final, without asking",

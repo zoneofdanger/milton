@@ -1645,10 +1645,13 @@ test("the TPS page lists memos newest first, escaped, opens each only for its ow
     );
     const report = await fixture.author.readReport(vendorIntent);
     const untouched = await fixture.author.saveMemo(
-      memoSave(
-        { first_draft: "Same.", final: "Same.", mode: "draft", rounds: 0 },
-        { report_id: report.report_id },
-      ),
+      memoSave({
+        first_draft: "Same.",
+        final: "Same.",
+        mode: "draft",
+        rounds: 0,
+        report_id: report.report_id,
+      }),
     );
     const own = await fixture.author.saveMemo(
       memoSave({ final: "My own words & more." }),

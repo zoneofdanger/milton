@@ -394,8 +394,8 @@ export function Security({
         </button>
       </form>
       <p>
-        Ending browser sessions leaves offline AIs connected. Manage AI
-        connections and account deletion in{" "}
+        Ending browser sessions leaves AIs with offline access connected. Manage
+        AI connections and account deletion in{" "}
         <a href="https://app.meetmilton.com/account">Milton</a>.
       </p>
       <form method="post" action="/form/signout">

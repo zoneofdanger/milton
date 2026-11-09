@@ -44,4 +44,4 @@ aeb3521d29ca9fe5c7eeaa81b8f5f00ea07ed64cfabc253f53e817a14f4e858a  server/migrati
 f58fc44aadd6d50a8881eaae3dc853556782975e071af22dd4343e5731713603  server/migrations/011-test-account-roles.sql
 fa2910b93c877e39494683286604d01ded518e3437284ecbb9d4d69b853a7229  server/migrations/012-session-token-nullable.up.sql
 93206e50977d3a56546ece5fb1072d59a947c284a216121cea60af6b8ea7f294  server/migrations/013-drop-session-access-token.up.sql
-6f8f4f50a8b3ef747e504de30b72b31f16a97ffc0f9f432edfd0f954a7cb3ee0  server/migrations/014-memos-roles.sql
+739c5c500bb3ad22dddacd6873045f1f6c50b80583955cb2b289efe5655da2a4  server/migrations/014-memos-roles.sql

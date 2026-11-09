@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { localStore } from "./local-store";
-import { seedUsers } from "./store-fixtures";
+import { fixtureStore, memoSave, seedUsers } from "./store-fixtures";
 import { migrationUrl } from "../scripts/migrate";
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
@@ -1068,7 +1068,7 @@ test("0012 adds empty memo tables the legacy group cannot reach; 014 grants the 
         table("memo_settings", "SELECT"),
         table("memos", "DELETE,INSERT,SELECT"),
         table("served_reports", "INSERT,SELECT"),
-        table("tweak_citations", "DELETE,INSERT,SELECT"),
+        table("tweak_citations", "INSERT,SELECT"),
         table("tweaks", "DELETE,INSERT,SELECT"),
       ],
       // Context only: never final or first_draft.
@@ -1087,7 +1087,7 @@ test("0012 adds empty memo tables the legacy group cannot reach; 014 grants the 
         table("memo_kinds", "DELETE,SELECT"),
         table("memo_settings", "INSERT,SELECT"),
         table("memos", "DELETE,SELECT"),
-        table("tweak_citations", "DELETE,SELECT"),
+        table("tweak_citations", "SELECT"),
         table("tweaks", "DELETE,SELECT"),
       ],
       columns: [
@@ -1101,7 +1101,51 @@ test("0012 adds empty memo tables the legacy group cannot reach; 014 grants the 
       tables: [],
       columns: [],
     });
+    // Neither runtime deletes citations itself: forgetting a memo (MCP) or
+    // deleting a tweak (app) removes them through the owner's cascades.
+    await seedUsers(pg, "cascade");
+    const store = fixtureStore(local.db, "cascade");
+    const cited = async (n: number) => {
+      const saved = await store.saveMemo(
+        memoSave({
+          first_draft: `Hi! Fictional first draft ${n}.`,
+          final: `Fictional final ${n}.`,
+          mode: "draft",
+          rounds: 1,
+          tweaks: [{ text: `fictional tweak ${n}` }],
+        }),
+      );
+      return saved.memo!;
+    };
+    const citations = async () =>
+      (
+        await pg.query<{ n: number }>(
+          "SELECT count(*)::int AS n FROM tweak_citations WHERE user_id='cascade'",
+        )
+      ).rows[0]!.n;
+    const forgotten = await cited(1);
+    const deleted = await cited(2);
+    expect(await citations()).toBe(2);
+    for (const [role, statement] of [
+      [
+        "milton_mcp_runtime",
+        `DELETE FROM memos WHERE user_id='cascade' AND id='${forgotten.memo_id}'`,
+      ],
+      [
+        "milton_app_runtime",
+        `DELETE FROM tweaks WHERE user_id='cascade' AND id='${deleted.tweaks[0]!.tweak_id}'`,
+      ],
+    ] as const) {
+      await pg.exec(`SET ROLE ${role}`);
+      await expect(
+        pg.query("DELETE FROM tweak_citations WHERE user_id='cascade'"),
+      ).rejects.toThrow("permission denied");
+      await pg.exec(statement);
+      await pg.exec("RESET ROLE");
+    }
+    expect(await citations()).toBe(0);
   } finally {
+    await pg.exec("RESET ROLE").catch(() => {});
     await local.dispose();
   }
 });

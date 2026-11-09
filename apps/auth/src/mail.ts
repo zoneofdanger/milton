@@ -99,8 +99,10 @@ function body(
 export type MailChecks = {
   /** mailDomain in production; tests inject an answer. */
   domain: (domain: string) => Promise<MailDomain>;
-  /** The request's own `email`, looked up when no message was captured. */
+  /** The request's own `email` and the kind its path sends, used when no
+   * message was captured. */
   requested?: string;
+  kind?: NativeMail["kind"];
 };
 export async function acceptMail(
   pool: pg.Pool,
@@ -137,16 +139,25 @@ export async function acceptMail(
   // the address, not the account, so a sign-up's first message counts the
   // moment it is queued and a deleted, recreated account starts no fresh
   // count. A fixed window from the first take, so a boundary can admit 6 in
-  // just over an hour. Only a message that would be queued takes it.
+  // just over an hour. Every outcome takes the bucket for the address and
+  // kind (sent, capped, skipped or nothing captured), so each answers after
+  // the same statements and the extra round trip reveals no account state.
+  const kind = s.mail?.kind ?? checks.kind;
+  const taken =
+    address && kind
+      ? await pool.query<{ allowed: boolean }>(
+          "select milton_guard.take_rate($1,$2,$3) as allowed",
+          [
+            createHmac("sha256", config.AUTH_RATE_SECRET)
+              .update("mail:" + JSON.stringify([kind, address.toLowerCase()]))
+              .digest("hex"),
+            3600,
+            3,
+          ],
+        )
+      : undefined;
   if (m) {
-    const key = createHmac("sha256", config.AUTH_RATE_SECRET)
-      .update("mail:" + JSON.stringify([m.kind, m.to.toLowerCase()]))
-      .digest("hex");
-    const taken = await pool.query<{ allowed: boolean }>(
-      "select milton_guard.take_rate($1,$2,$3) as allowed",
-      [key, 3600, 3],
-    );
-    if (taken.rows[0]?.allowed !== true) {
+    if (taken?.rows[0]?.allowed !== true) {
       console.log(
         JSON.stringify({
           message: "auth_mail_skipped",

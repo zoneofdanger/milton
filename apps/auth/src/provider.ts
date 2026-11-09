@@ -960,6 +960,7 @@ export function createProvider(
           await acceptMail(pool, config, requestState, {
             domain: options.boundaries?.mailDomain ?? ((d) => mailDomain(d)),
             requested: typeof body.email === "string" ? body.email : undefined,
+            kind: path === "/request-password-reset" ? "reset" : "verify",
           });
         }
         if (generic)

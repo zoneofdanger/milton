@@ -707,16 +707,16 @@ test("static assets cache by content version and keep the other security headers
 
 describe("auth mail queueing", () => {
   type State = import("../src/adapter.ts").RequestState;
-  // A pool that records each statement; take_rate admits the first three.
+  // A pool that records each statement; take_rate admits three per key.
   const queue = () => {
     const calls: { text: string; values: unknown[] }[] = [];
-    let hits = 0;
+    const hits = new Map<unknown, number>();
     const pool = {
       query: async (text: string, values: unknown[] = []) => {
         calls.push({ text, values });
-        return text.includes("take_rate")
-          ? { rows: [{ allowed: ++hits <= 3 }] }
-          : { rows: [] };
+        if (!text.includes("take_rate")) return { rows: [] };
+        hits.set(values[0], (hits.get(values[0]) ?? 0) + 1);
+        return { rows: [{ allowed: hits.get(values[0])! <= 3 }] };
       },
     } as unknown as import("pg").Pool;
     // Per accept_mail call: whether it queued a message (a payload).
@@ -871,9 +871,8 @@ describe("auth mail queueing", () => {
     } finally {
       log.mockRestore();
     }
-    // The pool admits three takes in all, so the verify message is capped
-    // too here; its bucket is still its own key.
-    expect(queued()).toEqual([true, true, true, false, false]);
+    // The verify message has its own bucket.
+    expect(queued()).toEqual([true, true, true, false, true]);
     const takes = calls.filter((c) => c.text.includes("take_rate"));
     expect(takes.map((c) => c.values.slice(1))).toEqual(
       Array(5).fill([3600, 3]),
@@ -884,9 +883,56 @@ describe("auth mail queueing", () => {
     expect(String(keys[0])).toMatch(/^[0-9a-f]{64}$/);
     expect(logs.map((l) => JSON.parse(l))).toEqual([
       { message: "auth_mail_skipped", reason: "account_cap", kind: "reset" },
-      { message: "auth_mail_skipped", reason: "account_cap", kind: "verify" },
     ]);
     expect(logs.join()).not.toContain("person");
+  });
+
+  test("every generic outcome runs the same acceptance statements", async () => {
+    const { acceptMail } = await import("../src/mail.ts");
+    const config = fixtureConfig();
+    const domain = async (d: string) =>
+      d === "no-mail.example"
+        ? ("undeliverable" as const)
+        : ("deliverable" as const);
+    const sequence = async (
+      run: (pool: import("pg").Pool) => Promise<void>,
+    ) => {
+      const { pool, calls } = queue();
+      await run(pool);
+      return calls.map((c) => c.text);
+    };
+    const quiet = spyOn(console, "log").mockImplementation(() => {});
+    const outcomes: Record<string, string[]> = {};
+    try {
+      const reset = { domain, kind: "reset" as const };
+      outcomes.sent = await sequence((pool) =>
+        acceptMail(pool, config, state("person@example.com"), reset),
+      );
+      outcomes.capped = await sequence(async (pool) => {
+        for (let n = 0; n < 4; n++)
+          await acceptMail(pool, config, state("person@example.com"), reset);
+      }).then((all) => all.slice(-2));
+      // No account, or one native sends nothing for (verified, social-only).
+      outcomes.unknown = await sequence((pool) =>
+        acceptMail(pool, config, state(), {
+          ...reset,
+          requested: "nobody@example.com",
+        }),
+      );
+      outcomes.undeliverable = await sequence((pool) =>
+        acceptMail(pool, config, state("person@no-mail.example"), reset),
+      );
+      outcomes.reserved = await sequence((pool) =>
+        acceptMail(pool, config, state("e2e@milton-test.invalid"), reset),
+      );
+    } finally {
+      quiet.mockRestore();
+    }
+    for (const statements of Object.values(outcomes))
+      expect(statements).toEqual(outcomes.sent!);
+    expect(
+      outcomes.sent!.map((t) => t.match(/milton_guard\.\w+/)?.[0]),
+    ).toEqual(["milton_guard.take_rate", "milton_guard.accept_mail"]);
   });
 
   test("a slow domain lookup holds none of the four native slots", async () => {

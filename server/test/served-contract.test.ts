@@ -39,6 +39,8 @@ test("the served text uses one word for each thing and describes the memo workfl
   // cover sheet versus tweak routing, and forget.
   for (const part of [
     "save it with create_memo without asking, untouched finals too",
+    "A revision you just showed is not accepted yet",
+    "Show the receipt word for word, however long",
     "send first_draft_missing instead of rebuilding it",
     "Reuse a served tweak's id",
     "Kept memo: vendor decline, 2 rounds, tweaks: no warm-up opener.",
@@ -56,6 +58,16 @@ test("the served text uses one word for each thing and describes the memo workfl
       tweaks: ["no warm-up opener"],
     }),
   ).toBe("Kept memo: vendor decline, 2 rounds, tweaks: no warm-up opener.");
+  // A tweak's own closing punctuation is not doubled by the receipt's.
+  expect(
+    receiptLine({
+      label: "vendor reply",
+      rounds: 1,
+      tweaks: ["state the trial duration.", "no warm-up opener;"],
+    }),
+  ).toBe(
+    "Kept memo: vendor reply, 1 round, tweaks: state the trial duration; no warm-up opener.",
+  );
   expect(readOnlyInstructions).toContain("read only");
   expect(readOnlyInstructions).not.toContain("create_memo");
 });

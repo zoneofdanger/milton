@@ -238,7 +238,10 @@ export function receiptLine(memo: {
   rounds?: number;
   tweaks: string[];
 }) {
-  const shown = memo.tweaks.slice(0, 3);
+  // A tweak's own closing punctuation would double the receipt's.
+  const shown = memo.tweaks
+    .slice(0, 3)
+    .map((tweak) => tweak.replace(/[\s.;,:]+$/u, ""));
   const more = memo.tweaks.length - shown.length;
   return `Kept memo: ${[
     memo.label,

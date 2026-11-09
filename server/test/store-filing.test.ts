@@ -34,7 +34,7 @@ test("a memo keeps both drafts word for word, scores the change, sets its tier a
       status: "saved",
       memo: { tier: "steered", kind: "vendor decline", rounds: 2 },
       receipt:
-        "Kept memo: vendor decline, 2 rounds, tweaks: Vendor replies: no warm-up opener.; declines: 2–3 sentences.",
+        "Kept memo: vendor decline, 2 rounds, tweaks: Vendor replies: no warm-up opener; declines: 2–3 sentences.",
     });
     expect(saved.memo!.change).toBeGreaterThan(0.5);
     const row = (

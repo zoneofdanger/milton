@@ -314,6 +314,65 @@ test("get_report requires an intent: without a well-formed one it refuses, sayin
   }
 });
 
+test("an object argument sent as a JSON string is read as that object; any other string is still refused", async () => {
+  const saved: unknown[] = [];
+  const intents: unknown[] = [];
+  const stub = stubStore();
+  const server = createMiltonServer({
+    ...stub,
+    readReport: (intent) => {
+      intents.push(intent);
+      return stub.readReport(intent);
+    },
+    saveMemo: async (input) => {
+      saved.push(input);
+      return {
+        status: "saved",
+        request_id: (input as { request_id: string }).request_id,
+        receipt: "Kept memo: email, your words.",
+      };
+    },
+  });
+  const client = new Client({ name: "sdk-test", version: "0.0.0" });
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
+  try {
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    const memo = {
+      final: "Hi Sam,\n\nFriday works. Thanks!\n\n> quoted\n–P",
+      context: {
+        summary: "accepting a fictional meeting day",
+        medium: "email",
+      },
+    };
+    const request_id = crypto.randomUUID();
+    const reply = await client.callTool({
+      name: "create_memo",
+      arguments: { request_id, memo: JSON.stringify(memo) },
+    });
+    expect(reply.isError).toBeUndefined();
+    expect(saved).toEqual([{ request_id, memo }]);
+    const read = await client.callTool({
+      name: "get_report",
+      arguments: { intent: JSON.stringify(goodIntent) },
+    });
+    expect(read.isError).toBeUndefined();
+    expect(intents).toEqual([goodIntent]);
+    for (const value of ["not json", JSON.stringify([memo]), '"text"']) {
+      const refused = await client.callTool({
+        name: "create_memo",
+        arguments: { request_id: crypto.randomUUID(), memo: value },
+      });
+      expect(refused.isError).toBe(true);
+    }
+    expect(saved).toHaveLength(1);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
 test("two authenticated clients isolate tenants and save once", async () => {
   const local = await localStore();
   const clients: Client[] = [];

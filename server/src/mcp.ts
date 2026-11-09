@@ -31,9 +31,9 @@ export const storeInstructions = [
   "Before writing or editing for or as the person: get_cover_sheet, then get_report with intent (one-line situation, medium, audience, purpose; kind_id when known). When they disagree, follow what the person says now, then the cover sheet, then tweaks, then examples; imitate examples' wording. An empty report means nothing similar yet: write from the cover sheet and the request, and never claim to know their voice.",
   "Edit mode: when asked to fix, clean up, proofread or tighten the person's own text, change only what was requested; preserve other words, length, tone, greeting and sign-off; add no stock phrases or new punctuation habits. Guidance never widens edit scope. Briefly list changes. Requested transformations (shortening, translation, tone) permit only that scope.",
   'Asked "Did you get the memo?" or "Did you get that memo?": get_cover_sheet even if you already read it, then get_report for the task. Confirm only after a successful read; report empty results and failures honestly. Quoting or discussing the phrase is not an invocation.',
-  "Memos: when the person accepts a final (approves it, says it's done or they'll send it, or copies it to use), save it with create_memo without asking, untouched finals too. Send first_draft exactly as you first showed it; if you no longer have it verbatim, send first_draft_missing instead of rebuilding it. Don't save abandoned drafts, writing not in their own voice (for someone else, a template), or when they ask you not to. When keep_memos is false, save only writing they ask you to remember.",
+  "Memos: when the person accepts a final (approves it, says it's done or they'll send it, or copies it to use), save it with create_memo without asking, untouched finals too. Send first_draft exactly as you first showed it; if you no longer have it verbatim, send first_draft_missing instead of rebuilding it. Don't save abandoned drafts, writing not in their own voice (for someone else, a template), or when they ask you not to. When keep_memos is false, save only writing they ask you to remember. A revision you just showed is not accepted yet: wait for their reply.",
   "Tweaks: when the final differs from the first draft, list what they made you change and why, one line each with its condition (\"vendor replies: no warm-up opener\"). Reuse a served tweak's id when it is the same change. Never send secrets, their correction messages or other people's text; summarize the situation and what they replied to in context.summary.",
-  'After saved, tell them in one line, with no question: "Kept memo: vendor decline, 2 rounds, tweaks: no warm-up opener." If a save fails, say so. On an error, follow its next.',
+  'After saved, tell them in one line, with no question: "Kept memo: vendor decline, 2 rounds, tweaks: no warm-up opener." Show the receipt word for word, however long. If a save fails, say so. On an error, follow its next.',
   'Cover sheet: only the person writes it. When they say "remember …" or "add to my cover sheet", add their exact line with cover_sheet; remove an exact line only on request. Never add tweaks or your own inferences, or offer to. A correction during a draft is a tweak, not a cover sheet line.',
   "Forget: when asked to forget a memo, send its id in forget_memos. To fix a memo's summary, medium, kind, audience or purpose, send memo_context; a memo's words never change.",
   "Setup: when get_cover_sheet is_empty, offer setup once and follow its script. Never block a writing task; setup never reads an inbox.",
@@ -80,6 +80,42 @@ const staleReportCall = z.object({
     .refine((args) => !intentInput.safeParse(args.intent).success)
     .optional(),
 });
+
+/** The object-typed arguments of each tool. Some clients send a nested
+ * object as a JSON string (fidelity test 1: Claude Code, 6 of 20 first saves);
+ * one that parses to a plain object is read as that object, and every other
+ * string still meets the schema's refusal. */
+const objectArguments: Record<string, readonly string[]> = {
+  get_report: ["intent"],
+  create_memo: ["memo", "cover_sheet", "memo_context"],
+};
+function parsedObjectArguments(params: unknown) {
+  if (typeof params !== "object" || params === null) return;
+  const { name, arguments: args } = params as {
+    name?: unknown;
+    arguments?: unknown;
+  };
+  if (typeof name !== "string" || typeof args !== "object" || args === null)
+    return;
+  const values = args as Record<string, unknown>;
+  for (const key of Object.hasOwn(objectArguments, name)
+    ? objectArguments[name]!
+    : []) {
+    const value = values[key];
+    if (typeof value !== "string") continue;
+    try {
+      const parsed: unknown = JSON.parse(value);
+      if (
+        typeof parsed === "object" &&
+        parsed !== null &&
+        !Array.isArray(parsed)
+      )
+        values[key] = parsed;
+    } catch {
+      /* Not JSON: the schema refuses it as sent. */
+    }
+  }
+}
 
 export function createMiltonServer(
   store: TenantStore,
@@ -137,6 +173,8 @@ export function createMiltonServer(
               started: performance.now(),
             });
         }
+        if ("method" in message && message.method === "tools/call")
+          parsedObjectArguments(message.params);
         // A get_report without a well-formed intent gets a refusal that says
         // what to send instead of the SDK's validation text. No intent at all
         // usually means a client holding the schema before intent existed.

@@ -704,3 +704,147 @@ test("static assets cache by content version and keep the other security headers
     for (const [name, value] of Object.entries(SECURITY_HEADERS))
       expect(r.headers.get(name)).toBe(value);
 });
+
+describe("auth mail queueing", () => {
+  type State = import("../src/adapter.ts").RequestState;
+  // A pool that records each statement; take_rate admits the first three.
+  const queue = () => {
+    const calls: { text: string; values: unknown[] }[] = [];
+    let hits = 0;
+    const pool = {
+      query: async (text: string, values: unknown[] = []) => {
+        calls.push({ text, values });
+        return text.includes("take_rate")
+          ? { rows: [{ allowed: ++hits <= 3 }] }
+          : { rows: [] };
+      },
+    } as unknown as import("pg").Pool;
+    // Per accept_mail call: whether it queued a message (a payload).
+    const queued = () =>
+      calls
+        .filter((c) => c.text.includes("accept_mail"))
+        .map((c) => c.values[6] !== null);
+    return { pool, calls, queued };
+  };
+  const state = (to?: string, kind: "verify" | "reset" = "reset"): State => ({
+    path: "/request-password-reset",
+    cleanupPath: false,
+    revokePath: false,
+    users: new Map(),
+    credentials: new Map(),
+    admissions: new Map(),
+    ...(to
+      ? {
+          mail: {
+            kind,
+            to,
+            url: "https://auth.meetmilton.com/api/auth/reset-password/fictional",
+            user: "fictional-user",
+            incarnation: "fictional-incarnation",
+            generation: "fictional-generation",
+            proofExpiresAt: new Date(Date.now() + 3600000).toISOString(),
+          },
+        }
+      : {}),
+  });
+
+  test("mail domain lookup: MX, null MX, A/AAAA fallback, and fail open", async () => {
+    const { mailDomain } = await import("../src/mail-domain.ts");
+    type Resolver = import("../src/mail-domain.ts").MailResolver;
+    // A string answer is the resolver error code it throws.
+    const answer = (v: unknown) => async () => {
+      if (typeof v === "string") throw Object.assign(new Error(v), { code: v });
+      return v;
+    };
+    const resolver = (mx: unknown, a: unknown = "ENODATA", aaaa = a) =>
+      ({
+        resolveMx: answer(mx),
+        resolve4: answer(a),
+        resolve6: answer(aaaa),
+        cancel: () => {},
+      }) as unknown as Resolver;
+    const mx = (exchange: string) => [{ exchange, priority: 0 }];
+    const cases: [Resolver, import("../src/mail-domain.ts").MailDomain][] = [
+      [resolver(mx("mx.example.com")), "deliverable"],
+      [resolver(mx("")), "undeliverable"],
+      [resolver(mx(".")), "undeliverable"],
+      [resolver("ENOTFOUND"), "undeliverable"],
+      [resolver("ENODATA", ["192.0.2.1"], "ENODATA"), "deliverable"],
+      [resolver("ENODATA", "ENODATA", ["2001:db8::1"]), "deliverable"],
+      [resolver("ENODATA"), "undeliverable"],
+      [resolver("ESERVFAIL"), "unknown"],
+      [resolver("ETIMEOUT"), "unknown"],
+      [resolver("ECONNREFUSED"), "unknown"],
+      [resolver("ENODATA", "ESERVFAIL", "ENODATA"), "unknown"],
+    ];
+    for (const [r, expected] of cases)
+      expect(await mailDomain("example.com", r)).toBe(expected);
+    // A lookup that never answers is cancelled at the deadline and sends.
+    let cancelled = false;
+    const hang = {
+      resolveMx: () => new Promise(() => {}),
+      cancel: () => {
+        cancelled = true;
+      },
+    } as unknown as Resolver;
+    expect(await mailDomain("example.com", hang, 20)).toBe("unknown");
+    expect(cancelled).toBe(true);
+    expect(await mailDomain("", resolver(mx("")))).toBe("unknown");
+  });
+
+  test("mail to an undeliverable domain commits the no-op receipt, logging only a domain digest", async () => {
+    const { acceptMail } = await import("../src/mail.ts");
+    const { domainDigest } = await import("../src/mail-domain.ts");
+    const config = fixtureConfig();
+    const { pool, queued } = queue();
+    const looked: string[] = [];
+    const domain = async (d: string) => {
+      looked.push(d);
+      return d === "no-mail.example"
+        ? ("undeliverable" as const)
+        : d === "dns-down.example"
+          ? ("unknown" as const)
+          : ("deliverable" as const);
+    };
+    const logs: unknown[][] = [];
+    const log = spyOn(console, "log").mockImplementation((...a) => {
+      logs.push(a);
+    });
+    try {
+      await acceptMail(pool, config, state("person@No-Mail.example."), {
+        domain,
+      });
+      // An unknown address still looks its domain up, so both take as long.
+      await acceptMail(pool, config, state(), {
+        domain,
+        requested: "nobody@no-mail.example",
+      });
+      await acceptMail(pool, config, state("person@example.com"), { domain });
+      // DNS failing answers "unknown": the message is sent.
+      await acceptMail(pool, config, state("person@dns-down.example"), {
+        domain,
+      });
+      await acceptMail(pool, config, state("e2e@milton-test.invalid"), {
+        domain,
+      });
+    } finally {
+      log.mockRestore();
+    }
+    expect(queued()).toEqual([false, false, true, true, false]);
+    expect(looked).toEqual([
+      "no-mail.example",
+      "no-mail.example",
+      "example.com",
+      "dns-down.example",
+    ]);
+    expect(logs.map((l) => JSON.parse(String(l[0])))).toEqual([
+      {
+        message: "auth_mail_skipped",
+        reason: "undeliverable_domain",
+        kind: "reset",
+        domain: domainDigest("no-mail.example"),
+      },
+    ]);
+    expect(JSON.stringify(logs)).not.toContain("no-mail");
+  });
+});

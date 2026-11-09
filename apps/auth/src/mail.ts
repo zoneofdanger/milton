@@ -9,6 +9,7 @@ import type pg from "pg";
 import { AUTH_ORIGIN, type Config } from "./config.ts";
 import type { RequestState } from "./adapter.ts";
 import { reservedRecipient } from "./recipient.ts";
+import { addressDomain, domainDigest, type MailDomain } from "./mail-domain.ts";
 
 // Native getCryptoKey (used by makeSignature) imports an HMAC signing key.
 // Symmetric utilities instead accept a versioned SecretConfig. No bare-hex fallback.
@@ -87,17 +88,43 @@ function body(config: Pick<Config, "AUTH_MAIL_FROM">, m: NativeMail) {
     text: `${m.kind === "verify" ? "Verify your email" : "Set a new password"}: ${m.url}\n\nIf you did not request this, ignore this message.`,
   };
 }
+export type MailChecks = {
+  /** mailDomain in production; tests inject an answer. */
+  domain: (domain: string) => Promise<MailDomain>;
+  /** The request's own `email`, looked up when no message was captured. */
+  requested?: string;
+};
 export async function acceptMail(
   pool: pg.Pool,
   config: Config,
   s: RequestState,
+  checks: MailChecks,
 ) {
   if (s.mailFault || (s.mailExpected && !s.mail))
     throw new Error("native_mail_capture_failed");
-  // A reserved recipient's message commits the same no-op receipt an unknown
-  // address does, so the public answer is the same and nothing is queued.
-  const id = randomUUID(),
-    m = s.mail && !reservedRecipient(s.mail.to) ? s.mail : undefined;
+  // A reserved recipient's message, or one to a domain DNS says takes no mail
+  // (null MX, NXDOMAIN, or no MX, A or AAAA), commits the same no-op receipt
+  // an unknown address does, so the public answer is the same and nothing is
+  // queued. The domain is looked up whether or not a message was captured, so
+  // an unknown address's answer waits for the same lookup; DNS failing sends.
+  const address = s.mail?.to ?? checks.requested;
+  const domain =
+    address && !reservedRecipient(address) ? addressDomain(address) : "";
+  const reachable =
+    !domain || (await checks.domain(domain)) !== "undeliverable";
+  let m = s.mail && !reservedRecipient(s.mail.to) ? s.mail : undefined;
+  if (m && !reachable) {
+    console.log(
+      JSON.stringify({
+        message: "auth_mail_skipped",
+        reason: "undeliverable_domain",
+        kind: m.kind,
+        domain: domainDigest(domain),
+      }),
+    );
+    m = undefined;
+  }
+  const id = randomUUID();
   const payload = m
     ? await symmetricEncrypt({
         key: await key(config.AUTH_SECRET),

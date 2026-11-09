@@ -34,6 +34,7 @@ import {
 } from "./config.ts";
 import { credentialAdapter, transport, type RequestState } from "./adapter.ts";
 import { acceptMail, stashMail } from "./mail.ts";
+import { mailDomain, type MailDomain } from "./mail-domain.ts";
 import { admissionClient } from "./admission.ts";
 import { validPassword } from "./password.ts";
 import {
@@ -49,6 +50,8 @@ export type Boundaries = {
     init?: RequestInit,
   ) => Promise<Response>;
   beforeMailStash?: (state: RequestState) => void;
+  /** Whether DNS says a domain takes mail; real DNS (mailDomain) by default. */
+  mailDomain?: (domain: string) => Promise<MailDomain>;
 };
 /** Any https client metadata URL on a DNS name. The plugin also refuses
  * private hosts, and fetchClientMetadataResource pins public addresses. */
@@ -930,7 +933,10 @@ export function createProvider(
               ((await response.clone().json()) as { code?: string }).code ===
                 "EMAIL_ALREADY_VERIFIED"));
         if (generic || requestState.mail)
-          await acceptMail(pool, config, requestState);
+          await acceptMail(pool, config, requestState, {
+            domain: options.boundaries?.mailDomain ?? ((d) => mailDomain(d)),
+            requested: typeof body.email === "string" ? body.email : undefined,
+          });
         if (generic)
           return json({
             message:

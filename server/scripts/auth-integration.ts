@@ -1207,6 +1207,8 @@ try {
   const nativeService = createProvider(nativeConfig, {
     pool: authPool,
     boundaries: {
+      // No real DNS: every fixture domain takes mail.
+      mailDomain: async () => "deliverable",
       fetch: async (input, init) => {
         if (
           String(input) ===

@@ -37,7 +37,13 @@ const admissions: Record<string, unknown>[] = [];
 let admitStatus = 204;
 let onAdmit: ((subject: string) => void) | undefined;
 const mail: { to: string; url: string; kind: "reset" | "verify" }[] = [];
+// No real DNS: no-mail.example stands for a domain that takes no mail.
+const mailDomain = async (domain: string) =>
+  domain === "no-mail.example"
+    ? ("undeliverable" as const)
+    : ("deliverable" as const);
 const boundaries = {
+  mailDomain,
   fetch: async (input: string | URL | Request, init?: RequestInit) => {
     if (
       String(input) ===
@@ -2270,6 +2276,7 @@ try {
     const noNetwork = createProvider(config, {
       pool: authPool,
       boundaries: {
+        mailDomain,
         fetch: async () => {
           providerCalls++;
           throw new Error("request_delivery_forbidden");
@@ -2397,6 +2404,7 @@ try {
       const faulty = createProvider(config, {
         pool: authPool,
         boundaries: {
+          mailDomain,
           beforeMailStash: (s) => {
             if (fault === "missing") s.users.clear();
             else if (fault === "duplicate")
@@ -2489,6 +2497,23 @@ try {
       return new Response(null, { status: 200 });
     });
     assert.deepEqual([reservedPass.claimed, reservedSends], [0, 0]);
+    // A sign-up, then a reset, at a domain DNS says takes no mail answer
+    // exactly as any does and queue only the no-op receipt.
+    for (const path of ["/sign-up/email", "/request-password-reset"]) {
+      const reply = await post(
+        noNetwork.handler,
+        path,
+        "mail-new@no-mail.example",
+      );
+      assert.equal(reply.status, 200);
+      assert.equal(await reply.text(), neutral);
+      const receipt = await last();
+      assert.deepEqual(
+        [receipt.state, receipt.payload],
+        ["noop", null],
+        `an undeliverable domain queues no message (${path})`,
+      );
+    }
     // L-1: issue and encrypt the original native proof on a clock 30s ahead
     // of PostgreSQL, without editing the proof, envelope or stored job later.
     await clearJobs();

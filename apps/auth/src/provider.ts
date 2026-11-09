@@ -12,7 +12,7 @@ import {
   decodeBasicCredentials,
   parseAccessTokenAuthorization,
 } from "@better-auth/core/oauth2";
-import { captcha, jwt } from "better-auth/plugins";
+import { jwt } from "better-auth/plugins";
 import {
   getOAuthProviderState,
   oauthProvider,
@@ -77,6 +77,14 @@ const ACCOUNT_DELETING = {
   message: "This Milton account is being deleted.",
 };
 const accountDeleting = () => new APIError("FORBIDDEN", ACCOUNT_DELETING);
+const TURNSTILE_SITEVERIFY =
+  "https://challenges.cloudflare.com/turnstile/v0/siteverify";
+// Cloudflare's siteverify codes that mean the token itself is bad.
+const TOKEN_ERRORS = new Set([
+  "missing-input-response",
+  "invalid-input-response",
+  "timeout-or-duplicate",
+]);
 const hash = (v: string) => createHash("sha256").update(v).digest("hex");
 export function createProvider(
   config: Config,
@@ -640,26 +648,63 @@ export function createProvider(
         metadataProfile: "mcp-2026-07-28",
         isMetadataDocumentUrlAllowed: metadataDocumentUrlAllowed,
       }),
-      // Email sign-up only, after native's rate limits: the token in
-      // x-captcha-response is checked with Cloudflare's siteverify (with the
-      // derived client address), for this host and the widget's action. A
-      // missing or refused token is 400/403. Siteverify unreachable or failing
-      // (10 s plugin limit) is native's 500, which the handler answers as a
-      // retryable 503: fail closed, nothing is created.
-      ...(config.AUTH_TURNSTILE_SECRET_KEY
-        ? [
-            captcha({
-              provider: "cloudflare-turnstile",
-              secretKey: config.AUTH_TURNSTILE_SECRET_KEY,
-              endpoints: ["/sign-up/email"],
-              expectedAction: "signup",
-              allowedHostnames: [new URL(AUTH_ORIGIN).hostname],
-            }),
-          ]
-        : []),
     ],
   });
   let inFlight = 0;
+  // Cloudflare Turnstile on email sign-up, verified here rather than by
+  // Better Auth's captcha plugin, which waits up to 10 s inside a native slot,
+  // answers every success:false (Cloudflare's internal-error too) as a bad
+  // token, and sends a /64 for IPv6. At most four verifications wait at once
+  // per process, each at most 5 s. Only Cloudflare's token codes refuse (403);
+  // anything else (another code, none, a non-2xx, a network failure or
+  // timeout) is a retryable 503: fail closed. No remoteip is sent: this
+  // process knows only an IPv6 client's /64, and it is optional.
+  let verifying = 0;
+  const networkFetch = options.boundaries?.fetch ?? fetch;
+  async function turnstile(secret: string, token: string | null) {
+    if (!token) return json({ error: "captcha_required" }, 400);
+    // Cloudflare's own bound on a token.
+    if (token.length > 2048) return json({ error: "captcha_refused" }, 403);
+    if (verifying >= 4) return json({ error: "busy_retry" }, 429);
+    verifying++;
+    let codes: string[] = [];
+    try {
+      const r = await networkFetch(TURNSTILE_SITEVERIFY, {
+        method: "POST",
+        redirect: "error",
+        signal: AbortSignal.timeout(5000),
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ secret, response: token }),
+      });
+      const v: unknown = r.ok ? await r.json() : null;
+      if (!r.ok) {
+        codes = [`http_${r.status}`];
+        await r.body?.cancel();
+      } else if (v && typeof v === "object") {
+        const { success, hostname, action } = v as Record<string, unknown>;
+        const reported = (v as Record<string, unknown>)["error-codes"];
+        if (success === true)
+          return hostname === new URL(AUTH_ORIGIN).hostname &&
+            action === "signup"
+            ? undefined
+            : json({ error: "captcha_refused" }, 403);
+        codes = Array.isArray(reported)
+          ? reported.filter((c): c is string => typeof c === "string")
+          : [];
+        if (codes.length && codes.every((c) => TOKEN_ERRORS.has(c)))
+          return json({ error: "captcha_refused" }, 403);
+      }
+    } catch {
+      codes = ["network"];
+    } finally {
+      verifying--;
+    }
+    // Cloudflare's fixed code names only: never the token or the secret.
+    console.error("auth_turnstile", {
+      codes: codes.filter((c) => /^[a-z0-9_-]{1,40}$/.test(c)).slice(0, 5),
+    });
+    return json({ error: "captcha_unavailable" }, 503);
+  }
   // The peer keys the network rate limits, so every caller names the client.
   async function handler(request: Request, peer: string): Promise<Response> {
     const denied = guardRequest(request);
@@ -855,6 +900,20 @@ export function createProvider(
       const allowed = taken.rows[0]?.allowed;
       if (!Array.isArray(allowed) || !allowed.every((a) => a === true))
         return json({ error: "rate_limited" }, 429);
+      if (path === "/sign-up/email" && config.AUTH_TURNSTILE_SECRET_KEY) {
+        // Siteverify can take seconds, so it waits in its own bound, not in
+        // a native slot; the slot is taken again only once it passes.
+        inFlight--;
+        acquired = false;
+        const refused = await turnstile(
+          config.AUTH_TURNSTILE_SECRET_KEY,
+          request.headers.get("x-captcha-response"),
+        );
+        if (refused) return refused;
+        if (inFlight >= 4) return json({ error: "busy_retry" }, 429);
+        inFlight++;
+        acquired = true;
+      }
       if (
         path === "/oauth2/userinfo" &&
         !(await liveBinding(bearer, bearer ? stored(bearer) : ""))
@@ -875,6 +934,7 @@ export function createProvider(
         "x-real-ip",
         "x-client-ip",
         "x-milton-transport-ip",
+        "x-captcha-response",
       ])
         headers.delete(k);
       headers.set("x-milton-transport-ip", ip);

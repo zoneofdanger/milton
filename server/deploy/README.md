@@ -227,7 +227,10 @@ and move traffic with `update-traffic`).
   secret key added (the site key is public and may go in the payload or as a plain
   variable); deploy `milton-auth` with that pinned version. The mail and maintenance jobs
   do not need it. Then load `/signup` (the widget renders, no CSP error in the console)
-  and complete one real sign-up. Turning it off is deploying without the keys. Before it
+  and complete one real sign-up; milton-auth's log should have no `auth_turnstile` line
+  (each one is a siteverify failure, logged with Cloudflare's code names; `http_*`,
+  `network` or a secret code mean egress or the secret, not visitors). Turning it off is
+  deploying without the keys. Before it
   goes on, update the privacy page (Cloudflare receives the visitor's IP and browser
   signals); Peter has the wording.
 

@@ -313,10 +313,12 @@ export function createApp(
         FAILED_TO_UNLINK_LAST_ACCOUNT:
           "Keep at least one working sign-in method.",
         rate_limited: "Too many attempts. Wait a minute and try again.",
-        MISSING_RESPONSE:
+        captcha_required:
           "Milton could not confirm you are a person. Try again; the check runs on the sign-up page.",
-        VERIFICATION_FAILED:
+        captcha_refused:
           "Milton could not confirm you are a person. Try again; the check runs on the sign-up page.",
+        captcha_unavailable:
+          "Milton could not run its check that you are a person. Nothing was created. Try again shortly, or continue with Google or GitHub.",
         busy_retry: "Milton is busy. Try again shortly.",
       };
       const retry =
@@ -330,12 +332,14 @@ export function createApp(
       return c.html(
         <Page title="Please try again">
           <p role="alert">
-            {response.status === 503
-              ? "Milton could not confirm the outcome. Try signing in or request a new link before repeating a security change."
-              : (messages[key] ??
-                (response.status === 429
-                  ? "Too many attempts. Wait a minute and try again."
-                  : "This request could not be completed. Check your details or request a new link."))}
+            {key === "captcha_unavailable"
+              ? messages[key]
+              : response.status === 503
+                ? "Milton could not confirm the outcome. Try signing in or request a new link before repeating a security change."
+                : (messages[key] ??
+                  (response.status === 429
+                    ? "Too many attempts. Wait a minute and try again."
+                    : "This request could not be completed. Check your details or request a new link."))}
           </p>
           <a href={retry}>Try again</a>
           <p>

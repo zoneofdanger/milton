@@ -2542,22 +2542,30 @@ try {
         AUTH_TURNSTILE_SITE_KEY: "fictional-site-key",
         AUTH_TURNSTILE_SECRET_KEY: "fictional-turnstile-secret",
       },
-      { pool: authPool, boundaries: { mailDomain } },
+      {
+        pool: authPool,
+        boundaries: {
+          mailDomain,
+          fetch: async (input, init) => {
+            assert.equal(
+              String(input),
+              "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+            );
+            const { response } = JSON.parse(String(init?.body));
+            return Response.json(
+              response === "fictional-pass"
+                ? {
+                    success: true,
+                    hostname: "auth.meetmilton.com",
+                    action: "signup",
+                  }
+                : { success: false, "error-codes": ["invalid-input-response"] },
+            );
+          },
+        },
+      },
     );
-    const networkFetch = globalThis.fetch;
-    globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
-      assert.equal(
-        String(input),
-        "https://challenges.cloudflare.com/turnstile/v0/siteverify",
-      );
-      const { response } = JSON.parse(String(init?.body));
-      return Response.json({
-        success: response === "fictional-pass",
-        hostname: "auth.meetmilton.com",
-        action: "signup",
-      });
-    }) as typeof fetch;
-    try {
+    {
       for (const [token, status, created] of [
         [undefined, 400, false],
         ["fictional-fail", 403, false],
@@ -2594,8 +2602,6 @@ try {
           assert.equal(job.state, "pending");
         }
       }
-    } finally {
-      globalThis.fetch = networkFetch;
     }
     // L-1: issue and encrypt the original native proof on a clock 30s ahead
     // of PostgreSQL, without editing the proof, envelope or stored job later.

@@ -1072,25 +1072,50 @@ describe("Turnstile on sign-up", () => {
         throw new Error("fixture_database_refused");
       },
     } as unknown as import("pg").Pool;
-    const verified: Record<string, unknown>[] = [];
-    const fetch = spyOn(globalThis, "fetch").mockImplementation((async (
-      input: string | URL | Request,
-      init?: RequestInit,
-    ) => {
+    // Siteverify's answer for each fictional token: [status, body], or a
+    // thrown network failure.
+    const answers: Record<string, [number, unknown] | "network"> = {
+      "fictional-pass": [
+        200,
+        { success: true, hostname: "auth.meetmilton.com", action: "signup" },
+      ],
+      "fictional-invalid": [
+        200,
+        { success: false, "error-codes": ["invalid-input-response"] },
+      ],
+      "fictional-reused": [
+        200,
+        { success: false, "error-codes": ["timeout-or-duplicate"] },
+      ],
+      "fictional-elsewhere": [
+        200,
+        { success: true, hostname: "evil.example", action: "signup" },
+      ],
+      "fictional-other-action": [
+        200,
+        { success: true, hostname: "auth.meetmilton.com", action: "login" },
+      ],
+      "fictional-internal": [
+        200,
+        { success: false, "error-codes": ["internal-error"] },
+      ],
+      "fictional-bad-secret": [
+        200,
+        { success: false, "error-codes": ["invalid-input-secret"] },
+      ],
+      "fictional-no-codes": [200, { success: false }],
+      "fictional-5xx": [502, {}],
+      "fictional-network": "network",
+    };
+    const verified: { body: Record<string, unknown>; init: RequestInit }[] = [];
+    const fetch = async (input: string | URL | Request, init?: RequestInit) => {
       expect(String(input)).toBe(SITEVERIFY);
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      verified.push(body);
-      if (body.response === "fictional-unreachable")
-        throw new TypeError("fetch failed");
-      return Response.json({
-        success: body.response !== "fictional-fail",
-        hostname:
-          body.response === "fictional-elsewhere"
-            ? "evil.example"
-            : "auth.meetmilton.com",
-        action: "signup",
-      });
-    }) as unknown as typeof globalThis.fetch);
+      verified.push({ body, init: init! });
+      const answer = answers[String(body.response)]!;
+      if (answer === "network") throw new TypeError("fetch failed");
+      return Response.json(answer[1], { status: answer[0] });
+    };
     const quiet = spyOn(console, "error").mockImplementation(() => {});
     const signUp = async (
       service: ReturnType<typeof createProvider>,
@@ -1117,39 +1142,127 @@ describe("Turnstile on sign-up", () => {
       return [r.status, body.code ?? body.error, nativeWork > 0];
     };
     try {
-      const guarded = createProvider(fixtureConfig(keys), { pool });
-      expect(await signUp(guarded)).toEqual([400, "MISSING_RESPONSE", false]);
-      expect(await signUp(guarded, "fictional-fail")).toEqual([
+      const guarded = createProvider(fixtureConfig(keys), {
+        pool,
+        boundaries: { fetch },
+      });
+      expect(await signUp(guarded)).toEqual([400, "captcha_required", false]);
+      expect(await signUp(guarded, "x".repeat(2049))).toEqual([
         403,
-        "VERIFICATION_FAILED",
+        "captcha_refused",
         false,
       ]);
-      expect(await signUp(guarded, "fictional-elsewhere")).toEqual([
-        403,
-        "VERIFICATION_FAILED",
-        false,
-      ]);
-      // Siteverify unreachable: refused as a retry, never let through.
-      expect(await signUp(guarded, "fictional-unreachable")).toEqual([
-        503,
-        "retryable_dependency_failure",
-        false,
-      ]);
+      // A bad token, or a good one for another host or action: refused.
+      for (const token of [
+        "fictional-invalid",
+        "fictional-reused",
+        "fictional-elsewhere",
+        "fictional-other-action",
+      ])
+        expect(await signUp(guarded, token)).toEqual([
+          403,
+          "captcha_refused",
+          false,
+        ]);
+      // Cloudflare failing, or misconfigured: a retry, never let through.
+      for (const token of [
+        "fictional-internal",
+        "fictional-bad-secret",
+        "fictional-no-codes",
+        "fictional-5xx",
+        "fictional-network",
+      ])
+        expect(await signUp(guarded, token)).toEqual([
+          503,
+          "captcha_unavailable",
+          false,
+        ]);
       // A passing token reaches native's sign-up (here, a refused database).
       expect((await signUp(guarded, "fictional-pass"))[2]).toBe(true);
-      expect(verified.at(-1)).toEqual({
+      // Only the secret and token: no remoteip, and a bounded wait.
+      const last = verified.at(-1)!;
+      expect(last.body).toEqual({
         secret: keys.AUTH_TURNSTILE_SECRET_KEY,
         response: "fictional-pass",
-        remoteip: "127.0.0.1",
       });
+      expect(last.init.signal).toBeInstanceOf(AbortSignal);
+      expect(last.init.redirect).toBe("error");
       // Without the keys, sign-up needs no token and siteverify is never called.
       const calls = verified.length;
-      expect((await signUp(createProvider(fixtureConfig(), { pool })))[2]).toBe(
-        true,
-      );
+      expect(
+        (
+          await signUp(
+            createProvider(fixtureConfig(), { pool, boundaries: { fetch } }),
+          )
+        )[2],
+      ).toBe(true);
       expect(verified.length).toBe(calls);
     } finally {
-      fetch.mockRestore();
+      quiet.mockRestore();
+    }
+  });
+
+  test("siteverify waits hold no native slot and have their own bound of four", async () => {
+    const { createProvider } = await import("../src/provider.ts");
+    const pool = {
+      on: () => pool,
+      query: async (text: string) =>
+        text.includes("with g as")
+          ? { rows: [{ allowed: [true, true] }] }
+          : { rows: [{ allowed: true }] },
+    } as unknown as import("pg").Pool;
+    let release = () => {};
+    const held = new Promise<void>((r) => (release = r));
+    let waiting = 0;
+    const service = createProvider(fixtureConfig(keys), {
+      pool,
+      boundaries: {
+        fetch: async () => {
+          waiting++;
+          await held;
+          return Response.json({
+            success: false,
+            "error-codes": ["internal-error"],
+          });
+        },
+      },
+    });
+    service.provider.handler = async () => Response.json({ ok: true });
+    const call = (path: string, init: RequestInit = {}) =>
+      service.handler(
+        new Request("https://auth.meetmilton.com/api/auth" + path, {
+          ...init,
+          headers: {
+            origin: "https://auth.meetmilton.com",
+            "content-type": "application/json",
+            "x-captcha-response": "fictional-held",
+          },
+        }),
+        "127.0.0.1",
+      );
+    const signUp = () =>
+      call("/sign-up/email", {
+        method: "POST",
+        body: JSON.stringify({ email: "person@example.com" }),
+      });
+    const quiet = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const held4: Promise<Response>[] = [];
+      for (let n = 1; n <= 4; n++) {
+        held4.push(signUp());
+        while (waiting < n) await new Promise((r) => setTimeout(r, 1));
+      }
+      // A fifth verification waits for none; sign-in and the rest still work.
+      const fifth = await signUp();
+      expect([fifth.status, (await fifth.json()).error]).toEqual([
+        429,
+        "busy_retry",
+      ]);
+      expect(waiting).toBe(4);
+      for (let n = 0; n < 5; n++) expect((await call("/ok")).status).toBe(200);
+      release();
+      for (const r of await Promise.all(held4)) expect(r.status).toBe(503);
+    } finally {
       quiet.mockRestore();
     }
   });
@@ -1166,7 +1279,10 @@ describe("Turnstile on sign-up", () => {
           turnstileSiteKey,
           handler: async (request: Request) => {
             seen.push(request);
-            return Response.json({ ok: true });
+            return request.headers.get("x-captcha-response") ===
+              "fictional-down"
+              ? Response.json({ error: "captcha_unavailable" }, { status: 503 })
+              : Response.json({ ok: true });
           },
         } as unknown as import("../src/provider.ts").AuthService,
         assets,
@@ -1221,6 +1337,22 @@ describe("Turnstile on sign-up", () => {
     );
     expect(Object.keys(await forwarded.json())).not.toContain(
       "cf-turnstile-response",
+    );
+    // Turnstile unreachable: the form says so, not "could not confirm the outcome".
+    const down = await on.request("https://auth.meetmilton.com/form/signup", {
+      method: "POST",
+      headers: {
+        origin: "https://auth.meetmilton.com",
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        email: "person@example.com",
+        "cf-turnstile-response": "fictional-down",
+      }).toString(),
+    });
+    expect(down.status).toBe(503);
+    expect(await down.text()).toContain(
+      "could not run its check that you are a person. Nothing was created.",
     );
   });
 });

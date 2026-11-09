@@ -125,7 +125,9 @@ reports, memos) and plain text on security screens and anything an assistant rea
       overlap, and asks Decisions (gpt-6-luna, one Choice question) "the same as one of these,
       or none?". Report only: list what it would merge, change nothing. It sends Peter's tweak
       lines (never memo text) to OpenAI, so it needs his go on the day. Few duplicates: drop
-      this item, since AIs already reuse served tweak ids. Many: the same job merges for real,
+      this item. Don't assume AIs reuse served tweak ids: on #76's first instructions none did
+      (0 of 118 tweaks in qa's runs); after the Tweaks text rewrite (886e71c) Claude reused the
+      id in the one repeat case qa reran. Many duplicates: the same job merges for real,
       only at probability 0.90 or more, never a reworded tweak, never across accounts, keeping
       the older text, logging each merge with undo on the TPS page, plus a privacy-page line.
       Offline test (2026-11-09, fictional, local-only notes in .agents/tmp/decisions-test):

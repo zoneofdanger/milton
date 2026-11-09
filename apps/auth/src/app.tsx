@@ -113,10 +113,8 @@ export function createApp(
       return navigate(c, response, destination);
     return response;
   });
-  const oauthQuery = (url: string) => {
-    const q = new URL(url).searchParams;
-    return q.has("sig") && q.has("client_id") ? q.toString() : "";
-  };
+  const oauthQuery = (q: URLSearchParams) =>
+    q.has("sig") && q.has("client_id") ? q.toString() : "";
   const notice = (value: string | undefined) =>
     value === "done"
       ? "Your request was accepted. Check your email, or sign in again to continue."
@@ -124,25 +122,61 @@ export function createApp(
         ? "This request could not be completed. Check your details and try again. Expired links require a new request."
         : undefined;
   app.get("/", (c) => c.redirect("/login", 303));
-  app.get("/login", (c) =>
+  // The pages a password form's refusal re-renders, with its alert and status.
+  type Refusal = { alert?: string; status?: 400 | 429 };
+  const signIn = (
+    c: Context,
+    query: URLSearchParams,
+    { alert, status }: Refusal = {},
+    email?: string,
+  ) =>
     c.html(
-      <Page title="Sign in" notice={notice(c.req.query("notice"))}>
-        <SignIn query={oauthQuery(c.req.url)} />
+      <Page
+        title="Sign in"
+        notice={alert ? undefined : notice(c.req.query("notice"))}
+        alert={alert}
+      >
+        <SignIn query={oauthQuery(query)} email={email} />
       </Page>,
-    ),
-  );
-  app.get("/signup", (c) => {
+      status ?? 200,
+    );
+  const signUp = (
+    c: Context,
+    query: URLSearchParams,
+    { alert, status }: Refusal = {},
+    typed: { name?: string; email?: string } = {},
+  ) => {
     const siteKey = auth.turnstileSiteKey;
     if (siteKey) c.set("turnstile", true);
     return c.html(
       <Page
         title="Create your account"
         script={siteKey ? TURNSTILE_SCRIPT : undefined}
+        alert={alert}
       >
-        <SignIn signup query={oauthQuery(c.req.url)} turnstile={siteKey} />
+        <SignIn
+          signup
+          query={oauthQuery(query)}
+          turnstile={siteKey}
+          {...typed}
+        />
       </Page>,
+      status ?? 200,
     );
-  });
+  };
+  const resetPassword = (
+    c: Context,
+    token: string,
+    { alert, status }: Refusal = {},
+  ) =>
+    c.html(
+      <Page title="Set a new password" alert={alert}>
+        <ResetForm token={token} />
+      </Page>,
+      status ?? 200,
+    );
+  app.get("/login", (c) => signIn(c, new URL(c.req.url).searchParams));
+  app.get("/signup", (c) => signUp(c, new URL(c.req.url).searchParams));
   app.get("/verify", (c) =>
     c.html(
       <Page title="Verify your email" notice={notice(c.req.query("notice"))}>
@@ -158,11 +192,7 @@ export function createApp(
     ),
   );
   app.get("/reset-password", (c) =>
-    c.html(
-      <Page title="Set a new password">
-        <ResetForm token={c.req.query("token") ?? ""} />
-      </Page>,
-    ),
+    resetPassword(c, c.req.query("token") ?? ""),
   );
   app.get("/consent", (c) =>
     c.html(
@@ -196,7 +226,7 @@ export function createApp(
       session: { id: string; createdAt: string };
     } | null;
   }
-  app.get("/security", async (c) => {
+  const security = async (c: Context, { alert, status }: Refusal = {}) => {
     const s = await current(c);
     if (!s) return c.redirect("/login", 303);
     const methods = await auth.pool.query<MethodSummary>(
@@ -208,7 +238,11 @@ export function createApp(
       [s.user.id, s.session.id],
     );
     return c.html(
-      <Page title="Account security" notice={notice(c.req.query("notice"))}>
+      <Page
+        title="Account security"
+        notice={alert ? undefined : notice(c.req.query("notice"))}
+        alert={alert}
+      >
         <Security
           email={s.user.email}
           fresh={
@@ -219,8 +253,10 @@ export function createApp(
           sessions={sessions.rows}
         />
       </Page>,
+      status ?? 200,
     );
-  });
+  };
+  app.get("/security", (c) => security(c));
   app.post("/form/:action", async (c) => {
     if (c.req.header("origin") !== AUTH_ORIGIN)
       return json({ error: "same_origin_required" }, 403);
@@ -321,6 +357,35 @@ export function createApp(
           "Milton could not run its check that you are a person. Nothing was created. Try again shortly, or continue with Google or GitHub.",
         busy_retry: "Milton is busy. Try again shortly.",
       };
+      const alert =
+        messages[key] ??
+        (response.status === 429
+          ? "Too many attempts. Wait a minute and try again."
+          : "This request could not be completed. Check your details or request a new link.");
+      // A password form's refusal shows on that same form, with what was typed
+      // except the password. Not a 5xx (its outcome is uncertain), nor a dead
+      // reset link, which needs a new email.
+      if (
+        response.status >= 400 &&
+        response.status < 500 &&
+        !(action === "reset" && key === "INVALID_TOKEN")
+      ) {
+        const refusal: Refusal = {
+          alert,
+          status: response.status === 429 ? 429 : 400,
+        };
+        const query = new URLSearchParams(f.get("oauth_query") ?? "");
+        const email = f.get("email") ?? undefined;
+        if (action === "signin") return signIn(c, query, refusal, email);
+        if (action === "signup")
+          return signUp(c, query, refusal, {
+            name: f.get("name") ?? undefined,
+            email,
+          });
+        if (action === "reset")
+          return resetPassword(c, f.get("token") ?? "", refusal);
+        if (action === "change") return security(c, refusal);
+      }
       const retry =
         action === "signup"
           ? "/signup"
@@ -336,10 +401,7 @@ export function createApp(
               ? messages[key]
               : response.status === 503
                 ? "Milton could not confirm the outcome. Try signing in or request a new link before repeating a security change."
-                : (messages[key] ??
-                  (response.status === 429
-                    ? "Too many attempts. Wait a minute and try again."
-                    : "This request could not be completed. Check your details or request a new link."))}
+                : alert}
           </p>
           <a href={retry}>Try again</a>
           <p>

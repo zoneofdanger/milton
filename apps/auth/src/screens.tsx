@@ -15,6 +15,7 @@ export function Page({
   title,
   children,
   notice,
+  alert,
   refresh,
   assets,
   script,
@@ -22,6 +23,8 @@ export function Page({
   title: string;
   children: Child;
   notice?: string;
+  /** Why the form below refused its last submission. */
+  alert?: string;
   refresh?: string;
   assets: StaticAssets;
   /** One external script, such as Turnstile's on the sign-up page. */
@@ -66,6 +69,11 @@ export function Page({
                 {notice}
               </p>
             ) : null}
+            {alert ? (
+              <p role="alert" class="notice">
+                {alert}
+              </p>
+            ) : null}
             {children}
           </div>
           <footer>
@@ -83,12 +91,15 @@ export function Input({
   type = "text",
   autocomplete,
   required = true,
+  value,
 }: {
   name: string;
   label: string;
   type?: string;
   autocomplete?: string;
   required?: boolean;
+  /** What the person typed before a refusal; a password is never refilled. */
+  value?: string;
 }) {
   return (
     <label>
@@ -97,6 +108,7 @@ export function Input({
         name={name}
         type={type}
         autocomplete={autocomplete}
+        value={type === "password" ? undefined : value}
         required={required}
         // A new password's floor, so the browser flags a short one before
         // submitting (it counts code units; the server counts characters).
@@ -110,11 +122,16 @@ export function SignIn({
   signup = false,
   query = "",
   turnstile,
+  name,
+  email,
 }: {
   signup?: boolean;
   query?: string;
   /** The Turnstile site key, when the widget guards sign-up. */
   turnstile?: string;
+  /** The name and email typed before a refusal. */
+  name?: string;
+  email?: string;
 }) {
   return (
     <>
@@ -137,12 +154,15 @@ export function SignIn({
       <p class="divider">Or use your email</p>
       <form method="post" action={signup ? "/form/signup" : "/form/signin"}>
         <input type="hidden" name="oauth_query" value={query} />
-        {signup ? <Input name="name" label="Name" autocomplete="name" /> : null}
+        {signup ? (
+          <Input name="name" label="Name" autocomplete="name" value={name} />
+        ) : null}
         <Input
           name="email"
           label="Email"
           type="email"
           autocomplete="username"
+          value={email}
         />
         <Input
           name="password"

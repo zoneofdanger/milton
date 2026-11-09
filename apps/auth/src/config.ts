@@ -51,6 +51,13 @@ const schema = z.object({
   AUTH_MAIL_FROM: z
     .email()
     .refine((v) => v.endsWith("@notifications.meetmilton.com")),
+  // Cloudflare Turnstile on email sign-up, on only with both keys. The site
+  // key is public and rendered into the page, so it is a plain token.
+  AUTH_TURNSTILE_SITE_KEY: z
+    .string()
+    .regex(/^[0-9A-Za-z_-]{1,128}$/)
+    .optional(),
+  AUTH_TURNSTILE_SECRET_KEY: z.string().min(1).max(512).optional(),
   PORT: z.coerce.number().int().min(1024).max(65535).default(8080),
 });
 export type Config = z.infer<typeof schema>;
@@ -59,7 +66,8 @@ export function readConfig(env: NodeJS.ProcessEnv): Config {
   if (
     !r.success ||
     (env.NODE_ENV === "production" &&
-      admissionTarget(r.data.AUTH_ADMISSION_URL) !== "cloud-run")
+      admissionTarget(r.data.AUTH_ADMISSION_URL) !== "cloud-run") ||
+    !r.data.AUTH_TURNSTILE_SITE_KEY !== !r.data.AUTH_TURNSTILE_SECRET_KEY
   )
     throw new Error("invalid_auth_configuration");
   databaseOptions(r.data.AUTH_DATABASE_URL);

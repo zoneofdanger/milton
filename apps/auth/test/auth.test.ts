@@ -889,3 +889,203 @@ describe("auth mail queueing", () => {
     expect(logs.join()).not.toContain("person");
   });
 });
+
+describe("Turnstile on sign-up", () => {
+  const keys = {
+    AUTH_TURNSTILE_SITE_KEY: "0x4AAAAAAAfictional",
+    AUTH_TURNSTILE_SECRET_KEY: "fictional-turnstile-secret",
+  };
+  const SITEVERIFY =
+    "https://challenges.cloudflare.com/turnstile/v0/siteverify";
+
+  test("is off unless both keys are set, and the site key is a plain token", () => {
+    const env = Object.fromEntries(
+      Object.entries(fixtureConfig()).map(([k, v]) => [k, String(v)]),
+    );
+    expect(readConfig(env).AUTH_TURNSTILE_SITE_KEY).toBeUndefined();
+    expect(readConfig({ ...env, ...keys }).AUTH_TURNSTILE_SITE_KEY).toBe(
+      keys.AUTH_TURNSTILE_SITE_KEY,
+    );
+    for (const partial of [
+      { AUTH_TURNSTILE_SITE_KEY: keys.AUTH_TURNSTILE_SITE_KEY },
+      { AUTH_TURNSTILE_SECRET_KEY: keys.AUTH_TURNSTILE_SECRET_KEY },
+      { ...keys, AUTH_TURNSTILE_SITE_KEY: 'x" onload="y' },
+      { ...keys, AUTH_TURNSTILE_SECRET_KEY: "" },
+    ])
+      expect(() => readConfig({ ...env, ...partial })).toThrow(
+        "invalid_auth_configuration",
+      );
+  });
+
+  test("the server verifies the token with siteverify and fails closed", async () => {
+    const { createProvider } = await import("../src/provider.ts");
+    // Rate statements admit; any other query is native's sign-up work,
+    // reached only once the captcha passes, and is refused.
+    let nativeWork = 0;
+    const pool = {
+      on: () => pool,
+      query: async (text: string) => {
+        if (text.includes("with g as"))
+          return { rows: [{ allowed: [true, true] }] };
+        if (text.includes("milton_guard.take_rate"))
+          return { rows: [{ allowed: true }] };
+        nativeWork++;
+        throw new Error("fixture_database_refused");
+      },
+      connect: async () => {
+        nativeWork++;
+        throw new Error("fixture_database_refused");
+      },
+    } as unknown as import("pg").Pool;
+    const verified: Record<string, unknown>[] = [];
+    const fetch = spyOn(globalThis, "fetch").mockImplementation((async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      expect(String(input)).toBe(SITEVERIFY);
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      verified.push(body);
+      if (body.response === "fictional-unreachable")
+        throw new TypeError("fetch failed");
+      return Response.json({
+        success: body.response !== "fictional-fail",
+        hostname:
+          body.response === "fictional-elsewhere"
+            ? "evil.example"
+            : "auth.meetmilton.com",
+        action: "signup",
+      });
+    }) as unknown as typeof globalThis.fetch);
+    const quiet = spyOn(console, "error").mockImplementation(() => {});
+    const signUp = async (
+      service: ReturnType<typeof createProvider>,
+      token?: string,
+    ) => {
+      nativeWork = 0;
+      const r = await service.handler(
+        new Request("https://auth.meetmilton.com/api/auth/sign-up/email", {
+          method: "POST",
+          headers: {
+            origin: "https://auth.meetmilton.com",
+            "content-type": "application/json",
+            ...(token ? { "x-captcha-response": token } : {}),
+          },
+          body: JSON.stringify({
+            email: "person@example.com",
+            password: "Fictional sign-up password",
+            name: "Fictional",
+          }),
+        }),
+        "127.0.0.1",
+      );
+      const body = (await r.json()) as { code?: string; error?: string };
+      return [r.status, body.code ?? body.error, nativeWork > 0];
+    };
+    try {
+      const guarded = createProvider(fixtureConfig(keys), { pool });
+      expect(await signUp(guarded)).toEqual([400, "MISSING_RESPONSE", false]);
+      expect(await signUp(guarded, "fictional-fail")).toEqual([
+        403,
+        "VERIFICATION_FAILED",
+        false,
+      ]);
+      expect(await signUp(guarded, "fictional-elsewhere")).toEqual([
+        403,
+        "VERIFICATION_FAILED",
+        false,
+      ]);
+      // Siteverify unreachable: refused as a retry, never let through.
+      expect(await signUp(guarded, "fictional-unreachable")).toEqual([
+        503,
+        "retryable_dependency_failure",
+        false,
+      ]);
+      // A passing token reaches native's sign-up (here, a refused database).
+      expect((await signUp(guarded, "fictional-pass"))[2]).toBe(true);
+      expect(verified.at(-1)).toEqual({
+        secret: keys.AUTH_TURNSTILE_SECRET_KEY,
+        response: "fictional-pass",
+        remoteip: "127.0.0.1",
+      });
+      // Without the keys, sign-up needs no token and siteverify is never called.
+      const calls = verified.length;
+      expect((await signUp(createProvider(fixtureConfig(), { pool })))[2]).toBe(
+        true,
+      );
+      expect(verified.length).toBe(calls);
+    } finally {
+      fetch.mockRestore();
+      quiet.mockRestore();
+    }
+  });
+
+  test("the widget and its CSP are on the sign-up page only, and the form passes its token", async () => {
+    const { rmSync } = await import("node:fs");
+    const { createApp } = await import("../src/app.tsx");
+    const { SECURITY_HEADERS } = await import("../src/http.ts");
+    const assets = await versionedAssets();
+    const seen: Request[] = [];
+    const app = (turnstileSiteKey?: string) =>
+      createApp(
+        {
+          turnstileSiteKey,
+          handler: async (request: Request) => {
+            seen.push(request);
+            return Response.json({ ok: true });
+          },
+        } as unknown as import("../src/provider.ts").AuthService,
+        assets,
+      );
+    const on = app(keys.AUTH_TURNSTILE_SITE_KEY),
+      off = app();
+    rmSync(assets, { recursive: true, force: true });
+    const page = async (a: typeof on, path: string) => {
+      const r = await a.request("https://auth.meetmilton.com" + path);
+      return [await r.text(), r.headers.get("content-security-policy")!];
+    };
+    const base = SECURITY_HEADERS["content-security-policy"];
+    const [signup, csp] = await page(on, "/signup");
+    expect(signup).toContain(
+      '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async="" defer=""></script>',
+    );
+    expect(signup).toContain(
+      `<div class="cf-turnstile" data-sitekey="${keys.AUTH_TURNSTILE_SITE_KEY}" data-action="signup"></div>`,
+    );
+    expect(csp).toBe(
+      base.replace(
+        "script-src 'self';",
+        "script-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com;",
+      ),
+    );
+    for (const [html, policy] of [
+      await page(on, "/login"),
+      await page(off, "/signup"),
+    ]) {
+      expect(html).not.toContain("challenges.cloudflare.com");
+      expect(html).not.toContain("cf-turnstile");
+      expect(policy).toBe(base);
+    }
+    const r = await on.request("https://auth.meetmilton.com/form/signup", {
+      method: "POST",
+      headers: {
+        origin: "https://auth.meetmilton.com",
+        "content-type": "application/x-www-form-urlencoded",
+        "x-captcha-response": "fictional-forged",
+      },
+      body: new URLSearchParams({
+        name: "Fictional",
+        email: "person@example.com",
+        password: "Fictional sign-up password",
+        "cf-turnstile-response": "fictional-widget-token",
+      }).toString(),
+    });
+    expect(r.status).toBe(303);
+    const forwarded = seen.at(-1)!;
+    expect(forwarded.headers.get("x-captcha-response")).toBe(
+      "fictional-widget-token",
+    );
+    expect(Object.keys(await forwarded.json())).not.toContain(
+      "cf-turnstile-response",
+    );
+  });
+});

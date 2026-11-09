@@ -17,12 +17,15 @@ export function Page({
   notice,
   refresh,
   assets,
+  script,
 }: {
   title: string;
   children: Child;
   notice?: string;
   refresh?: string;
   assets: StaticAssets;
+  /** One external script, such as Turnstile's on the sign-up page. */
+  script?: string;
 }) {
   return (
     <html lang="en">
@@ -45,6 +48,7 @@ export function Page({
           />
         ))}
         <link rel="stylesheet" href={assets.url("/auth.css")} />
+        {script ? <script src={script} async defer></script> : null}
       </head>
       <body>
         <header>
@@ -102,9 +106,12 @@ export function Input({
 export function SignIn({
   signup = false,
   query = "",
+  turnstile,
 }: {
   signup?: boolean;
   query?: string;
+  /** The Turnstile site key, when the widget guards sign-up. */
+  turnstile?: string;
 }) {
   return (
     <>
@@ -145,6 +152,13 @@ export function SignIn({
             Use 15–128 Unicode characters. Spaces are welcome. Common passwords
             are refused. Equivalent Unicode forms share a password.
           </p>
+        ) : null}
+        {signup && turnstile ? (
+          <div
+            class="cf-turnstile"
+            data-sitekey={turnstile}
+            data-action="signup"
+          ></div>
         ) : null}
         <button type="submit">{signup ? "Create account" : "Sign in"}</button>
       </form>

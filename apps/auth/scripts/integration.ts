@@ -2532,6 +2532,69 @@ try {
       queuedResets.push((await last()).payload !== null);
     }
     assert.deepEqual(queuedResets, [true, true, true, false]);
+    // With Turnstile on, only a token siteverify (faked; no network) passes
+    // creates the account and queues its verification.
+    const guarded = createProvider(
+      {
+        ...config,
+        AUTH_TURNSTILE_SITE_KEY: "fictional-site-key",
+        AUTH_TURNSTILE_SECRET_KEY: "fictional-turnstile-secret",
+      },
+      { pool: authPool, boundaries: { mailDomain } },
+    );
+    const networkFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
+      assert.equal(
+        String(input),
+        "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+      );
+      const { response } = JSON.parse(String(init?.body));
+      return Response.json({
+        success: response === "fictional-pass",
+        hostname: "auth.meetmilton.com",
+        action: "signup",
+      });
+    }) as typeof fetch;
+    try {
+      for (const [token, status, created] of [
+        [undefined, 400, false],
+        ["fictional-fail", 403, false],
+        ["fictional-pass", 200, true],
+      ] as const) {
+        await clearRates();
+        const address = `turnstile-${token ?? "none"}@example.com`;
+        const reply = await guarded.handler(
+          new Request(ISSUER + "/sign-up/email", {
+            method: "POST",
+            headers: {
+              origin: AUTH_ORIGIN,
+              "content-type": "application/json",
+              ...(token ? { "x-captcha-response": token } : {}),
+            },
+            body: JSON.stringify({
+              email: address,
+              password: probePassword,
+              name: "Fictional mail",
+            }),
+          }),
+          TEST_PEER,
+        );
+        assert.equal(reply.status, status);
+        if (created) assert.equal(await reply.text(), neutral);
+        const users = await p.owner.query(
+          'select id from milton_auth."user" where email=$1',
+          [address],
+        );
+        assert.equal(users.rows.length, created ? 1 : 0);
+        if (created) {
+          const job = await last();
+          assert.equal(job.origin_user, users.rows[0].id);
+          assert.equal(job.state, "pending");
+        }
+      }
+    } finally {
+      globalThis.fetch = networkFetch;
+    }
     // L-1: issue and encrypt the original native proof on a clock 30s ahead
     // of PostgreSQL, without editing the proof, envelope or stored job later.
     await clearJobs();

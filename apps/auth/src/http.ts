@@ -156,6 +156,17 @@ export const SECURITY_HEADERS = {
     "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
   "strict-transport-security": "max-age=31536000",
 };
+/** Cloudflare Turnstile's script and challenge frame. */
+export const TURNSTILE_SCRIPT =
+  "https://challenges.cloudflare.com/turnstile/v0/api.js";
+/** The sign-up page's policy when Turnstile is on: the base policy plus
+ * Turnstile's origin for scripts and frames, the two its CSP reference asks. */
+export const TURNSTILE_CSP = SECURITY_HEADERS[
+  "content-security-policy"
+].replace(
+  "script-src 'self';",
+  "script-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com;",
+);
 /**
  * The client address Google's external Application Load Balancer saw, used
  * for the network rate limits: forwardedClient's rules, shared with the MCP

@@ -187,6 +187,28 @@ rollback (its sign-in writes the dropped column). MCP never touches sessions; it
 is unchanged. See [Drop the app session's access-token column](#drop-the-app-sessions-access-token-column-owner-file-013).
 Earlier records: git history (`git log -p server/deploy/README.md`).
 
+## Auth mail hardening (pending release)
+
+Code only: no migration, no new table (the per-address cap is a `take_rate` bucket in
+`milton_guard.rate_bucket`). One auth image carries all of it; build, then deploy it to
+`milton-auth` and both jobs exactly as in the last auth release (check the serving revision
+and move traffic with `update-traffic`).
+
+- **Domain check and per-address cap:** nothing to configure. Auth's Cloud Run service must
+  resolve public DNS (the default metadata resolver does). After release, a sign-up at a
+  domain with a null MX logs `auth_mail_skipped` (`undeliverable_domain`) in milton-auth's
+  log, and a fourth reset for one address in an hour logs `account_cap`.
+- **Turnstile (separate go from Peter at release):** off until both
+  `AUTH_TURNSTILE_SITE_KEY` and `AUTH_TURNSTILE_SECRET_KEY` are in auth's environment; the
+  image starts with neither. To turn it on: create the widget for hostname
+  `auth.meetmilton.com` in Cloudflare; mint the next `milton-auth-env` version with the
+  secret key added (the site key is public and may go in the payload or as a plain
+  variable); deploy `milton-auth` with that pinned version. The mail and maintenance jobs
+  do not need it. Then load `/signup` (the widget renders, no CSP error in the console)
+  and complete one real sign-up. Turning it off is deploying without the keys. Before it
+  goes on, update the privacy page (Cloudflare receives the visitor's IP and browser
+  signals); Peter has the wording.
+
 ## Runtime role timeouts (applied 2026-11-07, TODO #29)
 
 Neon's proxy and pooler drop the `statement_timeout`/`lock_timeout` the pools pass at

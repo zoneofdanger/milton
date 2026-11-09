@@ -12,7 +12,7 @@ import {
   decodeBasicCredentials,
   parseAccessTokenAuthorization,
 } from "@better-auth/core/oauth2";
-import { jwt } from "better-auth/plugins";
+import { captcha, jwt } from "better-auth/plugins";
 import {
   getOAuthProviderState,
   oauthProvider,
@@ -640,6 +640,23 @@ export function createProvider(
         metadataProfile: "mcp-2026-07-28",
         isMetadataDocumentUrlAllowed: metadataDocumentUrlAllowed,
       }),
+      // Email sign-up only, after native's rate limits: the token in
+      // x-captcha-response is checked with Cloudflare's siteverify (with the
+      // derived client address), for this host and the widget's action. A
+      // missing or refused token is 400/403. Siteverify unreachable or failing
+      // (10 s plugin limit) is native's 500, which the handler answers as a
+      // retryable 503: fail closed, nothing is created.
+      ...(config.AUTH_TURNSTILE_SECRET_KEY
+        ? [
+            captcha({
+              provider: "cloudflare-turnstile",
+              secretKey: config.AUTH_TURNSTILE_SECRET_KEY,
+              endpoints: ["/sign-up/email"],
+              expectedAction: "signup",
+              allowedHostnames: [new URL(AUTH_ORIGIN).hostname],
+            }),
+          ]
+        : []),
     ],
   });
   let inFlight = 0;
@@ -1022,6 +1039,14 @@ export function createProvider(
       if (acquired) inFlight--;
     }
   }
-  return { provider, pool, handler };
+  return {
+    provider,
+    pool,
+    handler,
+    /** Set only when Turnstile guards sign-up; the page renders its widget. */
+    turnstileSiteKey: config.AUTH_TURNSTILE_SECRET_KEY
+      ? config.AUTH_TURNSTILE_SITE_KEY
+      : undefined,
+  };
 }
 export type AuthService = ReturnType<typeof createProvider>;

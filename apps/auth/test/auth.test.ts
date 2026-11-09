@@ -887,6 +887,31 @@ describe("auth mail queueing", () => {
     expect(logs.join()).not.toContain("person");
   });
 
+  test("requests that send nothing never spend an address's bucket", async () => {
+    const { acceptMail } = await import("../src/mail.ts");
+    const config = fixtureConfig();
+    const { pool, calls, queued } = queue();
+    const domain = async () => "deliverable" as const;
+    // Before the account exists: verification asks native sends nothing for.
+    for (let n = 0; n < 5; n++)
+      await acceptMail(pool, config, state(), {
+        domain,
+        kind: "verify",
+        requested: "new@example.com",
+      });
+    // Its first real message still goes out.
+    await acceptMail(pool, config, state("new@example.com", "verify"), {
+      domain,
+    });
+    expect(queued()).toEqual([false, false, false, false, false, true]);
+    const keys = calls
+      .filter((c) => c.text.includes("take_rate"))
+      .map((c) => c.values[0]);
+    // The no-mail takes share one key that is not the address's own.
+    expect(new Set(keys.slice(0, 5)).size).toBe(1);
+    expect(keys[5]).not.toBe(keys[0]);
+  });
+
   test("every generic outcome runs the same acceptance statements", async () => {
     const { acceptMail } = await import("../src/mail.ts");
     const config = fixtureConfig();

@@ -79,17 +79,17 @@ export const assistants = async (ctx: PageContext): Promise<Response> => {
     <>
       {connectSteps(false, config.resource)}
       <p>
-        Each AI has the access you chose. Disconnecting ends its current
-        access immediately. To use it again, reconnect from the AI.
+        Each AI has the access you chose. Disconnecting ends its current access
+        immediately. To use it again, reconnect from the AI.
       </p>
       {pending.map((op) => (
         <section>{retry(op)}</section>
       ))}
       {full && (
         <p>
-          This connection list is incomplete. Disconnect a listed AI and
-          reload; if none is listed, sign-in session cleanup is needed before
-          all AIs can be shown.
+          This connection list is incomplete. Disconnect a listed AI and reload;
+          if none is listed, sign-in session cleanup is needed before all AIs
+          can be shown.
         </p>
       )}
       {listed.length === 0 ? (

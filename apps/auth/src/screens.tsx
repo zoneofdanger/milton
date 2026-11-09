@@ -211,8 +211,8 @@ export function Consent({ query }: { query: URLSearchParams }) {
   if (!requested.includes("milton:read"))
     return (
       <p>
-        This AI’s request is missing reading permission. Start a new
-        connection from your AI.
+        This AI’s request is missing reading permission. Start a new connection
+        from your AI.
       </p>
     );
   const read = requested.filter((s) => s !== "milton:write").join(" ");
@@ -223,8 +223,8 @@ export function Consent({ query }: { query: URLSearchParams }) {
         <strong class="identifier">
           {query.get("client_id") ?? "Unknown client"}
         </strong>{" "}
-        is asking to connect to your writing. Check that this is the AI
-        you intended.
+        is asking to connect to your writing. Check that this is the AI you
+        intended.
       </p>
       <form method="post" action="/form/consent">
         <input type="hidden" name="oauth_query" value={query.toString()} />
@@ -255,9 +255,8 @@ export function Consent({ query }: { query: URLSearchParams }) {
           </p>
         ) : null}
         <p>
-          Writing permission lets an AI use the save tool. You still
-          approve the exact text of every memo. You can disconnect an AI
-          in Milton.
+          Writing permission lets an AI use the save tool. You still approve the
+          exact text of every memo. You can disconnect an AI in Milton.
         </p>
         <div class="actions">
           <button name="accept" value="true" type="submit">
@@ -269,8 +268,7 @@ export function Consent({ query }: { query: URLSearchParams }) {
         </div>
       </form>
       <p class="hint">
-        Expired or interrupted request? Start the connection again from your
-        AI.
+        Expired or interrupted request? Start the connection again from your AI.
       </p>
     </>
   );
@@ -357,8 +355,8 @@ export function Security({
               autocomplete="new-password"
             />
             <p class="hint">
-              15–128 Unicode characters. Other sessions and all AI
-              connections end.
+              15–128 Unicode characters. Other sessions and all AI connections
+              end.
             </p>
             <button disabled={!fresh}>Change password</button>
           </form>
@@ -396,8 +394,8 @@ export function Security({
         </button>
       </form>
       <p>
-        Ending browser sessions leaves offline AIs connected. Manage
-        AI connections and account deletion in{" "}
+        Ending browser sessions leaves offline AIs connected. Manage AI
+        connections and account deletion in{" "}
         <a href="https://app.meetmilton.com/account">Milton</a>.
       </p>
       <form method="post" action="/form/signout">

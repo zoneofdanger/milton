@@ -83,8 +83,8 @@ export function connectSteps(empty: boolean, mcpUrl: string) {
           <h3>Add Milton in your AI’s settings.</h3>
           <p>
             Use this address in its MCP or connector settings, then complete
-            sign-in and approve the connection. Availability depends on your
-            AI and plan.
+            sign-in and approve the connection. Availability depends on your AI
+            and plan.
           </p>
           <p>
             <a href="https://www.meetmilton.com/setup">
@@ -239,8 +239,8 @@ function sheet({ docs, email, date, comment }: SheetView) {
           <p class="empty-placeholder">No writing samples on file yet.</p>
           <p>
             <a href="/assistants#connect">Follow the setup steps</a> to connect
-            an AI, then paste something you wrote and ask it to clean it
-            up; older examples are optional.
+            an AI, then paste something you wrote and ask it to clean it up;
+            older examples are optional.
           </p>
           <p>Once connected, copy this prompt into your AI:</p>
           <blockquote class="setup-copy">
@@ -359,8 +359,8 @@ function current(
       {notice}
       {!view.docs.is_empty && !assistantPaused && (
         <p class="small-note sheet-meta">
-          Give a connected AI the facts for your next email or DM and ask
-          it to use what’s on file. You can also approve a writing sample.
+          Give a connected AI the facts for your next email or DM and ask it to
+          use what’s on file. You can also approve a writing sample.
         </p>
       )}
       {sheet(view)}

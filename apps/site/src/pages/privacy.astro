@@ -22,28 +22,27 @@ import SiteLayout from "../layouts/SiteLayout.astro";
     Your name and email address when you sign up or sign in, and the identifiers
     of Google or GitHub accounts you use to sign in or link; password hashes if
     you use a password; sign-in sessions, email verification and password reset
-    records, AI permissions and access tokens, and security rate-limit
-    records; the writing rules you ask your AIs to save; the samples of
-    your writing you approve for saving, stored exactly as approved, including
-    any names they contain; each rule and sample you saved, with its versions
-    and which AI saved it; request receipts used to prevent duplicate
-    saves; internal records of accepted changes, including the exact submitted
-    rules, edits or samples, authorship and affected versions; connected
-    AIs and the AIs you disconnect; counts of tool calls you make
-    each day; and your billing record: your Stripe customer and subscription
-    IDs, the subscription’s status, its trial and billing period dates, and
-    which trial reminders have been sent.
+    records, AI permissions and access tokens, and security rate-limit records;
+    the writing rules you ask your AIs to save; the samples of your writing you
+    approve for saving, stored exactly as approved, including any names they
+    contain; each rule and sample you saved, with its versions and which AI
+    saved it; request receipts used to prevent duplicate saves; internal records
+    of accepted changes, including the exact submitted rules, edits or samples,
+    authorship and affected versions; connected AIs and the AIs you disconnect;
+    counts of tool calls you make each day; and your billing record: your Stripe
+    customer and subscription IDs, the subscription’s status, its trial and
+    billing period dates, and which trial reminders have been sent.
   </p>
 
   <h2>How we use it</h2>
   <p>
     Only to run Milton: to sign you in, verify your email, help you recover and
     secure your account, store your rules, retain their internal history,
-    prepare the cover sheet and reports for the AIs you connect, and run
-    your trial and subscription. Accepted-change records remain with your
-    internal history until account deletion. Your data is encrypted at rest by
-    our database provider. We do not sell your data, show ads, or use your rules
-    or samples to train AI models.
+    prepare the cover sheet and reports for the AIs you connect, and run your
+    trial and subscription. Accepted-change records remain with your internal
+    history until account deletion. Your data is encrypted at rest by our
+    database provider. We do not sell your data, show ads, or use your rules or
+    samples to train AI models.
   </p>
   <p>
     Email/password sign-in requires a verified email address. If you use a
@@ -56,20 +55,20 @@ import SiteLayout from "../layouts/SiteLayout.astro";
 
   <h2>Who can see your rules and samples</h2>
   <p>
-    You and the AIs you connect receive your current cover sheet and
-    reports, samples included. Once an AI has read them, its handling of
-    that content is governed by that AI’s own terms and privacy policy,
-    not ours. Rules and samples are stored exactly as your AI sends them;
-    Ordinary saves and reads do not send them to an AI model. If you explicitly
-    opt into the private guide pilot, the background processing described below
-    sends approved samples to Anthropic. Milton does not collect your AI
-    conversations. The service providers below process data to operate Milton.
+    You and the AIs you connect receive your current cover sheet and reports,
+    samples included. Once an AI has read them, its handling of that content is
+    governed by that AI’s own terms and privacy policy, not ours. Rules and
+    samples are stored exactly as your AI sends them; Ordinary saves and reads
+    do not send them to an AI model. If you explicitly opt into the private
+    guide pilot, the background processing described below sends approved
+    samples to Anthropic. Milton does not collect your AI conversations. The
+    service providers below process data to operate Milton.
   </p>
   <p>
-    You can disconnect an AI at any time from Connected AIs in the
-    Milton app. Milton blocks further access, even with an existing
-    authorization. This does not erase content the AI already received.
-    To use it again, reconnect it and approve access.
+    You can disconnect an AI at any time from Connected AIs in the Milton app.
+    Milton blocks further access, even with an existing authorization. This does
+    not erase content the AI already received. To use it again, reconnect it and
+    approve access.
   </p>
 
   <h2>Samples</h2>
@@ -78,10 +77,9 @@ import SiteLayout from "../layouts/SiteLayout.astro";
     it is stored exactly as you approved it. Milton does not remove names or
     other details from it; you decide what to save. Saving a new sample keeps
     your existing samples unless you ask to replace or remove them. You can ask
-    your AI to replace or remove a sample. Removed or replaced samples
-    leave future reports and current downloads, but remain in your internal
-    history until account deletion. This does not erase copies an AI
-    already received.
+    your AI to replace or remove a sample. Removed or replaced samples leave
+    future reports and current downloads, but remain in your internal history
+    until account deletion. This does not erase copies an AI already received.
   </p>
 
   <h2>Optional derived guides</h2>
@@ -90,10 +88,10 @@ import SiteLayout from "../layouts/SiteLayout.astro";
     Milton sends every active approved sample in a report, with its approved
     classification and context, to Anthropic to infer writing tendencies. Rules,
     retired sample revisions and earlier guides are excluded. The resulting
-    guide is an interpretation, shown to you and the AIs you connect;
-    your approved writing stays unchanged. A stale guide can still reflect a
-    sample that was corrected or removed until its update succeeds. Removing all
-    active samples clears the guide immediately. Guides are excluded from your
+    guide is an interpretation, shown to you and the AIs you connect; your
+    approved writing stays unchanged. A stale guide can still reflect a sample
+    that was corrected or removed until its update succeeds. Removing all active
+    samples clears the guide immediately. Guides are excluded from your
     download.
   </p>
   <p>
@@ -104,9 +102,9 @@ import SiteLayout from "../layouts/SiteLayout.astro";
       Anthropic’s retention policy
     </a>
     . Disabling participation hides guides on future reads; it cannot retract
-    copies already received by an AI. Completed guides may remain stored
-    while disabled, until account deletion. Milton keeps one current guide per
-    report, without a guide history archive.
+    copies already received by an AI. Completed guides may remain stored while
+    disabled, until account deletion. Milton keeps one current guide per report,
+    without a guide history archive.
   </p>
 
   <h2>Where it is kept</h2>
@@ -156,43 +154,42 @@ import SiteLayout from "../layouts/SiteLayout.astro";
   <p>
     The app and sign-in service use separate cookies, each limited to its own
     hostname, to keep you signed in and protect sign-in and account actions.
-    Signing out ends browser access; AIs with offline access stay
-    connected. Changing or resetting your password, or unlinking a sign-in
-    method, invalidates earlier browser sessions and AI authorizations.
-    AIs must reconnect with your consent to regain access.
+    Signing out ends browser access; AIs with offline access stay connected.
+    Changing or resetting your password, or unlinking a sign-in method,
+    invalidates earlier browser sessions and AI authorizations. AIs must
+    reconnect with your consent to regain access.
   </p>
 
   <h2>Deleting your account</h2>
   <p>
-    Choose Delete account in the Milton app. Deletion blocks account and
-    AI access. If you have a Stripe customer, deletion deletes it at
-    Stripe first, which ends any subscription immediately, with no refund.
-    Milton then removes your rules, samples, derived guides and pending guide
-    work, internal memos and their history, your cover sheet and reports,
-    request receipts, accepted-change records, usage counts and billing record,
-    and the app’s sign-in sessions and credentials. When you delete your
-    account, Milton’s sign-in service also deletes your sign-in profile,
-    password hashes, linked sign-in methods, sessions, and every AI
-    connection you approved. An AI registration that only you approved is
-    deleted; one that another account also approved stays, with its name and
-    contact details erased. We keep only a one-way fingerprint of each deleted
-    or erased registration’s ID, so its details stay erased if it registers
-    again. Any registration approved before November 8, 2026 that can no longer
-    be linked to an account remains as registered. If account cleanup is
-    incomplete, the app offers a retry; deletion is confirmed only when that
-    cleanup finishes. Unused password reset links stop working when account
-    security changes or deletion starts, as well as when they expire.
-    Verification links expire after one hour; remaining verification records
-    become eligible for cleanup one day after expiry and can remain until
-    cleanup reaches them. The limited records below remain.
+    Choose Delete account in the Milton app. Deletion blocks account and AI
+    access. If you have a Stripe customer, deletion deletes it at Stripe first,
+    which ends any subscription immediately, with no refund. Milton then removes
+    your rules, samples, derived guides and pending guide work, internal memos
+    and their history, your cover sheet and reports, request receipts,
+    accepted-change records, usage counts and billing record, and the app’s
+    sign-in sessions and credentials. When you delete your account, Milton’s
+    sign-in service also deletes your sign-in profile, password hashes, linked
+    sign-in methods, sessions, and every AI connection you approved. An AI
+    registration that only you approved is deleted; one that another account
+    also approved stays, with its name and contact details erased. We keep only
+    a one-way fingerprint of each deleted or erased registration’s ID, so its
+    details stay erased if it registers again. Any registration approved before
+    November 8, 2026 that can no longer be linked to an account remains as
+    registered. If account cleanup is incomplete, the app offers a retry;
+    deletion is confirmed only when that cleanup finishes. Unused password reset
+    links stop working when account security changes or deletion starts, as well
+    as when they expire. Verification links expire after one hour; remaining
+    verification records become eligible for cleanup one day after expiry and
+    can remain until cleanup reaches them. The limited records below remain.
   </p>
   <p>These records remain after deletion:</p>
   <ul>
     <li>
-      Records of original account deletions and AI disconnections,
-      including original account, sign-in and AI identifiers and
-      connection references, so retries cannot affect a later account or
-      connection. These contain no writing or credentials.
+      Records of original account deletions and AI disconnections, including
+      original account, sign-in and AI identifiers and connection references, so
+      retries cannot affect a later account or connection. These contain no
+      writing or credentials.
     </li>
     <li>
       Keyed fingerprints of verified email addresses and stable Google or GitHub
@@ -215,10 +212,9 @@ import SiteLayout from "../layouts/SiteLayout.astro";
   <p>
     These limited identity and security records are kept without a fixed expiry
     for those purposes. They do not restore deleted writing or authorize access.
-    Expired sign-in sessions, verification and reset records, and expired
-    AI tokens can remain until periodic cleanup; records still needed for
-    active offline access or unfinished cleanup remain until that work can
-    finish.
+    Expired sign-in sessions, verification and reset records, and expired AI
+    tokens can remain until periodic cleanup; records still needed for active
+    offline access or unfinished cleanup remain until that work can finish.
   </p>
   <p>
     Copies in database backups are not erased immediately; they are removed when

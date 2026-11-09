@@ -112,8 +112,7 @@ export const accountDeletion = async (ctx: PageContext): Promise<Response> => {
     <>
       <p role="status">
         Your Milton account and sign-in have been deleted. Your writing is
-        erased, your subscription has ended, and connected AIs have lost
-        access.
+        erased, your subscription has ended, and connected AIs have lost access.
       </p>
       <p>
         Stripe keeps past payment records. Backup copies expire according to

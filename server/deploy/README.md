@@ -23,7 +23,23 @@ This runbook keeps only the latest release record. Earlier release records and a
 one-time procedures are in git history; the last full version is at commit 492b96a
 (`git show 492b96a:server/deploy/README.md`).
 
-## Release record: deletion fences Stripe, Stripe reads off the lock, guide pilot parked, deletion links, UserInfo binding, private admission service, session token drop, e2e fix, MCP next steps, guards (2026-11-08, PRs #58–#66, #68–#77)
+## Release record: deletion fences Stripe, Stripe reads off the lock, guide pilot parked, deletion links, UserInfo binding, private admission service, session token drop, e2e fix, MCP next steps, guards (2026-11-08, PRs #58–#66, #68–#80)
+
+- **#79 and #80 (Peter's go, relayed verbatim by milton-overlord; one release), `c3ed021`:**
+  #79 (Astra PASS, no findings): `create_memo` reads `memo.tweaks: []` and
+  `memo.kind_id: null` as omitted, before the request hash. #80 (milton-25; Astra FAIL on a
+  lost retention line, then a should-fix, both fixed; PASS): first setup asks for about five
+  pasted pieces the person wrote and sent, says Milton keeps each as a memo, and comes back to
+  that ask after a writing task brought first. No migration. Server image
+  `sha256:27219d385d25ef7f51315400613d3c28ed62219a903df2b93ba6e29507461192`: admit
+  `milton-admit-00006-gjl` at 03:26:40Z (2026-11-10), app and MCP `milton-*-setup-c3ed021` at
+  03:26:54Z and 03:27:10Z, `milton-e2e-daily` at 03:27:13Z. Live: health 200 ×3, app home
+  200, MCP 401 unauthenticated, forms probe PASS, `milton-e2e-daily-cfqss` passed; on the
+  test account a save with `tweaks: []` and one with `kind_id: null` were both saved, then
+  forgotten, the sheet back to empty at the same version; the site's setup page serves the new
+  ask. Gate at 03:38Z: clean; no request reached an older revision after 03:28Z; no error lines. Checks: PR CI green on `d8f34de` and `26d0b8e` (the
+  integration job's one teardown failure on `26d0b8e` passed on rerun), merged tree types,
+  154 tests and format 0, main CI green on `c3ed021`.
 
 - **#76 (Peter's go; milton-memos; Astra FAIL, four fixes, delta PASS), `bdac60f`:** memos
   and tweaks replace rules and samples, and the guide pilot is removed. Snapshot
@@ -238,6 +254,10 @@ rua=mailto:<prefix>@dmarc-reports.cloudflare.net"` (reports in the Cloudflare da
   the owner password reset, Neon autoscaling and the budget, daily snapshots
   (11:00 UTC, 14 days; first `snap-silent-feather-b84f2kwj`).
 
+Since #79/#80: app/MCP `milton-*-setup-c3ed021`, admit `milton-admit-00006-gjl` and
+`milton-e2e-daily` on image `sha256:27219d38…`; rollback, code only, to app/MCP
+`milton-*-memos-bdac60f`, admit `milton-admit-00005-vp2` and the daily job to image
+`sha256:b2952441…`.
 Since #76: app/MCP `milton-*-memos-bdac60f`, admit `milton-admit-00005-vp2` and
 `milton-e2e-daily` on image `sha256:b2952441…`; rollback, code only (0012 and 014 stay), to
 app/MCP `milton-*-sayai-74f6153` and admit `milton-admit-00004-q7h`, and the daily job to
@@ -1551,8 +1571,8 @@ references. Inspect revision readiness before selecting a recorded revision:
 gcloud run revisions list --service=milton-app --project=milton-510506 --region=us-east4
 ```
 
-Now serving (2026-11-09): app `milton-app-memos-bdac60f`, MCP `milton-mcp-memos-bdac60f`,
-admission `milton-admit-00005-vp2` (source `bdac60f`), and auth `milton-auth-00019-p4f` (source `77f7d10`). The
+Now serving (2026-11-10): app `milton-app-setup-c3ed021`, MCP `milton-mcp-setup-c3ed021`,
+admission `milton-admit-00006-gjl` (source `c3ed021`), and auth `milton-auth-00019-p4f` (source `77f7d10`). The
 release record above gives the image and rollback revisions.
 
 Roll back only affected services, preserve ingress/IAM, then repeat the canonical

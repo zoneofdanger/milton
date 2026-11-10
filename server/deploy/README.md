@@ -964,24 +964,34 @@ stored outcome). Each step needs Peter's go; the release coordinator runs it:
 
 2. As `neondb_owner`: `bun run --cwd server db:migrate` applies `0014_drop_source_hash`
    (journal 15 entries). Each statement takes an `ACCESS EXCLUSIVE` lock on `save_requests`
-   until commit, so saves wait for it; reads and every other table, `users` included, do
-   not. A save holds its own lock on `save_requests` from its receipt lookup to its commit,
-   so the migration waits for saves in flight. Its `SET LOCAL lock_timeout = '5s'` (inside
-   the migration's transaction, since Neon drops the limits a client passes at connect)
-   bounds that wait: on a lock timeout it rolls back whole and is simply rerun. The work
-   under the lock is catalog changes and one scan of `save_requests` (tens of rows) to
-   validate the new check, so it holds it for milliseconds.
+   until commit, so every statement on `save_requests`, a save's receipt lookup and any
+   other `SELECT` included, waits for it. 0014 locks no other table, but a save takes its
+   account's `users` row lock (`FOR NO KEY UPDATE`) before its receipt lookup, so a save
+   blocked here keeps that row lock, and the same account's other saves and anything else
+   that locks its `users` row (an erasure, a status change) wait behind it until 0014
+   commits or reaches its lock timeout. Other accounts' reads, and every request that
+   touches neither `save_requests` nor a blocked account's row, do not wait. A save holds
+   its own lock on `save_requests` from its receipt lookup to its commit, so the migration
+   also waits for saves in flight. Its `SET LOCAL lock_timeout = '5s'` (inside the
+   migration's transaction, since Neon drops the limits a client passes at connect) bounds
+   that wait: on a lock timeout it rolls back whole, releasing every waiter, and is simply
+   rerun. The work under the lock is catalog changes and one scan of `save_requests` (tens
+   of rows) to validate the new check, so once it has the lock it holds it for
+   milliseconds.
 3. Check as the owner. The first query returns 0; the second returns
-   `CHECK ((input_hash ~ '^[a-f0-9]{64}$'::text))`; the third returns step 1's `receipts`;
-   the fourth returns 15:
+   `CHECK ((input_hash ~ '^[a-f0-9]{64}$'::text))`; the third returns 0 (no row violates
+   the check); the fourth returns 15. The last records the receipt count for the record
+   only: with traffic open a save raises it and an account erasure lowers it, so it need
+   not match step 1's.
 
    ```sql
    SELECT count(*) FROM information_schema.columns
    WHERE table_schema = 'public' AND table_name = 'save_requests' AND column_name = 'source_hash';
    SELECT pg_get_constraintdef(oid) FROM pg_constraint
    WHERE conrelid = 'public.save_requests'::regclass AND conname = 'save_request_hashes';
-   SELECT count(*) FROM save_requests;
+   SELECT count(*) FROM save_requests WHERE input_hash !~ '^[a-f0-9]{64}$';
    SELECT count(*) FROM drizzle.__drizzle_migrations;
+   SELECT count(*) AS receipts FROM save_requests;
    ```
 
    Then `check-runtime-role.ts` prints `ok` for app and MCP, one manual `milton-e2e-daily`

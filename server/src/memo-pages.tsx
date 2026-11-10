@@ -311,7 +311,7 @@ function sheet({
           <p>
             <a href="/assistants#connect">Follow the setup steps</a> to connect
             an AI, then paste about five things you wrote and sent. Your AI
-            keeps each as a memo here, and every final you accept after.
+            keeps each as a memo here.
           </p>
           <p>Once connected, copy this prompt into your AI:</p>
           <blockquote class="setup-copy">

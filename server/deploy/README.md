@@ -1295,7 +1295,7 @@ or daily call allowance (removed by PR #40, serving since 2026-11-08). Existing 
 in effect. Trials and billing are live (since 2026-11-04).
 Each image includes the app, MCP and admit roles and the browser assets.
 [admit.service.json](admit.service.json) is kept at the serving image and is applied with
-`services replace` (see the admit release order below). `app.service.json` and
+`services replace` (see "Release order" under the admission service below). `app.service.json` and
 `mcp.service.json` are not kept current: they still pin a pre-cutover image and secret
 versions. Never apply them with `services replace`, which would deploy that old code and
 those old secrets.

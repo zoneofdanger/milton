@@ -238,6 +238,59 @@ test("tweaks reuse ids and exact wordings, count citations, and forgetting a mem
   }
 });
 
+test("an empty tweaks list and a null kind_id save as if omitted, and a retry sending them replays the omitted save", async () => {
+  const local = await localStore();
+  try {
+    await seedUsers(local.pg, "u");
+    const store = fixtureStore(local.db, "u");
+    // Sent by AI clients in testing (corpus-test, learning-test reports).
+    const lenient = { tweaks: [], kind_id: null as unknown as string };
+    const drafted = memoSave({ first_draft: draft, mode: "draft", rounds: 1 });
+    const saved = await store.saveMemo(drafted);
+    expect(saved).toMatchObject({ status: "saved", memo: { tweaks: [] } });
+    expect(saved.memo!.kind_id).toBeUndefined();
+    // The same request with [] and null is the same input: it replays.
+    expect(
+      await store.saveMemo({
+        ...drafted,
+        memo: { ...drafted.memo!, ...lenient },
+      }),
+    ).toEqual(saved);
+    // Shapes that refuse tweaks accept [] as none: writing the person gave,
+    // and a final equal to its first draft.
+    expect(
+      await store.saveMemo(memoSave({ final: "My own words.", ...lenient })),
+    ).toMatchObject({ status: "saved", memo: { tier: "own", tweaks: [] } });
+    expect(
+      await store.saveMemo(
+        memoSave({
+          first_draft: final,
+          final,
+          mode: "draft",
+          rounds: 0,
+          ...lenient,
+        }),
+      ),
+    ).toMatchObject({ status: "saved", memo: { tier: "untouched" } });
+    expect(
+      (await local.pg.query("SELECT 1 FROM memos WHERE kind_id IS NULL")).rows,
+    ).toHaveLength(3);
+    // memo_context keeps refusing a null kind_id.
+    await expect(
+      store.saveMemo({
+        request_id: crypto.randomUUID(),
+        memo_context: {
+          memo_id: saved.memo!.memo_id,
+          context: { summary: "decline a vendor", medium: "email" },
+          kind_id: lenient.kind_id,
+        },
+      }),
+    ).rejects.toMatchObject({ code: "invalid_input" });
+  } finally {
+    await local.dispose();
+  }
+});
+
 test("a report ranks by kind, medium and tier, serves no untouched finals and at most three steered, within its budget", async () => {
   const local = await localStore();
   try {

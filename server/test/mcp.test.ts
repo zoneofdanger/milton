@@ -179,6 +179,21 @@ test("an SDK client receives instructions, discovers the three tools, and reads 
       save.inputSchema.properties as Record<string, { properties?: object }>
     ).memo!;
     expect(Object.keys(memoSchema.properties ?? {})).toContain("report_id");
+    // Clients may send tweaks: [] and kind_id: null for none; memo_context's
+    // kind_id still takes only an id.
+    const fields = (schema: object | undefined) =>
+      (schema as { properties: Record<string, Record<string, unknown>> })
+        .properties;
+    const memoFields = fields(memoSchema);
+    expect(memoFields.tweaks).toMatchObject({ type: "array", maxItems: 10 });
+    expect(memoFields.tweaks).not.toHaveProperty("minItems");
+    expect(memoFields.kind_id!.anyOf).toContainEqual({ type: "null" });
+    expect(fields(save.inputSchema.properties!.memo_context).kind_id).toEqual({
+      type: "string",
+      minLength: 1,
+      maxLength: 64,
+      description: expect.any(String),
+    });
     // What a memo may hold, and what it never holds (spec, "Contract changes").
     for (const field of [
       "save one when the person accepts a final, without asking",
@@ -358,6 +373,17 @@ test("an object argument sent as a JSON string is read as that object; any other
     });
     expect(reply.isError).toBeUndefined();
     expect(saved).toEqual([{ request_id, memo }]);
+    // tweaks: [] and kind_id: null arrive as omitted, even inside the string.
+    const lenient = await client.callTool({
+      name: "create_memo",
+      arguments: {
+        request_id,
+        memo: JSON.stringify({ ...memo, tweaks: [], kind_id: null }),
+      },
+    });
+    expect(lenient.isError).toBeUndefined();
+    expect(JSON.stringify(saved[1])).toBe(JSON.stringify(saved[0]));
+    saved.pop();
     const read = await client.callTool({
       name: "get_report",
       arguments: { intent: JSON.stringify(goodIntent) },

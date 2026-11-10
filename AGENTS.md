@@ -33,6 +33,7 @@ the backlog. The concept files indexed below hold everything else.
 ## Concepts
 
 <!-- concepts:start -->
+
 - [accounts](docs/accounts.md) — Sign-in through the self-hosted auth service, app sessions and OIDC, admission and account creation, open sign-ups, and connection keys
 - [agents/approval](docs/agents/approval.md) — What counts as Peter's approval, including his words relayed from another session, and when to ask him
 - [agents/branches](docs/agents/branches.md) — One branch and worktree per task, one change per commit, staged by explicit path
@@ -70,4 +71,5 @@ the backlog. The concept files indexed below hold everything else.
 - [setup](docs/setup.md) — First setup on an empty account (offered once, about five pastes, the cover sheet, the standing line), the shared setup prompt and shared facts
 - [site](docs/site.md) — The static site at meetmilton.com: what Astro builds it from, what Vercel uploads and publishes, and what its pages do
 - [tps-page](docs/tps-page.md) — The web app a signed-in person sees: the TPS page, one memo, memo settings, the TPS.md export and the Connected AIs page
+
 <!-- concepts:end -->

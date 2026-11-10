@@ -33,7 +33,7 @@ test("each served tool description, and all of them together, stays within its b
       await server.connect(serverTransport);
       await client.connect(clientTransport);
       const tools = (await client.listTools()).tools;
-      // One word for each thing (SPEC.md): never the retired names.
+      // One word for each thing (docs/memos.md): never the retired names.
       for (const tool of tools)
         expect(tool.description).not.toMatch(
           /\b(assistants?|samples?|trails?|lessons?|rules?)\b/i,

@@ -77,9 +77,13 @@ depends on the client.
 - [`apps/site`](apps/site/): the Astro page behind `meetmilton.com`.
 - [`packages/theme`](packages/theme/): Milton's design tokens, stylesheets, and contrast check.
 - [`design/`](design/): Milton's portrait.
-- [`docs/how-milton-works.md`](docs/how-milton-works.md): every piece of logic in Milton, one line each.
+- [`docs/`](docs/): one file per concept, listed in [AGENTS.md](AGENTS.md). How Milton
+  behaves: [memos](docs/memos.md), [reports](docs/reports.md), [saves](docs/saves.md),
+  [setup](docs/setup.md), [the MCP server](docs/mcp.md), [the TPS page](docs/tps-page.md),
+  [accounts](docs/accounts.md), [deletion](docs/deletion.md) and
+  [billing](docs/billing.md); how it runs: [hosting](docs/hosting.md),
+  [database](docs/database.md), [the site](docs/site.md) and [checks](docs/checks.md).
 - [`docs/research/`](docs/research/): dated experiments, evidence and product/source research, including the Honcho comparison.
-- [`SPEC.md`](SPEC.md): the design notes and decisions, in the order they were made.
 
 ## Working locally
 

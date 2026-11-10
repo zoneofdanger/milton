@@ -112,7 +112,7 @@ test("copy states the standing line, trial length and price that code uses", () 
  * tmp notes is dead for everyone else. Known links, with why each stays. */
 const TMP_LINKS: Record<string, string> = {
   ".github/workflows/checks.yml": "names the folder the agent-docs step guards",
-  "docs/how-milton-works.md": "describes these checks",
+  "docs/checks.md": "describes these checks",
   "scripts/agent-docs.ts": "the vendored checker matches the folder it guards",
   "docs/research/derived-systems-2026.md":
     "its source reports; moves with the held docs restructure",

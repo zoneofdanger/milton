@@ -1,6 +1,6 @@
 // The TPS page's store: what the person sees of their memos, and the changes
-// they make there with their own session (SPEC.md, "Where the person sees and
-// controls it"). Every change takes the account lock saves take.
+// they make there with their own session (docs/tps-page.md). Every change
+// takes the account lock saves take.
 import { sql } from "drizzle-orm";
 import type { StoreDatabase, StoreSession } from "./database";
 import { databaseFailure } from "./database";

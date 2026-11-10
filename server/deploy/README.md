@@ -23,7 +23,18 @@ This runbook keeps only the latest release record. Earlier release records and a
 one-time procedures are in git history; the last full version is at commit 492b96a
 (`git show 492b96a:server/deploy/README.md`).
 
-## Release record: deletion fences Stripe, Stripe reads off the lock, guide pilot parked, deletion links, UserInfo binding, private admission service, session token drop, e2e fix, MCP next steps, guards (2026-11-08, PRs #58–#66, #68–#82)
+## Release record: deletion fences Stripe, Stripe reads off the lock, guide pilot parked, deletion links, UserInfo binding, private admission service, session token drop, e2e fix, MCP next steps, guards (2026-11-08, PRs #58–#66, #68–#83)
+
+- **#83 (Peter's go, relayed verbatim by milton-overlord; milton-ranking; Astra PASS, no
+  findings), `898f9ad`:** reports rank purpose/audience overlap ahead of tier (kind, medium,
+  overlap, tier, full-text rank, newest, id), so unrelated pasted setup writing no longer
+  fills the first slots or pushes matches out of the 32 KiB budget. No migration. Server
+  image `sha256:093ace98ef05c1c13b7ea45af5aef9baf06e505c12e5556ed6329a598e5e736c`: admit
+  `milton-admit-00007-rpn` at 05:29:26Z (2026-11-10), app and MCP `milton-*-rank-898f9ad` at
+  05:29:44Z and 05:29:59Z, `milton-e2e-daily` at 05:30:02Z. Live: health 200 ×3, app home
+  200, MCP 401 unauthenticated, forms probe PASS, `milton-e2e-daily-v92hl` passed. Gate at 05:40Z: clean; no request reached an older revision after 05:31Z; no error lines.
+  Checks: PR CI green on `9c67ff8`, merged tree types, 155 tests and format 0, main CI green
+  on `898f9ad`.
 
 - **#82 (Peter's go, relayed verbatim by milton-overlord under AGENTS.md `aba41ee`; Astra
   PASS, two runbook fixes), `7bc1194`, closes TODO #30:** Drizzle `0014_drop_source_hash`
@@ -284,6 +295,10 @@ rua=mailto:<prefix>@dmarc-reports.cloudflare.net"` (reports in the Cloudflare da
   the owner password reset, Neon autoscaling and the budget, daily snapshots
   (11:00 UTC, 14 days; first `snap-silent-feather-b84f2kwj`).
 
+Since #83: app/MCP `milton-*-rank-898f9ad`, admit `milton-admit-00007-rpn` and
+`milton-e2e-daily` on image `sha256:093ace98…`; rollback, code only, to app/MCP
+`milton-*-setup-c3ed021`, admit `milton-admit-00006-gjl` and the daily job to image
+`sha256:27219d38…`.
 Since #78 (0013 and 015): app, MCP and admission never roll back below #76
 (`milton-*-memos-bdac60f`, `milton-admit-00005-vp2`); the old tables, old receipts and guide
 roles come back only by restoring snapshot `snap-mute-water-b85o19c9`, which loses every
@@ -1787,8 +1802,8 @@ references. Inspect revision readiness before selecting a recorded revision:
 gcloud run revisions list --service=milton-app --project=milton-510506 --region=us-east4
 ```
 
-Now serving (2026-11-10): app `milton-app-setup-c3ed021`, MCP `milton-mcp-setup-c3ed021`,
-admission `milton-admit-00006-gjl` (source `c3ed021`), and auth `milton-auth-00019-p4f` (source `77f7d10`). The
+Now serving (2026-11-10): app `milton-app-rank-898f9ad`, MCP `milton-mcp-rank-898f9ad`,
+admission `milton-admit-00007-rpn` (source `898f9ad`), and auth `milton-auth-00019-p4f` (source `77f7d10`). The
 release record above gives the image and rollback revisions.
 
 Roll back only affected services, preserve ingress/IAM, then repeat the canonical

@@ -23,7 +23,21 @@ This runbook keeps only the latest release record. Earlier release records and a
 one-time procedures are in git history; the last full version is at commit 492b96a
 (`git show 492b96a:server/deploy/README.md`).
 
-## Release record: deletion fences Stripe, Stripe reads off the lock, guide pilot parked, deletion links, UserInfo binding, private admission service, session token drop, e2e fix, MCP next steps, guards (2026-11-08, PRs #58–#66, #68–#83)
+## Release record: deletion fences Stripe, Stripe reads off the lock, guide pilot parked, deletion links, UserInfo binding, private admission service, session token drop, e2e fix, MCP next steps, guards (2026-11-08, PRs #58–#66, #68–#85)
+
+- **#85 (Peter's go, relayed verbatim by milton-overlord; milton-saves; Astra PASS, one
+  should-fix, fixed), `1e6d859`, closes TODO #35:** `create_memo` reads a flattened memo
+  (`memo` as the plain final text, its `context`, `new_kind` or `kind_id` beside it) as the
+  nested one before validation and the request hash; an ambiguous or still-malformed one is
+  refused with the nested shape. No migration. Server image
+  `sha256:1be0d2c524a5e5d0f7eb45da8ee9830e0c5b684c5d702792ba5c702de99d8d8d`: admit
+  `milton-admit-00008-lxx` at 05:43:33Z (2026-11-10), app and MCP `milton-*-flat-1e6d859` at
+  05:43:49Z and 05:44:03Z, `milton-e2e-daily` at 05:44:05Z. Live: health 200 ×3, app home
+  200, MCP 401 unauthenticated, forms probe PASS, `milton-e2e-daily-gh98t` passed; on the
+  test account a flattened save was kept, its nested retry with the same `request_id`
+  returned the same memo, a flattened save without context was refused with the shape, and
+  the sheet was back to empty at the same version. Gate at 05:54Z: clean; no request reached an older revision after 05:45Z; no error lines. Checks: PR CI green on `3c09000`,
+  merged tree types, 156 tests and format 0, main CI green on `1e6d859`.
 
 - **#83 (Peter's go, relayed verbatim by milton-overlord; milton-ranking; Astra PASS, no
   findings), `898f9ad`:** reports rank purpose/audience overlap ahead of tier (kind, medium,
@@ -295,6 +309,10 @@ rua=mailto:<prefix>@dmarc-reports.cloudflare.net"` (reports in the Cloudflare da
   the owner password reset, Neon autoscaling and the budget, daily snapshots
   (11:00 UTC, 14 days; first `snap-silent-feather-b84f2kwj`).
 
+Since #85: app/MCP `milton-*-flat-1e6d859`, admit `milton-admit-00008-lxx` and
+`milton-e2e-daily` on image `sha256:1be0d2c5…`; rollback, code only, to app/MCP
+`milton-*-rank-898f9ad`, admit `milton-admit-00007-rpn` and the daily job to image
+`sha256:093ace98…`.
 Since #83: app/MCP `milton-*-rank-898f9ad`, admit `milton-admit-00007-rpn` and
 `milton-e2e-daily` on image `sha256:093ace98…`; rollback, code only, to app/MCP
 `milton-*-setup-c3ed021`, admit `milton-admit-00006-gjl` and the daily job to image
@@ -1802,8 +1820,8 @@ references. Inspect revision readiness before selecting a recorded revision:
 gcloud run revisions list --service=milton-app --project=milton-510506 --region=us-east4
 ```
 
-Now serving (2026-11-10): app `milton-app-rank-898f9ad`, MCP `milton-mcp-rank-898f9ad`,
-admission `milton-admit-00007-rpn` (source `898f9ad`), and auth `milton-auth-00019-p4f` (source `77f7d10`). The
+Now serving (2026-11-10): app `milton-app-flat-1e6d859`, MCP `milton-mcp-flat-1e6d859`,
+admission `milton-admit-00008-lxx` (source `1e6d859`), and auth `milton-auth-00019-p4f` (source `77f7d10`). The
 release record above gives the image and rollback revisions.
 
 Roll back only affected services, preserve ingress/IAM, then repeat the canonical

@@ -12,6 +12,10 @@ covers:
   - server/src/assets.ts
   - server/src/error-log.ts
   - server/Dockerfile
+  - server/vite.config.ts
+  - .dockerignore
+  - apps/auth/Dockerfile
+  - apps/auth/Dockerfile.dockerignore
   - server/scripts/**
   - packages/forwarded-client/**
 ---
@@ -49,6 +53,8 @@ are in [server/README.md](../server/README.md).
 - One Docker image runs as the app, MCP and admission services, and `MILTON_SERVICE`
   picks `app`, `mcp` or `admit`; any other value fails startup. The image builds with
   Bun, then ships only the bundle and public assets to a non-root Node container.
+  Its build context is only what `.dockerignore` keeps. The auth service has its own
+  image (`apps/auth/Dockerfile`).
 - The app role serves browser pages and an exact list of public assets; the MCP role
   needs no browser cookie secret.
 - `admit` (`milton-admit`) serves only auth's `POST /internal/auth/admit` and

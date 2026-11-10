@@ -5,6 +5,8 @@ type: reference
 covers:
   - apps/site/astro.config.mjs
   - apps/site/vercel.json
+  - apps/site/src/components/**
+  - apps/site/src/layouts/**
   - .vercelignore
 ---
 

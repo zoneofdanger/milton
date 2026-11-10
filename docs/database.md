@@ -4,6 +4,7 @@ description: The one shared Postgres: tenancy, runtime roles and their grants an
 type: behaviour
 covers:
   - server/drizzle/**
+  - server/drizzle.config.ts
   - server/migrations/**
   - apps/auth/migrations/**
   - server/src/store/schema.ts

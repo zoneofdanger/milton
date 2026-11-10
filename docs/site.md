@@ -45,6 +45,11 @@ Local commands and landing content are in [apps/site/README.md](../apps/site/REA
   animation.
 - The setup widget copies the shared setup prompt ([setup](setup.md)), falls back to
   manual selection, and closes on Escape or an outside click.
-- The fake crowdfunding campaign on `/pricing` is static data.
+- `/pricing` states the one plan ($5.01 USD a month after a 30-day free trial, no card
+  needed to start, charged only if a card is added), what it includes, a link to sign in
+  at the app, and a short FAQ: what happens after the trial, how to cancel (Stripe's
+  portal from the app's account menu, effective at the end of the billing period, with a
+  link to the payment and refund terms), and that the AI decides how it follows the
+  memo.
 - `/research` presents the approved testing notes, linked from About and the site
   footer. `/notes` is retired with no redirect or alias, so old URLs reach the normal 404.

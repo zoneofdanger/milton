@@ -43,16 +43,6 @@ reports, memos) and plain text on security screens and anything an assistant rea
       real-assistant tests show unprompted reads and fewer first-draft edits as samples grow.
       Peter approves Sam's samples. Check the .cast for tokens and home-folder paths before
       publishing; self-host asciinema-player; put the one-line setup command under the player.
-- [ ] #35 (server, low) **Accept a flattened create_memo memo before hashing.** In 7 of 20
-      #80 setup runs (claude-sonnet-5-5, Claude Code 2.1.321, both arms) the first five saves sent
-      `memo` as the final text, a plain non-JSON string, with `context` and `new_kind` beside it
-      at the top level; the server refused each ("memo: expected object, received string,
-      Unrecognized keys") and the retry with a nested memo worked. Read a string `memo` as
-      `final` and move top-level `context`, `new_kind` and `kind_id` into it, in memoInput
-      before the request hash, like #79's `[]`/`null` reading, so either shape retries as one
-      request. Unambiguous: none of those keys exist at create_memo's top level. ⚠ Only when
-      `memo` is a string that isn't a JSON object; mcp.ts parsedObjectArguments already unpacks
-      JSON-object strings.
 
 ## After the MVP
 

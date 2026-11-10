@@ -14,6 +14,7 @@ import {
   serverDescription,
   type ToolCall,
 } from "../src/mcp";
+import { saveMemoInput } from "../src/mcp-tools";
 import { createMiltonHandler, keyAttemptSource } from "../src/handler";
 import { createAccessTokenVerifier } from "../src/token";
 import {
@@ -22,7 +23,12 @@ import {
   personStoreForCurrentRequest,
   resolveIdentityAccount,
 } from "../src/store";
-import { storeForCurrentRequest } from "./store-fixtures";
+import {
+  fixtureStore,
+  read,
+  seedUsers,
+  storeForCurrentRequest,
+} from "./store-fixtures";
 import { localStore } from "./local-store";
 import { PgDialect } from "drizzle-orm/pg-core";
 import {
@@ -401,6 +407,93 @@ test("an object argument sent as a JSON string is read as that object; any other
   } finally {
     await client.close();
     await server.close();
+  }
+});
+
+test("a memo sent flattened (the final as a string memo, its fields beside it) saves as the object form, one request either way; ambiguous shapes are refused with how to send it", async () => {
+  const local = await localStore();
+  const saved: unknown[] = [];
+  const store = fixtureStore(local.db, "u");
+  const server = createMiltonServer({
+    ...store,
+    appOrigin: stubStore().appOrigin,
+    saveMemo: (input, call) => {
+      saved.push(input);
+      return store.saveMemo(input, call);
+    },
+  });
+  const client = new Client({ name: "sdk-test", version: "0.0.0" });
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
+  try {
+    await seedUsers(local.pg, "u");
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    const save = async (args: Record<string, unknown>) => {
+      const reply = await client.callTool({
+        name: "create_memo",
+        arguments: args,
+      });
+      return { isError: reply.isError, value: read(reply as never) };
+    };
+    // The #80 setup runs' first saves: the final as memo, context and
+    // new_kind beside it. Here with every other memo field too.
+    const fields = {
+      first_draft: "Hi Sam! Hope you're well. Friday could work for me.",
+      mode: "draft",
+      rounds: 1,
+      tweaks: [{ text: "replies to Sam: no warm-up opener" }],
+      context: {
+        summary: "accepting a fictional meeting day",
+        medium: "email",
+      },
+      new_kind: "meeting reply",
+    };
+    const final = "Friday works.\n\n–P";
+    const request_id = crypto.randomUUID();
+    const flat = await save({ request_id, memo: final, ...fields });
+    expect(flat.isError).toBeUndefined();
+    expect(flat.value).toMatchObject({ status: "saved" });
+    // The store got exactly the object form, so the same memo and hash.
+    const nested = await save({ request_id, memo: { final, ...fields } });
+    expect(nested).toEqual(flat);
+    expect(JSON.stringify(saved[0])).toBe(JSON.stringify(saved[1]));
+    expect(JSON.stringify(saved[0])).toBe(
+      JSON.stringify(
+        saveMemoInput.parse({ request_id, memo: { ...fields, final } }),
+      ),
+    );
+    // A retry of the flattened save replays; nothing is duplicated.
+    expect(await save({ request_id, memo: final, ...fields })).toEqual(flat);
+    expect((await local.pg.query("SELECT final FROM memos")).rows).toEqual([
+      { final },
+    ]);
+    // Ambiguous, or flattened but still malformed: refused with how to
+    // send it, nothing saved.
+    const context = fields.context;
+    for (const args of [
+      { memo: final, new_kind: "reply" },
+      { memo: final, context: { summary: "a reply" }, new_kind: "reply" },
+      { memo: final },
+      { memo: final, final, context },
+      { memo: '"Friday works."', context },
+      { memo: final, context, colour: "blue" },
+      { memo: final, context, forget_memos: ["m"] },
+      { memo: { final }, context },
+      { memo: JSON.stringify({ final }), context },
+    ]) {
+      const refused = await save({ request_id: crypto.randomUUID(), ...args });
+      expect(refused.isError).toBe(true);
+      expect(refused.value).toMatchObject({
+        error: "invalid_input",
+        message: expect.stringContaining("memo: {final,"),
+      });
+    }
+    expect(saved).toHaveLength(3);
+  } finally {
+    await client.close();
+    await server.close();
+    await local.dispose();
   }
 });
 

@@ -7,6 +7,7 @@ import {
   coverSheetInput,
   intentInput,
   malformedIntent,
+  memoInput,
   missingIntent,
   reportInput,
   saveMemoInput,
@@ -117,6 +118,62 @@ function parsedObjectArguments(params: unknown) {
   }
 }
 
+/** Every memo field but final; none is also a create_memo argument. */
+const memoFields = Object.keys(memoInput.shape).filter(
+  (key) => key !== "final",
+);
+/** The refusal for a memo create_memo cannot read: what to send instead,
+ * after what was malformed when known. */
+const memoShape = (malformed: string[] = []) =>
+  `create_memo: ${malformed.length ? `${malformed.join(", ")} ${malformed.length === 1 ? "is" : "are"} malformed; ` : ""}send memo as one object holding its fields, such as memo: {final, context: {summary, medium}, new_kind}; only request_id goes beside it. Nothing was changed.`;
+/** Some AIs send a memo flattened: the final as a plain string memo, its
+ * other fields beside it (#80 setup runs: 7 of 20 conversations' first
+ * saves). When every argument beside request_id and memo is a memo field, it
+ * is read as memo: {final, ...those fields}, before validation and hashing, so
+ * either shape is one request. A string memo that parses as JSON (an object
+ * was unpacked above), or one beside final, another change or an unknown key,
+ * is ambiguous: the memoShape refusal, as is any memo field beside an object
+ * memo, and a flattened memo that, read as nested, is still malformed. */
+function flattenedMemo(params: unknown): string | undefined {
+  if (typeof params !== "object" || params === null) return;
+  const { name, arguments: args } = params as {
+    name?: unknown;
+    arguments?: unknown;
+  };
+  if (name !== "create_memo" || typeof args !== "object" || args === null)
+    return;
+  const values = args as Record<string, unknown>;
+  const beside = Object.keys(values).filter(
+    (key) => key !== "request_id" && key !== "memo",
+  );
+  const fields = beside.filter((key) => memoFields.includes(key));
+  if (typeof values.memo !== "string")
+    return fields.length ? memoShape() : undefined;
+  try {
+    JSON.parse(values.memo);
+    return memoShape();
+  } catch {
+    /* Plain text: the final, when its fields are beside it. */
+  }
+  if (!fields.length || fields.length !== beside.length) return memoShape();
+  const memo: Record<string, unknown> = { final: values.memo };
+  for (const key of fields) {
+    memo[key] = values[key];
+    delete values[key];
+  }
+  values.memo = memo;
+  // Read as nested but still malformed (no context, say): the refusal names
+  // what is wrong beside the shape, not the SDK's text alone.
+  const issues = saveMemoInput.safeParse(values).error?.issues ?? [];
+  if (issues.length)
+    return memoShape(
+      [...new Set(issues.map((i) => i.path.join(".") || i.message))].slice(
+        0,
+        5,
+      ),
+    );
+}
+
 export function createMiltonServer(
   store: TenantStore,
   log: (call: ToolCall) => void = (call) => console.info(JSON.stringify(call)),
@@ -173,8 +230,23 @@ export function createMiltonServer(
               started: performance.now(),
             });
         }
-        if ("method" in message && message.method === "tools/call")
+        let unreadMemo: string | undefined;
+        if ("method" in message && message.method === "tools/call") {
           parsedObjectArguments(message.params);
+          // A read-only connection lists no create_memo to send it to.
+          if (!options.readOnly) unreadMemo = flattenedMemo(message.params);
+        }
+        if (unreadMemo && "id" in message && message.id !== undefined) {
+          await transport.send({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: storeResult(
+              { error: "invalid_input", message: unreadMemo },
+              true,
+            ),
+          });
+          return;
+        }
         // A get_report without a well-formed intent gets a refusal that says
         // what to send instead of the SDK's validation text. No intent at all
         // usually means a client holding the schema before intent existed.

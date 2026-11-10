@@ -7,7 +7,6 @@ import TryItBox from "../components/TryItBox.astro";
 const copy = {
   price: "30 days free, then $5.01 a month. No card.",
   priceTail: "",
-  dateLine: "2026. The cover sheet is still required.",
   markOne: [
     { label: "Urgent", ticked: true },
     { label: "For review", ticked: false },
@@ -89,10 +88,6 @@ const guides = [
           <div>
             <dt>Re:</dt>
             <dd>How you write</dd>
-          </div>
-          <div>
-            <dt>Date:</dt>
-            <dd>{copy.dateLine}</dd>
           </div>
         </dl>
         <div class="mark-one">
@@ -369,12 +364,8 @@ const guides = [
     display: flex;
     gap: var(--space-2);
   }
-  /* The date takes its own line. The dot between the other fields is
-     decoration, not read aloud. */
-  .slip-fields > div:last-child {
-    flex-basis: 100%;
-  }
-  .slip-fields > div:not(:nth-last-child(-n + 2))::after {
+  /* The dot between fields is decoration, not read aloud. */
+  .slip-fields > div:not(:last-child)::after {
     content: "·";
     content: "·" / "";
     margin-left: var(--space-2);

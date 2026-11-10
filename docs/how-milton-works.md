@@ -4,13 +4,12 @@ description: Every piece of Milton's logic, one line each, until it is split int
 type: behaviour
 covers:
   - .github/workflows/checks.yml
-  - apps/site/**
+  - apps/site/astro.config.mjs
   - packages/forwarded-client/**
   - packages/theme/**
   - scripts/agent-docs.ts
   - scripts/check-migrations.ts
   - server/Dockerfile
-  - server/deploy/**
   - server/drizzle/**
   - server/scripts/**
   - server/src/assets.ts

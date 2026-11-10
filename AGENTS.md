@@ -23,7 +23,6 @@ open only the files your task needs. Until it is dissolved into concept files,
 ## Concepts
 
 <!-- concepts:start -->
-
 - [agents/approval](docs/agents/approval.md) — What counts as Peter's approval, including his words relayed from another session, and when to ask him
 - [agents/branches](docs/agents/branches.md) — One branch and worktree per task, one change per commit, staged by explicit path
 - [agents/messaging](docs/agents/messaging.md) — What goes in another Milton session's inbox, and how sessions are found
@@ -41,5 +40,4 @@ open only the files your task needs. Until it is dissolved into concept files,
 - [research/spiral-teardown-2026-11-05](docs/research/spiral-teardown-2026-11-05.md) — Spiral teardown, 2026-11-05: its public claims, Styles dashboard and two generated style guides, and a plausible reconstruction of how it works
 - [research/spiral-tool-library-pilot-2026-11-05](docs/research/spiral-tool-library-pilot-2026-11-05.md) — 2026-11-05 pilot: one Milton-assisted draft and three Spiral drafts of one essay brief, preserved exactly; small, unblinded and with no winner
 - [research/writing-evidence-2026](docs/research/writing-evidence-2026.md) — November 2026 reading of three papers and GBrain's record: examples beat nothing, formality is the default to override, and much is untested
-
 <!-- concepts:end -->

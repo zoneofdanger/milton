@@ -26,9 +26,9 @@ type Person = {
 
 interface Props {
   /** The mono caption beside the tabs (under the folder on a phone). */
-  fileCaption: string;
+  caption: string;
 }
-const { fileCaption } = Astro.props;
+const { caption } = Astro.props;
 
 const people = data.people as Person[];
 const { requests, defaults } = data;
@@ -70,7 +70,7 @@ const { requests, defaults } = data;
         </button>
       ))}
     </div>
-    <p class="file-caption file-caption-wide">{fileCaption}</p>
+    <p class="file-caption file-caption-wide">{caption}</p>
   </div>
   <div class="folder">
     {people.map((person) => (
@@ -180,7 +180,7 @@ const { requests, defaults } = data;
       </div>
     ))}
   </div>
-  <p class="file-caption file-caption-phone">{fileCaption}</p>
+  <p class="file-caption file-caption-phone">{caption}</p>
 </section>
 
 <!-- Inline and synchronous, so the pickers and the one default pair are set

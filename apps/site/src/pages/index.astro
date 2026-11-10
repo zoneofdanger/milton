@@ -1,6 +1,5 @@
 ---
 import SiteLayout from "../layouts/SiteLayout.astro";
-import AssistantSetup from "../components/AssistantSetup.astro";
 import TryItBox from "../components/TryItBox.astro";
 
 /* The page's swappable lines, one place each. */
@@ -20,7 +19,6 @@ const copy = {
   ],
   // Stays empty until setup can do this; when set, it is the slip's second row.
   onboardingStep: { text: "", initials: "AI" },
-  fileCaption: "Personnel file",
   signOff: "We did not build superintelligence. We built a filing department.",
   testimonial: {
     quote:
@@ -58,14 +56,10 @@ const guides = [
       <a class="button" href="https://app.meetmilton.com/login" data-try-it-cta>
         Try Milton free <span aria-hidden="true">↗</span>
       </a>
-      <p class="small-note">
-        {copy.price}
-        {copy.priceTail && ` ${copy.priceTail}`}
-      </p>
     </div>
   </section>
 
-  <TryItBox fileCaption={copy.fileCaption} />
+  <TryItBox caption={[copy.price, copy.priceTail].filter(Boolean).join(" ")} />
 
   <div class="work">
     <section class="slip-wrap" id="how-it-works" aria-labelledby="how-heading">
@@ -125,21 +119,16 @@ const guides = [
         Filed
       </span>
     </section>
-    <div class="distribution">
-      <p class="eyebrow" id="distribution-label">
-        Distribution
-      </p>
-      <nav aria-labelledby="distribution-label">
-        <ul>
-          {guides.map(({ label, href }) => (
-            <li>
-              <a href={href}>{label}</a>
-            </li>
-          ))}
-        </ul>
-      </nav>
-      <AssistantSetup />
-    </div>
+    <nav class="cc" aria-label="AI setup guides">
+      <span class="cc-label">cc:</span>
+      <ul>
+        {guides.map(({ label, href }) => (
+          <li>
+            <a href={href}>{label}</a>
+          </li>
+        ))}
+      </ul>
+    </nav>
   </div>
 
   <section class="faq" aria-labelledby="faq-heading">
@@ -295,7 +284,7 @@ const guides = [
   }
 
   /* Hero: one band on the ground. The headline and intro at the left; the
-     button and price at the right, until the band is too narrow for both. */
+     button at the right, until the band is too narrow for both. */
   .hero {
     position: relative;
     z-index: 1;
@@ -340,12 +329,9 @@ const guides = [
     margin-bottom: var(--space-8);
   }
 
-  /* Below the folder: the routing slip with its distribution list. */
+  /* Below the folder: the routing slip, with its cc line as a footnote. */
   .work {
-    display: grid;
-    grid-template-columns: minmax(0, 720px) minmax(0, 1fr);
-    gap: 56px;
-    align-items: start;
+    max-width: 720px;
     margin-top: 96px;
   }
   .slip-wrap {
@@ -477,24 +463,33 @@ const guides = [
     pointer-events: none;
     user-select: none;
   }
-  .distribution {
-    display: grid;
-    justify-items: start;
-    gap: var(--space-2);
-    padding-top: 4px;
+  /* One run of text, like a memo's cc line. Each name is a 44px target. */
+  .cc {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0 var(--space-2);
+    margin-top: var(--space-3);
     font-size: 0.9375rem;
   }
-  .distribution ul {
+  .cc-label {
+    color: var(--muted);
+    font: var(--text-small) / var(--leading-label) var(--font-mono);
+  }
+  .cc ul {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 0.35em;
     padding: 0;
     list-style: none;
   }
-  .distribution a {
+  .cc li:not(:nth-last-child(-n + 2))::after {
+    content: ",";
+  }
+  .cc a {
     display: inline-flex;
     align-items: center;
     min-height: var(--touch-target);
-  }
-  .distribution :global(.assistant-setup) {
-    margin-top: var(--space-3);
   }
 
   /* Questions: the one most asked, open as text, then a ruled list. */
@@ -597,18 +592,6 @@ const guides = [
   @media (max-width: 1079px) {
     .faq h2 {
       text-wrap: balance;
-    }
-    .work {
-      grid-template-columns: minmax(0, 1fr);
-      gap: var(--space-6);
-    }
-    .distribution {
-      display: block;
-    }
-    .distribution ul {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0 14px;
     }
   }
   @media (max-width: 767px) {

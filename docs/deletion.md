@@ -27,7 +27,7 @@ covers:
   account. There is no timer.
 - The cover sheet keeps every version until the account is deleted
   ([memos](memos.md)).
-- Usage rows are kept 90 days ([billing](billing.md)).
+- Usage rows are pruned on the schedule in [billing](billing.md#usage).
 
 ## Forgetting and Delete all
 

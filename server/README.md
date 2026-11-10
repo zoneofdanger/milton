@@ -50,9 +50,9 @@ secrets must not be exported through an application route.
 
 The exact hosted issuer is `https://auth.meetmilton.com/api/auth`. Auth hosts login,
 consent, password recovery, method linking and session management. App `/login` starts
-the OIDC flow ([accounts](../docs/accounts.md)). Provision one owner-provisioned
-confidential client for the app: `client_secret_post`, exact `/auth/callback` and
-`/auth/logged-out` app URLs, no default MCP resource, and fixed-client RP logout. Auth
+the OIDC flow ([accounts](../docs/accounts.md)). Provision the one confidential app client as
+[accounts](../docs/accounts.md#app-sessions) describes, with your own app origin in its
+callback and logout URLs. Auth
 reaches the `milton-admit` service through Cloud Run's invoker check (see
 [the hosting runbook](deploy/README.md#admission-service-milton-admit)).
 

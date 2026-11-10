@@ -167,6 +167,10 @@ The app never handles passwords or native cookies.
 
 ## App sessions
 
+- The app is the one first-party client: confidential, owner-provisioned,
+  `client_secret_post`, with exact callback `https://app.meetmilton.com/auth/callback`,
+  logout return `https://app.meetmilton.com/auth/logged-out`, no default MCP resource and
+  fixed-client RP logout.
 - The app uses maintained code/S256 OIDC (`openid-client`, scopes
   `openid profile email`, no resource and no offline access) with shared SQL one-use
   state/nonce/verifier, an exact callback, signature, issuer, audience and subject

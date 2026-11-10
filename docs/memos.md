@@ -71,13 +71,13 @@ and counts tweak citations. How a save commits is in [saves](saves.md).
 
 ## Bounds
 
-These are fixed in code and the schema; no memo bound reads `store_config`.
+These are fixed in code and the schema; no memo bound reads `store_config`. Which finals
+are served as examples, and their size cap, is in [reports](reports.md#examples).
 
 | What                               | Bound                                             |
 | ---------------------------------- | ------------------------------------------------- |
 | Request body                       | 256 KiB, before parsing ([hosting](hosting.md))   |
 | A final or first draft             | 256 KiB UTF-8, non-blank, well formed, no NUL     |
-| A final served as an example       | 128 KiB UTF-8; larger ones are kept, never served |
 | Cover sheet                        | 1,500 characters; an AI adds lines of at most 300 |
 | Summary / tweak                    | 200 characters each, one line                     |
 | Audience, purpose / kind label     | 100 / 60 characters, one line                     |

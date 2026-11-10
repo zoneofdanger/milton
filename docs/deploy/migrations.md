@@ -10,7 +10,7 @@ covers:
 # Migrations
 
 What each database role may do, and the schema itself, are product behaviour: see
-`docs/database.md`. This file is how the release coordinator changes the production
+[database](../database.md). This file is how the release coordinator changes the production
 database. Each step needs Peter's go; the release coordinator runs it. The current heads
 are in [serving](serving.md); applied one-time migrations are recorded in
 [history](../history.md).
@@ -38,23 +38,23 @@ are in [serving](serving.md); applied one-time migrations are recorded in
   files still name rollback files deleted on 2026-11-08; the snapshot is the rollback.
 - After 0013, `server/migrations/005-app-roles.sql` names dropped tables and fails, so it is
   never rerun; its other grants stay in place. A fresh install applies the owner files
-  through 015 before 0013 (server README).
+  through 015 before 0013 ([database](../database.md#migrations)).
 
 ## Additive and incompatible changes
 
-For an additive, backward-compatible migration, traffic stays open: snapshot, and confirm
-(in the rehearsal) that every revision at or above the floor runs on the resulting schema
-before selecting new revisions.
-
-For an incompatible change (one no serving revision can run on, and no code-first order
-avoids), stage the images with `gcloud run deploy --no-traffic` and temporarily set app/MCP
-ingress to `internal`. Confirm the canonical endpoints refuse traffic, then drain the
-longest request window (at least 180 seconds: MCP's request timeout). Snapshot and record
-the row counts of the tables the migration changes before running it. Keep traffic closed
-until the migration's checks pass and both matching runtime revisions are ready and
-selected. Restore app/MCP ingress to `internal-and-cloud-load-balancing` and verify
-canonical reads. This stops saves by closing their entry points without changing the
-pinned encrypted settings; sign-ins through auth and admission continue.
+For an incompatible coordinated schema release, stage the image with `gcloud run deploy --no-traffic`
+and temporarily set app/MCP ingress to `internal`. Confirm the
+canonical endpoints refuse traffic, then drain the longest request/lease window
+(at least 180 seconds for this configuration). Take a Neon snapshot and record exact
+table hashes before using the normal migration runner. Keep traffic closed until
+parity checks pass and both matching runtime revisions are ready and selected.
+Restore app/MCP ingress to `internal-and-cloud-load-balancing` and verify canonical
+reads. This stops saves by closing their entry
+points without changing the pinned encrypted settings.
+For an additive, backward-compatible migration, foreground traffic may stay open when
+source publication remains atomic and version-fenced. Take a
+backup, check source parity, and verify the old runtime can still serve the resulting
+source schema before selecting the new revisions.
 
 ## The runners
 

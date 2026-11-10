@@ -791,16 +791,119 @@ name the new tables, so 0012 and 014 stay. Memos saved meanwhile stay in the new
 invisible to the old code, and old-table writes resume. The snapshot is 0012's rollback only
 before the new code serves; there is no down script.
 
-**Follow-up drop and wipe (separate PR, separate go from Peter on the day).** Once this
-release serves, the builder prepares the migration that names #76 in `-- code-stopped-by:`,
-deletes every `save_requests` row and drops `accepted_changes`, `instruction_card_versions`,
-`instruction_cards`, `sample_versions`, `samples`, `sample_kinds`, `report_guides`,
-`guide_accounts`, `guide_spend`, `guide_budget_lock`, the sequence
-`instruction_card_position` and their eight guard functions (PR #76's description lists
-them). Snapshot first. After it: `005-app-roles.sql` names dropped tables, so it is not rerun
-as is; drop the cluster-level `milton_guide_worker` role and `milton_guide_runtime` login;
-receipts saved between this release and the drop are lost, so a replayed memo save then
-returns `unchanged`.
+After the drop below, this rollback no longer exists: code older than #76 reads the dropped
+tables.
+
+## Drop the old writing tables (Drizzle 0013, owner file 015)
+
+The follow-up drop and wipe from #76 (separate go from Peter on the day). Since #76 no code
+reads or writes the writing tables memos replaced. Owner file `015-drop-guide-roles.sql`
+runs first: it revokes what the cluster-level `milton_guide_worker` role and the NOLOGIN
+`milton_guide_runtime` hold in `milton` and drops both, which no Drizzle migration can. It is
+one transaction and drops nothing else, so if it fails nothing destructive has run.
+`0013_drop_old_writing` then names #76 in its `-- code-stopped-by:` line and drops
+`accepted_changes`, `instruction_card_versions`, `instruction_cards`, `sample_versions`,
+`samples`, `sample_kinds`, `report_guides`, `guide_accounts`, `guide_spend` and
+`guide_budget_lock` (with their triggers, constraints and grants), the
+`instruction_card_position` sequence and the eight functions only they used
+(`milton_accepted_change_guard`, `milton_card_guard`, `milton_card_version_guard`,
+`milton_guide_source_changed`, `milton_sample_guard`, `milton_sample_kind_guard`,
+`milton_sample_version_guard`, `milton_sample_context_valid`).
+
+0013 deletes only the old store's `save_requests` rows, whose outcomes can quote old
+writing, and keeps every receipt the memo code wrote. Without them a replay would run again:
+a replayed save of a memo since forgotten would save it again, and a replayed context
+correction would undo a later one. The two are told apart by the outcome's shape (0013's
+header gives the rule); a failed old receipt whose code the memo code also stores is
+indistinguishable and stays, and its message is fixed text. One known exception, harmless:
+`compiler_input_limit`, a retired old-store-only code that 0013's delete list leaves out, so
+its receipts stay too (production holds one, from 2026-10-31, with no message or writing).
+`save_requests`, its guard and its grants stay.
+
+**Roles on Neon.** Both roles were made with SQL (`milton_guide_worker` by Drizzle 0003,
+`milton_guide_runtime` at the 2026-11-07 cutover), and Neon's API lists them among the
+branch roles because its `neon` extension forwards role DDL to the control plane. The same
+extension forwards `DROP ROLE`, also from inside 015's `DO` block, when the transaction
+commits, and fails the transaction if the control plane refuses
+([`pgxn/neon/neon_ddl_handler.c`](https://github.com/neondatabase/neon/blob/main/pgxn/neon/neon_ddl_handler.c)),
+so a SQL drop keeps the API's list in step and no API delete is needed. The gap it
+documents: it forwards before PostgreSQL commits, so a commit that fails (or whose outcome
+is uncertain) after the forward can leave the control plane without roles PostgreSQL kept. A compute start recreates every role the
+control plane still lists, as a `neon_superuser` member
+([`compute_tools/src/spec_apply.rs`](https://github.com/neondatabase/neon/blob/main/compute_tools/src/spec_apply.rs)),
+so step 3 compares the two lists after every 015 attempt, failed or not, before anything
+else.
+
+After 0013, `005-app-roles.sql` names dropped tables and fails, so it is never rerun; its
+other grants stay in place. A fresh install applies the owner files through 015 before 0013
+(server README). The serving #76 images never name the dropped objects, so no image release
+is needed; this change's code (schema declarations and refusal codes nothing raises any more)
+ships with the next release. Rehearsed by `check-auth-integration.ts` (015 twice, then 0013,
+on PostgreSQL 18 with rows in the old tables and an old and a memo receipt; PR CI
+`integration`).
+
+**This is not a code-only release.** After 0013 the app, MCP and admission never roll back to
+an image older than #76 (`milton-*-memos-bdac60f` and `milton-admit-00005-vp2` are the floor),
+and the pre-migration snapshot is the only way back to the old tables, the old receipts and
+the roles. Restoring it loses every write since (see [Database recovery](#database-recovery)).
+Each step needs Peter's go; the release coordinator runs it:
+
+1. Confirm no app, MCP or admission revision older than #76 serves traffic, then snapshot
+   production and record its name. Record, as `neondb_owner`, what the release removes:
+
+   ```sql
+   SELECT (SELECT count(*) FROM save_requests) AS receipts,
+     (SELECT count(*) FROM instruction_cards) AS cards,
+     (SELECT count(*) FROM samples) AS samples,
+     (SELECT count(*) FROM guide_accounts) AS guide_accounts;
+   ```
+
+2. As `neondb_owner`:
+   `psql -X -v ON_ERROR_STOP=1 -f server/migrations/015-drop-guide-roles.sql` (one
+   transaction; rerunning converges). If it fails, PostgreSQL rolled it back, but Neon's
+   control plane may already have recorded the drops: do step 3's comparison before any
+   compute restart. Its error names what a role still holds or owns (another database's
+   grant, an owned object); resolve that and rerun it, and do not go on to 0013 until it
+   succeeds.
+3. After every 015 attempt, failed, uncertain or successful, compare the two lists. On
+   success, `SELECT rolname FROM pg_roles WHERE rolname LIKE 'milton_guide%';` returns no rows,
+   and the branch's role list in the Neon console or API (`GET
+/projects/{project_id}/branches/{branch_id}/roles`) no longer shows either role. If the
+   two disagree (after a failed attempt too), stop and resolve it with Neon before 0013, and
+   do not restart the compute meanwhile.
+4. As `neondb_owner`: `bun run --cwd server db:migrate` applies `0013_drop_old_writing`
+   (journal 14 entries). Each drop locks its table exclusively and, for a foreign key to
+   `users`, `users` too until commit, so every request waits for it. Its 5 s lock limit
+   bounds the wait for each lock, not the statements' run time: on a lock timeout it rolls
+   back whole and is simply rerun. The work under the locks is catalog changes and one
+   `DELETE` that scans `save_requests` once (46 receipts on 2026-11-08, about 10 more a day
+   from the daily check), so it holds them for milliseconds.
+5. Check as the owner. The first query returns no rows; the second returns
+   `milton_save_request_guard`, `milton_user_id_guard` and `prune_usage_calls`; the third
+   returns 0; the fourth lists what is left, for the record (every `error` a code the memo
+   code stores, except the known `compiler_input_limit` receipt above):
+
+   ```sql
+   SELECT relname FROM pg_class WHERE relnamespace = 'public'::regnamespace
+     AND relname IN ('accepted_changes', 'instruction_card_versions', 'instruction_cards',
+       'instruction_card_position', 'sample_versions', 'samples', 'sample_kinds',
+       'report_guides', 'guide_accounts', 'guide_spend', 'guide_budget_lock');
+   SELECT proname FROM pg_proc WHERE pronamespace = 'public'::regnamespace ORDER BY 1;
+   SELECT count(*) FROM save_requests WHERE result_json ?| ARRAY['version', 'question',
+     'samples_retired'];
+   SELECT result_json->>'status' AS status, result_json->>'error' AS error, count(*)
+   FROM save_requests GROUP BY 1, 2 ORDER BY 1, 2;
+   ```
+
+   Then `check-runtime-role.ts` prints `ok` for app and MCP, one manual `milton-e2e-daily`
+   run passes, and app, MCP and admit logs show no `permission denied` or
+   `store_unavailable`.
+
+Rollback: if 0013 fails, its transaction rolls back and changes nothing; if 015 fails,
+PostgreSQL rolls it back, and step 3's comparison settles Neon's list. Fix the cause
+and rerun. After 015 alone, nothing serving needs the roles, so there is nothing to roll
+back. Once 0013 has committed, the pre-migration snapshot is the only rollback; there is no
+down script.
 
 ## Test account and daily check
 
@@ -1053,8 +1156,8 @@ wanted. Alert delivery to Peter is unverified until milton-duo sends a test noti
 The parked guide pilot's worker, enrollment script, provider, switch and image copy are gone
 with PR #76 (its runbook, `guides.md`, too; it is in git history). No guide job, schedule,
 provider key or enrollment was ever provisioned in production. Its tables and the
-`milton_guide_worker` role and `milton_guide_runtime` login go with the follow-up drop
-([Memos and tweaks](#memos-and-tweaks-released-2026-11-09-drizzle-0012-owner-file-014-pr-76)).
+`milton_guide_worker` role and `milton_guide_runtime` go with owner file 015 and Drizzle 0013
+([Drop the old writing tables](#drop-the-old-writing-tables-drizzle-0013-owner-file-015)).
 
 ## Cloud resources
 
@@ -1592,8 +1695,8 @@ ordinary release.
 
 The baseline creates `milton_runtime`, a NOLOGIN group role with
 only the statements the runtime runs on each table (DELETE only on `users` and
-`assistant_disconnects`; `store_config` read-only), USAGE on the
-`instruction_card_position` sequence and schema `public`, CONNECT on the database, and
+`assistant_disconnects`; `store_config` read-only), USAGE on schema `public` (and on the
+`instruction_card_position` sequence until 0013 drops it), CONNECT on the database, and
 SELECT, INSERT and UPDATE by default on tables later migrations create (see the server
 README for the table list). It owns nothing, so it cannot alter, drop or truncate a
 table, disable a trigger or read the Drizzle journal. The migration runner
@@ -1605,7 +1708,8 @@ older database; the legacy schema cleanup script for a known-0033 database
 Since the 2026-11-07 cutover the services connect as separate NOINHERIT logins:
 `milton_auth_runtime`, `milton_app_runtime` and `milton_mcp_runtime`, never granted the
 shared `milton_runtime` group. The owner delegate `milton_auth_delegate` is kept for
-maintenance; `milton_guide_runtime` and `milton_app_delegate` are NOLOGIN. The legacy
+maintenance; `milton_app_delegate` is NOLOGIN, and so is `milton_guide_runtime` until
+owner file 015 drops it. The legacy
 `milton_app` login, a member of `milton_runtime`, is retained, unused. With
 `MILTON_SERVICE=app` or `mcp`, `server/scripts/check-runtime-role.ts` audits that
 service's own `milton_<service>_runtime` login (NOINHERIT, no memberships, ownership,

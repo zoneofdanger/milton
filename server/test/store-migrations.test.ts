@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { localStore } from "./local-store";
+import { localStore, storeDatabase } from "./local-store";
 import { fixtureStore, memoSave, seedUsers } from "./store-fixtures";
 import { migrationUrl } from "../scripts/migrate";
 import { PGlite } from "@electric-sql/pglite";
@@ -161,13 +161,6 @@ test("schema declarations generate the same surviving tables, constraints and in
       generateDrizzleJson({}),
       generateDrizzleJson(schema),
     );
-    await generated.exec("CREATE SEQUENCE instruction_card_position AS bigint");
-    const contextMigration = await Bun.file(
-      new URL("../drizzle/0001_sample_context.sql", import.meta.url),
-    ).text();
-    await generated.exec(
-      contextMigration.split("--> statement-breakpoint")[0]!,
-    );
     await generated.exec(statements.join("\n"));
     const actual = await schemaCatalog(local.pg),
       expected = await schemaCatalog(generated);
@@ -231,23 +224,13 @@ test("the runtime has only current grants, its guards hold, and later tables inh
     // What the runtime and the triggers it fires run on each table. DELETE
     // only where the runtime deletes; store_config is read-only.
     const used: Record<string, string> = {
-      accepted_changes: "INSERT",
       assistant_disconnects: "DELETE,INSERT,SELECT",
       connection_keys: "",
       cover_sheets: "",
-      guide_accounts: "SELECT",
-      guide_budget_lock: "",
-      guide_spend: "",
       identities: "INSERT,SELECT",
-      instruction_card_versions: "INSERT,SELECT",
-      instruction_cards: "INSERT,SELECT",
       memo_kinds: "",
       memo_settings: "",
       memos: "",
-      report_guides: "SELECT",
-      sample_kinds: "INSERT,SELECT",
-      sample_versions: "INSERT,SELECT",
-      samples: "INSERT,SELECT",
       save_requests: "INSERT,SELECT,UPDATE",
       served_reports: "",
       store_config: "SELECT",
@@ -279,24 +262,17 @@ test("the runtime has only current grants, its guards hold, and later tables inh
       },
     ]);
     const granted = await grants(pg);
-    // Every application table is listed; the sequence, USAGE only; nothing
-    // in drizzle; no CREATE anywhere.
+    // Every application table is listed; no sequence; nothing in drizzle; no
+    // CREATE anywhere.
     expect(Object.keys(used)).toEqual(await publicTables(pg));
     expect(granted.objects).toEqual(
-      [
-        ...Object.entries(used)
-          .filter(([, privileges]) => privileges)
-          .map(([relname, privileges]) => ({
-            relname,
-            relkind: "r",
-            privileges,
-          })),
-        {
-          relname: "instruction_card_position",
-          relkind: "S",
-          privileges: "USAGE",
-        },
-      ].sort((a, b) => (a.relname < b.relname ? -1 : 1)),
+      Object.entries(used)
+        .filter(([, privileges]) => privileges)
+        .map(([relname, privileges]) => ({
+          relname,
+          relkind: "r",
+          privileges,
+        })),
     );
     expect(granted.columns).toEqual([]);
     expect(granted.schemas).toEqual([
@@ -320,33 +296,20 @@ test("the runtime has only current grants, its guards hold, and later tables inh
       expect((await pg.query("SELECT current_user AS role")).rows).toEqual([
         { role: "milton_app_fixture" },
       ]);
-      // The legacy group still writes the old writing tables through their
-      // guards; it reaches no memo table (see 0012).
-      await pg.exec(
-        "INSERT INTO sample_kinds(user_id,id,report,label) VALUES ('runtime','kind','email','follow-up')",
+      // The legacy group still writes save receipts through their guard; it
+      // reaches no memo table (see 0012).
+      await pg.query(
+        "INSERT INTO save_requests(user_id,request_id,input_hash,result_json) VALUES ('runtime',$1,repeat('a',64),'{\"status\":\"saved\"}')",
+        [crypto.randomUUID()],
       );
-      await seedSample(
-        pg,
-        "runtime",
-        "sample",
-        "email",
-        "kind",
-        { version: 1, summary: "runtime context" },
-        "Runtime sample body.",
-      );
-      await expect(
-        pg.query(
-          "UPDATE sample_versions SET context=context || '{\"medium\":\"chat\"}'::jsonb,version=version+1 WHERE user_id='runtime'",
-        ),
-      ).rejects.toThrow("permission denied");
       // Owner-only statements are refused.
       for (const statement of [
-        "ALTER TABLE samples DISABLE TRIGGER samples_guard",
-        "ALTER TABLE samples DISABLE TRIGGER ALL",
+        "ALTER TABLE save_requests DISABLE TRIGGER save_request_guard",
+        "ALTER TABLE save_requests DISABLE TRIGGER ALL",
         "ALTER TABLE users DROP COLUMN status",
-        "DROP TABLE samples",
-        "DROP FUNCTION milton_sample_guard()",
-        "TRUNCATE samples",
+        "DROP TABLE save_requests",
+        "DROP FUNCTION milton_save_request_guard()",
+        "TRUNCATE save_requests",
         "CREATE TABLE public.runtime_made (id int)",
         "SELECT * FROM drizzle.__drizzle_migrations",
         "SET session_replication_role = replica",
@@ -358,26 +321,24 @@ test("the runtime has only current grants, its guards hold, and later tables inh
         "DELETE FROM identities",
         "UPDATE identities SET user_id=user_id",
         "UPDATE store_config SET trials_enabled=true",
-        "SELECT * FROM accepted_changes",
+        "SELECT * FROM usage_calls",
       ])
         await expect(pg.query(statement)).rejects.toThrow(
           /must be owner|permission denied/,
         );
-      // Runtime grants refuse mutation; the owner is still bound by immutability.
+      // A receipt never changes, for the runtime or the owner.
       const edit =
-        "UPDATE sample_versions SET body='Edited' WHERE user_id='runtime'";
-      await expect(pg.query(edit)).rejects.toThrow("permission denied");
+        "UPDATE save_requests SET result_json='{\"status\":\"failed\"}' WHERE user_id='runtime'";
+      await expect(pg.query(edit)).rejects.toThrow("save_receipt_is_immutable");
       await pg.exec("RESET ROLE");
-      await expect(pg.query(edit)).rejects.toThrow(
-        "sample_version_is_immutable",
-      );
+      await expect(pg.query(edit)).rejects.toThrow("save_receipt_is_immutable");
       expect(
         (
           await pg.query(
-            "SELECT body FROM sample_versions WHERE user_id='runtime'",
+            "SELECT result_json->>'status' AS status FROM save_requests WHERE user_id='runtime'",
           )
         ).rows,
-      ).toEqual([{ body: "Runtime sample body." }]);
+      ).toEqual([{ status: "saved" }]);
       // A table a later migration creates gets SELECT, INSERT and UPDATE by
       // default; DELETE only if that migration grants it.
       await pg.exec(
@@ -392,98 +353,6 @@ test("the runtime has only current grants, its guards hold, and later tables inh
     }
   } finally {
     await local.dispose();
-  }
-});
-
-test("guide migration preserves populated approved sources, defaults off and isolates worker capabilities", async () => {
-  const folder = new URL("../drizzle/", import.meta.url).pathname;
-  const scratch = await mkdtemp(join(tmpdir(), "milton-guides-"));
-  const pg = new PGlite();
-  try {
-    await cp(folder, scratch, { recursive: true });
-    const journal = await Bun.file(join(scratch, "meta/_journal.json")).json();
-    journal.entries = journal.entries.filter((e: { idx: number }) => e.idx < 3);
-    await writeFile(
-      join(scratch, "meta/_journal.json"),
-      JSON.stringify(journal),
-    );
-    await migrate(drizzle(pg), { migrationsFolder: scratch });
-    await seedUsers(pg, "upgrade");
-    await pg.exec(
-      "INSERT INTO sample_kinds(user_id,id,report,label) VALUES ('upgrade','kind','email','Fictional note')",
-    );
-    await seedSample(
-      pg,
-      "upgrade",
-      "example",
-      "email",
-      "kind",
-      { version: 1, summary: "Fictional note" },
-      "Collect the seedlings on Saturday.",
-    );
-    const before = (await pg.query("SELECT * FROM sample_versions")).rows;
-    await migrate(drizzle(pg), { migrationsFolder: folder });
-    await migrate(drizzle(pg), { migrationsFolder: folder });
-    expect((await pg.query("SELECT * FROM sample_versions")).rows).toEqual(
-      before,
-    );
-    expect((await pg.query("SELECT * FROM guide_accounts")).rows).toHaveLength(
-      0,
-    );
-    expect(
-      (await pg.query("SELECT source_version,status FROM report_guides")).rows,
-    ).toEqual([{ source_version: 1, status: "queued" }]);
-    const allowed = (
-      await pg.query<{ table_name: string; privilege_type: string }>(
-        "SELECT table_name,privilege_type FROM information_schema.role_table_grants WHERE grantee='milton_guide_worker' ORDER BY 1,2",
-      )
-    ).rows;
-    expect(
-      allowed.filter((r) =>
-        [
-          "identities",
-          "instruction_cards",
-          "instruction_card_versions",
-          "assistant_disconnects",
-        ].includes(r.table_name),
-      ),
-    ).toEqual([]);
-    expect(
-      allowed
-        .filter((r) => r.privilege_type !== "SELECT")
-        .map((r) => `${r.table_name}:${r.privilege_type}`),
-    ).toEqual([
-      "guide_budget_lock:UPDATE",
-      "guide_spend:INSERT",
-      "guide_spend:UPDATE",
-      "report_guides:UPDATE",
-    ]);
-    await pg.exec("SET ROLE milton_runtime");
-    await expect(
-      pg.query(
-        "INSERT INTO guide_accounts(user_id,enabled,epoch,opted_in_at,opt_in_reference) VALUES ('upgrade',true,1,now(),'fictional-consent')",
-      ),
-    ).rejects.toThrow("permission denied");
-    await expect(
-      pg.query(
-        "UPDATE guide_accounts SET enabled=true,epoch=epoch+1,opted_in_at=now(),opt_in_reference='fictional-consent'",
-      ),
-    ).rejects.toThrow("permission denied");
-    await pg.exec("RESET ROLE");
-    await pg.exec("SET ROLE milton_guide_worker");
-    await expect(
-      pg.query("UPDATE sample_versions SET body='changed'"),
-    ).rejects.toThrow("permission denied");
-    await expect(pg.query("SELECT * FROM identities")).rejects.toThrow(
-      "permission denied",
-    );
-    await expect(
-      pg.query("UPDATE guide_accounts SET enabled=true"),
-    ).rejects.toThrow("permission denied");
-    await pg.exec("RESET ROLE");
-  } finally {
-    await pg.close();
-    await rm(scratch, { recursive: true, force: true });
   }
 });
 
@@ -834,86 +703,6 @@ test("0008 drops usage_daily and the stored daily_calls; the maintenance job del
   }
 }, 60000);
 
-test("0010 parks the guide pilot: drops only its trigger and keeps every guide row", async () => {
-  const folder = new URL("../drizzle/", import.meta.url).pathname;
-  const scratch = await mkdtemp(join(tmpdir(), "milton-0010-"));
-  const pg = new PGlite();
-  try {
-    await cp(folder, scratch, { recursive: true });
-    const journal = await Bun.file(join(scratch, "meta/_journal.json")).json();
-    const through = async (idx: number) =>
-      writeFile(
-        join(scratch, "meta/_journal.json"),
-        JSON.stringify({
-          ...journal,
-          entries: journal.entries.filter((e: { idx: number }) => e.idx <= idx),
-        }),
-      );
-    await through(9);
-    await migrate(drizzle(pg), { migrationsFolder: scratch });
-    // Production's shape before 0010: guide rows the trigger wrote, a completed
-    // guide, and an enrollment row that is off.
-    await seedUsers(pg, "parked", "idle");
-    for (const [user, report, id] of [
-      ["parked", "email", "e1"],
-      ["parked", "chat", "c1"],
-      ["idle", "email", "i1"],
-    ] as const) {
-      await pg.query(
-        "INSERT INTO sample_kinds(user_id,id,report,label) VALUES ($1,$2,$2,'Fictional kind')",
-        [user, report],
-      );
-      await seedSample(
-        pg,
-        user,
-        id,
-        report,
-        report,
-        { version: 1, summary: "Fictional note" },
-        `Fictional sample ${id}.`,
-      );
-    }
-    await pg.exec(
-      // Completed guides on email and chat, and every row with spent retries
-      // scheduled a day ahead.
-      "UPDATE report_guides SET guide_text='Fictional guide.',completed_version=1,status='ready',reason='completed' WHERE user_id='parked' AND report IN ('email','chat'); UPDATE report_guides SET attempts=2,next_attempt_at=clock_timestamp()+interval '1 day'; INSERT INTO guide_accounts(user_id) VALUES ('idle')",
-    );
-    const kept = async () => ({
-      guides: (
-        await pg.query("SELECT * FROM report_guides ORDER BY user_id,report")
-      ).rows,
-      accounts: (await pg.query("SELECT * FROM guide_accounts")).rows,
-      function: (
-        await pg.query(
-          "SELECT proowner::regrole::text AS owner,proacl::text AS acl,prosecdef,proconfig::text AS config FROM pg_proc WHERE proname='milton_guide_source_changed'",
-        )
-      ).rows,
-      grants: (
-        await pg.query(
-          "SELECT grantee,table_name,privilege_type FROM information_schema.role_table_grants WHERE table_name IN ('guide_accounts','report_guides','guide_spend','guide_budget_lock') ORDER BY 1,2,3",
-        )
-      ).rows,
-    });
-    const before = await schemaCatalog(pg);
-    const prior = await kept();
-    expect(before.triggers).toContainEqual(
-      expect.objectContaining({ tgname: "report_guide_source" }),
-    );
-    await through(10);
-    await migrate(drizzle(pg), { migrationsFolder: scratch });
-    expect(await schemaCatalog(pg)).toEqual({
-      ...before,
-      triggers: before.triggers.filter(
-        (t) => t.tgname !== "report_guide_source",
-      ),
-    });
-    expect(await kept()).toEqual(prior);
-  } finally {
-    await pg.close();
-    await rm(scratch, { recursive: true, force: true });
-  }
-}, 30000);
-
 test("no request path deletes usage rows: only the maintenance job's prune does", async () => {
   // Request-serving code (server/src, apps/auth/src) never deletes from
   // usage_calls and never calls the prune; account erasure removes rows only
@@ -1147,6 +936,185 @@ test("0012 adds empty memo tables the legacy group cannot reach; 014 grants the 
   } finally {
     await pg.exec("RESET ROLE").catch(() => {});
     await local.dispose();
+  }
+});
+
+test("0013 drops the old writing tables, their sequence and functions, and the old store's receipts; memo receipts stay, so replays never undo a forget or a later correction", async () => {
+  const folder = new URL("../drizzle/", import.meta.url).pathname;
+  const scratch = await mkdtemp(join(tmpdir(), "milton-0013-"));
+  const pg = new PGlite();
+  // A fresh install through 0013, so later migrations leave this test alone.
+  const current = new PGlite();
+  try {
+    await cp(folder, scratch, { recursive: true });
+    const journal = await Bun.file(join(scratch, "meta/_journal.json")).json();
+    const through = async (tag: string) =>
+      writeFile(
+        join(scratch, "meta/_journal.json"),
+        JSON.stringify({
+          ...journal,
+          entries: journal.entries.slice(
+            0,
+            journal.entries.findIndex((e: { tag: string }) => e.tag === tag) +
+              1,
+          ),
+        }),
+      );
+    await through("0012_memos");
+    await migrate(drizzle(pg), { migrationsFolder: scratch });
+    // Production's shape before 0013: rows in the old tables and the old
+    // store's receipts, as save.ts before #76 wrote them.
+    await seedUsers(pg, "kept");
+    await pg.exec(
+      "INSERT INTO sample_kinds(user_id,id,report,label) VALUES ('kept','kind','email','Fictional kind'); INSERT INTO instruction_cards(user_id,id) VALUES ('kept','card'); INSERT INTO guide_accounts(user_id) VALUES ('kept')",
+    );
+    await seedSample(
+      pg,
+      "kept",
+      "sample",
+      "email",
+      "kind",
+      { version: 1, summary: "Fictional note" },
+      "Fictional sample.",
+    );
+    const oldReceipt = async (outcome: Record<string, unknown>) => {
+      const id = crypto.randomUUID();
+      await pg.query(
+        "INSERT INTO save_requests(user_id,request_id,input_hash,result_json) VALUES ('kept',$1,repeat('a',64),$2::jsonb)",
+        [id, JSON.stringify({ request_id: id, ...outcome })],
+      );
+      return id;
+    };
+    for (const outcome of [
+      { status: "saved", version: "v2" },
+      {
+        status: "saved",
+        version: "v3",
+        samples_retired: [{ id: "s", reason: "replaced" }],
+      },
+      { status: "unchanged", version: "v3" },
+      { status: "conflict", version: "v3" },
+      {
+        status: "failed",
+        error: "baseline_unknown",
+        message: '"Fictional rule" in email starts with "Baseline: "',
+      },
+      { status: "failed", error: "sample_conflict", message: "Fictional." },
+    ])
+      await oldReceipt(outcome);
+    // An old refusal with a code the memo code also stores is indistinguishable
+    // from a memo-era one, and stays.
+    const shared = await oldReceipt({
+      status: "failed",
+      error: "request_too_large",
+      message: "The save request is too large. Nothing was changed.",
+    });
+    // The memo code's receipts: a memo saved then forgotten, a memo whose
+    // context was corrected twice, a refusal and a cover sheet line.
+    const store = fixtureStore(storeDatabase(pg), "kept");
+    const forgottenSave = memoSave({ final: "Fictional forgotten final." });
+    const forgottenMemo = (await store.saveMemo(forgottenSave)).memo!.memo_id;
+    const forget = {
+      request_id: crypto.randomUUID(),
+      forget_memos: [forgottenMemo],
+    };
+    expect((await store.saveMemo(forget)).status).toBe("saved");
+    const correctedSave = memoSave();
+    const corrected = (await store.saveMemo(correctedSave)).memo!.memo_id;
+    const correction = (summary: string) => ({
+      request_id: crypto.randomUUID(),
+      memo_context: {
+        memo_id: corrected,
+        context: { summary, medium: "chat" as const },
+      },
+    });
+    const first = correction("first fictional correction");
+    const second = correction("second fictional correction");
+    expect((await store.saveMemo(first)).status).toBe("saved");
+    expect((await store.saveMemo(second)).status).toBe("saved");
+    const refused = memoSave({ kind_id: "not-a-kind" });
+    expect((await store.saveMemo(refused)).status).toBe("failed");
+    const line = {
+      request_id: crypto.randomUUID(),
+      cover_sheet: { add: "Fictional line.", expected_version: 0 },
+    };
+    expect((await store.saveMemo(line)).status).toBe("saved");
+    const receipts = async () =>
+      (
+        await pg.query<{ request_id: string }>(
+          "SELECT request_id FROM save_requests ORDER BY request_id",
+        )
+      ).rows.map((r) => r.request_id);
+    const memoEra = [
+      forgottenSave.request_id,
+      forget.request_id,
+      correctedSave.request_id,
+      first.request_id,
+      second.request_id,
+      refused.request_id,
+      line.request_id,
+    ];
+    // What their replays return before 0013.
+    const replays = async () => [
+      await store.saveMemo(forgottenSave),
+      await store.saveMemo(first),
+    ];
+    const replayed = await replays();
+    // Six old-store receipts, the shared refusal and the memo-era ones.
+    expect(await receipts()).toHaveLength(6 + 1 + memoEra.length);
+    await through("0013_drop_old_writing");
+    await migrate(drizzle(pg), { migrationsFolder: scratch });
+    await migrate(drizzle(current), { migrationsFolder: scratch });
+    const after = await schemaCatalog(current);
+    expect(await schemaCatalog(pg)).toEqual(after);
+    for (const table of [
+      "accepted_changes",
+      "instruction_card_versions",
+      "instruction_cards",
+      "sample_versions",
+      "samples",
+      "sample_kinds",
+      "report_guides",
+      "guide_accounts",
+      "guide_spend",
+      "guide_budget_lock",
+    ])
+      expect(after.tables).not.toContain(table);
+    expect(
+      (
+        await pg.query(
+          "SELECT proname FROM pg_proc WHERE pronamespace='public'::regnamespace ORDER BY 1",
+        )
+      ).rows,
+    ).toEqual([
+      { proname: "milton_save_request_guard" },
+      { proname: "milton_user_id_guard" },
+      { proname: "prune_usage_calls" },
+    ]);
+    expect(
+      (
+        await pg.query(
+          "SELECT relname FROM pg_class WHERE relkind='S' AND relnamespace='public'::regnamespace",
+        )
+      ).rows,
+    ).toEqual([]);
+    // The old store's receipts are gone; every memo-era one and the shared
+    // refusal stay.
+    expect(await receipts()).toEqual([...memoEra, shared].sort());
+    // Replays return the stored outcomes: the forgotten memo is not saved
+    // again, and the first correction does not undo the second.
+    expect(await replays()).toEqual(replayed);
+    expect(
+      (
+        await pg.query(
+          "SELECT id,summary FROM memos WHERE user_id='kept' ORDER BY id",
+        )
+      ).rows,
+    ).toEqual([{ id: corrected, summary: "second fictional correction" }]);
+  } finally {
+    await current.close();
+    await pg.close();
+    await rm(scratch, { recursive: true, force: true });
   }
 });
 

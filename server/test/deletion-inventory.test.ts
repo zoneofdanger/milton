@@ -3,6 +3,9 @@ import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
 import { readdirSync, readFileSync } from "node:fs";
+import { cp, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { AUTH_MIGRATIONS } from "../../apps/auth/scripts/migrations";
 
 const INVENTORY = "docs/deletion-inventory.txt";
@@ -11,12 +14,28 @@ const root = new URL("../../", import.meta.url);
 const read = (path: string) => readFileSync(new URL(path, root), "utf8");
 
 /** A fresh schema from all three tracks, applied as a fresh install applies them:
- * Drizzle, then native auth, then the owner files. */
+ * Drizzle through 0012, native auth, the owner files (through 015), then the rest of
+ * Drizzle. 005-app-roles.sql grants on tables 0013 drops, so it runs before 0013, as
+ * it did in production, and 015 runs before 0013 as the release does
+ * (server/README.md). */
 async function freshSchema() {
   const pg = new PGlite();
-  await migrate(drizzle(pg), {
-    migrationsFolder: new URL("server/drizzle/", root).pathname,
-  });
+  const drizzleFolder = new URL("server/drizzle/", root).pathname;
+  const scratch = await mkdtemp(join(tmpdir(), "milton-inventory-"));
+  try {
+    await cp(drizzleFolder, scratch, { recursive: true });
+    const journal = JSON.parse(read("server/drizzle/meta/_journal.json"));
+    journal.entries = journal.entries.filter(
+      (e: { tag: string }) => e.tag < "0013",
+    );
+    await writeFile(
+      join(scratch, "meta/_journal.json"),
+      JSON.stringify(journal),
+    );
+    await migrate(drizzle(pg), { migrationsFolder: scratch });
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
   // The native preparation's audited inventory: this cluster has no other logins.
   await pg.query("SELECT set_config('milton.retained_logins','[]',false)");
   await pg.exec(read("apps/auth/migrations/000-owner-prerequisites.sql"));
@@ -26,6 +45,7 @@ async function freshSchema() {
   await pg.exec("CREATE DATABASE milton");
   for (const file of readdirSync(new URL("server/migrations/", root)).sort())
     await pg.exec(read(`server/migrations/${file}`));
+  await migrate(drizzle(pg), { migrationsFolder: drizzleFolder });
   return pg;
 }
 const schema = freshSchema();

@@ -202,58 +202,12 @@ export const triggerRefusals = new Map<
   { message: string; status: number }
 >([
   [
-    "card_version_conflict",
-    {
-      message: "The instruction card changed. Read the current report.",
-      status: 409,
-    },
-  ],
-  [
-    "card_version_is_immutable",
-    { message: "Instruction card versions cannot be changed.", status: 409 },
-  ],
-  [
-    "card_identity_is_immutable",
-    { message: "Instruction card identity cannot be changed.", status: 409 },
-  ],
-  [
-    "memo_body_limit",
-    { message: "The memo body exceeds its size limit.", status: 422 },
-  ],
-  [
-    "memo_description_limit",
-    { message: "The memo description exceeds its size limit.", status: 422 },
-  ],
-  [
-    "memo_reason_limit",
-    { message: "The memo reason exceeds its size limit.", status: 422 },
-  ],
-  [
     "account_unavailable",
     { message: "This Milton account is unavailable.", status: 403 },
   ],
   [
     "user_id_is_immutable",
     { message: "The Milton user id cannot be changed.", status: 409 },
-  ],
-  [
-    "sample_identity_is_immutable",
-    { message: "Sample identities cannot be changed.", status: 409 },
-  ],
-  [
-    "sample_version_is_immutable",
-    { message: "Sample revisions cannot be changed.", status: 409 },
-  ],
-  [
-    "sample_version_conflict",
-    {
-      message: "Append the next complete revision of an active sample.",
-      status: 409,
-    },
-  ],
-  [
-    "sample_kind_is_immutable",
-    { message: "Sample kinds cannot be changed.", status: 409 },
   ],
   [
     "save_receipt_is_immutable",

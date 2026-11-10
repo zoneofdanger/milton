@@ -37,7 +37,6 @@ export const loggedErrorCodes = new Set([
   "invalid_input",
   "invalid_kind",
   "request_too_large",
-  "memo_body_limit",
   "request_id_reused",
   "save_outcome_unknown",
   "assistant_required",
@@ -49,7 +48,6 @@ export const loggedErrorCodes = new Set([
   "cover_sheet_limit",
   "cover_sheet_empty",
   "tweak_exists",
-  "card_version_conflict",
   "unique_violation",
   "check_violation",
   "invalid_token",
@@ -118,7 +116,6 @@ const rereadAll = step(
 export const nextSteps: Record<string, NextStep> = {
   // Saves that met changed guidance.
   version_conflict: rereadAll,
-  card_version_conflict: rereadAll,
   unique_violation: rereadAll,
   invalid_kind: step(
     "reread",
@@ -225,21 +222,10 @@ export const nextSteps: Record<string, NextStep> = {
   ),
   // Billing's own refusal, met only in checkout.
   billing_unavailable: retryOnce,
-  // Store invariants and configuration a correct call never meets (Milton
-  // derives descriptions and reasons itself).
+  // Store invariants and configuration a correct call never meets: the user id
+  // and save receipt guards.
   configuration: unavailableNow,
-  // The writing tables before memos keep these triggers until their drop; no
-  // code writes those tables, so none can fire.
-  sample_version_conflict: unavailableNow,
-  memo_body_limit: unavailableNow,
-  memo_description_limit: unavailableNow,
-  memo_reason_limit: unavailableNow,
-  card_version_is_immutable: unavailableNow,
-  card_identity_is_immutable: unavailableNow,
   user_id_is_immutable: unavailableNow,
-  sample_identity_is_immutable: unavailableNow,
-  sample_version_is_immutable: unavailableNow,
-  sample_kind_is_immutable: unavailableNow,
   save_receipt_is_immutable: unavailableNow,
 };
 

@@ -459,7 +459,7 @@ NULL; each statement is a catalog change, no table rewrite. Every recorded app/M
 writes `source_hash` and reads neither, so traffic stays open and rollback targets are
 unchanged. App/MCP code released with 0006 stops writing `source_hash` and fails every save
 without it, so apply 0006 first, then release that code. The column itself and its
-`save_request_hashes` check go in a later migration (TODO.md). Rehearse on a disposable
+`save_request_hashes` check go in a later migration (0014, below). Rehearse on a disposable
 branch or database first, then:
 
 1. Snapshot.
@@ -925,6 +925,75 @@ PostgreSQL rolls it back, and step 3's comparison settles Neon's list. Fix the c
 and rerun. After 015 alone, nothing serving needs the roles, so there is nothing to roll
 back. Once 0013 has committed, the pre-migration snapshot is the only rollback; there is no
 down script.
+
+## Drop save_requests.source_hash (Drizzle 0014)
+
+Nothing has ever read `save_requests.source_hash`, and saves stopped writing it in #45, which
+0006 made possible by dropping its NOT NULL. `0014_drop_source_hash` names #45 in its
+`-- code-stopped-by:` line, drops the column and rewrites the `save_request_hashes` check to
+test `input_hash` alone. It drops the check by name before the column and re-adds it after,
+so nothing goes implicitly, and uses no CASCADE. `save_requests`' rows, its guard trigger
+and its grants stay.
+
+**Migrate first; no code release has to come before it.** Every app/MCP revision from #45 on
+names only `user_id`, `request_id`, `input_hash` and `result_json` on `save_requests`: the
+receipt lookup `SELECT input_hash,result_json FROM save_requests WHERE user_id=$1 AND
+request_id=$2` and the insert `INSERT INTO save_requests(user_id,request_id,input_hash,result_json)`
+in `save.ts`, both plain SQL. The table's Drizzle declaration in `schema.ts` (which still
+listed `source_hash` up to this change) is read only by drizzle-kit and the tests; no request
+builds a query from it. Checked on PostgreSQL 18 with every statement logged: the save
+path of main `c3ed021` and of #76's `bdac60f` (a saved memo, its replay, a refused save and a
+cover sheet line) ran on a database migrated through 0014 with no error, and no logged
+statement named `source_hash`. This change's own code (the schema declaration without the
+column) ships with the next release, in either order. The rollback floor stays #76
+(`milton-*-memos-bdac60f`, `milton-admit-00005-vp2`, see the 0013 section); 0014 moves no
+revision off the list of safe rollback targets. Code older than #45 writes `source_hash`,
+but it was already below the floor.
+
+Rehearsed by `check-auth-integration.ts` (applies 0014 after 0013 on PostgreSQL 18 and saves
+through the MCP runtime role; PR CI `integration`) and by `store-migrations.test.ts` (a
+receipt with `source_hash` and a memo-era one survive 0014, and the replay returns its
+stored outcome). Each step needs Peter's go; the release coordinator runs it:
+
+1. Snapshot production and record its name. Record, as `neondb_owner`, what the release
+   removes (the column's values are hashes of old inputs that nothing reads):
+
+   ```sql
+   SELECT count(*) AS receipts, count(source_hash) AS with_source_hash FROM save_requests;
+   ```
+
+2. As `neondb_owner`: `bun run --cwd server db:migrate` applies `0014_drop_source_hash`
+   (journal 15 entries). Each statement takes an `ACCESS EXCLUSIVE` lock on `save_requests`
+   until commit, so saves wait for it; reads and every other table, `users` included, do
+   not. A save holds its own lock on `save_requests` from its receipt lookup to its commit,
+   so the migration waits for saves in flight. Its `SET LOCAL lock_timeout = '5s'` (inside
+   the migration's transaction, since Neon drops the limits a client passes at connect)
+   bounds that wait: on a lock timeout it rolls back whole and is simply rerun. The work
+   under the lock is catalog changes and one scan of `save_requests` (tens of rows) to
+   validate the new check, so it holds it for milliseconds.
+3. Check as the owner. The first query returns 0; the second returns
+   `CHECK ((input_hash ~ '^[a-f0-9]{64}$'::text))`; the third returns step 1's `receipts`;
+   the fourth returns 15:
+
+   ```sql
+   SELECT count(*) FROM information_schema.columns
+   WHERE table_schema = 'public' AND table_name = 'save_requests' AND column_name = 'source_hash';
+   SELECT pg_get_constraintdef(oid) FROM pg_constraint
+   WHERE conrelid = 'public.save_requests'::regclass AND conname = 'save_request_hashes';
+   SELECT count(*) FROM save_requests;
+   SELECT count(*) FROM drizzle.__drizzle_migrations;
+   ```
+
+   Then `check-runtime-role.ts` prints `ok` for app and MCP, one manual `milton-e2e-daily`
+   run passes (it saves, so it writes a receipt), and MCP logs show no `store_unavailable`
+   or `check_violation`.
+
+Rollback: if 0014 fails, its transaction rolls back and changes nothing; fix the cause and
+rerun. Once it has committed, nothing serving needs the column, so no code rollback calls
+for a database one: every revision at or above the #76 floor runs on either schema. The
+pre-migration snapshot is the only way back to the column and its values (restoring it
+loses every write since; see [Database recovery](#database-recovery)); there is no down
+script.
 
 ## Test account and daily check
 

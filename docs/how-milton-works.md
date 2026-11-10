@@ -151,7 +151,7 @@ Files: `server/src/mcp.ts`, `server/src/mcp-tools.ts`.
 - A `kind_id` the account does not have is refused (`invalid_kind`) without creating a kind.
 - `get_report` returns `report_id`, `text`, `is_empty`, `examples` (`{memo_id, kind_id?, kind?, medium, tier, date}` in served order), `tweaks` (`{tweak_id, text, memos}`) and `kinds` (every kind on the account as `{kind_id, kind}`, by label).
 - `create_memo` takes a UUID `request_id` and exactly one of `memo`, `cover_sheet`, `forget_memos` or `memo_context`; `memo.report_id` names the `get_report` read before the draft.
-- A `create_memo` whose `memo` is plain text (not JSON) with only memo fields beside it is read as `memo: {final: that text, ...those fields}`, before validation and hashing, so either shape is one request; a JSON string `memo` beside memo fields, one beside `final`, another change or an unknown argument, and memo fields beside an object `memo` are refused (`invalid_input`) with how to send it.
+- A `create_memo` whose `memo` is plain text (not JSON) with only memo fields beside it is read as `memo: {final: that text, ...those fields}`, before validation and hashing, so either shape is one request; a JSON string `memo` beside memo fields, one beside `final`, another change or an unknown argument, and memo fields beside an object `memo` are refused (`invalid_input`) with how to send it, as is a flattened memo still malformed once read as nested, naming what is malformed.
 - Every error result and every MCP HTTP refusal body keeps `error` and `message` and adds
   `code` (the `error`, or `version_conflict` for a stale-version conflict) and `next`:
   `{action, text}`, the action one of `retry`, `reread`, `fix_input`, `ask_user` or

@@ -468,9 +468,12 @@ test("a memo sent flattened (the final as a string memo, its fields beside it) s
     expect((await local.pg.query("SELECT final FROM memos")).rows).toEqual([
       { final },
     ]);
-    // Ambiguous: refused with how to send it, nothing saved.
+    // Ambiguous, or flattened but still malformed: refused with how to
+    // send it, nothing saved.
     const context = fields.context;
     for (const args of [
+      { memo: final, new_kind: "reply" },
+      { memo: final, context: { summary: "a reply" }, new_kind: "reply" },
       { memo: final },
       { memo: final, final, context },
       { memo: '"Friday works."', context },

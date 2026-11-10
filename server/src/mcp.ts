@@ -122,9 +122,10 @@ function parsedObjectArguments(params: unknown) {
 const memoFields = Object.keys(memoInput.shape).filter(
   (key) => key !== "final",
 );
-/** The refusal for a memo create_memo cannot read: what to send instead. */
-const memoShape =
-  "create_memo: send memo as one object holding its fields, such as memo: {final, context: {summary, medium}, new_kind}; only request_id goes beside it. Nothing was changed.";
+/** The refusal for a memo create_memo cannot read: what to send instead,
+ * after what was malformed when known. */
+const memoShape = (malformed: string[] = []) =>
+  `create_memo: ${malformed.length ? `${malformed.join(", ")} ${malformed.length === 1 ? "is" : "are"} malformed; ` : ""}send memo as one object holding its fields, such as memo: {final, context: {summary, medium}, new_kind}; only request_id goes beside it. Nothing was changed.`;
 /** Some AIs send a memo flattened: the final as a plain string memo, its
  * other fields beside it (#80 setup runs: 7 of 20 conversations' first
  * saves). When every argument beside request_id and memo is a memo field, it
@@ -132,7 +133,7 @@ const memoShape =
  * either shape is one request. A string memo that parses as JSON (an object
  * was unpacked above), or one beside final, another change or an unknown key,
  * is ambiguous: the memoShape refusal, as is any memo field beside an object
- * memo. */
+ * memo, and a flattened memo that, read as nested, is still malformed. */
 function flattenedMemo(params: unknown): string | undefined {
   if (typeof params !== "object" || params === null) return;
   const { name, arguments: args } = params as {
@@ -147,20 +148,30 @@ function flattenedMemo(params: unknown): string | undefined {
   );
   const fields = beside.filter((key) => memoFields.includes(key));
   if (typeof values.memo !== "string")
-    return fields.length ? memoShape : undefined;
+    return fields.length ? memoShape() : undefined;
   try {
     JSON.parse(values.memo);
-    return memoShape;
+    return memoShape();
   } catch {
     /* Plain text: the final, when its fields are beside it. */
   }
-  if (!fields.length || fields.length !== beside.length) return memoShape;
+  if (!fields.length || fields.length !== beside.length) return memoShape();
   const memo: Record<string, unknown> = { final: values.memo };
   for (const key of fields) {
     memo[key] = values[key];
     delete values[key];
   }
   values.memo = memo;
+  // Read as nested but still malformed (no context, say): the refusal names
+  // what is wrong beside the shape, not the SDK's text alone.
+  const issues = saveMemoInput.safeParse(values).error?.issues ?? [];
+  if (issues.length)
+    return memoShape(
+      [...new Set(issues.map((i) => i.path.join(".") || i.message))].slice(
+        0,
+        5,
+      ),
+    );
 }
 
 export function createMiltonServer(

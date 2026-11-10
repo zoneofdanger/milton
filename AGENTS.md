@@ -14,7 +14,8 @@ into concept files, [SPEC.md](SPEC.md) also describes product behaviour.
 - Before pushing, merging, releasing or deleting a branch:
   [publishing](docs/agents/publishing.md). Before messaging another session:
   [messaging](docs/agents/messaging.md). Who reviews and delivers: [roles](docs/agents/roles.md).
-- For product work, read the concept files the task touches.
+- Before writing copy or proposing a feature: [positioning](docs/positioning.md). For product
+  work, read the concept files the task touches.
 
 ## Stop first
 
@@ -42,9 +43,11 @@ into concept files, [SPEC.md](SPEC.md) also describes product behaviour.
 - [agents/roles](docs/agents/roles.md) — Who owns what on the Milton team (builders, milton-duo, milton-overlord, Designer), when review is needed, and which models run
 - [agents/working](docs/agents/working.md) — How to build and check a change in Milton: Bun, the checks to run, tests, served text, theme, shims and secrets
 - [how-milton-works](docs/how-milton-works.md) — Every piece of Milton's logic, one line each, until it is split into concept files
+- [positioning](docs/positioning.md) — What Milton is for and how to judge features, copy and backlog against it: your AI writes like you
 - [research/derived-systems-2026](docs/research/derived-systems-2026.md) — November 2026: the embeddings, advisory graph, task retrieval and gardening Milton built, measured and removed, and what would justify rebuilding
 - [research/honcho-2026](docs/research/honcho-2026.md) — Honcho compared with Milton on 2026-11-05: a substantial overlap in person memory; Milton's distinction was a writing workflow on approved examples
 - [research/honcho-source-2026](docs/research/honcho-source-2026.md) — Honcho source read at a pinned commit, 2026-11-05: context delivery varied by client; no reason found to add embeddings or autonomous learning
+- [research/memos-spec-2026-11-09](docs/research/memos-spec-2026-11-09.md) — The memos-and-tweaks spec Peter approved on 2026-11-09 for the memos release (#76), with its reasons and rejected options; frozen
 - [research/pg-style-guide-ablation-2026-11-05](docs/research/pg-style-guide-ablation-2026-11-05.md) — 2026-11-05 pilot on ten briefs: adding a written style guide to three Paul Graham essays gave no clear overall gain, judged by one model
 - [research/pg-style-guide-ablation-drafts-2026-11-05](docs/research/pg-style-guide-ablation-drafts-2026-11-05.md) — The exact briefs and unedited first drafts, both conditions, behind the 2026-11-05 Paul Graham style-guide pilot
 - [research/sample-ranking-2026](docs/research/sample-ranking-2026.md) — November 2026 offline tests on fictional authors: labels plus full text shipped, embeddings were rejected, better picks did not write better drafts

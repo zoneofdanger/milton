@@ -251,9 +251,8 @@ secret versions together with its configuration.
 
 ## Database logins as operated
 
-What each role may read and write is in `docs/database.md` (until it lands, the server
-README's "Runtime role" and `server/drizzle/0000_baseline.sql`); this is what exists and how
-it is used.
+What each role may read and write is in [database](../database.md#runtime-roles); this is
+what exists and how it is used.
 
 - The services connect as separate NOINHERIT logins, `milton_auth_runtime`,
   `milton_app_runtime` (app and admission) and `milton_mcp_runtime`, never granted the

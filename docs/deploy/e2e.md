@@ -16,7 +16,7 @@ end-to-end check writes and retires. `.invalid` is a reserved top-level domain n
 system delivers to; the account is created verified, and auth never queues any mail (reset,
 verification or other) for a `.invalid` address, answering such a request exactly as any
 other, so nothing for it reaches the mail queue or Resend. Usage and metric counts exclude it
-(`users.test_account`, server README).
+(`users.test_account`, [billing](../billing.md#usage)).
 
 Trials stay on, and the account is permanently exempt from them and from billing, so its
 access never depends on a trial or a Stripe customer. With billing configured, a trial row
@@ -24,7 +24,7 @@ with no status gets a Stripe customer and a 30-day trial at sign-in (`ensureSubs
 which would put a fictional customer in live Stripe and lock the account out when that
 trial ended without a card. So provisioning creates the Milton account itself, marked and
 without a trial row, before the native user exists, and every billing path checks
-`test_account` explicitly (server README, "Test accounts"): the gate reads it as early
+`test_account` explicitly ([billing](../billing.md#access)): the gate reads it as early
 access, sign-in starts nothing, checkout and the portal answer 409, and no path gives it a
 row, status, customer or notice.
 

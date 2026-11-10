@@ -26,10 +26,10 @@ import SiteLayout from "../layouts/SiteLayout.astro";
             <p>
               <strong>What this shows:</strong> no clear overall benefit from
               adding this particular guide in this small pilot. The guide was
-              preferred more often on voice alone, but not overall. Samples stay
-              the practical default, and a guide stays optional. Milton stores
-              your approved samples and corrections, and the AI you already use
-              does the writing.
+              preferred more often on voice alone, but not overall. Real writing
+              stayed the practical default, and a guide stayed optional. Milton
+              now keeps the finals you accept as examples, beside a cover sheet
+              you write, and the AI you already use does the writing.
             </p>
             <p>
               <strong>Working conclusion:</strong> capable models may be able to
@@ -142,23 +142,25 @@ import SiteLayout from "../layouts/SiteLayout.astro";
           <section class="report-section" aria-labelledby="no-model">
             <h3 id="no-model">Why Milton doesn't rewrite your writing</h3>
             <p>
-              Milton stores your rules exactly as sent and your samples exactly
-              as approved. Reading them back is a database query, with no model
-              call. Milton itself never rewrites what you saved. Your AI does
-              the writing, with its own model. Milton keeps the file.
+              Milton stores your memos and cover sheet exactly as your AI sends
+              them. Reading them back is a database query, with no model call.
+              Milton itself never rewrites what you saved. Your AI does the
+              writing, with its own model. Milton keeps the file.
             </p>
             <p>
-              We tested adding a model to how Milton picks samples. See below.
+              We tested adding a model to how Milton picks examples. See below.
             </p>
           </section>
 
           <section class="report-section" aria-labelledby="sample-ranking">
-            <h3 id="sample-ranking">How Milton picks eight samples</h3>
+            <h3 id="sample-ranking">How Milton picks examples</h3>
             <p>
-              Milton keeps every sample you approve and serves eight per report.
-              Your AI says what it is writing, to whom, and why. Milton ranks
-              your samples by who they were for and what they were for, then by
-              matching words, then by date.
+              When we ran these tests, Milton served eight samples per report,
+              ranked by who they were for and what they were for, then by
+              matching words, then by date. It now ranks your memos by kind,
+              medium, who and what they were for, whether the final is your own
+              words, then matching words and date, and serves as many as fit in
+              a fixed budget, with at most three drafts you steered.
             </p>
             <p>
               We tested that against two alternatives: the newest eight, and
@@ -226,13 +228,14 @@ import SiteLayout from "../layouts/SiteLayout.astro";
               Real writing teaches an AI more than nothing. In one study, five
               real emails roughly doubled how often a model's email could be
               traced to the person it was imitating, from 29% to 60%, and two
-              emails did about as well as ten. That is why setup asks for one
-              email first, and why your samples outrank the setup choices.
+              emails did about as well as ten. That is why setup asks for about
+              five pieces you wrote and sent.
             </p>
             <p>
               In our earlier ranking tests, cutting from eight samples to four
-              made drafts clearly worse, 3.21 against 3.65 out of 5. Milton
-              serves eight.
+              made drafts clearly worse, 3.21 against 3.65 out of 5. Milton now
+              serves as many matching examples as fit in a fixed budget, not a
+              fixed count.
             </p>
           </section>
 
@@ -242,15 +245,15 @@ import SiteLayout from "../layouts/SiteLayout.astro";
               <li>Drafts for real people, judged by those people.</li>
               <li>
                 How well ChatGPT, Codex, and other clients beyond Claude Code
-                retrieve samples from Milton and write from them. The
+                retrieve examples from Milton and write from them. The
                 style-guide pilot was an offline prompt test: the samples were
                 placed in the prompt, and no client fetched them from Milton.
               </li>
               <li>Whether one short email is enough.</li>
               <li>
-                Whether the setup choices, or rules a person has approved or
-                corrected, add anything beyond a pasted sample. The style-guide
-                pilot tested one fixed guide, not those.
+                Whether a cover sheet or tweaks add anything beyond pasted
+                writing. The style-guide pilot tested one fixed guide, not
+                those.
               </li>
               <li>Whether you can pick out your own writing, blind.</li>
             </ul>

@@ -44,6 +44,7 @@ const { requests, defaults } = data;
   <h2 class="visually-hidden" id="try-it-title">
     See the difference
   </h2>
+  <p class="file-caption file-caption-phone">{caption}</p>
   <div class="tab-row">
     <div
       class="tabs"
@@ -103,6 +104,20 @@ const { requests, defaults } = data;
               </button>
             ))}
           </div>
+          <select
+            class="request-select"
+            data-request-select
+            aria-labelledby={`try-it-request-label-${person.id}`}
+          >
+            {requests.map((request) => (
+              <option
+                value={request.id}
+                selected={request.id === defaults.request}
+              >
+                {request.label}
+              </option>
+            ))}
+          </select>
         </div>
         {requests.map((request) => {
           const pair = person.pairs[request.id]!;
@@ -180,7 +195,6 @@ const { requests, defaults } = data;
       </div>
     ))}
   </div>
-  <p class="file-caption file-caption-phone">{caption}</p>
 </section>
 
 <!-- Inline and synchronous, so the pickers and the one default pair are set
@@ -198,6 +212,14 @@ const { requests, defaults } = data;
           "aria-pressed",
           String(button.value === box.dataset[button.dataset.pick]),
         );
+      for (const select of box.querySelectorAll("[data-request-select]"))
+        select.value = box.dataset.request;
+    };
+    const pick = (kind, value) => {
+      if (box.dataset[kind] === value) return;
+      box.dataset[kind] = value;
+      show();
+      box.dispatchEvent(new Event("try-it-pick"));
     };
     box.addEventListener("click", (event) => {
       const more = event.target.closest("button[data-read-all]");
@@ -212,10 +234,12 @@ const { requests, defaults } = data;
         return;
       }
       const button = event.target.closest("button[data-pick]");
-      if (!button || box.dataset[button.dataset.pick] === button.value) return;
-      box.dataset[button.dataset.pick] = button.value;
-      show();
-      box.dispatchEvent(new Event("try-it-pick"));
+      if (button) pick(button.dataset.pick, button.value);
+    });
+    // On a phone the three requests are one native select.
+    box.addEventListener("change", (event) => {
+      const select = event.target.closest("select[data-request-select]");
+      if (select) pick("request", select.value);
     });
     for (const picker of box.querySelectorAll("[data-picker]"))
       picker.hidden = false;
@@ -442,6 +466,9 @@ const { requests, defaults } = data;
     font-weight: 600;
     text-decoration-thickness: 2px;
   }
+  .request-select {
+    display: none;
+  }
 
   /* The papers keep their own heights; the plain one is plain paper on the
      ground, the Milton one a sheet. */
@@ -612,11 +639,11 @@ const { requests, defaults } = data;
     .tab {
       flex: 1 1 0;
       width: auto;
-      height: 54px;
+      height: 50px;
     }
     .tab[aria-pressed="true"],
     .tab[aria-pressed="true"]:hover {
-      height: 56px;
+      height: 52px;
     }
     .tab-in {
       flex-direction: column;
@@ -634,9 +661,11 @@ const { requests, defaults } = data;
     .file-caption-wide {
       display: none;
     }
+    /* Tighter tracking keeps the price on one line at 360px. */
     .file-caption-phone {
       display: block;
-      margin-top: 10px;
+      margin-bottom: 10px;
+      letter-spacing: 0.02em;
     }
     .folder {
       padding: var(--space-4) 14px 18px;
@@ -644,15 +673,38 @@ const { requests, defaults } = data;
     .requests {
       margin-top: calc(-1 * var(--space-2));
     }
+    /* One row: the three requests are a native select, so both papers
+       start in the first screen. */
+    .requests {
+      flex-wrap: nowrap;
+      gap: var(--space-3);
+    }
     .requests-label {
-      flex-basis: 100%;
+      flex: none;
     }
     .requests-options {
-      display: grid;
+      display: none;
+    }
+    .request-select {
+      display: block;
+      flex: 1 1 0;
+      width: 0;
+      min-width: 0;
+      min-height: var(--touch-target);
+      padding: 0 var(--space-3);
+      border: 1px solid var(--ink);
+      border-radius: 0;
+      background: var(--surface);
+      color: var(--ink);
+      font: 600 var(--text-small) / 1.3 var(--font-sans);
+    }
+    .email {
+      font-size: var(--text-small);
+      line-height: 1.5;
     }
     .papers {
       grid-template-columns: minmax(0, 1fr);
-      gap: var(--space-6);
+      gap: var(--space-4);
     }
     .paper {
       gap: 10px;
@@ -692,14 +744,14 @@ const { requests, defaults } = data;
       text-underline-offset: 0.25em;
     }
     .try-it[data-ready] .clip:has(+ .read-all[aria-expanded="false"]) {
-      max-height: 170px;
+      max-height: calc(var(--text-small) * 1.5 * 8);
       overflow: hidden;
     }
     .try-it[data-ready] .clip:has(+ .read-all[aria-expanded="false"])::after {
       content: "";
       position: absolute;
       inset: auto 0 0;
-      height: 72px;
+      height: calc(var(--text-small) * 1.5 * 1.25);
       background: linear-gradient(transparent, var(--paper));
       pointer-events: none;
     }

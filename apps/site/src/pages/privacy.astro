@@ -87,14 +87,14 @@ import SiteLayout from "../layouts/SiteLayout.astro";
   <p style="text-wrap:pretty">
     Memos are kept until you forget them, choose Delete all memos, or delete
     your account; there is no timer. On your TPS page you can forget a memo,
-    which also removes tweaks only it taught; delete all memos, which removes
-    every memo, tweak and kind but keeps your cover sheet; delete or reword a
-    tweak; and turn off Keep memos, which stops your AI keeping drafts while
-    still letting you ask it to remember something. You can also ask your AI to
-    forget a memo. Earlier versions of your cover sheet, and receipts of past
-    saves, remain until account deletion. None of this erases copies an AI
-    already received. Writing saved before memos is no longer served to AIs or
-    shown, and will be deleted.
+    which also removes tweaks only it taught, and delete or reword a tweak. In
+    Memo settings you can delete all memos, which removes every memo, tweak and
+    kind but keeps your cover sheet, and turn off Keep memos, which stops your
+    AI keeping drafts while still letting you ask it to remember something. You
+    can also ask your AI to forget a memo. Earlier versions of your cover sheet,
+    and receipts of past saves, remain until account deletion. None of this
+    erases copies an AI already received. Writing saved before memos has been
+    deleted; backup copies are removed when those backups expire or are deleted.
   </p>
 
   <h2>Where it is kept</h2>
@@ -156,22 +156,22 @@ import SiteLayout from "../layouts/SiteLayout.astro";
     access. If you have a Stripe customer, deletion deletes it at Stripe first,
     which ends any subscription immediately, with no refund. Milton then removes
     your memos, tweaks and kinds, your cover sheet and its earlier versions,
-    records of served reports, any writing saved before memos, request receipts,
-    usage counts and billing record, and the app’s sign-in sessions and
-    credentials. When you delete your account, Milton’s sign-in service also
-    deletes your sign-in profile, password hashes, linked sign-in methods,
-    sessions, and every AI connection you approved. An AI registration that only
-    you approved is deleted; one that another account also approved stays, with
-    its name and contact details erased. We keep only a one-way fingerprint of
-    each deleted or erased registration’s ID, so its details stay erased if it
-    registers again. Any registration approved before November 8, 2026 that can
-    no longer be linked to an account remains as registered. If account cleanup
-    is incomplete, the app offers a retry; deletion is confirmed only when that
-    cleanup finishes. Unused password reset links stop working when account
-    security changes or deletion starts, as well as when they expire.
-    Verification links expire after one hour; remaining verification records
-    become eligible for cleanup one day after expiry and can remain until
-    cleanup reaches them. The limited records below remain.
+    records of served reports, request receipts, usage counts and billing
+    record, and the app’s sign-in sessions and credentials. When you delete your
+    account, Milton’s sign-in service also deletes your sign-in profile,
+    password hashes, linked sign-in methods, sessions, and every AI connection
+    you approved. An AI registration that only you approved is deleted; one that
+    another account also approved stays, with its name and contact details
+    erased. We keep only a one-way fingerprint of each deleted or erased
+    registration’s ID, so its details stay erased if it registers again. Any
+    registration approved before November 8, 2026 that can no longer be linked
+    to an account remains as registered. If account cleanup is incomplete, the
+    app offers a retry; deletion is confirmed only when that cleanup finishes.
+    Unused password reset links stop working when account security changes or
+    deletion starts, as well as when they expire. Verification links expire
+    after one hour; remaining verification records become eligible for cleanup
+    one day after expiry and can remain until cleanup reaches them. The limited
+    records below remain.
   </p>
   <p>These records remain after deletion:</p>
   <ul>
@@ -192,10 +192,6 @@ import SiteLayout from "../layouts/SiteLayout.astro";
       Limited verified records linking earlier sign-in identities to Milton
       account IDs, to preserve account and deletion history, and a check that
       trial fingerprints remain consistent.
-    </li>
-    <li>
-      Content-free spending records from a retired writing-guide test (amount,
-      time and a one-way account fingerprint).
     </li>
     <li>Stripe keeps past invoices and payment records.</li>
   </ul>

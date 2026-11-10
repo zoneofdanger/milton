@@ -78,7 +78,7 @@ depends on the client.
 - [`packages/theme`](packages/theme/): Milton's design tokens, stylesheets, and contrast check.
 - [`design/`](design/): Milton's portrait.
 - [`docs/how-milton-works.md`](docs/how-milton-works.md): every piece of logic in Milton, one line each.
-- [`docs/research/`](docs/research/README.md): dated experiments, evidence and product/source research, including the Honcho comparison.
+- [`docs/research/`](docs/research/): dated experiments, evidence and product/source research, including the Honcho comparison.
 - [`SPEC.md`](SPEC.md): the design notes and decisions, in the order they were made.
 
 ## Working locally

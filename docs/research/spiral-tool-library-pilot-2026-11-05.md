@@ -1,3 +1,9 @@
+---
+name: spiral-tool-library-pilot-2026-11-05
+description: 2026-11-05 pilot: one Milton-assisted draft and three Spiral drafts of one essay brief, preserved exactly; small, unblinded and with no winner
+type: research
+---
+
 # Tool-library writing pilot: Milton and Spiral
 
 Research date: November 5, 2026, Pacific time. See [the teardown](spiral-teardown-2026-11-05.md) for the source set, guide reconstruction, and product observations.

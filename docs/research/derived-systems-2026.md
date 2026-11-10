@@ -1,3 +1,9 @@
+---
+name: derived-systems-2026
+description: November 2026: the embeddings, advisory graph, task retrieval and gardening Milton built, measured and removed, and what would justify rebuilding
+type: research
+---
+
 # Derived systems: what was built, measured and removed
 
 Milton briefly ran four systems derived from its canonical instruction cards. None

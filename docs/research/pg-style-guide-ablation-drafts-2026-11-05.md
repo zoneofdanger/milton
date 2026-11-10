@@ -1,3 +1,9 @@
+---
+name: pg-style-guide-ablation-drafts-2026-11-05
+description: The exact briefs and unedited first drafts, both conditions, behind the 2026-11-05 Paul Graham style-guide pilot
+type: research
+---
+
 # PG guide pilot: exact briefs and first drafts
 
 These are model-generated drafts for fictional tasks, not writing by Paul Graham or real messages sent by a person. See [the results and method](pg-style-guide-ablation-2026-11-05.md). Both conditions received the same three reference essays; only the added-guide condition received the fixed guide. The condition labels here are disclosed for audit, so this file is not a blind judging packet.

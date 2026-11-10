@@ -1,3 +1,9 @@
+---
+name: writing-evidence-2026
+description: November 2026 reading of three papers and GBrain's record: examples beat nothing, formality is the default to override, and much is untested
+type: research
+---
+
 # Writing style: what the evidence supports
 
 Notes behind Milton's setup quiz and its evaluation, from November 2026. For how samples are

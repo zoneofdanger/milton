@@ -1,3 +1,9 @@
+---
+name: spiral-teardown-2026-11-05
+description: Spiral teardown, 2026-11-05: its public claims, Styles dashboard and two generated style guides, and a plausible reconstruction of how it works
+type: research
+---
+
 # Spiral: competitive teardown and style-guide reconstruction
 
 Research date: November 5, 2026, Pacific time.

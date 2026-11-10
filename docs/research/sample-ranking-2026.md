@@ -1,3 +1,9 @@
+---
+name: sample-ranking-2026
+description: November 2026 offline tests on fictional authors: labels plus full text shipped, embeddings were rejected, better picks did not write better drafts
+type: research
+---
+
 # Sample ranking: what was tested and what it showed
 
 Milton keeps every approved sample and serves eight per report, so something has to choose

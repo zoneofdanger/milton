@@ -94,6 +94,38 @@ import SiteLayout from "../layouts/SiteLayout.astro";
             </li>
           </ul>
 
+          <section class="questions" aria-labelledby="questions-title">
+            <h3 class="eyebrow" id="questions-title">
+              Questions
+            </h3>
+            <details>
+              <summary>Is it useful if I only use Claude?</summary>
+              <p>
+                Yes. Keep one voice across conversations with the same AI, with
+                your own finals it can imitate instead of adjectives it has to
+                interpret. Connecting another AI later is optional.
+              </p>
+            </details>
+            <details>
+              <summary>What’s the cover sheet? What’s a report?</summary>
+              <p>
+                The cover sheet is your own voice guide: a few short lines every
+                draft follows, like “sign off –P.” A report is what Milton puts
+                together for each draft: your cover sheet, the finals that best
+                match it, then your tweaks. You don’t file anything. The names
+                are an Office Space reference. The paperwork is less demanding.
+              </p>
+            </details>
+            <details>
+              <summary>What if Milton is down?</summary>
+              <p>
+                Your AI writes like itself for a while. You’ll notice. Your
+                cover sheet and memos stay on file: a failed read loses nothing.
+                When Milton is back, ask your AI to read the memo again.
+              </p>
+            </details>
+          </section>
+
           <div class="comments">
             <p class="line">
               <span class="line-label">Comments:</span>{" "}
@@ -181,6 +213,28 @@ import SiteLayout from "../layouts/SiteLayout.astro";
 
   .report .instruction-list {
     margin-top: var(--space-8);
+  }
+
+  /* Questions moved from the landing page: a short ruled list. */
+  .questions {
+    margin-top: var(--space-8);
+  }
+  .questions details {
+    border-bottom: 1px solid var(--hairline);
+  }
+  .questions .eyebrow {
+    padding-bottom: var(--space-2);
+    border-bottom: 1px solid var(--hairline);
+  }
+  .questions summary {
+    min-height: var(--touch-target);
+    padding-block: 10px;
+    cursor: pointer;
+    font-weight: 500;
+  }
+  .questions details > p {
+    padding: 0 0 var(--space-4) var(--space-5);
+    color: var(--muted);
   }
 
   /* Comments: the signed-in cover sheet's ruled lines, the comment typed in

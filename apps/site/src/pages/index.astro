@@ -508,17 +508,14 @@ const guides = [
 
   /* Questions: the one most asked, open as text, then a ruled list. */
   .faq {
-    max-width: 860px;
     margin-top: 72px;
   }
   .faq h2 {
     font-size: clamp(1.375rem, 2.35vw, 1.875rem);
     line-height: 1.2;
     letter-spacing: -0.045em;
-    text-wrap: balance;
   }
   .faq-answer {
-    max-width: 66ch;
     margin-top: 14px;
     font-size: var(--text-lead);
     line-height: var(--leading-body);
@@ -548,7 +545,7 @@ const guides = [
   /* Closing: the question again, the button, and a phone message slip. */
   .closing {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 360px;
+    grid-template-columns: minmax(0, 1fr) 400px;
     gap: var(--space-12);
     align-items: start;
     margin-top: 96px;
@@ -607,6 +604,9 @@ const guides = [
   }
 
   @media (max-width: 1079px) {
+    .faq h2 {
+      text-wrap: balance;
+    }
     .work {
       grid-template-columns: minmax(0, 1fr);
       gap: var(--space-6);

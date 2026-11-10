@@ -23,7 +23,20 @@ This runbook keeps only the latest release record. Earlier release records and a
 one-time procedures are in git history; the last full version is at commit 492b96a
 (`git show 492b96a:server/deploy/README.md`).
 
-## Release record: deletion fences Stripe, Stripe reads off the lock, guide pilot parked, deletion links, UserInfo binding, private admission service, session token drop, e2e fix, MCP next steps, guards (2026-11-08, PRs #58–#66, #68–#80, #78)
+## Release record: deletion fences Stripe, Stripe reads off the lock, guide pilot parked, deletion links, UserInfo binding, private admission service, session token drop, e2e fix, MCP next steps, guards (2026-11-08, PRs #58–#66, #68–#82)
+
+- **#82 (Peter's go, relayed verbatim by milton-overlord under AGENTS.md `aba41ee`; Astra
+  PASS, two runbook fixes), `7bc1194`, closes TODO #30:** Drizzle `0014_drop_source_hash`
+  drops `save_requests.source_hash` and checks `input_hash` alone. Snapshot
+  `snap-lingering-rice-b8pg8kxw` (`before-0014-drop-source-hash-pr82`) at 04:58:49Z
+  (2026-11-10); 12 receipts, 1 with `source_hash`. Applied with `db:migrate` at
+  04:58:57–58Z (journal 15). Checks: column gone, constraint
+  `CHECK ((input_hash ~ '^[a-f0-9]{64}$'::text))`, 0 violating rows, 12 receipts;
+  `check-runtime-role` ok for app and MCP; `milton-e2e-daily-vqt4z` passed; no error,
+  `store_unavailable`, `check_violation` or `permission denied` lines. Gate at 05:09Z: clean; no error lines from app, MCP, admit, auth or jobs since 04:58Z. Checks: PR CI
+  green on `7afccc3`, merged tree types, 154 tests, format and released-migration hashes 0,
+  main CI green on `7bc1194`. No image release (no serving code names the column); rollback
+  floor stays #76.
 
 - **#78 (Peter's own go in the coordinator's tab, after milton-overlord relayed "Go on 78
   now"; Astra FAIL, two fixes, PASS), `aee00b6`:** the drop and wipe from #76. Export first:

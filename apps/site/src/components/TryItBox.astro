@@ -29,16 +29,6 @@ type Person = {
 const people = data.people as Person[];
 const { requests, defaults } = data;
 
-/** The text through its third non-blank line, keeping its own line breaks. */
-function firstLines(text: string, count = 3): string {
-  const lines = text.split("\n");
-  let seen = 0;
-  for (let i = 0; i < lines.length; i++)
-    if (lines[i]!.trim() && ++seen === count)
-      return lines.slice(0, i + 1).join("\n");
-  return text;
-}
-
 const sides = [
   { key: "plain", label: "Your AI today", stamp: "Sounds like AI" },
   { key: "milton", label: "With Milton", stamp: "Approved" },
@@ -80,41 +70,11 @@ const sides = [
     ))}
   </div>
   {people.map((person) => {
-    const excerpt = firstLines(person.pastes[0]!.text);
     return (
       <div class="person" data-person-group={person.id}>
         <h3 class="static-heading">
           {person.name} · {person.role}
         </h3>
-        <div class="peek">
-          <p class="eyebrow">What Milton knows about {person.name}</p>
-          <p class="peek-text">
-            {excerpt}
-            {excerpt !== person.pastes[0]!.text && (
-              <span aria-hidden="true">…</span>
-            )}
-          </p>
-          <details class="peek-more">
-            <summary>
-              All five setup emails and {person.name}’s cover sheet
-            </summary>
-            <h4 class="eyebrow">Cover sheet</h4>
-            <ul class="peek-list">
-              {person.coverSheet.map((line) => (
-                <li>{line}</li>
-              ))}
-            </ul>
-            <h4 class="eyebrow">Setup emails</h4>
-            <ol class="peek-list">
-              {person.pastes.map((paste) => (
-                <li>
-                  <p class="peek-situation">{paste.situation}</p>
-                  <p class="peek-text">{paste.text}</p>
-                </li>
-              ))}
-            </ol>
-          </details>
-        </div>
         <div
           class="picker"
           role="group"
@@ -147,18 +107,43 @@ const sides = [
               </h4>
               <div class="memos">
                 {sides.map((side) => (
-                  <figure class={`sheet memo memo-${side.key}`}>
-                    <figcaption class="sheet-bar">
-                      <span>Interoffice memo</span>
-                      <span class="memo-kind">{side.label}</span>
-                    </figcaption>
-                    <div class="memo-body">
-                      <span class="memo-stamp" aria-hidden="true">
-                        {side.stamp}
-                      </span>
-                      <p class="memo-text">{pair[side.key]}</p>
-                    </div>
-                  </figure>
+                  <div class="memo-column">
+                    <figure class={`sheet memo memo-${side.key}`}>
+                      <figcaption class="sheet-bar">
+                        <span>Interoffice memo</span>
+                        <span class="memo-kind">{side.label}</span>
+                      </figcaption>
+                      <div class="memo-body">
+                        <span class="memo-stamp" aria-hidden="true">
+                          {side.stamp}
+                        </span>
+                        <p class="memo-text">{pair[side.key]}</p>
+                      </div>
+                    </figure>
+                    {side.key === "milton" && (
+                      <details class="setup-emails">
+                        <summary>
+                          See {person.name}’s {person.pastes.length} setup
+                          emails and cover sheet
+                        </summary>
+                        <p class="eyebrow">Cover sheet</p>
+                        <ul class="setup-list">
+                          {person.coverSheet.map((line) => (
+                            <li>{line}</li>
+                          ))}
+                        </ul>
+                        <p class="eyebrow">Setup emails</p>
+                        <ol class="setup-list">
+                          {person.pastes.map((paste) => (
+                            <li>
+                              <p class="setup-situation">{paste.situation}</p>
+                              <p class="setup-text">{paste.text}</p>
+                            </li>
+                          ))}
+                        </ol>
+                      </details>
+                    )}
+                  </div>
                 ))}
               </div>
               <figure class="sheet changes">
@@ -342,38 +327,35 @@ const sides = [
     color: var(--surface);
   }
 
-  .peek {
+  .memo-column {
     display: grid;
-    gap: var(--space-2);
+    gap: var(--space-3);
     min-width: 0;
-    padding: var(--space-3) var(--space-4);
-    border-left: 2px solid var(--sheet-rule);
-    background: var(--surface);
   }
-  .peek-text {
-    font: var(--text-small) / var(--leading-label) var(--font-mono);
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-  }
-  .peek-more summary {
+  .setup-emails summary {
     min-height: var(--touch-target);
     padding-block: var(--space-3);
     cursor: pointer;
     font-size: var(--text-small);
     font-weight: 600;
   }
-  .peek-more h4 {
+  .setup-emails > .eyebrow {
     margin-top: var(--space-4);
   }
-  .peek-list {
+  .setup-list {
     display: grid;
     gap: var(--space-3);
     margin-top: var(--space-2);
     padding-inline-start: var(--space-5);
     font-size: var(--text-small);
   }
-  .peek-situation {
+  .setup-situation {
     color: var(--muted);
+  }
+  .setup-text {
+    font: var(--text-small) / var(--leading-label) var(--font-mono);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
   }
 
   .memos {
@@ -490,17 +472,19 @@ const sides = [
   }
   /* Desktop, once the script has run: the intro on the left, the controls
      beside it, and the chosen pair across both columns, so the top of both
-     memos is in the first screen. The person group steps aside so its peek,
-     request picker and pairs take the grid's areas. */
+     memos is in the first screen. The person group steps aside so its
+     request picker and pairs take the grid's areas; the last intro row takes
+     any height the intro has over the controls. */
   @media (min-width: 1024px) {
     .try-it[data-ready] {
       grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr);
       grid-template-areas:
         "intro heading"
         "intro people"
-        "intro peek"
         "intro requests"
+        "intro ."
         "pair pair";
+      grid-template-rows: auto auto auto 1fr auto;
       gap: var(--space-4) var(--space-10);
       align-items: start;
     }
@@ -516,10 +500,6 @@ const sides = [
     }
     .try-it[data-ready] .person {
       display: contents;
-    }
-    .try-it[data-ready] .peek {
-      grid-area: peek;
-      padding-block: var(--space-2);
     }
     .try-it[data-ready] .person > .picker {
       grid-area: requests;

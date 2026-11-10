@@ -41,10 +41,10 @@ Local commands and landing content are in [apps/site/README.md](../apps/site/REA
   person's cover sheet and report as Milton serves them. They are stored unedited in
   `apps/site/src/data/try-it.json`; only the bold markers around "Subject:" are dropped
   for display. A draft that can't be shown is regenerated, never edited.
-- Beside the pickers, "What Milton knows" shows one of that person's five setup emails,
-  with the rest and their cover sheet one tap away. A "Cover sheet attached" slip under
-  the memos compares greeting, opening words, length and sign-off, computed by code when
-  the drafts were generated.
+- Under the "With Milton" email, a closed disclosure ("See Peter's 5 setup emails and
+  cover sheet") holds that person's setup emails and cover sheet. A "Cover sheet
+  attached" slip under the memos compares greeting, opening words, length and sign-off,
+  computed by code when the drafts were generated.
 - Everything is rendered at build time with no motion. Without JavaScript every person
   and pair shows as plain sections; with it, the pickers (real buttons with
   `aria-pressed`) swap the pair in place without announcements. Picks, and clicks on

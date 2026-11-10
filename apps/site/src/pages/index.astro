@@ -6,6 +6,7 @@ import TryItBox from "../components/TryItBox.astro";
 const copy = {
   price: "30 days free, then $5.01 a month. No card.",
   priceTail: "",
+  folderNote: "Same AI, same request. Em dashes added for dramatic effect.",
   markOne: [
     { label: "Urgent", ticked: true },
     { label: "For review", ticked: false },
@@ -59,7 +60,10 @@ const guides = [
     </div>
   </section>
 
-  <TryItBox caption={[copy.price, copy.priceTail].filter(Boolean).join(" ")} />
+  <TryItBox
+    caption={[copy.price, copy.priceTail].filter(Boolean).join(" ")}
+    note={copy.folderNote}
+  />
 
   <div class="work">
     <section class="slip-wrap" id="how-it-works" aria-labelledby="how-heading">

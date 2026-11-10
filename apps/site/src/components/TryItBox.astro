@@ -25,10 +25,12 @@ type Person = {
 };
 
 interface Props {
-  /** The mono caption beside the tabs (under the folder on a phone). */
+  /** The mono caption beside the tabs (above them on a phone). */
   caption: string;
+  /** The line at the folder's foot, saying how the emails were made. */
+  note: string;
 }
-const { caption } = Astro.props;
+const { caption, note } = Astro.props;
 
 const people = data.people as Person[];
 const { requests, defaults } = data;
@@ -168,9 +170,7 @@ const { requests, defaults } = data;
           );
         })}
         <div class="folder-foot">
-          <p class="folder-note">
-            Same AI, same request. Generated once, filed unedited.
-          </p>
+          <p class="folder-note">{note}</p>
           <details class="setup-emails">
             <summary>See what Milton has on file for {person.name}</summary>
             <div class="setup-content">

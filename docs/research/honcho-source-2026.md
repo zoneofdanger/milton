@@ -1,3 +1,9 @@
+---
+name: honcho-source-2026
+description: Honcho source read at a pinned commit, 2026-11-05: context delivery varied by client; no reason found to add embeddings or autonomous learning
+type: research
+---
+
 # Focused Honcho source teardown
 
 Reviewed **2026-11-05**, pinned to [`b57a3730d00a95efbcd1b203c130c47a6028c289`](https://github.com/plastic-labs/honcho/tree/b57a3730d00a95efbcd1b203c130c47a6028c289). This extends the [product comparison](honcho-2026.md). The [source manifest](honcho-source-manifest-2026.json) records the reviewed public commit and Git blob hashes for 51 collected files; the source snapshots are not vendored here. Findings concern the specific sections and paths cited below, not an exhaustive audit. All recommendations remain proposals.

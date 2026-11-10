@@ -1,3 +1,9 @@
+---
+name: pg-style-guide-ablation-2026-11-05
+description: 2026-11-05 pilot on ten briefs: adding a written style guide to three Paul Graham essays gave no clear overall gain, judged by one model
+type: research
+---
+
 # Does a written style guide help? A Paul Graham pilot
 
 Run date: November 5, 2026, Pacific time (November 6 UTC).

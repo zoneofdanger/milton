@@ -1,3 +1,9 @@
+---
+name: honcho-2026
+description: Honcho compared with Milton on 2026-11-05: a substantial overlap in person memory; Milton's distinction was a writing workflow on approved examples
+type: research
+---
+
 # Honcho and Milton: product comparison
 
 Research date: **2026-11-05**. This is a dated assessment of public pages and source, not a continuously updated competitor page. Prices, claims and observed site copy refer to that date. Milton’s behavior comparison uses the shipped `fec8802` runtime and the public site observed during the review. Recommendations and the proposed experiment are not approved work or product commitments. See also the [focused source teardown](honcho-source-2026.md).

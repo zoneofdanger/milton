@@ -5,7 +5,6 @@ type: procedure
 covers:
   - server/deploy/app.service.json
   - server/deploy/mcp.service.json
-  - server/deploy/admit.service.json
   - server/Dockerfile
   - apps/auth/Dockerfile
   - server/scripts/probe-forms.ts

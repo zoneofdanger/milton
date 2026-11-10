@@ -23,7 +23,26 @@ This runbook keeps only the latest release record. Earlier release records and a
 one-time procedures are in git history; the last full version is at commit 492b96a
 (`git show 492b96a:server/deploy/README.md`).
 
-## Release record: deletion fences Stripe, Stripe reads off the lock, guide pilot parked, deletion links, UserInfo binding, private admission service, session token drop, e2e fix, MCP next steps, guards (2026-11-08, PRs #58–#66, #68–#85)
+## Release record: deletion fences Stripe, Stripe reads off the lock, guide pilot parked, deletion links, UserInfo binding, private admission service, session token drop, e2e fix, MCP next steps, guards (2026-11-08, PRs #58–#66, #68–#92)
+
+- **#86 to #92, docs phase 2 (Peter's "land all", relayed verbatim by milton-overlord; auth
+  release on his "release auth now", typed in milton-overlord's tab, the answer selected
+  there at his request), landed by `8faa274`:** milton-docs' copy and docs PRs. #87, #90 and
+  #91 (this runbook releases app and MCP by tagged revision, never the stale manifests) are
+  docs only. #88's site copy (memos, not rules or samples, on home, pricing, terms, privacy,
+  research and setup) is live from Vercel's production deployment of `8faa274`. #89: no
+  blocking lead, and `CLAUDE.md` imports AGENTS.md. #92 drift guards (retired-words test,
+  `packages/theme/facts.ts`); the served setup script's SHA-256 is unchanged
+  (`d9084c9f…8ab3`), and its server copy ships with the next server image. #86's
+  consent-screen copy: auth image
+  `sha256:11946548b6e3fc563c11b8e6d2933566a7f90a83d83156e2e4ccf8a0d1d9bf56`,
+  `milton-auth-00020-k77` at 06:06:53–07:10Z (2026-11-10, traffic moved by
+  `update-traffic`), `milton-auth-mail` and `milton-auth-maint` by 06:07:15Z. Live:
+  `/api/auth/ok`, `/login`, `/signup`, `/forgot-password` and `/reset-password` 200; the
+  served bundle holds the new consent lines, and neither "Four tools" nor "exact text of
+  every memo" remains; `milton-e2e-daily-82hf6` passed its sign-in. Gate at 06:18Z: clean; no auth request reached an older revision after 06:08Z; no errors from the revision or jobs. Checks: PR CI
+  green on each head; merged tree types, 159 tests, format, site and server builds 0; main
+  CI green on `8faa274`.
 
 - **#85 (Peter's go, relayed verbatim by milton-overlord; milton-saves; Astra PASS, one
   should-fix, fixed), `1e6d859`, closes TODO #35:** `create_memo` reads a flattened memo
@@ -329,6 +348,9 @@ Since #76: app/MCP `milton-*-memos-bdac60f`, admit `milton-admit-00005-vp2` and
 `milton-e2e-daily` on image `sha256:b2952441…`; rollback, code only (0012 and 014 stay), to
 app/MCP `milton-*-sayai-74f6153` and admit `milton-admit-00004-q7h`, and the daily job to
 image `sha256:73b1ae07…` with them (each check fails against the other MCP).
+Since #86: auth `milton-auth-00020-k77` and both auth jobs on image `sha256:11946548…`;
+rollback, code only, the service to `milton-auth-00019-p4f` and both jobs to image
+`sha256:dc55298e…`.
 Since #77: auth `milton-auth-00019-p4f` and both auth jobs on image `sha256:dc55298e…`;
 rollback the service to `milton-auth-00018-hcv` and both jobs to image `sha256:51a8d3e3…`.
 Since #75: auth `milton-auth-00018-hcv` and both auth jobs on image `sha256:51a8d3e3…`;
@@ -1824,7 +1846,7 @@ gcloud run revisions list --service=milton-app --project=milton-510506 --region=
 ```
 
 Now serving (2026-11-10): app `milton-app-flat-1e6d859`, MCP `milton-mcp-flat-1e6d859`,
-admission `milton-admit-00008-lxx` (source `1e6d859`), and auth `milton-auth-00019-p4f` (source `77f7d10`). The
+admission `milton-admit-00008-lxx` (source `1e6d859`), and auth `milton-auth-00020-k77` (source `8faa274`). The
 release record above gives the image and rollback revisions.
 
 Roll back only affected services, preserve ingress/IAM, then repeat the canonical

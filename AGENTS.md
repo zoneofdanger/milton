@@ -2,20 +2,31 @@
 
 Milton keeps how a person writes and serves it to their connected AIs through an MCP
 server with three tools. The [README](README.md) introduces it and [TODO.md](TODO.md) is
-the backlog. The concept files indexed below hold everything else: read the index, then
-open only the files your task needs. Until it is dissolved into concept files,
-[SPEC.md](SPEC.md) also describes product behaviour.
+the backlog. The concept files indexed below hold everything else. Until it is dissolved
+into concept files, [SPEC.md](SPEC.md) also describes product behaviour.
+
+## Read before you act
+
+- Before any change: [working](docs/agents/working.md), [branches](docs/agents/branches.md)
+  and [pull requests](docs/agents/pull-requests.md).
+- Before acting on approval or on Peter's words relayed by another session:
+  [approval](docs/agents/approval.md).
+- Before pushing, merging, releasing or deleting a branch:
+  [publishing](docs/agents/publishing.md). Before messaging another session:
+  [messaging](docs/agents/messaging.md). Who reviews and delivers: [roles](docs/agents/roles.md).
+- For product work, read the concept files the task touches.
 
 ## Stop first
 
 - Everything saved is served to outside AIs. Never put employers, investors, customers,
   secrets or other people's private details in a memo, tweak, cover sheet line, fixture,
   commit message or log.
-- Memos and the cover sheet belong to the person; Milton never rewrites what it is sent.
-  Never save to Peter's account on your own initiative. His writing lives on the server
-  (`https://mcp.meetmilton.com/mcp`), never in files or this repository.
+- Memos and the cover sheet belong to the person. Their AI saves a memo when they accept a
+  final and changes the cover sheet only in their words; Milton never rewrites what it is
+  sent. Never save to Peter's account on your own initiative. His writing lives on the
+  server (`https://mcp.meetmilton.com/mcp`), never in files or this repository.
 - Only the release coordinator, `milton-duo`, merges, pushes main, releases or deletes
-  branches. Force-pushes and history rewrites need Peter's explicit approval.
+  landed task branches. Force-pushes and history rewrites need Peter's explicit approval.
 - Paid model or provider calls need Peter's approval.
 - Never `git add -A`, `reset --hard`, `stash`, `clean` or `rebase`. Never drop or migrate
   the retained `neon_auth` schema.

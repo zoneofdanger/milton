@@ -177,9 +177,10 @@ hosting runbook.
 
 ### Setup
 
-Setup, when `is_empty`, offers once to help with a real task, to keep a few pieces the
-person pastes as final-only memos (top tier), and to start the cover sheet in their
-words. Setup never reads an inbox and never blocks a writing task.
+Setup, when `is_empty`, offers once. It first asks for about five pieces the person
+wrote and sent, kept as final-only memos (top tier) exactly as pasted, then offers to
+start the cover sheet in their words, then the standing line. Setup never reads an
+inbox and never blocks a writing task.
 
 ### Removed, and unchanged
 

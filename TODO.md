@@ -74,7 +74,7 @@ sheet, report, AI) and plain text on security screens and anything an AI reads.
       with the full text, and keeps only the approved ones as final-only memos; Milton gets no
       mail access. Built and reviewed as merge f2ea867 (setup.ts question 6, test, README),
       reverted unreleased. That code predates memos and the current setup script, so rebuild it
-      rather than revert the revert. ⚠ SPEC.md says setup never reads an inbox; Peter decides
+      rather than revert the revert. ⚠ docs/setup.md says setup never reads an inbox; Peter decides
       before this is rebuilt. Then run first setup on an empty test account through Claude Code
       with a mail connector (#8) before release.
 

@@ -1,5 +1,5 @@
 // Memos as AIs read them: the cover sheet read, and the report Milton assembles
-// for one draft (SPEC.md, "Memos and tweaks"). Reads run no model.
+// for one draft (docs/reports.md). Reads run no model.
 import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 import type { StoreSession } from "./database";
@@ -12,10 +12,10 @@ export const MEDIA = ["email", "chat", "post", "document", "speech"] as const;
 export type Medium = (typeof MEDIA)[number];
 
 /** The cover sheet's character cap: it is served on every read and competes
- * with examples (SPEC.md, "The cover sheet"). */
+ * with examples (docs/memos.md). */
 export const COVER_SHEET_CHARS = 1500;
 /** Examples fill by rank within this many UTF-8 bytes, about 8k tokens; the
- * top example is served even over it (SPEC.md, "How many"). */
+ * top example is served even over it (docs/reports.md). */
 export const EXAMPLE_BUDGET = 32768;
 /** A final over this many bytes is kept but never served as an example. */
 export const MAX_EXAMPLE_BYTES = 131072;
@@ -137,9 +137,9 @@ const overlap = (a: Set<string>, b: Set<string>) =>
   [...a].filter((w) => b.has(w)).length;
 const TIER_ORDER: Record<Tier, number> = { own: 0, steered: 1, untouched: 2 };
 
-/** SPEC.md's ranking: requested kind, medium, purpose and audience word
- * overlap, tier, full-text rank of the situation against summary and words,
- * recency, then id. */
+/** The ranking (docs/reports.md): requested kind, medium, purpose and
+ * audience word overlap, tier, full-text rank of the situation against
+ * summary and words, recency, then id. */
 export function rankMemos<T extends Candidate>(
   memos: T[],
   intent: ReportIntent,

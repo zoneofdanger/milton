@@ -41,6 +41,14 @@ into concept files, [SPEC.md](SPEC.md) also describes product behaviour.
 - [agents/pull-requests](docs/agents/pull-requests.md) — What a Milton task PR records, and how checks and evidence carry across a handoff
 - [agents/roles](docs/agents/roles.md) — Who owns what on the Milton team (builders, milton-duo, milton-overlord, Designer), when review is needed, and which models run
 - [agents/working](docs/agents/working.md) — How to build and check a change in Milton: Bun, the checks to run, tests, served text, theme, shims and secrets
+- [deploy/alerts](docs/deploy/alerts.md) — Milton's production alerts as code: each policy, its threshold and reason, the release gate, and how monitoring.ts plans and applies them
+- [deploy/cloud](docs/deploy/cloud.md) — Milton's hosting as operated: the services, cloud resources and edge, the admission service, secrets and the database logins
+- [deploy/e2e](docs/deploy/e2e.md) — The fictional test account and the twice-daily end-to-end check against production: provisioning, the run, the job, key renewal
+- [deploy/migrations](docs/deploy/migrations.md) — How a production schema change is snapshotted, run and checked, the Neon lessons behind each step, and how the database is restored
+- [deploy/releases](docs/deploy/releases.md) — How a Milton release is built, deployed, verified, gated and rolled back on Cloud Run, and how Turnstile is switched on
+- [deploy/serving](docs/deploy/serving.md) — What runs in production now: each service's revision, image and secrets, the rollback targets and floor, schema heads and snapshots to keep
+- [deploy/stripe](docs/deploy/stripe.md) — Operating Stripe for Milton: live mode, the Dashboard settings billing relies on, and the subscription backfill and resync
+- [history](docs/history.md) — Append-only record of Milton's production releases and applied one-time migrations, newest first, with revisions and snapshot names
 - [how-milton-works](docs/how-milton-works.md) — Every piece of Milton's logic, one line each, until it is split into concept files
 - [research/derived-systems-2026](docs/research/derived-systems-2026.md) — November 2026: the embeddings, advisory graph, task retrieval and gardening Milton built, measured and removed, and what would justify rebuilding
 - [research/honcho-2026](docs/research/honcho-2026.md) — Honcho compared with Milton on 2026-11-05: a substantial overlap in person memory; Milton's distinction was a writing workflow on approved examples

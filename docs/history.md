@@ -13,6 +13,12 @@ rewritten. Rollback targets and floors in an entry were true when it was written
 current ones are in [serving](deploy/serving.md), and the procedure is in
 [releases](deploy/releases.md) and [migrations](deploy/migrations.md).
 
+The entries up to 2026-11-10 came from the hosting runbook (`server/deploy/README.md`) word
+for word, under dated headings, with three exceptions: links point where their targets now
+live (removed sections by permalink to the runbook before the split); a private file path in
+the #78 record is redacted; and the auth mail entry leaves out the Turnstile switch-on, a
+pending procedure now in [releases](deploy/releases.md#turnstile-separate-go-from-peter-at-release).
+
 Earlier records are in git history: the last runbook holding them is at commit 492b96a
 (`git show 492b96a:server/deploy/README.md`), and the runbook's later versions are in
 `git log -p server/deploy/README.md` until 2026-11-10, when this file began.
@@ -333,11 +339,15 @@ Since #83: app/MCP `milton-*-rank-898f9ad`, admit `milton-admit-00007-rpn` and
 Since #78 (0013 and 015): app, MCP and admission never roll back below #76
 (`milton-*-memos-bdac60f`, `milton-admit-00005-vp2`); the old tables, old receipts and guide
 roles come back only by restoring snapshot `snap-mute-water-b85o19c9`, which loses every
-write since.
+write since. The #76 rollback line below is void.
 Since #79/#80: app/MCP `milton-*-setup-c3ed021`, admit `milton-admit-00006-gjl` and
 `milton-e2e-daily` on image `sha256:27219d38…`; rollback, code only, to app/MCP
 `milton-*-memos-bdac60f`, admit `milton-admit-00005-vp2` and the daily job to image
 `sha256:b2952441…`.
+Since #76: app/MCP `milton-*-memos-bdac60f`, admit `milton-admit-00005-vp2` and
+`milton-e2e-daily` on image `sha256:b2952441…`; rollback, code only (0012 and 014 stay), to
+app/MCP `milton-*-sayai-74f6153` and admit `milton-admit-00004-q7h`, and the daily job to
+image `sha256:73b1ae07…` with them (each check fails against the other MCP).
 Since #86: auth `milton-auth-00020-k77` and both auth jobs on image `sha256:11946548…`;
 rollback, code only, the service to `milton-auth-00019-p4f` and both jobs to image
 `sha256:dc55298e…`.
@@ -346,6 +356,23 @@ rollback the service to `milton-auth-00018-hcv` and both jobs to image `sha256:5
 Since #75: auth `milton-auth-00018-hcv` and both auth jobs on image `sha256:51a8d3e3…`;
 rollback the service to `milton-auth-00017-swp` and both jobs to image `sha256:b129db3d…`
 together (a job on the older image fails mail the new one queued in the last 15 minutes).
+Since #74: app/MCP `milton-*-sayai-74f6153`, admit `milton-admit-00004-q7h` and auth
+`milton-auth-00017-swp`; rollback, in any order (text only), to app `milton-app-race-778a1a1`,
+MCP `milton-mcp-park-f735701`, admit `milton-admit-00003-rmr` and auth `milton-auth-00016-q4c`.
+Since #71: app `milton-app-race-778a1a1`, admit `milton-admit-00003-rmr` and auth
+`milton-auth-00016-q4c`; rollback, in any order, to `milton-app-srl-7ffc5cf`,
+`milton-admit-00002-ws6` and `milton-auth-00020-hef` (code only; the erase step then no longer
+ends a customer linked after deletion began). Before #71: auth `milton-auth-00020-hef`, rollback `milton-auth-00018-heq` (code only); floor `00018-heq` (older auth calls the
+app's removed admission routes: roll auth back only together with app/MCP to
+`milton-*-token-0f7d5aa`, then auth to `00016-kul`). App `milton-app-srl-7ffc5cf`, rollback `milton-app-park-f735701` (code only; it runs on
+0011), and admit `milton-admit-00002-ws6`, rollback `milton-admit-00001-ggf`; roll both back
+together, then, once the new code returns, run the resync again. MCP `milton-mcp-park-f735701`.
+Before those, app/MCP `milton-*-park-f735701`,
+rollback `milton-*-admit-20b0f27` (code only; with no guide account it serves no stale guide), then `milton-*-token-0f7d5aa` (never before #62). Once owner file 013 is applied, the app never rolls back to an image older than #62:
+`milton-app-token-0f7d5aa` is its floor, and `milton-app-guards-1a82fde` is no longer a
+rollback (its sign-in writes the dropped column). MCP never touches sessions; its rollback
+is unchanged. See [Drop the app session's access-token column](#2026-11-08-drop-the-app-sessions-access-token-column-owner-file-013-pr-64).
+Earlier records: git history (`git log -p server/deploy/README.md`).
 
 ## 2026-11-10: Drop save_requests.source_hash (Drizzle 0014, PR #82)
 
@@ -725,7 +752,7 @@ revisions, images and secret versions first.
 
 **1. Create `milton-admit` and its IAM.** Build and push the runtime image as for an
 app/MCP release, but do not move app or MCP yet. In a no-history shell inside a private
-temporary directory (`umask 077`), as in Runtime role step 4 (git history):
+temporary directory (`umask 077`), as in [Runtime role](https://github.com/zoneofdanger/milton/blob/d4d04913e8b65c09cb7f323dd149b2096601d3f8/server/deploy/README.md#runtime-role) step 4:
 
 ```sh
 P=--project=milton-510506
@@ -827,7 +854,9 @@ back to a pre-change revision: that only reopens the old public route, which not
 calls `https://app.meetmilton.com/internal/auth/admit`, which now answers 404, so every
 authorize and consent accept fails with `admission_retry_required` and unlink with
 `eligibility_preservation_retry_required`. Treat the step 2 auth revision as auth's rollback
-floor.
+floor. If an older auth must run, first roll the app back to a revision that still serves
+the routes (for example `milton-app-e2e-7938dd5`; code only, schema compatible), and move
+it forward again once auth is current.
 
 ## 2026-11-08: Drop the app session's access-token column (owner file 013, PR #64)
 
@@ -863,13 +892,13 @@ rollback is the pre-migration snapshot; there is no down script.
 ## 2026-11-08: Test accounts (Drizzle 0009, owner file 011, PR #57)
 
 0009 adds `users.test_account boolean NOT NULL DEFAULT false`, the owner-only mark on the
-fictional end-to-end check account (see [the end-to-end check](deploy/e2e.md)).
+fictional end-to-end check account (see [Test account and daily check](deploy/e2e.md)).
 It is additive: one column with a constant default is a catalog change with no rewrite,
 every existing account reads false, and serving app/MCP code never names the column, so
 traffic stays open. App/MCP code from this change on reads it (the test-account exemption
 from trials and billing), so release that code only after 0009. Roll that code back like
-any schema-compatible release, code only, keeping 0009 and 011 (see Rolling back past the
-test-account release, removed once the floor passed #76); never restore the
+any schema-compatible release, code only, keeping 0009 and 011 (see [Rolling back past the
+test-account release](https://github.com/zoneofdanger/milton/blob/d4d04913e8b65c09cb7f323dd149b2096601d3f8/server/deploy/README.md#rolling-back-past-the-test-account-release)); never restore the
 snapshot for it, which would discard every later save. 011 narrows app's INSERT on `users` to `id`, `status` and `created_at` (the
 only columns it could insert before) so no runtime login can set the mark. 0009 sets a 5 s
 lock limit in its own transaction: the ADD COLUMN briefly locks `users` exclusively. Rehearse

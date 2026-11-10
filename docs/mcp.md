@@ -16,6 +16,8 @@ covers:
   - server/scripts/check-mcp.ts
   - server/test/mcp.test.ts
   - server/test/served-budget.test.ts
+  - server/deploy/mcp.service.json
+  - apps/auth/migrations/007-connection-key-status.up.sql
 ---
 
 # MCP

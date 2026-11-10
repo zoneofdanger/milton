@@ -7,6 +7,7 @@ covers:
   - server/src/store/compiled.ts
   - server/src/store/trials.ts
   - server/src/store/schema.ts
+  - server/drizzle/0012_memos.sql
 ---
 
 # Reports

@@ -13,6 +13,7 @@ covers:
   - server/src/store/schema.ts
   - server/src/memo-pages.tsx
   - server/test/copy-drift.test.ts
+  - server/drizzle/0012_memos.sql
 ---
 
 # Memos

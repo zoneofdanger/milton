@@ -10,6 +10,7 @@ covers:
   - server/src/http.ts
   - server/src/store/database.ts
   - server/src/store/trials.ts
+  - server/drizzle/0000_baseline.sql
 ---
 
 # Saves

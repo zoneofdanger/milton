@@ -25,6 +25,8 @@ covers:
   - server/deploy/monitoring/**
   - packages/forwarded-client/**
   - packages/theme/assets.ts
+  - server/src/billing.tsx
+  - server/package.json
 ---
 
 # Hosting

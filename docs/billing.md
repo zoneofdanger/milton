@@ -24,6 +24,9 @@ covers:
   - server/drizzle/0007_usage_calls.sql
   - server/drizzle/0008_usage_retention.sql
   - apps/auth/scripts/prune-usage.ts
+  - server/src/cloud-run.ts
+  - server/src/store/database.ts
+  - apps/auth/scripts/maintain.ts
 ---
 
 # Billing

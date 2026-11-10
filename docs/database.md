@@ -14,6 +14,7 @@ covers:
   - server/scripts/check-runtime-role.ts
   - apps/auth/scripts/migrate.ts
   - scripts/check-migrations.ts
+  - server/src/auth-assistants.tsx
 ---
 
 # Database

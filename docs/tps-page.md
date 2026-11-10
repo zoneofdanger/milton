@@ -12,6 +12,8 @@ covers:
   - server/src/auth.tsx
   - server/src/store/index.ts
   - packages/theme/*.css
+  - server/src/auth-session.tsx
+  - server/src/auth-lifecycle.ts
 ---
 
 # TPS page

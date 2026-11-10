@@ -16,6 +16,7 @@ covers:
   - apps/auth/migrations/008-deletion-links.up.sql
   - apps/auth/scripts/prune-usage.ts
   - server/test/deletion-inventory.test.ts
+  - apps/auth/migrations/003-mechanism.up.sql
 ---
 
 # Deletion

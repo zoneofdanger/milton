@@ -19,6 +19,8 @@ covers:
   - apps/auth/scripts/**
   - apps/auth/migrations/**
   - packages/forwarded-client/**
+  - apps/auth/package.json
+  - packages/theme/assets.ts
 ---
 
 # Accounts

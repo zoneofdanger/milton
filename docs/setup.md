@@ -13,6 +13,7 @@ covers:
   - apps/site/src/components/AssistantSetup.astro
   - apps/site/src/pages/setup.astro
   - server/test/copy-drift.test.ts
+  - server/src/store/memos.ts
 ---
 
 # Setup

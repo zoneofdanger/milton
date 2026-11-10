@@ -11,6 +11,8 @@ covers:
   - packages/theme/{package.json,tsconfig.json,README.md}
   - server/test/copy-drift.test.ts
   - server/scripts/check-auth-integration.ts
+  - .vercelignore
+  - package.json
 ---
 
 # Checks

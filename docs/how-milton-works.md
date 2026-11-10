@@ -1,3 +1,55 @@
+---
+name: how-milton-works
+description: Every piece of Milton's logic, one line each, until it is split into concept files
+type: behaviour
+covers:
+  - .github/workflows/checks.yml
+  - apps/site/**
+  - packages/forwarded-client/**
+  - packages/theme/**
+  - scripts/agent-docs.ts
+  - scripts/check-migrations.ts
+  - server/Dockerfile
+  - server/deploy/**
+  - server/drizzle/**
+  - server/scripts/**
+  - server/src/assets.ts
+  - server/src/auth-account.tsx
+  - server/src/auth-assistants.tsx
+  - server/src/auth-login.tsx
+  - server/src/auth-session.tsx
+  - server/src/auth.tsx
+  - server/src/billing.tsx
+  - server/src/cloud-app.ts
+  - server/src/cloud-run.ts
+  - server/src/config.ts
+  - server/src/environment.ts
+  - server/src/error-log.ts
+  - server/src/handler.ts
+  - server/src/http.ts
+  - server/src/index.ts
+  - server/src/mcp-outcomes.ts
+  - server/src/mcp-tools.ts
+  - server/src/mcp.ts
+  - server/src/memo-pages.tsx
+  - server/src/pages.tsx
+  - server/src/store/accounts.ts
+  - server/src/store/billing.ts
+  - server/src/store/compiled.ts
+  - server/src/store/connection-keys.ts
+  - server/src/store/database.ts
+  - server/src/store/index.ts
+  - server/src/store/memos.ts
+  - server/src/store/save.ts
+  - server/src/store/schema.ts
+  - server/src/store/score.ts
+  - server/src/store/setup.ts
+  - server/src/store/tps.ts
+  - server/src/store/trials.ts
+  - server/src/token.ts
+  - server/test/copy-drift.test.ts
+---
+
 # How Milton works
 
 This is every piece of logic in Milton, one line each, so you can skim how it works.
@@ -508,7 +560,7 @@ Files: `apps/site/`.
 ## Theme, scripts, and CI
 
 Files: `packages/theme/`, `server/scripts/`, `scripts/check-migrations.ts`,
-`server/test/copy-drift.test.ts`, `.github/workflows/checks.yml`.
+`scripts/agent-docs.ts`, `server/test/copy-drift.test.ts`, `.github/workflows/checks.yml`.
 
 - A shared theme supplies fonts, favicons, and tokens, with a WCAG contrast test. App and auth text outside the Latin JetBrains Mono subset fetches the full master on demand, which also renders a non-Latin letter with its combining mark; the site serves only the subset.
 - `migrate.ts` applies writing migrations only as neondb_owner; explicit --app-auth applies app-only migration005 after native004 as an approved app migration owner, with no runtime startup migration.
@@ -521,8 +573,8 @@ Files: `packages/theme/`, `server/scripts/`, `scripts/check-migrations.ts`,
 - `e2e.ts` checks a deployment end to end on the test account only: a browser sign-in (following redirects, Continue pages and native's JSON redirects, which native sends because Node's fetch always says `Sec-Fetch-Mode: cors`, only to the app and auth origins) that must show the account and list the key's public id before the key is sent anywhere, an MCP connection with that key listing exactly the three tools, then a gate before any write (no cover sheet, no tweaks, and at most 5 memos, every one this check's own: kind `e2e check`, your words), forgetting those leftovers, an empty baseline, a marked fictional final-only memo saved (tier `own`, receipt `Kept memo: e2e check, your words.`), read fresh by a new session with its summary and quoted final as the only example, forgotten, and a final read equal to the baseline (empty, same cover sheet version, no memos, tweaks or examples). One JSON line per step with no secret or memo text; a key under 30 days from expiry warns; exit 0 only when every step passes, and 1 for a refusal, a failed step, a crash or a run past 240 s.
 - `build.ts` builds the CSS with Vite, versions the public assets by content hash, and bundles the Cloud Run and end-to-end check (`e2e.js`, the `milton-e2e-daily` job) entries with Bun, minified except identifiers, with source maps the image leaves out.
 - `dev.ts` serves the app on loopback and rebuilds the CSS on change.
-- CI runs the migration guards, types, tests, formatting, and both integration suites on PostgreSQL 18, holds no secrets, and does not deploy.
+- CI runs the migration guards, the concept docs check, types, tests, formatting, and both integration suites on PostgreSQL 18, holds no secrets, and does not deploy.
 - `check-migrations` compares with main: a new migration is numbered above main's highest in its track with its own number, Drizzle journal entries run in order with strictly increasing `when`, every migration file and snapshot matches its hash in `scripts/released-migrations.sha256` (main's never change), and a new drop, truncate or rename of a table, column, view, schema, type or function names its merged code-stopped-by PR (comments and strings skipped; a `DO` block, `EXECUTE` (top level or in a function body), or a function body that drops, truncates or renames, needs that or a `no-drop-or-rename` reason). Without origin/main it checks only the lock and journal; in CI that fails.
 - The retired-words check fails, listing file:line, when the site, the consent screen, the app's pages, README, TODO or AGENTS say a word memos replaced (`list_reports`, exact edits, instruction cards, writing rules, samples) or "assistant"; identifiers and keys pass, and lines between `retired-words: off` and `retired-words: on` markers are historical and skipped.
 - `packages/theme/facts.ts` holds the standing line, the 30-day trial and the $5.01 price: the setup script, the setup page and Stripe's trial read them, and the shared-facts check fails when README lacks the standing line or a site page or app page states another trial length or price.
-- The no-tmp-links check fails when a tracked file links into the untracked agent notes under the ignored `.agents/` folder, except two known links, each with its reason, that move with the held runbook split and docs restructure.
+- `agent-docs check` runs in CI (`scripts/agent-docs.ts`, vendored by `agent-docs install`) and fails on invalid concept frontmatter, an AGENTS.md index that does not match `docs/`, a tracked file that links into `.agents/tmp`, or drift: a change to code a concept file covers without a change to that file, unless a `Docs-unchanged: <concept>: <reason>` commit trailer excuses it.

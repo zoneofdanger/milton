@@ -98,14 +98,6 @@ reports, memos) and plain text on security screens and anything an assistant rea
       safeError prints, without secrets. Also make provision.ts's "output outside the
       repository" check resolve the real repository root rather than only its own checkout.
 
-- [ ] #30 (server, low) **Drop save_requests.source_hash and its check.** Since Drizzle 0006
-      the column is nullable and saves no longer write it (audit 2026-11-07b, finding 12);
-      nothing reads it. Unblocked 2026-11-10: after #78 nothing serves or rolls back below #76
-      (`milton-*-memos-bdac60f`), and no revision since 0006 writes it. Generate a migration
-      that drops the column and rewrites `save_request_hashes` to check `input_hash` alone (no
-      CASCADE, with a rollback file and a runbook section), and remove the two raw test
-      INSERTs' `source_hash` in server/test/store-saves.test.ts.
-
 - [ ] #31 (server, low) **Take Stripe off sign-in and deletion after launch.** The
       narrowed follow-up to PR #67 took checkout's live read and the webhook off the row lock
       (compare-and-set on `trial_accounts.stripe_revision`, 0011, with a one-off `--resync`

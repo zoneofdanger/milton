@@ -10,6 +10,10 @@ covers:
   - server/src/store/schema.ts
   - server/src/store/database.ts
   - server/src/store/errors.ts
+  - server/scripts/migrate.ts
+  - server/scripts/check-runtime-role.ts
+  - apps/auth/scripts/migrate.ts
+  - scripts/check-migrations.ts
 ---
 
 # Database

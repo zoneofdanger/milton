@@ -8,6 +8,14 @@ covers:
   - server/src/mcp.ts
   - server/src/mcp-tools.ts
   - server/src/mcp-outcomes.ts
+  - server/src/auth-authority.ts
+  - server/src/store/connection-keys.ts
+  - server/src/store/index.ts
+  - server/src/http.ts
+  - packages/forwarded-client/**
+  - server/scripts/check-mcp.ts
+  - server/test/mcp.test.ts
+  - server/test/served-budget.test.ts
 ---
 
 # MCP

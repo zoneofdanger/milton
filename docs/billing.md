@@ -9,6 +9,21 @@ covers:
   - server/src/store/usage.ts
   - server/src/store/index.ts
   - server/src/store/limits.ts
+  - server/src/store/compiled.ts
+  - server/src/store/save.ts
+  - server/src/store/schema.ts
+  - server/src/mcp-tools.ts
+  - server/src/auth-admission.ts
+  - server/src/config.ts
+  - server/src/index.ts
+  - server/src/pages.tsx
+  - server/src/memo-pages.tsx
+  - packages/theme/facts.ts
+  - server/scripts/backfill-subscriptions.ts
+  - server/migrations/005-app-roles.sql
+  - server/drizzle/0007_usage_calls.sql
+  - server/drizzle/0008_usage_retention.sql
+  - apps/auth/scripts/prune-usage.ts
 ---
 
 # Billing

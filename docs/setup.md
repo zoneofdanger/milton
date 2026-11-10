@@ -6,6 +6,13 @@ covers:
   - server/src/store/setup.ts
   - packages/theme/setup-prompt.ts
   - packages/theme/facts.ts
+  - server/src/mcp-tools.ts
+  - server/src/mcp.ts
+  - server/src/memo-pages.tsx
+  - server/src/billing.tsx
+  - apps/site/src/components/AssistantSetup.astro
+  - apps/site/src/pages/setup.astro
+  - server/test/copy-drift.test.ts
 ---
 
 # Setup

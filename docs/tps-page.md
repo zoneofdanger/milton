@@ -8,6 +8,10 @@ covers:
   - server/src/store/tps.ts
   - server/src/auth-assistants.tsx
   - server/src/*.css
+  - server/src/auth-account.tsx
+  - server/src/auth.tsx
+  - server/src/store/index.ts
+  - packages/theme/*.css
 ---
 
 # TPS page

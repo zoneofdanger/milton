@@ -4,6 +4,9 @@ description: How get_cover_sheet and get_report read, and how a report ranks mem
 type: behaviour
 covers:
   - server/src/store/memos.ts
+  - server/src/store/compiled.ts
+  - server/src/store/trials.ts
+  - server/src/store/schema.ts
 ---
 
 # Reports

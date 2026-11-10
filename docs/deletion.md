@@ -5,6 +5,17 @@ type: behaviour
 covers:
   - server/src/auth-lifecycle.ts
   - docs/deletion-inventory.txt
+  - server/src/store/save.ts
+  - server/src/store/tps.ts
+  - server/src/mcp-tools.ts
+  - server/src/auth-account.tsx
+  - server/src/billing.tsx
+  - server/src/store/billing.ts
+  - server/src/store/schema.ts
+  - apps/auth/src/**
+  - apps/auth/migrations/008-deletion-links.up.sql
+  - apps/auth/scripts/prune-usage.ts
+  - server/test/deletion-inventory.test.ts
 ---
 
 # Deletion

@@ -3,11 +3,10 @@ name: site
 description: The static site at meetmilton.com: what Astro builds it from, what Vercel uploads and publishes, and what its pages do
 type: reference
 covers:
-  - apps/site/astro.config.mjs
-  - apps/site/vercel.json
-  - apps/site/src/components/**
-  - apps/site/src/layouts/**
+  - apps/site/**
   - .vercelignore
+  - scripts/check-site-upload.sh
+  - packages/theme/public/**
 ---
 
 # Site

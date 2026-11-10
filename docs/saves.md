@@ -6,6 +6,10 @@ covers:
   - server/src/store/save.ts
   - server/src/store/compiled.ts
   - server/src/store/accounts.ts
+  - server/src/mcp-tools.ts
+  - server/src/http.ts
+  - server/src/store/database.ts
+  - server/src/store/trials.ts
 ---
 
 # Saves

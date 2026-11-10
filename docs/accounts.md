@@ -12,8 +12,13 @@ covers:
   - server/src/auth-keys.tsx
   - server/src/auth-account.tsx
   - server/src/store/connection-keys.ts
+  - server/src/store/index.ts
+  - server/migrations/005-app.up.sql
+  - server/migrations/013-drop-session-access-token.up.sql
   - apps/auth/src/**
   - apps/auth/scripts/**
+  - apps/auth/migrations/**
+  - packages/forwarded-client/**
 ---
 
 # Accounts

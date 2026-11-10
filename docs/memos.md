@@ -4,6 +4,15 @@ description: What a memo, tweak, cover sheet and report are; what a memo holds, 
 type: behaviour
 covers:
   - server/src/store/score.ts
+  - server/src/store/save.ts
+  - server/src/mcp-tools.ts
+  - server/src/mcp.ts
+  - server/src/store/memos.ts
+  - server/src/store/tps.ts
+  - server/src/http.ts
+  - server/src/store/schema.ts
+  - server/src/memo-pages.tsx
+  - server/test/copy-drift.test.ts
 ---
 
 # Memos

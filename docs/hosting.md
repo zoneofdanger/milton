@@ -11,19 +11,29 @@ covers:
   - server/src/http.ts
   - server/src/assets.ts
   - server/src/error-log.ts
+  - server/src/auth-admission.ts
   - server/Dockerfile
   - server/vite.config.ts
   - .dockerignore
   - apps/auth/Dockerfile
   - apps/auth/Dockerfile.dockerignore
+  - apps/auth/src/cloud-run.ts
+  - apps/auth/src/roles.ts
   - server/scripts/**
+  - server/deploy/*.json
+  - server/deploy/*.yaml
+  - server/deploy/monitoring/**
   - packages/forwarded-client/**
+  - packages/theme/assets.ts
 ---
 
 # Hosting
 
 Release, rollback and cloud resources are procedure, in
-[the hosting runbook](../server/deploy/README.md). Local setup and environment variables
+[the hosting runbook](../server/deploy/README.md); that procedure moves to `docs/deploy/`
+with #96. This file covers the deployment configuration beside it: the service
+descriptors (`server/deploy/*.json`), the load balancer routing and HTTP redirect
+(`server/deploy/*.yaml`) and the alerts (`server/deploy/monitoring/`). Local setup and environment variables
 are in [server/README.md](../server/README.md).
 
 ## Services

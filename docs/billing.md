@@ -141,10 +141,15 @@ covers:
 - `stripe_events` keeps each event's ID, type and body hash, never the payload.
 - The next request rechecks access, so reconnecting an AI after a status change is
   unnecessary.
-- The Stripe state columns (`stripe_*`, `subscription_status` and the dates) are written
-  only from what Stripe answers, never from MCP or browser input: MCP may update only a
-  trial row's `notice_stage` (owner file `005`), and the billing routes take no state
-  from their forms.
+- The Stripe state columns (`stripe_*`, `subscription_status` and the dates) are never
+  written from MCP or browser input: MCP may update only a trial row's `notice_stage`
+  (owner file `005`), and the billing routes take no state from their forms. Milton's
+  code writes them from what Stripe answers, with two local transitions that keep the
+  second-trial block: account creation starts a returning identity's row `canceled`
+  (`store/index.ts`), and the backfill cancels a returning deleted identity's row that
+  has no status (`cancelReturningIdentities` in `store/billing.ts`). Once Stripe confirms a
+  customer deleted, the row's customer and subscription are cleared and its status set
+  `canceled`.
 
 ## Checkout and portal
 

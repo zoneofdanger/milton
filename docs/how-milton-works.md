@@ -3,19 +3,28 @@ name: how-milton-works
 description: Every piece of Milton's logic, one line each, until it is split into concept files
 type: behaviour
 covers:
+  - .dockerignore
   - .github/workflows/**
+  - .vercelignore
   - apps/auth/migrations/**
   - apps/auth/scripts/**
   - apps/auth/src/**
+  - apps/auth/Dockerfile
+  - apps/auth/Dockerfile.dockerignore
   - apps/site/astro.config.mjs
+  - apps/site/src/components/**
+  - apps/site/src/layouts/**
+  - apps/site/vercel.json
   - packages/**
   - scripts/**
   - server/Dockerfile
+  - server/drizzle.config.ts
   - server/drizzle/**
   - server/migrations/**
   - server/scripts/**
   - server/src/**
   - server/test/copy-drift.test.ts
+  - server/vite.config.ts
 ---
 
 # How Milton works

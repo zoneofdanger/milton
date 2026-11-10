@@ -51,9 +51,10 @@ Local commands and landing content are in [apps/site/README.md](../apps/site/REA
   2026-11-10 from the same system prompt and request, the Milton one also given that
   person's cover sheet and report as Milton serves them. They are stored in
   `apps/site/src/data/try-it.json`, whose provenance note lists every edit: the bold
-  markers around the subject line are dropped, and two or three spaced em dashes were
-  added by hand to each "Your AI today" email for effect (Peter, 2026-11-10). The
-  "With Milton" emails are as generated. The folder's foot says the dashes were added.
+  markers around the subject line are dropped, two or three spaced em dashes were added
+  by hand to each "Your AI today" email for effect (Peter, 2026-11-10), and Bill's
+  fictional employer is renamed. The "With Milton" emails are as generated. The folder's
+  foot says the dashes were added.
 - The folder's foot holds a closed disclosure ("See what Milton has on file for Peter")
   with that person's cover sheet and the emails on file.
 - Everything is rendered at build time with no motion. Without JavaScript every person

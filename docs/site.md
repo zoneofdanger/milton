@@ -42,9 +42,9 @@ Local commands and landing content are in [apps/site/README.md](../apps/site/REA
   `apps/site/src/data/try-it.json`; only the bold markers around "Subject:" are dropped
   for display. A draft that can't be shown is regenerated, never edited.
 - Under the "With Milton" email, a closed disclosure ("See Peter's 5 setup emails and
-  cover sheet") holds that person's setup emails and cover sheet. A "Cover sheet
-  attached" slip under the memos compares greeting, opening words, length and sign-off,
-  computed by code when the drafts were generated.
+  cover sheet") holds that person's setup emails and cover sheet. One line under the
+  memos lists what changed (greeting, opening words and sign-off when they differ, and
+  length), from values computed by code when the drafts were generated.
 - Everything is rendered at build time with no motion. Without JavaScript every person
   and pair shows as plain sections; with it, the pickers (real buttons with
   `aria-pressed`) swap the pair in place without announcements. Picks, and clicks on

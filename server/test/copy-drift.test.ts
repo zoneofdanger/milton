@@ -107,3 +107,25 @@ test("copy states the standing line, trial length and price that code uses", () 
   expect(trials).toBeGreaterThan(5);
   expect(prices).toBeGreaterThan(5);
 });
+
+/** Agent notes live in the ignored .agents folder, so a tracked link into its
+ * tmp notes is dead for everyone else. Known links, with why each stays. */
+const TMP_LINKS: Record<string, string> = {
+  "server/deploy/README.md":
+    "the auth cutover runbook reference; moves with the held runbook split",
+  "docs/research/derived-systems-2026.md":
+    "its source reports; moves with the held docs restructure",
+};
+
+test("no tracked file links into untracked agent notes", () => {
+  const linking = tracked().filter((file) => {
+    let bytes: Buffer;
+    try {
+      bytes = readFileSync(root + file);
+    } catch {
+      return false; // deleted in the working tree
+    }
+    return !bytes.includes(0) && /\.agents\/tmp/.test(bytes.toString("utf8"));
+  });
+  expect(linking.sort()).toEqual(Object.keys(TMP_LINKS).sort());
+});

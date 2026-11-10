@@ -38,8 +38,12 @@ release's record goes in [history](../history.md). How to release and roll back:
 
 - **App, MCP and admission never roll back below #76** (`milton-*-memos-bdac60f`,
   `milton-admit-00005-vp2`, image `sha256:b29524412dfee440627cc2f7487317fadae4e64b597bf89fec2ce8494c4c8060`):
-  0013 (#78) dropped the tables older code reads. The only way below is restoring snapshot
-  `snap-mute-water-b85o19c9`, which loses every write since.
+  0013 (#78) dropped the tables older code reads, and its snapshot `snap-mute-water-b85o19c9`
+  is deleted (Peter, 2026-11-10). Going below means restoring the newest snapshot with the
+  old tables, `snap-holy-cloud-b8jmn8q3` (before 0012, 2026-11-09 22:24:49Z), which loses
+  every write since, every memo included. Until 2026-11-11 04:09Z, Neon's 24-hour
+  point-in-time history also reaches a moment before owner file 015 (04:09:22Z) and 0013,
+  losing less.
 - **Auth never rolls back below `milton-auth-00018-heq`** (#63): older auth calls the app's
   admission routes, which no revision at or above the app's floor serves.
 
@@ -53,8 +57,10 @@ release's record goes in [history](../history.md). How to release and roll back:
 
 ## Snapshots to keep
 
-- `snap-mute-water-b85o19c9` (`before-0013-drop-old-writing-pr78`): the only copy of the old
-  writing tables, old receipts and guide roles. No expiry; kept until Peter says.
+- `snap-holy-cloud-b8jmn8q3` (`before-0012-memos-pr76`): the newest copy of the old writing
+  tables, old receipts and guide roles since `snap-mute-water-b85o19c9` was deleted, and so
+  the restore point for going below [the floor](#the-floor). The scheduled snapshots that
+  still hold them are older and expire by 2026-11-23; older manual ones lose more.
 - `snap-lingering-rice-b8pg8kxw` (`before-0014-drop-source-hash-pr82`): the only copy of
   `save_requests.source_hash`.
 - `snap-fancy-hat-b8j5ls14` (pre-cutover, 2026-11-07): excluded from recovery; restoring it

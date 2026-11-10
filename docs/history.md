@@ -25,6 +25,14 @@ Earlier records are in git history: the last runbook holding them is at commit 4
 
 ## 2026-11-08 to 2026-11-10: deletion fences Stripe, Stripe reads off the lock, guide pilot parked, deletion links, UserInfo binding, private admission service, session token drop, e2e fix, MCP next steps, guards (PRs #58–#66, #68–#92)
 
+- **#78 snapshot deleted (Peter's "Delete now", in pane wH:p1F on 2026-11-10, answering
+  milton-overlord's "Keep it or delete it now?"):** milton-overlord deleted
+  `snap-mute-water-b85o19c9` (`before-0013-drop-old-writing-pr78`) with Neon's
+  `delete_snapshot` and confirmed it gone with `list_snapshots`; the coordinator's listing at
+  16:57Z agrees. The old tables, old receipts and guide roles now survive only in
+  `snap-holy-cloud-b8jmn8q3` (before 0012, 2026-11-09 22:24:49Z) and older snapshots, and
+  in Neon's 24-hour history until 2026-11-11 04:09Z.
+
 - **#86 to #92, docs phase 2 (Peter's "land all", relayed verbatim by milton-overlord; auth
   release on his "release auth now", typed in milton-overlord's tab, the answer selected
   there at his request), landed by `8faa274`:** milton-docs' copy and docs PRs. #87, #90 and
@@ -328,6 +336,9 @@ rua=mailto:<prefix>@dmarc-reports.cloudflare.net"` (reports in the Cloudflare da
   the owner password reset, Neon autoscaling and the budget, daily snapshots
   (11:00 UTC, 14 days; first `snap-silent-feather-b84f2kwj`).
 
+Since the #78 snapshot's deletion (2026-11-10): below #76 only by restoring
+`snap-holy-cloud-b8jmn8q3` (before 0012), which loses every write since; the
+`snap-mute-water-b85o19c9` path in the #78 line below is void.
 Since #85: app/MCP `milton-*-flat-1e6d859`, admit `milton-admit-00008-lxx` and
 `milton-e2e-daily` on image `sha256:1be0d2c5…`; rollback, code only, to app/MCP
 `milton-*-rank-898f9ad`, admit `milton-admit-00007-rpn` and the daily job to image

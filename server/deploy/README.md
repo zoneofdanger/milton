@@ -23,7 +23,24 @@ This runbook keeps only the latest release record. Earlier release records and a
 one-time procedures are in git history; the last full version is at commit 492b96a
 (`git show 492b96a:server/deploy/README.md`).
 
-## Release record: deletion fences Stripe, Stripe reads off the lock, guide pilot parked, deletion links, UserInfo binding, private admission service, session token drop, e2e fix, MCP next steps, guards (2026-11-08, PRs #58–#66, #68–#80)
+## Release record: deletion fences Stripe, Stripe reads off the lock, guide pilot parked, deletion links, UserInfo binding, private admission service, session token drop, e2e fix, MCP next steps, guards (2026-11-08, PRs #58–#66, #68–#80, #78)
+
+- **#78 (Peter's own go in the coordinator's tab, after milton-overlord relayed "Go on 78
+  now"; Astra FAIL, two fixes, PASS), `aee00b6`:** the drop and wipe from #76. Export first:
+  the two real accounts' old writing, verified against the database, in Peter's
+  `~/Documents/milton-old-writing-export-2026-11-09.json` (mode 600). All app, MCP and admit
+  traffic on post-#76 revisions; snapshot `snap-mute-water-b85o19c9`
+  (`before-0013-drop-old-writing-pr78`, no expiry, kept until Peter says) at 04:08:51Z
+  (2026-11-10). Removed: receipts 109, cards 44, samples 34, guide accounts 0 before; 99
+  old-store receipts deleted, 10 kept (9 memo-era saves, the known `compiler_input_limit`
+  receipt). Owner file 015 with `psql` at 04:09:22Z; `pg_roles` and Neon's branch role list
+  both without the two guide roles. Drizzle `0013_drop_old_writing` at 04:09:31–35Z (journal
+  14). Checks: no dropped table left; functions `milton_save_request_guard`,
+  `milton_user_id_guard`, `prune_usage_calls`; 0 old-store receipts; `check-runtime-role` ok
+  for app and MCP; `milton-e2e-daily-bsc4q` passed; health 200; no error, `permission denied`
+  or `store_unavailable` lines. Gate at 04:20Z: clean; no error lines from app, MCP, admit, auth or jobs since 04:09Z. Checks: PR CI green on `b3677c8`, merged tree types,
+  153 tests, format and the released-migration hashes (50) 0, main CI green on `aee00b6`.
+  No image release.
 
 - **#79 and #80 (Peter's go, relayed verbatim by milton-overlord; one release), `c3ed021`:**
   #79 (Astra PASS, no findings): `create_memo` reads `memo.tweaks: []` and
@@ -254,6 +271,10 @@ rua=mailto:<prefix>@dmarc-reports.cloudflare.net"` (reports in the Cloudflare da
   the owner password reset, Neon autoscaling and the budget, daily snapshots
   (11:00 UTC, 14 days; first `snap-silent-feather-b84f2kwj`).
 
+Since #78 (0013 and 015): app, MCP and admission never roll back below #76
+(`milton-*-memos-bdac60f`, `milton-admit-00005-vp2`); the old tables, old receipts and guide
+roles come back only by restoring snapshot `snap-mute-water-b85o19c9`, which loses every
+write since. The #76 rollback line below is void.
 Since #79/#80: app/MCP `milton-*-setup-c3ed021`, admit `milton-admit-00006-gjl` and
 `milton-e2e-daily` on image `sha256:27219d38…`; rollback, code only, to app/MCP
 `milton-*-memos-bdac60f`, admit `milton-admit-00005-vp2` and the daily job to image

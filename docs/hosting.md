@@ -32,8 +32,7 @@ covers:
 # Hosting
 
 Release, rollback and cloud resources are procedure, in
-[the hosting runbook](../server/deploy/README.md); that procedure moves to `docs/deploy/`
-with #96. This file covers the deployment configuration beside it: the service
+[releases](deploy/releases.md) and [cloud](deploy/cloud.md). This file covers the deployment configuration beside it: the service
 descriptors (`server/deploy/*.json`), the load balancer routing and HTTP redirect
 (`server/deploy/*.yaml`) and the alerts (`server/deploy/monitoring/`). Local setup and environment variables
 are in [server/README.md](../server/README.md).

@@ -8,7 +8,7 @@ and authorization ([its README](../apps/auth/README.md)).
 This file covers local setup and operation. How Milton behaves is in the concept files
 under [docs/](../docs/), listed in [AGENTS.md](../AGENTS.md): start with
 [memos](../docs/memos.md), [reports](../docs/reports.md), [mcp](../docs/mcp.md) and
-[hosting](../docs/hosting.md). Releases follow [the hosting runbook](deploy/README.md).
+[hosting](../docs/hosting.md). Releases follow [the release procedure](../docs/deploy/releases.md).
 
 ## Prerequisites
 
@@ -54,7 +54,7 @@ the OIDC flow ([accounts](../docs/accounts.md)). Provision the one confidential 
 [accounts](../docs/accounts.md#app-sessions) describes, with your own app origin in its
 callback and logout URLs. Auth
 reaches the `milton-admit` service through Cloud Run's invoker check (see
-[the hosting runbook](deploy/README.md#admission-service-milton-admit)).
+[the admission service](../docs/deploy/cloud.md#admission-service-milton-admit)).
 
 ## Environment variables
 
@@ -109,7 +109,7 @@ empty database; the order of the three migration tracks and the owner files is i
 ## Deploy
 
 For Cloud Run, build and publish the container, then follow
-[the hosting runbook](deploy/README.md) for scoped secrets, ingress, hostname routing,
+[the release procedure](../docs/deploy/releases.md) for scoped secrets, ingress, hostname routing,
 certificate verification and rollback. The container includes the Vite-built CSS, fonts
 and favicons. Keep the previous runtime artifact and secret versions; never roll back
 memo data with a hosting release.

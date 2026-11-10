@@ -20,7 +20,7 @@ covers:
 # Database
 
 How to run migrations locally is in [server/README.md](../server/README.md); the
-production order and snapshots are in [the hosting runbook](../server/deploy/README.md).
+production order and snapshots are in [migrations](deploy/migrations.md).
 
 ## One shared database
 

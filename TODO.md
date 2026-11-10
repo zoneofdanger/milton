@@ -60,8 +60,8 @@ sheet, report, AI) and plain text on security screens and anything an AI reads.
       email before-and-after is the first piece; needs a fictional test account Peter provides.
       2026-11-08: the fictional account (`e2e@milton-test.invalid`, owner script
       `server/scripts/test-account.ts`) and a daily-runnable check (`server/scripts/e2e.ts`:
-      browser sign-in, connection key, save, fresh read, forget) exist; see the hosting
-      runbook. Still open: the fresh-chat read and download through real AI clients, and
+      browser sign-in, connection key, save, fresh read, forget) exist; see
+      [the end-to-end check](docs/deploy/e2e.md). Still open: the fresh-chat read and download through real AI clients, and
       cross-client evidence of what AIs save.
 
 - [ ] #11 (server, low) **Make the spend test independent of UTC midnight.** A store-spend test

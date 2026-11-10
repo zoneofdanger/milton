@@ -73,7 +73,7 @@ depends on the client.
 
 ## What is here
 
-- [`server/`](server/): the Hono MCP server and web app, with Vite-built assets and Node 26 LTS runtimes. Its three services (app, MCP and self-hosted auth with verified password/email, Google and GitHub) are live on Cloud Run; memos are kept in PostgreSQL. Its README and [hosting runbook](server/deploy/README.md) describe operation, release and rollback.
+- [`server/`](server/): the Hono MCP server and web app, with Vite-built assets and Node 26 LTS runtimes. Its three services (app, MCP and self-hosted auth with verified password/email, Google and GitHub) are live on Cloud Run; memos are kept in PostgreSQL. Its README and [the deploy docs](docs/deploy/releases.md) describe operation, release and rollback.
 - [`apps/site`](apps/site/): the Astro page behind `meetmilton.com`.
 - [`packages/theme`](packages/theme/): Milton's design tokens, stylesheets, and contrast check.
 - [`design/`](design/): Milton's portrait.

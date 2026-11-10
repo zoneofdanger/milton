@@ -12,7 +12,7 @@ type: rule
   Vercel builds and publishes the static site from main on every push.
 - Cloud Run hosts the auth service, the browser app, the MCP server and the admission
   service. Production releases are run by the release coordinator from
-  [the hosting runbook](../../server/deploy/README.md): preserve rollback revisions,
+  [the release procedure](../deploy/releases.md): preserve rollback revisions,
   pinned images and numeric secret versions; snapshot before every migration; when a
   migration drops something the running code reads, release the code first.
 - Landed means deleted: the release coordinator removes the landed worktree and deletes

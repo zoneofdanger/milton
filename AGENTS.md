@@ -33,6 +33,7 @@ the backlog. The concept files indexed below hold everything else.
 ## Concepts
 
 <!-- concepts:start -->
+
 - [accounts](docs/accounts.md) — Sign-in through the self-hosted auth service, app sessions and OIDC, admission and account creation, open sign-ups, and connection keys
 - [agents/approval](docs/agents/approval.md) — What counts as Peter's approval, including his words relayed from another session, and when to ask him
 - [agents/branches](docs/agents/branches.md) — One branch and worktree per task, one change per commit, staged by explicit path
@@ -45,6 +46,14 @@ the backlog. The concept files indexed below hold everything else.
 - [checks](docs/checks.md) — What CI runs on every push and PR, the migration guards, the copy-drift and contrast tests, agent-docs check, and the theme package
 - [database](docs/database.md) — The one shared Postgres: tenancy, runtime roles and their grants and timeouts, what the schema enforces, migrations and backups
 - [deletion](docs/deletion.md) — What the person controls and how long Milton keeps it: forgetting, Delete all memos, disconnecting an AI, account deletion and the deletion inventory
+- [deploy/alerts](docs/deploy/alerts.md) — Milton's production alerts as code: each policy, its threshold and reason, the release gate, and how monitoring.ts plans and applies them
+- [deploy/cloud](docs/deploy/cloud.md) — Milton's hosting as operated: the services, cloud resources and edge, the admission service, secrets and the database logins
+- [deploy/e2e](docs/deploy/e2e.md) — The fictional test account and the twice-daily end-to-end check against production: provisioning, the run, the job, key renewal
+- [deploy/migrations](docs/deploy/migrations.md) — How a production schema change is snapshotted, run and checked, the Neon lessons behind each step, and how the database is restored
+- [deploy/releases](docs/deploy/releases.md) — How a Milton release is built, deployed, verified, gated and rolled back on Cloud Run, and how Turnstile is switched on
+- [deploy/serving](docs/deploy/serving.md) — What runs in production now: each service's revision, image and secrets, the rollback targets and floor, schema heads and snapshots to keep
+- [deploy/stripe](docs/deploy/stripe.md) — Operating Stripe for Milton: live mode, the Dashboard settings billing relies on, and the subscription backfill and resync
+- [history](docs/history.md) — Append-only record of Milton's production releases and applied one-time migrations, newest first, with revisions and snapshot names
 - [hosting](docs/hosting.md) — Where Milton runs (Cloud Run services, the Vercel site), startup and configuration, every HTTP request, static assets and the operation scripts
 - [mcp](docs/mcp.md) — An MCP call from token or key to tool result, the three tools and their arguments, outcomes and next steps, and the served-text contract
 - [memos](docs/memos.md) — What a memo, tweak, cover sheet and report are; what a memo holds, its tier and change score; tweaks, kinds, the cover sheet and when AIs save
@@ -62,4 +71,5 @@ the backlog. The concept files indexed below hold everything else.
 - [setup](docs/setup.md) — First setup on an empty account (offered once, about five pastes, the cover sheet, the standing line), the shared setup prompt and shared facts
 - [site](docs/site.md) — The static site at meetmilton.com: what Astro builds it from, what Vercel uploads and publishes, and what its pages do
 - [tps-page](docs/tps-page.md) — The web app a signed-in person sees: the TPS page, one memo, memo settings, the TPS.md export and the Connected AIs page
+
 <!-- concepts:end -->

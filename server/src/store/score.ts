@@ -48,8 +48,8 @@ export function change(from: string, to: string): number | undefined {
 export type Tier = "own" | "steered" | "untouched";
 export type FirstDraftState = "kept" | "missing" | "none";
 
-/** Which examples a final can be, from the memo's source alone (SPEC.md,
- * "Examples"): writing the person gave and edit-mode finals are their own
+/** Which examples a final can be, from the memo's source alone
+ * (docs/memos.md): writing the person gave and edit-mode finals are their own
  * words; a drafted final is steered when it differs from its first draft and
  * untouched when it equals it. Without the first draft, a drafted final with
  * at least one redraft is steered, and one with none is untouched. */

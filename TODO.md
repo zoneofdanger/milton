@@ -14,16 +14,17 @@ shared context for every item beneath it.**
 
 ## MVP
 
-Work that ships before sign-ups open widely. Use the product note's vocabulary (cover sheet,
-reports, memos) and plain text on security screens and anything an assistant reads.
+Work that ships before sign-ups open widely. Use the product vocabulary (memo, tweak, cover
+sheet, report, AI) and plain text on security screens and anything an AI reads.
 
-- [ ] #2 (server, med) **Try first setup with a real assistant.** A new account starts with an
-      empty cover sheet and empty reports. Refresh connector discovery for get_cover_sheet,
-      get_report, list_reports and create_memo. Run the setup script, show the complete draft,
-      obtain approval, save, and confirm only after a successful reread. Verify a correction
-      through exact_edits, a fresh-chat read, and the web download through the hosted service.
-      Each actual draft needs Peter's approval before an account write. Saves are model-free
-      since 2026-11-02; rerun after the first newcomer test account exists.
+- [ ] #2 (server, med) **Try first setup with a real AI.** A new account starts with an
+      empty cover sheet and no memos. Refresh connector discovery for get_cover_sheet,
+      get_report and create_memo. Run the setup script: paste about five pieces, kept as
+      final-only memos, start the cover sheet in the person's words, then the standing line.
+      Then draft, accept a final, check the one-line receipt, read again in a fresh chat,
+      forget a memo, and download TPS.md through the hosted service. Each write to a real
+      account needs Peter's approval. Saves are model-free since 2026-11-02; rerun after the
+      first newcomer test account exists.
 - [ ] #33 (site, high, founder)
       **Record the HN demo clip as an asciinema time-lapse.** Peter postponed the launch about a
       week (2026-11-09) to build the trail feature first. It shipped as memos on 2026-11-09
@@ -32,16 +33,17 @@ reports, memos) and plain text on security screens and anything an assistant rea
       test account, each tool with its own CLAUDE_CONFIG_DIR / CODEX_HOME so Peter's real Milton
       connection is never used): Day 1 in Claude Code, a fictional "Sam" asks "Reply to my
       manager. He needs me in on Saturday. I can't."; the first draft is generic, Sam makes three
-      fixes and approves, the AI offers to save, Sam says yes. Card: "# Two weeks and 9 approved
-      drafts later" (real samples from earlier real sessions, not seeded text). Day 14 in Codex
+      fixes and approves, and the AI keeps the memo and shows its one-line receipt. Card: "# Two
+      weeks and 9 approved drafts later" (real memos from earlier real sessions, not seeded
+      text). Day 14 in Codex
       (or Muse): "Tell the team the printer says PC LOAD LETTER again."; the first draft is
       approved unedited. Close: "# Did you get the memo? Your AI already did." then
       "# meetmilton.com · 30-day free trial, no card". Say "AI", not "assistant". ⚠ Never show
       Sam asking "Did you get the memo?": the homepage promises the AI reads Milton unprompted.
       Original names only, no film characters. Label it "real run, typing automated, pauses
       trimmed" (asciinema idle limit) and disclose a best-of-N take. Record only after the
-      real-assistant tests show unprompted reads and fewer first-draft edits as samples grow.
-      Peter approves Sam's samples. Check the .cast for tokens and home-folder paths before
+      real-AI tests show unprompted reads and fewer first-draft edits as memos grow.
+      Peter approves Sam's memos. Check the .cast for tokens and home-folder paths before
       publishing; self-host asciinema-player; put the one-line setup command under the player.
 - [ ] #35 (server, low) **Accept a flattened create_memo memo before hashing.** In 7 of 20
       #80 setup runs (claude-sonnet-5-5, Claude Code 2.1.321, both arms) the first five saves sent
@@ -62,27 +64,29 @@ reports, memos) and plain text on security screens and anything an assistant rea
       choose new artwork and check its readability at navigation-icon size first.
 
 - [ ] #8 (ops, med, founder) **Get end-to-end evidence for the newcomer path.** Never rehearsed:
-      sign up, connect an assistant, approve, first setup, save, fresh-chat read, correction,
-      download. Also unanswered with evidence: why Milton over the assistant's built-in memory,
-      and how reliably assistants offer and save what they should across clients. milton-eval's
+      sign up, connect an AI, approve, first setup, save, fresh-chat read, forget, download.
+      Also unanswered with evidence: why Milton over the AI's built-in memory, and how
+      reliably AIs save what they should across clients. milton-eval's
       email before-and-after is the first piece; needs a fictional test account Peter provides.
       2026-11-08: the fictional account (`e2e@milton-test.invalid`, owner script
       `server/scripts/test-account.ts`) and a daily-runnable check (`server/scripts/e2e.ts`:
-      browser sign-in, connection key, save, fresh read, correction, retirement) exist; see
-      the hosting runbook. Still open: the fresh-chat read and download through real
-      assistant clients, and cross-client evidence of what assistants offer and save.
+      browser sign-in, connection key, save, fresh read, forget) exist; see the hosting
+      runbook. Still open: the fresh-chat read and download through real AI clients, and
+      cross-client evidence of what AIs save.
 
 - [ ] #11 (server, low) **Make the spend test independent of UTC midnight.** A store-spend test
       reads the current UTC day twice and fails when a run crosses midnight (seen 2026-11-03
       00:00Z on a parallel run; passes on rerun). Inject the clock or compute the day once.
 
 - [ ] #13 (server, med, founder) **Optional learn-from-sent-mail step in first setup.** Decided
-      2026-11-03, then parked the same day because people will not trust a new product reading their mail, even through the assistant's own connector: the assistant, with permission, reads about twenty
+      2026-11-03, then parked the same day because people will not trust a new product reading their mail, even through the AI's own connector: the AI, with permission, reads about twenty
       recent sent emails through its own mail connector, proposes up to five of different kinds
-      with the full text, and files only the approved ones as exact samples; Milton gets no mail
-      access. Built and reviewed as merge f2ea867 (setup.ts question 6, test, README), reverted
-      unreleased; reapply by reverting the revert, then run first setup on an empty test account
-      through Claude Code with a mail connector (#8) before release.
+      with the full text, and keeps only the approved ones as final-only memos; Milton gets no
+      mail access. Built and reviewed as merge f2ea867 (setup.ts question 6, test, README),
+      reverted unreleased. That code predates memos and the current setup script, so rebuild it
+      rather than revert the revert. ⚠ SPEC.md says setup never reads an inbox; Peter decides
+      before this is rebuilt. Then run first setup on an empty test account through Claude Code
+      with a mail connector (#8) before release.
 
 - [ ] #23 (ops, low, founder) **Billing mailbox: accountspayable@meetmilton.com.** Decided
       2026-11-03: subscription and payment issues go to accountspayable@ (the Nina nod), a real,
@@ -132,15 +136,15 @@ reports, memos) and plain text on security screens and anything an assistant rea
       id in the one repeat case qa reran. Many duplicates: the same job merges for real,
       only at probability 0.90 or more, never a reworded tweak, never across accounts, keeping
       the older text, logging each merge with undo on the TPS page, plus a privacy-page line.
-      Offline test (2026-11-09, fictional, local-only notes in .agents/tmp/decisions-test):
+      Offline test (2026-11-09, fictional, local-only notes, not in the repository):
       at 10 candidates, 70% of reworded repeats found against 19% for exact match, 0 false
       merges in 95 must-not-merge cases; at 50 candidates recall fell to 43%. About 330 ms and
       $0.0001 per tweak, which is why it runs weekly, off the save path. ⚠ Without the 0.90
       threshold it wrongly merged near-misses ("replies to clients" vs "support answers").
       Ranking with Decisions was tested too and rejected: no draft gain.
 
-## From the audit of 2026-11-02 (`.agents/tmp/audit/report.md`)
+## From the audit of 2026-11-02
 
-- [ ] #19 (server, low) **Document two known limits.** Exact-edit anchors are not Unicode-normalized,
-      so a quote typed with composed accents misses decomposed stored text (A26); the token's clock
-      tolerance does not apply to expiry (A27). Both harmless today; write them into server/README.
+- [ ] #19 (server, low) **Document the token-expiry clock limit.** The token's 30-second clock
+      tolerance does not apply to expiry (A27; `server/src/token.ts`). Harmless today; write it
+      into server/README. (The exact-edit half of this item went with exact edits in #76.)

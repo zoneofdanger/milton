@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// Vendored by `agent-docs install` from agent-docs commit 92ab97b. Do not edit here; update it by running install again.
+// Vendored by `agent-docs install` from agent-docs commit 7abbead. Do not edit here; update it by running install again.
 // agent-docs: checks a repository's concept files (docs/<concept>.md) and the index in AGENTS.md.
 // One Markdown file per concept, each with frontmatter name, description, type and covers (the code it
 // describes). CI runs `check --base <ref>`: it blocks invalid frontmatter, a stale index, tracked links
@@ -251,7 +251,10 @@ export function check(root: string, base: string | undefined, io: IO): number {
   for (const f of files) {
     if (!f.endsWith(".md")) continue;
     const path = join(root, f);
-    if (statSync(path).size > 2 * 1024 * 1024) continue;
+    if (statSync(path).size > 2 * 1024 * 1024) {
+      notes.push(`${f}: over 2 MiB, not scanned for scratch links`);
+      continue;
+    }
     const buf = readFileSync(path);
     if (buf.includes(0)) continue; // binary
     buf.toString("utf-8").split("\n").forEach((line, i) => {
@@ -282,6 +285,8 @@ export function check(root: string, base: string | undefined, io: IO): number {
   return problems.length ? 1 : 0;
 }
 
+const padded = (entries: string[]) => (entries.length ? ["", ...entries, ""] : []);
+
 export function index(root: string, io: IO): number {
   const agents = join(root, "AGENTS.md");
   if (!existsSync(agents)) throw new Fatal("no AGENTS.md here; write its hand-written lines first");
@@ -289,8 +294,9 @@ export function index(root: string, io: IO): number {
   const entries = indexLines(readConcepts(root, repoFiles(root)));
   const block = findIndex(text);
   let next: string;
-  if (!("error" in block)) next = [...block.lines.slice(0, block.start + 1), ...entries, ...block.lines.slice(block.end)].join("\n");
-  else if (block.line === 1) next = `${text.replace(/\n*$/, "\n")}\n${[START, ...entries, END].join("\n")}\n`;
+  // Blank lines inside the markers match what prettier writes, so the two never fight.
+  if (!("error" in block)) next = [...block.lines.slice(0, block.start + 1), ...padded(entries), ...block.lines.slice(block.end)].join("\n");
+  else if (block.line === 1) next = `${text.replace(/\n*$/, "\n")}\n${[START, ...padded(entries), END].join("\n")}\n`;
   else throw new Fatal(`AGENTS.md:${block.line}: ${block.error}`);
   if (next === text) return io.out(`AGENTS.md index is current (${plural(entries.length, "concept")}).`), 0;
   writeFileSync(agents, next);

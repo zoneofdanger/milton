@@ -2,8 +2,7 @@
 
 Milton keeps how a person writes and serves it to their connected AIs through an MCP
 server with three tools. The [README](README.md) introduces it and [TODO.md](TODO.md) is
-the backlog. The concept files indexed below hold everything else. Until it is dissolved
-into concept files, [SPEC.md](SPEC.md) also describes product behaviour.
+the backlog. The concept files indexed below hold everything else.
 
 ## Read before you act
 
@@ -35,6 +34,8 @@ into concept files, [SPEC.md](SPEC.md) also describes product behaviour.
 ## Concepts
 
 <!-- concepts:start -->
+
+- [accounts](docs/accounts.md) — Sign-in through the self-hosted auth service, app sessions and OIDC, admission and account creation, open sign-ups, and connection keys
 - [agents/approval](docs/agents/approval.md) — What counts as Peter's approval, including his words relayed from another session, and when to ask him
 - [agents/branches](docs/agents/branches.md) — One branch and worktree per task, one change per commit, staged by explicit path
 - [agents/messaging](docs/agents/messaging.md) — What goes in another Milton session's inbox, and how sessions are found
@@ -42,8 +43,23 @@ into concept files, [SPEC.md](SPEC.md) also describes product behaviour.
 - [agents/pull-requests](docs/agents/pull-requests.md) — What a Milton task PR records, and how checks and evidence carry across a handoff
 - [agents/roles](docs/agents/roles.md) — Who owns what on the Milton team (builders, milton-duo, milton-overlord, Designer), when review is needed, and which models run
 - [agents/working](docs/agents/working.md) — How to build and check a change in Milton: Bun, the checks to run, tests, served text, theme, shims and secrets
-- [how-milton-works](docs/how-milton-works.md) — Every piece of Milton's logic, one line each, until it is split into concept files
+- [billing](docs/billing.md) — Trials, the one plan and Stripe (checkout, portal, webhook), access by subscription status, trial notices, store limits and usage rows
+- [checks](docs/checks.md) — What CI runs on every push and PR, the migration guards, the copy-drift and contrast tests, agent-docs check, and the theme package
+- [database](docs/database.md) — The one shared Postgres: tenancy, runtime roles and their grants and timeouts, what the schema enforces, migrations and backups
+- [deletion](docs/deletion.md) — What the person controls and how long Milton keeps it: forgetting, Delete all memos, disconnecting an AI, account deletion and the deletion inventory
+- [deploy/alerts](docs/deploy/alerts.md) — Milton's production alerts as code: each policy, its threshold and reason, the release gate, and how monitoring.ts plans and applies them
+- [deploy/cloud](docs/deploy/cloud.md) — Milton's hosting as operated: the services, cloud resources and edge, the admission service, secrets and the database logins
+- [deploy/e2e](docs/deploy/e2e.md) — The fictional test account and the twice-daily end-to-end check against production: provisioning, the run, the job, key renewal
+- [deploy/migrations](docs/deploy/migrations.md) — How a production schema change is snapshotted, run and checked, the Neon lessons behind each step, and how the database is restored
+- [deploy/releases](docs/deploy/releases.md) — How a Milton release is built, deployed, verified, gated and rolled back on Cloud Run, and how Turnstile is switched on
+- [deploy/serving](docs/deploy/serving.md) — What runs in production now: each service's revision, image and secrets, the rollback targets and floor, schema heads and snapshots to keep
+- [deploy/stripe](docs/deploy/stripe.md) — Operating Stripe for Milton: live mode, the Dashboard settings billing relies on, and the subscription backfill and resync
+- [history](docs/history.md) — Append-only record of Milton's production releases and applied one-time migrations, newest first, with revisions and snapshot names
+- [hosting](docs/hosting.md) — Where Milton runs (Cloud Run services, the Vercel site), startup and configuration, every HTTP request, static assets and the operation scripts
+- [mcp](docs/mcp.md) — An MCP call from token or key to tool result, the three tools and their arguments, outcomes and next steps, and the served-text contract
+- [memos](docs/memos.md) — What a memo, tweak, cover sheet and report are; what a memo holds, its tier and change score; tweaks, kinds, the cover sheet and when AIs save
 - [positioning](docs/positioning.md) — What Milton is for and how to judge features, copy and backlog against it: your AI writes like you
+- [reports](docs/reports.md) — How get_cover_sheet and get_report read, and how a report ranks memos, picks examples and tweaks and prints its text
 - [research/derived-systems-2026](docs/research/derived-systems-2026.md) — November 2026: the embeddings, advisory graph, task retrieval and gardening Milton built, measured and removed, and what would justify rebuilding
 - [research/honcho-2026](docs/research/honcho-2026.md) — Honcho compared with Milton on 2026-11-05: a substantial overlap in person memory; Milton's distinction was a writing workflow on approved examples
 - [research/honcho-source-2026](docs/research/honcho-source-2026.md) — Honcho source read at a pinned commit, 2026-11-05: context delivery varied by client; no reason found to add embeddings or autonomous learning
@@ -54,4 +70,9 @@ into concept files, [SPEC.md](SPEC.md) also describes product behaviour.
 - [research/spiral-teardown-2026-11-05](docs/research/spiral-teardown-2026-11-05.md) — Spiral teardown, 2026-11-05: its public claims, Styles dashboard and two generated style guides, and a plausible reconstruction of how it works
 - [research/spiral-tool-library-pilot-2026-11-05](docs/research/spiral-tool-library-pilot-2026-11-05.md) — 2026-11-05 pilot: one Milton-assisted draft and three Spiral drafts of one essay brief, preserved exactly; small, unblinded and with no winner
 - [research/writing-evidence-2026](docs/research/writing-evidence-2026.md) — November 2026 reading of three papers and GBrain's record: examples beat nothing, formality is the default to override, and much is untested
+- [saves](docs/saves.md) — How a create_memo save commits: the account lock, receipts, replay and request hashing, refusals, savepoints and the request size
+- [setup](docs/setup.md) — First setup on an empty account (offered once, about five pastes, the cover sheet, the standing line), the shared setup prompt and shared facts
+- [site](docs/site.md) — The static site at meetmilton.com: what Astro builds it from, what Vercel uploads and publishes, and what its pages do
+- [tps-page](docs/tps-page.md) — The web app a signed-in person sees: the TPS page, one memo, memo settings, the TPS.md export and the Connected AIs page
+
 <!-- concepts:end -->

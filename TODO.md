@@ -60,8 +60,8 @@ sheet, report, AI) and plain text on security screens and anything an AI reads.
       email before-and-after is the first piece; needs a fictional test account Peter provides.
       2026-11-08: the fictional account (`e2e@milton-test.invalid`, owner script
       `server/scripts/test-account.ts`) and a daily-runnable check (`server/scripts/e2e.ts`:
-      browser sign-in, connection key, save, fresh read, forget) exist; see the hosting
-      runbook. Still open: the fresh-chat read and download through real AI clients, and
+      browser sign-in, connection key, save, fresh read, forget) exist; see
+      [the end-to-end check](docs/deploy/e2e.md). Still open: the fresh-chat read and download through real AI clients, and
       cross-client evidence of what AIs save.
 
 - [ ] #11 (server, low) **Make the spend test independent of UTC midnight.** A store-spend test
@@ -74,7 +74,7 @@ sheet, report, AI) and plain text on security screens and anything an AI reads.
       with the full text, and keeps only the approved ones as final-only memos; Milton gets no
       mail access. Built and reviewed as merge f2ea867 (setup.ts question 6, test, README),
       reverted unreleased. That code predates memos and the current setup script, so rebuild it
-      rather than revert the revert. ⚠ SPEC.md says setup never reads an inbox; Peter decides
+      rather than revert the revert. ⚠ docs/setup.md says setup never reads an inbox; Peter decides
       before this is rebuilt. Then run first setup on an empty test account through Claude Code
       with a mail connector (#8) before release.
 

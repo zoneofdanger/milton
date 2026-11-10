@@ -30,9 +30,9 @@ hands over the right one.
   then `get_report` with the situation, medium, audience and purpose. Milton ranks your
   memos and returns the cover sheet, the best-matching finals as examples (your own
   words ahead of equally matching ones, at most three AI drafts you steered, never
-  untouched AI drafts), then the tweaks those memos taught. Reads make no model call.
-  AIs decide when to read and how to apply them; Milton does not guarantee their
-  adherence.
+  untouched AI drafts), then the tweaks your best-matching memos taught. Reads make no
+  model call. AIs decide when to read and how to apply them; Milton does not guarantee
+  their adherence.
 - **See and control what's on file.** Your TPS page shows the cover sheet, your memos
   (newest first, with their rounds, the tweaks served and the tweaks taught), your
   tweaks with counts and a scoreboard of how much your first drafts change. You can
@@ -44,7 +44,8 @@ The hosted service is at [meetmilton.com](https://meetmilton.com), in early acce
 
 ## Get started
 
-1. Sign in at [app.meetmilton.com](https://app.meetmilton.com/login) with Google or GitHub.
+1. Sign in at [app.meetmilton.com](https://app.meetmilton.com/login) with email and
+   password, Google or GitHub.
 2. Add `https://mcp.meetmilton.com/mcp` in your AI's MCP or connector settings,
    then complete sign-in and approve the connection. Availability depends on the
    AI and your plan.
@@ -55,11 +56,11 @@ The hosted service is at [meetmilton.com](https://meetmilton.com), in early acce
 4. For the next email or DM, give your AI the facts. It reads the report for that
    draft and writes. When you accept the final, it keeps the memo.
 
-Use **Connect an AI** on your TPS page for the connection address and a prompt to
-copy. It starts expanded for empty accounts and stays available after your first memo.
+The app's **Connected AIs** page shows the connection address and links to the setup
+guide for your AI. An empty TPS page links there and shows a setup prompt to copy.
 
-Milton supplies usage instructions when your AI connects, plus descriptions for all
-three tools and their arguments. These explain when to read, when to keep a memo, how
+Milton supplies usage instructions when your AI connects, plus descriptions for its
+tools and their arguments. These explain when to read, when to keep a memo, how
 to write tweaks, how to run first setup, and how to recover an uncertain save. Clients
 decide how to present that guidance to their models. If your AI needs a persistent
 reminder, add this to its custom instructions or project setup file:

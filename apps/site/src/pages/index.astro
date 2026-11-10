@@ -328,14 +328,16 @@ const guides = [
   @media (min-width: 1080px) {
     .hero {
       grid-template-columns: minmax(0, 1fr) auto;
-      align-items: end;
+      align-items: start;
       gap: var(--space-8);
     }
     h1 {
       white-space: nowrap;
     }
+    /* The button's top sits level with the top of the headline's capitals. */
     .hero-cta {
       justify-items: end;
+      margin-top: calc(clamp(2.375rem, 5vw, 4rem) * 0.16);
       text-align: right;
     }
   }

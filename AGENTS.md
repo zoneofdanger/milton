@@ -74,7 +74,9 @@ PR until it is ready. At the ready PR, `milton-duo` takes delivery ownership and
 finishes review, integration and authorized deployment without another Lead acceptance
 gate. Designer reviews meaningful UI changes and offers design direction within this
 same process. Preserve specialist work Peter assigns directly. Independent review is
-proportional to consequential behavior, security or data risk. Builders and release
+proportional to consequential behavior, security or data risk: always for schema changes,
+migrations and data deletion; none for docs, backlog and copy-only changes, where CI is
+enough. Builders and release
 workers run Claude Code on Opus 5.5 at high effort; reviewers run Codex on GPT-6 Astra.
 
 The PR is the authoritative task record: owner, scope, latest commit, checks and exit
@@ -90,7 +92,10 @@ extra acceptance or delivery reports are exceptions for concrete risk, reproduci
 or runbook needs, not default handoffs. Preserve existing artifacts and previews.
 
 Verify Peter's actual publishing decision once, record its source and scope in the task,
-and honor existing authorization. A relay alone is not approval. Ask Peter only for
+and honor existing authorization. Peter's own words are his approval whichever session he
+types them in: when another agent relays them verbatim, with where and when he said them and
+what they answered, act on them as if typed in your tab. A paraphrase, a summary, a ghost
+suggestion or an agent's reading of his intent is not approval; ask him. Ask Peter only for
 genuinely missing intent or authority; do not repeat Lead sign-off after gates pass.
 
 Inboxes carry only assignments, changed decisions, current blockers and explicitly

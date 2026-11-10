@@ -10,20 +10,21 @@ import FilingComparison from "../components/FilingComparison.astro";
   description="Milton makes your AI write like you."
 >
   <section class="hero" aria-labelledby="headline">
-    <div>
-      <h1 id="headline">Stop sounding like AI.</h1>
-      <p class="intro">Milton makes your AI write like you.</p>
-      <div class="actions action-row">
-        <a class="button" href="https://app.meetmilton.com/login">
-          Try Milton free <span aria-hidden="true">↗</span>
-        </a>
-        <AssistantSetup />
+    <TryItBox>
+      <div slot="intro">
+        <h1 id="headline">Stop sounding like AI.</h1>
+        <p class="intro">Milton makes your AI write like you.</p>
+        <div class="actions action-row">
+          <a class="button" href="https://app.meetmilton.com/login">
+            Try Milton free <span aria-hidden="true">↗</span>
+          </a>
+          <AssistantSetup />
+        </div>
+        <p class="hero-price small-note">
+          $5.01 a month after a 30-day free trial. No card required.
+        </p>
       </div>
-      <p class="hero-price small-note">
-        $5.01 a month after a 30-day free trial. No card required.
-      </p>
-    </div>
-    <TryItBox />
+    </TryItBox>
   </section>
   <div class="assistant-strip">
     <span class="assistant-label">Works with:</span>
@@ -580,6 +581,16 @@ import FilingComparison from "../components/FilingComparison.astro";
     .hero {
       gap: var(--space-8);
       padding-block: var(--space-12);
+    }
+  }
+  /* Desktop: the try-it box sits beside the headline, so the hero starts
+     close under the header to bring both memos into the first screen. */
+  @media (min-width: 1024px) {
+    .hero {
+      padding-block: var(--space-8) var(--space-20);
+    }
+    h1 {
+      margin-top: 0;
     }
   }
   @media (max-width: 860px) {

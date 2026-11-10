@@ -21,6 +21,9 @@
   --sheet-bar: #e3d1a8;
   --sheet-bar-ink: #242424;
   --sheet-rule: #242424;
+  /* Rubber-stamp inks for the site's try-it box; text, so checked on surface. */
+  --stamp-red: #a33a2a;
+  --stamp-blue: #1f4e8c;
   --input: #80786b;
   --shadow: rgba(34, 31, 27, 0.08);
   --font-display: var(--font-mono);
@@ -78,6 +81,8 @@
     --sheet-bar: #3e382c;
     --sheet-bar-ink: #f5efdf;
     --sheet-rule: #b9aa87;
+    --stamp-red: #e88a7a;
+    --stamp-blue: #8fb3e6;
     --input: #9a907b;
     --shadow: rgba(0, 0, 0, 0.3);
   }
@@ -95,6 +100,8 @@
   --sheet-bar: #3e382c;
   --sheet-bar-ink: #f5efdf;
   --sheet-rule: #b9aa87;
+  --stamp-red: #e88a7a;
+  --stamp-blue: #8fb3e6;
   --input: #9a907b;
   --shadow: rgba(0, 0, 0, 0.3);
 }

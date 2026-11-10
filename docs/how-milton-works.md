@@ -3,49 +3,18 @@ name: how-milton-works
 description: Every piece of Milton's logic, one line each, until it is split into concept files
 type: behaviour
 covers:
-  - .github/workflows/checks.yml
+  - .github/workflows/**
+  - apps/auth/migrations/**
+  - apps/auth/scripts/**
+  - apps/auth/src/**
   - apps/site/astro.config.mjs
-  - packages/forwarded-client/**
-  - packages/theme/**
-  - scripts/agent-docs.ts
-  - scripts/check-migrations.ts
+  - packages/**
+  - scripts/**
   - server/Dockerfile
   - server/drizzle/**
+  - server/migrations/**
   - server/scripts/**
-  - server/src/assets.ts
-  - server/src/auth-account.tsx
-  - server/src/auth-assistants.tsx
-  - server/src/auth-login.tsx
-  - server/src/auth-session.tsx
-  - server/src/auth.tsx
-  - server/src/billing.tsx
-  - server/src/cloud-app.ts
-  - server/src/cloud-run.ts
-  - server/src/config.ts
-  - server/src/environment.ts
-  - server/src/error-log.ts
-  - server/src/handler.ts
-  - server/src/http.ts
-  - server/src/index.ts
-  - server/src/mcp-outcomes.ts
-  - server/src/mcp-tools.ts
-  - server/src/mcp.ts
-  - server/src/memo-pages.tsx
-  - server/src/pages.tsx
-  - server/src/store/accounts.ts
-  - server/src/store/billing.ts
-  - server/src/store/compiled.ts
-  - server/src/store/connection-keys.ts
-  - server/src/store/database.ts
-  - server/src/store/index.ts
-  - server/src/store/memos.ts
-  - server/src/store/save.ts
-  - server/src/store/schema.ts
-  - server/src/store/score.ts
-  - server/src/store/setup.ts
-  - server/src/store/tps.ts
-  - server/src/store/trials.ts
-  - server/src/token.ts
+  - server/src/**
   - server/test/copy-drift.test.ts
 ---
 
@@ -576,4 +545,5 @@ Files: `packages/theme/`, `server/scripts/`, `scripts/check-migrations.ts`,
 - `check-migrations` compares with main: a new migration is numbered above main's highest in its track with its own number, Drizzle journal entries run in order with strictly increasing `when`, every migration file and snapshot matches its hash in `scripts/released-migrations.sha256` (main's never change), and a new drop, truncate or rename of a table, column, view, schema, type or function names its merged code-stopped-by PR (comments and strings skipped; a `DO` block, `EXECUTE` (top level or in a function body), or a function body that drops, truncates or renames, needs that or a `no-drop-or-rename` reason). Without origin/main it checks only the lock and journal; in CI that fails.
 - The retired-words check fails, listing file:line, when the site, the consent screen, the app's pages, README, TODO or AGENTS say a word memos replaced (`list_reports`, exact edits, instruction cards, writing rules, samples) or "assistant"; identifiers and keys pass, and lines between `retired-words: off` and `retired-words: on` markers are historical and skipped.
 - `packages/theme/facts.ts` holds the standing line, the 30-day trial and the $5.01 price: the setup script, the setup page and Stripe's trial read them, and the shared-facts check fails when README lacks the standing line or a site page or app page states another trial length or price.
-- `agent-docs check` runs in CI (`scripts/agent-docs.ts`, vendored by `agent-docs install`) and fails on invalid concept frontmatter, an AGENTS.md index that does not match `docs/`, a tracked file that links into `.agents/tmp`, or drift: a change to code a concept file covers without a change to that file, unless a `Docs-unchanged: <concept>: <reason>` commit trailer excuses it.
+- `agent-docs check` runs in CI (`scripts/agent-docs.ts`, vendored by `agent-docs install`) and fails on invalid concept frontmatter, an AGENTS.md index that does not match `docs/`, a Markdown link from a tracked Markdown file into `.agents/tmp`, or drift: a change to code a concept file covers without a change to that file, unless a `Docs-unchanged: <concept>: <reason>` commit trailer excuses it.
+- The no-tmp-links test is stricter than agent-docs: it fails when any tracked text file, of any size, mentions `.agents/tmp`, except one known mention with its reason.

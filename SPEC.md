@@ -87,12 +87,12 @@ Milton sets each final's tier at save, from the memo's source alone:
   draft, or, with it missing, that had no rounds. Untouched finals are never served;
   they count only on the scoreboard.
 
-A report ranks every memo by requested kind, medium match, tier (your words before
-steered), word overlap of purpose and audience, full-text rank of the situation against
-summary, purpose, audience and final, recency, then id. Examples fill by rank within a
-32 KiB budget, a block that doesn't fit is skipped for the next, and the top one is
-always served. At most 3 steered finals are served per report, and finals over 128 KiB
-are kept but never served. There is no deliberate variety rule.
+A report ranks every memo by requested kind, medium match, word overlap of purpose and
+audience, tier (your words before steered when overlap ties), full-text rank of the
+situation against summary, purpose, audience and final, recency, then id. Examples fill
+by rank within a 32 KiB budget, a block that doesn't fit is skipped for the next, and
+the top one is always served. At most 3 steered finals are served per report, and finals
+over 128 KiB are kept but never served. There is no deliberate variety rule.
 
 ### Tweaks
 
@@ -104,7 +104,7 @@ added. Each memo-and-tweak pair is one citation, and a tweak's count is its cita
 A tweak is matched only through the memos that cite it: a report serves the tweaks
 cited by the 10 best-ranked memos that cite any, ordered by their best memo's rank,
 then citation count, at most 10. (Ranked over all memos, the person's own pasted
-writing, which ranks first and cites none, would starve tweaks.) Each read records its
+writing, which cites none, could starve tweaks.) Each read records its
 served tweak ids under its `report_id`.
 
 The person can delete a tweak or reword it on the TPS page; a reworded tweak keeps its

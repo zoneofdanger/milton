@@ -360,6 +360,94 @@ test("a report ranks by kind, medium and tier, serves no untouched finals and at
   }
 });
 
+test("a report ranks matching memos above unrelated pasted ones, and your words only win ties", async () => {
+  const ask = {
+    situation: "declining a software vendor's renewal quote",
+    medium: "email" as const,
+    audience: "a software vendor",
+    purpose: "decline the renewal",
+  };
+  // Five setup pastes on other topics, then three steered matches, best first.
+  const pastes = [
+    ["thanking a friend for dinner", "a friend", "thank"],
+    [
+      "asking the landlord to fix the heater",
+      "my landlord",
+      "ask for a repair",
+    ],
+    ["accepting a talk invitation", "an organizer", "accept an invitation"],
+    ["planning a family visit", "my sister", "plan a visit"],
+    ["signing up for the school fair", "a coordinator", "volunteer"],
+  ];
+  const matches = [
+    [
+      "declining a software vendor's renewal quote",
+      "a software vendor",
+      "decline the renewal",
+    ],
+    [
+      "declining a vendor's upsell offer",
+      "a software vendor",
+      "decline an upsell",
+    ],
+    ["declining a vendor's meeting request", "a vendor", "decline a meeting"],
+  ];
+  for (const size of [600, 6000]) {
+    const local = await localStore();
+    try {
+      await seedUsers(local.pg, "u");
+      const store = fixtureStore(local.db, "u");
+      const save = async (
+        [summary, audience, purpose]: string[],
+        steered: boolean,
+      ) => {
+        const final = `About ${summary}.\n`.repeat(size / 40);
+        return (
+          await store.saveMemo(
+            memoSave({
+              final,
+              context: {
+                summary: summary!,
+                medium: "email",
+                audience,
+                purpose,
+              },
+              ...(steered
+                ? { first_draft: `Hello,\n${final}`, mode: "draft", rounds: 1 }
+                : {}),
+            }),
+          )
+        ).memo!.memo_id;
+      };
+      const own: string[] = [];
+      for (const p of pastes) own.push(await save(p, false));
+      const steered: string[] = [];
+      for (const m of matches) steered.push(await save(m, true));
+      const ids = (await store.readReport(ask)).examples.map((e) => e.memo_id);
+      expect(ids.slice(0, 3)).toEqual(steered);
+      if (size === 600) {
+        expect(ids.slice(3).sort()).toEqual([...own].sort());
+        // Same overlap as the best match, a weaker situation match: your words
+        // still come first.
+        const tie = await save(
+          ["a short note", ask.audience, ask.purpose],
+          false,
+        );
+        expect(
+          (await store.readReport(ask)).examples
+            .slice(0, 4)
+            .map((e) => e.memo_id),
+        ).toEqual([tie, ...steered]);
+      } else {
+        // About 6 KB each: the budget runs out on pastes, not on matches.
+        expect(ids.length).toBeLessThan(8);
+      }
+    } finally {
+      await local.dispose();
+    }
+  }
+});
+
 test("a report serves tweaks from the ten best-matching memos that cite one, and a memo saved after it records them", async () => {
   const local = await localStore();
   try {

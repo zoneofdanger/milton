@@ -107,6 +107,8 @@ test("setup offers once, reads no inbox, and its example memo parses as a final-
   expect(setupScript).toContain("exactly as pasted");
   // The ask itself says the pieces are kept, even without the setup prompt.
   expect(setupScript).toContain("tell them Milton keeps each as a memo");
+  // A writing task brought first returns to the paste step afterwards.
+  expect(setupScript).toContain("do that, then come back");
   expect(SETUP_PROMPT).toContain("First ask me to paste about five things");
   const example = JSON.parse(
     setupScript.slice(

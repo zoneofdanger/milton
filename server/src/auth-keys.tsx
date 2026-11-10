@@ -80,7 +80,7 @@ const keyItems = (keys: ConnectionKey[]) => (
   </ul>
 );
 
-/** The Connected assistants page's section: every active key, the most
+/** The Connected AIs page's section: every active key, the most
  * recently expired ones, and the create form. */
 export function keysSection(
   keys: { active: ConnectionKey[]; expired: ConnectionKey[] },

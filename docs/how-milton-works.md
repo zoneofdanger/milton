@@ -508,7 +508,7 @@ Files: `apps/site/`.
 ## Theme, scripts, and CI
 
 Files: `packages/theme/`, `server/scripts/`, `scripts/check-migrations.ts`,
-`.github/workflows/checks.yml`.
+`server/test/copy-drift.test.ts`, `.github/workflows/checks.yml`.
 
 - A shared theme supplies fonts, favicons, and tokens, with a WCAG contrast test. App and auth text outside the Latin JetBrains Mono subset fetches the full master on demand, which also renders a non-Latin letter with its combining mark; the site serves only the subset.
 - `migrate.ts` applies writing migrations only as neondb_owner; explicit --app-auth applies app-only migration005 after native004 as an approved app migration owner, with no runtime startup migration.
@@ -523,3 +523,4 @@ Files: `packages/theme/`, `server/scripts/`, `scripts/check-migrations.ts`,
 - `dev.ts` serves the app on loopback and rebuilds the CSS on change.
 - CI runs the migration guards, types, tests, formatting, and both integration suites on PostgreSQL 18, holds no secrets, and does not deploy.
 - `check-migrations` compares with main: a new migration is numbered above main's highest in its track with its own number, Drizzle journal entries run in order with strictly increasing `when`, every migration file and snapshot matches its hash in `scripts/released-migrations.sha256` (main's never change), and a new drop, truncate or rename of a table, column, view, schema, type or function names its merged code-stopped-by PR (comments and strings skipped; a `DO` block, `EXECUTE` (top level or in a function body), or a function body that drops, truncates or renames, needs that or a `no-drop-or-rename` reason). Without origin/main it checks only the lock and journal; in CI that fails.
+- The retired-words check fails, listing file:line, when the site, the consent screen, the app's pages, README, TODO or AGENTS say a word memos replaced (`list_reports`, exact edits, instruction cards, writing rules, samples) or "assistant"; identifiers and keys pass, and lines between `retired-words: off` and `retired-words: on` markers are historical and skipped.

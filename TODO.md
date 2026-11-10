@@ -137,4 +137,7 @@ sheet, report, AI) and plain text on security screens and anything an AI reads.
 
 - [ ] #19 (server, low) **Document the token-expiry clock limit.** The token's 30-second clock
       tolerance does not apply to expiry (A27; `server/src/token.ts`). Harmless today; write it
-      into server/README. (The exact-edit half of this item went with exact edits in #76.)
+      into server/README.
+      <!-- retired-words: off: names the feature #76 removed -->
+      (The exact-edit half of this item went with exact edits in #76.)
+      <!-- retired-words: on -->

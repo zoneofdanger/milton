@@ -20,6 +20,7 @@ import SiteLayout from "../layouts/SiteLayout.astro";
           </p>
 
           <section class="report-section" aria-labelledby="style-guide-pilot">
+            {/* retired-words: off: the pilot's drafts had samples */}
             <h3 id="style-guide-pilot">
               Do good samples need a written style guide?
             </h3>
@@ -117,6 +118,7 @@ import SiteLayout from "../layouts/SiteLayout.astro";
                 How much samples help. Every draft had samples, so nothing was
                 compared with drafts written without them.
               </li>
+              {/* retired-words: on */}
               <li>
                 That all GPT or Claude models work equally well, or that Milton
                 achieves any percentage of Spiral's quality.
@@ -154,6 +156,7 @@ import SiteLayout from "../layouts/SiteLayout.astro";
 
           <section class="report-section" aria-labelledby="sample-ranking">
             <h3 id="sample-ranking">How Milton picks examples</h3>
+            {/* retired-words: off: the ranking tests served samples */}
             <p>
               When we ran these tests, Milton served eight samples per report,
               ranked by who they were for and what they were for, then by
@@ -220,9 +223,11 @@ import SiteLayout from "../layouts/SiteLayout.astro";
               client than to a friend, which is where picking the right sample
               should matter. That test needs real writing, and it is next.
             </p>
+            {/* retired-words: on */}
           </section>
 
           <section class="report-section" aria-labelledby="sample-count">
+            {/* retired-words: off: the earlier tests' samples */}
             <h3 id="sample-count">How many samples</h3>
             <p>
               Real writing teaches an AI more than nothing. In one study, five
@@ -237,18 +242,21 @@ import SiteLayout from "../layouts/SiteLayout.astro";
               serves as many matching examples as fit in a fixed budget, not a
               fixed count.
             </p>
+            {/* retired-words: on */}
           </section>
 
           <section class="report-section" aria-labelledby="untested">
             <h3 id="untested">What we haven't tested yet</h3>
             <ul class="instruction-list">
               <li>Drafts for real people, judged by those people.</li>
+              {/* retired-words: off: the pilot's samples */}
               <li>
                 How well ChatGPT, Codex, and other clients beyond Claude Code
                 retrieve examples from Milton and write from them. The
                 style-guide pilot was an offline prompt test: the samples were
                 placed in the prompt, and no client fetched them from Milton.
               </li>
+              {/* retired-words: on */}
               <li>Whether one short email is enough.</li>
               <li>
                 Whether a cover sheet or tweaks add anything beyond pasted
@@ -262,9 +270,11 @@ import SiteLayout from "../layouts/SiteLayout.astro";
           <section class="report-section" aria-labelledby="test-method">
             <h3 id="test-method">How the earlier ranking tests were run</h3>
             <ul class="instruction-list">
+              {/* retired-words: off: the ranking tests' samples */}
               <li>
                 The fictional writers and their samples were written by a model.
               </li>
+              {/* retired-words: on */}
               <li>
                 Drafts were scored blind by a second model, twice each, against
                 a description of the writer.
@@ -279,10 +289,11 @@ import SiteLayout from "../layouts/SiteLayout.astro";
               <li>We set the pass mark before each run.</li>
             </ul>
             <p>
-              Full notes:{" "}
+              Full notes: {/* retired-words: off: the report's title */}
               <a href="https://github.com/zoneofdanger/milton/blob/main/docs/research/sample-ranking-2026.md">
                 Sample ranking
               </a>{" "}
+              {/* retired-words: on */}
               and{" "}
               <a href="https://github.com/zoneofdanger/milton/blob/main/docs/research/writing-evidence-2026.md">
                 What the evidence supports

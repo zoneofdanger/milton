@@ -51,7 +51,7 @@ plan, the [README](README.md) says what is here, and [TODO.md](TODO.md) is the b
   this in the brief. Never describe a report, a commit or a passing typecheck as proof
   of behavior nobody observed.
 - Served text is contract: the server instructions stay at or under 4,096 characters,
-  tool descriptions and the setup script are shown to assistants as written, and a change
+  tool descriptions and the setup script are shown to AIs as written, and a change
   to served text comes with the contract test that parses it.
 - Keep Milton's look: build pages and screens from `packages/theme`, and keep the
   contrast test passing.

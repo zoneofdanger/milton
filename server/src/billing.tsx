@@ -1,6 +1,7 @@
 /** @jsxImportSource hono/jsx */
 import { createHash } from "node:crypto";
 import Stripe from "stripe";
+import { TRIAL_DAYS } from "@milton/theme/facts";
 import { z } from "zod";
 import type { RuntimeConfig, StripeApiConfig } from "./config";
 import {
@@ -270,7 +271,7 @@ export async function ensureSubscription(
             {
               customer,
               "items[0][price]": billing.priceId,
-              trial_period_days: "30",
+              trial_period_days: String(TRIAL_DAYS),
               "payment_settings[save_default_payment_method]":
                 "on_subscription",
               "trial_settings[end_behavior][missing_payment_method]": "cancel",

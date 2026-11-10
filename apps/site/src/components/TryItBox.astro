@@ -1,0 +1,496 @@
+---
+import data from "../data/try-it.json";
+
+/* Static: every person and request is in the HTML. Without script all of it
+   reads as plain sections; the script shows the pickers and one pair. */
+type Side = {
+  greeting: string;
+  opening: string;
+  words: number;
+  signoff: string;
+};
+type Pair = {
+  to: string;
+  request: string;
+  facts: string[];
+  plain: string;
+  milton: string;
+  changed: { plain: Side; milton: Side };
+};
+type Person = {
+  id: string;
+  name: string;
+  role: string;
+  coverSheet: string[];
+  pastes: { situation: string; text: string }[];
+  pairs: Record<string, Pair>;
+};
+
+const people = data.people as Person[];
+const { requests, defaults } = data;
+const DATE = "10 Nov 2026";
+const LOGIN = "https://app.meetmilton.com/login";
+
+/** The text through its third non-blank line, keeping its own line breaks. */
+function firstLines(text: string, count = 3): string {
+  const lines = text.split("\n");
+  let seen = 0;
+  for (let i = 0; i < lines.length; i++)
+    if (lines[i]!.trim() && ++seen === count)
+      return lines.slice(0, i + 1).join("\n");
+  return text;
+}
+
+const sides = [
+  { key: "plain", label: "Your AI today", stamp: "Sounds like AI" },
+  { key: "milton", label: "With Milton", stamp: "Approved" },
+] as const;
+---
+
+<section
+  class="try-it"
+  data-try-it
+  data-person={defaults.person}
+  data-request={defaults.request}
+  aria-labelledby="try-it-heading"
+>
+  <h2 id="try-it-heading">Did you get the memo?</h2>
+  <div
+    class="picker"
+    role="group"
+    aria-labelledby="try-it-person-label"
+    data-picker
+    hidden
+  >
+    <span class="picker-label" id="try-it-person-label">
+      Person
+    </span>
+    {people.map((person) => (
+      <button
+        type="button"
+        class="pick"
+        data-pick="person"
+        value={person.id}
+        aria-pressed={person.id === defaults.person ? "true" : "false"}
+      >
+        {person.name} · {person.role}
+      </button>
+    ))}
+  </div>
+  {people.map((person) => {
+    const excerpt = firstLines(person.pastes[0]!.text);
+    return (
+      <div class="person" data-person-group={person.id}>
+        <h3 class="static-heading">
+          {person.name} · {person.role}
+        </h3>
+        <div class="peek">
+          <p class="eyebrow">What Milton knows about {person.name}</p>
+          <p class="peek-text">
+            {excerpt}
+            {excerpt !== person.pastes[0]!.text && (
+              <span aria-hidden="true">…</span>
+            )}
+          </p>
+          <details class="peek-more">
+            <summary>
+              All five setup emails and {person.name}’s cover sheet
+            </summary>
+            <h4 class="eyebrow">Cover sheet</h4>
+            <ul class="peek-list">
+              {person.coverSheet.map((line) => (
+                <li>{line}</li>
+              ))}
+            </ul>
+            <h4 class="eyebrow">Setup emails</h4>
+            <ol class="peek-list">
+              {person.pastes.map((paste) => (
+                <li>
+                  <p class="peek-situation">{paste.situation}</p>
+                  <p class="peek-text">{paste.text}</p>
+                </li>
+              ))}
+            </ol>
+          </details>
+        </div>
+        <div
+          class="picker"
+          role="group"
+          aria-labelledby={`try-it-request-label-${person.id}`}
+          data-picker
+          hidden
+        >
+          <span class="picker-label" id={`try-it-request-label-${person.id}`}>
+            Request
+          </span>
+          {requests.map((request) => (
+            <button
+              type="button"
+              class="pick"
+              data-pick="request"
+              value={request.id}
+              aria-pressed={request.id === defaults.request ? "true" : "false"}
+            >
+              {request.label}
+            </button>
+          ))}
+        </div>
+        {requests.map((request) => {
+          const pair = person.pairs[request.id]!;
+          const { plain, milton } = pair.changed;
+          return (
+            <div class="pair" data-pair={request.id}>
+              <h4 class="static-heading">
+                {person.name} · {request.label}
+              </h4>
+              <div class="memos">
+                {sides.map((side) => (
+                  <figure class={`sheet memo memo-${side.key}`}>
+                    <figcaption class="sheet-bar">
+                      <span>Interoffice memo</span>
+                      <span class="memo-kind">{side.label}</span>
+                    </figcaption>
+                    <dl class="fields">
+                      <div>
+                        <dt>To</dt>
+                        <dd>{pair.to}</dd>
+                      </div>
+                      <div>
+                        <dt>From</dt>
+                        <dd>{person.name}</dd>
+                      </div>
+                      <div>
+                        <dt>Re</dt>
+                        <dd>{request.label}</dd>
+                      </div>
+                      <div>
+                        <dt>Date</dt>
+                        <dd>{DATE}</dd>
+                      </div>
+                    </dl>
+                    <div class="memo-body">
+                      <span class="memo-stamp" aria-hidden="true">
+                        {side.stamp}
+                      </span>
+                      <p class="memo-text">{pair[side.key]}</p>
+                    </div>
+                  </figure>
+                ))}
+              </div>
+              <figure class="sheet changes">
+                <figcaption class="sheet-bar">
+                  <span>Cover sheet attached</span>
+                  <span>Your AI today → With Milton</span>
+                </figcaption>
+                <dl class="fields">
+                  <div>
+                    <dt>Greeting</dt>
+                    <dd>
+                      {plain.greeting} → {milton.greeting}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Opens</dt>
+                    <dd>
+                      “{plain.opening}…” → “{milton.opening}…”
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Length</dt>
+                    <dd>
+                      {plain.words} → {milton.words} words
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Sign-off</dt>
+                    <dd>
+                      {plain.signoff} → {milton.signoff}
+                    </dd>
+                  </div>
+                </dl>
+              </figure>
+              <p class="small-note">
+                Same AI, same request. Generated once, filed unedited.
+              </p>
+              <details class="request">
+                <summary>The request both got</summary>
+                <p>{pair.request}</p>
+                <ul>
+                  {pair.facts.map((fact) => (
+                    <li>{fact}</li>
+                  ))}
+                </ul>
+              </details>
+            </div>
+          );
+        })}
+      </div>
+    );
+  })}
+  <a class="button try-it-cta" href={LOGIN} data-try-it-cta>
+    Try Milton free <span aria-hidden="true">↗</span>
+  </a>
+</section>
+
+<!-- Inline and synchronous, so the pickers and the one default pair are set
+     before first paint and the hero does not jump when the page loads. -->
+<script is:inline>
+  (() => {
+    const box = document.currentScript.previousElementSibling;
+    const show = () => {
+      for (const group of box.querySelectorAll("[data-person-group]"))
+        group.hidden = group.dataset.personGroup !== box.dataset.person;
+      for (const pair of box.querySelectorAll("[data-pair]"))
+        pair.hidden = pair.dataset.pair !== box.dataset.request;
+      for (const button of box.querySelectorAll("[data-pick]"))
+        button.setAttribute(
+          "aria-pressed",
+          String(button.value === box.dataset[button.dataset.pick]),
+        );
+    };
+    box.addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-pick]");
+      if (!button || box.dataset[button.dataset.pick] === button.value) return;
+      box.dataset[button.dataset.pick] = button.value;
+      show();
+      box.dispatchEvent(new Event("try-it-pick"));
+    });
+    for (const picker of box.querySelectorAll("[data-picker]"))
+      picker.hidden = false;
+    box.dataset.ready = "";
+    show();
+  })();
+</script>
+
+<script>
+  import { track } from "@vercel/analytics";
+
+  const box = document.querySelector<HTMLElement>("[data-try-it]");
+  if (box) {
+    const picks = () => ({
+      person: box.dataset.person ?? "",
+      request: box.dataset.request ?? "",
+    });
+    box.addEventListener("try-it-pick", () => track("Try-it pick", picks()));
+    box
+      .querySelector("[data-try-it-cta]")
+      ?.addEventListener("click", () => track("Try-it CTA", picks()));
+  }
+</script>
+
+<style>
+  .try-it {
+    position: relative;
+    display: grid;
+    gap: var(--space-6);
+    min-width: 0;
+  }
+  :where(h2, h3, h4, p, figure, dl, dd, ul, ol) {
+    margin: 0;
+  }
+  h2 {
+    font-size: var(--text-section);
+    letter-spacing: -0.045em;
+  }
+  .person,
+  .pair {
+    display: grid;
+    gap: var(--space-6);
+    min-width: 0;
+  }
+  /* Rules between groups only when all of them show, without script. */
+  .try-it:not([data-ready]) .person + .person {
+    padding-top: var(--space-6);
+    border-top: 1px solid var(--hairline);
+  }
+  .try-it:not([data-ready]) .pair + .pair {
+    padding-top: var(--space-6);
+    border-top: 1px dashed var(--hairline);
+  }
+  [hidden] {
+    display: none !important;
+  }
+  .static-heading {
+    font-size: var(--text-subtitle);
+  }
+  .pair > .static-heading {
+    font: var(--text-small) / var(--leading-label) var(--font-mono);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  /* With the pickers showing, the headings only name the groups for
+     screen readers. */
+  .try-it[data-ready] .static-heading {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .picker {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+  }
+  .picker-label {
+    flex-basis: 100%;
+    color: var(--muted);
+    font: var(--text-caption) / var(--leading-label) var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .pick {
+    min-height: var(--touch-target);
+    padding: var(--space-2) var(--space-4);
+    border: 1px solid var(--ink);
+    background: var(--surface);
+    color: var(--ink);
+  }
+  .pick:hover {
+    border-color: var(--ink);
+    background: var(--ground);
+  }
+  .pick[aria-pressed="true"],
+  .pick[aria-pressed="true"]:hover {
+    background: var(--ink);
+    color: var(--surface);
+  }
+
+  .peek {
+    display: grid;
+    gap: var(--space-2);
+    min-width: 0;
+    padding: var(--space-3) var(--space-4);
+    border-left: 2px solid var(--sheet-rule);
+    background: var(--surface);
+  }
+  .peek-text {
+    font: var(--text-small) / var(--leading-label) var(--font-mono);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .peek-more summary {
+    min-height: var(--touch-target);
+    padding-block: var(--space-3);
+    cursor: pointer;
+    font-size: var(--text-small);
+    font-weight: 600;
+  }
+  .peek-more h4 {
+    margin-top: var(--space-4);
+  }
+  .peek-list {
+    display: grid;
+    gap: var(--space-3);
+    margin-top: var(--space-2);
+    padding-inline-start: var(--space-5);
+    font-size: var(--text-small);
+  }
+  .peek-situation {
+    color: var(--muted);
+  }
+
+  .memos {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-6);
+    align-items: start;
+  }
+  @media (min-width: 768px) {
+    .memos {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+  .memo-kind {
+    font-weight: 600;
+  }
+  .fields {
+    display: grid;
+    border-bottom: 1px solid var(--ink);
+  }
+  .fields > div {
+    display: grid;
+    grid-template-columns: 4rem minmax(0, 1fr);
+    gap: var(--space-3);
+    align-items: baseline;
+    padding: var(--space-2) var(--sheet-padding);
+    border-bottom: 1px solid var(--hairline);
+  }
+  .fields > div:last-child {
+    border-bottom: 0;
+  }
+  .fields dt {
+    color: var(--muted);
+    font: var(--text-caption) / var(--leading-label) var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .fields dd {
+    font: var(--text-body) / var(--leading-label) var(--font-form);
+    overflow-wrap: anywhere;
+  }
+  /* Room at the top for the stamp, so it never covers the email. */
+  .memo-body {
+    position: relative;
+    padding: var(--space-12) var(--sheet-padding) var(--sheet-padding);
+  }
+  .memo-text {
+    font: var(--text-small) / var(--leading-body) var(--font-mono);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .memo-stamp {
+    position: absolute;
+    z-index: 1;
+    top: calc(-1 * var(--space-3));
+    right: var(--space-4);
+    padding: var(--space-2) var(--space-3);
+    border: 2px solid currentColor;
+    outline: 1px solid currentColor;
+    outline-offset: 2px;
+    background: color-mix(in srgb, var(--surface) 85%, transparent);
+    color: var(--stamp-red);
+    transform: rotate(-8deg);
+    font: var(--text-small) / 1 var(--font-mono);
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    pointer-events: none;
+    user-select: none;
+  }
+  .memo-milton .memo-stamp {
+    color: var(--stamp-blue);
+  }
+  .changes .fields {
+    border-bottom: 0;
+  }
+  .changes .fields > div {
+    grid-template-columns: 6rem minmax(0, 1fr);
+  }
+
+  .request summary {
+    min-height: var(--touch-target);
+    padding-block: var(--space-3);
+    cursor: pointer;
+    font-size: var(--text-small);
+    font-weight: 600;
+  }
+  .request p,
+  .request ul {
+    margin-top: var(--space-2);
+    font-size: var(--text-small);
+    color: var(--muted);
+  }
+  .request ul {
+    display: grid;
+    gap: var(--space-2);
+    padding-inline-start: var(--space-5);
+  }
+  .try-it-cta {
+    justify-self: start;
+  }
+</style>

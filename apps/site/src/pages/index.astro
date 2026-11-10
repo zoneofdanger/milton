@@ -1,7 +1,7 @@
 ---
 import SiteLayout from "../layouts/SiteLayout.astro";
 import AssistantSetup from "../components/AssistantSetup.astro";
-import MemoDemo from "../components/MemoDemo.astro";
+import TryItBox from "../components/TryItBox.astro";
 import FilingComparison from "../components/FilingComparison.astro";
 ---
 
@@ -23,7 +23,7 @@ import FilingComparison from "../components/FilingComparison.astro";
         $5.01 a month after a 30-day free trial. No card required.
       </p>
     </div>
-    <MemoDemo />
+    <TryItBox />
   </section>
   <div class="assistant-strip">
     <span class="assistant-label">Works with:</span>
@@ -276,8 +276,8 @@ import FilingComparison from "../components/FilingComparison.astro";
   :where(h1, h2, p, figure) {
     margin: 0;
   }
-  /* No paragraph ends on a lone word. Scoped to this page, so the demo's
-     typed lines keep plain wrapping. */
+  /* No paragraph ends on a lone word. Scoped to this page, so the try-it
+     box's emails keep plain wrapping. */
   p,
   blockquote {
     text-wrap: pretty;

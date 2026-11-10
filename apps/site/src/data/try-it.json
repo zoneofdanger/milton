@@ -1,0 +1,390 @@
+{
+  "provenance": {
+    "model": "claude-sonnet-5-5",
+    "date": "2026-11-10",
+    "generated": "once per draft",
+    "edited": false,
+    "note": "Both drafts in a pair: same model, system prompt and request; the Milton draft also had the person's cover sheet and report as Milton serves them. Fictional people. Only the bold markers around \"Subject:\" are removed for display."
+  },
+  "defaults": {
+    "person": "peter",
+    "request": "ask"
+  },
+  "requests": [
+    {
+      "id": "ask",
+      "label": "Ask for something"
+    },
+    {
+      "id": "update",
+      "label": "Send a quick update"
+    },
+    {
+      "id": "unfinished",
+      "label": "Follow up on an unfinished job"
+    }
+  ],
+  "people": [
+    {
+      "id": "bill",
+      "name": "Bill",
+      "role": "manager",
+      "description": "Manager. Drawn-out and politely pointed: “Yeahhh…”, “if you could just…”, “that’d be great”. Always “Thanks, Bill”.",
+      "coverSheet": [
+        "Start with Hi and their name.",
+        "Open with Yeahhh.",
+        "Keep it friendly: \"if you could just…\", \"that'd be great\".",
+        "Always sign off \"Thanks, Bill\"."
+      ],
+      "pastes": [
+        {
+          "situation": "welcoming a new hire to the team on his first day",
+          "text": "Hi Marcus,\n\nYeahhh, so welcome to the team. Your desk is the one by the printer on four, and IT should have your login sorted by lunch, mmkay?\n\nAnd if you could just make sure the weekly reports go out with the cover sheet on them, that'd be great. We've had a few go out without.\n\nThanks,\nBill"
+        },
+        {
+          "situation": "turning down a team member's request to move desks",
+          "text": "Hi Tanya,\n\nYeahhh, I'm going to have to say no on the desk move for now. Facilities are pretty set on the seating plan through the end of the quarter, so if you could just hang in there by the window a little longer, that'd be great.\n\nWe can take another look in January, mmkay?\n\nThanks,\nBill"
+        },
+        {
+          "situation": "replying to the team's complaints that the office is cold",
+          "text": "Hi all,\n\nYeahhh, so I've had a few notes about it being cold on four. I've passed it on to facilities and they're looking into it.\n\nIn the meantime, if you could just keep the window by the kitchen closed, that'd be great.\n\nThanks,\nBill"
+        },
+        {
+          "situation": "thanking the team for finishing a billing migration",
+          "text": "Hi team,\n\nYeahhh, great work getting the billing migration over the line on Friday. Really. That was a big one.\n\nNow, if you could just make sure the tickets are actually closed in the tracker, that'd be great. Some of them are still showing as open, mmkay?\n\nThanks,\nBill"
+        },
+        {
+          "situation": "apologising to a colleague for double-booking a meeting room",
+          "text": "Hi Sandra,\n\nYeahhh, so it looks like we both had Room 4B booked for Tuesday at 2. That one's on me, I think I put it in twice.\n\nIf you could just take the small room this time, that'd be great, and I'll make sure it doesn't happen again.\n\nThanks,\nBill"
+        }
+      ],
+      "pairs": {
+        "ask": {
+          "to": "Greg Nolan, analyst",
+          "request": "To Greg Nolan, an analyst on my team. Ask him for the vendor spend summary before my review.",
+          "facts": [
+            "I'm Bill, a manager at Corvell Data Services. Greg is an analyst on my team.",
+            "I need the Q3 vendor spend summary, with the breakdown by department.",
+            "I need it by Thursday 12 November, because I'm reviewing it with my director on Friday 13 November at 10.",
+            "He should put it in the team's shared folder."
+          ],
+          "plain": "Subject: Q3 vendor spend summary needed by Thursday\n\nHi Greg,\n\nCould you please put together the Q3 vendor spend summary, including the breakdown by department? I'm reviewing it with my director on Friday 13 November at 10, so I need it by end of day Thursday 12 November.\n\nPlease save it in the team's shared folder when it's ready, and let me know once it's there.\n\nIf anything is likely to hold this up, tell me as early as you can so we can sort it out before Thursday.\n\nThanks,\nBill",
+          "milton": "Subject: Q3 vendor spend summary by Thursday\n\nHi Greg,\n\nYeahhh, so I'm reviewing the Q3 vendor spend summary with my director on Friday 13 November at 10, and I'll need it before then.\n\nIf you could just get it to me by Thursday 12 November, with the breakdown by department, that'd be great. Please drop it in the team's shared folder, mmkay?\n\nThanks,\nBill",
+          "changed": {
+            "plain": {
+              "greeting": "Hi Greg,",
+              "opening": "Could you please",
+              "words": 83,
+              "signoff": "Thanks, Bill"
+            },
+            "milton": {
+              "greeting": "Hi Greg,",
+              "opening": "Yeahhh, so I'm",
+              "words": 57,
+              "signoff": "Thanks, Bill"
+            }
+          },
+          "whatChanged": "Greeting: Hi Greg, → Hi Greg, · opens: \"Could you please…\" → \"Yeahhh, so I'm…\" · 83 → 57 words · sign-off: Thanks, Bill → Thanks, Bill"
+        },
+        "update": {
+          "to": "The team",
+          "request": "To my team. Send them a quick update about the new expense system.",
+          "facts": [
+            "I'm Bill, a manager at Corvell Data Services, writing to the team I manage.",
+            "From Monday 16 November, expenses go through the new system, Ledgerline.",
+            "Login emails for Ledgerline arrive this Friday, 13 November.",
+            "There's a training session on Thursday 19 November at 2 in Room 4B.",
+            "The old paper forms won't be accepted after 30 November."
+          ],
+          "plain": "Subject: New Expense System: Ledgerline Starts 16 November\n\nHi team,\n\nA quick update on the new expense system, Ledgerline.\n\n**Key dates**\n- **Friday 13 November:** Your Ledgerline login emails will arrive. Please keep an eye on your inbox (and spam folder, just in case).\n- **Monday 16 November:** Expenses go through Ledgerline from this date.\n- **Thursday 19 November, 2:00 pm:** Training session in Room 4B.\n- **30 November:** Paper forms will no longer be accepted after this date.\n\nPlease log in once your details arrive so you're ready to go on the 16th. If you run into any problems with your login or have questions before the training session, let me know.\n\nThanks,\nBill",
+          "milton": "Subject: New expense system: Ledgerline from 16 November\n\nHi team,\n\nYeahhh, so a quick update on expenses. From Monday 16 November, everything goes through our new system, Ledgerline. Your login emails will arrive this Friday, 13 November, mmkay?\n\nThere's a training session on Thursday 19 November at 2 in Room 4B. If you could just come along, that'd be great.\n\nAlso, the old paper forms won't be accepted after 30 November, so if you could just get any outstanding claims moved over before then, that'd be great.\n\nThanks,\nBill",
+          "changed": {
+            "plain": {
+              "greeting": "Hi team,",
+              "opening": "A quick update",
+              "words": 103,
+              "signoff": "Thanks, Bill"
+            },
+            "milton": {
+              "greeting": "Hi team,",
+              "opening": "Yeahhh, so a",
+              "words": 81,
+              "signoff": "Thanks, Bill"
+            }
+          },
+          "whatChanged": "Greeting: Hi team, → Hi team, · opens: \"A quick update…\" → \"Yeahhh, so a…\" · 103 → 81 words · sign-off: Thanks, Bill → Thanks, Bill"
+        },
+        "unfinished": {
+          "to": "Ray Dunmore, Dunmore Fencing",
+          "request": "To Ray Dunmore of Dunmore Fencing. Follow up on the fence job he didn't finish at my house.",
+          "facts": [
+            "I'm Bill. Ray runs a small fencing firm doing work at my house.",
+            "The job: replace six fence panels in the back garden and fix the side gate. Quote £650; I paid £400 up front.",
+            "He did four panels on Saturday 31 October and covered the two gaps with a pallet. He said he'd be back on Wednesday 4 November to finish.",
+            "He didn't come. I left a voicemail on Thursday and sent a text on Monday, and he hasn't replied.",
+            "Our dog keeps getting out through the gaps.",
+            "I want him to come back this week to finish the last two panels and the gate."
+          ],
+          "plain": "Subject: Unfinished fence work at my house: need to arrange completion this week\n\nHi Ray,\n\nI'm following up on the fence job at my house. You replaced four of the six panels on Saturday 31 October and covered the two remaining gaps with a pallet, and you said you'd be back on Wednesday 4 November to finish. I haven't seen or heard from you since.\n\nI left you a voicemail on Thursday and sent a text on Monday, but haven't had a reply.\n\nThe pallet isn't holding, and our dog keeps getting out through the gaps, so I'd like this sorted quickly. I need you to come back this week to:\n\n- Install the last two fence panels\n- Fix the side gate\n\nCould you reply by the end of tomorrow (Wednesday) with a day you can come? I'd like the work finished by Friday 13 November. I've already paid £400 of the £650 quote and will pay the remaining £250 once everything is done.\n\nIf there's a problem that's holding things up, please just let me know so we can sort out a plan. If I don't hear from you, I'll need to look at getting someone else to finish the work.\n\nThanks,\nBill",
+          "milton": "Subject: Finishing the fence job – last two panels and the gate\n\nHi Ray,\n\nYeahhh, so I'm following up on the fence work at my house. You did four of the six panels on Saturday 31 October and covered the two gaps with a pallet. You said you'd be back on Wednesday 4 November to finish, but we haven't seen you. I left a voicemail on Thursday and sent a text on Monday, and haven't heard back.\n\nThe pallet isn't holding, and our dog keeps getting out through the gaps. So if you could just come back this week to finish the last two panels and fix the side gate, that'd be great. I've paid the £400 deposit against the £650 quote, and I'm happy to settle the rest once it's all done.\n\nCould you let me know which day you can make it?\n\nThanks,\nBill",
+          "changed": {
+            "plain": {
+              "greeting": "Hi Ray,",
+              "opening": "I'm following up",
+              "words": 190,
+              "signoff": "Thanks, Bill"
+            },
+            "milton": {
+              "greeting": "Hi Ray,",
+              "opening": "Yeahhh, so I'm",
+              "words": 134,
+              "signoff": "Thanks, Bill"
+            }
+          },
+          "whatChanged": "Greeting: Hi Ray, → Hi Ray, · opens: \"I'm following up…\" → \"Yeahhh, so I'm…\" · 190 → 134 words · sign-off: Thanks, Bill → Thanks, Bill"
+        }
+      }
+    },
+    {
+      "id": "peter",
+      "name": "Peter",
+      "role": "developer",
+      "description": "Developer. Blunt and minimal: three lines, no pleasantries, signs “—P”.",
+      "coverSheet": [
+        "Three lines. Fewer if possible.",
+        "No greetings, no pleasantries, no \"hope you're well\".",
+        "Sign —P"
+      ],
+      "pastes": [
+        {
+          "situation": "declining a recurring team meeting",
+          "text": "Kim, I'll skip Thursday's sync. Nothing on the agenda needs me.\n\nSend notes if something comes up.\n\n—P"
+        },
+        {
+          "situation": "replying to a colleague's code review comments",
+          "text": "Fair point on the retry logic. Fixed in the latest push.\n\nThe naming stays, it matches the rest of the module.\n\n—P"
+        },
+        {
+          "situation": "thanking a colleague for covering an on-call shift",
+          "text": "Raj, thanks for covering on-call on Saturday. I owe you one.\n\nPick a weekend and it's yours.\n\n—P"
+        },
+        {
+          "situation": "apologising to the team for breaking the build",
+          "text": "My fault. I merged without running the integration tests and broke the build for an hour.\n\nReverted. Won't happen again.\n\n—P"
+        },
+        {
+          "situation": "turning down a recruiter's job pitch",
+          "text": "Not interested.\n\nPlease take me off the list.\n\n—P"
+        }
+      ],
+      "pairs": {
+        "ask": {
+          "to": "Dana Whitfield, product manager",
+          "request": "To Dana Whitfield, the product manager. Ask her for the copy and one decision I need before the release.",
+          "facts": [
+            "I'm Peter, a developer. Dana is the product manager for the checkout work.",
+            "I need the final wording for the error messages on the new checkout page.",
+            "I need a decision on whether the \"save card\" checkbox is ticked by default.",
+            "I need both by Wednesday 11 November, because the release branch is cut on Thursday morning."
+          ],
+          "plain": "Subject: Need error message copy and \"save card\" default by Wednesday\n\nHi Dana,\n\nI need two things from you to finish the new checkout page before the release.\n\n1. **Final wording for the error messages** on the new checkout page.\n2. **A decision on the \"save card\" checkbox:** should it be ticked by default or not?\n\nCould you get both to me by end of day tomorrow, Wednesday 11 November? The release branch is cut on Thursday morning, so I need them in hand before then to get everything in.\n\nIf anything is unclear or you'd like to talk through the options, I'm happy to jump on a quick call.\n\nThanks,\nPeter",
+          "milton": "Subject: Checkout: error copy and save-card default by Wednesday\n\nDana, I need two things by Wednesday 11 November: the final wording for the new checkout page's error messages, and a decision on whether \"save card\" is ticked by default.\n\nThe release branch is cut Thursday morning.\n\n—P",
+          "changed": {
+            "plain": {
+              "greeting": "Hi Dana,",
+              "opening": "I need two",
+              "words": 101,
+              "signoff": "Thanks, Peter"
+            },
+            "milton": {
+              "greeting": "(none)",
+              "opening": "Dana, I need",
+              "words": 38,
+              "signoff": "—P"
+            }
+          },
+          "whatChanged": "Greeting: Hi Dana, → (none) · opens: \"I need two…\" → \"Dana, I need…\" · 101 → 38 words · sign-off: Thanks, Peter → —P"
+        },
+        "update": {
+          "to": "Sam Okoro, team lead",
+          "request": "To Sam Okoro, my team lead. Send him a quick update on the search bug.",
+          "facts": [
+            "I'm Peter, a developer. Sam is my team lead.",
+            "The search bug fix is done and in code review.",
+            "The data migration took longer than planned because of about 2,000 duplicate records.",
+            "It'll be merged by the end of tomorrow.",
+            "No impact on the release date."
+          ],
+          "plain": "Subject: Search Bug Update\n\nHi Sam,\n\nQuick update on the search bug: the fix is done and currently in code review. I expect it to be merged by the end of tomorrow (Wednesday).\n\nThe data migration took longer than planned because of about 2,000 duplicate records, but that's now handled. There's no impact on the release date.\n\nLet me know if you have any questions.\n\nThanks,\nPeter",
+          "milton": "Subject: Search bug update\n\nFix is done and in code review. Merges by end of tomorrow.\n\nThe migration ran long because of about 2,000 duplicate records. No impact on the release date.\n\n—P",
+          "changed": {
+            "plain": {
+              "greeting": "Hi Sam,",
+              "opening": "Quick update on",
+              "words": 63,
+              "signoff": "Thanks, Peter"
+            },
+            "milton": {
+              "greeting": "(none)",
+              "opening": "Fix is done",
+              "words": 29,
+              "signoff": "—P"
+            }
+          },
+          "whatChanged": "Greeting: Hi Sam, → (none) · opens: \"Quick update on…\" → \"Fix is done…\" · 63 → 29 words · sign-off: Thanks, Peter → —P"
+        },
+        "unfinished": {
+          "to": "Nick Farrow, handyman",
+          "request": "To Nick Farrow, the handyman. Follow up on the job he didn't finish at my flat.",
+          "facts": [
+            "I'm Peter. Nick is a handyman I hired for two jobs at my flat.",
+            "The jobs: reseal the bath and replace the bathroom extractor fan. £160 in total; I paid £90 up front.",
+            "He resealed the bath on Monday 2 November. He said the fan was on order and he'd be back on Friday 6 November to fit it.",
+            "He didn't come. I emailed on Saturday and got no reply.",
+            "The old fan is out and there's an open hole in the ceiling.",
+            "I want a date this week. If I don't get one, I'll get someone else to fit it."
+          ],
+          "plain": "Subject: Bathroom extractor fan: need a fitting date this week\n\nHi Nick,\n\nI'm following up on the work at my flat. You resealed the bath on Monday 2 November, and you said the extractor fan was on order and you'd be back on Friday 6 November to fit it. You didn't come, and I haven't had a reply to my email on Saturday.\n\nThe old fan has been removed, so there's currently an open hole in my bathroom ceiling. I need this sorted quickly.\n\nPlease let me know by tomorrow (Wednesday) what day this week you can come and fit it. If I don't hear back with a date, I'll arrange for someone else to fit the fan.\n\nYou can reply here or call me.\n\nThanks,\nPeter",
+          "milton": "Subject: Bathroom fan, need a date this week\n\nNick, you were due Friday 6 Nov to fit the extractor fan. You didn't come, and my Saturday email got no reply. The old fan is out and there's an open hole in the ceiling.\n\nGive me a date this week. Otherwise I'll get someone else to fit it.\n\n—P",
+          "changed": {
+            "plain": {
+              "greeting": "Hi Nick,",
+              "opening": "I'm following up",
+              "words": 117,
+              "signoff": "Thanks, Peter"
+            },
+            "milton": {
+              "greeting": "(none)",
+              "opening": "Nick, you were",
+              "words": 50,
+              "signoff": "—P"
+            }
+          },
+          "whatChanged": "Greeting: Hi Nick, → (none) · opens: \"I'm following up…\" → \"Nick, you were…\" · 117 → 50 words · sign-off: Thanks, Peter → —P"
+        }
+      }
+    },
+    {
+      "id": "joanna",
+      "name": "Joanna",
+      "role": "server",
+      "description": "Restaurant server. Lowercase, like a text, short and friendly. Signs “jo x”.",
+      "coverSheet": [
+        "lowercase, like i text",
+        "short and friendly",
+        "no \"dear\" and no \"kind regards\"",
+        "sign off jo x"
+      ],
+      "pastes": [
+        {
+          "situation": "thanking a coworker for covering a Saturday shift",
+          "text": "heyy maria\n\nthank you sooo much for covering my sat shift, you're a lifesaver!!\n\ndrinks on me next week\n\njo x"
+        },
+        {
+          "situation": "turning down a friend's party invitation because of work",
+          "text": "hey sam!\n\nugh i'd love to but i'm on a double friday :(\n\nhave the best time and send pics!!\n\njo x"
+        },
+        {
+          "situation": "apologising to the shift manager for arriving late",
+          "text": "hi dev\n\nso sorry i was late tonight, the bus just didn't show\n\ni'll stay and do close if that helps\n\njo x"
+        },
+        {
+          "situation": "congratulating a friend on her engagement",
+          "text": "omg CONGRATS!!!\n\ni'm so happy for you both, i actually screamed\n\ncan't wait to celebrate properly\n\njo x"
+        },
+        {
+          "situation": "recommending a hairdresser to a friend",
+          "text": "hey lou\n\nmy hairdresser is kat at the place on bridge st, she's amazing and not crazy expensive\n\ntell her i sent you!\n\njo x"
+        }
+      ],
+      "pairs": {
+        "ask": {
+          "to": "Carla, general manager",
+          "request": "To Carla, my manager at the restaurant. Ask her if I can swap a shift.",
+          "facts": [
+            "I'm Joanna, a server at the restaurant. Carla is the general manager and does the rota.",
+            "I want to swap my dinner shift on Friday 20 November for the lunch shift on Sunday 22 November.",
+            "It's for my sister's graduation on the Friday.",
+            "Rob has already said he'll take the Friday shift.",
+            "I need to know by Saturday, because the rota goes up on Sunday."
+          ],
+          "plain": "Subject: Shift swap request: Fri 20 Nov / Sun 22 Nov\n\nHi Carla,\n\nCould I swap my dinner shift on Friday 20 November for the lunch shift on Sunday 22 November? My sister's graduation is on the Friday, and I'd really like to be there.\n\nRob has already said he's happy to take the Friday dinner shift.\n\nSince the rota goes up on Sunday, could you let me know by Saturday (14 November) whether this works? If there's anything I need to sort out on my end, just tell me.\n\nThanks so much,\nJoanna",
+          "milton": "Subject: shift swap fri 20 nov for sun 22 nov?\n\nhi carla\n\ncould i swap my dinner shift on fri 20 nov for the lunch shift on sun 22 nov? it's my sister's graduation on the friday and i'd really love to be there\n\nrob has already said he'll take the friday shift\n\ncould you let me know by saturday? i know the rota goes up on sunday\n\nthank you!\n\njo x",
+          "changed": {
+            "plain": {
+              "greeting": "Hi Carla,",
+              "opening": "Could I swap",
+              "words": 83,
+              "signoff": "Thanks so much, Joanna"
+            },
+            "milton": {
+              "greeting": "hi carla",
+              "opening": "could i swap",
+              "words": 62,
+              "signoff": "thank you! jo x"
+            }
+          },
+          "whatChanged": "Greeting: Hi Carla, → hi carla · opens: \"Could I swap…\" → \"could i swap…\" · 83 → 62 words · sign-off: Thanks so much, Joanna → thank you! jo x"
+        },
+        "update": {
+          "to": "Carla, general manager",
+          "request": "To Carla, my manager at the restaurant. Send her a quick update about the walk-in fridge after close tonight.",
+          "facts": [
+            "I'm Joanna, a server. I closed the restaurant tonight; Carla is the general manager.",
+            "The walk-in fridge was reading 8°C at 10pm, warmer than it should be.",
+            "I moved the dairy and the fish into the bar fridge.",
+            "I put a note on the walk-in door and wrote it in the temperature log.",
+            "The engineer's number is on the board in the office."
+          ],
+          "plain": "Subject: Walk-in fridge reading 8°C tonight\n\nHi Carla,\n\nQuick update from closing tonight. The walk-in fridge was reading 8°C at 10pm, which is warmer than it should be.\n\nI've moved the dairy and the fish into the bar fridge. I also put a note on the walk-in door and recorded the reading in the temperature log.\n\nThe engineer's number is on the board in the office if you want to arrange a call-out.\n\nLet me know if you need anything else from me.\n\nThanks,\nJoanna",
+          "milton": "Subject: walk-in fridge running warm\n\nhi carla\n\nquick heads up, the walk-in was reading 8°c at 10pm tonight, which is warmer than it should be\n\ni moved the dairy and the fish into the bar fridge, and put a note on the walk-in door. i've also written it in the temperature log\n\nthe engineer's number is on the board in the office\n\njo x",
+          "changed": {
+            "plain": {
+              "greeting": "Hi Carla,",
+              "opening": "Quick update from",
+              "words": 79,
+              "signoff": "Thanks, Joanna"
+            },
+            "milton": {
+              "greeting": "hi carla",
+              "opening": "quick heads up,",
+              "words": 59,
+              "signoff": "jo x"
+            }
+          },
+          "whatChanged": "Greeting: Hi Carla, → hi carla · opens: \"Quick update from…\" → \"quick heads up,…\" · 79 → 59 words · sign-off: Thanks, Joanna → jo x"
+        },
+        "unfinished": {
+          "to": "Dean Ashworth, appliance repair",
+          "request": "To Dean Ashworth, the washing machine repair guy. Follow up on the repair he didn't finish at my flat.",
+          "facts": [
+            "I'm Joanna. Dean is a local appliance repairer.",
+            "He came to my flat on Tuesday 3 November and said the washing machine pump was broken. He took the old pump away.",
+            "He said he'd be back on Friday 6 November with a new one. He didn't come.",
+            "I've texted him twice and had no reply.",
+            "The machine is in bits in my kitchen and I can't wash my work uniforms.",
+            "I paid the £60 call-out already.",
+            "I'm free any morning before 11 except Saturday."
+          ],
+          "plain": "Subject: Washing machine repair - no show on Friday 6 November\n\nHi Dean,\n\nI'm following up on the washing machine repair at my flat. You came on Tuesday 3 November, diagnosed a broken pump, and took the old one away. You said you'd be back on Friday 6 November with a replacement, but I haven't seen or heard from you since. I've also sent two texts with no reply.\n\nThe machine is still in pieces in my kitchen, and I can't wash my work uniforms, so I need this sorted quickly. I've already paid the £60 call-out fee.\n\nCould you please let me know by Thursday 12 November when you can come and fit the new pump? I'm free any morning before 11:00 except Saturday, so I can fit around whatever suits you.\n\nIf you can't complete the repair, please tell me as soon as possible so I can arrange something else, and let me know how I can get the old pump back.\n\nThanks,\nJoanna",
+          "milton": "Subject: washing machine repair – when can you come back?\n\nhi dean\n\nyou came on tuesday 3 nov and said the pump was broken, took the old one away and said you'd be back friday 6th with a new one. i haven't seen you since, and i've texted twice with no reply\n\nthe machine's still in bits in my kitchen and i can't wash my work uniforms, so i really need this sorted asap. i've already paid the £60 call-out\n\ni'm free any morning before 11 except saturday. can you let me know when you can come?\n\nthanks\njo x",
+          "changed": {
+            "plain": {
+              "greeting": "Hi Dean,",
+              "opening": "I'm following up",
+              "words": 155,
+              "signoff": "Thanks, Joanna"
+            },
+            "milton": {
+              "greeting": "hi dean",
+              "opening": "you came on",
+              "words": 90,
+              "signoff": "thanks jo x"
+            }
+          },
+          "whatChanged": "Greeting: Hi Dean, → hi dean · opens: \"I'm following up…\" → \"you came on…\" · 155 → 90 words · sign-off: Thanks, Joanna → thanks jo x"
+        }
+      }
+    }
+  ]
+}

@@ -137,6 +137,8 @@ code wrote, so memo-era replays still return their outcome); owner file
 `migrations/015-drop-guide-roles.sql`, applied just before it, drops the cluster-level
 `milton_guide_worker` and `milton_guide_runtime` roles. After 0013, `005-app-roles.sql`
 is never rerun.
+`0014_drop_source_hash` drops `save_requests.source_hash`, which nothing reads or writes,
+and leaves `save_request_hashes` checking `input_hash` alone.
 Reads take no lock and invoke no model; a report read records which tweaks it served.
 
 The baseline requires an empty database; direct baseline use on a populated old database

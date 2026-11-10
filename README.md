@@ -29,9 +29,10 @@ hands over the right one.
 - **Each draft gets its own report.** Before writing, your AI reads `get_cover_sheet`,
   then `get_report` with the situation, medium, audience and purpose. Milton ranks your
   memos and returns the cover sheet, the best-matching finals as examples (your own
-  words first, at most three AI drafts you steered, never untouched AI drafts), then
-  the tweaks those memos taught. Reads make no model call. AIs decide when to read and
-  how to apply them; Milton does not guarantee their adherence.
+  words ahead of equally matching ones, at most three AI drafts you steered, never
+  untouched AI drafts), then the tweaks those memos taught. Reads make no model call.
+  AIs decide when to read and how to apply them; Milton does not guarantee their
+  adherence.
 - **See and control what's on file.** Your TPS page shows the cover sheet, your memos
   (newest first, with their rounds, the tweaks served and the tweaks taught), your
   tweaks with counts and a scoreboard of how much your first drafts change. You can

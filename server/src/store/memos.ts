@@ -137,9 +137,9 @@ const overlap = (a: Set<string>, b: Set<string>) =>
   [...a].filter((w) => b.has(w)).length;
 const TIER_ORDER: Record<Tier, number> = { own: 0, steered: 1, untouched: 2 };
 
-/** SPEC.md's ranking: requested kind, medium, tier, today's signals (purpose
- * and audience word overlap, then full-text rank of the situation against
- * summary and words), recency, then id. */
+/** SPEC.md's ranking: requested kind, medium, purpose and audience word
+ * overlap, tier, full-text rank of the situation against summary and words,
+ * recency, then id. */
 export function rankMemos<T extends Candidate>(
   memos: T[],
   intent: ReportIntent,
@@ -158,8 +158,8 @@ export function rankMemos<T extends Candidate>(
     (a, b) =>
       b.kind - a.kind ||
       b.medium - a.medium ||
-      a.tier - b.tier ||
       b.overlap - a.overlap ||
+      a.tier - b.tier ||
       b.m.lexical - a.m.lexical ||
       (a.m.at < b.m.at ? 1 : a.m.at > b.m.at ? -1 : 0) ||
       a.m.id.localeCompare(b.m.id),
@@ -221,7 +221,7 @@ export function selectExamples(
 
 /** The tweaks the TWEAK_MEMOS best-matching memos cite, by their best memo's
  * rank, then citation count, at most MAX_TWEAKS. Only memos that cite a tweak
- * are matched: memos of the person's own words, ranked first, cite none. */
+ * are matched: memos of the person's own words cite none. */
 export function selectTweaks(
   ranked: Candidate[],
   counts: Map<string, { text: string; memos: number }>,

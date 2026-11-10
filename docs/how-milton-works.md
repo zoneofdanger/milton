@@ -183,7 +183,7 @@ Files: `server/src/store/compiled.ts`, `server/src/store/memos.ts`.
 
 Files: `server/src/store/memos.ts`.
 
-- A report ranks every memo by requested kind, medium match, tier (your words before steered), word overlap of purpose and audience with the intent (stopwords dropped), full-text rank of the situation (any word) against summary, purpose, audience and final, newest, then id.
+- A report ranks every memo by requested kind, medium match, word overlap of purpose and audience with the intent (stopwords dropped), tier (your words before steered when overlap ties), full-text rank of the situation (any word) against summary, purpose, audience and final, newest, then id.
 - Examples fill by rank: never untouched finals, never finals over 128 KiB, at most 3 steered finals, within a 32 KiB budget; a block that would pass the budget is skipped for the next, and the top one is always served.
 - A block's size is counted before its words are fetched, as an upper bound: its header, its words and a `> ` per line.
 - Tweaks come from the 10 best-ranked memos that cite any tweak, ordered by their best memo's rank, then citation count, then id, at most 10.

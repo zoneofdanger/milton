@@ -464,7 +464,7 @@ added. `tweak_citations` holds one row per memo and tweak, and a tweak's count i
 citations. Forgetting a memo deletes its citations and any tweak left with none.
 
 `get_report` ranks every memo (`src/store/memos.ts`) by requested kind, medium match,
-tier, word overlap of purpose and audience, `ts_rank` of the situation against the
+word overlap of purpose and audience, tier, `ts_rank` of the situation against the
 stored search vector of summary, purpose, audience and final, recency, then id.
 Examples fill by rank within 32 KiB, skipping a block that doesn't fit, always serving
 the top one, never serving untouched finals or finals over 128 KiB, and serving at most

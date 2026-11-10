@@ -37,7 +37,7 @@ Local commands and landing content are in [apps/site/README.md](../apps/site/REA
 - The homepage, top to bottom: the headline band with the intro and the "Try Milton free"
   button; the try-it folder, whose caption states the price; the routing slip (how it
   works in three steps) with a cc line of links to the AI setup guides under it; the
-  Markdown-file question answered in the open, then five closed questions; and the
+  Markdown-file question answered in the open, then four closed questions; and the
   closing "Did you get the memo?" with the button again and a fictional phone message.
   "Try Milton free" is the only button. Its swappable lines sit in one object at the top
   of `apps/site/src/pages/index.astro`; the slip's onboarding row stays empty, and
@@ -57,10 +57,11 @@ Local commands and landing content are in [apps/site/README.md](../apps/site/REA
 - Everything is rendered at build time with no motion. Without JavaScript every person
   and pair shows as plain sections with every email open; with it, the tabs and request
   pickers (real buttons with `aria-pressed`) swap the pair in place without
-  announcements, and on screens up to 767px wide the plain email shows its first lines
-  with a "Read all N words" button. Picks, and clicks on the hero's "Try Milton free"
-  button (not the closing one), are sent as Vercel Analytics custom events with the
-  current pick.
+  announcements. On screens up to 767px wide the price caption sits above the tabs, the
+  requests are one native select, and the plain email shows its first lines with a
+  "Read all N words" button, so both papers start in the first screen. Picks, and clicks
+  on the hero's "Try Milton free" button (not the closing one), are sent as Vercel
+  Analytics custom events with the current pick.
 - The setup widget on `/setup` copies the shared setup prompt ([setup](setup.md)), falls back to
   manual selection, and closes on Escape or an outside click.
 - `/pricing` states the one plan ($5.01 USD a month after a 30-day free trial, no card

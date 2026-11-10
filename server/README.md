@@ -28,7 +28,7 @@ MCP roles reject the other hostname and direct `run.app` requests and serve no
 `/internal/` path. The MCP role needs no browser cookie secret. The admit role reads only
 `AUTH_ISSUER`, `DATABASE_URL`, `AUTH_ADMISSION_SECRET`, `MILTON_TRIAL_FINGERPRINT_KEY` and
 the Stripe settings; it is reached only through Cloud Run's invoker check (see the
-[hosting runbook](deploy/README.md#admission-service-milton-admit)).
+[admission service](../docs/deploy/cloud.md#admission-service-milton-admit)).
 
 Build the container from the repository root:
 
@@ -185,7 +185,7 @@ remove it, such as anonymous client registrations) or not personal, with a reaso
 ## Deploy
 
 For Cloud Run, build and publish the container, then use separate app and MCP
-service manifests. Follow [the hosting runbook](deploy/README.md) for scoped secrets,
+service manifests. Follow [the release procedure](../docs/deploy/releases.md) for scoped secrets,
 ingress, hostname routing, certificate verification and rollback. The container
 includes the Vite-built CSS, fonts and favicons. Keep the previous runtime artifact
 and secret versions; never roll back memo data with a hosting release.
@@ -402,7 +402,7 @@ never a request. `0008` also dropped `usage_daily` and the stored `daily_calls` 
 retired daily allowance's leftovers.
 
 `users.test_account` (Drizzle `0009`, default false) marks the fictional account the
-daily end-to-end check uses (`e2e@milton-test.invalid`; see the hosting runbook). Only
+daily end-to-end check uses (`e2e@milton-test.invalid`; see [the end-to-end check](../docs/deploy/e2e.md)). Only
 the owner sets it. Usage numbers and every metric or count of accounts, calls, saves or
 memos exclude test accounts: join `users` and filter `NOT u.test_account`. The
 canonical usage count:
@@ -490,7 +490,7 @@ deletion cascades every memo table.
 ### Trials and billing (0012 groundwork, now live)
 
 Trials are **off by default** in a new database (`store_config.trials_enabled=false`);
-production has had trials and billing on since 2026-11-04 ([the hosting runbook](deploy/README.md)).
+production has had trials and billing on since 2026-11-04 ([Stripe operations](../docs/deploy/stripe.md)).
 The price is **USD $5.01/month**, one plan, no per-AI fees, set in Stripe and
 named by `STRIPE_PRICE_ID`. Signed-in `/billing/checkout` and `/billing/portal`,
 the Stripe webhook (0027) and the trial gate are implemented, and Stripe owns the trial.

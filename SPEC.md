@@ -206,7 +206,7 @@ Hono MCP and self-hosted native auth on three separate Cloud Run services. The p
 server code. Separate dotenvx payloads use platform-held private keys.
 
 The app and MCP are migrated. The private spend-alert worker and its scheduler are
-removed with migration 0023. App and MCP canonical URLs remain unchanged. Auth has its own host, issuer and runtime role; exact verified issuer/subject maps to retained internal account IDs through owner-verified metadata. App OIDC sessions and MCP native bindings have separate authority. The [hosting runbook](server/deploy/README.md) defines release checks and rollback.
+removed with migration 0023. App and MCP canonical URLs remain unchanged. Auth has its own host, issuer and runtime role; exact verified issuer/subject maps to retained internal account IDs through owner-verified metadata. App OIDC sessions and MCP native bindings have separate authority. The [release procedure](docs/deploy/releases.md) defines release checks and rollback.
 The retired Vercel app/MCP project and migration validation services are decommissioned;
 there is no Vercel backend failover. Preserve the current Cloud Run revisions, pinned
 images and secret versions. Future runtime rollback uses Cloud Run revision traffic,

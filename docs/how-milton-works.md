@@ -26,7 +26,7 @@ that line in the same commit. Add a line for new behavior, and delete the line w
 behavior goes.
 
 This file covers logic only. It leaves out the wording of setup questions, page copy,
-CSS, and tests. For deployment steps, see [the hosting runbook](../server/deploy/README.md).
+CSS, and tests. For deployment steps, see [releases](deploy/releases.md).
 Live settings, such as whether trials are on, are held in the database and not recorded
 here.
 

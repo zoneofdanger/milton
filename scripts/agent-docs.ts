@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// Vendored by `agent-docs install` from agent-docs commit e379110. Do not edit here; update it by running install again.
+// Vendored by `agent-docs install` from agent-docs commit 92ab97b. Do not edit here; update it by running install again.
 // agent-docs: checks a repository's concept files (docs/<concept>.md) and the index in AGENTS.md.
 // One Markdown file per concept, each with frontmatter name, description, type and covers (the code it
 // describes). CI runs `check --base <ref>`: it blocks invalid frontmatter, a stale index, tracked links
@@ -24,8 +24,9 @@ const NULL_SHA = /^0{40}$|^0{64}$/; // git's "no commit", e.g. github.event.befo
 const VENDORED_HEADER = /^\/\/ Vendored by `agent-docs install`/m;
 // A path into the scratch folder (a bare mention of the folder, or a <placeholder> in it, is fine),
 // and a Markdown link whose target is in it.
-const TMP_PATH = /\.agents\/tmp\/[^\s`'"()[\]<>{}*|,;]/;
-const TMP_LINK = /\]\([^)]*\.agents\/tmp/;
+// A Markdown link target (inline or reference-style) into scratch. Plain paths in prose or
+// code are allowed: they name where output goes, not a source to read (Peter, 2026-11-10).
+const TMP_LINK = /\]\([^)]*\.agents\/tmp|^\s*\[[^\]]+\]:\s*<?\S*\.agents\/tmp/;
 
 const USAGE = `Usage, from a repository:
   agent-docs check [--base <ref>]   frontmatter, the AGENTS.md index, scratch links and drift; exit 0 ok, 1 problems, 2 error
@@ -246,14 +247,15 @@ export function check(root: string, base: string | undefined, io: IO): number {
     }
   }
 
-  // Tracked files that link into the scratch folder.
+  // Tracked Markdown files that link into the scratch folder.
   for (const f of files) {
+    if (!f.endsWith(".md")) continue;
     const path = join(root, f);
     if (statSync(path).size > 2 * 1024 * 1024) continue;
     const buf = readFileSync(path);
     if (buf.includes(0)) continue; // binary
     buf.toString("utf-8").split("\n").forEach((line, i) => {
-      if (TMP_PATH.test(line) || TMP_LINK.test(line)) say(f, i + 1, "links into .agents/tmp, which is scratch; move what it needs into a concept file and link that");
+      if (TMP_LINK.test(line)) say(f, i + 1, "links into .agents/tmp, which is scratch; move what it needs into a concept file and link that");
     });
   }
 

@@ -32,17 +32,23 @@ Local commands and landing content are in [apps/site/README.md](../apps/site/REA
 - `/for-agents` serves a static product briefing, alternatives, the three tools, when
   memos are saved, export, price, evidence limits and an optional first writing task in
   the initial HTML.
-- The hero demo shows one fictional cleanup request with illustrative plain-AI and
-  Milton outputs; build-time ordered word matching computes words kept from the
-  displayed strings, ignoring case and punctuation except normalized internal
-  apostrophes, and unmatched output words stay underlined. One 10,500 ms clock sweeps a
-  paper tint over edits with two 2,150 ms reading holds; all text and scores remain
-  readable throughout, with no playback controls or status announcements.
-- Playback waits for 35% card visibility, or 80% of the maximum visible card area when a
-  short viewport cannot show 35%; resizing updates that threshold, and playback pauses
-  off-screen or in a hidden tab, preserving its position.
-- Reduced motion or disabled JavaScript shows the complete illustration without
-  animation.
+- The hero's try-it box ("Did you get the memo?") lets a visitor pick one of three
+  fictional people (Bill, Peter, Joanna, first names only) and one of three requests, and
+  shows two memo sheets: "Your AI today" and "With Milton". Visitors can't paste their
+  own writing (Peter, 2026-11-10). Peter and "Ask for something" show first.
+- The nine pairs are real drafts, generated once each by `claude-sonnet-5-5` on
+  2026-11-10 from the same system prompt and request, the Milton one also given that
+  person's cover sheet and report as Milton serves them. They are stored unedited in
+  `apps/site/src/data/try-it.json`; only the bold markers around "Subject:" are dropped
+  for display. A draft that can't be shown is regenerated, never edited.
+- Beside the pickers, "What Milton knows" shows one of that person's five setup emails,
+  with the rest and their cover sheet one tap away. A "Cover sheet attached" slip under
+  the memos compares greeting, opening words, length and sign-off, computed by code when
+  the drafts were generated.
+- Everything is rendered at build time with no motion. Without JavaScript every person
+  and pair shows as plain sections; with it, the pickers (real buttons with
+  `aria-pressed`) swap the pair in place without announcements. Picks and the box's
+  "Try Milton free" clicks are sent as Vercel Analytics custom events.
 - The setup widget copies the shared setup prompt ([setup](setup.md)), falls back to
   manual selection, and closes on Escape or an outside click.
 - `/pricing` states the one plan ($5.01 USD a month after a 30-day free trial, no card

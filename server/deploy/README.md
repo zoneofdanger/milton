@@ -1807,9 +1807,12 @@ code reads, release the code first.
   [Runtime role](#runtime-role)) before rolling out code that needs the change.
 
 Revisions from before the 2026-11-07 schema and auth cutover (`*-edit-00223ec` and
-older) cannot read the current schema. Fix forward. Restoring the pre-cutover Neon snapshot
-`snap-fancy-hat-b8j5ls14` would discard every change since 2026-11-07, including all memos;
-that is a decision for Peter under [Database recovery](#database-recovery). App/MCP
+older) cannot read the current schema. Fix forward. The pre-cutover Neon snapshot `snap-fancy-hat-b8j5ls14` is excluded from
+[Database recovery](#database-recovery): restoring it would discard every change since
+2026-11-07, including all memos, and that is Peter's decision. If he makes it, first stop
+every app, MCP and auth writer, pause the schedulers and drain their executions, snapshot
+the current state, then restore, reconcile Stripe, invalidate issued sessions and tokens,
+and serve only a runtime and secret versions that match the restored schema. App/MCP
 revisions before connection keys
 (`*-store2-b64ec6a` and older) can read the schema but serve no keys. After owner file 013,
 app revisions older than `milton-app-token-0f7d5aa` (#62) fail every sign-in, so that is the

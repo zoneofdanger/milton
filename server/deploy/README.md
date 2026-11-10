@@ -1326,19 +1326,22 @@ is deliberately non-deployable. Production's writing journal holds `0000_baselin
 `010-usage-retention-roles.sql`, `011-test-account-roles.sql`, `012-session-token-nullable.up.sql` and `013-drop-session-access-token.up.sql` (see [runtime role timeouts](#runtime-role-timeouts-applied-2026-11-07-todo-29)). There is no memo-update
 or daily call allowance (removed by PR #40, serving since 2026-11-08). Existing positive account safeguards remain
 in effect. Trials and billing are live (since 2026-11-04).
-Each image includes both roles and browser assets. Validate manifests before applying:
-
-```sh
-gcloud run services replace server/deploy/mcp.service.json --dry-run --project=milton-510506 --region=us-east4
-gcloud run services replace server/deploy/app.service.json --dry-run --project=milton-510506 --region=us-east4
-```
+Each image includes the app, MCP and admit roles and the browser assets.
+[admit.service.json](admit.service.json) is kept at the serving image and is applied with
+`services replace` (see "Release order" under the admission service below). `app.service.json` and
+`mcp.service.json` are not kept current: they still pin a pre-cutover image and secret
+versions. Never apply them with `services replace`, which would deploy that old code and
+those old secrets.
 
 For a release, build `server/Dockerfile` from the repository root for Linux amd64,
-push the image to `us-east4-docker.pkg.dev/milton-510506/milton/runtime`, record its
-digest, update the manifests, validate, and replace the services. Run the usual
-Bun type/tests first and verify the built artifact under Node 26. The container
-runs as the unprivileged `node` user and contains a self-contained runtime bundle.
-Do not copy local dependencies, environment files or private keys into the image.
+push the image to `us-east4-docker.pkg.dev/milton-510506/milton/runtime` and record its
+digest. Run the usual Bun type/tests first and verify the built artifact under Node 26.
+Deploy the digest to `milton-app` and `milton-mcp` as a tagged revision with
+`gcloud run deploy --no-traffic`, check that revision, then move traffic with
+`gcloud run services update-traffic`. Move `milton-e2e-daily` to the same image in the
+same step. The container runs as the unprivileged `node` user and contains a
+self-contained runtime bundle. Do not copy local dependencies, environment files or
+private keys into the image.
 
 The app and MCP services accept ingress only from internal sources and Google's load
 balancer. Its platform invoker policy permits external MCP clients; Milton still

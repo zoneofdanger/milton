@@ -59,8 +59,9 @@ CI that fails.
   on invalid concept frontmatter, an AGENTS.md index that does not match `docs/`, a
   Markdown link from a tracked Markdown file into `.agents/tmp`, or drift: a change to
   code a concept file covers without a change to that file, unless a
-  `Docs-unchanged: <concept>: <reason>` commit trailer excuses it. `agent-docs index`
-  rewrites the index.
+  `Docs-unchanged: <concept>: <reason>` commit trailer excuses it. It prints a note for a
+  file over 2 MiB that it cannot check. `agent-docs index` rewrites the index in the form
+  prettier keeps, so AGENTS.md is formatted like any other file.
 - The no-tmp-links test in `server/test/copy-drift.test.ts` is stricter: it fails when
   any tracked text file, of any size, mentions `.agents/tmp`, except the known mentions
   it lists with their reasons.

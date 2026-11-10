@@ -11,3 +11,4 @@ server/drizzle/meta/
 .agents/
 .playwright-mcp/
 .codex/
+scripts/agent-docs.ts

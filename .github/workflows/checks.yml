@@ -33,6 +33,12 @@ jobs:
         with:
           node-version: 26
       - run: bun install --frozen-lockfile
+      # Concept frontmatter, the AGENTS.md index, links into .agents/tmp and drift
+      # (scripts/agent-docs.ts, vendored by agent-docs install).
+      - name: Concept docs (agent-docs)
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: bun scripts/agent-docs.ts check --base "$BASE"
       # check-types builds the server assets the tests read.
       - run: bun run check-types
       - run: bun test

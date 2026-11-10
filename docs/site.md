@@ -34,14 +34,14 @@ Local commands and landing content are in [apps/site/README.md](../apps/site/REA
   the initial HTML.
 - Every page's header holds the brand, "How it works", "Pricing" and a "Sign in" text link
   to the app; on screens 600px wide or less it is one row, the brand and "Sign in".
-- The homepage, top to bottom: the headline band with the intro, the "Try Milton free"
-  button and the price line; the try-it folder; the routing slip (how it works in three
-  steps) beside the list of AI setup guides and the setup widget; the Markdown-file
-  question answered in the open, then five closed questions; and the closing "Did you get
-  the memo?" with the button again and a fictional phone message. "Try Milton free" is
-  the only filled button. Its swappable lines sit in one object at the top of
-  `apps/site/src/pages/index.astro`; the slip's onboarding row stays empty, and unshown,
-  until setup can do it.
+- The homepage, top to bottom: the headline band with the intro and the "Try Milton free"
+  button; the try-it folder, whose caption states the price; the routing slip (how it
+  works in three steps) with a cc line of links to the AI setup guides under it; the
+  Markdown-file question answered in the open, then five closed questions; and the
+  closing "Did you get the memo?" with the button again and a fictional phone message.
+  "Try Milton free" is the only button. Its swappable lines sit in one object at the top
+  of `apps/site/src/pages/index.astro`; the slip's onboarding row stays empty, and
+  unshown, until setup can do it.
 - The try-it folder lets a visitor pick one of three fictional people (Bill, Peter,
   Joanna, first names only) by folder tab and one of three requests, and shows two papers
   side by side, each headed with its word count: "Your AI today" on plain paper and
@@ -61,7 +61,7 @@ Local commands and landing content are in [apps/site/README.md](../apps/site/REA
   with a "Read all N words" button. Picks, and clicks on the hero's "Try Milton free"
   button (not the closing one), are sent as Vercel Analytics custom events with the
   current pick.
-- The setup widget copies the shared setup prompt ([setup](setup.md)), falls back to
+- The setup widget on `/setup` copies the shared setup prompt ([setup](setup.md)), falls back to
   manual selection, and closes on Escape or an outside click.
 - `/pricing` states the one plan ($5.01 USD a month after a 30-day free trial, no card
   needed to start, charged only if a card is added), what it includes, a link to sign in

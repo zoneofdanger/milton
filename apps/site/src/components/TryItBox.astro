@@ -52,11 +52,6 @@ const sides = [
   data-person={defaults.person}
   data-request={defaults.request}
 >
-  {Astro.slots.has("intro") && (
-    <div class="try-it-intro">
-      <slot name="intro" />
-    </div>
-  )}
   <h2 class="try-it-heading">Did you get the memo?</h2>
   <div
     class="picker"
@@ -225,10 +220,12 @@ const sides = [
 </script>
 
 <style>
+  /* Small gaps from the heading through the pickers to the memos, so the
+     pickers read as the memos' own controls. */
   .try-it {
     position: relative;
     display: grid;
-    gap: var(--space-6);
+    gap: var(--space-4);
     min-width: 0;
   }
   :where(h2, h3, h4, p, figure, dl, dd, ul, ol) {
@@ -241,8 +238,11 @@ const sides = [
   .person,
   .pair {
     display: grid;
-    gap: var(--space-6);
+    gap: var(--space-4);
     min-width: 0;
+  }
+  .pair {
+    gap: var(--space-6);
   }
   /* Rules between groups only when all of them show, without script. */
   .try-it:not([data-ready]) .person + .person {
@@ -410,62 +410,11 @@ const sides = [
     white-space: nowrap;
   }
 
-  /* The hero's intro, passed in from the page, keeps the space it had above
-     the box when the two were separate. */
-  .try-it-intro {
-    margin-bottom: var(--space-10);
-  }
-  @media (max-width: 1100px) {
-    .try-it-intro {
-      margin-bottom: var(--space-2);
-    }
-  }
-  @media (min-width: 768px) and (max-width: 860px) {
-    .try-it-intro {
-      margin-bottom: var(--space-4);
-    }
-  }
-  /* Desktop, once the script has run: the intro on the left, the controls
-     beside it, and the chosen pair across both columns, so the top of both
-     memos is in the first screen. The person group steps aside so its
-     request picker and pairs take the grid's areas; the last intro row takes
-     any height the intro has over the controls. */
-  @media (min-width: 1024px) {
-    .try-it[data-ready] {
-      grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr);
-      grid-template-areas:
-        "intro heading"
-        "intro people"
-        "intro requests"
-        "intro ."
-        "pair pair";
-      grid-template-rows: auto auto auto 1fr auto;
-      gap: var(--space-4) var(--space-10);
-      align-items: start;
-    }
-    .try-it[data-ready] .try-it-intro {
-      grid-area: intro;
-      margin-bottom: 0;
-    }
-    .try-it[data-ready] .try-it-heading {
-      grid-area: heading;
-    }
-    .try-it[data-ready] > .picker {
-      grid-area: people;
-    }
-    .try-it[data-ready] .person {
-      display: contents;
-    }
-    .try-it[data-ready] .person > .picker {
-      grid-area: requests;
-    }
-    .try-it[data-ready] .pair {
-      grid-area: pair;
-      margin-top: var(--space-2);
-    }
-    .try-it[data-ready] .picker-label {
-      flex-basis: auto;
-      margin-inline-end: var(--space-2);
+  /* From tablet width each picker's label sits at the start of its row,
+     at one width so the two rows of buttons line up. */
+  @media (min-width: 768px) {
+    .picker-label {
+      flex-basis: 9rem;
     }
   }
 </style>

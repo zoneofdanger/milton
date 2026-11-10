@@ -9,25 +9,24 @@ import TryItBox from "../components/TryItBox.astro";
   description="Milton makes your AI write like you."
 >
   <section class="hero" aria-labelledby="headline">
-    <TryItBox>
-      <div slot="intro">
-        <h1 id="headline">Stop sounding like AI.</h1>
-        <p class="intro">Milton makes your AI write like you.</p>
-        <div class="actions action-row">
-          <a
-            class="button"
-            href="https://app.meetmilton.com/login"
-            data-try-it-cta
-          >
-            Try Milton free <span aria-hidden="true">↗</span>
-          </a>
-          <AssistantSetup />
-        </div>
-        <p class="hero-price small-note">
-          $5.01 a month after a 30-day free trial. No card required.
-        </p>
+    <div>
+      <h1 id="headline">Stop sounding like AI.</h1>
+      <p class="intro">Milton makes your AI write like you.</p>
+      <div class="actions action-row">
+        <a
+          class="button"
+          href="https://app.meetmilton.com/login"
+          data-try-it-cta
+        >
+          Try Milton free <span aria-hidden="true">↗</span>
+        </a>
+        <AssistantSetup />
       </div>
-    </TryItBox>
+      <p class="hero-price small-note">
+        $5.01 a month after a 30-day free trial. No card required.
+      </p>
+    </div>
+    <TryItBox />
   </section>
   <div class="assistant-strip">
     <span class="assistant-label">Works with:</span>
@@ -577,10 +576,11 @@ import TryItBox from "../components/TryItBox.astro";
       padding-block: var(--space-12);
     }
   }
-  /* Desktop: the try-it box sits beside the headline, so the hero starts
-     close under the header to bring both memos into the first screen. */
+  /* Desktop: the hero starts close under the header and the try-it box
+     close under the price line, so both memos open in the first screen. */
   @media (min-width: 1024px) {
     .hero {
+      gap: var(--space-8);
       padding-block: var(--space-8) var(--space-20);
     }
     h1 {

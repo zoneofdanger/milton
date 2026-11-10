@@ -283,7 +283,7 @@ Files: `server/src/store/setup.ts`, `packages/theme/setup-prompt.ts`.
 - Setup is served while `get_cover_sheet.is_empty` says the account has no cover sheet and no memos; the AI offers it once, a request to set up Milton accepts it, and a declined offer is not repeated.
 - Setup never blocks a writing task, never reads an inbox, connects mail or imports anything the person didn't paste.
 - The connection is confirmed only after a successful `get_cover_sheet` read.
-- The AI first asks the person to paste about five things they wrote and sent, unedited, and saves each as a final-only memo exactly as pasted, with context and a kind, telling them each receipt; only their own writing, skipping automated, forwarded and other people's text and anything holding secrets.
+- The AI first asks the person to paste about five things they wrote and sent, unedited, saying Milton keeps each as a memo, and saves each as a final-only memo exactly as pasted, with context and a kind, telling them each receipt; only their own writing, skipping automated, forwarded and other people's text and anything holding secrets.
 - A writing task the person brings comes first: the AI reads `get_report` for it, saves the memo when they accept the final, then returns to setup.
 - Then it offers to start the cover sheet with lines the person gives, in their words, never suggested from their writing.
 - Every setup includes the standing instruction: the AI shows it and asks on its own, adding it only after the person agrees, or shows where to paste it.

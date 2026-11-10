@@ -105,6 +105,8 @@ test("setup offers once, reads no inbox, and its example memo parses as a final-
   ].map((step) => setupScript.indexOf(step));
   expect(steps.every((at, i) => at > (steps[i - 1] ?? 0))).toBe(true);
   expect(setupScript).toContain("exactly as pasted");
+  // The ask itself says the pieces are kept, even without the setup prompt.
+  expect(setupScript).toContain("tell them Milton keeps each as a memo");
   expect(SETUP_PROMPT).toContain("First ask me to paste about five things");
   const example = JSON.parse(
     setupScript.slice(

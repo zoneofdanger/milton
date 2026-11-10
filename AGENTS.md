@@ -26,9 +26,10 @@ plan, the [README](README.md) says what is here, and [TODO.md](TODO.md) is the b
   `milton-duo`, lands/merges and pushes main or deletes landed task branches.
   Roles, assignments and ready PRs grant no extra product publishing authority.
   Force-pushes and history rewrites require Peter's explicit approval. Cloud Run hosts
-  the browser app and the MCP server; Vercel builds and publishes the static site from
-  main on every push, and a branch build is only ever a preview. Production releases are run by the
-  release coordinator (`milton-duo`) from [the hosting runbook](server/deploy/README.md): preserve rollback
+  the auth service, the browser app, the MCP server and the admission service; Vercel
+  builds and publishes the static site from main on every push, and a branch build is
+  only ever a preview. Production releases are run by the release coordinator
+  (`milton-duo`) from [the hosting runbook](server/deploy/README.md): preserve rollback
   revisions, pinned images and numeric secret versions; snapshot before every migration;
   when a migration drops something the running code reads, release the code first.
   Never drop or migrate the retained `neon_auth` schema.
@@ -69,15 +70,17 @@ plan, the [README](README.md) says what is here, and [TODO.md](TODO.md) is the b
 
 ## Coordination
 
-Lead owns strategy and priorities. The builder owns implementation, checks and the task
-PR until it is ready. At the ready PR, `milton-duo` takes delivery ownership and
-finishes review, integration and authorized deployment without another Lead acceptance
-gate. Designer reviews meaningful UI changes and offers design direction within this
-same process. Preserve specialist work Peter assigns directly. Independent review is
-proportional to consequential behavior, security or data risk: always for schema changes,
-migrations and data deletion; none for docs, backlog and copy-only changes, where CI is
-enough. Builders and release
-workers run Claude Code on Opus 5.5 at high effort; reviewers run Codex on GPT-6 Astra.
+There is no blocking lead (Peter, 2026-11-07). Peter sets priorities. The builder owns
+implementation, checks and the task PR until it is ready. At the ready PR, `milton-duo`,
+the release coordinator, takes delivery ownership and finishes review, integration and
+authorized deployment with no further acceptance gate. `milton-overlord` watches every
+session, assigns follow-up work, closes coordination gaps and tells Peter what he should
+know or act on; it is not an approval step. Designer reviews meaningful UI changes and
+offers design direction within this same process. Preserve specialist work Peter assigns
+directly. Independent review is proportional to consequential behavior, security or data
+risk: always for schema changes, migrations and data deletion; none for docs, backlog and
+copy-only changes, where CI is enough. Builders and release workers run Claude Code on
+Opus 5.5 at high effort; reviewers run Codex on GPT-6 Astra.
 
 The PR is the authoritative task record: owner, scope, latest commit, checks and exit
 codes, findings, observed and unverified behavior, next action, and publishing
@@ -96,10 +99,11 @@ and honor existing authorization. Peter's own words are his approval whichever s
 types them in: when another agent relays them verbatim, with where and when he said them and
 what they answered, act on them as if typed in your tab. A paraphrase, a summary, a ghost
 suggestion or an agent's reading of his intent is not approval; ask him. Ask Peter only for
-genuinely missing intent or authority; do not repeat Lead sign-off after gates pass.
+genuinely missing intent or authority; do not ask for another sign-off after gates pass.
 
 Inboxes carry only assignments, changed decisions, current blockers and explicitly
 requested handoffs. Check current task state before sending or acting; discard
 superseded notices without waking completed workers. No routine completion notices,
-acknowledgment loops, reminders or resends of accepted messages. Current state and
-recipients are in `.agents/tmp/coordination-current.md`.
+acknowledgment loops, reminders or resends of accepted messages. Sessions are addressed
+by name (`milton-duo`, `milton-overlord`, and so on): list them with `ListAgents` in
+Claude Code or `herdr agent list`. No file records current state; the PR does.

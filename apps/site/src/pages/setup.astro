@@ -60,10 +60,7 @@ import AssistantSetup from "../components/AssistantSetup.astro";
   </div>
   <nav class="clients" aria-label="Choose your AI">
     <a href="#claude">Claude</a>
-    <a href="#claude-duet">Claude Duet</a>
     <a href="#chatgpt">ChatGPT</a>
-    <a href="#grok-bot">Grok Bot</a>
-    <a href="#muse">Muse</a>
     <a href="#claude-code">Claude Code</a>
     <a href="#codex">Codex</a>
     <a href="#cursor">Cursor</a>
@@ -94,43 +91,7 @@ import AssistantSetup from "../components/AssistantSetup.astro";
     </p>
     <p>
       As part of setup, add <a href="#standing-line">the standing line</a> to
-      your profile preferences, a project’s instructions, or a memory. One entry
-      also covers Claude Duet.
-    </p>
-  </section>
-  <section id="claude-duet" aria-labelledby="claude-duet-heading">
-    <h2 id="claude-duet-heading">Claude Duet</h2>
-    <p class="small-note">Guide only: not yet verified with Milton.</p>
-    <p>
-      Anthropic says Duet uses the connectors in your Claude account. The
-      expected setup path is to connect Milton in Claude first, then use that
-      connection in Duet.
-    </p>
-    <ol>
-      <li>
-        Follow the <a href="#claude">Claude setup steps</a> above.
-      </li>
-      <li>
-        Open Duet with the same Claude account and make Milton available to the
-        conversation.
-      </li>
-      <li>
-        Ask “Did you get that memo?” Confirm it reads your current cover sheet
-        before relying on the connection.
-      </li>
-    </ol>
-    <p>
-      Duet is a research preview with limited access. Check{" "}
-      <a href="https://support.claude.com/en/articles/17631495-get-started-with-claude-duet">
-        Anthropic’s Duet guide ↗
-      </a>
-      for current availability. If Milton is unavailable in Duet, use the
-      connected Claude client while compatibility is being checked.
-    </p>
-    <p>
-      Duet runs on the same Claude account, so{" "}
-      <a href="#standing-line">the standing line</a> you keep in Claude covers
-      Duet too.
+      your profile preferences, a project’s instructions, or a memory.
     </p>
   </section>
   <section id="chatgpt" aria-labelledby="chatgpt-heading">
@@ -157,80 +118,6 @@ import AssistantSetup from "../components/AssistantSetup.astro";
     <p>
       As part of setup, add <a href="#standing-line">the standing line</a> to
       your custom instructions or a memory.
-    </p>
-  </section>
-  <section id="grok-bot" aria-labelledby="grok-bot-heading">
-    <h2 id="grok-bot-heading">Grok Bot</h2>
-    <p class="small-note">Guide only: not yet verified with Milton.</p>
-    <p>
-      Grok Bot can add an MCP server by URL through chat. Try this in your Bot:
-    </p>
-    <blockquote>
-      Add Milton as a remote MCP server at https://mcp.meetmilton.com/mcp. Use
-      OAuth browser sign-in, then list its tools. Don’t save memos or change my
-      cover sheet during setup.
-    </blockquote>
-    <ol>
-      <li>Complete the browser sign-in using your Milton account.</li>
-      <li>
-        Start a new message after connecting, then ask “Did you get that memo?”
-      </li>
-      <li>
-        Confirm the Bot reads your current cover sheet. Once connected, use the{" "}
-        <a href="#first-preference">first steps below</a>.
-      </li>
-    </ol>
-    <p>
-      Grok Bot connections are shared across the Bots on your account. Workspace
-      policies may restrict connectors. See the{" "}
-      <a href="https://docs.x.ai/grok-bot/computer-and-apps#connect-an-app">
-        Grok Bot connection guide ↗
-      </a>
-      .
-    </p>
-    <p>
-      If Grok Bot has standing instructions or memory, add{" "}
-      <a href="#standing-line">the standing line</a> there as part of setup.
-      Otherwise, ask “Did you get that memo?” each time.
-    </p>
-  </section>
-  <section id="muse" aria-labelledby="muse-heading">
-    <h2 id="muse-heading">Muse</h2>
-    <p class="small-note">Guide only: not yet verified with Milton.</p>
-    <p>Ask Muse in chat to create a Custom Connector:</p>
-    <blockquote>
-      Create a Custom Connector named Milton for the remote MCP server at
-      https://mcp.meetmilton.com/mcp. It uses Streamable HTTP and OAuth browser
-      sign-in. List its tools after connecting. Don’t save memos or change my
-      cover sheet during setup.
-    </blockquote>
-    <ol>
-      <li>
-        Follow Muse’s connection flow and complete browser sign-in using your
-        Milton account.
-      </li>
-      <li>
-        Ask “Did you get that memo?” and confirm Muse reads the current cover
-        sheet.
-      </li>
-      <li>
-        Once the connection works, use the{" "}
-        <a href="#first-preference">first steps below</a>.
-      </li>
-    </ol>
-    <p>
-      Meta documents chat-created Custom Connectors; Milton’s OAuth flow still
-      needs a complete Muse test. Milton does not provide an API key, so this
-      connection must use browser sign-in. If Muse cannot complete it, report
-      the connection issue instead of treating setup as finished.{" "}
-      <a href="https://www.meta.com/help/superintelligence/1687253048996149/">
-        Meta’s connector guide ↗
-      </a>
-    </p>
-    <p>
-      If Muse has standing instructions or memory, add{" "}
-      <a href="#standing-line">the standing line</a> there as part of setup.
-      Otherwise, ask “Did you get that memo?” each time.
     </p>
   </section>
   <section id="claude-code" aria-labelledby="claude-code-heading">

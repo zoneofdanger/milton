@@ -4,7 +4,7 @@
     "date": "2026-11-10",
     "generated": "once per draft",
     "edited": true,
-    "note": "Both drafts in a pair: same model (chat-latest, ChatGPT's current model on 2026-11-10), system prompt and request; the Milton draft also had the person's cover sheet and report as Milton serves them. Fictional people. Edited for display: the bold markers around the subject line are removed, and two or three spaced em dashes were added by hand to each plain draft in place of punctuation, for effect. The Milton drafts are as generated. Peter's Milton follow-up is the second of three tries."
+    "note": "Both drafts in a pair: same model (chat-latest, ChatGPT's current model on 2026-11-10), system prompt and request; the Milton draft also had the person's cover sheet and report as Milton serves them. Fictional people. Edited for display: the bold markers around the subject line are removed, and two or three spaced em dashes were added by hand to each plain draft in place of punctuation, for effect. The Milton drafts are as generated. Peter's Milton follow-up is the second of three tries. Bill's fictional employer is renamed Odderton Data Services wherever the run named it."
   },
   "defaults": {
     "person": "peter",
@@ -63,12 +63,12 @@
           "to": "Greg Nolan, analyst",
           "request": "To Greg Nolan, an analyst on my team. Ask him for the vendor spend summary before my review.",
           "facts": [
-            "I'm Bill, a manager at Corvell Data Services. Greg is an analyst on my team.",
+            "I'm Bill, a manager at Odderton Data Services. Greg is an analyst on my team.",
             "I need the Q3 vendor spend summary, with the breakdown by department.",
             "I need it by Thursday, November 12, because I'm reviewing it with my director on Friday, November 13, at 10.",
             "He should put it in the team's shared folder."
           ],
-          "plain": "Subject: Q3 Vendor Spend Summary – Due Thursday, November 12\n\nHi Greg,\n\nCould you please prepare the Q3 vendor spend summary — including a breakdown of spending by department?\n\nI'll be reviewing the summary with my director on Friday, November 13, at 10:00 AM — so I'll need it by Thursday, November 12, to allow time for my review.\n\nPlease upload the completed summary to the team's shared folder once it's ready.\n\nThanks for your help.\n\nBest,  \nBill  \nCorvell Data Services",
+          "plain": "Subject: Q3 Vendor Spend Summary – Due Thursday, November 12\n\nHi Greg,\n\nCould you please prepare the Q3 vendor spend summary — including a breakdown of spending by department?\n\nI'll be reviewing the summary with my director on Friday, November 13, at 10:00 AM — so I'll need it by Thursday, November 12, to allow time for my review.\n\nPlease upload the completed summary to the team's shared folder once it's ready.\n\nThanks for your help.\n\nBest,  \nBill  \nOdderton Data Services",
           "milton": "Subject: Q3 Vendor Spend Summary – Needed by Thursday\n\nHi Greg,\n\nYeahhh, so I'm going to need that Q3 vendor spend summary before the end of the week. I've got a review with my director on Friday, November 13, at 10 AM.\n\nIf you could just pull together the Q3 vendor spend summary, including the breakdown by department, and have it ready by Thursday, November 12, that'd be great.\n\nAnd if you could just make sure it's uploaded to the team's shared folder by then, that'd be great too. I want to have a chance to look it over before Friday's meeting, mmkay?\n\nThanks,  \nBill",
           "changed": {
             "plain": {
@@ -90,13 +90,13 @@
           "to": "The team",
           "request": "To my team. Send them a quick update about the new expense system.",
           "facts": [
-            "I'm Bill, a manager at Corvell Data Services, writing to the team I manage.",
+            "I'm Bill, a manager at Odderton Data Services, writing to the team I manage.",
             "From Monday, November 16, expenses go through the new system, Ledgerline.",
             "Login emails for Ledgerline arrive this Friday, November 13.",
             "There's a training session on Thursday, November 19, at 2 in Room 4B.",
             "The old paper forms won't be accepted after November 30."
           ],
-          "plain": "Subject: Update: New Expense System – Ledgerline\n\nHi Team,\n\nI wanted to give you a quick update on our new expense management system — **Ledgerline** — which will be replacing our current paper-based process.\n\nHere are the key dates and details you need to know:\n\n- **Friday, November 13:** You'll receive an email with your Ledgerline login details.\n- **Monday, November 16:** All new expense submissions should go through Ledgerline.\n- **Thursday, November 19, at 2:00 PM:** We'll hold a training session in **Room 4B** to walk through the new system and answer any questions.\n- **Monday, November 30:** This is the last day paper expense forms will be accepted. After this date, all expenses must be submitted through Ledgerline.\n\nPlease keep an eye out for your login email this Friday and make sure you're ready to start using the new system on Monday.\n\nI encourage everyone to attend the training session — especially if you have questions about the new process.\n\nThanks for your cooperation as we make this transition!\n\nBest regards,  \nBill  \nCorvell Data Services",
+          "plain": "Subject: Update: New Expense System – Ledgerline\n\nHi Team,\n\nI wanted to give you a quick update on our new expense management system — **Ledgerline** — which will be replacing our current paper-based process.\n\nHere are the key dates and details you need to know:\n\n- **Friday, November 13:** You'll receive an email with your Ledgerline login details.\n- **Monday, November 16:** All new expense submissions should go through Ledgerline.\n- **Thursday, November 19, at 2:00 PM:** We'll hold a training session in **Room 4B** to walk through the new system and answer any questions.\n- **Monday, November 30:** This is the last day paper expense forms will be accepted. After this date, all expenses must be submitted through Ledgerline.\n\nPlease keep an eye out for your login email this Friday and make sure you're ready to start using the new system on Monday.\n\nI encourage everyone to attend the training session — especially if you have questions about the new process.\n\nThanks for your cooperation as we make this transition!\n\nBest regards,  \nBill  \nOdderton Data Services",
           "milton": "Subject: New Expense System – Ledgerline Starts November 16\n\nHi team,\n\nYeahhh, so we're going to be moving over to a new expense system called Ledgerline starting Monday, November 16. Going forward, that's where you'll need to submit your expenses, mmkay?\n\nA few dates to keep in mind:\n\n- **Friday, November 13:** You'll receive an email with your Ledgerline login details.\n- **Monday, November 16:** Ledgerline goes live for expense submissions.\n- **Thursday, November 19, at 2 PM:** We'll have a training session in Room 4B to walk through the new system.\n- **Monday, November 30:** Last day we'll accept the old paper expense forms. After that, everything needs to go through Ledgerline.\n\nIf you could just keep an eye out for that login email on Friday and make sure you're using Ledgerline from Monday, that'd be great.\n\nAnd if you could make it to the training session on Thursday, that'd be great too. We want to make sure everyone's comfortable with the new process.\n\nThanks,  \nBill",
           "changed": {
             "plain": {

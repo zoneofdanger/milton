@@ -2,7 +2,6 @@
 import SiteLayout from "../layouts/SiteLayout.astro";
 import AssistantSetup from "../components/AssistantSetup.astro";
 import TryItBox from "../components/TryItBox.astro";
-import FilingComparison from "../components/FilingComparison.astro";
 ---
 
 <SiteLayout
@@ -55,21 +54,12 @@ import FilingComparison from "../components/FilingComparison.astro";
       </ul>
     </nav>
   </div>
-  <section class="section" id="why-milton" aria-labelledby="why-heading">
-    <p class="eyebrow">## Your writing, on file</p>
-    <h2 id="why-heading">Start with your own words.</h2>
-    <p class="section-lead">
-      Paste a few emails or DMs that sound like you. From then on, every final
-      you accept is kept as a memo too. Your own words become the examples your
-      next AI imitates.
-    </p>
-    <FilingComparison />
-  </section>
   <section class="section" id="how-it-works" aria-labelledby="how-heading">
     <p class="eyebrow">## How it works</p>
     <h2 id="how-heading">From your examples to your next message.</h2>
     <p class="section-lead">
-      Tell your AI what you want to say. Milton helps it write in your voice.
+      Paste a few emails that sound like you, then tell your AI what you want to
+      say. Milton helps it write in your voice.
     </p>
     <div class="slip-wrap">
       <figure class="sheet slip" aria-labelledby="slip-title">
@@ -288,11 +278,11 @@ import FilingComparison from "../components/FilingComparison.astro";
     text-wrap: pretty;
   }
   /* The hero is its own layer above the sections that follow, so the setup
-     popover is never drawn under the filing comparison's notes and cabinet
-     (their highest layer is 10). */
+     popover is never drawn under their positioned pieces, such as the
+     routing slip's stamp. */
   .hero {
     position: relative;
-    z-index: 11;
+    z-index: 1;
     display: grid;
     grid-template-columns: 1fr;
     gap: var(--space-16);

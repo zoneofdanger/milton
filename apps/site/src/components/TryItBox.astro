@@ -10,9 +10,6 @@ type Side = {
   signoff: string;
 };
 type Pair = {
-  to: string;
-  request: string;
-  facts: string[];
   plain: string;
   milton: string;
   changed: { plain: Side; milton: Side };
@@ -172,15 +169,6 @@ const sides = [
               <p class="small-note">
                 Same AI, same request. Generated once, filed unedited.
               </p>
-              <details class="request">
-                <summary>The request both got</summary>
-                <p>{pair.request}</p>
-                <ul>
-                  {pair.facts.map((fact) => (
-                    <li>{fact}</li>
-                  ))}
-                </ul>
-              </details>
             </div>
           );
         })}
@@ -418,25 +406,6 @@ const sides = [
     overflow: hidden;
     clip-path: inset(50%);
     white-space: nowrap;
-  }
-
-  .request summary {
-    min-height: var(--touch-target);
-    padding-block: var(--space-3);
-    cursor: pointer;
-    font-size: var(--text-small);
-    font-weight: 600;
-  }
-  .request p,
-  .request ul {
-    margin-top: var(--space-2);
-    font-size: var(--text-small);
-    color: var(--muted);
-  }
-  .request ul {
-    display: grid;
-    gap: var(--space-2);
-    padding-inline-start: var(--space-5);
   }
 
   /* The hero's intro, passed in from the page, keeps the space it had above

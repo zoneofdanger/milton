@@ -239,19 +239,13 @@ export const saveRequests = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     requestId: text("request_id").notNull(),
     inputHash: text("input_hash").notNull(),
-    // Never read, and nullable since 0006 so saves can stop writing it; dropped
-    // once no running or rollback code writes it (TODO.md).
-    sourceHash: text("source_hash"),
     // Written once, with the save's outcome, in the save's transaction.
     result: jsonb("result_json").notNull(),
     createdAt: createdAt(),
   },
   (t) => [
     primaryKey({ columns: [t.userId, t.requestId] }),
-    check(
-      "save_request_hashes",
-      sql`${t.inputHash} ~ '^[a-f0-9]{64}$' AND ${t.sourceHash} ~ '^[a-f0-9]{64}$'`,
-    ),
+    check("save_request_hashes", sql`${t.inputHash} ~ '^[a-f0-9]{64}$'`),
     check("save_request_id", sql`length(${t.requestId}) = 36`),
     check(
       "save_request_result",

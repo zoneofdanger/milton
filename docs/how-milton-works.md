@@ -457,6 +457,7 @@ Files: `server/drizzle/`, `server/src/store/schema.ts`, `server/src/store/databa
 - Owner file `014-memos-roles.sql` lets MCP insert, read and delete memos and update only their context columns, insert kinds, served reports and cover sheet versions, insert and delete tweaks and citations, and read the Keep memos switch; app reads them, deletes memos, kinds, citations and tweaks, rewords tweaks, appends cover sheet versions and sets the switch. Neither can change a memo's words.
 - Account erasure cascades every memo, kind, tweak, citation, served report, cover sheet version and switch row.
 - 0013 drops the old writing tables (cards, card versions, accepted changes, sample kinds, samples, sample versions and the guide tables) with their guards and sequence, and deletes the old store's save receipts, told apart by their outcome's shape; every receipt the memo code wrote stays, so a replay still returns its stored outcome. Owner file `015-drop-guide-roles.sql`, applied before 0013, drops the guide roles.
+- 0014 drops `save_requests.source_hash`, unread and unwritten since #45; a receipt holds the account, request id, input hash, outcome and time, and `save_request_hashes` checks the input hash's form.
 - A receipt is written once with its outcome and cannot change.
 - History has no size cap. History rows never shrink short of account deletion, so the
   lifetime cap that refused every save once an account reached it is gone (0030), with

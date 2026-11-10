@@ -25,7 +25,7 @@ public.tweak_citations | deleted | memo_id tweak_id user_id | Cascades from memo
 public.served_reports | deleted | id tweak_ids user_id | Cascades from users.
 public.cover_sheets | deleted | actor_json text user_id | Cascades from users.
 public.memo_settings | deleted | user_id | Cascades from users.
-public.save_requests | deleted | input_hash request_id result_json source_hash user_id | Cascades from users.
+public.save_requests | deleted | input_hash request_id result_json user_id | Cascades from users.
 public.trial_accounts | deleted | stripe_customer_id stripe_subscription_id subscription_status user_id | Cascades from users, after Stripe cancellation.
 public.usage_calls | deleted | tool user_id | Cascades from users.
 public.connection_keys | deleted | generation id incarnation issuer name scope secret_hash subject user_id | Cascades from users.

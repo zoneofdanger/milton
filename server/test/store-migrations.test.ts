@@ -1118,6 +1118,90 @@ test("0013 drops the old writing tables, their sequence and functions, and the o
   }
 });
 
+test("0014 drops source_hash; save_request_hashes checks input_hash alone, every receipt stays and replays", async () => {
+  const folder = new URL("../drizzle/", import.meta.url).pathname;
+  const scratch = await mkdtemp(join(tmpdir(), "milton-0014-"));
+  const pg = new PGlite();
+  // A fresh install through 0014, so later migrations leave this test alone.
+  const current = new PGlite();
+  try {
+    await cp(folder, scratch, { recursive: true });
+    const journal = await Bun.file(join(scratch, "meta/_journal.json")).json();
+    const through = async (tag: string) =>
+      writeFile(
+        join(scratch, "meta/_journal.json"),
+        JSON.stringify({
+          ...journal,
+          entries: journal.entries.slice(
+            0,
+            journal.entries.findIndex((e: { tag: string }) => e.tag === tag) +
+              1,
+          ),
+        }),
+      );
+    await through("0013_drop_old_writing");
+    await migrate(drizzle(pg), { migrationsFolder: scratch });
+    // A receipt as code before 0006 wrote it, with source_hash, and one the
+    // memo code writes, without.
+    await seedUsers(pg, "kept");
+    const old = crypto.randomUUID();
+    await pg.query(
+      "INSERT INTO save_requests(user_id,request_id,input_hash,source_hash,result_json) VALUES ('kept',$1,repeat('a',64),repeat('b',64),'{\"status\":\"failed\",\"error\":\"request_too_large\"}')",
+      [old],
+    );
+    const store = fixtureStore(storeDatabase(pg), "kept");
+    const save = memoSave();
+    const saved = await store.saveMemo(save);
+    expect(saved.status).toBe("saved");
+    await through("0014_drop_source_hash");
+    await migrate(drizzle(pg), { migrationsFolder: scratch });
+    await migrate(drizzle(current), { migrationsFolder: scratch });
+    const after = await schemaCatalog(current);
+    expect(await schemaCatalog(pg)).toEqual(after);
+    expect(
+      after.columns
+        .filter((c) => c.table_name === "save_requests")
+        .map((c) => c.column_name),
+    ).toEqual([
+      "created_at",
+      "input_hash",
+      "request_id",
+      "result_json",
+      "user_id",
+    ]);
+    expect(
+      after.constraints.find((c) => c.conname === "save_request_hashes"),
+    ).toMatchObject({
+      definition: "CHECK ((input_hash ~ '^[a-f0-9]{64}$'::text))",
+    });
+    expect(
+      (
+        await pg.query(
+          "SELECT request_id,input_hash FROM save_requests ORDER BY request_id",
+        )
+      ).rows,
+    ).toEqual(
+      [
+        { request_id: old, input_hash: "a".repeat(64) },
+        { request_id: save.request_id, input_hash: expect.any(String) },
+      ].sort((a, b) => (a.request_id < b.request_id ? -1 : 1)),
+    );
+    // The replay returns the stored outcome, and the check still refuses a
+    // malformed input_hash.
+    expect(await store.saveMemo(save)).toEqual(saved);
+    await expect(
+      pg.query(
+        "INSERT INTO save_requests(user_id,request_id,input_hash,result_json) VALUES ('kept',$1,'not-a-hash','{\"status\":\"saved\"}')",
+        [crypto.randomUUID()],
+      ),
+    ).rejects.toThrow(/save_request_hashes/);
+  } finally {
+    await current.close();
+    await pg.close();
+    await rm(scratch, { recursive: true, force: true });
+  }
+});
+
 test("native 008 links each authorized registration from what survives, by identity incarnation, and applies deletion's rule to deleted identities' registrations", async () => {
   const native = (name: string) =>
     Bun.file(

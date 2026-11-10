@@ -47,8 +47,9 @@ Local commands and landing content are in [apps/site/README.md](../apps/site/REA
   the drafts were generated.
 - Everything is rendered at build time with no motion. Without JavaScript every person
   and pair shows as plain sections; with it, the pickers (real buttons with
-  `aria-pressed`) swap the pair in place without announcements. Picks and the box's
-  "Try Milton free" clicks are sent as Vercel Analytics custom events.
+  `aria-pressed`) swap the pair in place without announcements. Picks, and clicks on
+  the hero's "Try Milton free" button (not the closing one), are sent as Vercel Analytics
+  custom events with the current pick.
 - The setup widget copies the shared setup prompt ([setup](setup.md)), falls back to
   manual selection, and closes on Escape or an outside click.
 - `/pricing` states the one plan ($5.01 USD a month after a 30-day free trial, no card

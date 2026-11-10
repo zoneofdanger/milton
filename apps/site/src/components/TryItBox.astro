@@ -29,7 +29,6 @@ type Person = {
 const people = data.people as Person[];
 const { requests, defaults } = data;
 const DATE = "10 Nov 2026";
-const LOGIN = "https://app.meetmilton.com/login";
 
 /** The text through its third non-blank line, keeping its own line breaks. */
 function firstLines(text: string, count = 3): string {
@@ -231,9 +230,6 @@ const sides = [
       </div>
     );
   })}
-  <a class="button try-it-cta" href={LOGIN} data-try-it-cta>
-    Try Milton free <span aria-hidden="true">↗</span>
-  </a>
 </div>
 
 <!-- Inline and synchronous, so the pickers and the one default pair are set
@@ -276,7 +272,8 @@ const sides = [
       request: box.dataset.request ?? "",
     });
     box.addEventListener("try-it-pick", () => track("Try-it pick", picks()));
-    box
+    // The hero's sign-up button only, not the page's closing one.
+    document
       .querySelector("[data-try-it-cta]")
       ?.addEventListener("click", () => track("Try-it CTA", picks()));
   }
@@ -494,9 +491,6 @@ const sides = [
     gap: var(--space-2);
     padding-inline-start: var(--space-5);
   }
-  .try-it-cta {
-    justify-self: start;
-  }
 
   /* The hero's intro, passed in from the page, keeps the space it had above
      the box when the two were separate. */
@@ -525,8 +519,7 @@ const sides = [
         "intro people"
         "intro peek"
         "intro requests"
-        "pair pair"
-        "cta cta";
+        "pair pair";
       gap: var(--space-4) var(--space-10);
       align-items: start;
     }
@@ -552,10 +545,6 @@ const sides = [
     }
     .try-it[data-ready] .pair {
       grid-area: pair;
-      margin-top: var(--space-2);
-    }
-    .try-it[data-ready] .try-it-cta {
-      grid-area: cta;
       margin-top: var(--space-2);
     }
     .try-it[data-ready] .picker-label {

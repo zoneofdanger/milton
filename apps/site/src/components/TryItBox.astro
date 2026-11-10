@@ -351,10 +351,12 @@ const sides = [
   .memo-kind {
     font-weight: 600;
   }
-  /* Room at the top for the stamp, so it never covers the email. */
+  /* Room at the top for the stamp, so it covers neither the memo bar's
+     label nor the email. */
   .memo-body {
     position: relative;
-    padding: var(--space-12) var(--sheet-padding) var(--sheet-padding);
+    padding: calc(var(--space-16) + var(--space-3)) var(--sheet-padding)
+      var(--sheet-padding);
   }
   .memo-text {
     font: var(--text-small) / var(--leading-body) var(--font-mono);
@@ -364,7 +366,7 @@ const sides = [
   .memo-stamp {
     position: absolute;
     z-index: 1;
-    top: calc(-1 * var(--space-3));
+    top: var(--space-5);
     right: var(--space-4);
     padding: var(--space-2) var(--space-3);
     border: 2px solid currentColor;
@@ -464,12 +466,6 @@ const sides = [
     .try-it[data-ready] .picker-label {
       flex-basis: auto;
       margin-inline-end: var(--space-2);
-    }
-    .try-it[data-ready] .memo-body {
-      padding-top: var(--space-10);
-    }
-    .try-it[data-ready] .memo-stamp {
-      top: calc(-1 * var(--space-4));
     }
   }
 </style>

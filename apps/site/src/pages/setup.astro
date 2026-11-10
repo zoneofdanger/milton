@@ -1,6 +1,7 @@
 ---
 import SiteLayout from "../layouts/SiteLayout.astro";
 import AssistantSetup from "../components/AssistantSetup.astro";
+import { STANDING_LINE } from "@milton/theme/facts";
 ---
 
 <SiteLayout
@@ -48,10 +49,7 @@ import AssistantSetup from "../components/AssistantSetup.astro";
       Every setup includes a line for your AI’s standing instructions, asking it
       to read Milton before writing:
     </p>
-    <blockquote>
-      Before writing anything for me, call Milton's get_cover_sheet, then
-      get_report.
-    </blockquote>
+    <blockquote>{STANDING_LINE}</blockquote>
     <p>
       Your AI shows it and adds it once you approve, or you paste it yourself;
       each AI below says where it goes. This is a reminder, not a guarantee. Ask

@@ -1,5 +1,6 @@
 /** The served first setup, while the account has no cover sheet and no memos. */
 export { SETUP_PROMPT } from "@milton/theme/setup-prompt";
+import { STANDING_LINE } from "@milton/theme/facts";
 
 const example = JSON.stringify(
   {
@@ -24,7 +25,7 @@ export const setupScript = [
   "1. Confirm the connection works only after a successful get_cover_sheet read.",
   "2. First ask them to paste about five things they wrote themselves and sent (emails, messages, posts), unedited, and tell them Milton keeps each as a memo so drafts sound like them. Save each as its own memo, exactly as pasted, with only final, a one-line context and a kind (no first_draft, mode, rounds or tweaks), and tell them each receipt. Use only their own writing; skip automated, forwarded and other people's text, and anything holding secrets. If they'd rather start with something to write or clean up, do that, then come back.",
   '3. Then offer to start the cover sheet: ask for a few short lines every draft should follow, such as "no em dashes" or "sign off –P", and add each line they give you, in their words, with cover_sheet. Don\'t suggest lines from their writing.',
-  '4. Every setup includes the standing instruction: "Before writing anything for me, call Milton\'s get_cover_sheet, then get_report." Show it and ask on its own; add it where this AI supports standing instructions only after they agree, otherwise show where they can paste it.',
+  `4. Every setup includes the standing instruction: "${STANDING_LINE}" Show it and ask on its own; add it where this AI supports standing instructions only after they agree, otherwise show where they can paste it.`,
   "A pasted memo (fictional; replace it with the person's own writing):\n```json\n" +
     example +
     "\n```",

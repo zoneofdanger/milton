@@ -8,7 +8,8 @@
     "./base": "./base.css",
     "./mono-site": "./mono-site.css",
     "./brand": "./brand.ts",
-    "./setup-prompt": "./setup-prompt.ts"
+    "./setup-prompt": "./setup-prompt.ts",
+    "./facts": "./facts.ts"
   },
   "scripts": {
     "check-types": "tsc --noEmit"

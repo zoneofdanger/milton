@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { PRICE_USD, STANDING_LINE, TRIAL_DAYS } from "@milton/theme/facts";
 
 // Copy drifts wherever no test reads it. These checks read the copy people see.
 const root = new URL("../../", import.meta.url).pathname;
@@ -67,4 +68,42 @@ test("user copy uses none of the retired product words", () => {
     }
   }
   expect(hits).toEqual([]);
+});
+
+/** Trial-length claims; the scoreboard's "the 30 days before" is a window, not
+ * the trial. Claims may wrap and use curly apostrophes. */
+const TRIAL_CLAIMS = [
+  /(\d+)[\s‑-]+day(?:\s+\w+)?\s+trial/gi,
+  /free\s+for\s+(\d+)\s+days/gi,
+  /first\s+(\d+)\s+days[’']?\s+are\s+free/gi,
+  /\bthe\s+(\d+)\s+days\b(?![’']?\s+before)/gi,
+];
+const PRICES = /\$(\d+\.\d{2})(?!\d)/g;
+
+test("copy states the standing line, trial length and price that code uses", () => {
+  expect(read("README.md")).toContain(STANDING_LINE);
+  const wrong: string[] = [];
+  let trials = 0;
+  let prices = 0;
+  for (const file of tracked(
+    ":(glob)apps/site/src/pages/*.astro",
+    ":(glob)server/src/*.tsx",
+  )) {
+    const text = read(file);
+    for (const claim of TRIAL_CLAIMS)
+      for (const match of text.matchAll(claim)) {
+        trials++;
+        if (Number(match[1]) !== TRIAL_DAYS)
+          wrong.push(`${file}:${lineOf(text, match.index)}: ${match[0]}`);
+      }
+    for (const match of text.matchAll(PRICES)) {
+      prices++;
+      if (match[1] !== PRICE_USD)
+        wrong.push(`${file}:${lineOf(text, match.index)}: ${match[0]}`);
+    }
+  }
+  expect(wrong).toEqual([]);
+  // The patterns still find the claims they guard.
+  expect(trials).toBeGreaterThan(5);
+  expect(prices).toBeGreaterThan(5);
 });

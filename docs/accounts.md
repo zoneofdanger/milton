@@ -150,6 +150,9 @@ The app never handles passwords or native cookies.
 - Every auth message replies to `AUTH_MAIL_REPLY_TO` (default `support@meetmilton.com`,
   validated as one address) through Resend's `reply_to`, bound into the encrypted
   message like the sender; the plain-text body is unchanged.
+- An auth revision from before the mail queue (native 006) sends mail inline during
+  the request. It is not a safe rollback target or a mixed writer: recover with a
+  compatible revision that has the queue, or repair forward.
 - Auth-only mail functions lease one original message at a time for bounded delivery,
   stable job-id idempotency, finite retries and a shared Retry-After pause capped at 24
   hours by worker and SQL across passes; native authority never rebinds to a later email

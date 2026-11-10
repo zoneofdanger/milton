@@ -64,12 +64,27 @@ covers:
 
 ## Starting a trial
 
-- With trials on, a new account gets a `trial_accounts` row at admission
-  ([accounts](accounts.md)), and the subscription backfill gives existing accounts
-  theirs ([hosting](hosting.md)). The row's `started_at` is the account's creation time,
-  which nothing reads; Stripe's `trial_end` ends the trial. `paid_through` is unread.
-- A trial row with no status gets the 30-day Stripe trial when billing is configured; no
-  row, no status or billing disabled calls no Stripe API.
+- A new account gets a `trial_accounts` row at account creation, in the admission
+  transaction ([accounts](accounts.md)), with the account's creation time as
+  `started_at`: with no status while trials are on, or `canceled` when its
+  trial-eligibility fingerprint belongs to an earlier account, whether trials are on or
+  off. A test account gets no row.
+- An existing account with no row gets one only from the owner-run subscription backfill
+  ([hosting](hosting.md)), which enrolls it with no status and its creation time as
+  `started_at`. No sign-in, read or save adds a row to an existing account, so existing
+  early access never acquires a payment gate implicitly.
+- The trial gate reads neither `started_at` nor `paid_through`. The backfill reads
+  `started_at`: a row with no status whose `started_at` is before its account's creation
+  is a returning deleted identity, which the backfill marks `canceled` (on `--apply`)
+  and never gives a trial.
+- `ensureSubscription`, run by admission at sign-in and by the backfill, does nothing
+  without billing configured, for a test account, for an account with no trial row, or
+  for a row that already has a status; an account whose deletion has begun is refused
+  with `account_deleting`. For an enrolled row with no status it calls Stripe: it
+  creates or reuses the customer, lists its subscriptions, and stores the deciding one,
+  or creates a subscription with the 30-day trial (card saved on the subscription; a
+  trial that ends with no payment method cancels). Stripe's `trial_end` then ends the
+  trial.
 - Subscription creation locks the trial row across customer, list and create;
   minute-based idempotency keeps the known remote-success/local-timeout ambiguity across
   a minute boundary.
@@ -123,6 +138,10 @@ covers:
 - `stripe_events` keeps each event's ID, type and body hash, never the payload.
 - The next request rechecks access, so reconnecting an AI after a status change is
   unnecessary.
+- The Stripe state columns (`stripe_*`, `subscription_status` and the dates) are written
+  only from what Stripe answers, never from MCP or browser input: MCP may update only a
+  trial row's `notice_stage` (owner file `005`), and the billing routes take no state
+  from their forms.
 
 ## Checkout and portal
 

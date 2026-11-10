@@ -106,12 +106,10 @@ production order and snapshots are in [the hosting runbook](../server/deploy/REA
 
 ## What the schema enforces
 
-- The memo tables (`0012`) check each column's shape: medium, one-line summary,
-  audience and purpose; the first-draft state matching the first draft and mode;
-  non-blank words up to 256 KiB; rounds 0 to 1000; change 0 to 1; the tier; and at most
-  10 served tweaks, only with a report id. Kind labels are 1 to 60 characters and unique
-  per account in any letter case, tweak forms unique per account, and cover sheet
-  versions positive and at most 1,500 characters.
+- The memo tables (`0012`) check each column's shape against the memo bounds in
+  [memos](memos.md#bounds): the first-draft state matching the first draft and mode, the
+  tier, and served tweaks only with a report id. Kind labels and tweak forms are unique
+  per account (labels in any letter case), and cover sheet versions are positive.
 - A memo's search vector (summary, purpose, audience and final, English) is a generated
   column ([reports](reports.md)).
 - Account erasure cascades every memo, kind, tweak, citation, served report, cover sheet

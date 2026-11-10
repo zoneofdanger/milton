@@ -60,6 +60,12 @@ The app never handles passwords or native cookies.
   repeated character or on the inline or pinned common-password lists. The before-hook
   refuses it before native reads or spends a reset token, so a refused reset can retry
   with the same link. New-password fields carry `minlength="8"`.
+- Native Better Auth 1.7.18 scrypt performs NFKC, so equivalent forms share a password.
+  The pinned common-password list is a local normalized hash list, checked without
+  network transmission; it is not an exhaustive compromise database. Native's code-unit
+  maximum of 256 accommodates 128 astral characters; the endpoint hook enforces the
+  128-code-point ceiling, and original and normalized expansion bounds are both checked
+  before expensive hashing.
 - A 4xx refusal of the sign-up, sign-in, reset or change-password form re-renders that
   page (status 400, or 429 when rate-limited) with the message in a `role="alert"`
   paragraph, refilling the typed name, email, sign-in continuation and reset token but
@@ -161,7 +167,12 @@ The app never handles passwords or native cookies.
   state/nonce/verifier, an exact callback, signature, issuer, audience and subject
   checks and matching UserInfo/opaque-token proof.
 - Identity-only app sessions last at most one absolute hour and never outlive their
-  native opaque token; renewal starts a new SSO flow with no refresh or offline scope.
+  native opaque token (one hour); renewal is a new state/nonce/PKCE code flow through
+  the auth SSO session, with no refresh or offline scope, never a restamp of old
+  authority.
+- The native SSO session lasts seven days with database-backed rolling renewal (renewed
+  at most daily). Sensitive operations, such as creating a connection key or deleting
+  the account, require a sign-in within the last five minutes.
 - An app session row holds the cookie's SHA-256, the native issuer, subject, sid,
   binding, incarnation, generation and verified email, and its expiry. The native access
   token is used only within the sign-in request (UserInfo and introspection) and never

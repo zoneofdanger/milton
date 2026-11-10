@@ -152,8 +152,8 @@ export function connectSteps(empty: boolean, mcpUrl: string) {
       </ol>
       {empty && (
         <p>
-          Your account starts empty; paste something you wrote and ask your AI
-          to clean it up, with older writing optional.
+          Your account starts empty; start by pasting about five things you
+          wrote and sent.
         </p>
       )}
     </section>
@@ -310,8 +310,8 @@ function sheet({
           <p class="empty-placeholder">No memos on file yet.</p>
           <p>
             <a href="/assistants#connect">Follow the setup steps</a> to connect
-            an AI, then paste something you wrote and ask it to clean it up.
-            When you accept a final, your AI keeps a memo here.
+            an AI, then paste about five things you wrote and sent. Your AI
+            keeps each as a memo here.
           </p>
           <p>Once connected, copy this prompt into your AI:</p>
           <blockquote class="setup-copy">

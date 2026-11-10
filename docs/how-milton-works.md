@@ -283,12 +283,12 @@ Files: `server/src/store/setup.ts`, `packages/theme/setup-prompt.ts`.
 - Setup is served while `get_cover_sheet.is_empty` says the account has no cover sheet and no memos; the AI offers it once, a request to set up Milton accepts it, and a declined offer is not repeated.
 - Setup never blocks a writing task, never reads an inbox, connects mail or imports anything the person didn't paste.
 - The connection is confirmed only after a successful `get_cover_sheet` read.
-- The AI helps with a real task first: it reads `get_report` for that task, saves the memo when the person accepts the final, and tells them its receipt.
-- It offers to keep a few pieces the person wrote and pastes, each a final-only memo with context and a kind; only their own writing, skipping automated, forwarded and other people's text and anything holding secrets.
-- It offers to start the cover sheet with lines the person gives, in their words, never suggested from their writing.
+- The AI first asks the person to paste about five things they wrote and sent, unedited, saying Milton keeps each as a memo, and saves each as a final-only memo exactly as pasted, with context and a kind, telling them each receipt; only their own writing, skipping automated, forwarded and other people's text and anything holding secrets.
+- A writing task the person brings comes first: the AI reads `get_report` for it, saves the memo when they accept the final, then returns to setup.
+- Then it offers to start the cover sheet with lines the person gives, in their words, never suggested from their writing.
 - Every setup includes the standing instruction: the AI shows it and asks on its own, adding it only after the person agrees, or shows where to paste it.
 - The script carries one fictional final-only memo as a JSON example.
-- The shared setup prompt (the site widget and the app's empty state) asks the AI to connect, read what is on file, help with a real task, keep the accepted final as a memo with a one-line receipt, optionally keep pasted writing and cover sheet lines, show the standing line and add it once the person says yes, and never wait on any of it.
+- The shared setup prompt (the site widget and the app's empty state) asks the AI to connect, read what is on file, ask first for about five pieces the person wrote and sent and keep each as a memo exactly as pasted, take optional cover sheet lines, show the standing line and add it once the person says yes, help with a writing or clean-up task first if the person would rather, and never wait on any of it.
 
 ## Sign-in and accounts
 

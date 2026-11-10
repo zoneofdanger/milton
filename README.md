@@ -48,9 +48,9 @@ The hosted service is at [meetmilton.com](https://meetmilton.com), in early acce
    then complete sign-in and approve the connection. Availability depends on the
    AI and your plan.
 3. Ask your AI to read your Milton cover sheet. An empty account offers setup once:
-   help with something you're writing now, keep a few pieces you paste, and start
-   your cover sheet in your words. Milton needs no inbox connection, and none of
-   this has to happen before your AI helps.
+   paste about five things you wrote and sent, kept as memos exactly as pasted, then
+   start your cover sheet in your words. Milton needs no inbox connection, and none
+   of this has to happen before your AI helps.
 4. For the next email or DM, give your AI the facts. It reads the report for that
    draft and writes. When you accept the final, it keeps the memo.
 

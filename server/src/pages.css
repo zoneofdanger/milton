@@ -456,6 +456,15 @@ main > nav + .tps-form {
 .tweak-row p {
   margin: 0 0 var(--space-2);
 }
+/* A tweak's counts sit on their own row, each label kept with its value. */
+.tweak-row .tweak-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--space-3);
+}
+.tweak-counts span {
+  white-space: nowrap;
+}
 .memo-head {
   display: flex;
   flex-wrap: wrap;

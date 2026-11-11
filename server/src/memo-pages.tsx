@@ -426,18 +426,16 @@ function sheet({ view, email, date, comment, csrf, notices }: SheetView) {
             {view.tweaks.map((t) => (
               <li class="tweak-row">
                 <p>
-                  <span class="typed">{t.text}</span>{" "}
-                  <span class="report-counts">
-                    {[
-                      counted(t.memos, "memo"),
-                      ...(t.served
-                        ? [
-                            `served ${t.served}`,
-                            `needed again ${t.needed_again}`,
-                          ]
-                        : []),
-                    ].join(" · ")}
-                  </span>
+                  <span class="typed">{t.text}</span>
+                </p>
+                <p class="report-counts tweak-counts">
+                  <span>{counted(t.memos, "memo")}</span>
+                  {t.served > 0 && (
+                    <>
+                      <span>served {String(t.served)}</span>
+                      <span>needed again {String(t.needed_again)}</span>
+                    </>
+                  )}
                 </p>
                 <div class="memo-actions">
                   <form method="post" action="/tps/tweaks/delete">

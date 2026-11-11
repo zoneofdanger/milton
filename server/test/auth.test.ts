@@ -1680,7 +1680,7 @@ test("the TPS page lists memos newest first, escaped, opens each only for its ow
     );
     // The untouched memo was served the tweak and did not need it again.
     expect(html).toContain(
-      '<span class="typed">no warm-up opener &lt;b&gt;</span> <span class="report-counts">1 memo · served 1 · needed again 0</span>',
+      '<p><span class="typed">no warm-up opener &lt;b&gt;</span></p><p class="report-counts tweak-counts"><span>1 memo</span><span>served 1</span><span>needed again 0</span></p>',
     );
     // Newest first.
     const at = (id: string) => html.indexOf(`href="/tps/memo/${id}"`);

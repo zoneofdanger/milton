@@ -116,17 +116,25 @@ body), each request bounded at 15 s:
    must come back as kind `e2e check`, tier `own`, receipt `Kept memo: e2e check, your words.`
 8. `fresh_read`: a new MCP session's `get_report` must serve exactly that memo, its
    situation line and its words.
-9. `forget_memo`, `cleanup`: `forget_memos` removes it; a new session must read an empty
-   account (no memos, no tweaks, an empty report) with the baseline's version.
+9. `save_drafted`: `create_memo` saves a fictional edit-mode memo marked with this run, a
+   first draft and a final differing in one place, with one change quoting it (content,
+   by the person, no tweak), so code's diff and quote check run in production. It must
+   come back as kind `e2e check`, tier `own`, changes `{found: 1, labelled: 1}`, receipt
+   `Kept memo: e2e check, 0 rounds.` Edit mode keeps it the person's words, so a crashed
+   run's leftover passes the safety gate like the first.
+10. `forget_memo`, `cleanup`: `forget_memos` removes both, with the change; a new
+    session must read an empty account (no memos, no tweaks, an empty report) with the
+    baseline's version.
 
 Exit 0 only when every step passed; otherwise the last line names the failing step and a
 fixed error code, and the exit is 1.
 
 **Footprint per run**, measured on the rehearsal (`auth-integration.ts` asserts it). No memo
-stays: the run saves one and forgets it. Rows that stay as long as the account: 2
-`save_requests` receipts (save, forget) and 3 `served_reports` (three reads), about 10 small
-rows a day; one `memo_kinds` row on the first run only; no cover sheet, tweak or citation. A
-crashed run's leftover forget adds one more receipt. Pruned: 8 `usage_calls` rows (deleted
+stays: the run saves two and forgets them. Rows that stay as long as the account: 3
+`save_requests` receipts (two saves, forget) and 3 `served_reports` (three reads), about 12
+small rows a day; one `memo_kinds` row on the first run only; no cover sheet, tweak, citation
+or change. A crashed run's leftover forget adds one more receipt. Pruned: 9 `usage_calls`
+rows (deleted
 after 90 days). Short-lived auth rows: one native session
 (7 days), one app session (1 hour), one admission correlation (1 day), the app's code-flow
 token and binding rows, all removed by expiry, later sign-ins and the maintenance job; at most about eight native sessions are live at once,

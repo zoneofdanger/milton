@@ -48,8 +48,9 @@ covers:
     quoted thread and an automatic signature and says so, and changes nothing else.
     Other people's names stay as written; an email that shouldn't be kept as it is gets
     skipped, never edited.
-  - It saves only the emails the person approves by number, one final-only memo each,
-    and tells them each receipt. The step never changes the cover sheet or forgets
+  - It saves only the emails the person approves by number, one final-only memo each
+    (only final, a context and a kind: no first_draft, mode, rounds or changes) and
+    tells them each receipt. The step never changes the cover sheet or forgets
     memos. Milton can't check that what a connector returned matches the sent email.
 - With no mail tool, a no or a failed search, the AI asks the person to paste about
   five things they wrote and sent (emails, messages, posts), unedited, saying Milton

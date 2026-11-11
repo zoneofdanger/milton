@@ -44,7 +44,8 @@ What each change does to memos, tweaks and the cover sheet is in [memos](memos.m
   newest 200 memos (older ones stay in the export), every tweak with its count (most
   cited first) and score, and the scoreboard ([memos](memos.md)).
 - Each tweak shows its memo count and, once it has been served, "served S" and "needed
-  again M" on a row under its text, as raw counts, never a ratio.
+  again M" on a row under its text, as raw counts, never a ratio. Rewording a tweak
+  restarts both counts ([memos](memos.md#tweaks)).
 - Each listed memo shows its time, AI, medium, kind, summary, audience, purpose, mode,
   rounds, change, tier, the tweaks its report served (those still on file) and the
   tweaks it taught; its first draft and final load only when that memo is opened.
@@ -54,7 +55,10 @@ What each change does to memos, tweaks and the cover sheet is in [memos](memos.m
   kept, with a note that an AI connected with Read and write changes it; an empty one
   says "No cover sheet yet." and how to start one. There is no cover sheet form
   (Peter, 2026-11-10; [memos](memos.md)).
-- The person can forget one memo, and delete or reword a tweak.
+- The person can forget one memo, and delete or reword a tweak. The store also reads
+  one memo's request, its stored changes (each with its labels and the tweak it taught,
+  while that tweak is on file) and its typed share, and clears a memo's request under
+  the account lock; the memo page's use of them is still to be built.
 - An empty TPS page links to the Connected AIs page and shows the shared setup prompt
   ([setup](setup.md)) to copy; an account with memos gets a shorter prompt for the next
   draft instead.

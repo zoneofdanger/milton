@@ -823,3 +823,30 @@ This week's working files (internal working notes, not published):
 - back-draft-test `back-draft-results.md`: simulated pairs, length 2.6×, kill-list limits;
 - exact-edits-build `report.md`: the retired anchored-replacement design, whose
   uniqueness and no-fuzzy-match rules this matcher shares.
+
+---
+
+## Follow-up notes (after approval)
+
+Added on 2026-11-11, after the offline test; the text above is unchanged.
+
+- **The offline test (E1)** ran on `chat-latest` and spent $2.63 of its $4 cap. Under
+  the one-label-per-spot rule above, 30 of 35 first saves were refused ("two changes
+  label the same spot differently"): on a rewrite, one code spot holds several changes
+  an AI names separately. milton-overlord therefore adopted **per-change rows**: one
+  stored row per accepted change, cut from the stored texts at its quotes and still
+  required to overlap a changed spot, plus an unlabelled row for each spot no change
+  covers. Several changes may share a spot. It also adopted the **locating fold**:
+  `*`, `_` and backticks dropped and em and en dashes read as hyphens, for locating
+  only; stored text stays code's cut.
+- **Tweak inflation.** E1's AI put a tweak on 147 of 150 changes. Peter approved,
+  typing in milton-overlord's pane on 2026-11-11 ("Go with all four, how do we fix
+  inflation?"), shipping the examples, a cap of three tweaks per memo, and "recurring
+  habits only" guidance: a tweak is the exception, most memos teach one or none, and
+  every change is recorded either way.
+- **Plainer tweak wording.** Later that day, relayed by milton-evidence as approved by
+  Peter, served text names a tweak's habit plainly ("no warm-up opener") and adds a
+  condition only when the habit doesn't hold in all the person's writing, in place of
+  "with when it applies".
+- **Examples for every served tweak.** Decision 8's split needs a real account switched
+  on, which was not cleared, so slice 2 serves examples for every served tweak.

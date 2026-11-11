@@ -1004,7 +1004,7 @@ test("a request is the person's typed ask on a drafted memo: trimmed, capped, ne
     });
   expect(drafted("Decline their call, short and kind.")).toEqual({ ok: true });
   expect(drafted("Line one\nLine two")).toEqual({ ok: true });
-  for (const [request, says] of [
+  const requests: [string, string][] = [
     ["", "request is empty"],
     ["x".repeat(601), "over 600 characters"],
     [Array(13).fill("line").join("\n"), "over 12 lines"],
@@ -1013,7 +1013,8 @@ test("a request is the person's typed ask on a drafted memo: trimmed, capped, ne
     ["Answer it.\nOn Tue, Sam wrote:", "quoted or pasted mail"],
     ["Reply.\nFrom: Sam", "quoted or pasted mail"],
     ["subject: lunch", "quoted or pasted mail"],
-  ])
+  ];
+  for (const [request, says] of requests)
     expect(drafted(request)).toMatchObject({
       ok: false,
       code: "invalid_input",

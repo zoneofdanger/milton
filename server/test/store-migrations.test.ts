@@ -1070,7 +1070,12 @@ test("0015 adds memo_changes and the request, changes state and reword columns, 
       )
     ).memo!;
     const rows = () =>
-      pg.query<{ n: number; about: string; by: string; tweak_id: string }>(
+      pg.query<{
+        n: number;
+        about: string;
+        by: string;
+        tweak_id: string | null;
+      }>(
         `SELECT n,about,"by",tweak_id FROM memo_changes WHERE user_id='evidence' ORDER BY n`,
       );
     const tweak = saved.tweaks[0]!.tweak_id;

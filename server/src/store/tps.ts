@@ -14,6 +14,7 @@ import {
   type Medium,
 } from "./memos";
 import { deleteMemos } from "./save";
+import { typedShare } from "./changes";
 import {
   normalizeTweak,
   scoreboard,
@@ -55,7 +56,33 @@ export type TpsView = {
   tweaks: TpsTweak[];
   scoreboard: Scoreboard[];
 };
-export type FullMemo = TpsMemo & { first_draft?: string; final: string };
+/** One stored change, as the memo page lists it (docs/memos.md, "Changes"). */
+export type TpsChange = {
+  n: number;
+  before: string;
+  after: string;
+  truncated: boolean;
+  about: "voice" | "content" | "format" | null;
+  by: "person" | "asked" | "unasked" | null;
+  draft_start: number | null;
+  draft_end: number | null;
+  final_start: number | null;
+  final_end: number | null;
+  /** The tweak this change taught, while it is on file. */
+  tweak?: { id: string; text: string };
+};
+export type FullMemo = TpsMemo & {
+  first_draft?: string;
+  final: string;
+  /** What the person typed to ask for it; never served to an AI. */
+  request?: string;
+  /** itemized or too_large; absent for a memo saved before changes were
+   * listed or without a kept first draft. */
+  changes_state?: "itemized" | "too_large";
+  changes: TpsChange[];
+  /** The share of the final's tokens inside changes the person typed. */
+  typed_share?: number;
+};
 
 /** Memos the page lists, newest first. Older ones stay in the export. */
 export const LISTED_MEMOS = 200;
@@ -152,16 +179,50 @@ export function tpsStore(db: StoreDatabase, userId: string) {
     },
     async readMemo(id: string): Promise<FullMemo | undefined> {
       const [row] = await db.query<
-        MemoRow & { first_draft: string | null; final: string }
-      >(sql`SELECT ${memoColumns},m.first_draft,m.final FROM memos m
+        MemoRow & {
+          first_draft: string | null;
+          final: string;
+          request: string | null;
+          changes_state: "itemized" | "too_large" | null;
+          changes: (Omit<TpsChange, "tweak"> & {
+            tweak: TpsChange["tweak"] | null;
+          })[];
+        }
+      >(sql`SELECT ${memoColumns},m.first_draft,m.final,m.request,m.changes_state,
+        (SELECT coalesce(json_agg(json_build_object('n',c.n,'before',c."before",'after',c."after",
+          'truncated',c.truncated,'about',c.about,'by',c."by",'draft_start',c.draft_start,
+          'draft_end',c.draft_end,'final_start',c.final_start,'final_end',c.final_end,
+          'tweak',CASE WHEN t.id IS NOT NULL THEN json_build_object('id',t.id,'text',t.text) END)
+          ORDER BY c.n),'[]'::json)
+          FROM memo_changes c LEFT JOIN tweaks t ON t.user_id=c.user_id AND t.id=c.tweak_id
+          WHERE c.user_id=m.user_id AND c.memo_id=m.id) AS changes
+        FROM memos m
         LEFT JOIN memo_kinds k ON k.user_id=m.user_id AND k.id=m.kind_id
         WHERE m.user_id=${userId} AND m.id=${id}`);
       if (!row) return undefined;
-      const { first_draft, final, ...rest } = row;
+      const { first_draft, final, request, changes_state, changes, ...rest } =
+        row;
+      const share = changes_state
+        ? typedShare(
+            final,
+            changes.map((c) => ({
+              by: c.by,
+              finalStart: c.final_start,
+              finalEnd: c.final_end,
+            })),
+          )
+        : undefined;
       return {
         ...memo(rest),
         ...(first_draft !== null ? { first_draft } : {}),
         final,
+        ...(request !== null ? { request } : {}),
+        ...(changes_state !== null ? { changes_state } : {}),
+        changes: changes.map(({ tweak, ...c }) => ({
+          ...c,
+          ...(tweak ? { tweak } : {}),
+        })),
+        ...(share !== undefined ? { typed_share: share } : {}),
       };
     },
     /** TPS.md: the cover sheet, the tweaks, and every memo's final grouped by
@@ -221,6 +282,16 @@ export function tpsStore(db: StoreDatabase, userId: string) {
       }
       return parts.join("\n\n") + "\n";
     },
+    /** Clears a memo's request, the person's own ask; its words stay. */
+    removeRequest: (id: string) =>
+      change(
+        async (tx) =>
+          (
+            await tx.query(
+              sql`UPDATE memos SET request=NULL WHERE user_id=${userId} AND id=${id} RETURNING id`,
+            )
+          ).length > 0,
+      ),
     forgetMemo: (id: string) =>
       change(async (tx) => (await deleteMemos(tx, userId, [id])).length > 0),
     deleteAllMemos: () =>
@@ -239,8 +310,9 @@ export function tpsStore(db: StoreDatabase, userId: string) {
             )
           ).length > 0,
       ),
-    /** A reworded tweak keeps its id and citations. A wording another tweak
-     * already has is refused, so each wording stays one tweak. */
+    /** A reworded tweak keeps its id and citations, and its score restarts
+     * from the new text. A wording another tweak already has is refused, so
+     * each wording stays one tweak. */
     rewordTweak: (id: string, text: string) =>
       change(async (tx) => {
         const trimmed = text.trim();
@@ -263,7 +335,9 @@ export function tpsStore(db: StoreDatabase, userId: string) {
         return (
           (
             await tx.query(
-              sql`UPDATE tweaks SET text=${trimmed},norm=${norm} WHERE user_id=${userId} AND id=${id} RETURNING id`,
+              sql`UPDATE tweaks SET text=${trimmed},norm=${norm},
+                text_changed_at=CASE WHEN text IS DISTINCT FROM ${trimmed} THEN clock_timestamp() ELSE text_changed_at END
+                WHERE user_id=${userId} AND id=${id} RETURNING id`,
             )
           ).length > 0
         );

@@ -499,6 +499,37 @@ test("a refused password form stays on its page, keeping email and reset token, 
   expect(busy).toContain("Milton could not confirm the outcome.");
 });
 
+test("consent preselects Read and write when the AI asks for milton:write, else Read only", async () => {
+  const { rmSync } = await import("node:fs");
+  const { createApp } = await import("../src/app.tsx");
+  const assets = await versionedAssets();
+  const app = createApp(
+    {} as unknown as import("../src/provider.ts").AuthService,
+    assets,
+  );
+  rmSync(assets, { recursive: true, force: true });
+  const consent = async (scope: string) => {
+    const query = new URLSearchParams({ client_id: "fictional-ai", scope });
+    const r = await app.request(
+      "https://auth.meetmilton.com/consent?" + query.toString(),
+    );
+    expect(r.status).toBe(200);
+    return await r.text();
+  };
+  const write = await consent("openid milton:read milton:write");
+  expect(write).toContain(
+    '<input type="radio" name="scope" value="openid milton:read"/>',
+  );
+  expect(write).toContain(
+    '<input type="radio" name="scope" value="openid milton:read milton:write" checked=""/>',
+  );
+  const read = await consent("openid milton:read");
+  expect(read).toContain(
+    '<input type="radio" name="scope" value="openid milton:read" checked=""/>',
+  );
+  expect(read).not.toContain("Read and write");
+});
+
 describe("OAuth profile refusals before database access", () => {
   // A pool that never connects: it records the rate-limit statement that
   // every admitted request makes first, and refuses it (or, with network,

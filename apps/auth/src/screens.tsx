@@ -268,13 +268,18 @@ export function Consent({ query }: { query: URLSearchParams }) {
         <fieldset>
           <legend>Choose permission</legend>
           <label class="choice">
-            <input type="radio" name="scope" value={read} checked />
+            <input type="radio" name="scope" value={read} checked={!canWrite} />
             Read only
             <span>Read your cover sheet and reports.</span>
           </label>
           {canWrite ? (
             <label class="choice">
-              <input type="radio" name="scope" value={requested.join(" ")} />
+              <input
+                type="radio"
+                name="scope"
+                value={requested.join(" ")}
+                checked
+              />
               Read and write
               <span>
                 Also save memos with create_memo when you accept a final.

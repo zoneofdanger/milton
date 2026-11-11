@@ -151,7 +151,11 @@ gave.
     share a spot, since a moved sentence is a cut at one spot and an addition at
     another; the change covers every spot its sides touch. Of several occurrences, the
     one overlapping a spot wins; occurrences at different spots are ambiguous, unless
-    only one shares a spot with the other side. Several changes may cover the same spot.
+    only one shares a spot with the other side. More than 50 occurrences at spots are
+    always ambiguous: a real quote of a few words recurs a handful of times, and the
+    cap bounds the check, which runs before the trial gate and the account lock (one
+    letter repeated in an 8 KB request once took a second and a gigabyte). Several
+    changes may cover the same spot.
   - `too_large`: each sent side must occur exactly once in its text, and the two sides
     must differ as sent (unfolded).
   - A quote that fails is refused with `invalid_change` naming the change by number: not

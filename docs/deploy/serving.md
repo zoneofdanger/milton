@@ -10,7 +10,7 @@ covers:
 
 Rewritten in place by the release coordinator at every release, never appended to; the
 release's record goes in [history](../history.md). How to release and roll back:
-[releases](releases.md). As of 2026-11-11 02:17Z (after #100).
+[releases](releases.md). As of 2026-11-11 06:52Z (after #102).
 
 ## Services
 
@@ -21,11 +21,11 @@ release's record goes in [history](../history.md). How to release and roll back:
   Rollback, code only, all four together: `milton-app-flat-1e6d859`,
   `milton-mcp-flat-1e6d859`, `milton-admit-00008-lxx` and the job to image
   `sha256:1be0d2c524a5e5d0f7eb45da8ee9830e0c5b684c5d702792ba5c702de99d8d8d` (#85, `1e6d859`).
-- **Auth and its jobs:** `milton-auth-00020-k77`, `milton-auth-mail` and `milton-auth-maint`
-  on image `sha256:11946548b6e3fc563c11b8e6d2933566a7f90a83d83156e2e4ccf8a0d1d9bf56` (#86,
-  `8faa274`; Cloud Run shows the amd64 manifest digest, not this index digest). Rollback,
-  code only, service and both jobs together: `milton-auth-00019-p4f` and image
-  `sha256:dc55298e668a85c2d126870435264a1aef883afa903fc43bf779fe2e5fdc7165` (#77).
+- **Auth and its jobs:** `milton-auth-00021-2gc`, `milton-auth-mail` and `milton-auth-maint`
+  on image `sha256:d394050c2687a6872655b6075d1e3de9f4c2defe4a05353721dd0ea31ec0a832` (#102,
+  `735937f`; Cloud Run shows the amd64 manifest digest, not this index digest). Rollback,
+  code only, service and both jobs together: `milton-auth-00020-k77` and image
+  `sha256:11946548b6e3fc563c11b8e6d2933566a7f90a83d83156e2e4ccf8a0d1d9bf56` (#86).
 - **Site:** Vercel production deployment of `cd2fa18` (#99's homepage, #100's setup and
   privacy copy).
 - **Secrets:** app `milton-app-env` 4 / `milton-app-key` 2, MCP `milton-mcp-env` 4 /

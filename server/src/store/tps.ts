@@ -8,13 +8,14 @@ import { accountUnavailable, requireActiveAccount } from "./accounts";
 import { StoreError } from "./errors";
 import {
   coverSheetJson,
+  EXAMPLE_SIDE,
   keepMemos,
   MEDIA,
   tweakScore,
   type Medium,
 } from "./memos";
 import { deleteMemos } from "./save";
-import { typedShare } from "./changes";
+import { exampleLine, typedShare } from "./changes";
 import {
   normalizeTweak,
   scoreboard,
@@ -36,6 +37,11 @@ export type TpsMemo = {
   rounds?: number;
   change?: number;
   tier: Tier;
+  /** The request's first line, cut to ASKED_LINE characters. */
+  asked?: string;
+  /** How many changes it lists, Markdown-only ones aside; absent for a memo
+   * saved before changes were listed. */
+  change_count?: number;
   /** Tweaks the report before it served, still on file. */
   served: { id: string; text: string }[];
   /** Tweaks it cites. */
@@ -48,6 +54,8 @@ export type TpsTweak = {
   memos: number;
   served: number;
   needed_again: number;
+  /** Its newest example, in the report's form (docs/reports.md). */
+  example?: string;
 };
 export type TpsView = {
   cover_sheet: { text: string; version: number };
@@ -86,6 +94,8 @@ export type FullMemo = TpsMemo & {
 
 /** Memos the page lists, newest first. Older ones stay in the export. */
 export const LISTED_MEMOS = 200;
+/** A listed memo shows its request's first line, cut to this many characters. */
+export const ASKED_LINE = 120;
 
 const memoColumns = sql`m.id,to_char(m.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"') AS at,
   m.client_json::jsonb AS client,m.medium,k.label AS kind,m.summary,m.audience,m.purpose,m.mode,
@@ -94,10 +104,20 @@ const memoColumns = sql`m.id,to_char(m.created_at AT TIME ZONE 'UTC','YYYY-MM-DD
     FROM tweaks t WHERE t.user_id=m.user_id AND t.id=ANY(m.served_tweak_ids)) AS served,
   (SELECT coalesce(json_agg(json_build_object('id',t.id,'text',t.text) ORDER BY t.text,t.id),'[]'::json)
     FROM tweak_citations c JOIN tweaks t ON t.user_id=c.user_id AND t.id=c.tweak_id
-    WHERE c.user_id=m.user_id AND c.memo_id=m.id) AS taught`;
+    WHERE c.user_id=m.user_id AND c.memo_id=m.id) AS taught,
+  split_part(m.request,E'\n',1) AS asked,
+  CASE WHEN m.changes_state IS NOT NULL THEN (SELECT count(*)::int FROM memo_changes c
+    WHERE c.user_id=m.user_id AND c.memo_id=m.id AND c.about IS DISTINCT FROM 'format') END AS change_count`;
 type MemoRow = Omit<
   TpsMemo,
-  "kind" | "audience" | "purpose" | "mode" | "rounds" | "change"
+  | "kind"
+  | "audience"
+  | "purpose"
+  | "mode"
+  | "rounds"
+  | "change"
+  | "asked"
+  | "change_count"
 > & {
   kind: string | null;
   audience: string | null;
@@ -105,9 +125,22 @@ type MemoRow = Omit<
   mode: "draft" | "edit" | null;
   rounds: number | null;
   change: number | null;
+  asked: string | null;
+  change_count: number | null;
 };
 const memo = (row: MemoRow): TpsMemo => {
-  const { kind, audience, purpose, mode, rounds, change, ...rest } = row;
+  const {
+    kind,
+    audience,
+    purpose,
+    mode,
+    rounds,
+    change,
+    asked,
+    change_count,
+    ...rest
+  } = row;
+  const chars = asked === null ? [] : Array.from(asked);
   return {
     ...rest,
     ...(kind !== null ? { kind } : {}),
@@ -116,8 +149,43 @@ const memo = (row: MemoRow): TpsMemo => {
     ...(mode !== null ? { mode } : {}),
     ...(rounds !== null ? { rounds } : {}),
     ...(change !== null ? { change } : {}),
+    ...(asked !== null
+      ? {
+          asked:
+            chars.length > ASKED_LINE
+              ? chars.slice(0, ASKED_LINE).join("") + "…"
+              : asked,
+        }
+      : {}),
+    ...(change_count !== null ? { change_count } : {}),
   };
 };
+
+// Each tweak with its count, score and newest example: the report's pick
+// without an intent, among voice changes naming it with both sides short
+// enough (docs/reports.md).
+const tweakColumns = (
+  userId: string,
+) => sql`(SELECT coalesce(json_agg(json_build_object('id',t.id,'text',t.text,'memos',
+    (SELECT count(*) FROM tweak_citations c WHERE c.user_id=t.user_id AND c.tweak_id=t.id),
+    'served',s.served,'needed_again',s.needed_again,
+    'example',(SELECT json_build_object('before',c."before",'after',c."after")
+      FROM memo_changes c JOIN memos m ON m.user_id=c.user_id AND m.id=c.memo_id
+      WHERE c.user_id=t.user_id AND c.tweak_id=t.id AND c.about='voice'
+        AND char_length(c."before")<=${EXAMPLE_SIDE} AND char_length(c."after")<=${EXAMPLE_SIDE}
+      ORDER BY m.created_at DESC,m.id,c.n LIMIT 1)) ORDER BY t.text,t.id),'[]'::json)
+    FROM tweaks t ${tweakScore} WHERE t.user_id=${userId})`;
+type TweakRow = Omit<TpsTweak, "example"> & {
+  example: { before: string; after: string } | null;
+};
+/** Most cited first, each with its example line. */
+const tweakList = (rows: TweakRow[]): TpsTweak[] =>
+  rows
+    .toSorted((a, b) => b.memos - a.memos || a.text.localeCompare(b.text))
+    .map(({ example, ...t }) => ({
+      ...t,
+      ...(example ? { example: exampleLine(example) } : {}),
+    }));
 
 export function tpsStore(db: StoreDatabase, userId: string) {
   /** One change in one transaction under the account lock. */
@@ -139,7 +207,7 @@ export function tpsStore(db: StoreDatabase, userId: string) {
           cover: { version: number; text: string } | null;
           keep_memos: boolean;
           memos: MemoRow[];
-          tweaks: TpsTweak[];
+          tweaks: TweakRow[];
           scored: {
             mode: "draft" | "edit";
             rounds: number;
@@ -153,10 +221,7 @@ export function tpsStore(db: StoreDatabase, userId: string) {
           (SELECT coalesce(json_agg(to_jsonb(r)-'created' ORDER BY r.created DESC,r.id),'[]'::json) FROM (
             SELECT ${memoColumns},m.created_at AS created FROM memos m LEFT JOIN memo_kinds k ON k.user_id=m.user_id AND k.id=m.kind_id
             WHERE m.user_id=${userId} ORDER BY m.created_at DESC,m.id LIMIT ${LISTED_MEMOS}) r) AS memos,
-          (SELECT coalesce(json_agg(json_build_object('id',t.id,'text',t.text,'memos',
-            (SELECT count(*) FROM tweak_citations c WHERE c.user_id=t.user_id AND c.tweak_id=t.id),
-            'served',s.served,'needed_again',s.needed_again) ORDER BY t.text,t.id),'[]'::json)
-            FROM tweaks t ${tweakScore} WHERE t.user_id=${userId}) AS tweaks,
+          ${tweakColumns(userId)} AS tweaks,
           (SELECT coalesce(json_agg(json_build_object('mode',mode,'rounds',rounds,'change',change,
             'untouched',final=first_draft,'at',created_at) ORDER BY created_at),'[]'::json)
             FROM memos WHERE user_id=${userId} AND first_draft_state='kept' AND change IS NOT NULL) AS scored`)
@@ -169,9 +234,7 @@ export function tpsStore(db: StoreDatabase, userId: string) {
         },
         keep_memos: row.keep_memos,
         memos: row.memos.map(memo),
-        tweaks: row.tweaks.toSorted(
-          (a, b) => b.memos - a.memos || a.text.localeCompare(b.text),
-        ),
+        tweaks: tweakList(row.tweaks),
         scoreboard: scoreboard(
           row.scored.map((s) => ({ ...s, at: new Date(s.at) })),
         ),
@@ -225,28 +288,27 @@ export function tpsStore(db: StoreDatabase, userId: string) {
         ...(share !== undefined ? { typed_share: share } : {}),
       };
     },
-    /** TPS.md: the cover sheet, the tweaks, and every memo's final grouped by
-     * medium, newest first. */
+    /** TPS.md: the cover sheet, the tweaks with their examples, and every
+     * memo's final grouped by medium, newest first, with what the person
+     * asked. First drafts stay out. */
     async exportTps(): Promise<string> {
       const [row] = await db.query<{
         open: boolean;
         cover: { text: string } | null;
-        tweaks: TpsTweak[];
+        tweaks: TweakRow[];
         memos: {
           medium: Medium;
           kind: string | null;
           summary: string;
           at: string;
           final: string;
+          request: string | null;
         }[];
       }>(sql`SELECT EXISTS(SELECT 1 FROM users WHERE id=${userId} AND status='active') AS open,
         ${coverSheetJson(userId)} AS cover,
-        (SELECT coalesce(json_agg(json_build_object('id',t.id,'text',t.text,'memos',
-          (SELECT count(*) FROM tweak_citations c WHERE c.user_id=t.user_id AND c.tweak_id=t.id),
-          'served',s.served,'needed_again',s.needed_again) ORDER BY t.text,t.id),'[]'::json)
-          FROM tweaks t ${tweakScore} WHERE t.user_id=${userId}) AS tweaks,
+        ${tweakColumns(userId)} AS tweaks,
         (SELECT coalesce(json_agg(json_build_object('medium',m.medium,'kind',k.label,'summary',m.summary,
-          'at',to_char(m.created_at AT TIME ZONE 'UTC','YYYY-MM-DD'),'final',m.final) ORDER BY m.created_at DESC,m.id),'[]'::json)
+          'at',to_char(m.created_at AT TIME ZONE 'UTC','YYYY-MM-DD'),'final',m.final,'request',m.request) ORDER BY m.created_at DESC,m.id),'[]'::json)
           FROM memos m LEFT JOIN memo_kinds k ON k.user_id=m.user_id AND k.id=m.kind_id
           WHERE m.user_id=${userId}) AS memos`);
       if (!row!.open) throw accountUnavailable();
@@ -261,13 +323,10 @@ export function tpsStore(db: StoreDatabase, userId: string) {
       if (row!.tweaks.length)
         parts.push(
           "## Tweaks",
-          row!.tweaks
-            .toSorted(
-              (a, b) => b.memos - a.memos || a.text.localeCompare(b.text),
-            )
+          tweakList(row!.tweaks)
             .map(
               (t) =>
-                `- ${t.text} (${t.memos} memo${t.memos === 1 ? "" : "s"}${t.served ? `; served ${t.served}, needed again ${t.needed_again}` : ""})`,
+                `- ${t.text} (${t.memos} memo${t.memos === 1 ? "" : "s"}${t.served ? `; served ${t.served}, needed again ${t.needed_again}` : ""})${t.example ? `\n  ${t.example}` : ""}`,
             )
             .join("\n"),
         );
@@ -277,7 +336,7 @@ export function tpsStore(db: StoreDatabase, userId: string) {
         parts.push(`## ${medium[0]!.toUpperCase()}${medium.slice(1)}`);
         for (const m of mine)
           parts.push(
-            `### ${[m.kind, m.at].filter(Boolean).join(" · ")}\n${m.summary}\n\n${quote(m.final)}`,
+            `### ${[m.kind, m.at].filter(Boolean).join(" · ")}\n${m.summary}${m.request !== null ? `\nAsked: ${m.request}` : ""}\n\n${quote(m.final)}`,
           );
       }
       return parts.join("\n\n") + "\n";

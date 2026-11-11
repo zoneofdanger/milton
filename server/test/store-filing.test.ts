@@ -601,7 +601,7 @@ test("a tweak's served and needed-again counts come from kept-draft memos of its
       ["Sign off –P", 1, 2, 0],
     ]);
     expect(await tps.exportTps()).toContain(
-      "## Tweaks\n\n- No warm-up opener (4 memos; served 2, needed again 1)\n- Short paragraphs (1 memo)\n- Sign off –P (1 memo; served 2, needed again 0)\n",
+      '## Tweaks\n\n- No warm-up opener (4 memos; served 2, needed again 1)\n  cut: "Hi there!"\n- Short paragraphs (1 memo)\n  cut: "Hi there!"\n- Sign off –P (1 memo; served 2, needed again 0)\n  cut: "Hi there!"\n',
     );
   } finally {
     await local.dispose();

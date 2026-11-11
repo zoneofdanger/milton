@@ -538,6 +538,31 @@ button.compact {
   border: 1px dashed var(--input);
   background: var(--surface);
 }
+/* A tweak's newest example, under its line on the TPS page. */
+.tweak-example .typed {
+  color: var(--muted);
+}
+/* "What changed" on the memo page: one row per change, quotes wrapping. */
+.change-list {
+  list-style: none;
+  margin: 0 0 var(--space-4);
+  padding: 0;
+}
+.change-row {
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--hairline);
+}
+.change-row p {
+  margin: 0 0 var(--space-2);
+}
+.change-row .tweak-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--space-3);
+}
+.memo-text + .small-note {
+  margin-top: var(--space-2);
+}
 .memo-tweak-list {
   margin: 0 0 var(--space-4);
   padding-left: var(--space-6);

@@ -17,8 +17,8 @@ hands over the right one.
 
 - **Write a short cover sheet.** It's your own voice guide: hard lines every draft
   follows, such as "no em dashes" or "sign off –P". Tell your AI "remember …" or "add to
-  my cover sheet" and it adds your exact line, or edit it on your TPS page. It's capped
-  at 1,500 characters.
+  my cover sheet" and it adds your exact line, or ask it to remove one. Your TPS page
+  shows it. It's capped at 1,500 characters.
 - **Accept a final; your AI keeps a memo.** When you approve a draft, say it's done or
   copy it to use, your AI saves a memo with `create_memo` without asking and tells you
   in one line ("Kept memo: vendor decline, 2 rounds, tweaks: no warm-up opener."). A

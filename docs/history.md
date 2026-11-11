@@ -23,6 +23,31 @@ Earlier records are in git history: the last runbook holding them is at commit 4
 (`git show 492b96a:server/deploy/README.md`), and the runbook's later versions are in
 `git log -p server/deploy/README.md` until 2026-11-10, when this file began.
 
+## 2026-11-11: served instructions reuse the person's own words (PR #108)
+
+- **#108 (Peter's "ship 108", typed in milton-overlord's pane wH:p1F on 2026-11-11 after
+  milton-overlord's "CI is green on #108, the own-words sentence, at head b120aa5 … It's
+  ready to ship when you say "ship 108"."; relayed verbatim by milton-overlord; built by its
+  temporary subagent; served copy only, so CI review), `82ef571`:** the read-write
+  instructions gain one paragraph after "Before writing or editing…": when the person says
+  what to write, reuse their phrases word for word where they fit, add only a greeting, a
+  sign-off and connecting words, and don't expand. Read-only instructions unchanged; no
+  schema change. The tests behind it are in
+  [own-words-sentence-2026-11](research/own-words-sentence-2026-11.md). Server image
+  `sha256:e70e8e769eaaa5032bbe5a0341e4253017a4badaadaaf55685ed1b108df02cf8` (amd64
+  manifest `sha256:d14de938…`; bundle carries the sentence once): admit
+  `milton-admit-00011-jd9` at 19:27:52Z (2026-11-11), app and MCP `milton-*-own-82ef571` as
+  tagged no-traffic revisions, traffic moved at 19:28:48Z, `milton-e2e-daily` at
+  19:28:52Z. Site: Vercel production deployment of `82ef571` (no site file changed). Live:
+  app and MCP `/health` and auth `/api/auth/ok` 200, app home 200, MCP 401
+  unauthenticated, admit 403 without a token, forms probe PASS, `milton-e2e-daily-gdvv8`
+  passed. Gate at 19:39Z: clean; no request reached an older revision after 19:30:30Z; no error, `store_unavailable` or `permission denied` lines since 19:27Z. Checks: PR CI green on `b120aa5`, which was based on main
+  `6e92b0a`, so the merged tree is the same: types, 160 tests, format and agent-docs 0.
+  Not observed: a real client (Claude Code, the ChatGPT app, the Claude app) following the
+  sentence; connected AIs show it after they reconnect. Rollback, code only, all four
+  together: `milton-*-cover-16341d6`, `milton-admit-00010-gn4` and the daily job to image
+  `sha256:193135d2…`.
+
 ## 2026-11-11: the web cover sheet is read only (PR #103)
 
 - **#103 (Peter's "Ship 103", typed in milton-overlord's pane wH:p1F on 2026-11-10 after

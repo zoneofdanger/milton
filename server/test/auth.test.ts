@@ -1740,9 +1740,9 @@ test("a memo page lists what changed and what the person asked, and Remove clear
     const saved = await fixture.author.saveMemo(
       memoSave({
         first_draft:
-          "Hi Dana, I hope you're well! Thanks so much for the demo. It was a **useful** look at the tool.\n\nWe can't take a call this month.\n\nBest,\nPeter",
+          "Hi Dana, I hope you're well! Thanks so much for the demo. It was a **useful** look at the tool.\n\nWe can't take a call this month.\n\nBest,\nSam",
         final:
-          "Dana — thanks for the demo. It was a useful look at the tool.\n\nWe'll pass for now.\n\n–P",
+          "Dana — thanks for the demo. It was a useful look at the tool.\n\nWe'll pass for now.\n\n–S",
         mode: "draft",
         rounds: 2,
         request: asked,

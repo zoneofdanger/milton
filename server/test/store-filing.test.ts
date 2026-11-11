@@ -767,13 +767,13 @@ test("the scoreboard appears at ten scored memos, compares first five with lates
 test("code lists what changed: merged spots, Markdown-only spots about format, insertions and deletions; past its bounds the list is too large", () => {
   const list = changeList(
     "Hi Dana, I hope you're well!\n\nWe can't meet Thursday.\n\nBest,\nAI",
-    "Dana —\n\nWe can't meet **Thursday**.\n\nBest,\nAI\n–P",
+    "Dana —\n\nWe can't meet **Thursday**.\n\nBest,\nAI\n–S",
   );
   expect(list.state).toBe("itemized");
   const spots = list.state === "itemized" ? list.spots : [];
   const first =
     "Hi Dana, I hope you're well!\n\nWe can't meet Thursday.\n\nBest,\nAI";
-  const final = "Dana —\n\nWe can't meet **Thursday**.\n\nBest,\nAI\n–P";
+  const final = "Dana —\n\nWe can't meet **Thursday**.\n\nBest,\nAI\n–S";
   expect(
     spots.map((s) => [
       first.slice(s.draftStart, s.draftEnd),
@@ -786,7 +786,7 @@ test("code lists what changed: merged spots, Markdown-only spots about format, i
     // Bold added around a word: only Markdown marks differ.
     ["Thursday", "**Thursday**", true],
     // An insertion has an empty first-draft side.
-    ["", "–P", false],
+    ["", "–S", false],
   ]);
   // Case counts; identical tokens are no change.
   expect(changeList("hi there", "Hi there")).toMatchObject({
@@ -807,7 +807,7 @@ test("code lists what changed: merged spots, Markdown-only spots about format, i
   expect(exampleLine({ before: "Hi!\nThanks", after: "Thanks" })).toBe(
     '"Hi! / Thanks" → "Thanks"',
   );
-  expect(exampleLine({ before: "", after: "–P" })).toBe('added: "–P"');
+  expect(exampleLine({ before: "", after: "–S" })).toBe('added: "–S"');
   expect(exampleLine({ before: "Best,", after: "" })).toBe('cut: "Best,"');
 });
 
@@ -815,7 +815,7 @@ test("a change's quotes are located where the texts differ, folded only to find 
   const first =
     "Hi Dana, I hope you’re well!\n\nThanks so much for reaching out — we can't meet Thursday. Thanks again.\n\nBest,\nAI";
   const final =
-    "Dana -\n\nThanks for the note, but we can't meet **Thursday**. Thanks again.\n\nBest,\n–P";
+    "Dana -\n\nThanks for the note, but we can't meet **Thursday**. Thanks again.\n\nBest,\n–S";
   const memo = (changes: ChangeInput[]): MemoInput => ({
     ...memoSave().memo!,
     first_draft: first,
@@ -843,7 +843,7 @@ test("a change's quotes are located where the texts differ, folded only to find 
       }),
       change("Thanks so much", "", { about: "voice", by: "unasked" }),
       // Markdown marks dropped to locate; an insertion quotes only after.
-      change("", "–P", { tweak: { text: "sign off –P" } }),
+      change("", "–S", { tweak: { text: "sign off –S" } }),
     ]),
   );
   expect(ok.ok).toBe(true);
@@ -861,7 +861,7 @@ test("a change's quotes are located where the texts differ, folded only to find 
       undefined,
     ],
     ["Thanks so much", "", "voice", "unasked", undefined],
-    ["", "–P", "voice", "person", 3],
+    ["", "–S", "voice", "person", 3],
     // A spot no change covers: Markdown only.
     ["Thursday", "**Thursday**", "format", null, undefined],
   ]);
@@ -984,13 +984,13 @@ test("a change's quotes are located where the texts differ, folded only to find 
     checkMemo({
       ...memo(changes),
       first_draft: long.join(" ") + " Best, AI",
-      final: long.map((w) => `x${w}`).join(" ") + " Best — P",
+      final: long.map((w) => `x${w}`).join(" ") + " Best — S",
     });
-  expect(big([change("Best, AI", "Best — P")])).toMatchObject({
+  expect(big([change("Best, AI", "Best — S")])).toMatchObject({
     ok: true,
     evidence: {
       state: "too_large",
-      rows: [{ before: "Best, AI", after: "Best — P" }],
+      rows: [{ before: "Best, AI", after: "Best — S" }],
     },
   });
   expect(big([change("keep keep", "")])).toMatchObject({

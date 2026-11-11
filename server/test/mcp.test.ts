@@ -536,7 +536,7 @@ test("a memo with the old tweaks field, quotes that miss the texts, a pasted req
       return read(reply as never);
     };
     const memo = {
-      final: "Friday works.\n\n–P",
+      final: "Friday works.\n\n–S",
       first_draft: "Hi Sam! Hope you're well. Friday could work for me.",
       mode: "draft",
       rounds: 1,

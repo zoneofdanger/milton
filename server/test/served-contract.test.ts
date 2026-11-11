@@ -24,6 +24,7 @@ test("the served text uses one word for each thing and describes the memo workfl
   ).toEqual([
     "Milton holds the person's writing",
     "Before writing or editing for or as the person",
+    "When they tell you what to write, their words are the raw material",
     "Edit mode",
     'Asked "Did you get the memo?" or "Did you get that memo?"',
     "Memos",
@@ -49,6 +50,7 @@ test("the served text uses one word for each thing and describes the memo workfl
     "Never add tweaks or your own inferences, or offer to",
     "forget_memos",
     "what the person says now, then the cover sheet, then tweaks, then examples",
+    "reuse their phrases word for word where they fit, add only a greeting, a sign-off and connecting words in the manner of their examples, and don't expand on what they said.",
   ])
     expect(storeInstructions).toContain(part);
   // The receipt the instructions quote is the one a save returns.

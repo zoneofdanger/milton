@@ -10,7 +10,7 @@ landed and the item is still open), `blocked: <why or #id>`. A bolded headline o
 or fewer states the task; one item is one landing. **A section heading and its preamble are
 shared context for every item beneath it.**
 
-**next-id: 37.** Ids are never reused, so this counter survives deleting the newest item.
+**next-id: 40.** Ids are never reused, so this counter survives deleting the newest item.
 
 ## MVP
 
@@ -148,6 +148,32 @@ sheet, report, AI) and plain text on security screens and anything an AI reads.
       active users and usage."). Before any build: opt-in consent, a privacy policy change
       (apps/site/src/pages/privacy.astro), a check against
       [positioning](docs/positioning.md), and a spec. ⚠ It could cost trust, which is the risk.
+
+- [ ] #37 (server, low) **Handle pool errors at integration test teardown.** CI's
+      integration job sometimes passes every group and then crashes while stopping its
+      disposable Postgres: an idle pool client throws an unhandled 57P01 ("terminating
+      connection due to administrator command"). Seen twice by 2026-11-11 (#103 and #109);
+      a rerun passed each time. Find which pool is still open when the cluster stops
+      (`server/scripts/auth-integration.ts` ends its pools first, so check the pools it
+      doesn't list and the `apps/auth` suite), then end it before the stop or give it an
+      error handler. Don't swallow 57P01 while the groups are still running.
+
+- [ ] #38 (server, low) **Enforce the typed request's line and paste rules in SQL.** A
+      memo's kept request (#109) is limited to 600 characters, 12 lines and no pasted mail
+      (a line starting `>`, an "On … wrote:" line, a From or Subject header). The database
+      checks only the length and control characters (`memos_request`); the line and paste
+      rules live in `server/src/store/save.ts` alone, so a future write path could skip
+      them. Add a check constraint for both. It is a schema change: follow
+      [migrations](docs/deploy/migrations.md), and check every stored request passes first.
+
+- [ ] #39 (server, low) **Run the save's change check after the access gate.**
+      `create_memo` compares the first draft with the final and matches every quote
+      (`checkMemo`, `server/src/store/compiled.ts`) before the save reaches the trial gate
+      and the account lock, so an account with no access can still make the server do that
+      work. The cost is bounded since #109 (a quote's occurrences are capped at 50: 10 ms at
+      80 KB), which is why this is low. Moving it changes which refusal such an account sees
+      first, and refusals today come before any database work
+      ([saves](docs/saves.md)): decide that order before building.
 
 ## From the audit of 2026-11-02
 

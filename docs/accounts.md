@@ -127,6 +127,10 @@ The app never handles passwords or native cookies.
   stored hash. A missing, revoked or superseded binding gets 401 `invalid_token` with no
   claims and native is not called; a database failure is 503. So a disconnect or a begun
   deletion ends an AI token's UserInfo at once rather than at its expiry.
+- The consent screen offers Read only, and Read and write only when the AI's request
+  includes `milton:write`. It preselects Read and write when that is offered, otherwise
+  Read only; the person can still choose Read only. Connection keys keep their own
+  default ([Connection keys](#connection-keys)).
 
 ## Auth mail
 

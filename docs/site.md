@@ -36,7 +36,7 @@ Local commands and landing content are in [apps/site/README.md](../apps/site/REA
   to the app; on screens 600px wide or less it is one row, the brand and "Sign in".
 - The homepage, top to bottom: the headline band with the intro and the "Try Milton free"
   button; the try-it folder, whose caption states the price; the routing slip (how it
-  works in three steps) with a cc line of links to the AI setup guides under it; the
+  works in three steps), whose cc field links to the AI setup guides; the
   Markdown-file question answered in the open, then four closed questions; and the
   closing "Did you get the memo?" with the button again and a fictional phone message.
   "Try Milton free" is the only button. Its swappable lines sit in one object at the top

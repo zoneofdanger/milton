@@ -1678,6 +1678,10 @@ test("the TPS page lists memos newest first, escaped, opens each only for its ow
     expect(html).toContain(
       "First drafts: 2 scored memos so far. 8 more to start the scoreboard.",
     );
+    // The untouched memo was served the tweak and did not need it again.
+    expect(html).toContain(
+      '<span class="typed">no warm-up opener &lt;b&gt;</span> <span class="report-counts">1 memo · served 1 · needed again 0</span>',
+    );
     // Newest first.
     const at = (id: string) => html.indexOf(`href="/tps/memo/${id}"`);
     expect(at(c)).toBeGreaterThan(0);
@@ -1809,6 +1813,8 @@ test("forget, tweak delete and reword change only the session account's memos an
       id: opener,
       text: "No warm-up opener <i>",
       memos: 1,
+      served: 0,
+      needed_again: 0,
     });
     const page = await (await fixture.send("/?done=tweak-reworded")).text();
     expect(page).toContain("Tweak reworded.");

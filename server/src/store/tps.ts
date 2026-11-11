@@ -6,7 +6,13 @@ import type { StoreDatabase, StoreSession } from "./database";
 import { databaseFailure } from "./database";
 import { accountUnavailable, requireActiveAccount } from "./accounts";
 import { StoreError } from "./errors";
-import { coverSheetJson, keepMemos, MEDIA, type Medium } from "./memos";
+import {
+  coverSheetJson,
+  keepMemos,
+  MEDIA,
+  tweakScore,
+  type Medium,
+} from "./memos";
 import { deleteMemos } from "./save";
 import {
   normalizeTweak,
@@ -34,7 +40,14 @@ export type TpsMemo = {
   /** Tweaks it cites. */
   taught: { id: string; text: string }[];
 };
-export type TpsTweak = { id: string; text: string; memos: number };
+/** A tweak with its citation count and its score (docs/reports.md). */
+export type TpsTweak = {
+  id: string;
+  text: string;
+  memos: number;
+  served: number;
+  needed_again: number;
+};
 export type TpsView = {
   cover_sheet: { text: string; version: number };
   keep_memos: boolean;
@@ -114,8 +127,9 @@ export function tpsStore(db: StoreDatabase, userId: string) {
             SELECT ${memoColumns},m.created_at AS created FROM memos m LEFT JOIN memo_kinds k ON k.user_id=m.user_id AND k.id=m.kind_id
             WHERE m.user_id=${userId} ORDER BY m.created_at DESC,m.id LIMIT ${LISTED_MEMOS}) r) AS memos,
           (SELECT coalesce(json_agg(json_build_object('id',t.id,'text',t.text,'memos',
-            (SELECT count(*) FROM tweak_citations c WHERE c.user_id=t.user_id AND c.tweak_id=t.id)) ORDER BY t.text,t.id),'[]'::json)
-            FROM tweaks t WHERE t.user_id=${userId}) AS tweaks,
+            (SELECT count(*) FROM tweak_citations c WHERE c.user_id=t.user_id AND c.tweak_id=t.id),
+            'served',s.served,'needed_again',s.needed_again) ORDER BY t.text,t.id),'[]'::json)
+            FROM tweaks t ${tweakScore} WHERE t.user_id=${userId}) AS tweaks,
           (SELECT coalesce(json_agg(json_build_object('mode',mode,'rounds',rounds,'change',change,
             'untouched',final=first_draft,'at',created_at) ORDER BY created_at),'[]'::json)
             FROM memos WHERE user_id=${userId} AND first_draft_state='kept' AND change IS NOT NULL) AS scored`)
@@ -167,8 +181,9 @@ export function tpsStore(db: StoreDatabase, userId: string) {
       }>(sql`SELECT EXISTS(SELECT 1 FROM users WHERE id=${userId} AND status='active') AS open,
         ${coverSheetJson(userId)} AS cover,
         (SELECT coalesce(json_agg(json_build_object('id',t.id,'text',t.text,'memos',
-          (SELECT count(*) FROM tweak_citations c WHERE c.user_id=t.user_id AND c.tweak_id=t.id)) ORDER BY t.text,t.id),'[]'::json)
-          FROM tweaks t WHERE t.user_id=${userId}) AS tweaks,
+          (SELECT count(*) FROM tweak_citations c WHERE c.user_id=t.user_id AND c.tweak_id=t.id),
+          'served',s.served,'needed_again',s.needed_again) ORDER BY t.text,t.id),'[]'::json)
+          FROM tweaks t ${tweakScore} WHERE t.user_id=${userId}) AS tweaks,
         (SELECT coalesce(json_agg(json_build_object('medium',m.medium,'kind',k.label,'summary',m.summary,
           'at',to_char(m.created_at AT TIME ZONE 'UTC','YYYY-MM-DD'),'final',m.final) ORDER BY m.created_at DESC,m.id),'[]'::json)
           FROM memos m LEFT JOIN memo_kinds k ON k.user_id=m.user_id AND k.id=m.kind_id
@@ -190,7 +205,8 @@ export function tpsStore(db: StoreDatabase, userId: string) {
               (a, b) => b.memos - a.memos || a.text.localeCompare(b.text),
             )
             .map(
-              (t) => `- ${t.text} (${t.memos} memo${t.memos === 1 ? "" : "s"})`,
+              (t) =>
+                `- ${t.text} (${t.memos} memo${t.memos === 1 ? "" : "s"}${t.served ? `; served ${t.served}, needed again ${t.needed_again}` : ""})`,
             )
             .join("\n"),
         );

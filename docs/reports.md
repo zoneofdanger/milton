@@ -24,8 +24,9 @@ What a memo, tier and tweak are is in [memos](memos.md); the tool envelopes are 
   cover sheet, the memo and tweak counts and the Keep memos switch. It writes nothing.
 - `get_report` is then two statements outside a transaction: one loads the account and
   kind checks, the cover sheet, the kinds, every memo's ranking fields (not its words)
-  and its citations, and every tweak's count; the second records the served report and
-  fetches the chosen finals. A memo forgotten between them is left out.
+  and its citations, and every tweak's count and score ([memos](memos.md)); the second
+  records the served report and fetches the chosen finals. A memo forgotten between them
+  is left out.
 - `get_report` writes one `served_reports` row (its `report_id` and served tweak ids);
   no other read writes.
 - AI reads are blocked once an account reads as expired, but the person's own web view
@@ -66,8 +67,10 @@ A report ranks every memo by, in order:
 
 - The text is `# Cover sheet` (when not blank), then `# Examples` (each
   `## n. kind · medium · tier label · date`, a Situation line, an Audience · Purpose line
-  when known, and the final quoted with `>`), then `# Your tweaks` (one bullet per tweak
-  with its memo count).
+  when known, and the final quoted with `>`), then `# Your tweaks` (a line saying
+  "needed again" counts drafts that were given the tweak and still needed it, then one
+  bullet per tweak with its memo count, and `; needed again M of S` after it when M is at
+  least 1). The `tweaks` envelope stays tweak id, text and memo count.
 - Tier labels in report text are "your words" and "steered by you"; kind labels appear
   in example headers.
 - With no example and no tweak, `is_empty` is true and the text ends with a fixed line

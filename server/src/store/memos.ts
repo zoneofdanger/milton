@@ -65,6 +65,16 @@ export const coverSheetJson = (userId: string) =>
 export const keepMemos = (userId: string) =>
   sql`coalesce((SELECT keep_memos FROM memo_settings WHERE user_id=${userId}),true)`;
 
+/** A tweak's score, for a query over `tweaks t` (docs/reports.md): among
+ * the account's memos with a kept first draft saved since the tweak was
+ * created, s.served counts those whose report served it and s.needed_again
+ * those of them that cite it too. Computed at read, never stored. */
+export const tweakScore = sql`LEFT JOIN LATERAL (SELECT count(*) AS served,
+    count(*) FILTER (WHERE EXISTS(SELECT 1 FROM tweak_citations c
+      WHERE c.user_id=m.user_id AND c.memo_id=m.id AND c.tweak_id=t.id)) AS needed_again
+    FROM memos m WHERE m.user_id=t.user_id AND m.first_draft_state='kept'
+      AND t.id=ANY(m.served_tweak_ids) AND m.created_at>=t.created_at) s ON true`;
+
 /** The refusal for an intent kind_id the account does not have. */
 export const invalidKind = () =>
   new StoreError(
@@ -242,7 +252,10 @@ export function selectTweaks(
         a.localeCompare(b),
     )
     .slice(0, MAX_TWEAKS)
-    .map(([id]): ServedTweak => ({ tweak_id: id, ...counts.get(id)! }));
+    .map(([id]): ServedTweak => {
+      const { text, memos } = counts.get(id)!;
+      return { tweak_id: id, text, memos };
+    });
 }
 
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
@@ -266,7 +279,13 @@ export async function readReport(
       cover: { text: string } | null;
       kinds: { id: string; label: string }[];
       memos: Candidate[];
-      tweaks: { id: string; text: string; memos: number }[];
+      tweaks: {
+        id: string;
+        text: string;
+        memos: number;
+        served: number;
+        needed_again: number;
+      }[];
     }>(sql`SELECT EXISTS(SELECT 1 FROM users WHERE id=${userId} AND status='active') AS open,
       ${kindValid(userId, intent.kind_id)} AS kind_valid,
       ${coverSheetJson(userId)} AS cover,
@@ -282,18 +301,17 @@ export async function readReport(
           WHERE c.user_id=m.user_id AND c.memo_id=m.id))),'[]'::json)
         FROM memos m WHERE m.user_id=${userId}) AS memos,
       (SELECT coalesce(json_agg(json_build_object('id',t.id,'text',t.text,'memos',
-        (SELECT count(*) FROM tweak_citations c WHERE c.user_id=t.user_id AND c.tweak_id=t.id))),'[]'::json)
-        FROM tweaks t WHERE t.user_id=${userId}) AS tweaks`)
+        (SELECT count(*) FROM tweak_citations c WHERE c.user_id=t.user_id AND c.tweak_id=t.id),
+        'served',s.served,'needed_again',s.needed_again)),'[]'::json)
+        FROM tweaks t ${tweakScore} WHERE t.user_id=${userId}) AS tweaks`)
   )[0]!;
   if (!row.open) throw accountUnavailable();
   if (!row.kind_valid) throw invalidKind();
   const labels = new Map(row.kinds.map((k) => [k.id, k.label]));
   const ranked = rankMemos(row.memos, intent);
   const examples = selectExamples(ranked, labels);
-  const tweaks = selectTweaks(
-    ranked,
-    new Map(row.tweaks.map((t) => [t.id, { text: t.text, memos: t.memos }])),
-  );
+  const scores = new Map(row.tweaks.map((t) => [t.id, t]));
+  const tweaks = selectTweaks(ranked, scores);
   const reportId = randomUUID();
   const finals = new Map(
     (
@@ -321,9 +339,12 @@ export async function readReport(
     ...(tweaks.length
       ? [
           "# Your tweaks",
-          "What the person made an AI change in similar memos, best match first.",
+          'What the person made an AI change in similar memos, best match first. "needed again" counts drafts that were given the tweak and still needed it.',
           tweaks
-            .map((t) => `- ${t.text} (${plural(t.memos, "memo")})`)
+            .map((t) => {
+              const { served, needed_again } = scores.get(t.tweak_id)!;
+              return `- ${t.text} (${plural(t.memos, "memo")}${needed_again ? `; needed again ${needed_again} of ${served}` : ""})`;
+            })
             .join("\n"),
         ]
       : []),

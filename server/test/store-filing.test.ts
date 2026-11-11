@@ -7,6 +7,7 @@ import {
   vendorIntent,
 } from "./store-fixtures";
 import { change, scoreboard, tier } from "../src/store/score";
+import { tpsStore } from "../src/store/tps";
 import type { MemoInput } from "../src/mcp-tools";
 
 const draft =
@@ -492,6 +493,89 @@ test("a report serves tweaks from the ten best-matching memos that cite one, and
         memoSave({ final: "c", report_id: crypto.randomUUID() }),
       ),
     ).toMatchObject({ status: "failed", error: "invalid_report" });
+  } finally {
+    await local.dispose();
+  }
+});
+
+test("a tweak's served and needed-again counts come from kept-draft memos of its account, in report text, the TPS read and TPS.md", async () => {
+  const local = await localStore();
+  try {
+    await seedUsers(local.pg, "u", "other");
+    const store = fixtureStore(local.db, "u");
+    const drafted = (memo: Partial<MemoInput>) =>
+      store.saveMemo(
+        memoSave({ first_draft: draft, mode: "draft", rounds: 1, ...memo }),
+      );
+    const first = await drafted({
+      tweaks: [{ text: "No warm-up opener" }, { text: "Sign off –P" }],
+    });
+    const opener = first.memo!.tweaks[0]!.tweak_id;
+    // Served both and cited neither.
+    await drafted({
+      final: "Not this time.",
+      report_id: (await store.readReport(vendorIntent)).report_id,
+    });
+    // Served both and cited the opener: needed again.
+    await drafted({
+      final: "Thanks, no.",
+      report_id: (await store.readReport(vendorIntent)).report_id,
+      tweaks: [{ tweak_id: opener }],
+    });
+    // Without a kept first draft, a served and cited memo does not count.
+    await store.saveMemo(
+      memoSave({
+        first_draft_missing: true,
+        mode: "draft",
+        rounds: 1,
+        final: "We'll pass.",
+        report_id: (await store.readReport(vendorIntent)).report_id,
+        tweaks: [{ tweak_id: opener }],
+      }),
+    );
+    // Cited but not served.
+    await drafted({
+      final: "No, thanks.",
+      tweaks: [{ tweak_id: opener }, { text: "Short paragraphs" }],
+    });
+    // Another account's memo naming this tweak id is not counted.
+    const foreign = await fixtureStore(local.db, "other").saveMemo(
+      memoSave({ first_draft: draft, mode: "draft", rounds: 1 }),
+    );
+    await local.pg.query(
+      "UPDATE memos SET report_id=$1,served_tweak_ids=ARRAY[$2] WHERE id=$3",
+      [crypto.randomUUID(), opener, foreign.memo!.memo_id],
+    );
+    const report = await store.readReport(vendorIntent);
+    expect(report.text).toContain(
+      'What the person made an AI change in similar memos, best match first. "needed again" counts drafts that were given the tweak and still needed it.',
+    );
+    expect(report.text).toContain(
+      "- No warm-up opener (4 memos; needed again 1 of 2)",
+    );
+    expect(report.text).toMatch(/^- Sign off –P \(1 memo\)$/m);
+    expect(report.text).toContain("- Short paragraphs (1 memo)");
+    expect(report.tweaks.find((t) => t.tweak_id === opener)).toEqual({
+      tweak_id: opener,
+      text: "No warm-up opener",
+      memos: 4,
+    });
+    const tps = tpsStore(local.db, "u");
+    expect(
+      (await tps.read()).tweaks.map(({ text, memos, served, needed_again }) => [
+        text,
+        memos,
+        served,
+        needed_again,
+      ]),
+    ).toEqual([
+      ["No warm-up opener", 4, 2, 1],
+      ["Short paragraphs", 1, 0, 0],
+      ["Sign off –P", 1, 2, 0],
+    ]);
+    expect(await tps.exportTps()).toContain(
+      "## Tweaks\n\n- No warm-up opener (4 memos; served 2, needed again 1)\n- Short paragraphs (1 memo)\n- Sign off –P (1 memo; served 2, needed again 0)\n",
+    );
   } finally {
     await local.dispose();
   }

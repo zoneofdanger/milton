@@ -42,7 +42,9 @@ What each change does to memos, tweaks and the cover sheet is in [memos](memos.m
 
 - It reads in one statement: the cover sheet and its version, the Keep memos switch, the
   newest 200 memos (older ones stay in the export), every tweak with its count (most
-  cited first) and the scoreboard ([memos](memos.md)).
+  cited first) and score, and the scoreboard ([memos](memos.md)).
+- Each tweak shows its memo count and, once it has been served, "served S · needed
+  again M" as raw counts, never a ratio.
 - Each listed memo shows its time, AI, medium, kind, summary, audience, purpose, mode,
   rounds, change, tier, the tweaks its report served (those still on file) and the
   tweaks it taught; its first draft and final load only when that memo is opened.
@@ -71,9 +73,10 @@ What each change does to memos, tweaks and the cover sheet is in [memos](memos.m
 ## TPS.md
 
 - `/download` returns the complete writing export as `TPS.md`, including when AI access
-  is paused: the cover sheet, the tweaks with counts (most cited first), then every
-  memo's final grouped by medium, newest first, each under its kind and date with its
-  summary. First drafts are not in it.
+  is paused: the cover sheet, the tweaks with counts (most cited first; a served one as
+  `- text (N memos; served S, needed again M)`), then every memo's final grouped by
+  medium, newest first, each under its kind and date with its summary. First drafts are
+  not in it.
 
 ## Connected AIs
 

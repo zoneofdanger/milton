@@ -138,6 +138,13 @@ Milton sets each final's tier at save, from the memo's source alone:
   punctuation dropped) and reuses the account's tweak with that form, else is added;
   text of only punctuation is refused. A tweak named twice in one memo is cited once.
 - Each memo-and-tweak pair is one citation; a tweak's count is its citations.
+- A tweak's score counts the account's memos with a kept first draft saved since the
+  tweak was created: **served** is how many of them had it in their served tweaks, and
+  **needed again** how many of those also cite it, so it did not work as written. It is
+  computed at read, never stored, and never ranks, hides or reorders tweaks.
+- Needed again is a lower bound: it counts only when the AI reuses the tweak's id or its
+  exact wording. A reworded tweak keeps its counts; they restart on rewording only once a
+  later release records when a tweak's text last changed.
 - The TPS page deletes a tweak with its citations, or rewords it in place, keeping its id
   and citations; a wording another tweak already has is refused with `tweak_exists`.
 

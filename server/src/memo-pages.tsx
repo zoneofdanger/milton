@@ -414,7 +414,9 @@ function sheet({ view, email, date, comment, csrf, notices }: SheetView) {
         <h2 id="tweaks">Tweaks</h2>
         <p class="applies">
           What you made your AIs change, one line each, with how many memos
-          taught it. The next AI gets the ones from your closest memos.
+          taught it. The next AI gets the ones from your closest memos. “Served”
+          counts drafts an AI was given a tweak for; “needed again”, how many of
+          those you still had to fix the same way.
         </p>
         {notices.tweaks}
         {view.tweaks.length === 0 ? (
@@ -425,7 +427,17 @@ function sheet({ view, email, date, comment, csrf, notices }: SheetView) {
               <li class="tweak-row">
                 <p>
                   <span class="typed">{t.text}</span>{" "}
-                  <span class="report-counts">{counted(t.memos, "memo")}</span>
+                  <span class="report-counts">
+                    {[
+                      counted(t.memos, "memo"),
+                      ...(t.served
+                        ? [
+                            `served ${t.served}`,
+                            `needed again ${t.needed_again}`,
+                          ]
+                        : []),
+                    ].join(" · ")}
+                  </span>
                 </p>
                 <div class="memo-actions">
                   <form method="post" action="/tps/tweaks/delete">

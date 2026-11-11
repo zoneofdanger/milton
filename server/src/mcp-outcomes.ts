@@ -177,7 +177,7 @@ export const nextSteps: Record<string, NextStep> = {
   ),
   request_too_large: step(
     "fix_input",
-    "Save the memo again with the final alone: send first_draft_missing instead of first_draft, with a new request_id.",
+    "Save the memo again with the final alone: send first_draft_missing instead of first_draft, and no changes, with a new request_id.",
   ),
   // Codes only the TPS page meets.
   tweak_exists: step(

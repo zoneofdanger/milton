@@ -23,6 +23,32 @@ Earlier records are in git history: the last runbook holding them is at commit 4
 (`git show 492b96a:server/deploy/README.md`), and the runbook's later versions are in
 `git log -p server/deploy/README.md` until 2026-11-10, when this file began.
 
+## 2026-11-11: the web cover sheet is read only (PR #103)
+
+- **#103 (Peter's "Ship 103", typed in milton-overlord's pane wH:p1F on 2026-11-10 after
+  milton-coversheet's report; the request his "in the web app, the cover sheet should not be
+  editable, it is only generated/maintained via agent mcps", and "Let the AI remove the last
+  line" over a web Clear button; relayed verbatim by milton-overlord; milton-coversheet;
+  milton-designer approved, no findings), `16341d6`:** the TPS page shows the cover sheet
+  read only and `POST /tps/cover-sheet` is gone; an AI's `cover_sheet.remove` of the last
+  line empties it (the `cover_sheet_empty` refusal is removed). No schema change; the app
+  role's unused INSERT grant on `cover_sheets` stays (not approved). Server image
+  `sha256:193135d28e8fcc0707d840cffe7719edcee9f34697bb90b532ddf00321c730e8` (bundle without
+  `cover_sheet_empty` or `/tps/cover-sheet`, with #100's mail step): admit
+  `milton-admit-00010-gn4` at 07:31:18Z (2026-11-11), app and MCP
+  `milton-*-cover-16341d6` as tagged no-traffic revisions, traffic moved at 07:32:03Z,
+  `milton-e2e-daily` at 07:32:05Z. Site: /setup's copy live from Vercel's production
+  deployment of `16341d6`. Live: app and MCP `/health` and auth `/api/auth/ok` 200, app
+  home 200, MCP 401 unauthenticated, `POST /tps/cover-sheet` 404, forms probe PASS,
+  `milton-e2e-daily-r9fhb` passed. Gate at 07:42Z: clean; no request reached an older
+  revision after 07:33:30Z; no error, `store_unavailable` or `permission denied` lines
+  since 07:30Z. Checks: PR CI green on `7fc8565`; on the tree
+  merged with main (which had moved by #100 to #104): types, 160 tests, format and
+  agent-docs 0. Not observed: a real AI emptying a cover sheet over MCP (the store test
+  covers it); screen-reader speech. Rollback, code only, all four together:
+  `milton-*-mail-cd2fa18`, `milton-admit-00009-c99` and the daily job to image
+  `sha256:3630960a…`.
+
 ## 2026-11-11: consent preselects Read and write (PR #102)
 
 - **#102 (Peter's request "can you make it so that the default oauth is read/write (right

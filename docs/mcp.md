@@ -152,7 +152,7 @@ How a person creates and revokes keys is in [accounts](accounts.md).
   every code in the source has an entry, and an unknown code gets the
   unexpected-failure step. A memo refusal with a `field` takes that field's step when
   the table has one: `invalid_input.request` (send only what the person typed, or leave
-  request out), `invalid_input.tweaks` (put tweaks on changes) and
+  request out, and the rest unchanged), `invalid_input.tweaks` (put tweaks on changes) and
   `invalid_input.changes.tweak` (keep the three most likely to recur).
 - The SDK's plain-text argument refusals become such bodies, `invalid_arguments` with
   the SDK's text as `message`.

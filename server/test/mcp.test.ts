@@ -585,7 +585,7 @@ test("a memo with the old tweaks field, quotes that miss the texts, a pasted req
       error: "invalid_input",
       field: "request",
       next: {
-        text: "Send only what the person typed to ask, without pasted or quoted text, or leave request out; save with a new request_id.",
+        text: "Send only what the person typed to ask, without pasted or quoted text, or leave request out; send the rest unchanged and save with a new request_id.",
       },
     });
     expect(

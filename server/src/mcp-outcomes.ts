@@ -151,7 +151,7 @@ export const nextSteps: Record<string, NextStep> = {
   // By field, the part of a memo a refusal names.
   "invalid_input.request": step(
     "fix_input",
-    "Send only what the person typed to ask, without pasted or quoted text, or leave request out; save with a new request_id.",
+    "Send only what the person typed to ask, without pasted or quoted text, or leave request out; send the rest unchanged and save with a new request_id.",
   ),
   "invalid_input.tweaks": step(
     "fix_input",

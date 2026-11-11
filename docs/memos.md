@@ -48,7 +48,7 @@ and counts tweak citations. How a save commits is in [saves](saves.md).
   it no longer had the draft verbatim) or `none` (writing the person gave).
 - With `first_draft` or `first_draft_missing`, `mode` (`draft` or `edit`) and `rounds`
   (redrafts after the first draft, 0 to 1000) are required. With neither, the memo is
-  final-only (setup pastes, "remember this") and takes no mode, rounds or tweaks. Both
+  final-only (setup, "remember this") and takes no mode, rounds or tweaks. Both
   together are refused. Shape problems are refused before any database work.
 - A context: a one-line placeholder-safe `summary` of the situation and the text
   replied to (never the quoted text, at most 200 characters), `medium`, and optional

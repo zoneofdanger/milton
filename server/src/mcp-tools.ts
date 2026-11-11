@@ -158,7 +158,7 @@ export const memoInput = z
       .describe("The report_id of the get_report read before this draft."),
   })
   .describe(
-    'One accepted final. Omit first_draft, first_draft_missing, mode, rounds and tweaks for writing the person gave you to keep (setup pastes, "remember this email").',
+    'One accepted final. Omit first_draft, first_draft_missing, mode, rounds and tweaks for writing the person gave you to keep (setup, "remember this email").',
   );
 export const coverSheetChangeInput = z
   .strictObject({

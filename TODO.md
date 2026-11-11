@@ -10,7 +10,7 @@ landed and the item is still open), `blocked: <why or #id>`. A bolded headline o
 or fewer states the task; one item is one landing. **A section heading and its preamble are
 shared context for every item beneath it.**
 
-**next-id: 36.** Ids are never reused, so this counter survives deleting the newest item.
+**next-id: 37.** Ids are never reused, so this counter survives deleting the newest item.
 
 ## MVP
 
@@ -135,6 +135,19 @@ sheet, report, AI) and plain text on security screens and anything an AI reads.
       $0.0001 per tweak, which is why it runs weekly, off the save path. ⚠ Without the 0.90
       threshold it wrongly merged near-misses ("replies to clients" vs "support answers").
       Ranking with Decisions was tested too and rejected: no draft gain.
+
+- [ ] #36 (server, low, founder, blocked: a longer period of active users and usage)
+      **Pool what people delete from AI drafts, opt-in.** Across accounts, count the phrases
+      people remove between an AI's first draft and the final they accept. Plain code does the
+      counting, and no person or model reads anyone's text. A phrase counts only once enough
+      accounts have removed it that nothing particular to one person can appear. Two uses:
+      sensible defaults for a brand-new account that has no memos yet, and a public write-up
+      of what people delete from AI drafts. It needs enough active accounts and memos to mean
+      anything, and Peter parked it until then (2026-11-11, of this idea, fifth on a list of
+      five: "I think #5 can be a much later todo, after there has been a longer period of
+      active users and usage."). Before any build: opt-in consent, a privacy policy change
+      (apps/site/src/pages/privacy.astro), a check against
+      [positioning](docs/positioning.md), and a spec. ⚠ It could cost trust, which is the risk.
 
 ## From the audit of 2026-11-02
 

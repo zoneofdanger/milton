@@ -4,7 +4,7 @@
     "date": "2026-11-10",
     "generated": "once per draft",
     "edited": true,
-    "note": "Both drafts in a pair: same model (chat-latest, ChatGPT's current model on 2026-11-10), system prompt and request; the Milton draft also had the person's cover sheet and report as Milton serves them. Fictional people. Edited for display: the bold markers around the subject line are removed, and two or three spaced em dashes were added by hand to each plain draft in place of punctuation, for effect. The Milton drafts are as generated. Peter's Milton follow-up is the second of three tries. Bill's fictional employer is renamed Odderton Data Services wherever the run named it."
+    "note": "Both drafts in a pair: same model (chat-latest, ChatGPT's current model on 2026-11-10), system prompt and request; the Milton draft also had the person's cover sheet and report as Milton serves them. Fictional people. Edited for display: the bold markers around the subject line are removed, and two or three spaced em dashes were added by hand to each plain draft in place of punctuation, for effect. The Milton drafts are as generated. Peter's Milton follow-up is the second of three tries. Bill's fictional employer is renamed Odderton Data Services wherever the run named it. The subject of Peter's plain \"Ask for something\" is shortened."
   },
   "defaults": {
     "person": "peter",
@@ -187,7 +187,7 @@
             "I need a decision on whether the \"save card\" checkbox is checked by default.",
             "I need both by Wednesday, November 11, because the release branch is cut on Thursday morning."
           ],
-          "plain": "Subject: Checkout Release – Final Copy and Decision Needed by Nov 11\n\nHi Dana,\n\nAs we get ready for the upcoming checkout release, I need two things from you to finalize the implementation:\n\n1. **Final error message copy** — Can you send me the approved wording for the error messages on the new checkout page?\n2. **Save card checkbox** — Can you confirm whether the \"Save card\" checkbox should be checked or unchecked by default?\n\nCould you please send both by **Wednesday, November 11**? The release branch is being cut Thursday morning — so I need to have these finalized before then.\n\nThanks for your help!\n\nPeter",
+          "plain": "Subject: Checkout Release — Decision Needed by Nov 11\n\nHi Dana,\n\nAs we get ready for the upcoming checkout release, I need two things from you to finalize the implementation:\n\n1. **Final error message copy** — Can you send me the approved wording for the error messages on the new checkout page?\n2. **Save card checkbox** — Can you confirm whether the \"Save card\" checkbox should be checked or unchecked by default?\n\nCould you please send both by **Wednesday, November 11**? The release branch is being cut Thursday morning — so I need to have these finalized before then.\n\nThanks for your help!\n\nPeter",
           "milton": "Subject: Checkout copy and save card decision\n\nDana, need the final error message copy for the new checkout page and a decision on whether \"save card\" should be checked by default.\n\nNeed both by Wednesday, Nov 11. Release branch gets cut Thursday morning.\n\n—P",
           "changed": {
             "plain": {

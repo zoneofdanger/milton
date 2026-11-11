@@ -907,9 +907,30 @@ test("a change's quotes are located where the texts differ, folded only to find 
     code: "invalid_change",
     message: expect.stringContaining("more than one changed place"),
   });
-  expect(refused([change("Hi Dana", "for the note")])).toMatchObject([
-    "invalid_change",
-    "change 1: before and after are at different changes.",
+  // A moved, reworded sentence: the diff sees a cut at one spot and an
+  // addition at another, and one change covering both is kept, both sides cut.
+  const moved = checkMemo({
+    ...memo([
+      change(
+        "Although it is relatively small, it is not entirely straightforward, and I thought you would be well placed to help.",
+        "The estate is modest but not straightforward, so an hour should do.",
+      ),
+    ]),
+    first_draft:
+      "Dear Ms Rowe,\n\nI am writing about my late aunt's estate. Although it is relatively small, it is not entirely straightforward, and I thought you would be well placed to help. Could we speak next week?\n\nKind regards,\nSam",
+    final:
+      "Dear Ms Rowe,\n\nI am writing about my late aunt's estate, and I thought you would be well placed to help. Could we speak next week? The estate is modest but not straightforward, so an hour should do.\n\nKind regards,\nSam",
+  });
+  expect(
+    moved.ok
+      ? moved.evidence!.rows.map((r) => [r.before, r.after, r.by])
+      : moved,
+  ).toEqual([
+    [
+      "Although it is relatively small, it is not entirely straightforward, and I thought you would be well placed to help.",
+      "The estate is modest but not straightforward, so an hour should do.",
+      "person",
+    ],
   ]);
   expect(refused([change(" ", "")])).toMatchObject([
     "invalid_input",

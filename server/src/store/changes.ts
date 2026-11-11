@@ -241,14 +241,17 @@ export type Located =
     }
   | {
       ok: false;
-      why: "not_in_text" | "not_at_change" | "ambiguous" | "sides_disagree";
+      why: "not_in_text" | "not_at_change" | "ambiguous";
     };
 
 /** Where one change's quotes are. Itemized: each quote occurs in its text
  * overlapping a changed spot on that side (an empty side is matched by the
- * other alone); both sides must share a spot; an occurrence overlapping no
- * spot is passed over, and occurrences at different spots are ambiguous.
- * Too large: each quote occurs exactly once and the two differ. */
+ * other alone); an occurrence overlapping no spot is passed over, and
+ * occurrences at different spots are ambiguous, unless only one of them
+ * shares a spot with the other side. The two sides need not share a spot (a
+ * moved sentence is a cut at one and an addition at another); the change
+ * covers every spot its sides touch. Too large: each quote occurs exactly
+ * once and the two differ. */
 export function locate(
   list: ChangeList,
   texts: { first: Folded; final: Folded },
@@ -295,34 +298,45 @@ export function locate(
     hits[name] = atSpots;
   }
   const key = (spots: number[]) => spots.join(",");
+  const union = (a: number[], b: number[]) =>
+    [...new Set([...a, ...b])].sort((x, y) => x - y);
+  // Several occurrences on the same spots are one answer: the first.
+  const single = (found: Hit[]) =>
+    new Set(found.map((h) => key(h.spots))).size > 1 ? undefined : found[0]!;
   if (hits.before && hits.after) {
     const pairs = hits.before.flatMap((b) =>
       hits.after!.flatMap((a) =>
         b.spots.some((n) => a.spots.includes(n))
-          ? [
-              {
-                b,
-                a,
-                spots: [...new Set([...b.spots, ...a.spots])].sort(
-                  (x, y) => x - y,
-                ),
-              },
-            ]
+          ? [{ b, a, spots: union(b.spots, a.spots) }]
           : [],
       ),
     );
-    if (!pairs.length) return { ok: false, why: "sides_disagree" };
-    // Several occurrences on the same spots are one answer: the first.
-    if (new Set(pairs.map((p) => key(p.spots))).size > 1)
-      return { ok: false, why: "ambiguous" };
-    const [p] = pairs;
-    return { ok: true, spots: p!.spots, before: p!.b.range, after: p!.a.range };
+    if (pairs.length) {
+      if (new Set(pairs.map((p) => key(p.spots))).size > 1)
+        return { ok: false, why: "ambiguous" };
+      const [p] = pairs;
+      return {
+        ok: true,
+        spots: p!.spots,
+        before: p!.b.range,
+        after: p!.a.range,
+      };
+    }
+    // No shared spot: each side stands on its own.
+    const b = single(hits.before);
+    const a = single(hits.after);
+    if (!b || !a) return { ok: false, why: "ambiguous" };
+    return {
+      ok: true,
+      spots: union(b.spots, a.spots),
+      before: b.range,
+      after: a.range,
+    };
   }
   const name = hits.before ? "before" : "after";
-  const one = hits[name]!;
-  if (new Set(one.map((h) => key(h.spots))).size > 1)
-    return { ok: false, why: "ambiguous" };
-  return { ok: true, spots: one[0]!.spots, [name]: one[0]!.range };
+  const one = single(hits[name]!);
+  if (!one) return { ok: false, why: "ambiguous" };
+  return { ok: true, spots: one.spots, [name]: one.range };
 }
 
 /** Why a located change was refused, as invalid_change says it. */
@@ -335,7 +349,6 @@ export const locateProblem: Record<
   not_at_change: "the quote is in its text, but not where the two texts differ",
   ambiguous:
     "the quote matches more than one changed place; add a few words around it",
-  sides_disagree: "before and after are at different changes",
 };
 
 // ---------------------------------------------------------------- rows

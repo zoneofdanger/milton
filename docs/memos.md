@@ -147,14 +147,16 @@ gave.
   `` ` `` dropped, em and en dashes as hyphens. The fold only locates; what is stored is
   always code's cut of the stored texts, so a dash habit is never lost.
   - `itemized`: each sent side must occur in its text overlapping a non-format spot on
-    that side; an empty side is matched by the other alone. With both sides, they must
-    share a spot. Of several occurrences, the one overlapping a spot wins; occurrences
-    at different spots are ambiguous. Several changes may cover the same spot.
+    that side; an empty side is matched by the other alone. The two sides need not
+    share a spot, since a moved sentence is a cut at one spot and an addition at
+    another; the change covers every spot its sides touch. Of several occurrences, the
+    one overlapping a spot wins; occurrences at different spots are ambiguous, unless
+    only one shares a spot with the other side. Several changes may cover the same spot.
   - `too_large`: each sent side must occur exactly once in its text, and the two sides
     must differ as sent (unfolded).
   - A quote that fails is refused with `invalid_change` naming the change by number: not
-    in its text, in it but not where the texts differ, at more than one changed place,
-    or before and after at different changes ([saves](saves.md)).
+    in its text, in it but not where the texts differ, or at more than one changed
+    place ([saves](saves.md)).
 - **What is stored** (`memo_changes`): one row per accepted change, in the order sent,
   cut from the two texts at its quotes (an empty side placed at its first spot's start),
   with its labels and tweak; then, when itemized, one unlabelled row per spot no change

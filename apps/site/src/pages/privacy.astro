@@ -9,7 +9,7 @@ import SiteLayout from "../layouts/SiteLayout.astro";
 >
   <h1>Privacy policy</h1>
   <p class="updated">
-    Last updated: <time datetime="2026-11-10">November 10, 2026</time>
+    Last updated: <time datetime="2026-11-11">November 11, 2026</time>
   </p>
   <p>
     Milton is operated by Zone of Danger, LLC (“we”). Milton keeps the writing
@@ -23,15 +23,16 @@ import SiteLayout from "../layouts/SiteLayout.astro";
     of Google or GitHub accounts you use to sign in or link; password hashes if
     you use a password; sign-in sessions, email verification and password reset
     records, AI permissions and access tokens, and security rate-limit records;
-    your memos (described below), with which AI saved each one and when; your
-    tweaks and how many memos cite each; your cover sheet and every earlier
-    version of it, with whether you or an AI made each change; a record of which
-    tweaks each report served; request receipts used to prevent duplicate saves,
-    which can include a memo’s kind and tweaks or your cover sheet’s text;
-    whether Keep memos is on; connected AIs and the AIs you disconnect; counts
-    of tool calls you make each day; and your billing record: your Stripe
-    customer and subscription IDs, the subscription’s status, its trial and
-    billing period dates, and which trial reminders have been sent.
+    your memos (described below), with which AI saved each one and when, the
+    changes listed between each first draft and final, and the request you
+    typed; your tweaks and how many memos cite each; your cover sheet and every
+    earlier version of it, with whether you or an AI made each change; a record
+    of which tweaks each report served; request receipts used to prevent
+    duplicate saves, which can include a memo’s kind and tweaks or your cover
+    sheet’s text; whether Keep memos is on; connected AIs and the AIs you
+    disconnect; counts of tool calls you make each day; and your billing record:
+    your Stripe customer and subscription IDs, the subscription’s status, its
+    trial and billing period dates, and which trial reminders have been sent.
   </p>
 
   <h2>How we use it</h2>
@@ -56,12 +57,14 @@ import SiteLayout from "../layouts/SiteLayout.astro";
   <p>
     You see everything on your TPS page. The AIs you connect receive your cover
     sheet and reports: for each draft, the finals that best match it and your
-    tweaks. First drafts are shown only to you. Once an AI has read them, its
-    handling of that content is governed by the terms and privacy policy of that
-    AI’s provider, not ours. Memos and your cover sheet are stored exactly as
-    your AI sends them; saves and reads do not send them to an AI model. Milton
-    does not collect your AI conversations; it receives only what your AI sends.
-    The service providers below process data to operate Milton.
+    tweaks. First drafts are shown only to you, except short before-and-after
+    quotes, at most 160 characters a side, that Milton serves with the tweaks
+    they taught. Once an AI has read them, its handling of that content is
+    governed by the terms and privacy policy of that AI’s provider, not ours.
+    Memos and your cover sheet are stored exactly as your AI sends them; saves
+    and reads do not send them to an AI model. Milton does not collect your AI
+    conversations; it receives only what your AI sends. The service providers
+    below process data to operate Milton.
   </p>
   <p>
     You can disconnect an AI at any time from Connected AIs in the Milton app.
@@ -75,28 +78,34 @@ import SiteLayout from "../layouts/SiteLayout.astro";
     A memo holds the first draft your AI showed you, when it still has it
     exactly; the final you accepted; the tweaks your AI wrote for what you made
     it change; and a one-line summary of the situation, with its medium,
-    audience, purpose, kind and how many rounds it took. By default your AI
-    keeps a memo when you accept a final, without asking; it can also keep
-    writing you paste or ask it to remember. Milton stores it exactly as sent.
-    If your AI already has access to your email, it can offer at setup to find a
-    few emails you sent; only the ones you approve reach Milton, exactly as
-    shown. Milton itself never reads your inbox. Whether your AI tells you in
-    one line that it kept a memo depends on the AI app you use. Your AI is told
-    to summarize other people’s text, such as an email you are replying to,
-    rather than send it, and never to send secrets; Milton cannot check what an
-    AI sends, and it does not remove names or other details.
+    audience, purpose, kind and how many rounds it took. Milton’s code lists
+    what changed between the first draft and the final, and your AI labels each
+    change: your voice or what it says; typed by you, asked for, or changed
+    unasked. A memo can also hold the instruction you typed to ask for the
+    writing, without anything you pasted, at most 600 characters. It is shown
+    only to you, never sent to an AI, and you can remove it from a memo. By
+    default your AI keeps a memo when you accept a final, without asking; it can
+    also keep writing you paste or ask it to remember. Milton stores it exactly
+    as sent. If your AI already has access to your email, it can offer at setup
+    to find a few emails you sent; only the ones you approve reach Milton,
+    exactly as shown. Milton itself never reads your inbox. Whether your AI
+    tells you in one line that it kept a memo depends on the AI app you use.
+    Your AI is told to summarize other people’s text, such as an email you are
+    replying to, rather than send it, and never to send secrets; Milton cannot
+    check what an AI sends, and it does not remove names or other details.
   </p>
   <p style="text-wrap:pretty">
     Memos are kept until you forget them, choose Delete all memos, or delete
     your account; there is no timer. On your TPS page you can forget a memo,
-    which also removes tweaks only it taught, and delete or reword a tweak. In
-    Memo settings you can delete all memos, which removes every memo, tweak and
-    kind but keeps your cover sheet, and turn off Keep memos, which stops your
-    AI keeping drafts while still letting you ask it to remember something. You
-    can also ask your AI to forget a memo. Earlier versions of your cover sheet,
-    and receipts of past saves, remain until account deletion. None of this
-    erases copies an AI already received. Writing saved before memos has been
-    deleted; backup copies are removed when those backups expire or are deleted.
+    which also removes tweaks only it taught, remove what you asked from a memo,
+    and delete or reword a tweak. In Memo settings you can delete all memos,
+    which removes every memo, tweak and kind but keeps your cover sheet, and
+    turn off Keep memos, which stops your AI keeping drafts while still letting
+    you ask it to remember something. You can also ask your AI to forget a memo.
+    Earlier versions of your cover sheet, and receipts of past saves, remain
+    until account deletion. None of this erases copies an AI already received.
+    Writing saved before memos has been deleted; backup copies are removed when
+    those backups expire or are deleted.
   </p>
 
   <h2>Where it is kept</h2>

@@ -6,7 +6,7 @@ import { STANDING_LINE } from "@milton/theme/facts";
 
 <SiteLayout
   title="Connect your AI | Milton"
-  description="Connect your AI and paste about five things you wrote and sent. Setup guidance and connection requirements for Milton."
+  description="Connect your AI and start with about five things you wrote and sent, found by your AI in your email or pasted. Setup guidance and connection requirements for Milton."
   legal
 >
   <p class="eyebrow">## A little paperwork. Once.</p>
@@ -15,9 +15,11 @@ import { STANDING_LINE } from "@milton/theme/facts";
     <strong>Connect Milton. Say “set up Milton.”</strong>
   </p>
   <p>
-    Your AI first asks for about five things you wrote and sent: emails,
-    messages or posts, pasted as you sent them. It keeps each as a memo, so its
-    drafts start from how you actually write. Milton never reads your inbox.
+    If your AI can already search your email, it offers to find about five
+    emails you wrote and sent and shows you each one in full. Milton keeps only
+    the ones you approve, exactly as shown, so drafts start from how you
+    actually write. Otherwise it asks you to paste a few. Milton never reads
+    your inbox.
   </p>
   <p>
     Then it asks for a few lines for your cover sheet, in your words, and shows
@@ -173,11 +175,20 @@ codex mcp login milton`}</code></pre>
   <section id="first-preference" aria-labelledby="first-heading">
     <h2 id="first-heading">Start with your own words.</h2>
     <p>
-      New accounts start empty. Once connected, paste about five emails,
-      messages or posts you wrote and sent, unedited. Your AI keeps each as a
-      memo, exactly as you pasted it. Milton needs no inbox connection or Gmail
-      permissions. Your AI should use only your own writing, skipping automated,
-      forwarded and other people’s text.
+      New accounts start empty. If your AI already has your email connected, it
+      can offer to find about five emails you sent in the last 90 days. It reads
+      at most about 30, shows you each candidate in full, and keeps only the
+      ones you approve by number, exactly as shown. Your AI uses its own
+      connection; Milton never reads your inbox and gets no email permissions.
+      The option appears only when your AI can already search your email; it
+      won’t ask you to connect it.
+    </p>
+    <p>
+      Otherwise, paste about five emails, messages or posts you wrote and sent,
+      unedited. Your AI keeps each as a memo, exactly as you pasted it. Either
+      way it should use only your own writing, skipping automated, forwarded and
+      other people’s text. No emails to start? Just write. Each final you accept
+      becomes a memo, and drafts sound like you within a handful of them.
     </p>
     <p>
       Or start with a writing task: paste an email or DM to clean up, or ask for

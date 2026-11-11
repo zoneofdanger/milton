@@ -48,15 +48,19 @@ What each change does to memos, tweaks and the cover sheet is in [memos](memos.m
   tweaks it taught; its first draft and final load only when that memo is opened.
 - `/tps/memo/<id>` shows one memo in full (first draft or why there is none, final,
   context, served and taught tweaks, Forget); another account's or an unknown id is a 404.
-- The person can edit the cover sheet, forget one memo, and delete or reword a tweak.
+- The cover sheet is shown read only, one ruled line per line as written, blank lines
+  kept, with a note that an AI connected with Read and write changes it; an empty one
+  says "No cover sheet yet." and how to start one. There is no cover sheet form
+  (Peter, 2026-11-10; [memos](memos.md)).
+- The person can forget one memo, and delete or reword a tweak.
 - An empty TPS page links to the Connected AIs page and shows the shared setup prompt
   ([setup](setup.md)) to copy; an account with memos gets a shorter prompt for the next
   draft instead.
 - Every TPS page change is a POST with the CSRF and Origin checks, then redirects back
   with a notice.
 - Every TPS page change runs in its own transaction under the account lock
-  ([saves](saves.md)): the cover sheet form, forgetting one memo, Delete all memos,
-  deleting or rewording a tweak, and the Keep memos switch.
+  ([saves](saves.md)): forgetting one memo, Delete all memos, deleting or rewording a
+  tweak, and the Keep memos switch.
 
 ## Memo settings
 

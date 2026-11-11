@@ -415,7 +415,7 @@ async function memoSummary(tx: StoreSession, userId: string, id: string) {
 /** The cover sheet's lines, as add and remove see them. */
 export const coverLines = (text: string) =>
   text === "" ? [] : text.split("\n");
-export const coverSheetLimit = (length: number) =>
+const coverSheetLimit = (length: number) =>
   new StoreError(
     "cover_sheet_limit",
     `The cover sheet would be ${length.toLocaleString("en-US")} characters, over its ${COVER_SHEET_CHARS.toLocaleString("en-US")}-character limit. Nothing was changed.`,

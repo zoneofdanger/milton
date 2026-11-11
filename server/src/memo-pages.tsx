@@ -1,11 +1,10 @@
 /** @jsxImportSource hono/jsx */
 import { billingItem, page, type BillingItem } from "./pages";
 import type { Child } from "hono/jsx";
-import { StoreError, type PersonStore } from "./store";
+import type { PersonStore } from "./store";
 import type { TrialStatus } from "./store/trials";
 import type { FullMemo, TpsMemo, TpsView } from "./store/tps";
 import { LISTED_MEMOS } from "./store/tps";
-import { COVER_SHEET_CHARS } from "./store/memos";
 import { SCOREBOARD_MIN, type Scoreboard, type ScoreLine } from "./store/score";
 import { SETUP_PROMPT } from "@milton/theme/setup-prompt";
 import { clientHost } from "./auth-assistants";
@@ -13,12 +12,7 @@ import { clientHost } from "./auth-assistants";
 // The TPS page's routes. "/" also serves the signed-out landing page, so the
 // browser router sends it here only for a signed-in person.
 const GETS = ["/", "/download", "/tps-report"];
-const POSTS = [
-  "/tps/cover-sheet",
-  "/tps/forget",
-  "/tps/tweaks/delete",
-  "/tps/tweaks/reword",
-];
+const POSTS = ["/tps/forget", "/tps/tweaks/delete", "/tps/tweaks/reword"];
 const MEMO_PATH = /^\/tps\/memo\/([^/]+)$/;
 const ID = /^[0-9a-f-]{36}$/;
 /** The one method a TPS route answers, or undefined for any other path. */
@@ -35,7 +29,6 @@ type PageStore = Pick<
   | "read"
   | "readMemo"
   | "exportTps"
-  | "saveCoverSheet"
   | "forgetMemo"
   | "deleteTweak"
   | "rewordTweak"
@@ -245,19 +238,12 @@ function scoreboardLine(score: Scoreboard) {
 
 /** The line a change's redirect shows, in the section it changed. */
 const NOTICES = {
-  "cover-saved": ["cover", "Cover sheet saved."],
-  "cover-unchanged": ["cover", "Cover sheet unchanged."],
   forgot: ["memos", "Memo forgotten."],
   "tweak-deleted": ["tweaks", "Tweak deleted."],
   "tweak-reworded": ["tweaks", "Tweak reworded."],
 } as const;
 type Done = keyof typeof NOTICES;
-type Notices = Partial<Record<"cover" | "memos" | "tweaks", Child>>;
-
-/** What the cover sheet form shows: the saved text by default, or after a
- * refusal what the person typed (too long) or the current text (changed
- * elsewhere), with the version to send next. */
-type CoverForm = { text: string; version: number };
+type Notices = Partial<Record<"memos" | "tweaks", Child>>;
 
 type SheetView = {
   view: TpsView;
@@ -265,20 +251,11 @@ type SheetView = {
   date: string;
   comment: string;
   csrf: () => Child;
-  cover: CoverForm;
   notices: Notices;
 };
-/** The signed-in TPS report as a printed form: the cover sheet and its form,
+/** The signed-in TPS report as a printed form: the cover sheet, read only,
  * the scoreboard, the memos newest first and the person's tweaks. */
-function sheet({
-  view,
-  email,
-  date,
-  comment,
-  csrf,
-  cover,
-  notices,
-}: SheetView) {
+function sheet({ view, email, date, comment, csrf, notices }: SheetView) {
   const empty = !view.cover_sheet.text && view.memos.length === 0;
   const listed =
     view.memos.length >= LISTED_MEMOS
@@ -349,34 +326,33 @@ function sheet({
         <p class="applies">
           Your voice guide, served first to every AI. Keep it to short, hard
           things your memos can’t show: “no em dashes”, “sign off –P”. Only you
-          write it, here or by telling your AI the exact words.
+          write it, by telling your AI the exact words.
         </p>
-        {notices.cover}
-        <form method="post" action="/tps/cover-sheet" class="cover-form">
-          {csrf()}
-          <input
-            type="hidden"
-            name="expected_version"
-            value={String(cover.version)}
-          />
-          <label for="cover-sheet-text">
-            Cover sheet text
-            <span class="small-note">
-              Up to {COVER_SHEET_CHARS.toLocaleString("en-US")} characters.
-            </span>
-          </label>
-          {/* The leading newline is the one HTML drops, so a cover sheet that
-              starts with a blank line keeps it. */}
-          <textarea
-            id="cover-sheet-text"
-            name="text"
-            rows={8}
-            maxlength={COVER_SHEET_CHARS}
-          >
-            {"\n" + cover.text}
-          </textarea>
-          <button>Save cover sheet</button>
-        </form>
+        {/* Read only: AIs change it on the person's words (docs/memos.md).
+            One ruled line per line as written, blank lines included. */}
+        {view.cover_sheet.text.trim() ? (
+          <>
+            <div class="cover-lines">
+              {view.cover_sheet.text.split("\n").map((line) => (
+                <p class="line">
+                  <span class="typed">{line}</span>
+                </p>
+              ))}
+            </div>
+            <p class="small-note">
+              To change it, tell an AI you connected with Read and write which
+              line to add or remove.
+            </p>
+          </>
+        ) : (
+          <>
+            <p class="report-counts">No cover sheet yet.</p>
+            <p class="small-note">
+              To start one, tell an AI you connected with Read and write: “Add
+              to my cover sheet: no em dashes.”
+            </p>
+          </>
+        )}
       </section>
       <section class="form-section">
         <h2 id="scoreboard">Scoreboard</h2>
@@ -508,15 +484,7 @@ const chrome = (
 async function tpsPage(
   store: PageStore,
   ctx: MemoPageContext,
-  {
-    cover,
-    notices = {},
-    code = 200,
-  }: {
-    cover?: (view: TpsView) => CoverForm;
-    notices?: Notices;
-    code?: number;
-  } = {},
+  notices: Notices = {},
 ) {
   // Two independent reads at once, each on its own pooled connection. Billing
   // information is page chrome, never part of the report or download.
@@ -543,11 +511,10 @@ async function tpsPage(
         date: (ctx.now?.() ?? new Date()).toISOString().slice(0, 10),
         comment: (ctx.comment ?? randomComment)(),
         csrf: ctx.csrf,
-        cover: cover?.(view) ?? view.cover_sheet,
         notices,
       })}
     </>,
-    code,
+    200,
     null,
     {
       ...chrome(ctx, ctx.billing ? billingItem(trial) : undefined, "report"),
@@ -716,53 +683,6 @@ export async function memoPages(
       const value = form.get(name) ?? "";
       return ID.test(value) ? value : undefined;
     };
-    if (path === "/tps/cover-sheet") {
-      const text = form.get("text") ?? "";
-      const expected = Number(form.get("expected_version"));
-      if (!Number.isInteger(expected) || expected < 0)
-        throw new StoreError(
-          "invalid_input",
-          "Reload the page before saving your cover sheet. Nothing was saved.",
-          400,
-        );
-      let saved: Awaited<ReturnType<PageStore["saveCoverSheet"]>>;
-      try {
-        saved = await store.saveCoverSheet(text, expected);
-      } catch (error) {
-        if (
-          !(error instanceof StoreError) ||
-          error.code !== "cover_sheet_limit"
-        )
-          throw error;
-        // What the person typed stays in the form to shorten.
-        return tpsPage(store, ctx, {
-          code: 422,
-          cover: () => ({ text, version: expected }),
-          notices: { cover: <p role="alert">{error.message}</p> },
-        });
-      }
-      if (saved.status === "conflict")
-        // Never overwrite: show the current text, and what they typed to copy.
-        return tpsPage(store, ctx, {
-          code: 409,
-          notices: {
-            cover: (
-              <div role="alert">
-                <p>
-                  Your cover sheet changed elsewhere, by an AI or another tab,
-                  after you opened this page. Nothing was saved. The form now
-                  holds the current text; your text is below to copy.
-                </p>
-                {plain(text)}
-              </div>
-            ),
-          },
-        });
-      return back(
-        saved.status === "saved" ? "cover-saved" : "cover-unchanged",
-        "cover-sheet",
-      );
-    }
     if (path === "/tps/forget") {
       const memo = id("memo");
       if (!memo || !(await store.forgetMemo(memo)))
@@ -791,7 +711,9 @@ export async function memoPages(
     done !== null && Object.hasOwn(NOTICES, done)
       ? NOTICES[done as Done]
       : undefined;
-  return tpsPage(store, ctx, {
-    notices: notice ? { [notice[0]]: <p role="status">{notice[1]}</p> } : {},
-  });
+  return tpsPage(
+    store,
+    ctx,
+    notice ? { [notice[0]]: <p role="status">{notice[1]}</p> } : {},
+  );
 }

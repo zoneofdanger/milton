@@ -407,7 +407,9 @@ function sheet({ view, email, date, comment, csrf, notices }: SheetView) {
                   {[
                     clientLabel(m.client),
                     roundsLabel(m),
-                    m.change_count ? counted(m.change_count, "change") : "",
+                    m.change_count
+                      ? counted(m.change_count, "listed change")
+                      : "",
                     TIER[m.tier],
                   ]
                     .filter(Boolean)

@@ -1667,7 +1667,7 @@ test("the TPS page lists memos newest first, escaped, opens each only for its ow
     expect(html).not.toContain("<script>");
     expect(html).toContain("Email · vendor decline");
     expect(html).toContain(
-      "ai.example · 2 rounds · 3 changes · steered by you",
+      "ai.example · 2 rounds · 3 listed changes · steered by you",
     );
     expect(html).toContain("ai.example · 0 rounds · accepted untouched");
     expect(html).toContain("ai.example · your words");
@@ -1774,10 +1774,13 @@ test("a memo page lists what changed and what the person asked, and Remove clear
     expect(list).toContain(
       `<span class="tweak-label">You asked:</span> <span class="typed">${"Say no to the call, politely. ".repeat(4)}…</span>`,
     );
-    expect(list).toMatch(
-      /ai\.example · 2 rounds · \d+ changes · steered by you/,
-    );
     const page = await (await fixture.send(`/tps/memo/${id}`)).text();
+    // The list's count is every row the memo page lists, formatting included.
+    const rows = page.match(/<li class="change-row/g)?.length ?? 0;
+    expect(rows).toBeGreaterThan(3);
+    expect(list).toContain(
+      `ai.example · 2 rounds · ${rows} listed changes · steered by you`,
+    );
     for (const text of [
       '<h2 id="memo-asked">You asked</h2>',
       "Keep it short.",

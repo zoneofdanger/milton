@@ -39,8 +39,9 @@ export type TpsMemo = {
   tier: Tier;
   /** The request's first line, cut to ASKED_LINE characters. */
   asked?: string;
-  /** How many changes it lists, Markdown-only ones aside; absent for a memo
-   * saved before changes were listed. */
+  /** How many changes its memo page lists, Markdown-only ones included (for a
+   * too_large memo, only those its AI named); absent for a memo saved before
+   * changes were listed. */
   change_count?: number;
   /** Tweaks the report before it served, still on file. */
   served: { id: string; text: string }[];
@@ -107,7 +108,7 @@ const memoColumns = sql`m.id,to_char(m.created_at AT TIME ZONE 'UTC','YYYY-MM-DD
     WHERE c.user_id=m.user_id AND c.memo_id=m.id) AS taught,
   split_part(m.request,E'\n',1) AS asked,
   CASE WHEN m.changes_state IS NOT NULL THEN (SELECT count(*)::int FROM memo_changes c
-    WHERE c.user_id=m.user_id AND c.memo_id=m.id AND c.about IS DISTINCT FROM 'format') END AS change_count`;
+    WHERE c.user_id=m.user_id AND c.memo_id=m.id) END AS change_count`;
 type MemoRow = Omit<
   TpsMemo,
   | "kind"

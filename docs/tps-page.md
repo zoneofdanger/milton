@@ -52,7 +52,8 @@ What each change does to memos, tweaks and the cover sheet is in [memos](memos.m
   both counts and keeps its examples ([memos](memos.md#tweaks)).
 - Each listed memo shows its medium, kind, time and summary; "You asked:" with its
   request's first line cut to 120 characters; one line with its AI, rounds, "N
-  changes" (those not Markdown-only, when it has any) and tier; the tweaks its report
+  listed changes" (every row its memo page lists, when it has any; for a memo too
+  different to list in full, only those its AI named) and tier; the tweaks its report
   served (those still on file) and the tweaks it taught. Its first draft and final load
   only when that memo is opened.
 - `/tps/memo/<id>` shows one memo in full: context; "You asked" with the request in

@@ -15,6 +15,7 @@ import {
   check,
   customType,
   doublePrecision,
+  smallint,
 } from "drizzle-orm/pg-core";
 
 const tsvector = customType<{ data: string }>({ dataType: () => "tsvector" });
@@ -338,6 +339,12 @@ export const memos = pgTable(
     requestId: text("request_id").notNull(),
     createdAt: createdAt(),
     contextUpdatedAt: timestamp("context_updated_at", { withTimezone: true }),
+    // What the person typed to ask for the writing (drafted memos only), never
+    // served to an AI; the person can clear it.
+    request: text("request"),
+    // itemized: memo_changes lists every spot code found; too_large: only the
+    // changes the AI named. NULL before 0015 and without a kept first draft.
+    changesState: text("changes_state"),
     search: tsvector("search").generatedAlwaysAs(
       sql`to_tsvector('english'::regconfig, summary || ' ' || coalesce(purpose, '') || ' ' || coalesce(audience, '') || ' ' || final)`,
     ),
@@ -391,6 +398,14 @@ export const memos = pgTable(
       sql`jsonb_typeof(${t.clientJson}::jsonb)='object'`,
     ),
     check("memos_request_id", sql`length(${t.requestId}) = 36`),
+    check(
+      "memos_request",
+      sql`${t.request} IS NULL OR (${t.firstDraftState} <> 'none' AND char_length(${t.request}) BETWEEN 1 AND 600 AND ${t.request} = btrim(${t.request}, ' ' || chr(10)) AND translate(${t.request}, chr(10), '') !~ '[[:cntrl:]]')`,
+    ),
+    check(
+      "memos_changes_state",
+      sql`${t.changesState} IS NULL OR (${t.changesState} IN ('itemized','too_large') AND ${t.firstDraftState} = 'kept')`,
+    ),
   ],
 );
 // One line about what the person made an AI change. Matched through the memos
@@ -408,6 +423,8 @@ export const tweaks = pgTable(
     norm: text("norm").notNull(),
     clientJson: text("client_json").notNull(),
     createdAt: createdAt(),
+    // When the person last reworded it; its score counts from then.
+    textChangedAt: timestamp("text_changed_at", { withTimezone: true }),
   },
   (t) => [
     primaryKey({ columns: [t.userId, t.id] }),
@@ -442,6 +459,68 @@ export const tweakCitations = pgTable(
       foreignColumns: [tweaks.userId, tweaks.id],
     }).onDelete("cascade"),
     index("tweak_citations_by_tweak").on(t.userId, t.tweakId),
+  ],
+);
+// What changed from a memo's kept first draft to its final (0015): one row per
+// change the AI named, cut from the two stored texts at its quotes, then one
+// per spot code found that no change covers. Offsets are UTF-16 indices into
+// first_draft and final (NULL for an empty side code could not place); each
+// side is cut to 300 characters. A change's tweak is always one its memo
+// cites; deleting the tweak keeps the change and clears the link.
+export const memoChanges = pgTable(
+  "memo_changes",
+  {
+    userId: text("user_id").notNull(),
+    memoId: text("memo_id").notNull(),
+    n: smallint("n").notNull(),
+    draftStart: integer("draft_start"),
+    draftEnd: integer("draft_end"),
+    finalStart: integer("final_start"),
+    finalEnd: integer("final_end"),
+    before: text("before").notNull(),
+    after: text("after").notNull(),
+    truncated: boolean("truncated").notNull().default(false),
+    // voice or content, from the AI; format, from code, for a Markdown-only
+    // spot; NULL for a spot no change covers.
+    about: text("about"),
+    // person, asked or unasked, from the AI, with voice or content only.
+    by: text("by"),
+    tweakId: text("tweak_id"),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.memoId, t.n] }),
+    foreignKey({
+      name: "memo_changes_memo_fk",
+      columns: [t.userId, t.memoId],
+      foreignColumns: [memos.userId, memos.id],
+    }).onDelete("cascade"),
+    // Clears only tweak_id (PostgreSQL 15's column list), keeping the change.
+    foreignKey({
+      name: "memo_changes_citation_fk",
+      columns: [t.userId, t.memoId, t.tweakId],
+      foreignColumns: [
+        tweakCitations.userId,
+        tweakCitations.memoId,
+        tweakCitations.tweakId,
+      ],
+    }).onDelete("set null (tweak_id)" as "set null"),
+    check("memo_changes_n", sql`${t.n} BETWEEN 0 AND 119`),
+    check(
+      "memo_changes_offsets",
+      sql`(${t.draftStart} IS NULL) = (${t.draftEnd} IS NULL) AND (${t.finalStart} IS NULL) = (${t.finalEnd} IS NULL) AND (${t.draftStart} IS NULL OR 0 <= ${t.draftStart} AND ${t.draftStart} <= ${t.draftEnd}) AND (${t.finalStart} IS NULL OR 0 <= ${t.finalStart} AND ${t.finalStart} <= ${t.finalEnd})`,
+    ),
+    check(
+      "memo_changes_sides",
+      sql`char_length(${t.before}) <= 300 AND char_length(${t.after}) <= 300 AND (${t.before} <> '' OR ${t.after} <> '')`,
+    ),
+    check(
+      "memo_changes_labels",
+      sql`(${t.about} IS NULL OR ${t.about} IN ('voice','content','format')) AND (${t.by} IS NULL OR ${t.by} IN ('person','asked','unasked')) AND (${t.by} IS NULL) = (${t.about} IS NULL OR ${t.about} = 'format')`,
+    ),
+    check(
+      "memo_changes_tweak",
+      sql`${t.tweakId} IS NULL OR (${t.about} = 'voice' AND ${t.by} IN ('person','asked'))`,
+    ),
   ],
 );
 // Each get_report an AI read: its id and the tweak ids it served, so a memo

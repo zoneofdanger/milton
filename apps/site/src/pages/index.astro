@@ -20,7 +20,7 @@ const copy = {
   ],
   // Stays empty until setup can do this; when set, it is the slip's second row.
   onboardingStep: { text: "", initials: "AI" },
-  signOff: "We did not build superintelligence. We built a filing department.",
+  signOff: "We did not build superintelligence. It’s not AGI — it’s a memo.",
   testimonial: {
     quote:
       "I already share a name with a singer. I’d rather not share a voice with a clanker.",
@@ -88,6 +88,16 @@ const guides = [
             <dd>How you write</dd>
           </div>
         </dl>
+        <nav class="cc" aria-label="AI setup guides">
+          <span class="cc-label">cc:</span>
+          <ul>
+            {guides.map(({ label, href }) => (
+              <li>
+                <a href={href}>{label}</a>
+              </li>
+            ))}
+          </ul>
+        </nav>
         <div class="mark-one">
           <span class="mark-label" id="mark-one-label">
             Mark one
@@ -123,16 +133,6 @@ const guides = [
         Filed
       </span>
     </section>
-    <nav class="cc" aria-label="AI setup guides">
-      <span class="cc-label">cc:</span>
-      <ul>
-        {guides.map(({ label, href }) => (
-          <li>
-            <a href={href}>{label}</a>
-          </li>
-        ))}
-      </ul>
-    </nav>
   </div>
 
   <section class="faq" aria-labelledby="faq-heading">
@@ -140,9 +140,8 @@ const guides = [
       Couldn’t I just use a Markdown file in a synced folder?
     </h2>
     <p class="faq-answer">
-      Yes. Milton handles the connections, keeps memos as you go and picks the
-      finals for the job. Ours comes with a cover sheet, a monthly invoice, and
-      someone else to blame.
+      Yes. Ours comes with a cover sheet, a monthly invoice, and someone else to
+      blame.
     </p>
     <div class="questions">
       <details>
@@ -327,7 +326,7 @@ const guides = [
     margin-bottom: var(--space-8);
   }
 
-  /* Below the folder: the routing slip, with its cc line as a footnote. */
+  /* Below the folder: the routing slip. */
   .work {
     max-width: 720px;
     margin-top: 96px;
@@ -461,23 +460,26 @@ const guides = [
     pointer-events: none;
     user-select: none;
   }
-  /* One run of text, like a memo's cc line. Each name is a 44px target. */
+  /* The slip's cc field: one run of setup links, set like To, From and Re.
+     Each name is a 44px target. */
   .cc {
     display: flex;
-    flex-wrap: wrap;
-    align-items: center;
+    align-items: flex-start;
     gap: 0 var(--space-2);
-    margin-top: var(--space-3);
-    font-size: 0.9375rem;
-  }
-  .cc-label {
-    color: var(--muted);
+    padding: 0 var(--sheet-padding);
+    border-bottom: 1px solid var(--ink);
     font: var(--text-small) / var(--leading-label) var(--font-mono);
+  }
+  /* The label sits level with the first line of names when they wrap. */
+  .cc-label {
+    flex: none;
+    color: var(--muted);
+    line-height: var(--touch-target);
   }
   .cc ul {
     display: flex;
     flex-wrap: wrap;
-    gap: 0 0.35em;
+    gap: 0 1ch;
     padding: 0;
     list-style: none;
   }

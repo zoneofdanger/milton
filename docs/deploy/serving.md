@@ -10,25 +10,25 @@ covers:
 
 Rewritten in place by the release coordinator at every release, never appended to; the
 release's record goes in [history](../history.md). How to release and roll back:
-[releases](releases.md). As of 2026-11-11 07:32Z (after #103).
+[releases](releases.md). As of 2026-11-11 19:28Z (after #108).
 
 ## Services
 
-- **App, MCP, admission, daily check:** `milton-app-cover-16341d6`,
-  `milton-mcp-cover-16341d6`, `milton-admit-00010-gn4` and job `milton-e2e-daily`, all on
-  image `sha256:193135d28e8fcc0707d840cffe7719edcee9f34697bb90b532ddf00321c730e8` (#103,
-  `16341d6`; Cloud Run shows the amd64 manifest digest, not this index digest). Rollback,
-  code only, all four together: `milton-app-mail-cd2fa18`, `milton-mcp-mail-cd2fa18`,
-  `milton-admit-00009-c99` and the job to image
-  `sha256:3630960abaf412deb2cab9625ba8a5eeb69f3092e94b083bc4f3d11d7a93325f` (#100, `cd2fa18`).
-  An emptied cover sheet stays readable on the rollback (`cover_sheet_empty` only refused
-  making one).
+- **App, MCP, admission, daily check:** `milton-app-own-82ef571`,
+  `milton-mcp-own-82ef571`, `milton-admit-00011-jd9` and job `milton-e2e-daily`, all on
+  image `sha256:e70e8e769eaaa5032bbe5a0341e4253017a4badaadaaf55685ed1b108df02cf8` (#108,
+  `82ef571`; Cloud Run shows the amd64 manifest digest `sha256:d14de938…`, not this index
+  digest). Rollback, code only, all four together: `milton-app-cover-16341d6`,
+  `milton-mcp-cover-16341d6`, `milton-admit-00010-gn4` and the job to image
+  `sha256:193135d28e8fcc0707d840cffe7719edcee9f34697bb90b532ddf00321c730e8` (#103, `16341d6`).
+  An emptied cover sheet stays readable on the rollback, and on #100's before it
+  (`cover_sheet_empty` only refused making one).
 - **Auth and its jobs:** `milton-auth-00021-2gc`, `milton-auth-mail` and `milton-auth-maint`
   on image `sha256:d394050c2687a6872655b6075d1e3de9f4c2defe4a05353721dd0ea31ec0a832` (#102,
   `735937f`; Cloud Run shows the amd64 manifest digest, not this index digest). Rollback,
   code only, service and both jobs together: `milton-auth-00020-k77` and image
   `sha256:11946548b6e3fc563c11b8e6d2933566a7f90a83d83156e2e4ccf8a0d1d9bf56` (#86).
-- **Site:** Vercel production deployment of `16341d6` (#103's setup copy).
+- **Site:** Vercel production deployment of `82ef571` (#108 changes no site file).
 - **Secrets:** app `milton-app-env` 4 / `milton-app-key` 2, MCP `milton-mcp-env` 4 /
   `milton-mcp-key` 2 and auth `milton-auth-env` 2 / `milton-auth-key` 1, as at the 2026-11-07
   cutover (no release since recorded a change; confirm before the next one); admission

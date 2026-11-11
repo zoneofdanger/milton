@@ -1,6 +1,6 @@
 ---
 name: setup
-description: First setup on an empty account (offered once, optional sent emails or about five pastes, cover sheet, standing line), the setup prompt and shared facts
+description: First setup on an empty account (offered once, optional sent emails or about five pastes, cover sheet, standing line), setup prompt and shared facts
 type: behaviour
 covers:
   - server/src/store/setup.ts

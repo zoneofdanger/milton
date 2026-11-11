@@ -71,7 +71,7 @@ the backlog. The concept files indexed below hold everything else.
 - [research/spiral-tool-library-pilot-2026-11-05](docs/research/spiral-tool-library-pilot-2026-11-05.md) — 2026-11-05 pilot: one Milton-assisted draft and three Spiral drafts of one essay brief, preserved exactly; small, unblinded and with no winner
 - [research/writing-evidence-2026](docs/research/writing-evidence-2026.md) — November 2026 reading of three papers and GBrain's record: examples beat nothing, formality is the default to override, and much is untested
 - [saves](docs/saves.md) — How a create_memo save commits: the account lock, receipts, replay and request hashing, refusals, savepoints and the request size
-- [setup](docs/setup.md) — First setup on an empty account (offered once, about five pastes, the cover sheet, the standing line), the shared setup prompt and shared facts
+- [setup](docs/setup.md) — First setup on an empty account (offered once, optional sent emails or about five pastes, cover sheet, standing line), the setup prompt and shared facts
 - [site](docs/site.md) — The static site at meetmilton.com: what Astro builds it from, what Vercel uploads and publishes, and what its pages do
 - [tps-page](docs/tps-page.md) — The web app a signed-in person sees: the TPS page, one memo, memo settings, the TPS.md export and the Connected AIs page
 

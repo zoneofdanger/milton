@@ -9,6 +9,7 @@ import {
   malformedIntent,
   memoInput,
   missingIntent,
+  oldTweaks,
   reportInput,
   saveMemoInput,
 } from "./mcp-tools";
@@ -33,7 +34,7 @@ export const storeInstructions = [
   "Edit mode: when asked to fix, clean up, proofread or tighten the person's own text, change only what was requested; preserve other words, length, tone, greeting and sign-off; add no stock phrases or new punctuation habits. Guidance never widens edit scope. Briefly list changes. Requested transformations (shortening, translation, tone) permit only that scope.",
   'Asked "Did you get the memo?" or "Did you get that memo?": get_cover_sheet even if you already read it, then get_report for the task. Confirm only after a successful read; report empty results and failures honestly. Quoting or discussing the phrase is not an invocation.',
   "Memos: when the person accepts a final (approves it, says it's done or they'll send it, or copies it to use), save it with create_memo without asking, untouched finals too. Send first_draft exactly as you first showed it; if you no longer have it verbatim, send first_draft_missing instead of rebuilding it. Don't save abandoned drafts, writing not in their own voice (for someone else, a template), or when they ask you not to. When keep_memos is false, save only writing they ask you to remember. A revision you just showed is not accepted yet: wait for their reply.",
-  'Tweaks: when the final differs from the first draft, list each habit they made you change, one line each with when it applies ("vendor replies: no warm-up opener"), never "when requested". Skip one-off facts they added and changes you made unasked. Reuse a served tweak\'s id when it is the same change. Never send secrets, their correction messages or other people\'s text; summarize the situation and what they replied to in context.summary.',
+  "Changes: when the final differs from your first draft, send changes: before and after quoted exactly, with about (voice or content) and by (person, asked or unasked). Tweak only a habit likely to recur, at most three, named plainly (\"no warm-up opener\"); reuse a served tweak's id for the same habit. request: only what they typed to ask. Never send secrets, pasted text, their corrections or other people's text; summarize the situation in context.summary.",
   'After saved, tell them in one line, with no question: "Kept memo: vendor decline, 2 rounds, tweaks: no warm-up opener." Show the receipt word for word, however long. If a save fails, say so. On an error, follow its next.',
   'Cover sheet: only the person writes it. When they say "remember …" or "add to my cover sheet", add their exact line with cover_sheet; remove an exact line only on request. Never add tweaks or your own inferences, or offer to. A correction during a draft is a tweak, not a cover sheet line.',
   "Forget: when asked to forget a memo, send its id in forget_memos. To fix a memo's summary, medium, kind, audience or purpose, send memo_context; a memo's words never change.",
@@ -236,6 +237,33 @@ export function createMiltonServer(
           // A read-only connection lists no create_memo to send it to.
           if (!options.readOnly) unreadMemo = flattenedMemo(message.params);
         }
+        // A memo with the old tweaks field: the AI holds the definition from
+        // before changes, so the refusal also asks for a refresh.
+        if (
+          !options.readOnly &&
+          !unreadMemo &&
+          "method" in message &&
+          message.method === "tools/call" &&
+          "id" in message &&
+          message.id !== undefined &&
+          message.params?.name === "create_memo" &&
+          oldTweaks(message.params.arguments)
+        ) {
+          if (!first) await toolsChanged(message.id);
+          await transport.send({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: storeResult(
+              {
+                error: "invalid_input",
+                field: "tweaks",
+                message: oldTweaks.message,
+              },
+              true,
+            ),
+          });
+          return;
+        }
         if (unreadMemo && "id" in message && message.id !== undefined) {
           await transport.send({
             jsonrpc: "2.0",
@@ -308,8 +336,8 @@ export function createMiltonServer(
     "get_report",
     {
       description: options.readOnly
-        ? "Assemble the report for one draft. intent needs situation (one line: what you are writing, to whom and why), medium, audience and purpose; add kind_id from kinds when one fits. Returns text (the cover sheet, the person's best-matching finals as examples, then Your tweaks), examples, tweaks, kinds and is_empty. Imitate the examples; the tweaks say what the person keeps changing. Empty means nothing similar yet; never guess their voice. No model call."
-        : "Assemble the report for one draft. intent needs situation (one line: what you are writing, to whom and why), medium, audience and purpose; add kind_id from kinds when one fits. A vague intent gets worse examples and tweaks. Returns text (the cover sheet, the person's best-matching finals as examples, best first, then Your tweaks), report_id (pass it to create_memo when you save this draft's memo), examples (memo ids and context, in served order), tweaks (served tweaks with ids: reuse an id when a change is the same), kinds (the person's kinds as {kind_id, kind}) and is_empty. Imitate the examples; the tweaks say what the person keeps changing. Empty means nothing similar yet; never guess their voice. No model call; Milton records which tweaks it served.",
+        ? "Assemble the report for one draft. intent needs situation (one line: what you are writing, to whom and why), medium, audience and purpose; add kind_id from kinds when one fits. Returns text (the cover sheet, the person's best-matching finals as examples, then Your tweaks, each tweak with an example of what it changed), examples, tweaks, kinds and is_empty. Imitate the examples; the tweaks say what the person keeps changing. Empty means nothing similar yet; never guess their voice. No model call."
+        : "Assemble the report for one draft. intent needs situation (one line: what you are writing, to whom and why), medium, audience and purpose; add kind_id from kinds when one fits. A vague intent gets worse examples and tweaks. Returns text (the cover sheet, the person's best-matching finals as examples, best first, then Your tweaks, each tweak with an example of what it changed), report_id (pass it to create_memo when you save this draft's memo), examples (memo ids and context, in served order), tweaks (served tweaks with ids: reuse an id when a change is the same), kinds (the person's kinds as {kind_id, kind}) and is_empty. Imitate the examples; the tweaks say what the person keeps changing. Empty means nothing similar yet; never guess their voice. No model call; Milton records which tweaks it served.",
       inputSchema: reportInput,
       annotations: readOnly,
     },
@@ -320,7 +348,7 @@ export function createMiltonServer(
       "create_memo",
       {
         description:
-          "Save writing the person settled on, change their cover sheet, or forget memos. Send exactly one of memo, cover_sheet, forget_memos or memo_context, with a new request_id; to recover an uncertain outcome, resend exactly the same arguments. Milton stores your bytes unchanged, whole or not at all. memo: save one when the person accepts a final, without asking. final is the accepted text exactly, hand edits included. first_draft is your first version exactly as shown (in edit mode, your first edit of their text); if you no longer have it verbatim, send first_draft_missing: true instead. Send mode and rounds with either. For writing the person gives you to keep (setup, \"remember this email\"), send only final, context and kind. tweaks, only when the final differs from the first draft: each habit they made you change, one line each with when it applies; skip one-off facts they added; {tweak_id} reuses a served tweak, {text} adds one. context: summary (one placeholder-safe line on the situation and the text replied to), medium, audience, purpose. kind_id from kinds, or new_kind when none fits. memo.report_id from the get_report read before the draft. A memo holds only these: never secrets, the transcript, the person's correction messages or other people's text. cover_sheet: only the person's words. add one exact line they asked you to add, or remove one exact line they asked to drop, with expected_version from get_cover_sheet; never add tweaks or your inferences. forget_memos: memo ids the person asked you to forget, with what they taught. memo_context: a corrected context or kind for one memo; its words never change. A saved memo result carries receipt: tell the person that line. An error result's next says what to do.",
+          "Save writing the person settled on, change their cover sheet, or forget memos. Send exactly one of memo, cover_sheet, forget_memos or memo_context, with a new request_id; to recover an uncertain outcome, resend exactly the same arguments. Milton stores your bytes unchanged, whole or not at all. memo: save one when the person accepts a final, without asking. final is the accepted text exactly, hand edits included. first_draft is your first version exactly as shown (in edit mode, your first edit of their text); if you no longer have it verbatim, send first_draft_missing: true instead. Send mode and rounds with either. For writing the person gives you to keep (setup, \"remember this email\"), send only final, context and kind. changes, when the final differs from a kept first draft: each quoted exactly, with about and by. A tweak is rare (most memos teach one or none, at most three): a recurring voice habit they typed or asked for, named plainly, with a condition only if it doesn't hold in all their writing. Every change is kept either way. request: their typed ask, no pasted text. context: summary (one placeholder-safe line on the situation and the text replied to), medium, audience, purpose. kind_id from kinds, or new_kind when none fits. memo.report_id from the get_report read before the draft. A memo holds only these: never secrets, the transcript, the person's correction messages or other people's text. cover_sheet: only the person's words. add one exact line they asked you to add, or remove one exact line they asked to drop, with expected_version from get_cover_sheet; never add tweaks or your inferences. forget_memos: memo ids the person asked you to forget, with what they taught. memo_context: a corrected context or kind for one memo; its words never change. A saved memo result carries receipt: tell the person that line. An error result's next says what to do.",
         inputSchema: saveMemoInput,
         annotations: {
           readOnlyHint: false,

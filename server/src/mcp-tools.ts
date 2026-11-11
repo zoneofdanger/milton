@@ -9,6 +9,7 @@ import { subscriptionRequired } from "./store/trials";
 import { usageWithin, type CallUsage, type ToolName } from "./store/usage";
 import { MEDIA, type CoverSheetRead, type ReportRead } from "./store/memos";
 import { setupScript } from "./store/setup";
+import { MAX_CHANGES, MAX_SIDE } from "./store/changes";
 
 /** One trimmed line of at most `max` characters, with no control characters. */
 export const oneLine = (max: number) =>
@@ -100,6 +101,38 @@ const kindFields = {
       "Only when no listed kind fits: a short label such as vendor decline. A label already on file, in any letter case, reuses that kind.",
     ),
 };
+/** One quoted side of a change: a few words copied exactly, possibly none. */
+const side = z
+  .string()
+  .max(MAX_SIDE)
+  .refine((v) => v.isWellFormed() && !v.includes("\0"));
+export const changeInput = z.strictObject({
+  before: side.describe(
+    "Words quoted from your first draft: a few words, copied exactly; for an insertion leave before empty.",
+  ),
+  after: side.describe(
+    "Words quoted from the final: a few words, copied exactly; for a deletion leave after empty.",
+  ),
+  about: z
+    .enum(["voice", "content"])
+    .describe(
+      "voice: how it sounds (wording, tone, length, greeting, sign-off); content: what it says (a fact or point added, cut or corrected).",
+    ),
+  by: z
+    .enum(["person", "asked", "unasked"])
+    .describe(
+      "person: they typed these words (an edited version they pasted back, or wording they gave in a message); asked: they asked for the change and you wrote the words; unasked: you changed it while redrafting.",
+    ),
+  tweak: z
+    .union([
+      z.strictObject({ tweak_id: id }),
+      z.strictObject({ text: oneLine(200) }),
+    ])
+    .optional()
+    .describe(
+      'Rare: only on a voice change by person or asked, for a habit likely to recur in their other writing; skip one-off facts. Most memos teach one or none; every change is kept either way. {tweak_id} reuses a served tweak for the same habit, even in a new situation. {text} adds one: the habit named plainly ("no warm-up opener"), with when it applies only if it doesn\'t hold in all their writing ("vendor replies: no price talk"). Never "when requested". At most three distinct tweaks per memo.',
+    ),
+});
 export const memoInput = z
   .strictObject({
     final: words.describe(
@@ -131,19 +164,21 @@ export const memoInput = z
       .describe(
         "How many times you redrafted after the first draft. Required with a first draft.",
       ),
-    tweaks: z
-      .array(
-        z.union([
-          z.strictObject({ tweak_id: id }),
-          z.strictObject({ text: oneLine(200) }),
-        ]),
-      )
-      .max(10)
-      // An empty list, as some clients send for none, is read as omitted.
-      .transform((tweaks) => (tweaks.length ? tweaks : undefined))
+    request: z
+      .string()
+      .trim()
       .optional()
       .describe(
-        'Only when the final differs from the first draft: each habit the person made you change, one line each with when it applies ("vendor replies: no warm-up opener"). Skip one-off facts they added. When it is the same change, reuse a served tweak\'s id with {tweak_id}; {text} adds one only when none fits.',
+        "Only with first_draft or first_draft_missing: what the person typed to ask for this writing, exactly as typed, at most 600 characters and 12 lines. Cut pasted or quoted text (an email, a thread, a document) and anything secret, marking each cut […]; change nothing else. In edit mode, their instruction, never the text to edit. Never their later corrections.",
+      ),
+    changes: z
+      .array(changeInput)
+      .max(MAX_CHANGES)
+      // An empty list, as some clients send for none, is read as omitted.
+      .transform((changes) => (changes.length ? changes : undefined))
+      .optional()
+      .describe(
+        "Only when the final differs from a kept first_draft: the spots that differ, each quoted and labelled, at most 20. Every change is kept either way; most memos teach one tweak or none, at most three.",
       ),
     context: memoContextInput,
     ...kindFields,
@@ -158,7 +193,7 @@ export const memoInput = z
       .describe("The report_id of the get_report read before this draft."),
   })
   .describe(
-    'One accepted final. Omit first_draft, first_draft_missing, mode, rounds and tweaks for writing the person gave you to keep (setup, "remember this email").',
+    'One accepted final. Omit first_draft, first_draft_missing, mode, rounds, request and changes for writing the person gave you to keep (setup, "remember this email").',
   );
 export const coverSheetChangeInput = z
   .strictObject({
@@ -187,6 +222,22 @@ export const memoContextChangeInput = z.strictObject({
   context: memoContextInput,
   ...kindFields,
 });
+
+/** Whether a save carries memo.tweaks, the field changes replaced: an AI
+ * holding the tool definition from before them. Refused, never read. */
+export const oldTweaks = Object.assign(
+  (args: unknown) => {
+    const memo =
+      typeof args === "object" && args !== null
+        ? (args as { memo?: unknown }).memo
+        : undefined;
+    return typeof memo === "object" && memo !== null && "tweaks" in memo;
+  },
+  {
+    message:
+      "memo.tweaks is no longer a field: each tweak now goes on the change it came from, in memo.changes. Nothing was changed.",
+  },
+);
 
 export const oneChange =
   "Send exactly one of memo, cover_sheet, forget_memos or memo_context.";
@@ -220,6 +271,7 @@ export const saveMemoInput = z
   );
 export type SaveMemoInput = z.infer<typeof saveMemoInput>;
 export type MemoInput = z.infer<typeof memoInput>;
+export type ChangeInput = z.infer<typeof changeInput>;
 export type MemoContextInput = z.infer<typeof memoContextInput>;
 
 type ToolResult = {

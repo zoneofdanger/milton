@@ -185,14 +185,15 @@ test("an SDK client receives instructions, discovers the three tools, and reads 
       save.inputSchema.properties as Record<string, { properties?: object }>
     ).memo!;
     expect(Object.keys(memoSchema.properties ?? {})).toContain("report_id");
-    // Clients may send tweaks: [] and kind_id: null for none; memo_context's
+    // Clients may send changes: [] and kind_id: null for none; memo_context's
     // kind_id still takes only an id.
     const fields = (schema: object | undefined) =>
       (schema as { properties: Record<string, Record<string, unknown>> })
         .properties;
     const memoFields = fields(memoSchema);
-    expect(memoFields.tweaks).toMatchObject({ type: "array", maxItems: 10 });
-    expect(memoFields.tweaks).not.toHaveProperty("minItems");
+    expect(memoFields).not.toHaveProperty("tweaks");
+    expect(memoFields.changes).toMatchObject({ type: "array", maxItems: 20 });
+    expect(memoFields.changes).not.toHaveProperty("minItems");
     expect(memoFields.kind_id!.anyOf).toContainEqual({ type: "null" });
     expect(fields(save.inputSchema.properties!.memo_context).kind_id).toEqual({
       type: "string",
@@ -204,7 +205,9 @@ test("an SDK client receives instructions, discovers the three tools, and reads 
     for (const field of [
       "save one when the person accepts a final, without asking",
       "send first_draft_missing: true instead",
-      "{tweak_id} reuses a served tweak",
+      "A tweak is rare (most memos teach one or none, at most three)",
+      "named plainly, with a condition only if it doesn't hold in all their writing",
+      "Every change is kept either way",
       "A memo holds only these: never secrets, the transcript, the person's correction messages or other people's text",
       "never add tweaks or your inferences",
       "carries receipt: tell the person that line",
@@ -379,12 +382,12 @@ test("an object argument sent as a JSON string is read as that object; any other
     });
     expect(reply.isError).toBeUndefined();
     expect(saved).toEqual([{ request_id, memo }]);
-    // tweaks: [] and kind_id: null arrive as omitted, even inside the string.
+    // changes: [] and kind_id: null arrive as omitted, even inside the string.
     const lenient = await client.callTool({
       name: "create_memo",
       arguments: {
         request_id,
-        memo: JSON.stringify({ ...memo, tweaks: [], kind_id: null }),
+        memo: JSON.stringify({ ...memo, changes: [], kind_id: null }),
       },
     });
     expect(lenient.isError).toBeUndefined();
@@ -442,7 +445,15 @@ test("a memo sent flattened (the final as a string memo, its fields beside it) s
       first_draft: "Hi Sam! Hope you're well. Friday could work for me.",
       mode: "draft",
       rounds: 1,
-      tweaks: [{ text: "replies to Sam: no warm-up opener" }],
+      changes: [
+        {
+          before: "Hi Sam! Hope you're well.",
+          after: "",
+          about: "voice",
+          by: "person",
+          tweak: { text: "replies to Sam: no warm-up opener" },
+        },
+      ],
       context: {
         summary: "accepting a fictional meeting day",
         medium: "email",
@@ -490,6 +501,113 @@ test("a memo sent flattened (the final as a string memo, its fields beside it) s
       });
     }
     expect(saved).toHaveLength(3);
+  } finally {
+    await client.close();
+    await server.close();
+    await local.dispose();
+  }
+});
+
+test("a memo with the old tweaks field, quotes that miss the texts, a pasted request or a fourth tweak is refused with its own next step; the old field also refreshes the tool list", async () => {
+  const local = await localStore();
+  const calls: ToolCall[] = [];
+  const store = fixtureStore(local.db, "u");
+  const server = createMiltonServer(
+    { ...store, appOrigin: stubStore().appOrigin },
+    (call) => calls.push(call),
+  );
+  const client = new Client({ name: "sdk-test", version: "0.0.0" });
+  let changed = 0;
+  client.setNotificationHandler(ToolListChangedNotificationSchema, () => {
+    changed++;
+  });
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
+  try {
+    await seedUsers(local.pg, "u");
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    const save = async (memo: Record<string, unknown>) => {
+      const reply = await client.callTool({
+        name: "create_memo",
+        arguments: { request_id: crypto.randomUUID(), memo },
+      });
+      expect(reply.isError).toBe(true);
+      return read(reply as never);
+    };
+    const memo = {
+      final: "Friday works.\n\n–P",
+      first_draft: "Hi Sam! Hope you're well. Friday could work for me.",
+      mode: "draft",
+      rounds: 1,
+      context: {
+        summary: "accepting a fictional meeting day",
+        medium: "email",
+      },
+    };
+    const change = (tweak: string) => ({
+      before: "Hi Sam!",
+      after: "",
+      about: "voice",
+      by: "person",
+      tweak: { text: tweak },
+    });
+    // An AI holding the definition from before changes.
+    const old = await save({
+      ...memo,
+      tweaks: [{ text: "no warm-up opener" }],
+    });
+    expect(old).toMatchObject({
+      error: "invalid_input",
+      field: "tweaks",
+      next: {
+        action: "fix_input",
+        text: "tweaks now go on changes: quote before and after and add tweak there, or save without tweaks; new request_id.",
+      },
+    });
+    expect(changed).toBe(1);
+    expect(
+      await save({
+        ...memo,
+        changes: [{ ...change("x"), before: "Hello Sam!" }],
+      }),
+    ).toMatchObject({
+      error: "invalid_change",
+      message: expect.stringContaining("change 1: a quote is not in its text"),
+      next: {
+        action: "fix_input",
+        text: expect.stringContaining("or leave that change out"),
+      },
+    });
+    expect(
+      await save({ ...memo, request: "Reply yes.\n> On Friday we could meet" }),
+    ).toMatchObject({
+      error: "invalid_input",
+      field: "request",
+      next: {
+        text: "Send only what the person typed to ask, without pasted or quoted text, or leave request out; save with a new request_id.",
+      },
+    });
+    expect(
+      await save({
+        ...memo,
+        changes: ["one", "two", "three", "four"].map(change),
+      }),
+    ).toMatchObject({
+      error: "invalid_input",
+      field: "changes.tweak",
+      next: { text: expect.stringContaining("Keep the three tweaks") },
+    });
+    expect(changed).toBe(1);
+    expect(calls.map((c) => [c.outcome, c.error_code])).toEqual([
+      ["refused", "invalid_input"],
+      ["refused", "invalid_change"],
+      ["refused", "invalid_input"],
+      ["refused", "invalid_input"],
+    ]);
+    expect((await local.pg.query("SELECT 1 FROM save_requests")).rows).toEqual(
+      [],
+    );
   } finally {
     await client.close();
     await server.close();
@@ -801,7 +919,7 @@ test("scopes control discovery and direct calls; original binding revocation sur
 }, 30000);
 
 // Round trips per call, beyond the per-tweak statements.
-const TRIPS = { report: 5, save: 13 };
+const TRIPS = { report: 5, save: 14 };
 test("a setup request makes one database round trip and a tool call four, by token or connection key", async () => {
   const local = await localStore();
   try {
@@ -911,7 +1029,7 @@ test("a setup request makes one database round trip and a tool call four, by tok
     expect(await trips_for(key, "tools/call", report)).toBe(TRIPS.report);
     // A memo save: access, then one transaction (the account lock, the
     // receipt, the trial gate, the savepoint, the keep-memos switch, the
-    // duplicate check, the memo, its citations, the receipt), with the usage
+    // duplicate check, the memo, its citations, its changes, the receipt), with the usage
     // append alongside. Its gate found no reminder due, so no notice claim.
     const save = (tweaks: string[]) => ({
       name: "create_memo",
@@ -922,7 +1040,13 @@ test("a setup request makes one database round trip and a tool call four, by tok
           final: `Not this time, thanks. ${tweaks.length}`,
           mode: "draft",
           rounds: 1,
-          tweaks: tweaks.map((text) => ({ text })),
+          changes: tweaks.map((text) => ({
+            before: "Hi!",
+            after: "",
+            about: "voice",
+            by: "person",
+            tweak: { text },
+          })),
           context: { summary: "a fictional decline", medium: "email" },
         },
       },
@@ -931,11 +1055,11 @@ test("a setup request makes one database round trip and a tool call four, by tok
       TRIPS.save + 1,
     );
     // Each new tweak is one statement more.
-    const ten = save(Array.from({ length: 10 }, (_, i) => `Tweak ${i + 1}`));
-    expect(await trips_for(key, "tools/call", ten)).toBe(TRIPS.save + 10);
+    const three = save(["Tweak 1", "Tweak 2", "Tweak 3"]);
+    expect(await trips_for(key, "tools/call", three)).toBe(TRIPS.save + 3);
     // A replay never reaches the gate, so its notice claim runs (a
     // transaction of the timeouts and the claim).
-    expect(await trips_for(key, "tools/call", ten)).toBe(5 + 4);
+    expect(await trips_for(key, "tools/call", three)).toBe(5 + 4);
   } finally {
     await local.dispose();
   }

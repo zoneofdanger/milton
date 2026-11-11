@@ -10,7 +10,7 @@ import {
   StoreError,
 } from "../src/store";
 import { localAsset } from "../src/assets";
-import { fixtureStore, memoSave, vendorIntent } from "./store-fixtures";
+import { fixtureStore, memoSave, teach, vendorIntent } from "./store-fixtures";
 import { localStore, openTransactions } from "./local-store";
 
 import {
@@ -1600,7 +1600,7 @@ async function otherAccount(
       final: "Alpha's final.",
       mode: "draft",
       rounds: 1,
-      tweaks: [{ text: "alpha signs as Ada" }],
+      changes: teach("first draft", { text: "alpha signs as Ada" }),
     }),
   );
   return {
@@ -1640,7 +1640,7 @@ test("the TPS page lists memos newest first, escaped, opens each only for its ow
         final: "No, thanks. <script>alert('final')</script>\n\n–P",
         mode: "draft",
         rounds: 2,
-        tweaks: [{ text: "no warm-up opener <b>" }],
+        changes: teach("Hi!", { text: "no warm-up opener <b>" }),
         new_kind: "vendor decline",
       }),
     );
@@ -1773,7 +1773,7 @@ test("forget, tweak delete and reword change only the session account's memos an
         final: "Short.",
         mode: "draft",
         rounds: 1,
-        tweaks: [{ text: "no opener" }, { text: "two sentences" }],
+        changes: teach("Hi!", { text: "no opener" }, { text: "two sentences" }),
       }),
     );
     const memo = saved.memo!.memo_id;
@@ -1887,7 +1887,7 @@ test("Keep memos turns off and on, and Delete all memos asks first, then keeps t
         final: "Final.",
         mode: "draft",
         rounds: 1,
-        tweaks: [{ text: "be brief" }],
+        changes: teach("Draft", { text: "be brief" }),
         new_kind: "vendor decline",
       }),
     );

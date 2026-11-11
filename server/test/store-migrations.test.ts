@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { localStore, storeDatabase } from "./local-store";
-import { fixtureStore, memoSave, seedUsers } from "./store-fixtures";
+import { fixtureStore, memoSave, seedUsers, teach } from "./store-fixtures";
 import { migrationUrl } from "../scripts/migrate";
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
@@ -47,6 +47,20 @@ async function seedSample(
     ],
   );
 }
+
+// The current memo code names 0015's table and columns. A test that saves
+// with it on an older schema adds them for its saves and drops them after,
+// so the schema it then migrates is that older one again.
+const memoEvidenceSql = () =>
+  Bun.file(
+    new URL("../drizzle/0015_memo_evidence.sql", import.meta.url),
+  ).text();
+const addMemoEvidence = async (pg: PGlite) =>
+  pg.exec(`BEGIN; ${await memoEvidenceSql()}; COMMIT;`);
+const dropMemoEvidence = (pg: PGlite) =>
+  pg.exec(
+    "DROP TABLE memo_changes; ALTER TABLE memos DROP COLUMN request, DROP COLUMN changes_state; ALTER TABLE tweaks DROP COLUMN text_changed_at",
+  );
 
 const publicTables = async (pg: PGlite) =>
   (
@@ -228,6 +242,7 @@ test("the runtime has only current grants, its guards hold, and later tables inh
       connection_keys: "",
       cover_sheets: "",
       identities: "INSERT,SELECT",
+      memo_changes: "",
       memo_kinds: "",
       memo_settings: "",
       memos: "",
@@ -901,7 +916,7 @@ test("0012 adds empty memo tables the legacy group cannot reach; 014 grants the 
           final: `Fictional final ${n}.`,
           mode: "draft",
           rounds: 1,
-          tweaks: [{ text: `fictional tweak ${n}` }],
+          changes: teach("Hi!", { text: `fictional tweak ${n}` }),
         }),
       );
       return saved.memo!;
@@ -933,6 +948,185 @@ test("0012 adds empty memo tables the legacy group cannot reach; 014 grants the 
       await pg.exec("RESET ROLE");
     }
     expect(await citations()).toBe(0);
+  } finally {
+    await pg.exec("RESET ROLE").catch(() => {});
+    await local.dispose();
+  }
+});
+
+test("0015 adds memo_changes and the request, changes state and reword columns, checked; 016 restates 014 with their grants; deleting a tweak keeps its changes", async () => {
+  const local = await localStore();
+  const pg = local.pg;
+  const tables = [
+    "cover_sheets",
+    "memo_changes",
+    "memo_kinds",
+    "memo_settings",
+    "memos",
+    "served_reports",
+    "tweak_citations",
+    "tweaks",
+  ];
+  const privileges = async (role: string) => ({
+    tables: (
+      await pg.query<{ relname: string; privileges: string }>(
+        `SELECT c.relname,string_agg(a.privilege_type,',' ORDER BY a.privilege_type) AS privileges
+         FROM pg_class c CROSS JOIN LATERAL aclexplode(c.relacl) a
+         WHERE a.grantee=$1::regrole AND c.relname=ANY($2) AND c.relnamespace='public'::regnamespace
+         GROUP BY 1 ORDER BY 1`,
+        [role, tables],
+      )
+    ).rows.map((r) => `${r.relname}:${r.privileges}`),
+    columns: (
+      await pg.query<{ c: string }>(
+        `SELECT c.relname||'.'||t.attname||':'||string_agg(a.privilege_type,',' ORDER BY a.privilege_type) AS c
+         FROM pg_attribute t JOIN pg_class c ON c.oid=t.attrelid CROSS JOIN LATERAL aclexplode(t.attacl) a
+         WHERE a.grantee=$1::regrole AND c.relname=ANY($2) AND c.relnamespace='public'::regnamespace
+         GROUP BY c.relname,t.attname ORDER BY 1`,
+        [role, tables],
+      )
+    ).rows.map((r) => r.c),
+  });
+  try {
+    expect(
+      (await pg.query("SELECT count(*)::int AS n FROM memo_changes")).rows,
+    ).toEqual([{ n: 0 }]);
+    expect(await privileges("milton_runtime")).toEqual({
+      tables: [],
+      columns: [],
+    });
+    await pg.exec(
+      "CREATE ROLE milton_app_runtime NOLOGIN NOINHERIT; CREATE ROLE milton_mcp_runtime NOLOGIN NOINHERIT",
+    );
+    const file = (name: string) =>
+      Bun.file(new URL(`../migrations/${name}`, import.meta.url)).text();
+    // 014 then 016, as a release that reran 014 would; rerunning converges,
+    // dropping a stray grant.
+    await pg.exec(await file("014-memos-roles.sql"));
+    await pg.exec(await file("016-memo-evidence-roles.sql"));
+    await pg.exec("GRANT UPDATE,DELETE ON memo_changes TO milton_mcp_runtime");
+    await pg.exec(await file("016-memo-evidence-roles.sql"));
+    const contextColumns = [
+      "audience",
+      "context_updated_at",
+      "kind_id",
+      "medium",
+      "purpose",
+      "summary",
+    ].map((c) => `memos.${c}:UPDATE`);
+    expect(await privileges("milton_mcp_runtime")).toEqual({
+      tables: [
+        "cover_sheets:INSERT,SELECT",
+        "memo_changes:INSERT,SELECT",
+        "memo_kinds:INSERT,SELECT",
+        "memo_settings:SELECT",
+        "memos:DELETE,INSERT,SELECT",
+        "served_reports:INSERT,SELECT",
+        "tweak_citations:INSERT,SELECT",
+        "tweaks:DELETE,INSERT,SELECT",
+      ],
+      columns: contextColumns,
+    });
+    expect(await privileges("milton_app_runtime")).toEqual({
+      tables: [
+        "cover_sheets:INSERT,SELECT",
+        "memo_changes:SELECT",
+        "memo_kinds:DELETE,SELECT",
+        "memo_settings:INSERT,SELECT",
+        "memos:DELETE,SELECT",
+        "tweak_citations:SELECT",
+        "tweaks:DELETE,SELECT",
+      ],
+      columns: [
+        "memo_settings.keep_memos:UPDATE",
+        "memo_settings.updated_at:UPDATE",
+        "memos.request:UPDATE",
+        "tweaks.norm:UPDATE",
+        "tweaks.text:UPDATE",
+        "tweaks.text_changed_at:UPDATE",
+      ],
+    });
+    // A drafted memo with two changes, one teaching a tweak, and its request.
+    await seedUsers(pg, "evidence");
+    const store = fixtureStore(local.db, "evidence");
+    const saved = (
+      await store.saveMemo(
+        memoSave({
+          first_draft: "Hi! Fictional first draft, long and warm.",
+          final: "Fictional final, short.",
+          mode: "draft",
+          rounds: 1,
+          request: "Write a short fictional note.",
+          changes: [
+            ...teach("Hi!", { text: "no warm-up opener" }),
+            {
+              before: "long and warm",
+              after: "short",
+              about: "content",
+              by: "asked",
+            },
+          ],
+        }),
+      )
+    ).memo!;
+    const rows = () =>
+      pg.query<{ n: number; about: string; by: string; tweak_id: string }>(
+        `SELECT n,about,"by",tweak_id FROM memo_changes WHERE user_id='evidence' ORDER BY n`,
+      );
+    const tweak = saved.tweaks[0]!.tweak_id;
+    expect((await rows()).rows).toEqual([
+      { n: 0, about: "voice", by: "person", tweak_id: tweak },
+      { n: 1, about: "content", by: "asked", tweak_id: null },
+    ]);
+    // The schema refuses what the save path refuses.
+    for (const bad of [
+      // A tweak on a content change, or on a change it doesn't cite.
+      `INSERT INTO memo_changes(user_id,memo_id,n,"before","after",about,"by",tweak_id) VALUES ('evidence','${saved.memo_id}',5,'a','b','content','person','${tweak}')`,
+      `INSERT INTO memo_changes(user_id,memo_id,n,"before","after",about,"by",tweak_id) VALUES ('evidence','${saved.memo_id}',5,'a','b','voice','person','not-cited')`,
+      // A format spot labelled by someone; a label without its other half.
+      `INSERT INTO memo_changes(user_id,memo_id,n,"before","after",about,"by") VALUES ('evidence','${saved.memo_id}',5,'','**','format','person')`,
+      `INSERT INTO memo_changes(user_id,memo_id,n,"before","after",about) VALUES ('evidence','${saved.memo_id}',5,'a','b','voice')`,
+      // Past the row cap, both sides empty, an offset pair half set.
+      `INSERT INTO memo_changes(user_id,memo_id,n,"before","after") VALUES ('evidence','${saved.memo_id}',120,'a','b')`,
+      `INSERT INTO memo_changes(user_id,memo_id,n,"before","after") VALUES ('evidence','${saved.memo_id}',5,'','')`,
+      `INSERT INTO memo_changes(user_id,memo_id,n,"before","after",draft_start) VALUES ('evidence','${saved.memo_id}',5,'a','b',1)`,
+      // A request untrimmed or holding a tab; an unknown changes state.
+      `UPDATE memos SET request=E'\\nindented' WHERE id='${saved.memo_id}'`,
+      `UPDATE memos SET request=E'tab\\there' WHERE id='${saved.memo_id}'`,
+      `UPDATE memos SET changes_state='listed' WHERE id='${saved.memo_id}'`,
+    ])
+      await expect(pg.query(bad)).rejects.toThrow();
+    await pg.query(
+      `UPDATE memos SET request=E'two\\nlines' WHERE id='${saved.memo_id}'`,
+    );
+    const final = (await store.saveMemo(memoSave({ final: "Mine." }))).memo!;
+    await expect(
+      pg.query(`UPDATE memos SET request='x' WHERE id='${final.memo_id}'`),
+    ).rejects.toThrow(/memos_request/);
+    // Deleting the tweak (the app's TPS action) keeps both changes and clears
+    // the link, through the owner's foreign-key action.
+    await pg.exec("SET ROLE milton_app_runtime");
+    await pg.exec(
+      `DELETE FROM tweaks WHERE user_id='evidence' AND id='${tweak}'`,
+    );
+    await expect(
+      pg.query("UPDATE memo_changes SET about='content'"),
+    ).rejects.toThrow("permission denied");
+    await pg.exec(
+      `UPDATE memos SET request=NULL WHERE user_id='evidence' AND id='${saved.memo_id}'`,
+    );
+    await pg.exec("RESET ROLE");
+    expect((await rows()).rows).toEqual([
+      { n: 0, about: "voice", by: "person", tweak_id: null },
+      { n: 1, about: "content", by: "asked", tweak_id: null },
+    ]);
+    // Forgetting the memo (MCP) removes its changes through the cascade.
+    await pg.exec("SET ROLE milton_mcp_runtime");
+    await pg.exec(
+      `DELETE FROM memos WHERE user_id='evidence' AND id='${saved.memo_id}'`,
+    );
+    await pg.exec("RESET ROLE");
+    expect((await rows()).rows).toEqual([]);
   } finally {
     await pg.exec("RESET ROLE").catch(() => {});
     await local.dispose();
@@ -1011,6 +1205,7 @@ test("0013 drops the old writing tables, their sequence and functions, and the o
     });
     // The memo code's receipts: a memo saved then forgotten, a memo whose
     // context was corrected twice, a refusal and a cover sheet line.
+    await addMemoEvidence(pg);
     const store = fixtureStore(storeDatabase(pg), "kept");
     const forgottenSave = memoSave({ final: "Fictional forgotten final." });
     const forgottenMemo = (await store.saveMemo(forgottenSave)).memo!.memo_id;
@@ -1062,6 +1257,7 @@ test("0013 drops the old writing tables, their sequence and functions, and the o
     const replayed = await replays();
     // Six old-store receipts, the shared refusal and the memo-era ones.
     expect(await receipts()).toHaveLength(6 + 1 + memoEra.length);
+    await dropMemoEvidence(pg);
     await through("0013_drop_old_writing");
     await migrate(drizzle(pg), { migrationsFolder: scratch });
     await migrate(drizzle(current), { migrationsFolder: scratch });
@@ -1151,8 +1347,10 @@ test("0014 drops source_hash; save_request_hashes checks input_hash alone, every
     );
     const store = fixtureStore(storeDatabase(pg), "kept");
     const save = memoSave();
+    await addMemoEvidence(pg);
     const saved = await store.saveMemo(save);
     expect(saved.status).toBe("saved");
+    await dropMemoEvidence(pg);
     await through("0014_drop_source_hash");
     await migrate(drizzle(pg), { migrationsFolder: scratch });
     await migrate(drizzle(current), { migrationsFolder: scratch });

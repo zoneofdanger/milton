@@ -9,6 +9,7 @@ import {
   memoSave,
   read,
   storeForCurrentRequest,
+  teach,
   vendorIntent,
 } from "./store-fixtures";
 import { createStoreMemoTools } from "../src/mcp-tools";
@@ -334,7 +335,7 @@ const steered = (who: string) =>
     mode: "draft",
     rounds: 1,
     new_kind: "follow-up",
-    tweaks: [{ text: `${who} drops the warm-up opener` }],
+    changes: teach("first draft", { text: `${who} drops the warm-up opener` }),
     context: {
       summary: `${who} context`,
       medium: "email",
@@ -420,7 +421,7 @@ test("tenants with overlapping memo, kind, tweak and request IDs never read, cha
       mode: "draft",
       rounds: 1,
       kind_id: kindId,
-      tweaks: [{ tweak_id: tweakId }],
+      changes: teach("draft", { tweak_id: tweakId }),
       context: {
         summary: "Beta reuse",
         medium: "email",
@@ -846,6 +847,7 @@ test("account deletion removes every tenant row, waits for an in-flight save and
       "memo_kinds",
       "tweaks",
       "tweak_citations",
+      "memo_changes",
       "memo_settings",
       "save_requests",
       "usage_calls",

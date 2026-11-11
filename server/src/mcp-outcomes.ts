@@ -35,6 +35,7 @@ export const loggedErrorCodes = new Set([
   "account_unavailable",
   "subscription_required",
   "invalid_input",
+  "invalid_change",
   "invalid_kind",
   "request_too_large",
   "request_id_reused",
@@ -63,6 +64,7 @@ const refusals = new Set([
   "account_unavailable",
   "subscription_required",
   "invalid_input",
+  "invalid_change",
   "invalid_kind",
   "request_too_large",
   "request_id_reused",
@@ -146,6 +148,23 @@ export const nextSteps: Record<string, NextStep> = {
   ),
   // Arguments to correct.
   invalid_input: fixArguments,
+  // By field, the part of a memo a refusal names.
+  "invalid_input.request": step(
+    "fix_input",
+    "Send only what the person typed to ask, without pasted or quoted text, or leave request out; save with a new request_id.",
+  ),
+  "invalid_input.tweaks": step(
+    "fix_input",
+    "tweaks now go on changes: quote before and after and add tweak there, or save without tweaks; new request_id.",
+  ),
+  "invalid_input.changes.tweak": step(
+    "fix_input",
+    "Keep the three tweaks most likely to recur; the other changes stay labelled without a tweak. Save with a new request_id.",
+  ),
+  invalid_change: step(
+    "fix_input",
+    "Copy before from the first draft and after from the final exactly, add a few words if it appears twice, or leave that change out; save with a new request_id.",
+  ),
   invalid_arguments: fixArguments,
   check_violation: fixArguments,
   unknown_tool: step(
@@ -227,7 +246,8 @@ export const nextSteps: Record<string, NextStep> = {
 /** An error body with its stable code and next step added; existing fields
  * stay. A stale-version conflict, which has no error field, is
  * version_conflict; an unknown code gets the unexpected-failure step. A
- * scope refusal's step follows its required_permission. */
+ * scope refusal's step follows its required_permission, and a memo
+ * refusal's its field. */
 export function withNext<T extends Record<string, unknown>>(value: T) {
   const code =
     typeof value.error === "string"
@@ -238,7 +258,9 @@ export function withNext<T extends Record<string, unknown>>(value: T) {
   const variant =
     typeof value.required_permission === "string"
       ? `${code}.${value.required_permission}`
-      : code;
+      : typeof value.field === "string"
+        ? `${code}.${value.field}`
+        : code;
   const key = Object.hasOwn(nextSteps, variant) ? variant : code;
   return {
     ...value,

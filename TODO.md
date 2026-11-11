@@ -68,15 +68,18 @@ sheet, report, AI) and plain text on security screens and anything an AI reads.
       reads the current UTC day twice and fails when a run crosses midnight (seen 2026-11-03
       00:00Z on a parallel run; passes on rerun). Inject the clock or compute the day once.
 
-- [ ] #13 (server, med, founder) **Optional learn-from-sent-mail step in first setup.** Decided
-      2026-11-03, then parked the same day because people will not trust a new product reading their mail, even through the AI's own connector: the AI, with permission, reads about twenty
-      recent sent emails through its own mail connector, proposes up to five of different kinds
-      with the full text, and keeps only the approved ones as final-only memos; Milton gets no
-      mail access. Built and reviewed as merge f2ea867 (setup.ts question 6, test, README),
-      reverted unreleased. That code predates memos and the current setup script, so rebuild it
-      rather than revert the revert. ⚠ docs/setup.md says setup never reads an inbox; Peter decides
-      before this is rebuilt. Then run first setup on an empty test account through Claude Code
-      with a mail connector (#8) before release.
+- [ ] #13 (server, med, founder) **Release the optional find-sent-emails setup step.** Peter
+      reopened it on 2026-11-10 ("go"), answering the 2026-11-03 worry that people won't trust a
+      new product reading their mail: the AI offers it only when it already has a mail tool in
+      that conversation and stays silent otherwise; it reads at most about 30 sent emails from
+      the last 90 days, shows up to five in full and saves only the ones the person approves by
+      number, exactly as shown; Milton gets no mail access. Served text and copy are on branch
+      `agent/find-sent-emails` ([setup](docs/setup.md)). Before release, run one first setup
+      through Claude Code on an empty test account with a test Gmail connected (#8,
+      [the end-to-end check](docs/deploy/e2e.md)); Peter connects the mailbox. Check that the AI
+      offered the step only with access, saved exactly what it showed and nothing unapproved.
+      Once that passes, release, then fill the homepage onboarding row (`onboardingStep` in
+      apps/site/src/pages/index.astro).
 
 - [ ] #23 (ops, low, founder) **Billing mailbox: accountspayable@meetmilton.com.** Decided
       2026-11-03: subscription and payment issues go to accountspayable@ (the Nina nod), a real,

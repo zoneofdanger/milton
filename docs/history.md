@@ -44,8 +44,8 @@ Earlier records are in git history: the last runbook holding them is at commit 4
   /privacy serves "only the ones you approve reach Milton". Gate at 02:27Z: clean; no request
   reached an older revision after 02:18Z; no error, `store_unavailable` or
   `permission denied` lines from app, MCP, admit, auth or jobs since 02:15Z. Checks: PR CI
-  green on
-  `8d380f5` (already on `4fe0763`); merged tree types, 159 tests, format and agent-docs 0.
+  green on `8d380f5` (already on `4fe0763`); merged tree types, 159 tests, format and
+  agent-docs 0.
   Not yet observed: a real AI running the new step; that is the test-Gmail run (TODO #8).
   Rollback, code only, all four together: `milton-*-flat-1e6d859`, `milton-admit-00008-lxx`
   and the daily job to image `sha256:1be0d2c5…`; the site rolls back with a Vercel

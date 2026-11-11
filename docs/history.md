@@ -23,6 +23,29 @@ Earlier records are in git history: the last runbook holding them is at commit 4
 (`git show 492b96a:server/deploy/README.md`), and the runbook's later versions are in
 `git log -p server/deploy/README.md` until 2026-11-10, when this file began.
 
+## 2026-11-11: consent preselects Read and write (PR #102)
+
+- **#102 (Peter's request "can you make it so that the default oauth is read/write (right
+  now it defaults to read)" and then "ship it when checks pass", both typed in
+  milton-overlord's pane wH:p1F on 2026-11-10; relayed verbatim by milton-overlord;
+  built by its temporary subagent), `735937f`:** the consent screen preselects Read and
+  write when the AI's request includes `milton:write`, otherwise Read only; the person can
+  still choose Read only, and connection keys keep their Read only default. Auth image
+  `sha256:d394050c2687a6872655b6075d1e3de9f4c2defe4a05353721dd0ea31ec0a832` (built from
+  the saved pinned auth build file, the private copy having been removed; its bundle holds
+  `checked: !canWrite` and `checked: true`): `milton-auth-00021-2gc` deployed with no
+  traffic, traffic moved by `update-traffic` at 06:51:42Z (2026-11-11), `milton-auth-mail`
+  and `milton-auth-maint` by 06:51:47Z. Live: `/api/auth/ok`, `/login`, `/signup`,
+  `/forgot-password` and `/reset-password` 200; `/consent` for a fictional client asking
+  `openid milton:read milton:write` serves Read and write `checked`, and for
+  `openid milton:read` serves Read only `checked` with no write choice; app and MCP
+  `/health` 200, forms probe PASS, `milton-e2e-daily-bb2vj` passed. Gate at 07:02Z: clean;
+  no auth request reached an older revision after 06:53Z; no errors from the services or
+  either auth job, and every mail run since succeeded. Checks: PR CI green on `e5dc35c`
+  (already on main); the builder's local auth integration 21/21. Not observed: a real AI
+  client submitting the new form; Safari. Rollback, code only, service and both jobs
+  together: `milton-auth-00020-k77` and image `sha256:11946548…`.
+
 ## 2026-11-10 to 2026-11-11: snapshot docs, homepage redesign, setup finds sent emails (PRs #97, #99, #100)
 
 - **#100 (Peter's "Let’s ship it first", typed in milton-overlord's pane wH:p1F on

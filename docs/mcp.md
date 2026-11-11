@@ -153,8 +153,7 @@ How a person creates and revokes keys is in [accounts](accounts.md).
   the person asks to remember; `invalid_kind`, `invalid_tweak`, `invalid_memo` and
   `line_not_found` reread for a valid id or the exact line; `invalid_report` sends the
   latest `report_id` or none; `cover_sheet_limit` asks the person what to shorten;
-  `cover_sheet_empty` points them to the TPS page; `tweak_exists`, met only on the TPS
-  page, is reported without retrying.
+  `tweak_exists`, met only on the TPS page, is reported without retrying.
 - The store's own refusals, a receipt or user id change, are unavailable-now steps; a
   correct call never meets them.
 - A scope refusal also carries `required_permission`, `read` or `read_write`: what the

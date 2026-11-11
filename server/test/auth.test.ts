@@ -1616,7 +1616,8 @@ test("the TPS page lists memos newest first, escaped, opens each only for its ow
     const empty = await (await fixture.send("/")).text();
     expect(empty).toContain("No memos on file yet.");
     expect(empty).toContain('href="/assistants#connect"');
-    expect(empty).toContain('<form method="post" action="/tps/cover-sheet"');
+    expect(empty).toContain("No cover sheet yet.");
+    expect(empty).not.toContain("<textarea");
     for (const [path, method] of [
       ["/download", "PUT"],
       ["/download", "POST"],
@@ -1725,73 +1726,34 @@ test("the TPS page lists memos newest first, escaped, opens each only for its ow
   }
 }, 30000);
 
-test("the cover sheet form saves on the version it showed, never overwrites a newer one, and needs a same-origin CSRF form", async () => {
+test("the TPS page shows the cover sheet read-only, line by line and escaped, and takes no cover sheet POST", async () => {
   const fixture = await memoPageFixture();
-  const version = (html: string) =>
-    /name="expected_version" value="(\d+)"/.exec(html)![1]!;
   try {
-    expect(version(await (await fixture.send("/")).text())).toBe("0");
-    const saved = await fixture.send("/tps/cover-sheet", {
-      text: "\r\nNo em dashes.\r\nSign off –P  ",
-      expected_version: "0",
-    });
-    expect(saved.status).toBe(303);
-    expect(saved.headers.get("Location")).toBe(
-      appOrigin + "/?done=cover-saved#cover-sheet",
+    const save = (cover_sheet: {
+      add?: string;
+      remove?: string;
+      expected_version: number;
+    }) =>
+      fixture.author.saveMemo({ request_id: crypto.randomUUID(), cover_sheet });
+    await save({ add: "No em dashes <b>", expected_version: 0 });
+    await save({ add: "Sign off –P", expected_version: 1 });
+    const shown = await (await fixture.send("/")).text();
+    expect(shown).toContain(
+      '<span class="typed">No em dashes &lt;b&gt;</span>',
     );
-    expect((await fixture.store.read()).cover_sheet).toEqual({
-      text: "\nNo em dashes.\nSign off –P",
-      version: 1,
-    });
-    const shown = await (await fixture.send("/?done=cover-saved")).text();
-    expect(shown).toContain('<p role="status">Cover sheet saved.</p>');
-    // HTML drops a textarea's first newline, so the leading blank line stays.
-    expect(shown).toContain(">\n\nNo em dashes.\nSign off –P</textarea>");
-    expect(version(shown)).toBe("1");
-    // An AI adds a line meanwhile; the page's version 1 is now stale.
-    expect(
-      (
-        await fixture.author.saveMemo({
-          request_id: crypto.randomUUID(),
-          cover_sheet: { add: "US spelling", expected_version: 1 },
-        })
-      ).status,
-    ).toBe("saved");
-    const stale = await fixture.send("/tps/cover-sheet", {
-      text: "Mine <b>",
-      expected_version: "1",
-    });
-    expect(stale.status).toBe(409);
-    const conflict = await stale.text();
-    expect(conflict).toContain("Your cover sheet changed elsewhere");
-    expect(conflict).toContain("Mine &lt;b&gt;");
-    expect(conflict).toContain("US spelling</textarea>");
-    expect(version(conflict)).toBe("2");
-    const current = (await fixture.store.read()).cover_sheet;
-    expect(current.version).toBe(2);
-    expect(current.text).toContain("US spelling");
-    const long = await fixture.send("/tps/cover-sheet", {
-      text: "x".repeat(1501),
+    expect(shown).toContain('<span class="typed">Sign off –P</span>');
+    expect(shown).not.toContain("No cover sheet yet.");
+    expect(shown).not.toContain("<textarea");
+    expect(shown).not.toContain('action="/tps/cover-sheet"');
+    const posted = await fixture.send("/tps/cover-sheet", {
+      text: "Mine.",
       expected_version: "2",
     });
-    expect(long.status).toBe(422);
-    expect(await long.text()).toContain("over its 1,500-character limit");
-    const refused = [
-      await fixture.send(
-        "/tps/cover-sheet",
-        { text: "Foreign.", expected_version: "2" },
-        { Origin: "https://evil.example" },
-      ),
-      await fixture.send(
-        "/tps/cover-sheet",
-        new URLSearchParams({ text: "No CSRF.", expected_version: "2" }),
-      ),
-    ];
-    for (const response of refused) {
-      expect(response.status).toBe(403);
-      expect(await response.text()).toContain("Reload the page");
-    }
-    expect((await fixture.store.read()).cover_sheet).toEqual(current);
+    expect(posted.status).toBe(404);
+    expect((await fixture.store.read()).cover_sheet).toEqual({
+      text: "No em dashes <b>\nSign off –P",
+      version: 2,
+    });
   } finally {
     await fixture.dispose();
   }

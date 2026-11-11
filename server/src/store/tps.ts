@@ -6,14 +6,8 @@ import type { StoreDatabase, StoreSession } from "./database";
 import { databaseFailure } from "./database";
 import { accountUnavailable, requireActiveAccount } from "./accounts";
 import { StoreError } from "./errors";
-import {
-  COVER_SHEET_CHARS,
-  coverSheetJson,
-  keepMemos,
-  MEDIA,
-  type Medium,
-} from "./memos";
-import { coverSheetLimit, deleteMemos } from "./save";
+import { coverSheetJson, keepMemos, MEDIA, type Medium } from "./memos";
+import { deleteMemos } from "./save";
 import {
   normalizeTweak,
   scoreboard,
@@ -211,24 +205,6 @@ export function tpsStore(db: StoreDatabase, userId: string) {
       }
       return parts.join("\n\n") + "\n";
     },
-    /** The form's full rewrite, fenced on the version the page showed. */
-    saveCoverSheet: (text: string, expectedVersion: number) =>
-      change(async (tx) => {
-        const normalized = text.replace(/\r\n?/g, "\n").replace(/\s+$/, "");
-        if (normalized.length > COVER_SHEET_CHARS)
-          throw coverSheetLimit(normalized.length);
-        const [row] = await tx.query<{
-          cover: { version: number; text: string } | null;
-        }>(sql`SELECT ${coverSheetJson(userId)} AS cover`);
-        const version = row!.cover?.version ?? 0;
-        if (version !== expectedVersion)
-          return { status: "conflict" as const, version };
-        if ((row!.cover?.text ?? "") === normalized)
-          return { status: "unchanged" as const, version };
-        await tx.query(sql`INSERT INTO cover_sheets(user_id,version,text,actor_json)
-          VALUES (${userId},${version + 1},${normalized},'{"kind":"person"}')`);
-        return { status: "saved" as const, version: version + 1 };
-      }),
     forgetMemo: (id: string) =>
       change(async (tx) => (await deleteMemos(tx, userId, [id])).length > 0),
     deleteAllMemos: () =>

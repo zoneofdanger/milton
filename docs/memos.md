@@ -144,20 +144,22 @@ Milton sets each final's tier at save, from the memo's source alone:
 ## The cover sheet
 
 - One free-text document per account, at most 1,500 characters, written only by the
-  person. Every change appends a version (from 1) recording whether an AI (its issuer
-  and client) or the person made it; nothing is overwritten.
+  person. Every change appends a version (from 1) recording the AI (its issuer and
+  client) that made it; nothing is overwritten. Versions marked as the person's came
+  from the TPS page's former cover sheet form and stay as they are.
+- Only an AI connected with Read and write changes it, on the person's words; the TPS
+  page shows it read only (Peter, 2026-11-10).
 - `cover_sheet` from an AI carries `expected_version` and either `add` (one line, at most
   300 characters) or `remove` (one whole existing line, copied exactly). The AI never
   resends the whole text.
 - A stale `expected_version` returns `conflict` with the current version and text.
 - Adding a line already present is `unchanged`; removing a line not present is
-  `line_not_found`; a removal that would leave it blank is `cover_sheet_empty`, so an AI
-  can't empty it.
+  `line_not_found`. Removing the last line empties the cover sheet (Peter, 2026-11-10);
+  with no memos either, the account is `is_empty` again and setup is offered
+  ([setup](setup.md)).
 - A change past 1,500 characters is refused with `cover_sheet_limit`.
-- The TPS page's form sends the whole text with the version it showed: line endings
-  become `\n`, trailing whitespace is trimmed, the same fence applies, it may empty the
-  cover sheet, and the same text is `unchanged`. Memos themselves are saved only by AIs:
-  the web app's own session cannot call `create_memo` ([saves](saves.md)).
+- Memos are saved only by AIs too: the web app's own session cannot call `create_memo`
+  ([saves](saves.md)).
 - The cover sheet is `get_cover_sheet`'s text and the first part of every report.
 
 ## What the AI is told

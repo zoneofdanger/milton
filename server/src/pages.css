@@ -437,21 +437,9 @@ main > nav + .tps-form {
 .comment {
   font-style: italic;
 }
-/* The cover sheet's form fills the sheet's width. */
-.cover-form {
-  justify-items: stretch;
+/* The read-only cover sheet's note sits clear of its last ruled line. */
+.cover-lines + .small-note {
   margin-top: var(--space-3);
-}
-.cover-form label {
-  font-family: var(--font-sans);
-}
-.cover-form textarea {
-  width: 100%;
-  font: var(--text-small) / var(--leading-body) var(--font-mono);
-  resize: vertical;
-}
-.cover-form button {
-  justify-self: start;
 }
 .memo-list,
 .tweak-list {

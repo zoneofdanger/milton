@@ -46,7 +46,6 @@ export const loggedErrorCodes = new Set([
   "invalid_memo",
   "line_not_found",
   "cover_sheet_limit",
-  "cover_sheet_empty",
   "tweak_exists",
   "unique_violation",
   "check_violation",
@@ -144,10 +143,6 @@ export const nextSteps: Record<string, NextStep> = {
   cover_sheet_limit: step(
     "ask_user",
     "Ask the person which cover sheet lines to shorten or remove, then save with a new request_id.",
-  ),
-  cover_sheet_empty: step(
-    "tell_user",
-    "Tell the person they can clear the cover sheet on their TPS page; an AI can only remove lines.",
   ),
   // Arguments to correct.
   invalid_input: fixArguments,

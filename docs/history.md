@@ -23,6 +23,43 @@ Earlier records are in git history: the last runbook holding them is at commit 4
 (`git show 492b96a:server/deploy/README.md`), and the runbook's later versions are in
 `git log -p server/deploy/README.md` until 2026-11-10, when this file began.
 
+## 2026-11-10 to 2026-11-11: snapshot docs, homepage redesign, setup finds sent emails (PRs #97, #99, #100)
+
+- **#100 (Peter's "Let’s ship it first", typed in milton-overlord's pane wH:p1F on
+  2026-11-10, answering its summary of the test runbook; relayed verbatim by milton-overlord
+  and milton-onboarding; it moves the PR's test-Gmail run to after the release),
+  `cd2fa18`, TODO #13:** first setup's optional step where the person's own AI, with a mail
+  tool already in the conversation and after a yes, searches their sent mail (last 90 days,
+  at most about 30 read, up to five offered) and saves only the numbered emails they
+  approve, exactly as shown; pasting stays the fallback. Served text and copy only: the
+  setup script, the instructions' setup line, `create_memo`'s "(setup, …)", `SETUP_PROMPT`,
+  the app's empty TPS page, and /setup and /privacy (dated November 10, 2026). No schema,
+  tool or mail access in Milton. Server image
+  `sha256:3630960abaf412deb2cab9625ba8a5eeb69f3092e94b083bc4f3d11d7a93325f` (amd64 manifest
+  `sha256:0f967c97…`; the bundle holds the new script and not "setup never reads an inbox"):
+  admit `milton-admit-00009-c99` at 02:15:41Z (2026-11-11), app and MCP
+  `milton-*-mail-cd2fa18` as tagged no-traffic revisions, traffic moved at 02:16:43Z,
+  `milton-e2e-daily` at 02:16:45Z. Live: app and MCP `/health` and auth `/api/auth/ok` 200,
+  app home 200, MCP 401 unauthenticated, forms probe PASS, `milton-e2e-daily-82rk4` passed;
+  /privacy serves "only the ones you approve reach Milton". Gate at 02:27Z: clean; no request
+  reached an older revision after 02:18Z; no error, `store_unavailable` or `permission
+  denied` lines from app, MCP, admit, auth or jobs since 02:15Z. Checks: PR CI green on
+  `8d380f5` (already on `4fe0763`); merged tree types, 159 tests, format and agent-docs 0.
+  Not yet observed: a real AI running the new step; that is the test-Gmail run (TODO #8).
+  Rollback, code only, all four together: `milton-*-flat-1e6d859`, `milton-admit-00008-lxx`
+  and the daily job to image `sha256:1be0d2c5…`; the site rolls back with a Vercel
+  promotion.
+
+- **#99 (Peter's "ship it" in milton-overlord's pane wH:p1F on 2026-11-10, after its preview
+  at `19adbd0`; then "next, get rid of the FAQ section from the /about page", done in
+  `10a1ccf`; milton-redesign, contains #98 from milton-tryit; milton-designer accepted),
+  `4fe0763`:** the homepage redesign as a personnel file with the try-it box of fictional
+  examples; /about back to main's. Site only, live from Vercel's production deployment of
+  `4fe0763`: www.meetmilton.com/ and /about 200, the try-it data served, /about without
+  questions. #98 shows merged, its commits being in #99.
+
+- **#97, `abe594b`:** docs for the deleted #78 snapshot (entry below).
+
 ## 2026-11-08 to 2026-11-10: deletion fences Stripe, Stripe reads off the lock, guide pilot parked, deletion links, UserInfo binding, private admission service, session token drop, e2e fix, MCP next steps, guards (PRs #58–#66, #68–#92)
 
 - **#78 snapshot deleted (Peter's "Delete now", in pane wH:p1F on 2026-11-10, answering

@@ -1794,7 +1794,7 @@ test("a memo page lists what changed and what the person asked, and Remove clear
     ])
       expect(page).toContain(text);
     expect(await fixture.store.exportTps()).toContain(
-      `decline a vendor's meeting request\nAsked: ${asked}\n\n> Dana`,
+      `decline a vendor's meeting request\nAsked: ${"Say no to the call, politely. ".repeat(5)}\n    Keep it short.\n\n> Dana`,
     );
     // Remove takes the CSRF and Origin checks, then reloads the memo.
     expect(

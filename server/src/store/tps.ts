@@ -317,6 +317,10 @@ export function tpsStore(db: StoreDatabase, userId: string) {
           .split("\n")
           .map((l) => (l === "" ? ">" : `> ${l}`))
           .join("\n");
+      // A request's later lines are indented four spaces, so none can start
+      // a heading, list, quote or fence: the request stays in its memo.
+      const asked = (request: string) =>
+        `Asked: ${request.split("\n").join("\n    ")}`;
       const parts = ["# TPS report"];
       if (row!.cover?.text.trim())
         parts.push("## Cover sheet", row!.cover.text);
@@ -336,7 +340,7 @@ export function tpsStore(db: StoreDatabase, userId: string) {
         parts.push(`## ${medium[0]!.toUpperCase()}${medium.slice(1)}`);
         for (const m of mine)
           parts.push(
-            `### ${[m.kind, m.at].filter(Boolean).join(" · ")}\n${m.summary}${m.request !== null ? `\nAsked: ${m.request}` : ""}\n\n${quote(m.final)}`,
+            `### ${[m.kind, m.at].filter(Boolean).join(" · ")}\n${m.summary}${m.request !== null ? `\n${asked(m.request)}` : ""}\n\n${quote(m.final)}`,
           );
       }
       return parts.join("\n\n") + "\n";

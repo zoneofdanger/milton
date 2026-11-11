@@ -96,8 +96,9 @@ What each change does to memos, tweaks and the cover sheet is in [memos](memos.m
   `- text (N memos; served S, needed again M)`), each followed by its newest example
   on an indented line as on the TPS page, then every memo's final grouped by medium,
   newest first, each under its kind and date with its summary and, when it has one,
-  `Asked: ` and its request. First drafts are not in it; the examples are the short
-  quotes the tweaks rest on.
+  `Asked: ` and its request, each later line indented four spaces so none can start a
+  heading or other Markdown block outside the memo. First drafts are not in it; the
+  examples are the short quotes the tweaks rest on.
 
 ## Connected AIs
 

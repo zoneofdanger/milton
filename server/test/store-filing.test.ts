@@ -497,7 +497,7 @@ test("a report serves tweaks from the ten best-matching memos that cite one, and
   }
 });
 
-test("the cover sheet takes whole lines from an AI, fenced by version, capped and never emptied", async () => {
+test("the cover sheet takes whole lines from an AI, fenced by version and capped, and removing the last line empties it", async () => {
   const local = await localStore();
   try {
     await seedUsers(local.pg, "u");
@@ -541,10 +541,16 @@ test("the cover sheet takes whole lines from an AI, fenced by version, capped an
     expect(
       await cover({ remove: "No em dashes", expected_version: 2 }),
     ).toMatchObject({ status: "saved", cover_sheet: { text: "Sign off –P" } });
+    // Removing the last line empties it, as a new version.
     expect(
       await cover({ remove: "Sign off –P", expected_version: 3 }),
-    ).toMatchObject({ status: "failed", error: "cover_sheet_empty" });
-    let version = 3;
+    ).toMatchObject({ status: "saved", cover_sheet: { version: 4, text: "" } });
+    expect(await store.readCoverSheet()).toMatchObject({
+      text: "",
+      version: 4,
+      is_empty: true,
+    });
+    let version = 4;
     let last;
     for (let i = 0; i < 6; i++)
       last = await cover({

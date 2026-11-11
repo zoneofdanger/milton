@@ -151,8 +151,9 @@ Milton sets each final's tier at save, from the memo's source alone:
   resends the whole text.
 - A stale `expected_version` returns `conflict` with the current version and text.
 - Adding a line already present is `unchanged`; removing a line not present is
-  `line_not_found`; a removal that would leave it blank is `cover_sheet_empty`, so an AI
-  can't empty it.
+  `line_not_found`. Removing the last line empties the cover sheet (Peter, 2026-11-10);
+  with no memos either, the account is `is_empty` again and setup is offered
+  ([setup](setup.md)).
 - A change past 1,500 characters is refused with `cover_sheet_limit`.
 - The TPS page's form sends the whole text with the version it showed: line endings
   become `\n`, trailing whitespace is trimmed, the same fence applies, it may empty the

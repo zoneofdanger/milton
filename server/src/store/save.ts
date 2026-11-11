@@ -447,13 +447,8 @@ async function saveCoverSheet(save: Save): Promise<SaveOutcome> {
         "remove must be one whole line copied exactly from the current cover sheet. Nothing was changed.",
         409,
       );
+    // Removing the last line may empty it (docs/memos.md).
     next = lines.filter((l) => l !== change.remove);
-    if (!next.some((l) => l.trim()))
-      throw new StoreError(
-        "cover_sheet_empty",
-        "An AI can't empty the cover sheet; the person can clear it on their TPS page. Nothing was changed.",
-        409,
-      );
   }
   const text = next.join("\n");
   if (text.length > COVER_SHEET_CHARS) throw coverSheetLimit(text.length);

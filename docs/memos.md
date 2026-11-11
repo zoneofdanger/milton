@@ -269,6 +269,10 @@ measured per client before any claim of reliability.
   `get_report` with an intent.
 - Precedence when guidance disagrees: what the person says now, then the cover sheet,
   then tweaks, then examples. Imitate examples' wording.
+- When the person says what to write (read-write connection), their words are the raw
+  material: reuse their phrases word for word where they fit, add only a greeting, a
+  sign-off and connecting words in the manner of their examples, and don't expand on
+  what they said.
 - Edit mode: change only what was requested and keep the person's other words, length,
   tone, greeting and sign-off; guidance never widens an edit's scope, and changes are
   briefly listed.

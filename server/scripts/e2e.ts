@@ -2,7 +2,8 @@
  * the fictional test account (test-account.ts). It signs in as a browser does,
  * connects to MCP with the account's connection key, refuses to write unless the
  * account holds nothing but this check's own marked leftovers, then saves a
- * marked final-only memo, reads it fresh, forgets it and confirms the account is
+ * marked final-only memo, reads it fresh, saves a marked edit-mode memo with one
+ * change so the change check runs, forgets both and confirms the account is
  * back where the run began. One JSON line per step on stdout (`step`, `ok`,
  * `ms`, `severity`), never a password, key, cookie or memo text. Exit 0 only when every step passed. */
 import { randomUUID } from "node:crypto";
@@ -126,7 +127,12 @@ async function mcpSession(origins: Origins, key: string, fetcher: Fetch) {
     save: async (args: object) => {
       const outcome = await call<{
         status: string;
-        memo?: { memo_id: string; tier: string; kind?: string };
+        memo?: {
+          memo_id: string;
+          tier: string;
+          kind?: string;
+          changes?: { found: number; labelled: number };
+        };
         receipt?: string;
         forgotten?: string[];
       }>("create_memo", { request_id: randomUUID(), ...args });
@@ -283,9 +289,43 @@ export async function runE2E(options: {
       fail("memo_not_served_exactly");
     done();
 
+    // A drafted memo with one change, so code's diff and the quote check run
+    // in production: edit mode, so it is the person's words and a crashed
+    // run's leftover is recognized like the first; no tweak, so none is left.
+    step = "save_drafted";
+    const lead = `Fictional reminder for the ${MARKER}, run ${run}: the spare key`;
+    const drafted = await first.save({
+      memo: {
+        first_draft: `${lead} is by the door.`,
+        final: `${lead} hangs by the shed door.`,
+        mode: "edit",
+        rounds: 0,
+        changes: [
+          {
+            before: "is by the door",
+            after: "hangs by the shed door",
+            about: "content",
+            by: "person",
+          },
+        ],
+        context: { summary, medium: INTENT.medium },
+        new_kind: KIND,
+      },
+    });
+    if (
+      drafted.memo?.tier !== "own" ||
+      drafted.memo.kind !== KIND ||
+      drafted.memo.changes?.found !== 1 ||
+      drafted.memo.changes.labelled !== 1 ||
+      drafted.receipt !== `Kept memo: ${KIND}, 0 rounds.`
+    )
+      fail("drafted_memo_not_saved_as_sent");
+    done();
+
     step = "forget_memo";
-    const forgotten = await first.save({ forget_memos: [example.memo_id] });
-    if (!forgotten.forgotten?.includes(example.memo_id))
+    const ids = [example.memo_id, drafted.memo.memo_id];
+    const forgotten = await first.save({ forget_memos: ids });
+    if (!ids.every((id) => forgotten.forgotten?.includes(id)))
       fail("memo_not_forgotten");
     done();
 

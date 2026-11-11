@@ -289,6 +289,16 @@ try {
   ])
     await owner.query(statement, ["m_00000000-0000-4000-8000-000000000001"]);
   for (const { tag } of journal.entries.slice(dropAt)) await writing(tag);
+  // 016 after 0015, its table's migration; it restates 014, so 014 then 016,
+  // each twice, converges on 016's set.
+  for (const file of [
+    "014-memos-roles.sql",
+    "016-memo-evidence-roles.sql",
+    "016-memo-evidence-roles.sql",
+  ])
+    await owner.query(
+      readFileSync(new URL(`./migrations/${file}`, sourceRoot), "utf8"),
+    );
   assert.deepEqual(
     (
       await owner.query(
@@ -734,9 +744,10 @@ try {
   }
   assert(await checkProductRuntimeRole(postgresDatabase(url("app")), "app"));
   assert(await checkProductRuntimeRole(postgresDatabase(url("mcp")), "mcp"));
-  // Memos (014): exactly the privileges its file grants, and no runtime can
-  // change a memo's words.
+  // Memos (014, restated by 016): exactly the privileges 016 grants, and no
+  // runtime can change a memo's words or a stored change.
   const memoTables = [
+    "memo_changes",
     "memos",
     "memo_kinds",
     "tweaks",
@@ -766,6 +777,8 @@ try {
   assert.deepEqual(await privileges("milton_mcp_runtime"), [
     "cover_sheets:INSERT",
     "cover_sheets:SELECT",
+    "memo_changes:INSERT",
+    "memo_changes:SELECT",
     "memo_kinds:INSERT",
     "memo_kinds:SELECT",
     "memo_settings:SELECT",
@@ -791,6 +804,7 @@ try {
   assert.deepEqual(await privileges("milton_app_runtime"), [
     "cover_sheets:INSERT",
     "cover_sheets:SELECT",
+    "memo_changes:SELECT",
     "memo_kinds:DELETE",
     "memo_kinds:SELECT",
     "memo_settings:INSERT",
@@ -804,8 +818,10 @@ try {
   assert.deepEqual(await columnUpdates("milton_app_runtime"), [
     "memo_settings.keep_memos",
     "memo_settings.updated_at",
+    "memos.request",
     "tweaks.norm",
     "tweaks.text",
+    "tweaks.text_changed_at",
   ]);
   for (const role of ["milton_auth_runtime", "milton_runtime"])
     assert.deepEqual(await privileges(role), [], role);
@@ -1702,8 +1718,9 @@ try {
     JSON.parse(served.result.content![0]!.text) as { report_id: string }
   ).report_id;
   stage = "MCP save";
-  // A memo with a new kind and a tweak, citing the report it was drafted
-  // from, then a cover sheet line: every memo table the MCP role writes.
+  // A memo with a new kind, its request and a change teaching a tweak, citing
+  // the report it was drafted from, then a cover sheet line: every memo table
+  // the MCP role writes.
   for (const change of [
     {
       memo: {
@@ -1712,7 +1729,16 @@ try {
         mode: "draft",
         rounds: 1,
         new_kind: "fictional note",
-        tweaks: [{ text: "pickup notes: no warm-up opener" }],
+        request: "Write a fictional pickup note for the trays.",
+        changes: [
+          {
+            before: "Hi! Hope you're well.",
+            after: "",
+            about: "voice",
+            by: "person",
+            tweak: { text: "pickup notes: no warm-up opener" },
+          },
+        ],
         context: { summary: "Fictional pickup note", medium: "email" },
         report_id: reportId,
       },
@@ -3595,6 +3621,7 @@ try {
         `select (select count(*) from memos where user_id=$1)::int memos,
           (select count(*) from memo_kinds where user_id=$1)::int kinds,
           (select count(*) from tweaks where user_id=$1)::int tweaks,
+          (select count(*) from memo_changes where user_id=$1)::int changes,
           (select count(*) from cover_sheets where user_id=$1)::int covers,
           (select count(*) from served_reports where user_id=$1)::int reports,
           (select count(*) from save_requests where user_id=$1)::int receipts,
@@ -3623,16 +3650,18 @@ try {
     }
     return grew(counted, await footprint());
   };
-  // A run leaves no memo behind: it saves one and forgets it. Its receipts
-  // (save, forget) and served-report records (three reads) stay.
+  // A run leaves no memo behind: it saves two and forgets them, with the
+  // drafted one's change. Its receipts (two saves, forget) and served-report
+  // records (three reads) stay.
   const perRun = {
     memos: 0,
     kinds: 0,
     tweaks: 0,
+    changes: 0,
     covers: 0,
     reports: 3,
-    receipts: 2,
-    usage: 8,
+    receipts: 3,
+    usage: 9,
   };
   // First run: the kind is made once; every later run reuses it.
   assert.deepEqual(await check(), { ...perRun, kinds: 1 });
@@ -3648,6 +3677,7 @@ try {
       "baseline",
       "save_memo",
       "fresh_read",
+      "save_drafted",
       "forget_memo",
       "cleanup",
       "done",
@@ -3810,7 +3840,7 @@ try {
     error: "account_holds_foreign_data",
   });
   pass(
-    "e2e check: browser sign-in, MCP key, safety gate, a marked memo saved, read fresh and forgotten, restored baseline; bounded per-run footprint; marked leftovers forgotten; expiring key warns; an unmarked memo of its kind and other foreign data refused without saving",
+    "e2e check: browser sign-in, MCP key, safety gate, a marked memo saved and read fresh, a marked drafted memo with one change saved, both forgotten, restored baseline; bounded per-run footprint; marked leftovers forgotten; expiring key warns; an unmarked memo of its kind and other foreign data refused without saving",
   );
   stage = "test account exempt from trials and billing";
   // Trials stay on. The test account's access never depends on a trial: repeated
@@ -4328,7 +4358,15 @@ try {
         mode: "draft",
         rounds: 1,
         new_kind: "fictional note",
-        tweaks: [{ text: `${m} tweak ${n}: ${tweak}` }],
+        changes: [
+          {
+            before: "Hi! Hope you are well.",
+            after: "",
+            about: "voice",
+            by: "person",
+            tweak: { text: `${m} tweak ${n}: ${tweak}` },
+          },
+        ],
         context: {
           summary: `${m} summary ${n === "one" ? "old" : "two"}`,
           medium: "email",
@@ -4482,7 +4520,15 @@ try {
               first_draft: "Fictional takeover draft.",
               mode: "draft",
               rounds: 1,
-              tweaks: [{ tweak_id: target.tweak }],
+              changes: [
+                {
+                  before: "draft",
+                  after: "",
+                  about: "voice",
+                  by: "person",
+                  tweak: { tweak_id: target.tweak },
+                },
+              ],
             },
           },
           "invalid_tweak",

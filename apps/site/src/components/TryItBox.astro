@@ -1,0 +1,762 @@
+---
+import data from "../data/try-it.json";
+
+/* Static: every person and request is in the HTML. Without script all of it
+   reads as plain sections; the script shows the tabs, the request picker and
+   one pair. */
+type Side = {
+  greeting: string;
+  opening: string;
+  words: number;
+  signoff: string;
+};
+type Pair = {
+  plain: string;
+  milton: string;
+  changed: { plain: Side; milton: Side };
+};
+type Person = {
+  id: string;
+  name: string;
+  role: string;
+  coverSheet: string[];
+  pastes: { situation: string; text: string }[];
+  pairs: Record<string, Pair>;
+};
+
+interface Props {
+  /** The mono caption beside the tabs (above them on a phone). */
+  caption: string;
+  /** The line at the folder's foot, saying how the emails were made. */
+  note: string;
+}
+const { caption, note } = Astro.props;
+
+const people = data.people as Person[];
+const { requests, defaults } = data;
+---
+
+<section
+  class="try-it"
+  aria-labelledby="try-it-title"
+  data-try-it
+  data-person={defaults.person}
+  data-request={defaults.request}
+>
+  <h2 class="visually-hidden" id="try-it-title">
+    See the difference
+  </h2>
+  <p class="file-caption file-caption-phone">{caption}</p>
+  <div class="tab-row">
+    <div
+      class="tabs"
+      role="group"
+      aria-label="Fictional person"
+      data-picker
+      hidden
+    >
+      {people.map((person) => (
+        <button
+          type="button"
+          class="tab"
+          data-pick="person"
+          value={person.id}
+          aria-pressed={person.id === defaults.person ? "true" : "false"}
+        >
+          <span class="tab-in">
+            <span class="tab-name">{person.name}</span>
+            <span class="tab-role">
+              <span class="tab-dot"> · </span>
+              {person.role}
+            </span>
+          </span>
+        </button>
+      ))}
+    </div>
+    <p class="file-caption file-caption-wide">{caption}</p>
+  </div>
+  <div class="folder">
+    {people.map((person) => (
+      <div class="person" data-person-group={person.id}>
+        <h3 class="static-heading">
+          {person.name} · {person.role}
+        </h3>
+        <div
+          class="requests"
+          role="group"
+          aria-labelledby={`try-it-request-label-${person.id}`}
+          data-picker
+          hidden
+        >
+          <span class="requests-label" id={`try-it-request-label-${person.id}`}>
+            Request
+          </span>
+          <div class="requests-options">
+            {requests.map((request) => (
+              <button
+                type="button"
+                class="request"
+                data-pick="request"
+                value={request.id}
+                aria-pressed={
+                  request.id === defaults.request ? "true" : "false"
+                }
+              >
+                {request.label}
+              </button>
+            ))}
+          </div>
+          <select
+            class="request-select"
+            data-request-select
+            aria-labelledby={`try-it-request-label-${person.id}`}
+          >
+            {requests.map((request) => (
+              <option
+                value={request.id}
+                selected={request.id === defaults.request}
+              >
+                {request.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        {requests.map((request) => {
+          const pair = person.pairs[request.id]!;
+          const clipId = `try-it-plain-${person.id}-${request.id}`;
+          return (
+            <div class="pair" data-pair={request.id}>
+              <h4 class="static-heading">
+                {person.name} · {request.label}
+              </h4>
+              <div class="papers">
+                <article class="paper paper-plain" aria-label="Your AI today">
+                  <p class="paper-head">
+                    <span>Your AI today</span>
+                    <span class="words">
+                      <b>{pair.changed.plain.words}</b> words
+                    </span>
+                  </p>
+                  <div class="clip" id={clipId}>
+                    <p class="email">{pair.plain}</p>
+                  </div>
+                  <button
+                    type="button"
+                    class="read-all"
+                    aria-expanded="false"
+                    aria-controls={clipId}
+                    data-read-all
+                  >
+                    Read all {pair.changed.plain.words} words
+                  </button>
+                  <span class="stamp" aria-hidden="true">
+                    Sounds like AI
+                  </span>
+                </article>
+                <article class="paper paper-milton" aria-label="With Milton">
+                  <p class="paper-head">
+                    <span>With Milton</span>
+                    <span class="words">
+                      <b>{pair.changed.milton.words}</b> words
+                    </span>
+                  </p>
+                  <p class="email">{pair.milton}</p>
+                  <span class="stamp" aria-hidden="true">
+                    Approved
+                  </span>
+                </article>
+              </div>
+            </div>
+          );
+        })}
+        <div class="folder-foot">
+          <p class="folder-note">{note}</p>
+          <details class="setup-emails">
+            <summary>See what Milton has on file for {person.name}</summary>
+            <div class="setup-content">
+              <p class="eyebrow">Cover sheet</p>
+              <ul class="setup-list">
+                {person.coverSheet.map((line) => (
+                  <li>{line}</li>
+                ))}
+              </ul>
+              <p class="eyebrow">Emails on file</p>
+              <ol class="setup-list">
+                {person.pastes.map((paste) => (
+                  <li>
+                    <p class="setup-situation">{paste.situation}</p>
+                    <p class="setup-text">{paste.text}</p>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          </details>
+        </div>
+      </div>
+    ))}
+  </div>
+</section>
+
+<!-- Inline and synchronous, so the pickers and the one default pair are set
+     before first paint and the page does not jump when it loads. -->
+<script is:inline>
+  (() => {
+    const box = document.currentScript.previousElementSibling;
+    const show = () => {
+      for (const group of box.querySelectorAll("[data-person-group]"))
+        group.hidden = group.dataset.personGroup !== box.dataset.person;
+      for (const pair of box.querySelectorAll("[data-pair]"))
+        pair.hidden = pair.dataset.pair !== box.dataset.request;
+      for (const button of box.querySelectorAll("[data-pick]"))
+        button.setAttribute(
+          "aria-pressed",
+          String(button.value === box.dataset[button.dataset.pick]),
+        );
+      for (const select of box.querySelectorAll("[data-request-select]"))
+        select.value = box.dataset.request;
+    };
+    const pick = (kind, value) => {
+      if (box.dataset[kind] === value) return;
+      box.dataset[kind] = value;
+      show();
+      box.dispatchEvent(new Event("try-it-pick"));
+    };
+    box.addEventListener("click", (event) => {
+      const more = event.target.closest("button[data-read-all]");
+      if (more) {
+        // The button goes once the email is open; focus moves to the email.
+        const clip = document.getElementById(
+          more.getAttribute("aria-controls"),
+        );
+        more.setAttribute("aria-expanded", "true");
+        clip.tabIndex = -1;
+        clip.focus({ preventScroll: true });
+        return;
+      }
+      const button = event.target.closest("button[data-pick]");
+      if (button) pick(button.dataset.pick, button.value);
+    });
+    // On a phone the three requests are one native select.
+    box.addEventListener("change", (event) => {
+      const select = event.target.closest("select[data-request-select]");
+      if (select) pick("request", select.value);
+    });
+    for (const picker of box.querySelectorAll("[data-picker]"))
+      picker.hidden = false;
+    box.dataset.ready = "";
+    show();
+  })();
+</script>
+
+<script>
+  import { track } from "@vercel/analytics";
+
+  const box = document.querySelector<HTMLElement>("[data-try-it]");
+  if (box) {
+    const picks = () => ({
+      person: box.dataset.person ?? "",
+      request: box.dataset.request ?? "",
+    });
+    box.addEventListener("try-it-pick", () => track("Try-it pick", picks()));
+    // The hero's sign-up button only, not the page's closing one.
+    document
+      .querySelector("[data-try-it-cta]")
+      ?.addEventListener("click", () => track("Try-it CTA", picks()));
+  }
+</script>
+
+<style>
+  /* The try-it box is a manila folder: three tabs, the folder body holding
+     the request picker, two papers and a foot. Its own layer, so nothing in
+     it is drawn over the hero's or the page's popovers. */
+  .try-it {
+    isolation: isolate;
+    min-width: 0;
+  }
+  :where(h2, h3, h4, p, figure, ul, ol) {
+    margin: 0;
+  }
+  [hidden] {
+    display: none !important;
+  }
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .file-caption {
+    color: var(--muted);
+    font: var(--text-caption) / var(--leading-label) var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  /* Tabs: each is drawn as a border-coloured shape with a 1px-inset inner
+     shape, so the chamfered corner keeps its outline. The pressed tab is a
+     pixel taller and covers the folder's top border, joining the body. */
+  .tab-row {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: flex-end;
+    gap: var(--space-4);
+    margin-bottom: -1px;
+  }
+  .tabs {
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+  }
+  .tab {
+    --chamfer: 14px;
+    position: relative;
+    flex: none;
+    width: 190px;
+    min-height: 0;
+    height: 46px;
+    margin: 0 0 1px;
+    padding: 0;
+    border: 0;
+    background: var(--hairline);
+    clip-path: polygon(
+      0 0,
+      calc(100% - var(--chamfer)) 0,
+      100% var(--chamfer),
+      100% 100%,
+      0 100%
+    );
+    color: var(--ink);
+    font: 400 0.9375rem / 1.2 var(--font-sans);
+    text-align: left;
+  }
+  .tab:hover {
+    background: var(--hairline);
+  }
+  .tab-in {
+    position: absolute;
+    inset: 1px 1px 0;
+    display: flex;
+    align-items: center;
+    padding: 0 var(--space-4);
+    background: var(--ground);
+    clip-path: polygon(
+      0 0,
+      calc(100% - var(--chamfer) + 0.6px) 0,
+      100% calc(var(--chamfer) - 0.6px),
+      100% 100%,
+      0 100%
+    );
+  }
+  .tab:hover .tab-in {
+    background: var(--surface);
+  }
+  .tab[aria-pressed="true"],
+  .tab[aria-pressed="true"]:hover {
+    height: 48px;
+    margin-bottom: 0;
+    background: var(--ink);
+  }
+  .tab[aria-pressed="true"] .tab-in {
+    background: var(--sheet-bar);
+    color: var(--sheet-bar-ink);
+    font-weight: 600;
+  }
+  /* The chamfer would clip an outside outline, so focus is drawn inside. */
+  .tab:focus-visible {
+    outline: none;
+  }
+  .tab:focus-visible .tab-in {
+    outline: 2px solid var(--ink);
+    outline-offset: -5px;
+  }
+  .tab-dot {
+    white-space: pre;
+  }
+  .file-caption-wide {
+    margin-left: auto;
+    padding-bottom: var(--space-2);
+    text-align: right;
+  }
+  .file-caption-phone {
+    display: none;
+  }
+
+  .folder {
+    padding: var(--space-6);
+    border: 1px solid var(--ink);
+    background: var(--sheet-bar);
+    color: var(--sheet-bar-ink);
+  }
+  .person,
+  .pair {
+    display: grid;
+    min-width: 0;
+  }
+  .pair {
+    gap: var(--space-4);
+  }
+  /* Rules between groups only when all of them show, without script. */
+  .try-it:not([data-ready]) .person + .person {
+    margin-top: var(--space-8);
+    padding-top: var(--space-6);
+    border-top: 1px solid var(--ink);
+  }
+  .try-it:not([data-ready]) .pair + .pair {
+    margin-top: var(--space-8);
+  }
+  .static-heading {
+    font-size: var(--text-subtitle);
+  }
+  .person > .static-heading {
+    margin-bottom: var(--space-4);
+  }
+  .pair > .static-heading {
+    font: var(--text-small) / var(--leading-label) var(--font-mono);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  /* With the pickers showing, the headings only name the groups for
+     screen readers. */
+  .try-it[data-ready] .static-heading {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  /* Requests: text buttons, the pressed one bold with a heavier rule. */
+  .requests {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0 var(--space-6);
+    margin: calc(-1 * var(--space-3)) 0 var(--space-3);
+  }
+  .requests-label {
+    font: var(--text-caption) / var(--leading-label) var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .requests-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 var(--space-6);
+  }
+  .request,
+  .request:hover {
+    min-height: var(--touch-target);
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--sheet-bar-ink);
+    font: 400 0.9375rem / 1.3 var(--font-sans);
+    justify-content: flex-start;
+    justify-self: start;
+    text-align: left;
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 0.35em;
+  }
+  .request[aria-pressed="true"] {
+    font-weight: 600;
+    text-decoration-thickness: 2px;
+  }
+  .request-select {
+    display: none;
+  }
+
+  /* The papers keep their own heights; the plain one is plain paper on the
+     ground, the Milton one a sheet. */
+  .papers {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 28px;
+    align-items: start;
+  }
+  .paper {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    min-width: 0;
+    padding: 18px var(--space-6) 0;
+  }
+  .paper-plain {
+    --paper: var(--ground);
+    border: 1px solid var(--hairline);
+    background: var(--ground);
+    color: var(--muted);
+  }
+  .paper-milton {
+    --paper: var(--surface);
+    border: 1px solid var(--ink);
+    background: var(--surface);
+    box-shadow: var(--shadow-sheet);
+    color: var(--ink);
+  }
+  .paper-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: var(--space-3);
+    font: var(--text-caption) / 1.2 var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .paper-milton .paper-head {
+    color: var(--ink);
+  }
+  .words {
+    white-space: nowrap;
+  }
+  .words b {
+    color: var(--ink);
+    font: 400 var(--text-subtitle) / 1 var(--font-mono);
+    letter-spacing: -0.02em;
+  }
+  .email {
+    font: 0.9375rem / 1.6 var(--font-sans);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .clip {
+    position: relative;
+  }
+  .read-all {
+    display: none;
+  }
+  /* Below the email, over the paper's lower edge, so it never covers text.
+     A solid surface behind it keeps its contrast the tested pair. */
+  .stamp {
+    position: relative;
+    z-index: 1;
+    align-self: flex-end;
+    margin: auto -8px -14px 0;
+    padding: 6px var(--space-3);
+    border: 2px solid currentColor;
+    outline: 1px solid currentColor;
+    outline-offset: 2px;
+    background: var(--surface);
+    color: var(--stamp-red);
+    transform: rotate(-8deg);
+    font: 0.8125rem / 1 var(--font-mono);
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    pointer-events: none;
+    user-select: none;
+  }
+  .paper-milton .stamp {
+    margin-bottom: -18px;
+    padding: var(--space-2) 14px;
+    color: var(--stamp-blue);
+    font-size: var(--text-subtitle);
+  }
+
+  /* The foot: the note at the left, the setup disclosure at the right. Open,
+     the disclosure takes its own row across the folder. */
+  .folder-foot {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0 var(--space-4);
+    margin-top: var(--space-6);
+    margin-bottom: calc(-1 * var(--space-3));
+    font-size: 0.8125rem;
+  }
+  .folder-note {
+    flex: 1 1 18rem;
+  }
+  .setup-emails {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+  .setup-emails[open] {
+    flex-basis: 100%;
+  }
+  .setup-emails summary {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--space-2);
+    min-height: var(--touch-target);
+    cursor: pointer;
+    list-style: none;
+    text-decoration: underline;
+    text-underline-offset: 0.25em;
+  }
+  .setup-emails summary::-webkit-details-marker {
+    display: none;
+  }
+  .setup-emails summary::after {
+    content: "▾";
+    content: "▾" / "";
+    text-decoration: none;
+  }
+  .setup-emails[open] summary::after {
+    content: "▴";
+    content: "▴" / "";
+  }
+  .setup-content {
+    margin-bottom: var(--space-3);
+    padding: var(--space-5) var(--space-6);
+    border: 1px solid var(--ink);
+    background: var(--surface);
+    color: var(--ink);
+  }
+  .setup-content > .eyebrow + * {
+    margin-top: var(--space-2);
+  }
+  .setup-content > * + .eyebrow {
+    margin-top: var(--space-5);
+  }
+  .setup-list {
+    display: grid;
+    gap: var(--space-3);
+    padding-inline-start: var(--space-5);
+    font-size: var(--text-small);
+  }
+  .setup-situation {
+    color: var(--muted);
+  }
+  .setup-text {
+    font: var(--text-small) / var(--leading-label) var(--font-mono);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  @media (max-width: 767px) {
+    .tabs {
+      flex: 1 1 auto;
+      gap: 4px;
+    }
+    .tab {
+      flex: 1 1 0;
+      width: auto;
+      height: 50px;
+    }
+    .tab[aria-pressed="true"],
+    .tab[aria-pressed="true"]:hover {
+      height: 52px;
+    }
+    .tab-in {
+      flex-direction: column;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 0 10px;
+    }
+    .tab-role {
+      font-size: var(--text-caption);
+      font-weight: 400;
+    }
+    .tab-dot {
+      display: none;
+    }
+    .file-caption-wide {
+      display: none;
+    }
+    /* Tighter tracking keeps the price on one line at 360px. */
+    .file-caption-phone {
+      display: block;
+      margin-bottom: 10px;
+      letter-spacing: 0.02em;
+    }
+    .folder {
+      padding: var(--space-4) 14px 18px;
+    }
+    .requests {
+      margin-top: calc(-1 * var(--space-2));
+    }
+    /* One row: the three requests are a native select, so both papers
+       start in the first screen. */
+    .requests {
+      flex-wrap: nowrap;
+      gap: var(--space-3);
+    }
+    .requests-label {
+      flex: none;
+    }
+    .requests-options {
+      display: none;
+    }
+    .request-select {
+      display: block;
+      flex: 1 1 0;
+      width: 0;
+      min-width: 0;
+      min-height: var(--touch-target);
+      padding: 0 var(--space-3);
+      border: 1px solid var(--ink);
+      border-radius: 0;
+      background: var(--surface);
+      color: var(--ink);
+      font: 600 var(--text-small) / 1.3 var(--font-sans);
+    }
+    .email {
+      font-size: var(--text-small);
+      line-height: 1.5;
+    }
+    .papers {
+      grid-template-columns: minmax(0, 1fr);
+      gap: var(--space-4);
+    }
+    .paper {
+      gap: 10px;
+      padding: 14px var(--space-4) 0;
+    }
+    .paper-milton .stamp {
+      margin-bottom: -12px;
+    }
+    .folder-foot {
+      display: grid;
+      margin-top: 34px;
+      margin-bottom: 0;
+    }
+    .folder-note {
+      flex: none;
+    }
+    .setup-emails summary {
+      justify-content: flex-start;
+    }
+    .setup-content {
+      padding: var(--space-4);
+    }
+    /* Only with script, so the email is never cut short without a way to
+       open it: the plain email shows its first lines, fading into the
+       paper, and a button opens the rest. */
+    .try-it[data-ready] .read-all[aria-expanded="false"] {
+      display: inline-flex;
+      align-items: center;
+      align-self: flex-start;
+      min-height: var(--touch-target);
+      padding: 0;
+      border: 0;
+      background: none;
+      color: var(--ink);
+      font: 600 var(--text-small) / 1.4 var(--font-sans);
+      text-decoration: underline;
+      text-underline-offset: 0.25em;
+    }
+    .try-it[data-ready] .clip:has(+ .read-all[aria-expanded="false"]) {
+      max-height: calc(var(--text-small) * 1.5 * 8);
+      overflow: hidden;
+    }
+    .try-it[data-ready] .clip:has(+ .read-all[aria-expanded="false"])::after {
+      content: "";
+      position: absolute;
+      inset: auto 0 0;
+      height: calc(var(--text-small) * 1.5 * 1.25);
+      background: linear-gradient(transparent, var(--paper));
+      pointer-events: none;
+    }
+    .read-all + .stamp {
+      margin-top: 4px;
+    }
+  }
+</style>

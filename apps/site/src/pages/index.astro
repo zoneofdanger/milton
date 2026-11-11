@@ -1,8 +1,47 @@
 ---
 import SiteLayout from "../layouts/SiteLayout.astro";
-import AssistantSetup from "../components/AssistantSetup.astro";
-import MemoDemo from "../components/MemoDemo.astro";
-import FilingComparison from "../components/FilingComparison.astro";
+import TryItBox from "../components/TryItBox.astro";
+
+/* The page's swappable lines, one place each. */
+const copy = {
+  price: "30 days free, then $5.01 a month. No card.",
+  priceTail: "",
+  folderNote: "Same AI, same request. Em dashes added for dramatic effect.",
+  markOne: [
+    { label: "Urgent", ticked: true },
+    { label: "For review", ticked: false },
+    { label: "Please comment", ticked: false },
+    { label: "Please stop", ticked: true },
+  ],
+  steps: [
+    { text: "Connect Milton to your AI.", initials: "You" },
+    { text: "Ask for a draft. Your AI pulls your file first.", initials: "AI" },
+    { text: "Fix it until it’s yours. The fixes go on file.", initials: "You" },
+  ],
+  // Stays empty until setup can do this; when set, it is the slip's second row.
+  onboardingStep: { text: "", initials: "AI" },
+  signOff: "We did not build superintelligence. It’s not AGI — it’s a memo.",
+  testimonial: {
+    quote:
+      "I already share a name with a singer. I’d rather not share a voice with a clanker.",
+    name: "Michael Bolton",
+    title: "Senior Founding AI Forward Deployed Product Engineer",
+  },
+};
+
+const [connect, ...rest] = copy.steps;
+const steps = [connect!, copy.onboardingStep, ...rest].filter(
+  (step) => step.text,
+);
+
+const guides = [
+  { label: "Claude", href: "/setup#claude" },
+  { label: "ChatGPT", href: "/setup#chatgpt" },
+  { label: "Claude Code", href: "/setup#claude-code" },
+  { label: "Codex", href: "/setup#codex" },
+  { label: "Cursor", href: "/setup#cursor" },
+  { label: "and more", href: "/setup" },
+];
 ---
 
 <SiteLayout
@@ -10,71 +49,35 @@ import FilingComparison from "../components/FilingComparison.astro";
   description="Milton makes your AI write like you."
 >
   <section class="hero" aria-labelledby="headline">
-    <div>
+    <div class="hero-text">
       <h1 id="headline">Stop sounding like AI.</h1>
       <p class="intro">Milton makes your AI write like you.</p>
-      <div class="actions action-row">
-        <a class="button" href="https://app.meetmilton.com/login">
-          Try Milton free <span aria-hidden="true">↗</span>
-        </a>
-        <AssistantSetup />
-      </div>
-      <p class="hero-price small-note">
-        $5.01 a month after a 30-day free trial. No card required.
-      </p>
     </div>
-    <MemoDemo />
+    <div class="hero-cta">
+      <a class="button" href="https://app.meetmilton.com/login" data-try-it-cta>
+        Try Milton free <span aria-hidden="true">↗</span>
+      </a>
+    </div>
   </section>
-  <div class="assistant-strip">
-    <span class="assistant-label">Works with:</span>
-    <nav aria-label="AI setup guides">
-      <ul>
-        <li>
-          <a href="/setup#claude">Claude</a>
-        </li>
-        <li>
-          <a href="/setup#chatgpt">ChatGPT</a>
-        </li>
-        <li>
-          <a href="/setup#claude-code">Claude Code</a>
-        </li>
-        <li>
-          <a href="/setup#codex">Codex</a>
-        </li>
-        <li>
-          <a href="/setup#cursor">Cursor</a>
-        </li>
-        <li>
-          <a href="/setup">and more</a>
-        </li>
-      </ul>
-    </nav>
-  </div>
-  <section class="section" id="why-milton" aria-labelledby="why-heading">
-    <p class="eyebrow">## Your writing, on file</p>
-    <h2 id="why-heading">Start with your own words.</h2>
-    <p class="section-lead">
-      Paste a few emails or DMs that sound like you. From then on, every final
-      you accept is kept as a memo too. Your own words become the examples your
-      next AI imitates.
-    </p>
-    <FilingComparison />
-  </section>
-  <section class="section" id="how-it-works" aria-labelledby="how-heading">
-    <p class="eyebrow">## How it works</p>
-    <h2 id="how-heading">From your examples to your next message.</h2>
-    <p class="section-lead">
-      Tell your AI what you want to say. Milton helps it write in your voice.
-    </p>
-    <div class="slip-wrap">
+
+  <TryItBox
+    caption={[copy.price, copy.priceTail].filter(Boolean).join(" ")}
+    note={copy.folderNote}
+  />
+
+  <div class="work">
+    <section class="slip-wrap" id="how-it-works" aria-labelledby="how-heading">
+      <h2 class="visually-hidden" id="how-heading">
+        How it works
+      </h2>
       <figure class="sheet slip" aria-labelledby="slip-title">
         <div class="sheet-bar">
-          <span id="slip-title">INTEROFFICE ROUTING SLIP</span>
+          <span id="slip-title">Interoffice routing slip</span>
         </div>
         <dl class="slip-fields">
           <div>
             <dt>To:</dt>
-            <dd>Every AI you connect</dd>
+            <dd>Your AI</dd>
           </div>
           <div>
             <dt>From:</dt>
@@ -85,303 +88,257 @@ import FilingComparison from "../components/FilingComparison.astro";
             <dd>How you write</dd>
           </div>
         </dl>
+        <nav class="cc" aria-label="AI setup guides">
+          <span class="cc-label">cc:</span>
+          <ul>
+            {guides.map(({ label, href }) => (
+              <li>
+                <a href={href}>{label}</a>
+              </li>
+            ))}
+          </ul>
+        </nav>
+        <div class="mark-one">
+          <span class="mark-label" id="mark-one-label">
+            Mark one
+          </span>
+          <ul aria-labelledby="mark-one-label">
+            {copy.markOne.map(({ label, ticked }) => (
+              <li>
+                <span class="tick-box" aria-hidden="true">
+                  {ticked ? "✕" : ""}
+                </span>
+                {label}
+                {ticked && <span class="visually-hidden">, ticked</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
         <ol class="slip-rows">
-          <li class="slip-row">
-            <span class="slip-box" aria-hidden="true">
-              ✓
-            </span>
-            <p class="slip-text">
-              <strong>Connect.</strong> Add Milton to your AI’s connector
-              settings and sign in.
-            </p>
-            <p class="slip-initials">
-              <span class="slip-initials-label">Initials</span>
-              <span class="slip-initials-value">You</span>
-            </p>
-          </li>
-          <li class="slip-row">
-            <span class="slip-box" aria-hidden="true">
-              ✓
-            </span>
-            <p class="slip-text">
-              <strong>Cover sheet.</strong> Tell your AI a few hard lines, like
-              “no em dashes.” They go on your cover sheet, in your words.
-            </p>
-            <p class="slip-initials">
-              <span class="slip-initials-label">Initials</span>
-              <span class="slip-initials-value">You</span>
-            </p>
-          </li>
-          <li class="slip-row">
-            <span class="slip-box" aria-hidden="true">
-              ✓
-            </span>
-            <p class="slip-text">
-              <strong>Draft.</strong> Give your AI the facts for the next email
-              or message. It reads your cover sheet and report, then drafts.
-            </p>
-            <p class="slip-initials">
-              <span class="slip-initials-label">Initials</span>
-              <span class="slip-initials-value">AI</span>
-            </p>
-          </li>
-          <li class="slip-row">
-            <span class="slip-box" aria-hidden="true">
-              ✓
-            </span>
-            <p class="slip-text">
-              <strong>Accept.</strong> Fix the draft until it’s yours, then
-              accept it. Your AI keeps the memo and tells you in one line. Next
-              time, any AI gets your tweaks.
-            </p>
-            <p class="slip-initials">
-              <span class="slip-initials-label">Initials</span>
-              <span class="slip-initials-value">You</span>
-            </p>
-          </li>
+          {steps.map(({ text, initials }) => (
+            <li class="slip-row">
+              <span class="slip-box" aria-hidden="true">
+                ✓
+              </span>
+              <p class="slip-text">{text}</p>
+              <p class="slip-initials">
+                <span class="slip-initials-label">Initials</span>
+                <span class="slip-initials-value">{initials}</span>
+              </p>
+            </li>
+          ))}
         </ol>
       </figure>
-      <span class="stamp" aria-hidden="true">
-        FILED
+      <span class="filed" aria-hidden="true">
+        Filed
       </span>
+    </section>
+  </div>
+
+  <section class="faq" aria-labelledby="faq-heading">
+    <h2 id="faq-heading">
+      Couldn’t I just use a Markdown file in a synced folder?
+    </h2>
+    <p class="faq-answer">
+      Yes. Ours comes with a cover sheet, a monthly invoice, and someone else to
+      blame.
+    </p>
+    <div class="questions">
+      <details>
+        <summary>What does Milton keep, and what does it never touch?</summary>
+        <p>
+          A memo each time you accept a final: your AI’s first draft, your
+          final, one-line tweaks for what you made it change, and a one-line
+          summary of the situation. Plus your cover sheet, in your words. Milton
+          never rewrites any of it. It does not read your inbox, files, or
+          conversations; it gets only what your AI sends. Forget a memo on your
+          TPS page, or turn off Keep memos and delete them all in Memo settings.
+        </p>
+      </details>
+      <details>
+        <summary>Can I take my writing and leave?</summary>
+        <p>
+          We won’t take your stapler. The source is public, and you can run
+          Milton yourself. Download your cover sheet, tweaks and every final as
+          TPS.md. No hard feelings, just soft copies. Disconnect an AI and
+          Milton refuses its future reads and saves immediately; it cannot erase
+          copies the AI already read. We’d prefer you keep paying us, but
+          apparently that’s not a retention strategy.
+        </p>
+        <p>
+          <a href="https://github.com/zoneofdanger/milton">Read the source ↗</a>
+        </p>
+      </details>
+      <details>
+        <summary>Will my AI always write like me?</summary>
+        <p>
+          Not always. Milton keeps your cover sheet, finals and tweaks
+          available. A standing instruction asks your AI to read them before
+          writing, but the AI still decides when to read and how to follow them.
+          Ask it to verify the read before relying on the result.
+        </p>
+      </details>
+      <details id="why-this-exists">
+        <summary>Why does this exist?</summary>
+        <p class="eyebrow">## An imaginary productivity review</p>
+        <p>
+          <strong>Reviewer:</strong> Why does this exist?
+        </p>
+        <p>
+          <strong>Me:</strong> I told four AIs “no em dashes.”
+        </p>
+        <p>
+          <strong>Reviewer:</strong> How did that go?
+        </p>
+        <p>
+          <strong>Me:</strong> “You’re absolutely right — I’ll avoid em dashes
+          going forward.”
+        </p>
+        <p>
+          <strong>Reviewer:</strong> …
+        </p>
+        <p>
+          <strong>Me:</strong> My hopes were dashed.
+        </p>
+      </details>
     </div>
   </section>
-  <section class="section" aria-label="Fictional employee testimonial">
-    <figure class="employee-testimonial" id="employee-testimonial">
-      <blockquote>
-        “I already share a name with a singer. I’d rather not share a voice with
-        a chatbot.”
-      </blockquote>
-      <figcaption>
-        <strong>Michael Bolton</strong>
-        <span>Senior Founding AI Forward Deployed Product Engineer</span>
-      </figcaption>
+
+  <section class="closing" aria-labelledby="closing-heading">
+    <div class="closing-main">
+      <h2 id="closing-heading">Did you get the memo?</h2>
+      <a class="button" href="https://app.meetmilton.com/login">
+        Try Milton free <span aria-hidden="true">↗</span>
+      </a>
+      <p class="small-note">{copy.signOff}</p>
+    </div>
+    <figure
+      class="sheet message"
+      id="employee-testimonial"
+      aria-label="Fictional employee testimonial"
+    >
+      <div class="sheet-bar">
+        <span>While you were out</span>
+      </div>
+      <dl>
+        <div class="message-row">
+          <dt>From</dt>
+          <dd>{copy.testimonial.name}</dd>
+        </div>
+        <div class="message-row">
+          <dt>Of</dt>
+          <dd>{copy.testimonial.title}</dd>
+        </div>
+        <div class="message-row">
+          <dt>Message</dt>
+          <dd>“{copy.testimonial.quote}”</dd>
+        </div>
+      </dl>
+      <p class="message-ticks" aria-hidden="true">
+        <span>
+          <span class="tick-box">✕</span>Telephoned
+        </span>
+        <span>
+          <span class="tick-box"></span>Please call
+        </span>
+        <span>
+          <span class="tick-box"></span>Will call again
+        </span>
+      </p>
     </figure>
-  </section>
-  <section class="section faq" aria-labelledby="faq-heading">
-    <p class="eyebrow">## A few things to know</p>
-    <h2 id="faq-heading">Before you connect.</h2>
-    <details>
-      <summary>What does Milton keep, and what does it never touch?</summary>
-      <p>
-        A memo each time you accept a final: your AI’s first draft, your final,
-        one-line tweaks for what you made it change, and a one-line summary of
-        the situation. Plus your cover sheet, in your words. Milton never
-        rewrites any of it. It does not read your inbox, files, or
-        conversations; it gets only what your AI sends. Forget a memo on your
-        TPS page, or turn off Keep memos and delete them all in Memo settings.
-      </p>
-    </details>
-    <details>
-      <summary>Couldn’t I just use a Markdown file in a synced folder?</summary>
-      <p>
-        Yes. Milton handles the connections, keeps memos as you go and picks the
-        finals for the job. We added a cover sheet and made it a recurring
-        expense.
-      </p>
-    </details>
-    <details>
-      <summary>Can I take my writing and leave?</summary>
-      <p>
-        We won’t take your stapler. The source is public, and you can run Milton
-        yourself. Download your cover sheet, tweaks and every final as TPS.md.
-        Disconnect an AI and Milton refuses its future reads and saves
-        immediately; it cannot erase copies the AI already read. We’d prefer you
-        keep paying us, but apparently that’s not a retention strategy.
-      </p>
-      <p>
-        <a href="https://github.com/zoneofdanger/milton">Read the source ↗</a>
-      </p>
-    </details>
-    <details>
-      <summary>Is it useful if I only use Claude?</summary>
-      <p>
-        Yes. Keep one voice across conversations with the same AI, with your own
-        finals it can imitate instead of adjectives it has to interpret.
-        Connecting another AI later is optional.
-      </p>
-    </details>
-    <details>
-      <summary>Which AIs can I connect?</summary>
-      <p>
-        Milton uses MCP. Your AI needs support for a remote MCP server, sign-in,
-        and both reading and saving through tools. Availability depends on your
-        AI, plan, and workspace settings.{" "}
-        <a href="/setup">Check the setup guide before signing up.</a>
-      </p>
-    </details>
-    <details>
-      <summary>What’s the cover sheet? What’s a report?</summary>
-      <p>
-        The cover sheet is your own voice guide: a few short lines every draft
-        follows, like “sign off –P.” A report is what Milton puts together for
-        each draft: your cover sheet, the finals that best match it, then your
-        tweaks. You don’t file anything. The names are an Office Space
-        reference. The paperwork is less demanding.
-      </p>
-    </details>
-    <details>
-      <summary>Will my AI always write like me?</summary>
-      <p>
-        Not always. Milton keeps your cover sheet, finals and tweaks available.
-        A standing instruction asks your AI to read them before writing, but the
-        AI still decides when to read and how to follow them. Ask it to verify
-        the read before relying on the result.
-      </p>
-    </details>
-    <details>
-      <summary>What if Milton is down?</summary>
-      <p>
-        Your AI writes like itself for a while. You’ll notice. Your cover sheet
-        and memos stay on file: a failed read loses nothing. When Milton is
-        back, ask your AI to read the memo again.
-      </p>
-    </details>
-    <details id="why-this-exists">
-      <summary>Why does this exist?</summary>
-      <p>
-        Peter wanted his AIs to write like him. Somehow he ended up building
-        them a filing department.
-      </p>
-      <p class="eyebrow">## An imaginary productivity review</p>
-      <p>
-        <strong>Reviewer:</strong> Walk us through a typical session.
-      </p>
-      <p>
-        <strong>Me:</strong> First I explain how I like to work. Then I remind
-        it. Then it apologizes. Then I explain that I don’t need the apology.
-      </p>
-      <p>
-        <strong>Reviewer:</strong> How much actual work gets done?
-      </p>
-      <p>
-        <strong>Me:</strong> About fifteen minutes.
-      </p>
-    </details>
-  </section>
-  <section class="closing">
-    <p class="eyebrow">## Did you get that memo?</p>
-    <h2>Let’s put that in a memo.</h2>
-    <p>
-      We did not build superintelligence. We built a filing department. Cover
-      sheets are now required.
-    </p>
-    <a class="button" href="https://app.meetmilton.com/login">
-      Try Milton free <span aria-hidden="true">↗</span>
-    </a>
   </section>
 </SiteLayout>
 
 <style>
-  :where(h1, h2, p, figure) {
+  :where(h1, h2, p, figure, dl, dd, ul, ol) {
     margin: 0;
   }
-  /* No paragraph ends on a lone word. Scoped to this page, so the demo's
-     typed lines keep plain wrapping. */
-  p,
-  blockquote {
+  /* No paragraph ends on a lone word. Scoped to this page, so the try-it
+     box's emails keep plain wrapping. */
+  p {
     text-wrap: pretty;
   }
-  /* The hero is its own layer above the sections that follow, so the setup
-     popover is never drawn under the filing comparison's notes and cabinet
-     (their highest layer is 10). */
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .eyebrow {
+    color: var(--muted);
+  }
+  /* Decorative tick squares on the slip and the phone message. */
+  .tick-box {
+    display: inline-grid;
+    place-items: center;
+    flex: none;
+    width: 14px;
+    height: 14px;
+    border: 1px solid var(--ink);
+    font: 11px / 1 var(--font-mono);
+  }
+
+  /* Hero: one band on the ground. The headline and intro at the left; the
+     button at the right, until the band is too narrow for both. */
   .hero {
     position: relative;
-    z-index: 11;
+    z-index: 1;
     display: grid;
-    grid-template-columns: 1fr;
-    gap: var(--space-16);
-    align-items: center;
-    padding-block: var(--space-20);
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-6);
+    padding-top: 28px;
   }
   h1 {
-    font-size: var(--text-hero);
-    line-height: 1.18;
+    font-size: clamp(2.375rem, 5vw, 4rem);
+    line-height: 1.05;
     letter-spacing: -0.05em;
-    margin-top: var(--space-6);
-    text-wrap: pretty;
+    text-wrap: balance;
   }
   .intro {
-    font-size: var(--text-lead);
-    line-height: var(--leading-body);
-    margin-top: var(--space-6);
+    margin-top: var(--space-2);
+    font-size: var(--text-subtitle);
+    line-height: var(--leading-label);
   }
-  .actions {
-    margin-top: var(--space-6);
+  .hero-cta {
+    display: grid;
+    justify-items: start;
+    gap: var(--space-2);
   }
-  .hero-price {
-    margin-top: var(--space-3);
+  @media (min-width: 1080px) {
+    .hero {
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: start;
+      gap: var(--space-8);
+    }
+    h1 {
+      white-space: nowrap;
+    }
+    /* The button's top sits level with the top of the headline's capitals. */
+    .hero-cta {
+      justify-items: end;
+      margin-top: calc(clamp(2.375rem, 5vw, 4rem) * 0.16);
+      text-align: right;
+    }
   }
-  .assistant-strip {
-    display: flex;
-    align-items: flex-start;
-    flex-wrap: wrap;
-    gap: var(--space-3);
-    border-block: 1px solid var(--hairline);
-    padding-block: var(--space-6);
-    font-size: var(--text-small);
-    color: var(--muted);
-  }
-  .assistant-label {
-    display: inline-flex;
-    align-items: center;
-    min-height: var(--touch-target);
-  }
-  .assistant-strip ul {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0 var(--space-2);
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-  .assistant-strip li {
-    display: inline-flex;
-    align-items: center;
-  }
-  /* Even separators between names; the dot is decoration, not read aloud. */
-  .assistant-strip li:not(:last-child)::after {
-    content: "·";
-    content: "·" / "";
-    margin-left: var(--space-2);
-  }
-  .assistant-strip a {
-    display: inline-flex;
-    align-items: center;
-    min-height: var(--touch-target);
-    color: var(--ink);
-    font-weight: 500;
-  }
-  .section {
-    padding-block: var(--space-20);
-    border-bottom: 1px solid var(--hairline);
-  }
-  .section h2 {
-    letter-spacing: -0.045em;
-    font-size: var(--text-section);
-    margin-block: var(--space-4) var(--space-6);
-  }
-  .section h2 span {
-    color: var(--muted);
-  }
-  .section-lead {
+  .hero {
     margin-bottom: var(--space-8);
-    font-size: var(--text-lead);
   }
-  /* How it works: an interoffice routing slip across the container. */
+
+  /* Below the folder: the routing slip. */
+  .work {
+    max-width: 720px;
+    margin-top: 96px;
+  }
   .slip-wrap {
     position: relative;
-    margin-top: var(--space-8);
     padding-bottom: var(--space-6);
-  }
-  .slip {
-    margin: 0;
   }
   .slip-fields {
     display: flex;
     flex-wrap: wrap;
     gap: var(--space-2) var(--space-3);
-    margin: 0;
     padding: var(--space-3) var(--sheet-padding);
     border-bottom: 1px solid var(--ink);
     font: var(--text-small) / var(--leading-label) var(--font-mono);
@@ -400,21 +357,42 @@ import FilingComparison from "../components/FilingComparison.astro";
   .slip-fields dt {
     color: var(--muted);
   }
-  .slip-fields dd {
-    margin: 0;
+  .mark-one {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2) var(--space-5);
+    padding: var(--space-3) var(--sheet-padding);
+    border-bottom: 1px solid var(--ink);
+    font: var(--text-caption) / var(--leading-label) var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .mark-label {
+    color: var(--muted);
+  }
+  .mark-one ul {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-5);
+    padding: 0;
+    list-style: none;
+  }
+  .mark-one li {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    white-space: nowrap;
   }
   .slip-rows {
-    list-style: none;
-    margin: 0;
     padding: 0;
+    list-style: none;
     counter-reset: slip;
   }
   .slip-row {
     counter-increment: slip;
     display: grid;
-    grid-template-columns: auto auto minmax(0, 1fr) calc(
-        var(--space-16) * 1.75
-      );
+    grid-template-columns: auto auto minmax(0, 1fr) 112px;
     grid-template-areas: "num box text initials";
     align-items: stretch;
     border-bottom: 1px solid var(--hairline);
@@ -431,6 +409,8 @@ import FilingComparison from "../components/FilingComparison.astro";
     font: var(--text-caption) / var(--leading-label) var(--font-mono);
   }
   .slip-box {
+    grid-area: box;
+    align-self: center;
     display: inline-grid;
     place-items: center;
     width: var(--space-6);
@@ -438,26 +418,18 @@ import FilingComparison from "../components/FilingComparison.astro";
     border: 1px solid var(--ink);
     background: var(--surface);
     font: var(--text-body) / 1 var(--font-mono);
-    grid-area: box;
-    align-self: center;
   }
   .slip-text {
     grid-area: text;
     align-self: center;
-    padding: var(--space-5) var(--space-6) var(--space-5) var(--space-5);
-    color: var(--muted);
-  }
-  .slip-text strong {
-    color: var(--ink);
-    font-weight: 600;
+    padding: var(--space-4) var(--space-6) var(--space-4) var(--space-5);
   }
   .slip-initials {
     grid-area: initials;
     display: flex;
     flex-direction: column;
-    justify-content: flex-start;
-    gap: var(--space-2);
-    padding: var(--space-3) var(--space-4);
+    gap: 4px;
+    padding: 10px var(--space-4);
     border-left: 1px solid var(--hairline);
   }
   .slip-initials-label {
@@ -469,25 +441,176 @@ import FilingComparison from "../components/FilingComparison.astro";
   .slip-initials-value {
     font: italic var(--text-lead) / var(--leading-heading) var(--font-form);
   }
-  /* A rubber stamp across the slip's lower edge, below the "AI" initials.
-     Decorative only. */
-  .stamp {
+  /* A rubber stamp across the slip's lower edge, left of the initials and
+     right of the last step's words. Decorative only. */
+  .filed {
     position: absolute;
-    right: var(--space-3);
-    bottom: calc(-1 * var(--space-5));
+    right: 150px;
+    bottom: -6px;
     padding: var(--space-2) var(--space-5);
     border: 2px solid currentColor;
     outline: 1px solid currentColor;
-    outline-offset: calc(var(--space-2) / 2);
+    outline-offset: 4px;
     color: var(--ink);
     opacity: 0.45;
     transform: rotate(-8deg);
-    font: var(--text-section) / 1 var(--font-mono);
+    font: 1.875rem / 1 var(--font-mono);
     letter-spacing: 0.2em;
+    text-transform: uppercase;
     pointer-events: none;
     user-select: none;
   }
-  @media (max-width: 600px) {
+  /* The slip's cc field: one run of setup links, set like To, From and Re.
+     Each name is a 44px target. */
+  .cc {
+    display: flex;
+    align-items: flex-start;
+    gap: 0 var(--space-2);
+    padding: 0 var(--sheet-padding);
+    border-bottom: 1px solid var(--ink);
+    font: var(--text-small) / var(--leading-label) var(--font-mono);
+  }
+  /* The label sits level with the first line of names when they wrap. */
+  .cc-label {
+    flex: none;
+    color: var(--muted);
+    line-height: var(--touch-target);
+  }
+  .cc ul {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 1ch;
+    padding: 0;
+    list-style: none;
+  }
+  .cc li:not(:nth-last-child(-n + 2))::after {
+    content: ",";
+  }
+  .cc a {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--touch-target);
+  }
+
+  /* Questions: the one most asked, open as text, then a ruled list. */
+  .faq {
+    margin-top: 72px;
+  }
+  .faq h2 {
+    font-size: clamp(1.375rem, 2.35vw, 1.875rem);
+    line-height: 1.2;
+    letter-spacing: -0.045em;
+  }
+  .faq-answer {
+    margin-top: 14px;
+    font-size: var(--text-lead);
+    line-height: var(--leading-body);
+  }
+  .questions {
+    margin-top: 28px;
+    font-size: 0.9375rem;
+  }
+  .questions details {
+    border-top: 1px solid var(--hairline);
+  }
+  .questions details:last-child {
+    border-bottom: 1px solid var(--hairline);
+  }
+  .questions summary {
+    display: list-item;
+    min-height: var(--touch-target);
+    padding-block: 10px;
+    cursor: pointer;
+    font-weight: 500;
+  }
+  .questions details > p {
+    padding: 0 0 14px 18px;
+    color: var(--muted);
+  }
+
+  /* Closing: the question again, the button, and a phone message slip. */
+  .closing {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 400px;
+    gap: var(--space-12);
+    align-items: start;
+    margin-top: 96px;
+    padding-bottom: var(--space-16);
+  }
+  .closing-main {
+    display: grid;
+    justify-items: start;
+    gap: var(--space-5);
+  }
+  .closing h2 {
+    font-size: clamp(2.125rem, 4.375vw, 3.5rem);
+    line-height: 1.05;
+    letter-spacing: -0.045em;
+  }
+  .message {
+    --sheet-padding: var(--space-5);
+  }
+  .message-row {
+    display: grid;
+    grid-template-columns: 88px minmax(0, 1fr);
+    gap: var(--space-2);
+    align-items: baseline;
+    padding: 10px var(--sheet-padding);
+    border-bottom: 1px solid var(--hairline);
+  }
+  .message-row dt {
+    color: var(--muted);
+    font: var(--text-caption) / var(--leading-label) var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .message-row dd {
+    font-size: 0.9375rem;
+    line-height: var(--leading-label);
+  }
+  .message-ticks {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px var(--space-4);
+    padding: var(--space-3) var(--sheet-padding) 14px;
+    font: 11px / var(--leading-label) var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .message-ticks > span {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+  }
+  .message-ticks .tick-box {
+    width: 13px;
+    height: 13px;
+    font-size: 10px;
+  }
+
+  @media (max-width: 1079px) {
+    .faq h2 {
+      text-wrap: balance;
+    }
+  }
+  @media (max-width: 767px) {
+    .hero {
+      gap: 18px;
+      padding-top: 22px;
+    }
+    .intro {
+      font-size: 1.0625rem;
+    }
+    .hero-cta {
+      justify-items: stretch;
+    }
+    .hero {
+      margin-bottom: var(--space-6);
+    }
+    .work {
+      margin-top: 56px;
+    }
     .slip-fields {
       flex-direction: column;
       gap: 0;
@@ -526,94 +649,28 @@ import FilingComparison from "../components/FilingComparison.astro";
       border-left: 0;
       border-top: 1px dashed var(--hairline);
     }
-    .stamp {
+    .filed {
+      right: var(--space-4);
+      bottom: -8px;
       font-size: var(--text-subtitle);
     }
-  }
-  .employee-testimonial blockquote {
-    margin: 0 0 var(--space-6);
-    font: var(--font-display-weight) var(--text-section) /
-      var(--leading-heading) var(--font-display);
-  }
-  .employee-testimonial figcaption {
-    display: grid;
-    gap: var(--space-2);
-    font-size: var(--text-small);
-  }
-  .employee-testimonial figcaption span {
-    color: var(--muted);
-  }
-  .faq details {
-    border-top: 1px solid var(--hairline);
-    padding-block: var(--space-3);
-  }
-  .faq summary {
-    cursor: pointer;
-    list-style-position: outside;
-    margin-inline-start: var(--space-5);
-    min-height: var(--touch-target);
-    padding-block: var(--space-3);
-    font-weight: 600;
-  }
-  .faq details p {
-    margin-block: var(--space-2) var(--space-3);
-    color: var(--muted);
-  }
-  /* The section's divider closes the last item, as the next item's border
-     closes the others, so the list ends on the item rhythm. */
-  .section.faq {
-    padding-bottom: 0;
-  }
-  .closing {
-    text-align: center;
-    padding-block: var(--space-20);
-  }
-  .closing h2 {
-    font-size: var(--text-section);
-    margin-block: var(--space-4);
-  }
-  .closing p:not(.eyebrow) {
-    color: var(--muted);
-    margin-bottom: var(--space-6);
-  }
-  @media (min-width: 861px) and (max-width: 1100px) {
-    .hero {
-      gap: var(--space-8);
-      padding-block: var(--space-12);
+    .faq {
+      margin-top: 56px;
     }
-  }
-  @media (max-width: 860px) {
-    .hero {
-      grid-template-columns: 1fr;
-      gap: var(--space-10);
-      padding-block: var(--space-12);
+    .faq-answer {
+      font-size: var(--text-body);
     }
-  }
-  @media (max-width: 767px) {
-    .assistant-strip {
-      display: grid;
-      gap: var(--space-2);
-    }
-    .assistant-label {
-      min-height: auto;
-    }
-    .section,
     .closing {
-      padding-block: var(--space-12);
-    }
-    .hero {
-      padding-block: var(--space-10);
+      grid-template-columns: minmax(0, 1fr);
       gap: var(--space-8);
+      margin-top: 64px;
+      padding-bottom: var(--space-10);
     }
-    .intro {
-      font-size: var(--text-body);
-      margin-top: var(--space-5);
+    .closing-main .button {
+      justify-self: stretch;
     }
-    .actions .button {
-      padding-inline: var(--space-5);
-    }
-    .section-lead {
-      font-size: var(--text-body);
+    .message-row {
+      grid-template-columns: 72px minmax(0, 1fr);
     }
   }
 </style>

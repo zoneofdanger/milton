@@ -88,11 +88,13 @@ const footerColumns: {
           <span>Milton</span>
         </a>
         <div class="nav-links">
-          <a href="/#how-it-works">How it works</a>
-          <a href="/pricing">Pricing</a>
-          <a class="button secondary" href="https://app.meetmilton.com/">
-            Open Milton
+          <a class="nav-wide" href="/#how-it-works">
+            How it works
           </a>
+          <a class="nav-wide" href="/pricing">
+            Pricing
+          </a>
+          <a href="https://app.meetmilton.com/">Sign in</a>
         </div>
       </nav>
     </header>
@@ -125,8 +127,7 @@ const footerColumns: {
       </nav>
       <div class="footer-links">
         <span>
-          © 2026 Zone of Danger, LLC. A founder who has mistaken this for a
-          company.
+          © 2026 Zone of Danger, LLC. All rights reserved. Some lefts too.
         </span>
         <p class="footer-aside">
           A small website with strong feelings about punctuation.
@@ -147,12 +148,12 @@ const footerColumns: {
     border-bottom: 1px solid var(--hairline);
   }
   .navigation {
-    min-height: 80px;
+    min-height: 64px;
     display: flex;
     justify-content: space-between;
     align-items: center;
     gap: var(--space-6);
-    padding-block: var(--space-3);
+    padding-block: var(--space-2);
     flex-wrap: wrap;
   }
   .nav-links {
@@ -167,10 +168,10 @@ const footerColumns: {
     min-height: var(--touch-target);
     align-items: center;
   }
-  .nav-links > a:not(.button) {
+  .nav-links > a {
     text-decoration: none;
   }
-  .nav-links > a:not(.button):hover {
+  .nav-links > a:hover {
     text-decoration: underline;
   }
   .legal {
@@ -246,16 +247,15 @@ const footerColumns: {
     .wrap {
       padding-inline: var(--space-5);
     }
+    /* Phones: one row, the brand and Sign in; Pricing stays in the footer. */
     .navigation {
       gap: var(--space-2) var(--space-5);
+      flex-wrap: nowrap;
+      min-height: 56px;
+      padding-block: var(--space-2);
     }
-    .nav-links {
-      gap: var(--space-3);
-      font-size: var(--text-caption);
-    }
-    .nav-links .button {
-      padding-inline: var(--space-4);
-      font-size: var(--text-caption);
+    .nav-wide {
+      display: none !important;
     }
     .legal {
       padding-block: var(--space-10) 56px;

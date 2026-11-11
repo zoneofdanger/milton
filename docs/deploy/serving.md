@@ -10,22 +10,24 @@ covers:
 
 Rewritten in place by the release coordinator at every release, never appended to; the
 release's record goes in [history](../history.md). How to release and roll back:
-[releases](releases.md). As of 2026-11-10 07:10Z (after #86).
+[releases](releases.md). As of 2026-11-11 02:17Z (after #100).
 
 ## Services
 
-- **App, MCP, admission, daily check:** `milton-app-flat-1e6d859`, `milton-mcp-flat-1e6d859`,
-  `milton-admit-00008-lxx` and job `milton-e2e-daily`, all on image
+- **App, MCP, admission, daily check:** `milton-app-mail-cd2fa18`, `milton-mcp-mail-cd2fa18`,
+  `milton-admit-00009-c99` and job `milton-e2e-daily`, all on image
+  `sha256:3630960abaf412deb2cab9625ba8a5eeb69f3092e94b083bc4f3d11d7a93325f` (#100, `cd2fa18`;
+  Cloud Run shows the amd64 manifest digest `sha256:0f967c97…`, not this index digest).
+  Rollback, code only, all four together: `milton-app-flat-1e6d859`,
+  `milton-mcp-flat-1e6d859`, `milton-admit-00008-lxx` and the job to image
   `sha256:1be0d2c524a5e5d0f7eb45da8ee9830e0c5b684c5d702792ba5c702de99d8d8d` (#85, `1e6d859`).
-  Rollback, code only, all four together: `milton-app-rank-898f9ad`,
-  `milton-mcp-rank-898f9ad`, `milton-admit-00007-rpn` and the job to image
-  `sha256:093ace98ef05c1c13b7ea45af5aef9baf06e505c12e5556ed6329a598e5e736c` (#83, `898f9ad`).
 - **Auth and its jobs:** `milton-auth-00020-k77`, `milton-auth-mail` and `milton-auth-maint`
   on image `sha256:11946548b6e3fc563c11b8e6d2933566a7f90a83d83156e2e4ccf8a0d1d9bf56` (#86,
   `8faa274`; Cloud Run shows the amd64 manifest digest, not this index digest). Rollback,
   code only, service and both jobs together: `milton-auth-00019-p4f` and image
   `sha256:dc55298e668a85c2d126870435264a1aef883afa903fc43bf779fe2e5fdc7165` (#77).
-- **Site:** Vercel production deployment of `8faa274`.
+- **Site:** Vercel production deployment of `cd2fa18` (#99's homepage, #100's setup and
+  privacy copy).
 - **Secrets:** app `milton-app-env` 4 / `milton-app-key` 2, MCP `milton-mcp-env` 4 /
   `milton-mcp-key` 2 and auth `milton-auth-env` 2 / `milton-auth-key` 1, as at the 2026-11-07
   cutover (no release since recorded a change; confirm before the next one); admission

@@ -844,9 +844,24 @@ Added on 2026-11-11, after the offline test; the text above is unchanged.
   inflation?"), shipping the examples, a cap of three tweaks per memo, and "recurring
   habits only" guidance: a tweak is the exception, most memos teach one or none, and
   every change is recorded either way.
-- **Plainer tweak wording.** Later that day, relayed by milton-evidence as approved by
-  Peter, served text names a tweak's habit plainly ("no warm-up opener") and adds a
-  condition only when the habit doesn't hold in all the person's writing, in place of
-  "with when it applies".
+- **Plainer tweak wording.** Later that day Peter approved, typing in milton-overlord's
+  pane ("go on the re-run and the wording"), served text that names a tweak's habit
+  plainly ("no warm-up opener") and adds a condition only when the habit doesn't hold in
+  all the person's writing, in place of "with when it applies".
+- **The re-run.** The same 35 saves, run against slice 2's served text and save checks
+  as built ($1.30 of a $2 cap): tweaks per memo fell from about 4.2 to 1.5 (26 new
+  tweaks instead of 130), served tweak ids were reused 28 times instead of 7, the cap of
+  three was never hit, 29 of 35 saved on the first try and 136 of 138 quotes matched.
+- **Reuse before new, tested and set aside.** A save-time check that refuses a new
+  tweak worded like an existing one, offering up to three candidates, was replayed on
+  E1's tweaks (word overlap on the habit at 0.2 or more caught 46 of 54 hand-labelled
+  repeats with no false alarm) and run in the re-run, where it refused 2 of 35 saves and
+  the AI then picked correctly both times. With the cap and the wording, too few repeats
+  were left to justify another refusal path, so milton-overlord set it aside.
+- **A moved sentence.** The re-run found an AI correctly pairing a sentence the person
+  moved and reworded, which code sees as a deletion at one spot and an insertion at
+  another; requiring both quotes to share a spot refused it. Each quote must still
+  overlap a changed spot on its own side, but the two sides may now sit at different
+  spots, as "spots the quotes jointly cover" above allows.
 - **Examples for every served tweak.** Decision 8's split needs a real account switched
   on, which was not cleared, so slice 2 serves examples for every served tweak.

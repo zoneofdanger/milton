@@ -1013,6 +1013,45 @@ test("a change's quotes are located where the texts differ, folded only to find 
   });
 });
 
+test("locating a quote stays fast however often it repeats: past the occurrence cap it is ambiguous, below it unchanged", () => {
+  const change: ChangeInput = {
+    before: "a",
+    after: "a",
+    about: "voice",
+    by: "person",
+  };
+  const save = (first_draft: string, final: string, c = change) =>
+    checkMemo({
+      ...memoSave().memo!,
+      first_draft,
+      final,
+      mode: "draft",
+      rounds: 1,
+      changes: [c],
+    });
+  // One letter, every occurrence at the one changed spot: it once paired
+  // every occurrence with every other, quadratic in time and memory.
+  const started = performance.now();
+  const flood = save("a".repeat(20000), "a".repeat(20001));
+  expect(performance.now() - started).toBeLessThan(500);
+  expect(flood).toMatchObject({
+    ok: false,
+    code: "invalid_change",
+    message: expect.stringContaining("more than one changed place"),
+  });
+  // A quote three times in its text, once where the texts differ, is that one.
+  expect(
+    save("Yes. Fine. Yes. Fine. Yes.", "Yes. Fine. Yes. Fine.", {
+      ...change,
+      before: "Yes.",
+      after: "",
+    }),
+  ).toMatchObject({
+    ok: true,
+    evidence: { rows: [{ before: "Yes.", draftStart: 22 }] },
+  });
+});
+
 test("a request is the person's typed ask on a drafted memo: trimmed, capped, never pasted mail, kept unserved, and removable on the TPS page", async () => {
   const drafted = (request: string, rest: Partial<MemoInput> = {}) =>
     checkMemo({

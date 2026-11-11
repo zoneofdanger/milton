@@ -217,15 +217,19 @@ export function fold(text: string): Folded {
 }
 
 export type Range = [number, number];
-/** Every place a quote occurs in a folded text, as original offsets. */
-function occurrences(folded: Folded, quote: string): Range[] {
+/** Each place a quote occurs in a folded text, in order, as original
+ * offsets; lazy, so a caller stops scanning when it has its answer. */
+function* occurrences(folded: Folded, quote: string): Generator<Range> {
   const q = fold(quote.trim()).f.trim();
-  if (!q) return [];
-  const found: Range[] = [];
+  if (!q) return;
   for (let k = folded.f.indexOf(q); k >= 0; k = folded.f.indexOf(q, k + 1))
-    found.push([folded.starts[k]!, folded.ends[k + q.length - 1]!]);
-  return found;
+    yield [folded.starts[k]!, folded.ends[k + q.length - 1]!];
 }
+/** A quote at more changed-spot occurrences than this is ambiguous: so short
+ * or repeated a quote names no one place (a real quote of a few words recurs
+ * a handful of times), and stopping here bounds the scan and the pairing (one
+ * letter repeated in an 8 KB request took a second and a gigabyte). */
+export const MAX_OCCURRENCES = 50;
 /** Whether [s, e) touches a spot side [a, b); an empty side is a point. */
 const touches = (s: number, e: number, a: number, b: number) =>
   a === b ? s <= a && a <= e : s < b && a < e;
@@ -248,10 +252,10 @@ export type Located =
  * overlapping a changed spot on that side (an empty side is matched by the
  * other alone); an occurrence overlapping no spot is passed over, and
  * occurrences at different spots are ambiguous, unless only one of them
- * shares a spot with the other side. The two sides need not share a spot (a
- * moved sentence is a cut at one and an addition at another); the change
- * covers every spot its sides touch. Too large: each quote occurs exactly
- * once and the two differ. */
+ * shares a spot with the other side; more than MAX_OCCURRENCES at spots
+ * always are. The two sides need not share a spot (a moved sentence is a cut
+ * at one and an addition at another); the change covers every spot its sides
+ * touch. Too large: each quote occurs exactly once and the two differ. */
 export function locate(
   list: ChangeList,
   texts: { first: Folded; final: Folded },
@@ -265,10 +269,13 @@ export function locate(
     const ranges: { before?: Range; after?: Range } = {};
     for (const [name, quote, folded] of sides) {
       if (!quote.trim()) continue;
-      const found = occurrences(folded, quote);
-      if (!found.length) return { ok: false, why: "not_in_text" };
-      if (found.length > 1) return { ok: false, why: "ambiguous" };
-      ranges[name] = found[0]!;
+      let found: Range | undefined;
+      for (const range of occurrences(folded, quote)) {
+        if (found) return { ok: false, why: "ambiguous" };
+        found = range;
+      }
+      if (!found) return { ok: false, why: "not_in_text" };
+      ranges[name] = found;
     }
     // Unfolded, so a dash or a Markdown mark is a change.
     if (change.before.trim() === change.after.trim())
@@ -276,28 +283,38 @@ export function locate(
     return { ok: true, spots: [], ...ranges };
   }
   type Hit = { range: Range; spots: number[] };
+  const key = (spots: number[]) => spots.join(",");
   const hits: Partial<Record<"before" | "after", Hit[]>> = {};
   for (const [name, quote, folded] of sides) {
     if (!quote.trim()) continue;
-    const found = occurrences(folded, quote);
-    if (!found.length) return { ok: false, why: "not_in_text" };
-    const atSpots = found
-      .map((range) => ({
-        range,
-        spots: list.spots.flatMap((spot, n) =>
-          !spot.format &&
-          (name === "before"
-            ? touches(...range, spot.draftStart, spot.draftEnd)
-            : touches(...range, spot.finalStart, spot.finalEnd))
-            ? [n]
-            : [],
-        ),
-      }))
-      .filter((hit) => hit.spots.length);
-    if (!atSpots.length) return { ok: false, why: "not_at_change" };
-    hits[name] = atSpots;
+    const side = list.spots.map((spot): Range =>
+      name === "before"
+        ? [spot.draftStart, spot.draftEnd]
+        : [spot.finalStart, spot.finalEnd],
+    );
+    // Only the first occurrence on each set of spots is kept: later ones on
+    // the same spots give the same answer.
+    const first = new Map<string, Hit>();
+    let any = false;
+    let atSpots = 0;
+    // Spots run in text order on each side and occurrences arrive in order,
+    // so the spots an occurrence can touch form a window that only moves on.
+    let lo = 0;
+    for (const range of occurrences(folded, quote)) {
+      any = true;
+      while (lo < side.length && side[lo]![1] < range[0]) lo++;
+      const spots: number[] = [];
+      for (let n = lo; n < side.length && side[n]![0] <= range[1]; n++)
+        if (!list.spots[n]!.format && touches(...range, ...side[n]!))
+          spots.push(n);
+      if (!spots.length) continue;
+      if (++atSpots > MAX_OCCURRENCES) return { ok: false, why: "ambiguous" };
+      if (!first.has(key(spots))) first.set(key(spots), { range, spots });
+    }
+    if (!any) return { ok: false, why: "not_in_text" };
+    if (!atSpots) return { ok: false, why: "not_at_change" };
+    hits[name] = [...first.values()];
   }
-  const key = (spots: number[]) => spots.join(",");
   const union = (a: number[], b: number[]) =>
     [...new Set([...a, ...b])].sort((x, y) => x - y);
   // Several occurrences on the same spots are one answer: the first.

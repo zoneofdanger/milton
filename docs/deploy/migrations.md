@@ -75,10 +75,10 @@ journal with the checkout to prove exactly `0016` pending
 (`SELECT count(*), max(created_at) FROM drizzle.__drizzle_migrations;` returns 16 and
 `0015`'s `when`, 1794423465584). It locks `save_requests` and then `memos`
 in `ACCESS EXCLUSIVE` mode first, the order a save touches them, and holds both until it
-commits, scanning each once; rehearsed on PostgreSQL 18 with 50,000 rows in each (80 MB
-and 26 MB), the locks were held for about 0.7 s. A save already under way finishes before
-it, and a new one waits for it. A lock not free within 5 s fails it whole, with the old
-checks and journal kept; rerun it.
+commits, scanning `memos` twice and `save_requests` once; rehearsed on PostgreSQL 18 with
+50,000 rows in each (80 MB and 26 MB), the locks were held for about 0.7 s. A save already
+under way finishes before it, and a new one waits for it. A lock not free within 5 s fails
+it whole, with the old checks and journal kept; rerun it.
 
 ## The runners
 

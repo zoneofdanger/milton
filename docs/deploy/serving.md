@@ -10,7 +10,7 @@ covers:
 
 Rewritten in place by the release coordinator at every release, never appended to; the
 release's record goes in [history](../history.md). How to release and roll back:
-[releases](releases.md). As of 2026-11-12 18:16Z (after #116).
+[releases](releases.md). As of 2026-11-12 19:40Z (after #116, and 0016 from #119).
 
 ## Services
 
@@ -56,8 +56,8 @@ release's record goes in [history](../history.md). How to release and roll back:
 
 ## Schema heads
 
-- Drizzle: `0015_memo_evidence`, journal 16 entries (`0000_baseline` to 0015), applied
-  2026-11-12.
+- Drizzle: `0016_loosen_checks`, journal 17 entries (`0000_baseline` to 0016), applied
+  2026-11-12 19:40Z. The code serving now predates it and satisfies its looser checks.
 - Native auth ledger: 001–008 (`008-deletion-links`, 2026-11-08).
 - Owner files: `000-app-owner.sql` through `016-memo-evidence-roles.sql`, all applied (016 on
   2026-11-12; rerun it after any rerun of 014). `005-app-roles.sql` is never rerun.
@@ -72,6 +72,8 @@ release's record goes in [history](../history.md). How to release and roll back:
   `save_requests.source_hash`.
 - `snap-dry-block-b8hc81mt` (`before-0015-memo-evidence-pr109`, 2026-11-12 02:16:00Z): the
   schema before 0015 (additive, so the code rollback does not need it).
+- `snap-curly-water-b8d140f8` (`before-0016-loosen-checks-pr119`, 2026-11-12 19:39:21Z):
+  the schema before 0016 (it only loosens checks, so no code rollback needs it).
 - `snap-fancy-hat-b8j5ls14` (pre-cutover, 2026-11-07): excluded from recovery; restoring it
   is Peter's decision ([migrations](migrations.md#database-recovery)).
 - Other manual pre-migration snapshots are kept until deleted; scheduled ones last 14 days.

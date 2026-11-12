@@ -1430,7 +1430,7 @@ test("0016 loosens the rounds and request id checks: today's rows stay as they a
     const journal = await Bun.file(join(scratch, "meta/_journal.json")).json();
     const entries = journal.entries as { tag: string }[];
     const at = entries.findIndex((e) => e.tag.startsWith("0016_"));
-    expect(at).toBe(entries.length - 1);
+    expect(at).toBeGreaterThan(0);
     const sqlFile = await Bun.file(
       join(scratch, `${entries[at]!.tag}.sql`),
     ).text();

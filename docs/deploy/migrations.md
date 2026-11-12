@@ -21,8 +21,9 @@ are in [serving](serving.md); applied one-time migrations are recorded in
   step), record its name, and rehearse on a throwaway Neon branch or disposable database
   (`server/scripts/check-auth-integration.ts` applies the migrations on PostgreSQL 18; PR
   CI runs it as `integration`).
-- Run one migrator at a time, and open no other owner session while a migration runs (the
-  migrator's advisory lock keeps a second migrator out, but not owner DDL in another
+- Run one migrator at a time, and open no other owner session while a migration runs (one
+  migrator is the operator's rule: the Drizzle runner takes no advisory lock, and the
+  native auth migrator's keeps out only a second native run, never owner DDL in another
   session). No service migrates on startup.
 - Keep the owner URL only in the process environment (from `neonctl connection-string`,
   checked by role, database and host, then unset), never typed on a command line, never in
@@ -72,14 +73,12 @@ ROLLBACK;
 Before `0016`, also record both tables' row counts and sizes, and compare the applied
 journal with the checkout to prove exactly `0016` pending
 (`SELECT count(*), max(created_at) FROM drizzle.__drizzle_migrations;` returns 16 and
-`0015`'s `when`, 1794423465584). It holds `ACCESS EXCLUSIVE`
-on `memos` and then `save_requests` until it commits, scanning each once; rehearsed on
-PostgreSQL 18 with 50,000 rows in each (80 MB and 26 MB), the locks were held for about
-0.66 s. A lock not free within 5 s fails it whole, with the old checks and journal kept;
-rerun it. While it holds `memos` and waits for `save_requests`, a save that has already
-read its receipt deadlocks with it when it reaches `memos`; in the rehearsal PostgreSQL
-aborted the save-shaped session after its 1 s deadlock check and `0016` committed (a
-save rolls back whole on that failure, so its retry can succeed).
+`0015`'s `when`, 1794423465584). It locks `save_requests` and then `memos`
+in `ACCESS EXCLUSIVE` mode first, the order a save touches them, and holds both until it
+commits, scanning `memos` twice and `save_requests` once; rehearsed on PostgreSQL 18 with
+50,000 rows in each (80 MB and 26 MB), the locks were held for about 0.7 s. A save already
+under way finishes before it, and a new one waits for it. A lock not free within 5 s fails
+it whole, with the old checks and journal kept; rerun it.
 
 ## The runners
 

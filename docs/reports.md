@@ -85,8 +85,9 @@ A report ranks every memo by, in order:
   breaks. Plain LF text prints as before; a final with other breaks, such as an empty
   CRLF line (`>` where it was `> `), prints differently, and the corrected count can
   change which examples fit.
-- A report serves no tweak examples and no request. Of a memo's first draft it serves
-  only the stored changes below, never the whole draft.
+- A report serves no tweak examples and no request. It never fetches a memo's first
+  draft; it serves only the stored changes below, and since a change can span a whole
+  short first draft, one served side can be the entire draft.
 - Tier labels in report text are "your words" and "steered by you"; kind labels appear
   in example headers.
 - With no example and no tweak, `is_empty` is true and the text ends with a fixed line

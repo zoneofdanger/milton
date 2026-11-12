@@ -1952,6 +1952,28 @@ test("forget, tweak delete and reword change only the session account's memos an
     const page = await (await fixture.send("/?done=tweak-reworded")).text();
     expect(page).toContain("Tweak reworded.");
     expect(page).toContain("No warm-up opener &lt;i&gt;");
+    // The reword follows the one-line rule: separators become one space,
+    // control characters are refused.
+    const LS = String.fromCharCode(0x2028);
+    expect(
+      (
+        await fixture.send("/tps/tweaks/reword", {
+          tweak: opener,
+          text: `No warm-up${LS}opener <i>${LS}`,
+        })
+      ).status,
+    ).toBe(303);
+    expect(
+      (
+        await fixture.send("/tps/tweaks/reword", {
+          tweak: opener,
+          text: "No warm-up\nopener",
+        })
+      ).status,
+    ).toBe(400);
+    expect((await fixture.store.read()).tweaks).toContainEqual(
+      expect.objectContaining({ id: opener, text: "No warm-up opener <i>" }),
+    );
     const taken = await fixture.send("/tps/tweaks/reword", {
       tweak: sentences,
       text: "no warm-up opener <i>.",

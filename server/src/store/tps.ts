@@ -8,6 +8,7 @@ import { accountUnavailable, requireActiveAccount } from "./accounts";
 import { StoreError } from "./errors";
 import {
   coverSheetJson,
+  joinSeparators,
   keepMemos,
   MEDIA,
   servesChanges,
@@ -356,11 +357,12 @@ export function tpsStore(db: StoreDatabase, userId: string) {
           ).length > 0,
       ),
     /** A reworded tweak keeps its id and citations, and its score restarts
-     * from the new text. A wording another tweak already has is refused, so
-     * each wording stays one tweak. */
+     * from the new text. The text passes the one-line rule, as an AI's tweak
+     * does (mcp-tools.ts, oneLine). A wording another tweak already has is
+     * refused, so each wording stays one tweak. */
     rewordTweak: (id: string, text: string) =>
       change(async (tx) => {
-        const trimmed = text.trim();
+        const trimmed = joinSeparators(text).trim();
         const norm = normalizeTweak(trimmed);
         if (!norm || trimmed.length > 200 || /[\p{Cc}]/u.test(trimmed))
           throw new StoreError(

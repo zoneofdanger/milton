@@ -21,7 +21,12 @@ import { StoreError } from "./errors";
 import { MAX_REQUEST_BYTES } from "../http";
 import { utf8Bytes } from "./limits";
 import { requireActiveAccount } from "./accounts";
-import { COVER_SHEET_CHARS, coverSheetJson, keepMemos } from "./memos";
+import {
+  COVER_SHEET_CHARS,
+  coverSheetJson,
+  joinSeparators,
+  keepMemos,
+} from "./memos";
 import { change, normalizeTweak, tier } from "./score";
 import { createHash } from "node:crypto";
 import { assertTrialAccess, type TrialStatus } from "./trials";
@@ -570,20 +575,23 @@ async function saveCoverSheet(save: Save): Promise<SaveOutcome> {
   if (change.expected_version !== current.version)
     return result("conflict", { cover_sheet: current });
   const lines = coverLines(current.text);
+  // A line is matched as served: add and remove passed the separator rule,
+  // and a line stored before it may hold a separator (memos.ts).
+  const served = lines.map(joinSeparators);
   let next: string[];
   if (change.add !== undefined) {
-    if (lines.includes(change.add))
+    if (served.includes(change.add))
       return result("unchanged", { cover_sheet: current });
     next = [...lines, change.add];
   } else {
-    if (!lines.includes(change.remove!))
+    if (!served.includes(change.remove!))
       throw new StoreError(
         "line_not_found",
         "remove must be one whole line copied exactly from the current cover sheet. Nothing was changed.",
         409,
       );
     // Removing the last line may empty it (docs/memos.md).
-    next = lines.filter((l) => l !== change.remove);
+    next = lines.filter((_, i) => served[i] !== change.remove);
   }
   const text = next.join("\n");
   if (text.length > COVER_SHEET_CHARS) throw coverSheetLimit(text.length);

@@ -11,7 +11,15 @@ import {
 } from "./store-fixtures";
 import { change, scoreboard, tier } from "../src/store/score";
 import { tpsStore } from "../src/store/tps";
-import type { MemoInput } from "../src/mcp-tools";
+import {
+  createStoreMemoTools,
+  intentInput,
+  memoContextInput,
+  memoInput,
+  oneLine,
+  saveMemoInput,
+  type MemoInput,
+} from "../src/mcp-tools";
 import {
   changeBlocks,
   changeLine,
@@ -2000,6 +2008,324 @@ test("a reword restarts a tweak's score from the new text; the same text keeps i
     expect((await store.readReport(vendorIntent)).text).toMatch(
       /^- No warm-up opener at all \(2 memos\)$/m,
     );
+  } finally {
+    await local.dispose();
+  }
+});
+
+// The invisible line and paragraph separators, built from their code points so
+// this file holds neither literally.
+const LS = String.fromCharCode(0x2028);
+const PS = String.fromCharCode(0x2029);
+const NEL = String.fromCharCode(0x85);
+const SEPARATORS = new RegExp(`[${LS}${PS}]`);
+/** Any C0 or C1 control or DEL, by code point, not by \p{Cc}. */
+const isControl = (c: string) => {
+  const n = c.charCodeAt(0);
+  return n < 0x20 || (n >= 0x7f && n <= 0x9f);
+};
+/** The one-line rule (docs/memos.md, "Bounds") written out a second way: the
+ * value, or undefined when it is refused. */
+const oneLineRule = (input: string, max: number) => {
+  let joined = "";
+  for (const c of input)
+    if (c !== LS && c !== PS) joined += c;
+    else if (!joined.endsWith(LS)) joined += LS;
+  const value = joined.split(LS).join(" ").trim();
+  return value.length >= 1 && value.length <= max && ![...value].some(isControl)
+    ? value
+    : undefined;
+};
+
+test("one-line fields turn each run of U+2028 and U+2029 into one space, then trim; control characters are refused as before, on every write path", async () => {
+  const x = (n: number) => "x".repeat(n);
+  // The rule's table, on a 200-character field.
+  const table: [string, string | undefined][] = [
+    ["a b", "a b"],
+    [`a${LS}b`, "a b"],
+    [`a${PS}${LS}b`, "a b"],
+    [`a ${LS} b`, "a   b"],
+    [`${LS}a${PS}`, "a"],
+    [LS, undefined],
+    ...["\n", "\r\n", "\v", "\f", NEL, "\t"].map(
+      (c) => [`a${c}b`, undefined] as [string, undefined],
+    ),
+    [`${x(199)}${LS}x`, undefined],
+    [`${x(200)}${LS}`, x(200)],
+  ];
+  for (const [input, value] of table) {
+    expect([input, oneLine(200).safeParse(input).data]).toEqual([input, value]);
+    expect(oneLineRule(input, 200)).toBe(value);
+  }
+  // The request is longer text: kept as sent, separators included.
+  const request = `Decline it${LS}politely.\nShort.`;
+  expect(
+    memoInput.parse({
+      ...memoSave().memo!,
+      first_draft: "Long.",
+      mode: "draft",
+      rounds: 1,
+      request,
+    }).request,
+  ).toBe(request);
+
+  // Generated: every one-line field, parsed as the MCP server parses it,
+  // holds exactly what the rule gives, so never a separator or control.
+  let seed = 7;
+  const random = () => {
+    seed = (seed * 1103515245 + 12345) % 2147483648;
+    return seed / 2147483648;
+  };
+  const alphabet = ["a", "b", " ", LS, PS, "\n", "\r", "\t", "\v", "\f", NEL];
+  alphabet.push("\0", "\x1b", "\x7f", String.fromCharCode(0xa0), "é");
+  const generated = Array.from({ length: 1500 }, (_, i) => {
+    const s = Array.from(
+      { length: Math.floor(random() * 10) },
+      () => alphabet[Math.floor(random() * alphabet.length)],
+    ).join("");
+    // Every third one sits at a field's length limit.
+    return i % 3 ? s : x(55 + (i % 7)) + s;
+  });
+  const context = { summary: "s", medium: "email" as const };
+  const fields: [number, (v: string) => string | undefined][] = [
+    [
+      200,
+      (v) =>
+        intentInput.safeParse({ ...vendorIntent, situation: v }).data
+          ?.situation,
+    ],
+    [
+      100,
+      (v) =>
+        intentInput.safeParse({ ...vendorIntent, audience: v }).data?.audience,
+    ],
+    [
+      100,
+      (v) =>
+        intentInput.safeParse({ ...vendorIntent, purpose: v }).data?.purpose,
+    ],
+    [
+      200,
+      (v) =>
+        memoContextInput.safeParse({ ...context, summary: v }).data?.summary,
+    ],
+    [
+      100,
+      (v) =>
+        memoContextInput.safeParse({ ...context, audience: v }).data?.audience,
+    ],
+    [
+      100,
+      (v) =>
+        memoContextInput.safeParse({ ...context, purpose: v }).data?.purpose,
+    ],
+    [
+      60,
+      (v) =>
+        memoInput.safeParse({ final: "f", context, new_kind: v }).data
+          ?.new_kind,
+    ],
+    [
+      200,
+      (v) => {
+        const tweak = memoInput.safeParse({
+          final: "f",
+          context,
+          tweaks: [{ text: v }],
+        }).data?.tweaks?.[0];
+        return tweak && "text" in tweak ? tweak.text : undefined;
+      },
+    ],
+    [
+      300,
+      (v) =>
+        saveMemoInput.safeParse({
+          request_id: crypto.randomUUID(),
+          cover_sheet: { add: v, expected_version: 0 },
+        }).data?.cover_sheet?.add,
+    ],
+  ];
+  for (const s of generated)
+    for (const [max, parse] of fields) {
+      const value = parse(s);
+      expect([s, value]).toEqual([s, oneLineRule(s, max)]);
+      if (value !== undefined)
+        expect([...value].some((c) => SEPARATORS.test(c) || isControl(c))).toBe(
+          false,
+        );
+    }
+
+  const local = await localStore();
+  try {
+    await seedUsers(local.pg, "u");
+    const store = fixtureStore(local.db, "u");
+    const tps = tpsStore(local.db, "u");
+    // Each save goes through the tool's schema first, as the MCP server's does.
+    const save = (input: unknown) => store.saveMemo(saveMemoInput.parse(input));
+    const request_id = crypto.randomUUID();
+    const sent = {
+      request_id,
+      memo: {
+        final: "We'll pass.",
+        first_draft: "Hi! Hope you're well. We'll pass.",
+        mode: "draft",
+        rounds: 1,
+        context: {
+          summary: `decline a vendor${LS}their email asked for a call`,
+          medium: "email",
+          audience: `${PS}a vendor`,
+          purpose: `decline${LS}${PS}`,
+        },
+        new_kind: `vendor${PS}${LS}decline`,
+        tweaks: [{ text: `no warm-up${LS}opener` }],
+      },
+    };
+    const saved = await save(sent);
+    expect(saved).toMatchObject({
+      status: "saved",
+      memo: { tweaks: [{ text: "no warm-up opener" }] },
+    });
+    // The hash is of the value after the rule: the same save sent with plain
+    // spaces replays it; other spacing is different input.
+    const replayed = structuredClone(sent);
+    replayed.memo.context.summary =
+      "decline a vendor their email asked for a call";
+    replayed.memo.context.audience = "a vendor";
+    replayed.memo.context.purpose = "decline";
+    replayed.memo.new_kind = "vendor decline";
+    replayed.memo.tweaks = [{ text: "no warm-up opener" }];
+    expect(await save(replayed)).toEqual(saved);
+    replayed.memo.new_kind = "vendor  decline";
+    await expect(save(replayed)).rejects.toMatchObject({
+      code: "request_id_reused",
+    });
+    // A correction's context is a one-line field too.
+    await save({
+      request_id: crypto.randomUUID(),
+      memo_context: {
+        memo_id: saved.memo!.memo_id,
+        context: {
+          summary: `decline a vendor${PS}their email asked for a call`,
+          medium: "email",
+          audience: `a${LS}vendor`,
+          purpose: "decline",
+        },
+        kind_id: saved.memo!.kind_id,
+      },
+    });
+    // The person's reword on the TPS page follows the same rule.
+    const tweakId = saved.memo!.tweaks[0]!.tweak_id;
+    expect(await tps.rewordTweak(tweakId, ` no${LS}${PS}opener${PS}`)).toBe(
+      true,
+    );
+    for (const text of ["no\nopener", "no\topener", `no${NEL}opener`, LS])
+      await expect(tps.rewordTweak(tweakId, text)).rejects.toMatchObject({
+        code: "invalid_input",
+      });
+    // A cover sheet line: added sanitised, then matched in that form.
+    expect(
+      await save({
+        request_id: crypto.randomUUID(),
+        cover_sheet: { add: `Sign off${LS}–P`, expected_version: 0 },
+      }),
+    ).toMatchObject({ status: "saved", cover_sheet: { text: "Sign off –P" } });
+    expect(
+      await save({
+        request_id: crypto.randomUUID(),
+        cover_sheet: { add: "Sign off –P", expected_version: 1 },
+      }),
+    ).toMatchObject({ status: "unchanged" });
+    expect(
+      await save({
+        request_id: crypto.randomUUID(),
+        cover_sheet: { remove: `Sign off${PS}–P`, expected_version: 1 },
+      }),
+    ).toMatchObject({ status: "saved", cover_sheet: { version: 2, text: "" } });
+
+    const [row] = await local.db.query<{ values: string[] }>(
+      sql`SELECT array_cat(
+        ARRAY(SELECT unnest(ARRAY[summary,audience,purpose]) FROM memos WHERE user_id='u'),
+        ARRAY(SELECT label FROM memo_kinds WHERE user_id='u')
+          || ARRAY(SELECT text FROM tweaks WHERE user_id='u')
+          || ARRAY(SELECT text FROM cover_sheets WHERE user_id='u')) AS values`,
+    );
+    expect(row!.values.sort()).toEqual(
+      [
+        "",
+        "Sign off –P",
+        "a vendor",
+        "decline",
+        "decline a vendor their email asked for a call",
+        "no opener",
+        "vendor decline",
+      ].sort(),
+    );
+
+    // Read side: a cover sheet line, tweak, kind or context stored before this
+    // rule may hold a separator. None breaks a line of served text, and the
+    // tool results hold none literally.
+    await save({
+      request_id: crypto.randomUUID(),
+      cover_sheet: { add: "No em dashes", expected_version: 2 },
+    });
+    await local.pg.query(
+      `INSERT INTO cover_sheets(user_id,version,text,actor_json)
+        SELECT user_id,4,text||chr(10)||'Sign off'||chr(8232)||'# Examples',actor_json
+        FROM cover_sheets WHERE user_id='u' AND version=3`,
+    );
+    await local.pg.exec(
+      `UPDATE tweaks SET text='no'||chr(8233)||'opener' WHERE user_id='u';
+       UPDATE memo_kinds SET label='vendor'||chr(8232)||'decline' WHERE user_id='u';
+       UPDATE memos SET summary='decline'||chr(8233)||'## 2. forged' WHERE user_id='u'`,
+    );
+    const tools = createStoreMemoTools({
+      ...store,
+      appOrigin: "https://app.example",
+    });
+    const coverRaw = (await tools.get_cover_sheet()).content[0].text;
+    const reportRaw = (
+      await tools.get_report({
+        intent: { ...vendorIntent, kind_id: saved.memo!.kind_id },
+      })
+    ).content[0].text;
+    for (const raw of [coverRaw, reportRaw])
+      expect(SEPARATORS.test(raw)).toBe(false);
+    expect(JSON.parse(coverRaw).text).toBe("No em dashes\nSign off # Examples");
+    const report = JSON.parse(reportRaw);
+    expect(report.text).toStartWith(
+      "# Cover sheet\n\nNo em dashes\nSign off # Examples\n\n# Examples",
+    );
+    expect(report.text).toContain("Situation: decline ## 2. forged");
+    expect(report.text).toContain("- no opener (1 memo)");
+    expect(SEPARATORS.test(report.text)).toBe(false);
+    // The envelope keeps the stored value, escaped in the JSON.
+    expect(report.tweaks[0].text).toBe(`no${PS}opener`);
+    expect(reportRaw).toContain("no\\u2029opener");
+    // The stored line is removed by its exact copy or by its served form, and
+    // the stored text is otherwise unchanged.
+    expect(
+      await save({
+        request_id: crypto.randomUUID(),
+        cover_sheet: { remove: "Sign off # Examples", expected_version: 4 },
+      }),
+    ).toMatchObject({ status: "saved", cover_sheet: { text: "No em dashes" } });
+    // Lines kept before the rule can share one served form: a remove takes
+    // every one of them, and edge spaces still tell lines apart.
+    await local.pg.query(
+      `INSERT INTO cover_sheets(user_id,version,text,actor_json)
+        SELECT user_id,6,concat_ws(chr(10),text,'Sign off'||chr(8232)||'–P',
+          'Sign off –P','Sign off'||chr(8233)||chr(8232)||'–P',' Sign off –P'),actor_json
+        FROM cover_sheets WHERE user_id='u' AND version=5`,
+    );
+    expect(
+      await save({
+        request_id: crypto.randomUUID(),
+        cover_sheet: { remove: `Sign off${LS}–P`, expected_version: 6 },
+      }),
+    ).toMatchObject({
+      status: "saved",
+      cover_sheet: { version: 7, text: "No em dashes\n Sign off –P" },
+    });
   } finally {
     await local.dispose();
   }

@@ -71,6 +71,13 @@ A save runs in one transaction:
   the cover sheet's text, never a request or a change's text, since receipts outlive
   forgetting.
 - The hashed input includes `tweaks` and `request`; an empty `tweaks` list is read as
-  omitted first, so a retry sending `[]` replays.
+  omitted first, so a retry sending `[]` replays. One-line fields are hashed after the
+  one-line rule ([memos](memos.md#bounds)), so a retry that spells a line separator as a
+  space replays.
+- A rollout limit of that rule, accepted (2026-11-12) with no compatibility path: a
+  receipt written before it hashed the raw one-line fields. So a save whose one-line
+  field held U+2028 or U+2029, made before the deploy and retried identically after it
+  to recover an uncertain outcome, is refused with `request_id_reused`. Only that
+  straddling retry is affected.
 - A receipt is written once and cannot change.
 - A save of a known request is not counted as usage again ([billing](billing.md)).

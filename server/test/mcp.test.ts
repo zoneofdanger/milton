@@ -342,6 +342,94 @@ test("get_report requires an intent: without a well-formed one it refuses, sayin
   }
 });
 
+test("the server hands the store one-line fields after the rule: separators as one space, trimmed", async () => {
+  const LS = String.fromCharCode(0x2028);
+  const PS = String.fromCharCode(0x2029);
+  const saved: unknown[] = [];
+  const intents: unknown[] = [];
+  const stub = stubStore();
+  const server = createMiltonServer({
+    ...stub,
+    readReport: (intent) => {
+      intents.push(intent);
+      return stub.readReport(intent);
+    },
+    saveMemo: async (input) => {
+      saved.push(input);
+      return { status: "saved", request_id: input.request_id };
+    },
+  });
+  const client = new Client({ name: "sdk-test", version: "0.0.0" });
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
+  try {
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    await client.callTool({
+      name: "get_report",
+      arguments: {
+        intent: { ...goodIntent, situation: `declining${LS}${PS}a vendor ` },
+      },
+    });
+    expect(intents).toEqual([
+      { ...goodIntent, situation: "declining a vendor" },
+    ]);
+    const request_id = crypto.randomUUID();
+    for (const args of [
+      {
+        memo: {
+          final: `Friday works.${LS}Thanks!`,
+          context: { summary: `${LS}accepting a day${PS}`, medium: "email" },
+          new_kind: `meeting${PS}yes`,
+          first_draft: "Friday is fine.",
+          mode: "draft",
+          rounds: 0,
+          tweaks: [{ text: `no${LS}exclamation` }],
+        },
+      },
+      { cover_sheet: { add: `Sign off${LS}–P`, expected_version: 0 } },
+      { cover_sheet: { remove: ` Sign off${LS}–P`, expected_version: 1 } },
+    ])
+      await client.callTool({
+        name: "create_memo",
+        arguments: { request_id, ...args },
+      });
+    expect(saved).toEqual([
+      {
+        request_id,
+        memo: {
+          // A memo's words are kept as sent.
+          final: `Friday works.${LS}Thanks!`,
+          context: { summary: "accepting a day", medium: "email" },
+          new_kind: "meeting yes",
+          first_draft: "Friday is fine.",
+          mode: "draft",
+          rounds: 0,
+          tweaks: [{ text: "no exclamation" }],
+        },
+      },
+      { request_id, cover_sheet: { add: "Sign off –P", expected_version: 0 } },
+      // remove is matched as sent, untrimmed.
+      {
+        request_id,
+        cover_sheet: { remove: " Sign off –P", expected_version: 1 },
+      },
+    ]);
+    // What create_memo promises matches: only final and first_draft are kept
+    // byte for byte.
+    const { tools } = await client.listTools();
+    const description =
+      tools.find((tool) => tool.name === "create_memo")?.description ?? "";
+    expect(description).toContain(
+      "Milton keeps final and first_draft unchanged; saves are all or nothing.",
+    );
+    expect(description).not.toContain("bytes unchanged");
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
 test("an object argument sent as a JSON string is read as that object; any other string is still refused", async () => {
   const saved: unknown[] = [];
   const intents: unknown[] = [];

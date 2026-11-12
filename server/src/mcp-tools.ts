@@ -7,13 +7,21 @@ import { StoreError } from "./store/errors";
 import { utf8Bytes } from "./store/limits";
 import { subscriptionRequired } from "./store/trials";
 import { usageWithin, type CallUsage, type ToolName } from "./store/usage";
-import { MEDIA, type CoverSheetRead, type ReportRead } from "./store/memos";
+import {
+  joinSeparators,
+  MEDIA,
+  type CoverSheetRead,
+  type ReportRead,
+} from "./store/memos";
 import { setupScript } from "./store/setup";
 
-/** One trimmed line of at most `max` characters, with no control characters. */
+/** One line of at most `max` characters (docs/memos.md, "Bounds"): each run
+ * of U+2028 and U+2029 becomes one space, then the value is trimmed and must
+ * hold no control character. The input is hashed after this. */
 export const oneLine = (max: number) =>
   z
     .string()
+    .overwrite(joinSeparators)
     .trim()
     .min(1)
     .max(max)
@@ -174,8 +182,11 @@ export const coverSheetChangeInput = z
     add: oneLine(300)
       .optional()
       .describe("One exact line the person asked you to add."),
+    // Matched against each line in the same form (save.ts), not trimmed, so
+    // any stored line can still be removed by its exact copy.
     remove: z
       .string()
+      .overwrite(joinSeparators)
       .min(1)
       .max(1500)
       .optional()
@@ -237,7 +248,9 @@ type ToolResult = {
 };
 
 /** Every tool result. An error result carries its code and next step from the
- * one table in mcp-outcomes. */
+ * one table in mcp-outcomes. U+2028 and U+2029, which JSON.stringify leaves
+ * literal, are escaped, so a value stored before the one-line rule breaks no
+ * line of the result; JSON.parse returns it unchanged. */
 export function storeResult(value: object, isError = false): ToolResult {
   return {
     content: [
@@ -245,6 +258,9 @@ export function storeResult(value: object, isError = false): ToolResult {
         type: "text",
         text: JSON.stringify(
           isError ? withNext(value as Record<string, unknown>) : value,
+        ).replace(
+          /[\p{Zl}\p{Zp}]/gu,
+          (c) => `\\u${c.charCodeAt(0).toString(16)}`,
         ),
       },
     ],

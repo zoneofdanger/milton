@@ -1800,6 +1800,12 @@ test("a memo page lists code's changes unlabelled and what the person asked, and
     ).text();
     expect(spaced).toContain("Only spacing or line breaks changed");
     expect(spaced).not.toContain("you accepted the first draft as it was");
+    // A memo whose changes a report may serve says so; one with nothing a
+    // report would serve says nothing.
+    const mayServe =
+      "Your AIs may see a few of these changes when this memo is used as an example.";
+    expect(page).toContain(mayServe);
+    expect(spaced).not.toContain(mayServe);
     // A request's HTML and fences reach TPS.md as literal text in a fence
     // longer than any run of tildes inside it.
     await fixture.author.saveMemo(

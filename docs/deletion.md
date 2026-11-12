@@ -33,7 +33,9 @@ covers:
 
 - Forgetting a memo (on the TPS page, or `forget_memos` from the AI) deletes it, its
   citations, its stored changes, its request and any tweak left with none, so its
-  example and its scoreboard numbers go too.
+  example, the changes a report quoted under it and its scoreboard numbers go too. A
+  report read before then, or already running, is not recalled
+  ([reports](reports.md#reads)).
 - `forget_memos` takes 1 to 100 ids; when none is the account's, it is refused with
   `invalid_memo`. The result lists the ids forgotten.
 - Deleting a tweak on the TPS page removes it with its citations; no stored change

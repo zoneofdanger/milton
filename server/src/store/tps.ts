@@ -10,9 +10,12 @@ import {
   coverSheetJson,
   keepMemos,
   MEDIA,
+  servesChanges,
   tweakScore,
   type Medium,
 } from "./memos";
+import { servableRow } from "./changes";
+import { utf8Bytes } from "./limits";
 import { deleteMemos } from "./save";
 import {
   normalizeTweak,
@@ -71,6 +74,8 @@ export type TpsChange = {
   truncated: boolean;
   /** "format" for a Markdown-only spot; no other label. */
   about: "format" | null;
+  by: string | null;
+  tweak_id: string | null;
   draft_start: number | null;
   draft_end: number | null;
   final_start: number | null;
@@ -86,6 +91,9 @@ export type FullMemo = TpsMemo & {
    * listed or without a kept first draft. */
   changes_state?: "itemized" | "too_large";
   changes: TpsChange[];
+  /** Whether a report may serve some of these changes under it as an
+   * example, by the report's own rule (docs/reports.md). */
+  changes_served: boolean;
 };
 
 /** Memos the page lists, newest first. Older ones stay in the export. */
@@ -232,7 +240,8 @@ export function tpsStore(db: StoreDatabase, userId: string) {
         }
       >(sql`SELECT ${memoColumns},m.first_draft,m.final,m.request,m.changes_state,
         (SELECT coalesce(json_agg(json_build_object('n',c.n,'before',c."before",'after',c."after",
-          'truncated',c.truncated,'about',c.about,'draft_start',c.draft_start,
+          'truncated',c.truncated,'about',c.about,'by',c.by,'tweak_id',c.tweak_id,
+          'draft_start',c.draft_start,
           'draft_end',c.draft_end,'final_start',c.final_start,'final_end',c.final_end)
           ORDER BY c.n),'[]'::json)
           FROM memo_changes c WHERE c.user_id=m.user_id AND c.memo_id=m.id) AS changes
@@ -249,6 +258,12 @@ export function tpsStore(db: StoreDatabase, userId: string) {
         ...(request !== null ? { request } : {}),
         ...(changes_state !== null ? { changes_state } : {}),
         changes,
+        changes_served:
+          servesChanges({
+            ...row,
+            changes_state,
+            bytes: utf8Bytes(final),
+          }) && changes.some(servableRow),
       };
     },
     /** TPS.md: the cover sheet, the tweaks, and every memo's final grouped by

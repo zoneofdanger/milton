@@ -1,12 +1,18 @@
 // Memos as AIs read them: the cover sheet read, and the report Milton assembles
 // for one draft (docs/reports.md). Reads run no model.
 import { randomUUID } from "node:crypto";
-import { sql } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
 import type { StoreSession } from "./database";
 import { accountUnavailable } from "./accounts";
 import { StoreError } from "./errors";
 import { utf8Bytes } from "./limits";
 import { tokens, type Tier } from "./score";
+import {
+  changeBlocks,
+  CHANGES_GUIDANCE,
+  STORED_SERVABLE_SQL,
+  type StoredChange,
+} from "./changes";
 
 export const MEDIA = ["email", "chat", "post", "document", "speech"] as const;
 export type Medium = (typeof MEDIA)[number];
@@ -132,6 +138,9 @@ type Candidate = {
   lines: number;
   lexical: number;
   tweaks: string[];
+  mode: "draft" | "edit" | null;
+  first_draft_state: "kept" | "missing" | "none";
+  changes_state: "itemized" | "too_large" | null;
 };
 const STOPWORDS = new Set(
   "a an and as at by for from i in into is it me my of on or our the their this to with your".split(
@@ -179,26 +188,59 @@ export function rankMemos<T extends Candidate>(
 }
 
 const TIER_LABEL = { own: "your words", steered: "steered by you" } as const;
-const quote = (body: string) =>
+/** Report text's line breaks (docs/reports.md, "Text"): CRLF as one, then
+ * LF, CR, VT, FF, NEL and the line and paragraph separators. A client may
+ * break lines at any of them, so memo text may start a line only inside a
+ * quoted final. */
+export const LINE_BREAK = /\r\n|[\n\r\v\f\u0085\u2028\u2029]/g;
+/** How many LINE_BREAKs a text holds, in SQL: every break character,
+ * less one per CRLF. Plain string functions, not a regular expression,
+ * which took six times as long on a 256 KiB final of short lines. */
+export const lineBreaks = (text: SQL) =>
+  sql`(length(${text})-length(translate(${text},${"\n\r\v\f\u0085\u2028\u2029"},''))-(length(${text})-length(replace(${text},${"\r\n"},'')))/2)`;
+/** A final as report text: every line, empty ones included, starts with `>`;
+ * each line break is kept as sent. */
+export const quote = (body: string) =>
   body
-    .split("\n")
-    .map((line) => (line === "" ? ">" : `> ${line}`))
-    .join("\n");
+    .split(new RegExp(`(${LINE_BREAK.source})`))
+    .map((part, i) => (i % 2 ? part : part === "" ? ">" : `> ${part}`))
+    .join("");
+/** A one-line field (context, kind label, tweak) as report text: each line
+ * break, which older saves could hold, becomes one space. */
+export const flat = (text: string) => text.replace(LINE_BREAK, " ");
 const exampleHeader = (m: Candidate, kind: string | undefined, n: number) =>
   [
-    `## ${n}. ${[kind, m.medium, TIER_LABEL[m.tier as "own"], m.at.slice(0, 10)].filter(Boolean).join(" · ")}`,
-    `Situation: ${m.summary}`,
+    `## ${n}. ${[kind && flat(kind), m.medium, TIER_LABEL[m.tier as "own"], m.at.slice(0, 10)].filter(Boolean).join(" · ")}`,
+    `Situation: ${flat(m.summary)}`,
     ...(m.audience || m.purpose
       ? [
           [
-            m.audience ? `Audience: ${m.audience}` : "",
-            m.purpose ? `Purpose: ${m.purpose}` : "",
+            m.audience ? `Audience: ${flat(m.audience)}` : "",
+            m.purpose ? `Purpose: ${flat(m.purpose)}` : "",
           ]
             .filter(Boolean)
             .join(" · "),
         ]
       : []),
   ].join("\n");
+
+/** Whether a memo's stored changes may be served under it as an example
+ * (docs/reports.md, "What they changed"), whatever the report: drafted, with
+ * its first draft kept and its changes itemized, steered, and a final small
+ * enough to be an example at all. The report asks it of the examples it
+ * selected; the memo page asks it directly. */
+export const servesChanges = (m: {
+  mode: string | null;
+  first_draft_state: string;
+  changes_state: string | null;
+  tier: Tier;
+  bytes: number;
+}) =>
+  m.mode === "draft" &&
+  m.first_draft_state === "kept" &&
+  m.changes_state === "itemized" &&
+  m.tier === "steered" &&
+  m.bytes <= MAX_EXAMPLE_BYTES;
 
 /** Examples in rank order within the budget: never untouched finals or ones
  * over MAX_EXAMPLE_BYTES, at most MAX_STEERED steered ones, the top one always.
@@ -296,8 +338,9 @@ export async function readReport(
         'summary',m.summary,'audience',m.audience,'purpose',m.purpose,
         'at',to_char(m.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
         'bytes',octet_length(m.final),
-        'lines',length(m.final)-length(replace(m.final,E'\\n','')),
+        'lines',${lineBreaks(sql`m.final`)},
         'lexical',ts_rank(m.search,${query}),
+        'mode',m.mode,'first_draft_state',m.first_draft_state,'changes_state',m.changes_state,
         'tweaks',(SELECT coalesce(array_agg(c.tweak_id ORDER BY c.tweak_id),'{}') FROM tweak_citations c
           WHERE c.user_id=m.user_id AND c.memo_id=m.id))),'[]'::json)
         FROM memos m WHERE m.user_id=${userId}) AS memos,
@@ -314,26 +357,44 @@ export async function readReport(
   const scores = new Map(row.tweaks.map((t) => [t.id, t]));
   const tweaks = selectTweaks(ranked, scores);
   const reportId = randomUUID();
-  const finals = new Map(
-    (
-      await session.query<{ id: string; final: string }>(sql`WITH served AS (
+  // At most MAX_STEERED memos: their changes come in the statement that
+  // fetches the finals, so a memo forgotten before it loses both.
+  const withChanges = examples.filter(servesChanges).map((m) => m.id);
+  const fetched = await session.query<{
+    id: string;
+    final: string;
+    changes: StoredChange[] | null;
+  }>(sql`WITH served AS (
         INSERT INTO served_reports(user_id,id,tweak_ids)
         VALUES (${userId},${reportId},${sql.param(tweaks.map((t) => t.tweak_id))}::text[]))
-        SELECT id,final FROM memos WHERE user_id=${userId}
-          AND id=ANY(${sql.param(examples.map((m) => m.id))}::text[])`)
-    ).map((m) => [m.id, m.final]),
-  );
+        SELECT m.id,m.final,CASE WHEN m.id=ANY(${sql.param(withChanges)}::text[]) THEN
+          (SELECT coalesce(json_agg(json_build_object('n',c.n,'before',c."before",'after',c."after",
+            'truncated',c.truncated,'about',c.about,'by',c.by,'tweak_id',c.tweak_id,
+            'draft_start',c.draft_start,'draft_end',c.draft_end,
+            'final_start',c.final_start,'final_end',c.final_end) ORDER BY c.n),'[]'::json)
+            FROM memo_changes c WHERE c.user_id=m.user_id AND c.memo_id=m.id
+              AND ${sql.raw(STORED_SERVABLE_SQL)}) END AS changes
+        FROM memos m WHERE m.user_id=${userId}
+          AND m.id=ANY(${sql.param(examples.map((m) => m.id))}::text[])`);
+  const finals = new Map(fetched.map((m) => [m.id, m.final]));
   const served = examples.filter((m) => finals.has(m.id));
+  const rows = new Map(fetched.map((m) => [m.id, m.changes]));
+  const { blocks, guidance } = changeBlocks(
+    served.flatMap((m) => {
+      const r = rows.get(m.id);
+      return r ? [{ id: m.id, rows: r }] : [];
+    }),
+  );
   const cover = row.cover?.text.trim() ? row.cover.text : "";
   const parts = [
     ...(cover ? ["# Cover sheet", cover] : []),
     ...(served.length
       ? [
           "# Examples",
-          "The person's finals that best match this draft, best first. Imitate their wording.",
+          `The person's finals that best match this draft, best first. Imitate their wording.${guidance ? `\n${CHANGES_GUIDANCE}` : ""}`,
           ...served.map(
             (m, i) =>
-              `${exampleHeader(m, labels.get(m.kind_id ?? ""), i + 1)}\n\n${quote(finals.get(m.id)!)}`,
+              `${exampleHeader(m, labels.get(m.kind_id ?? ""), i + 1)}\n\n${quote(finals.get(m.id)!)}${blocks.get(m.id) ?? ""}`,
           ),
         ]
       : []),
@@ -344,7 +405,7 @@ export async function readReport(
           tweaks
             .map((t) => {
               const { served, needed_again } = scores.get(t.tweak_id)!;
-              return `- ${t.text} (${plural(t.memos, "memo")}${needed_again ? `; needed again ${needed_again} of ${served}` : ""})`;
+              return `- ${flat(t.text)} (${plural(t.memos, "memo")}${needed_again ? `; needed again ${needed_again} of ${served}` : ""})`;
             })
             .join("\n"),
         ]

@@ -794,6 +794,41 @@ test("scopes control discovery and direct calls; original binding revocation sur
     ).rejects.toBeDefined();
     const writer = await connect(await fixture.token("alpha", "writer"));
     expect((await writer.listTools()).tools).toHaveLength(3);
+    // A read-only connection reads the same report, served changes included.
+    await writer.callTool({
+      name: "create_memo",
+      arguments: {
+        request_id: crypto.randomUUID(),
+        memo: {
+          first_draft: "Hi Dana, I hope this finds you well. Thanks!",
+          final: "Dana — thanks!",
+          mode: "draft",
+          rounds: 1,
+          context: { summary: "thank a colleague", medium: "email" },
+        },
+      },
+    });
+    const reportText = async (client: Client) =>
+      JSON.parse(
+        (
+          (
+            await client.callTool({
+              name: "get_report",
+              arguments: {
+                intent: {
+                  situation: "thanking a colleague",
+                  medium: "email",
+                  audience: "a colleague",
+                  purpose: "thank",
+                },
+              },
+            })
+          ).content as { text: string }[]
+        )[0]!.text,
+      ).text as string;
+    const written = await reportText(writer);
+    expect(written).toContain("What they changed in the AI's first draft:");
+    expect(await reportText(reader)).toBe(written);
     const request = (token: string) =>
       handler(
         new Request(resource, {

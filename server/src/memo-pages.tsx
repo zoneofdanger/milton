@@ -619,7 +619,17 @@ function whatChanged(m: FullMemo) {
           all.
         </p>
       ) : m.changes.length ? (
-        <ol class="change-list">{m.changes.map(changeRow)}</ol>
+        <>
+          <ol class="change-list">{m.changes.map(changeRow)}</ol>
+          {m.changes_served && (
+            // True by the report's own rule (docs/reports.md); a report's
+            // budget may still leave them out, hence "may".
+            <p class="small-note">
+              Your AIs may see a few of these changes when this memo is used as
+              an example.
+            </p>
+          )}
+        </>
       ) : m.first_draft === m.final ? (
         <p class="small-note">
           Nothing: you accepted the first draft as it was.

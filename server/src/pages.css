@@ -538,10 +538,6 @@ button.compact {
   border: 1px dashed var(--input);
   background: var(--surface);
 }
-/* A tweak's newest example, under its line on the TPS page. */
-.tweak-example .typed {
-  color: var(--muted);
-}
 /* "What changed" on the memo page: one row per change, quotes wrapping. */
 .change-list {
   list-style: none;
@@ -555,7 +551,7 @@ button.compact {
 .change-row p {
   margin: 0 0 var(--space-2);
 }
-.change-row .tweak-counts {
+.change-row .change-notes {
   display: flex;
   flex-wrap: wrap;
   gap: 0 var(--space-3);

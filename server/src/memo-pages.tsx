@@ -436,10 +436,9 @@ function sheet({ view, email, date, comment, csrf, notices }: SheetView) {
         <h2 id="tweaks">Tweaks</h2>
         <p class="applies">
           What you made your AIs change, one line each, with how many memos
-          taught it and the newest change behind it. The next AI gets the ones
-          from your closest memos. “Served” counts drafts an AI was given a
-          tweak for; “needed again”, how many of those you still had to fix the
-          same way.
+          taught it. The next AI gets the ones from your closest memos. “Served”
+          counts drafts an AI was given a tweak for; “needed again”, how many of
+          those you still had to fix the same way.
         </p>
         {notices.tweaks}
         {view.tweaks.length === 0 ? (
@@ -451,11 +450,6 @@ function sheet({ view, email, date, comment, csrf, notices }: SheetView) {
                 <p>
                   <span class="typed">{t.text}</span>
                 </p>
-                {t.example && (
-                  <p class="tweak-example">
-                    <span class="typed">{t.example}</span>
-                  </p>
-                )}
                 <p class="report-counts tweak-counts">
                   <span>{counted(t.memos, "memo")}</span>
                   {t.served > 0 && (
@@ -578,80 +572,57 @@ const notFound = (ctx: MemoPageContext, message: string) =>
     { ...chrome(ctx), wide: true },
   );
 
-// A change's two labels as the memo page words them (docs/memos.md).
-const ABOUT = {
-  voice: "how it sounds",
-  content: "what it says",
-  format: "formatting",
-} as const;
-const BY = {
-  person: "you typed",
-  asked: "you asked",
-  unasked: "AI changed it unasked",
-} as const;
-/** One side of a change, verbatim; "…" where it was cut short. */
+/** One side of a change, verbatim; "…" where it was cut at 300 characters. */
 const side = (text: string, c: TpsChange) => (
   <span class="typed">{`“${text}${c.truncated && Array.from(text).length >= 300 ? "…" : ""}”`}</span>
 );
-const changeRow = (c: TpsChange) => (
-  <li class="change-row">
-    <p>
-      {!c.before ? (
-        <>added: {side(c.after, c)}</>
-      ) : !c.after ? (
-        <>cut: {side(c.before, c)}</>
-      ) : (
-        <>
-          {side(c.before, c)} → {side(c.after, c)}
-        </>
-      )}
-    </p>
-    <p class="report-counts tweak-counts">
-      {c.about === "format" ? (
-        <span>{ABOUT.format}</span>
-      ) : c.about && c.by ? (
-        <>
-          <span>{ABOUT[c.about]}</span>
-          <span>{BY[c.by]}</span>
-        </>
-      ) : (
-        <span>not labelled</span>
-      )}
-    </p>
-    {c.tweak && (
-      <p class="memo-tweaks">
-        <span class="tweak-label">Tweak:</span>{" "}
-        <span class="typed">{c.tweak.text}</span>
+/** One spot code found, unlabelled: before → after, or added or cut when a
+ * side is empty; a Markdown-only spot says "formatting", and a cut side says
+ * so (docs/memos.md, "Changes"). */
+const changeRow = (c: TpsChange) => {
+  const notes = [
+    ...(c.about === "format" ? ["formatting"] : []),
+    ...(c.truncated ? ["shortened to 300 characters"] : []),
+  ];
+  return (
+    <li class="change-row">
+      <p>
+        {!c.before ? (
+          <>added: {side(c.after, c)}</>
+        ) : !c.after ? (
+          <>cut: {side(c.before, c)}</>
+        ) : (
+          <>
+            {side(c.before, c)} → {side(c.after, c)}
+          </>
+        )}
       </p>
-    )}
-  </li>
-);
-/** "What changed": the stored changes, for a memo saved since they were
- * listed. Changes may overlap: several can sit on one spot. */
+      {notes.length > 0 && (
+        <p class="report-counts change-notes">
+          {notes.map((note) => (
+            <span>{note}</span>
+          ))}
+        </p>
+      )}
+    </li>
+  );
+};
+/** "What changed": code's own list, for a memo saved since it was kept. */
 function whatChanged(m: FullMemo) {
   if (!m.changes_state) return null;
-  const share = m.typed_share;
   return (
     <section aria-labelledby="memo-changes">
       <h2 id="memo-changes">What changed</h2>
-      {m.changes_state === "too_large" && (
+      {m.changes_state === "too_large" ? (
         <p class="small-note">
-          Too different to list every change; showing the ones your AI named.
+          Too many changes to list; the first draft and final above show them
+          all.
         </p>
-      )}
-      {share !== undefined && m.changes.some((c) => c.by === "person") && (
-        <p>
-          You typed {share > 0 && share < 0.005 ? "under 1%" : percent(share)}{" "}
-          of this final.
-        </p>
-      )}
-      {m.changes.length ? (
+      ) : m.changes.length ? (
         <ol class="change-list">{m.changes.map(changeRow)}</ol>
       ) : (
         <p class="small-note">
-          {m.changes_state === "too_large"
-            ? "Your AI named none."
-            : "Nothing: you accepted the first draft as it was."}
+          Nothing: you accepted the first draft as it was.
         </p>
       )}
     </section>

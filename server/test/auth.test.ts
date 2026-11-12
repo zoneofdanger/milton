@@ -10,7 +10,7 @@ import {
   StoreError,
 } from "../src/store";
 import { localAsset } from "../src/assets";
-import { fixtureStore, memoSave, teach, vendorIntent } from "./store-fixtures";
+import { fixtureStore, memoSave, vendorIntent } from "./store-fixtures";
 import { localStore, openTransactions } from "./local-store";
 
 import {
@@ -1600,7 +1600,7 @@ async function otherAccount(
       final: "Alpha's final.",
       mode: "draft",
       rounds: 1,
-      changes: teach("first draft", { text: "alpha signs as Ada" }),
+      tweaks: [{ text: "alpha signs as Ada" }],
     }),
   );
   return {
@@ -1640,7 +1640,7 @@ test("the TPS page lists memos newest first, escaped, opens each only for its ow
         final: "No, thanks. <script>alert('final')</script>\n\n–P",
         mode: "draft",
         rounds: 2,
-        changes: teach("Hi!", { text: "no warm-up opener <b>" }),
+        tweaks: [{ text: "no warm-up opener <b>" }],
         new_kind: "vendor decline",
       }),
     );
@@ -1682,7 +1682,7 @@ test("the TPS page lists memos newest first, escaped, opens each only for its ow
     );
     // The untouched memo was served the tweak and did not need it again.
     expect(html).toContain(
-      '<p><span class="typed">no warm-up opener &lt;b&gt;</span></p><p class="tweak-example"><span class="typed">cut: &quot;Hi!&quot;</span></p><p class="report-counts tweak-counts"><span>1 memo</span><span>served 1</span><span>needed again 0</span></p>',
+      '<p><span class="typed">no warm-up opener &lt;b&gt;</span></p><p class="report-counts tweak-counts"><span>1 memo</span><span>served 1</span><span>needed again 0</span></p>',
     );
     // Newest first.
     const at = (id: string) => html.indexOf(`href="/tps/memo/${id}"`);
@@ -1732,41 +1732,21 @@ test("the TPS page lists memos newest first, escaped, opens each only for its ow
   }
 }, 30000);
 
-test("a memo page lists what changed and what the person asked, and Remove clears the request", async () => {
+test("a memo page lists code's changes unlabelled and what the person asked, and Remove clears the request", async () => {
   const fixture = await memoPageFixture();
   try {
     const asked =
       "Say no to the call, politely. ".repeat(5) + "\nKeep it short.";
+    const long = "We looked at it closely. ".repeat(14).trim();
     const saved = await fixture.author.saveMemo(
       memoSave({
-        first_draft:
-          "Hi Dana, I hope you're well! Thanks so much for the demo. It was a **useful** look at the tool.\n\nWe can't take a call this month.\n\nBest,\nSam",
+        first_draft: `Hi Dana, I hope you're well! Thanks so much for the demo. It was a **useful** look at the tool.\n\n${long}\n\nWe can't take a call this month.\n\nBest,\nSam`,
         final:
           "Dana — thanks for the demo. It was a useful look at the tool.\n\nWe'll pass for now.\n\n–S",
         mode: "draft",
         rounds: 2,
         request: asked,
-        changes: [
-          {
-            before: "Hi Dana, I hope you're well!",
-            after: "Dana —",
-            about: "voice",
-            by: "person",
-            tweak: { text: "no warm-up opener" },
-          },
-          {
-            before: "Thanks so much",
-            after: "thanks",
-            about: "voice",
-            by: "unasked",
-          },
-          {
-            before: "We can't take a call this month",
-            after: "We'll pass for now",
-            about: "content",
-            by: "asked",
-          },
-        ],
+        tweaks: [{ text: "no warm-up opener" }],
       }),
     );
     const id = saved.memo!.memo_id;
@@ -1786,16 +1766,22 @@ test("a memo page lists what changed and what the person asked, and Remove clear
       "Keep it short.",
       'action="/tps/request/remove"',
       '<h2 id="memo-changes">What changed</h2>',
-      "% of this final.",
-      '<span class="typed">“Hi Dana, I hope you&#39;re well!”</span> → <span class="typed">“Dana —”</span>',
-      "<span>how it sounds</span><span>you typed</span>",
-      '<span class="tweak-label">Tweak:</span> <span class="typed">no warm-up opener</span>',
-      "<span>how it sounds</span><span>AI changed it unasked</span>",
-      "<span>what it says</span><span>you asked</span>",
+      '<span class="typed">“Hi Dana, I hope you&#39;re well! Thanks so much”</span> → <span class="typed">“Dana — thanks”</span>',
+      // A Markdown-only spot says so; a side cut at 300 characters says so.
       "<span>formatting</span>",
-      "<span>not labelled</span>",
+      "…”</span>",
+      "<span>shortened to 300 characters</span>",
     ])
       expect(page).toContain(text);
+    // No labels, no typed share, no tweak line on a change.
+    for (const text of [
+      "how it sounds",
+      "<span>you typed</span>",
+      "not labelled",
+      "% of this final",
+      '<span class="tweak-label">Tweak:</span>',
+    ])
+      expect(page).not.toContain(text);
     expect(await fixture.store.exportTps()).toContain(
       `decline a vendor's meeting request\nAsked: ${"Say no to the call, politely. ".repeat(5)}\n    Keep it short.\n\n> Dana`,
     );
@@ -1821,19 +1807,22 @@ test("a memo page lists what changed and what the person asked, and Remove clear
     expect(after).not.toContain("Keep it short.");
     expect(await fixture.store.exportTps()).not.toContain("Asked:");
     // A memo saved before changes were listed shows no list; a too-large one
-    // says so.
+    // says the changes were too many to list.
     await fixture.db.query(
       sql`UPDATE memos SET changes_state=NULL WHERE id=${id}`,
     );
     expect(await (await fixture.send(`/tps/memo/${id}`)).text()).not.toContain(
       "What changed",
     );
+    await fixture.db.query(sql`DELETE FROM memo_changes WHERE memo_id=${id}`);
     await fixture.db.query(
       sql`UPDATE memos SET changes_state='too_large' WHERE id=${id}`,
     );
-    expect(await (await fixture.send(`/tps/memo/${id}`)).text()).toContain(
-      "Too different to list every change; showing the ones your AI named.",
+    const large = await (await fixture.send(`/tps/memo/${id}`)).text();
+    expect(large).toContain(
+      "Too many changes to list; the first draft and final above show them all.",
     );
+    expect(large).not.toContain('<li class="change-row');
   } finally {
     await fixture.dispose();
   }
@@ -1882,7 +1871,7 @@ test("forget, tweak delete and reword change only the session account's memos an
         final: "Short.",
         mode: "draft",
         rounds: 1,
-        changes: teach("Hi!", { text: "no opener" }, { text: "two sentences" }),
+        tweaks: [{ text: "no opener" }, { text: "two sentences" }],
       }),
     );
     const memo = saved.memo!.memo_id;
@@ -1924,7 +1913,6 @@ test("forget, tweak delete and reword change only the session account's memos an
       memos: 1,
       served: 0,
       needed_again: 0,
-      example: 'cut: "Hi!"',
     });
     const page = await (await fixture.send("/?done=tweak-reworded")).text();
     expect(page).toContain("Tweak reworded.");
@@ -1997,7 +1985,7 @@ test("Keep memos turns off and on, and Delete all memos asks first, then keeps t
         final: "Final.",
         mode: "draft",
         rounds: 1,
-        changes: teach("Draft", { text: "be brief" }),
+        tweaks: [{ text: "be brief" }],
         new_kind: "vendor decline",
       }),
     );

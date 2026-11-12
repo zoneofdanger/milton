@@ -8,14 +8,12 @@ import { accountUnavailable, requireActiveAccount } from "./accounts";
 import { StoreError } from "./errors";
 import {
   coverSheetJson,
-  EXAMPLE_SIDE,
   keepMemos,
   MEDIA,
   tweakScore,
   type Medium,
 } from "./memos";
 import { deleteMemos } from "./save";
-import { exampleLine, typedShare } from "./changes";
 import {
   normalizeTweak,
   scoreboard,
@@ -39,9 +37,9 @@ export type TpsMemo = {
   tier: Tier;
   /** The request's first line, cut to ASKED_LINE characters. */
   asked?: string;
-  /** How many changes its memo page lists, Markdown-only ones included (for a
-   * too_large memo, only those its AI named); absent for a memo saved before
-   * changes were listed. */
+  /** How many changes its memo page lists, Markdown-only ones included (none
+   * for a too_large memo); absent for a memo saved before changes were
+   * listed. */
   change_count?: number;
   /** Tweaks the report before it served, still on file. */
   served: { id: string; text: string }[];
@@ -55,8 +53,6 @@ export type TpsTweak = {
   memos: number;
   served: number;
   needed_again: number;
-  /** Its newest example, in the report's form (docs/reports.md). */
-  example?: string;
 };
 export type TpsView = {
   cover_sheet: { text: string; version: number };
@@ -65,20 +61,20 @@ export type TpsView = {
   tweaks: TpsTweak[];
   scoreboard: Scoreboard[];
 };
-/** One stored change, as the memo page lists it (docs/memos.md, "Changes"). */
+/** One stored change, code's own spot, as the memo page lists it
+ * (docs/memos.md, "Changes"). */
 export type TpsChange = {
   n: number;
   before: string;
   after: string;
+  /** A side was cut at 300 characters. */
   truncated: boolean;
-  about: "voice" | "content" | "format" | null;
-  by: "person" | "asked" | "unasked" | null;
+  /** "format" for a Markdown-only spot; no other label. */
+  about: "format" | null;
   draft_start: number | null;
   draft_end: number | null;
   final_start: number | null;
   final_end: number | null;
-  /** The tweak this change taught, while it is on file. */
-  tweak?: { id: string; text: string };
 };
 export type FullMemo = TpsMemo & {
   first_draft?: string;
@@ -89,8 +85,6 @@ export type FullMemo = TpsMemo & {
    * listed or without a kept first draft. */
   changes_state?: "itemized" | "too_large";
   changes: TpsChange[];
-  /** The share of the final's tokens inside changes the person typed. */
-  typed_share?: number;
 };
 
 /** Memos the page lists, newest first. Older ones stay in the export. */
@@ -162,31 +156,16 @@ const memo = (row: MemoRow): TpsMemo => {
   };
 };
 
-// Each tweak with its count, score and newest example: the report's pick
-// without an intent, among voice changes naming it with both sides short
-// enough (docs/reports.md).
+// Each tweak with its count and score (docs/reports.md).
 const tweakColumns = (
   userId: string,
 ) => sql`(SELECT coalesce(json_agg(json_build_object('id',t.id,'text',t.text,'memos',
     (SELECT count(*) FROM tweak_citations c WHERE c.user_id=t.user_id AND c.tweak_id=t.id),
-    'served',s.served,'needed_again',s.needed_again,
-    'example',(SELECT json_build_object('before',c."before",'after',c."after")
-      FROM memo_changes c JOIN memos m ON m.user_id=c.user_id AND m.id=c.memo_id
-      WHERE c.user_id=t.user_id AND c.tweak_id=t.id AND c.about='voice'
-        AND char_length(c."before")<=${EXAMPLE_SIDE} AND char_length(c."after")<=${EXAMPLE_SIDE}
-      ORDER BY m.created_at DESC,m.id,c.n LIMIT 1)) ORDER BY t.text,t.id),'[]'::json)
+    'served',s.served,'needed_again',s.needed_again) ORDER BY t.text,t.id),'[]'::json)
     FROM tweaks t ${tweakScore} WHERE t.user_id=${userId})`;
-type TweakRow = Omit<TpsTweak, "example"> & {
-  example: { before: string; after: string } | null;
-};
-/** Most cited first, each with its example line. */
-const tweakList = (rows: TweakRow[]): TpsTweak[] =>
-  rows
-    .toSorted((a, b) => b.memos - a.memos || a.text.localeCompare(b.text))
-    .map(({ example, ...t }) => ({
-      ...t,
-      ...(example ? { example: exampleLine(example) } : {}),
-    }));
+/** Most cited first. */
+const tweakList = (rows: TpsTweak[]): TpsTweak[] =>
+  rows.toSorted((a, b) => b.memos - a.memos || a.text.localeCompare(b.text));
 
 export function tpsStore(db: StoreDatabase, userId: string) {
   /** One change in one transaction under the account lock. */
@@ -208,7 +187,7 @@ export function tpsStore(db: StoreDatabase, userId: string) {
           cover: { version: number; text: string } | null;
           keep_memos: boolean;
           memos: MemoRow[];
-          tweaks: TweakRow[];
+          tweaks: TpsTweak[];
           scored: {
             mode: "draft" | "edit";
             rounds: number;
@@ -248,55 +227,37 @@ export function tpsStore(db: StoreDatabase, userId: string) {
           final: string;
           request: string | null;
           changes_state: "itemized" | "too_large" | null;
-          changes: (Omit<TpsChange, "tweak"> & {
-            tweak: TpsChange["tweak"] | null;
-          })[];
+          changes: TpsChange[];
         }
       >(sql`SELECT ${memoColumns},m.first_draft,m.final,m.request,m.changes_state,
         (SELECT coalesce(json_agg(json_build_object('n',c.n,'before',c."before",'after',c."after",
-          'truncated',c.truncated,'about',c.about,'by',c."by",'draft_start',c.draft_start,
-          'draft_end',c.draft_end,'final_start',c.final_start,'final_end',c.final_end,
-          'tweak',CASE WHEN t.id IS NOT NULL THEN json_build_object('id',t.id,'text',t.text) END)
+          'truncated',c.truncated,'about',c.about,'draft_start',c.draft_start,
+          'draft_end',c.draft_end,'final_start',c.final_start,'final_end',c.final_end)
           ORDER BY c.n),'[]'::json)
-          FROM memo_changes c LEFT JOIN tweaks t ON t.user_id=c.user_id AND t.id=c.tweak_id
-          WHERE c.user_id=m.user_id AND c.memo_id=m.id) AS changes
+          FROM memo_changes c WHERE c.user_id=m.user_id AND c.memo_id=m.id) AS changes
         FROM memos m
         LEFT JOIN memo_kinds k ON k.user_id=m.user_id AND k.id=m.kind_id
         WHERE m.user_id=${userId} AND m.id=${id}`);
       if (!row) return undefined;
       const { first_draft, final, request, changes_state, changes, ...rest } =
         row;
-      const share = changes_state
-        ? typedShare(
-            final,
-            changes.map((c) => ({
-              by: c.by,
-              finalStart: c.final_start,
-              finalEnd: c.final_end,
-            })),
-          )
-        : undefined;
       return {
         ...memo(rest),
         ...(first_draft !== null ? { first_draft } : {}),
         final,
         ...(request !== null ? { request } : {}),
         ...(changes_state !== null ? { changes_state } : {}),
-        changes: changes.map(({ tweak, ...c }) => ({
-          ...c,
-          ...(tweak ? { tweak } : {}),
-        })),
-        ...(share !== undefined ? { typed_share: share } : {}),
+        changes,
       };
     },
-    /** TPS.md: the cover sheet, the tweaks with their examples, and every
-     * memo's final grouped by medium, newest first, with what the person
-     * asked. First drafts stay out. */
+    /** TPS.md: the cover sheet, the tweaks, and every memo's final grouped by
+     * medium, newest first, with what the person asked. First drafts and
+     * changes stay out. */
     async exportTps(): Promise<string> {
       const [row] = await db.query<{
         open: boolean;
         cover: { text: string } | null;
-        tweaks: TweakRow[];
+        tweaks: TpsTweak[];
         memos: {
           medium: Medium;
           kind: string | null;
@@ -331,7 +292,7 @@ export function tpsStore(db: StoreDatabase, userId: string) {
           tweakList(row!.tweaks)
             .map(
               (t) =>
-                `- ${t.text} (${t.memos} memo${t.memos === 1 ? "" : "s"}${t.served ? `; served ${t.served}, needed again ${t.needed_again}` : ""})${t.example ? `\n  ${t.example}` : ""}`,
+                `- ${t.text} (${t.memos} memo${t.memos === 1 ? "" : "s"}${t.served ? `; served ${t.served}, needed again ${t.needed_again}` : ""})`,
             )
             .join("\n"),
         );

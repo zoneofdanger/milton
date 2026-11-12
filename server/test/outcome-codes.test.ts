@@ -39,8 +39,9 @@ test("every MCP error code has its own next step from the closed set", async () 
     for (const pattern of patterns)
       for (const match of text.matchAll(pattern)) codes.add(match[1]!);
   }
-  expect(codes.size).toBeGreaterThan(30);
+  expect(codes.size).toBeGreaterThan(25);
   for (const code of [
+    "tool_replaced",
     "insufficient_scope",
     "invalid_token",
     "rate_limited",

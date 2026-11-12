@@ -68,7 +68,7 @@ to write tweaks, how to run first setup, and how to recover an uncertain save. C
 decide how to present that guidance to their models. If your AI needs a persistent
 reminder, add this to its custom instructions or project setup file:
 
-> Before writing anything for me, call Milton's get_cover_sheet, then get_report.
+> Before writing anything for me, call Milton's get_report.
 
 Saving on acceptance is AI guidance, not a server-enforced setting: the AI must call
 the tool, and Milton cannot see the conversation. Whether the one-line receipt shows

@@ -4,17 +4,18 @@ import type { StoreDatabase } from "./database";
 import { databaseFailure } from "./database";
 import { StoreError } from "./errors";
 import { assertTrialAccess, type TrialStatus } from "./trials";
-import {
-  invalidKind,
-  kindValid,
-  readCoverSheet,
-  readReport,
-  type ReportIntent,
-} from "./memos";
+import { invalidKind, kindValid, readReport, type ReportIntent } from "./memos";
 import { checkMemo, runSave, type SaveOutcome } from "./save";
 import type { CallUsage } from "./usage";
 // The save schema is served to AIs, so it lives with the MCP tools.
-import { oneChange, saveMemoInput, type SaveMemoInput } from "../mcp-tools";
+import {
+  BIDI_MESSAGE,
+  NO_RECOVERY,
+  oneChange,
+  removedFields,
+  saveMemoInput,
+  type SaveMemoInput,
+} from "../mcp-tools";
 export type { SaveMemoInput } from "../mcp-tools";
 export type { SaveOutcome } from "./save";
 
@@ -54,14 +55,6 @@ export function compiledMemos(
     admit?.(call);
   }
   return {
-    async readCoverSheet(call?: CallUsage) {
-      try {
-        await gate(call);
-        return await readCoverSheet(db, userId);
-      } catch (error) {
-        throw databaseFailure(error);
-      }
-    },
     async readReport(intent: ReportIntent, call?: CallUsage) {
       try {
         await gate(call, intent.kind_id);
@@ -71,11 +64,19 @@ export function compiledMemos(
       }
     },
     async saveMemo(raw: SaveMemoInput, call?: CallUsage): Promise<SaveOutcome> {
+      // Removed fields and newly refused characters are refused before any
+      // receipt lookup, retries of earlier saves included (docs/saves.md,
+      // "Rollout boundary"), so their refusal says it can't recover one.
+      const removed = removedFields(raw);
+      if (removed)
+        throw new StoreError("invalid_input", removed, 400, {
+          field: "removed",
+        });
       const parsed = saveMemoInput.safeParse(raw);
       if (!parsed.success)
         throw new StoreError(
           "invalid_input",
-          parsed.error.issues.find((i) => i.message === oneChange)
+          (parsed.error.issues.find((i) => i.message === oneChange)
             ? oneChange + " Nothing was changed."
             : `create_memo: ${[
                 ...new Set(
@@ -85,7 +86,10 @@ export function compiledMemos(
                 .slice(0, 5)
                 .join(", ")} ${
                 parsed.error.issues.length === 1 ? "is" : "are"
-              } malformed; see the input schema. Nothing was changed.`,
+              } malformed; see the input schema. Nothing was changed.`) +
+            (parsed.error.issues.some((i) => i.message === BIDI_MESSAGE)
+              ? ` A one-line field ${BIDI_MESSAGE}. ${NO_RECOVERY}`
+              : ""),
           400,
         );
       const checked = parsed.data.memo && checkMemo(parsed.data.memo);

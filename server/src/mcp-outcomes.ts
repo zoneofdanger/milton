@@ -27,8 +27,10 @@ const response = z.object({
     })
     .optional(),
 });
-// Logged by name.
+// Logged by name. get_cover_sheet stays a logged tool name so a call from a
+// client still holding it shows as its tool_replaced refusal.
 export const loggedErrorCodes = new Set([
+  "tool_replaced",
   "rate_limited",
   "store_unavailable",
   "configuration",
@@ -41,12 +43,7 @@ export const loggedErrorCodes = new Set([
   "save_outcome_unknown",
   "assistant_required",
   "memos_off",
-  "invalid_report",
-  "invalid_tweak",
   "invalid_memo",
-  "line_not_found",
-  "cover_sheet_limit",
-  "tweak_exists",
   "unique_violation",
   "check_violation",
   "invalid_token",
@@ -59,6 +56,7 @@ export const loggedErrorCodes = new Set([
   "billing_unavailable",
 ]);
 const refusals = new Set([
+  "tool_replaced",
   "rate_limited",
   "account_unavailable",
   "subscription_required",
@@ -73,7 +71,7 @@ const refusals = new Set([
 
 /** What an assistant does after an error result, from a closed set:
  * retry - repeat the identical call, a save with its request_id;
- * reread - read the cover sheet or report again, then rebuild the call;
+ * reread - read the report again, then rebuild the call;
  * fix_input - correct the arguments, a changed save with a new request_id;
  * ask_user - the fix needs the person's approval or choice;
  * tell_user - stop and tell the person; retrying will not help. */
@@ -107,7 +105,7 @@ const fixArguments = step(
 );
 const rereadAll = step(
   "reread",
-  "Reread get_cover_sheet and the report, recheck the change, then save on the new version with a new request_id.",
+  "Reread the report, recheck the change, then save with a new request_id.",
 );
 /** The one table: every code an MCP error result or refusal carries, and its
  * next step. withNext adds both to every error body, so nothing else states
@@ -120,29 +118,13 @@ export const nextSteps: Record<string, NextStep> = {
     "reread",
     "Reread get_report and use a kind_id from its kinds, or send new_kind instead; a save needs a new request_id.",
   ),
-  invalid_tweak: step(
-    "reread",
-    "Use a tweak_id from the latest get_report's tweaks, or send the tweak as text; save with a new request_id.",
-  ),
-  invalid_report: step(
-    "fix_input",
-    "Send the report_id from this conversation's latest get_report, or leave report_id out; save with a new request_id.",
-  ),
   invalid_memo: step(
     "reread",
     "Use a memo_id from a saved result or get_report's examples; if unsure which memo, ask the person.",
   ),
-  line_not_found: step(
-    "reread",
-    "Reread get_cover_sheet and copy the whole line exactly; if it isn't there, tell the person. Use a new request_id.",
-  ),
   memos_off: step(
     "tell_user",
     "The person turned off Keep memos: don't save drafts or offer to. Save writing only when they ask you to remember it.",
-  ),
-  cover_sheet_limit: step(
-    "ask_user",
-    "Ask the person which cover sheet lines to shorten or remove, then save with a new request_id.",
   ),
   // Arguments to correct.
   invalid_input: fixArguments,
@@ -151,15 +133,21 @@ export const nextSteps: Record<string, NextStep> = {
     "fix_input",
     "Send only what the person typed to ask, without pasted or quoted text, or leave request out; send the rest unchanged and save with a new request_id.",
   ),
-  "invalid_input.tweaks": step(
-    "fix_input",
-    "Keep the three tweaks most likely to recur and drop the rest; send the rest unchanged and save with a new request_id.",
+  // A field create_memo no longer takes: drop it, and check before saving
+  // again, since the refusal can't tell whether an earlier attempt saved.
+  "invalid_input.removed": step(
+    "ask_user",
+    "Drop the fields message names and refresh your tool list. Ask the person to check their TPS page before saving again with a new request_id.",
   ),
   invalid_arguments: fixArguments,
   check_violation: fixArguments,
   unknown_tool: step(
     "fix_input",
-    "Call one of the tools Milton lists: get_cover_sheet, get_report or create_memo.",
+    "Call one of the tools Milton lists: get_report or create_memo.",
+  ),
+  tool_replaced: step(
+    "reread",
+    "Refresh your tool list, then call get_report with intent; it carries what get_cover_sheet did.",
   ),
   request_id_reused: step(
     "fix_input",
@@ -168,11 +156,6 @@ export const nextSteps: Record<string, NextStep> = {
   request_too_large: step(
     "fix_input",
     "Save the memo again with the final alone: send first_draft_missing instead of first_draft, with a new request_id.",
-  ),
-  // Codes only the TPS page meets.
-  tweak_exists: step(
-    "tell_user",
-    "Another tweak already says that; tell the person and don't retry.",
   ),
   // Transient failures.
   store_unavailable: retryOnce,

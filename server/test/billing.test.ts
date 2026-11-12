@@ -232,13 +232,10 @@ test("the gate follows the subscription status: unknown or missing is allowed, p
     expect(await status()).toBe("expired");
     // An assistant read refuses it, with or without a caller watching the gate.
     await expect(
-      fixtureStore(local.db, userId).readCoverSheet(),
-    ).rejects.toMatchObject({ code: "subscription_required" });
-    await expect(
       fixtureStore(local.db, userId).readReport(vendorIntent),
     ).rejects.toMatchObject({ code: "subscription_required" });
-    // So does an assistant save, with no caller watching the gate: no memo,
-    // no cover sheet, no served report and no receipt.
+    // So does an assistant save, with no caller watching the gate: no memo
+    // and no receipt (nor any retired row).
     const writes = async () =>
       (
         await local.db.query<{ n: number }>(
@@ -251,13 +248,7 @@ test("the gate follows the subscription status: unknown or missing is allowed, p
     const before = Number(await writes());
     for (const save of [
       memoSave(),
-      {
-        request_id: crypto.randomUUID(),
-        cover_sheet: {
-          add: "Keep fictional dates exact.",
-          expected_version: 0,
-        },
-      },
+      { request_id: crypto.randomUUID(), forget_memos: ["m-fictional"] },
     ])
       await expect(
         fixtureStore(local.db, userId).saveMemo(save),

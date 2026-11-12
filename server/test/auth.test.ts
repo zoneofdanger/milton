@@ -10,7 +10,12 @@ import {
   StoreError,
 } from "../src/store";
 import { localAsset } from "../src/assets";
-import { fixtureStore, memoSave, vendorIntent } from "./store-fixtures";
+import {
+  fixtureStore,
+  memoSave,
+  seedLegacy,
+  vendorIntent,
+} from "./store-fixtures";
 import { localStore, openTransactions } from "./local-store";
 
 import {
@@ -973,7 +978,7 @@ test("connection keys: create shows the key once, the list never shows secrets, 
       expect(listed).not.toContain(secret);
     expect(listed).toContain("Nightly &lt;job&gt;");
     expect(listed).toContain("Read only · Created");
-    expect(listed).toContain("Read and save · Created");
+    expect(listed).toContain("Read and write · Created");
     expect(listed).toContain("Never used");
     expect(listed).toContain("<strong>Never expires</strong>");
     expect(listed).toMatch(/Expires <time datetime="/);
@@ -1574,7 +1579,7 @@ test("trial reminders stay outside TPS and expired accounts retain web view and 
     expect(expired.status).toBe(200);
     const html = await expired.text();
     expect(html).toContain("AI reads and saves are paused until");
-    expect(html).toContain("Your memos, tweaks and cover sheet are still here");
+    expect(html).toContain("Your memos and their tweaks are still here");
     expect(html).not.toContain('action="/billing');
     expect(html).not.toContain("it keeps a memo here");
     expect(html).toContain("decline a vendor&#39;s meeting request");
@@ -1586,7 +1591,8 @@ test("trial reminders stay outside TPS and expired accounts retain web view and 
   }
 });
 
-// A second account in the same store, with a memo and a tweak of its own.
+// A second account in the same store, with a memo, its changes and a
+// legacy note of its own.
 async function otherAccount(
   fixture: Awaited<ReturnType<typeof memoPageFixture>>,
 ) {
@@ -1599,15 +1605,13 @@ async function otherAccount(
       first_draft: "Alpha's first draft.",
       final: "Alpha's final.",
       mode: "draft",
-      rounds: 1,
-      tweaks: [{ text: "alpha signs as Ada" }],
     }),
   );
-  return {
-    userId,
-    memo: saved.memo!.memo_id,
-    tweak: saved.memo!.tweaks[0]!.tweak_id,
-  };
+  const [tweak] = await seedLegacy(fixture.pg, userId, {
+    notes: ["alpha signs as Ada"],
+    citedBy: saved.memo!.memo_id,
+  });
+  return { userId, memo: saved.memo!.memo_id, tweak: tweak! };
 }
 
 test("the TPS page lists memos newest first, escaped, opens each only for its own account, and downloads TPS.md", async () => {
@@ -1616,8 +1620,9 @@ test("the TPS page lists memos newest first, escaped, opens each only for its ow
     const empty = await (await fixture.send("/")).text();
     expect(empty).toContain("No memos on file yet.");
     expect(empty).toContain('href="/assistants#connect"');
-    expect(empty).toContain("No cover sheet yet.");
-    expect(empty).not.toContain("<textarea");
+    // The Comments line's office jokes may name a cover sheet; no section
+    // does.
+    expect(empty).not.toMatch(/id="cover-sheet"|No cover sheet yet|<textarea/);
     for (const [path, method] of [
       ["/download", "PUT"],
       ["/download", "POST"],
@@ -1639,21 +1644,18 @@ test("the TPS page lists memos newest first, escaped, opens each only for its ow
         first_draft: "Hi! Hope you're well. <script>alert('draft')</script>",
         final: "No, thanks. <script>alert('final')</script>\n\n–P",
         mode: "draft",
-        rounds: 2,
-        tweaks: [{ text: "no warm-up opener <b>" }],
         new_kind: "vendor decline",
       }),
     );
-    const report = await fixture.author.readReport(vendorIntent);
     const untouched = await fixture.author.saveMemo(
-      memoSave({
-        first_draft: "Same.",
-        final: "Same.",
-        mode: "draft",
-        rounds: 0,
-        report_id: report.report_id,
-      }),
+      memoSave({ first_draft: "Same.", final: "Same.", mode: "draft" }),
     );
+    // A legacy note and cover sheet never reach the page.
+    await seedLegacy(fixture.pg, fixture.userId, {
+      cover: ["Legacy cover line"],
+      notes: ["legacy note <b>"],
+      citedBy: steered.memo!.memo_id,
+    });
     const own = await fixture.author.saveMemo(
       memoSave({ final: "My own words & more." }),
     );
@@ -1666,24 +1668,33 @@ test("the TPS page lists memos newest first, escaped, opens each only for its ow
     const html = await (await fixture.send("/tps-report")).text();
     expect(html).not.toContain("<script>");
     expect(html).toContain("Email · vendor decline");
-    expect(html).toContain(
-      "ai.example · 2 rounds · 3 listed changes · steered by you",
-    );
-    expect(html).toContain("ai.example · 0 rounds · accepted untouched");
+    expect(html).toContain("ai.example · steered by you");
+    expect(html).toContain("ai.example · accepted untouched");
     expect(html).toContain("ai.example · your words");
+    // Each memo shows its tweaks: the changes code found, escaped.
+    expect(html).toContain('<span class="tweak-label">Tweaks:</span>');
     expect(html).toContain(
-      '<span class="tweak-label">Taught:</span> <span class="typed">no warm-up opener &lt;b&gt;</span>',
-    );
-    expect(html).toContain(
-      '<span class="tweak-label">Served:</span> <span class="typed">no warm-up opener &lt;b&gt;</span>',
+      '<li class="change-row"><p><span class="typed">“&#39;draft&#39;”</span> → <span class="typed">“&#39;final&#39;”</span></p></li>',
     );
     expect(html).toContain(
       "First drafts: 2 scored memos so far. 8 more to start the scoreboard.",
     );
-    // The untouched memo was served the tweak and did not need it again.
-    expect(html).toContain(
-      '<p><span class="typed">no warm-up opener &lt;b&gt;</span></p><p class="report-counts tweak-counts"><span>1 memo</span><span>served 1</span><span>needed again 0</span></p>',
-    );
+    // No retired section: cover sheet, tweak list, reword form, rounds or
+    // tweak score.
+    for (const retired of [
+      "Legacy cover line",
+      "legacy note",
+      'id="cover-sheet"',
+      'id="tweaks"',
+      "/tps/tweaks",
+      "Reword",
+      " round",
+      "Rounds",
+      "needed again",
+      "Served:",
+      "Taught:",
+    ])
+      expect([retired, html.includes(retired)]).toEqual([retired, false]);
     // Newest first.
     const at = (id: string) => html.indexOf(`href="/tps/memo/${id}"`);
     expect(at(c)).toBeGreaterThan(0);
@@ -1727,6 +1738,7 @@ test("the TPS page lists memos newest first, escaped, opens each only for its ow
     expect(text).toBe(await fixture.store.exportTps());
     expect(text).toContain("> No, thanks. <script>alert('final')</script>");
     expect(text).not.toContain("Alpha");
+    expect(text).toContain("## Earlier notes from your edits (no longer used)");
   } finally {
     await fixture.dispose();
   }
@@ -1744,9 +1756,7 @@ test("a memo page lists code's changes unlabelled and what the person asked, and
         final:
           "Dana — thanks for the demo. It was a useful look at the tool.\n\nWe'll pass for now.\n\n–S",
         mode: "draft",
-        rounds: 2,
         request: asked,
-        tweaks: [{ text: "no warm-up opener" }],
       }),
     );
     const id = saved.memo!.memo_id;
@@ -1755,17 +1765,17 @@ test("a memo page lists code's changes unlabelled and what the person asked, and
       `<span class="tweak-label">You asked:</span> <span class="typed">${"Say no to the call, politely. ".repeat(4)}…</span>`,
     );
     const page = await (await fixture.send(`/tps/memo/${id}`)).text();
-    // The list's count is every row the memo page lists, formatting included.
+    // The list shows every row the memo page lists, formatting included.
     const rows = page.match(/<li class="change-row/g)?.length ?? 0;
     expect(rows).toBeGreaterThan(3);
-    expect(list).toContain(
-      `ai.example · 2 rounds · ${rows} listed changes · steered by you`,
-    );
+    expect(list.match(/<li class="change-row/g)?.length).toBe(rows);
+    expect(list).toContain("ai.example · steered by you");
+    expect(page).not.toMatch(/Rounds|Served tweaks|Taught tweaks/);
     for (const text of [
       '<h2 id="memo-asked">You asked</h2>',
       "Keep it short.",
       'action="/tps/request/remove"',
-      '<h2 id="memo-changes">What changed</h2>',
+      '<h2 id="memo-changes">Tweaks</h2>',
       '<span class="typed">“Hi Dana, I hope you&#39;re well! Thanks so much”</span> → <span class="typed">“Dana — thanks”</span>',
       // A Markdown-only spot says so; a side cut at 300 characters says so.
       "<span>formatting</span>",
@@ -1792,7 +1802,6 @@ test("a memo page lists code's changes unlabelled and what the person asked, and
         first_draft: "One line.\n\nAnother line.",
         final: "One line. Another line.",
         mode: "draft",
-        rounds: 1,
       }),
     );
     const spaced = await (
@@ -1813,7 +1822,6 @@ test("a memo page lists code's changes unlabelled and what the person asked, and
         first_draft: "Draft.",
         final: "Final.",
         mode: "draft",
-        rounds: 1,
         request: "<h1>Big</h1> <script>x</script>\n~~~\n# not a heading",
       }),
     );
@@ -1847,7 +1855,7 @@ test("a memo page lists code's changes unlabelled and what the person asked, and
       sql`UPDATE memos SET changes_state=NULL WHERE id=${id}`,
     );
     expect(await (await fixture.send(`/tps/memo/${id}`)).text()).not.toContain(
-      "What changed",
+      '<h2 id="memo-changes">',
     );
     await fixture.db.query(sql`DELETE FROM memo_changes WHERE memo_id=${id}`);
     await fixture.db.query(
@@ -1863,40 +1871,7 @@ test("a memo page lists code's changes unlabelled and what the person asked, and
   }
 }, 30000);
 
-test("the TPS page shows the cover sheet read-only, line by line and escaped, and takes no cover sheet POST", async () => {
-  const fixture = await memoPageFixture();
-  try {
-    const save = (cover_sheet: {
-      add?: string;
-      remove?: string;
-      expected_version: number;
-    }) =>
-      fixture.author.saveMemo({ request_id: crypto.randomUUID(), cover_sheet });
-    await save({ add: "No em dashes <b>", expected_version: 0 });
-    await save({ add: "Sign off –P", expected_version: 1 });
-    const shown = await (await fixture.send("/")).text();
-    expect(shown).toContain(
-      '<span class="typed">No em dashes &lt;b&gt;</span>',
-    );
-    expect(shown).toContain('<span class="typed">Sign off –P</span>');
-    expect(shown).not.toContain("No cover sheet yet.");
-    expect(shown).not.toContain("<textarea");
-    expect(shown).not.toContain('action="/tps/cover-sheet"');
-    const posted = await fixture.send("/tps/cover-sheet", {
-      text: "Mine.",
-      expected_version: "2",
-    });
-    expect(posted.status).toBe(404);
-    expect((await fixture.store.read()).cover_sheet).toEqual({
-      text: "No em dashes <b>\nSign off –P",
-      version: 2,
-    });
-  } finally {
-    await fixture.dispose();
-  }
-}, 30000);
-
-test("forget, tweak delete and reword change only the session account's memos and tweaks", async () => {
+test("forget changes only the session account's memos; the retired tweak and cover sheet routes are gone, and a stale POST to one changes nothing", async () => {
   const fixture = await memoPageFixture();
   try {
     const alpha = await otherAccount(fixture);
@@ -1905,27 +1880,33 @@ test("forget, tweak delete and reword change only the session account's memos an
         first_draft: "Hi! Long draft.",
         final: "Short.",
         mode: "draft",
-        rounds: 1,
-        tweaks: [{ text: "no opener" }, { text: "two sentences" }],
       }),
     );
     const memo = saved.memo!.memo_id;
-    const [opener, sentences] = saved.memo!.tweaks.map((t) => t.tweak_id) as [
-      string,
-      string,
-    ];
-    const alphaRead = async () =>
+    // The session account's own legacy rows, which no web route may change.
+    const [note] = await seedLegacy(fixture.pg, fixture.userId, {
+      cover: ["No em dashes"],
+      notes: ["no opener", "two sentences"],
+      citedBy: memo,
+    });
+    const legacy = async (userId: string) =>
       (
         await fixture.db.query(
-          sql`SELECT (SELECT count(*) FROM memos WHERE user_id=${alpha.userId}) AS memos,
-            (SELECT string_agg(text,',') FROM tweaks WHERE user_id=${alpha.userId}) AS tweaks`,
+          sql`SELECT (SELECT count(*)::int FROM memos WHERE user_id=${userId}) AS memos,
+            (SELECT string_agg(text||':'||coalesce(text_changed_at::text,''),',' ORDER BY id) FROM tweaks WHERE user_id=${userId}) AS tweaks,
+            (SELECT string_agg(version||':'||text,',' ORDER BY version) FROM cover_sheets WHERE user_id=${userId}) AS covers`,
         )
       )[0];
-    const before = await alphaRead();
+    const before = [await legacy(alpha.userId), await legacy(fixture.userId)];
     await fixture.send("/");
+    // Stale POSTs from an old page, valid CSRF and Origin included: not
+    // found, and nothing changes, for this account or another.
     for (const [path, fields] of [
+      ["/tps/tweaks/reword", { tweak: note!, text: "taken over" }],
       ["/tps/tweaks/reword", { tweak: alpha.tweak, text: "taken over" }],
+      ["/tps/tweaks/delete", { tweak: note! }],
       ["/tps/tweaks/delete", { tweak: alpha.tweak }],
+      ["/tps/cover-sheet", { text: "Mine.", expected_version: "1" }],
       ["/tps/forget", { memo: alpha.memo }],
       ["/tps/forget", { memo: "not-a-memo" }],
     ] as const)
@@ -1933,74 +1914,28 @@ test("forget, tweak delete and reword change only the session account's memos an
         path,
         404,
       ]);
-    expect(await alphaRead()).toEqual(before);
-    const reworded = await fixture.send("/tps/tweaks/reword", {
-      tweak: opener,
-      text: "No warm-up opener <i>",
-    });
-    expect(reworded.status).toBe(303);
-    expect(reworded.headers.get("Location")).toBe(
-      appOrigin + "/?done=tweak-reworded#tweaks",
+    expect([await legacy(alpha.userId), await legacy(fixture.userId)]).toEqual(
+      before,
     );
-    expect((await fixture.store.read()).tweaks).toContainEqual({
-      id: opener,
-      text: "No warm-up opener <i>",
-      memos: 1,
-      served: 0,
-      needed_again: 0,
-    });
-    const page = await (await fixture.send("/?done=tweak-reworded")).text();
-    expect(page).toContain("Tweak reworded.");
-    expect(page).toContain("No warm-up opener &lt;i&gt;");
-    // The reword follows the one-line rule: separators become one space,
-    // control characters are refused.
-    const LS = String.fromCharCode(0x2028);
-    expect(
-      (
-        await fixture.send("/tps/tweaks/reword", {
-          tweak: opener,
-          text: `No warm-up${LS}opener <i>${LS}`,
-        })
-      ).status,
-    ).toBe(303);
-    expect(
-      (
-        await fixture.send("/tps/tweaks/reword", {
-          tweak: opener,
-          text: "No warm-up\nopener",
-        })
-      ).status,
-    ).toBe(400);
-    expect((await fixture.store.read()).tweaks).toContainEqual(
-      expect.objectContaining({ id: opener, text: "No warm-up opener <i>" }),
-    );
-    const taken = await fixture.send("/tps/tweaks/reword", {
-      tweak: sentences,
-      text: "no warm-up opener <i>.",
-    });
-    expect(taken.status).toBe(409);
-    expect(await taken.text()).toContain("Another tweak already says that.");
-    expect(
-      (await fixture.send("/tps/tweaks/delete", { tweak: sentences })).status,
-    ).toBe(303);
-    expect((await fixture.store.read()).tweaks.map((t) => t.id)).toEqual([
-      opener,
-    ]);
+    // Forgetting a memo takes its changes and the notes only it cited.
     const forgot = await fixture.send("/tps/forget", { memo });
     expect(forgot.status).toBe(303);
     expect(forgot.headers.get("Location")).toBe(
       appOrigin + "/?done=forgot#memos",
     );
-    const view = await fixture.store.read();
-    expect(view.memos).toEqual([]);
-    expect(view.tweaks).toEqual([]);
-    expect(await alphaRead()).toEqual(before);
+    expect((await fixture.store.read()).memos).toEqual([]);
+    expect(await legacy(fixture.userId)).toEqual({
+      memos: 0,
+      tweaks: null,
+      covers: "1:No em dashes",
+    });
+    expect(await legacy(alpha.userId)).toEqual(before[0]);
   } finally {
     await fixture.dispose();
   }
 }, 30000);
 
-test("Keep memos turns off and on, and Delete all memos asks first, then keeps the cover sheet and other accounts", async () => {
+test("Keep memos turns off and on, and Delete all memos asks first, then keeps a legacy cover sheet and other accounts", async () => {
   const fixture = await memoPageFixture();
   try {
     const alpha = await otherAccount(fixture);
@@ -2036,19 +1971,18 @@ test("Keep memos turns off and on, and Delete all memos asks first, then keeps t
     );
     expect((await fixture.store.read()).keep_memos).toBe(true);
 
-    await fixture.author.saveMemo(
+    const kept = await fixture.author.saveMemo(
       memoSave({
         first_draft: "Draft.",
         final: "Final.",
         mode: "draft",
-        rounds: 1,
-        tweaks: [{ text: "be brief" }],
         new_kind: "vendor decline",
       }),
     );
-    await fixture.author.saveMemo({
-      request_id: crypto.randomUUID(),
-      cover_sheet: { add: "Sign off –P", expected_version: 0 },
+    await seedLegacy(fixture.pg, fixture.userId, {
+      cover: ["Sign off –P"],
+      notes: ["be brief"],
+      citedBy: kept.memo!.memo_id,
     });
     const counts = (userId: string) =>
       fixture.db.query(
@@ -2059,7 +1993,9 @@ test("Keep memos turns off and on, and Delete all memos asks first, then keeps t
       );
     const confirm = await (await fixture.send("/account/memos/delete")).text();
     expect(confirm).toContain('<input type="hidden" name="confirm"');
-    expect(confirm).toContain("Your cover sheet stays.");
+    expect(confirm).toContain(
+      "A cover sheet from an earlier version of Milton stays until you delete your account.",
+    );
     // The download it offers as a backup leaves out first drafts; say so.
     expect(confirm).toContain("it leaves out first drafts");
     expect(
@@ -2081,7 +2017,9 @@ test("Keep memos turns off and on, and Delete all memos asks first, then keeps t
     expect(await counts(alpha.userId)).toEqual([
       { memos: 1, tweaks: 1, kinds: 0, covers: 0 },
     ]);
-    expect((await fixture.store.read()).cover_sheet.text).toBe("Sign off –P");
+    expect(await fixture.store.exportTps()).toContain(
+      "## Cover sheet (no longer used)\n\n~~~text\nSign off –P\n~~~",
+    );
   } finally {
     await fixture.dispose();
   }
@@ -2150,7 +2088,7 @@ test("an unexpected error shows a browser page PC LOAD LETTER and answers everyt
     const html = await shown.text();
     expect(html).toContain("<h1>PC LOAD LETTER</h1>");
     expect(html).toContain(
-      "<p>Something went wrong on our side. Your cover sheet and reports are unchanged. Try again in a moment.</p></div></main>",
+      "<p>Something went wrong on our side. Your memos are unchanged. Try again in a moment.</p></div></main>",
     );
     for (const request of [
       failing("/tps-report", { headers: { Accept: "application/json" } }),

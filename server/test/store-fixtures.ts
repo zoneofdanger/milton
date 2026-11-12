@@ -98,3 +98,33 @@ export async function storeForCurrentRequest(
   await requireActiveAccount(db, auth.userId, { lock: false });
   return tenantStore(bindings, { ...auth, limits }, assistant);
 }
+
+// Writing this release no longer makes, as earlier versions left it: cover
+// sheet versions, oldest first (the last is current), and notes AIs wrote from
+// edits, each cited by `citedBy` when given. Fictional.
+export async function seedLegacy(
+  pg: PGlite,
+  userId: string,
+  legacy: { cover?: string[]; notes?: string[]; citedBy?: string },
+) {
+  for (const [i, text] of (legacy.cover ?? []).entries())
+    await pg.query(
+      `INSERT INTO cover_sheets(user_id,version,text,actor_json) VALUES ($1,$2,$3,'{"kind":"ai","issuer":"fixture","client_id":"fixture"}')`,
+      [userId, i + 1, text],
+    );
+  const ids: string[] = [];
+  for (const text of legacy.notes ?? []) {
+    const id = crypto.randomUUID();
+    ids.push(id);
+    await pg.query(
+      `INSERT INTO tweaks(user_id,id,text,norm,client_json) VALUES ($1,$2,$3,lower($3),'{"issuer":"fixture","client_id":"fixture"}')`,
+      [userId, id, text],
+    );
+    if (legacy.citedBy)
+      await pg.query(
+        "INSERT INTO tweak_citations(user_id,memo_id,tweak_id) VALUES ($1,$2,$3)",
+        [userId, legacy.citedBy, id],
+      );
+  }
+  return ids;
+}

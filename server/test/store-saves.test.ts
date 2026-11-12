@@ -1,48 +1,109 @@
 import { expect, test } from "bun:test";
 import { localStore } from "./local-store";
 import { fixtureStore, memoSave, seedUsers } from "./store-fixtures";
+import { hash, REPLAYED } from "../src/store/save";
 
-test("a conflict or refusal stores a receipt with its outcome and replays it", async () => {
+test("a refusal stores a receipt with its outcome and replays it; a pre-release receipt replays verbatim, labelled, and an old-shape retry is refused without touching it", async () => {
   const local = await localStore();
   try {
     await seedUsers(local.pg, "replay");
     const store = fixtureStore(local.db, "replay");
-    const line = (add: string, expected_version: number) => ({
-      request_id: crypto.randomUUID(),
-      cover_sheet: { add, expected_version },
+    // A refusal decided against the request replays the same way.
+    const unknownKind = memoSave({ kind_id: "not-a-kind" });
+    const refused = await store.saveMemo(unknownKind);
+    expect(refused).toMatchObject({ status: "failed", error: "invalid_kind" });
+    expect(await store.saveMemo(unknownKind)).toEqual({
+      ...refused,
+      replayed: REPLAYED,
     });
-    expect((await store.saveMemo(line("First.", 0))).status).toBe("saved");
-    const stale = line("Stale.", 0);
-    const conflict = await store.saveMemo(stale);
-    expect(conflict).toMatchObject({ status: "conflict" });
-    // The account moves on; the same request still replays its first outcome.
-    expect((await store.saveMemo(line("Second.", 1))).status).toBe("saved");
-    expect(await store.saveMemo(stale)).toEqual(conflict);
-    // A refreshed retry under the same ID is told to take a new one.
+    // A changed retry under the same ID is told to take a new one.
     await expect(
       store.saveMemo({
-        ...stale,
-        cover_sheet: { add: "Stale.", expected_version: 2 },
+        ...unknownKind,
+        memo: { ...unknownKind.memo!, kind_id: "k2" },
       }),
     ).rejects.toMatchObject({
       code: "request_id_reused",
       message:
         "This request ID belongs to different input. A changed save needs a new request_id; the original arguments replay the same outcome.",
     });
-    // A refusal decided against the request replays the same way.
-    const unknownKind = memoSave({ kind_id: "not-a-kind" });
-    const refused = await store.saveMemo(unknownKind);
-    expect(refused).toMatchObject({ status: "failed", error: "invalid_kind" });
-    expect(await store.saveMemo(unknownKind)).toEqual(refused);
-    expect(
-      (
-        await local.pg.query<{ status: string }>(
-          "SELECT result_json->>'status' AS status FROM save_requests WHERE user_id='replay' ORDER BY created_at",
-        )
-      ).rows.map((row) => row.status),
-    ).toEqual(["saved", "conflict", "saved", "failed"]);
     // A refusal wrote nothing else.
     expect((await local.pg.query("SELECT 1 FROM memos")).rows).toEqual([]);
+    // Receipts written before this release hold fields it no longer writes.
+    // An exact replay returns them as stored, beside the one label.
+    const receipt = async (input: object, outcome: object) =>
+      local.pg.query(
+        "INSERT INTO save_requests(user_id,request_id,input_hash,result_json) VALUES ('replay',$1,$2,$3::jsonb)",
+        [
+          (input as { request_id: string }).request_id,
+          hash(input),
+          JSON.stringify(outcome),
+        ],
+      );
+    const given = memoSave({ final: "Kept before the release." });
+    const old = {
+      status: "saved",
+      request_id: given.request_id,
+      memo: { memo_id: "m-old", tier: "own", tweaks: [] },
+      receipt: "Kept memo: email, your words.",
+    };
+    await receipt(given, old);
+    const coverInput = {
+      request_id: crypto.randomUUID(),
+      forget_memos: ["m-gone"],
+    };
+    const oldCover = {
+      status: "conflict",
+      request_id: coverInput.request_id,
+      cover_sheet: { version: 2, text: "No em dashes" },
+    };
+    await receipt(coverInput, oldCover);
+    expect((await store.saveMemo(given)) as unknown).toEqual({
+      ...old,
+      replayed: REPLAYED,
+    });
+    expect((await store.saveMemo(coverInput)) as unknown).toEqual({
+      ...oldCover,
+      replayed: REPLAYED,
+    });
+    // A drafted save from before the release carried rounds: its retry is
+    // refused before the lookup, saying it can't recover the outcome, and
+    // the stored receipt is untouched.
+    const drafted = {
+      request_id: crypto.randomUUID(),
+      memo: {
+        ...memoSave().memo!,
+        first_draft: "A first draft.",
+        mode: "draft" as const,
+        rounds: 1,
+      },
+    };
+    const draftedOutcome = {
+      status: "saved",
+      request_id: drafted.request_id,
+      memo: {
+        memo_id: "m-drafted",
+        tier: "steered",
+        rounds: 1,
+        tweaks: [{ tweak_id: "t", text: "no warm-up opener" }],
+      },
+      receipt: "Kept memo: email, 1 round, tweaks: no warm-up opener.",
+    };
+    await receipt(drafted, draftedOutcome);
+    await expect(store.saveMemo(drafted as never)).rejects.toMatchObject({
+      code: "invalid_input",
+      message: expect.stringContaining(
+        "Milton can't recover an earlier outcome for this request.",
+      ),
+    });
+    expect(
+      (
+        await local.pg.query<{ result: unknown }>(
+          "SELECT result_json AS result FROM save_requests WHERE request_id=$1",
+          [drafted.request_id],
+        )
+      ).rows,
+    ).toEqual([{ result: draftedOutcome }]);
   } finally {
     await local.dispose();
   }
@@ -95,7 +156,12 @@ test("a save and its receipt commit together: a lost acknowledgment replays the 
     cues.push("ack");
     const recovered = await store.saveMemo(lost);
     expect(recovered.status).toBe("saved");
-    expect(await store.saveMemo(lost)).toEqual(recovered);
+    // Its own outcome, not a replay; a resend is one.
+    expect(recovered).not.toHaveProperty("replayed");
+    expect(await store.saveMemo(lost)).toEqual({
+      ...recovered,
+      replayed: REPLAYED,
+    });
     // When the lookup fails too, the outcome is unknown until the same
     // request replays it.
     const unknown = memoSave({ final: "Unknown until replayed." });

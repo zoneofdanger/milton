@@ -38,7 +38,7 @@ import {
   type SaveMemoInput,
   type SaveOutcome,
 } from "./compiled";
-import type { CoverSheetRead, ReportIntent, ReportRead } from "./memos";
+import type { ReportIntent, ReportRead } from "./memos";
 import { tpsStore } from "./tps";
 import { parseLimits, readLimits } from "./limits";
 import { recordToolUsage, type CallUsage } from "./usage";
@@ -362,11 +362,9 @@ export interface TenantStore {
   /** The app's origin, for the one link served to AIs. */
   appOrigin: string;
   trialNotice?(): Promise<TrialNotice | undefined>;
-  /** `call`, when given, is the tool call this read or save serves: once
-   * admitted, its usage row is appended alongside the work (see
-   * recordToolUsage). */
-  readCoverSheet(call?: CallUsage): Promise<CoverSheetRead>;
-  /** The report for one draft, recording the tweaks it served. */
+  /** The report for one draft; it writes nothing. `call`, when given, is the
+   * tool call this read or save serves: once admitted, its usage row is
+   * appended alongside the work (see recordToolUsage). */
   readReport(intent: ReportIntent, call?: CallUsage): Promise<ReportRead>;
   saveMemo(input: SaveMemoInput, call?: CallUsage): Promise<SaveOutcome>;
 }
@@ -431,7 +429,6 @@ export function tenantStore(
         return claimTrialNotice(tx, userId, bindings.appOrigin);
       });
     },
-    readCoverSheet: compiled.readCoverSheet,
     readReport: compiled.readReport,
     saveMemo: compiled.saveMemo,
   };

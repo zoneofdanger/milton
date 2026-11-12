@@ -103,7 +103,7 @@ const pageFonts = [
 ];
 
 /**
- * One shell for every page. A sheet page (the cover sheet) brings its own
+ * One shell for every page. A sheet page (the TPS report) brings its own
  * title; every other page gets an h1 and a readable-width body.
  */
 export function page(
@@ -196,8 +196,8 @@ export function unavailablePage() {
   return page(
     "PC LOAD LETTER",
     <p>
-      Something went wrong on our side. Your cover sheet and reports are
-      unchanged. Try again in a moment.
+      Something went wrong on our side. Your memos are unchanged. Try again in a
+      moment.
     </p>,
     503,
   );

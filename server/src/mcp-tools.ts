@@ -7,17 +7,20 @@ import { StoreError } from "./store/errors";
 import { utf8Bytes } from "./store/limits";
 import { subscriptionRequired } from "./store/trials";
 import { usageWithin, type CallUsage, type ToolName } from "./store/usage";
-import {
-  joinSeparators,
-  MEDIA,
-  type CoverSheetRead,
-  type ReportRead,
-} from "./store/memos";
+import { joinSeparators, MEDIA, type ReportRead } from "./store/memos";
 import { setupScript } from "./store/setup";
 
+/** The bidirectional controls that open an embedding, override or isolate
+ * span (U+202A–U+202E, U+2066–U+2069). A one-line field holding one is
+ * refused, never stripped; U+200E, U+200F and U+061C open no span and stay
+ * accepted (docs/memos.md, "Bounds"). */
+export const BIDI_CONTROL = /[\u202A-\u202E\u2066-\u2069]/;
+/** The refusal's text for a one-line field holding one of them. */
+export const BIDI_MESSAGE = "holds a bidirectional control character";
 /** One line of at most `max` characters (docs/memos.md, "Bounds"): each run
  * of U+2028 and U+2029 becomes one space, then the value is trimmed and must
- * hold no control character. The input is hashed after this. */
+ * hold no control character and no BIDI_CONTROL. The input is hashed after
+ * this. */
 export const oneLine = (max: number) =>
   z
     .string()
@@ -25,13 +28,13 @@ export const oneLine = (max: number) =>
     .trim()
     .min(1)
     .max(max)
-    .refine((v) => v.isWellFormed() && !/[\p{Cc}]/u.test(v));
+    .refine((v) => v.isWellFormed() && !/[\p{Cc}]/u.test(v))
+    .refine((v) => !BIDI_CONTROL.test(v), { message: BIDI_MESSAGE });
 const id = z.string().min(1).max(64);
 const medium = z
   .enum(MEDIA)
   .describe("email, chat (DMs, texts, Slack), post, document or speech.");
 
-export const coverSheetInput = z.strictObject({});
 export const intentInput = z
   .strictObject({
     situation: oneLine(200).describe(
@@ -51,7 +54,7 @@ export const intentInput = z
       ),
   })
   .describe(
-    "What this report is for. Audience and purpose are required: a vague intent gets worse examples and tweaks.",
+    "What this report is for. Audience and purpose are required: a vague intent gets worse examples.",
   );
 export const reportInput = z.strictObject({ intent: intentInput });
 /** The refusal for a get_report call with no intent, as from a client still
@@ -130,37 +133,12 @@ export const memoInput = z
       .describe(
         "draft when you wrote it, edit when you edited the person's text. Required with a first draft.",
       ),
-    rounds: z
-      .number()
-      .int()
-      .min(0)
-      .max(1000)
-      .optional()
-      .describe(
-        "How many times you redrafted after the first draft. Required with a first draft.",
-      ),
     request: z
       .string()
       .trim()
       .optional()
       .describe(
         "Only with first_draft or first_draft_missing: what the person typed to ask for this writing, exactly as typed, at most 600 characters and 12 lines. Cut pasted or quoted text (an email, a thread, a document) and anything secret, marking each cut […]; change nothing else. In edit mode, their instruction, never the text to edit. Never their later corrections.",
-      ),
-    tweaks: z
-      .array(
-        z.union([
-          z.strictObject({ tweak_id: id }),
-          z.strictObject({ text: oneLine(200) }),
-        ]),
-      )
-      // Ten, as the released definition took, so a save naming more than
-      // MAX_MEMO_TWEAKS (save.ts) gets that refusal's own next step.
-      .max(10)
-      // An empty list, as some clients send for none, is read as omitted.
-      .transform((tweaks) => (tweaks.length ? tweaks : undefined))
-      .optional()
-      .describe(
-        'Only when the final differs from the first draft: each habit the person made you change that is likely to recur, at most three, one line each, named plainly ("no warm-up opener"), with when it applies only if it doesn\'t hold in all their writing ("vendor replies: no price talk"); never "when requested". Most memos teach one or none. Skip one-off facts they added. When it is the same change, reuse a served tweak\'s id with {tweak_id}; {text} adds one only when none fits.',
       ),
     context: memoContextInput,
     ...kindFields,
@@ -170,38 +148,10 @@ export const memoInput = z
       .transform((kind) => kind ?? undefined)
       .optional()
       .describe(kindFields.kind_id.description!),
-    report_id: id
-      .optional()
-      .describe("The report_id of the get_report read before this draft."),
   })
   .describe(
-    'One accepted final. Omit first_draft, first_draft_missing, mode, rounds, request and tweaks for writing the person gave you to keep (setup, "remember this email").',
+    'One accepted final. Omit first_draft, first_draft_missing, mode and request for writing the person gave you to keep (setup, "remember this email").',
   );
-export const coverSheetChangeInput = z
-  .strictObject({
-    add: oneLine(300)
-      .optional()
-      .describe("One exact line the person asked you to add."),
-    // Matched against each line in the same form (save.ts), not trimmed, so
-    // any stored line can still be removed by its exact copy.
-    remove: z
-      .string()
-      .overwrite(joinSeparators)
-      .min(1)
-      .max(1500)
-      .optional()
-      .describe(
-        "One exact existing line the person asked you to remove, copied verbatim.",
-      ),
-    expected_version: z
-      .number()
-      .int()
-      .min(0)
-      .describe("The version from the latest get_cover_sheet."),
-  })
-  .refine((v) => (v.add === undefined) !== (v.remove === undefined), {
-    message: "cover_sheet takes add or remove, not both.",
-  });
 export const memoContextChangeInput = z.strictObject({
   memo_id: id,
   context: memoContextInput,
@@ -209,16 +159,19 @@ export const memoContextChangeInput = z.strictObject({
 });
 
 export const oneChange =
-  "Send exactly one of memo, cover_sheet, forget_memos or memo_context.";
+  "Send exactly one of memo, forget_memos or memo_context.";
+/** A save's request_id (docs/saves.md, "Request ids"): 1 to 64 of these
+ * characters, compared byte for byte; a UUID passes. */
+export const REQUEST_ID = /^[A-Za-z0-9._:-]{1,64}$/;
 export const saveMemoInput = z
   .strictObject({
     request_id: z
-      .uuid()
+      .string()
+      .regex(REQUEST_ID)
       .describe(
-        "A new UUID for each new save. Reuse it with exactly the same arguments only to recover an uncertain outcome.",
+        "Any new id for each save, up to 64 letters, digits, dots, dashes, underscores or colons; resend the same one only to recover an uncertain outcome.",
       ),
     memo: memoInput.optional(),
-    cover_sheet: coverSheetChangeInput.optional(),
     forget_memos: z
       .array(id)
       .min(1)
@@ -233,7 +186,7 @@ export const saveMemoInput = z
   })
   .refine(
     (v) =>
-      [v.memo, v.cover_sheet, v.forget_memos, v.memo_context].filter(
+      [v.memo, v.forget_memos, v.memo_context].filter(
         (part) => part !== undefined,
       ).length === 1,
     { message: oneChange },
@@ -267,27 +220,59 @@ export function storeResult(value: object, isError = false): ToolResult {
     ...(isError ? { isError } : {}),
   };
 }
-/** The cover sheet envelope. While the account is empty, setup carries the
- * onboarding script. */
-export function coverSheet(read: CoverSheetRead) {
-  return {
-    text: read.text,
-    version: read.version,
-    memos: read.memos,
-    tweaks: read.tweaks,
-    keep_memos: read.keep_memos,
-    is_empty: read.is_empty,
-    ...(read.is_empty ? { setup: setupScript } : {}),
-  };
-}
+/** The report envelope (docs/reports.md): the text and what it served, the
+ * account's total memo count and keep_memos; setup carries the first-setup
+ * script while the account has no memo. */
 export const reportEnvelope = (report: ReportRead) => ({
-  report_id: report.report_id,
   text: report.text,
   is_empty: report.is_empty,
   examples: report.examples,
-  tweaks: report.tweaks,
   kinds: report.kinds,
+  memos: report.memos,
+  keep_memos: report.keep_memos,
+  ...(report.memos === 0 ? { setup: setupScript } : {}),
 });
+
+/** Rule A4's sentence (docs/saves.md, "Rollout boundary"): a request refused
+ * before its receipt is looked up says nothing about an earlier attempt. */
+export const NO_RECOVERY =
+  "Milton can't recover an earlier outcome for this request. Before saving again with a new request_id, ask the person to check their TPS page and, if it isn't there, the full TPS.md export (the page lists the latest 200 memos), for this memo.";
+/** Fields create_memo no longer takes, each with its guidance, in the order a
+ * refusal names them: cover_sheet beside the change, the rest in the memo
+ * (or beside a flattened one). Never shimmed. */
+const REMOVED = [
+  [
+    "cover_sheet",
+    "There is no cover sheet. When the person asks you to remember a preference, keep it in your own memory or instructions; Milton keeps their changes as tweaks.",
+  ],
+  [
+    "tweaks",
+    "tweaks are no longer sent: Milton works out the person's changes from first_draft and final.",
+  ],
+  ["rounds", "rounds is no longer sent."],
+  ["report_id", "report_id is no longer sent."],
+] as const;
+/** The refusal for create_memo arguments holding a removed field at its
+ * documented position, or undefined. `args` is already decoded (a memo sent
+ * as a JSON-object string is an object here). Only key names are looked at,
+ * never the words of a final, first draft or request. */
+export function removedFields(args: unknown): string | undefined {
+  if (typeof args !== "object" || args === null || Array.isArray(args)) return;
+  const top = args as Record<string, unknown>;
+  const memo =
+    typeof top.memo === "object" &&
+    top.memo !== null &&
+    !Array.isArray(top.memo)
+      ? (top.memo as Record<string, unknown>)
+      : {};
+  const found = REMOVED.filter(([key]) =>
+    key === "cover_sheet"
+      ? Object.hasOwn(top, key)
+      : Object.hasOwn(memo, key) || Object.hasOwn(top, key),
+  );
+  if (!found.length) return;
+  return `create_memo: ${found.map(([, guidance]) => guidance).join(" ")} Nothing was changed. ${NO_RECOVERY}`;
+}
 
 export function createStoreMemoTools(
   store: TenantStore,
@@ -344,19 +329,13 @@ export function createStoreMemoTools(
     }
   }
   return {
-    get_cover_sheet: () =>
-      run("get_cover_sheet", async (call) =>
-        storeResult(
-          await withNotice(
-            permission(coverSheet(await store.readCoverSheet(call))),
-          ),
-        ),
-      ),
     get_report: (input: z.infer<typeof reportInput>) =>
       run("get_report", async (call) =>
         storeResult(
           await withNotice(
-            reportEnvelope(await store.readReport(input.intent, call)),
+            permission(
+              reportEnvelope(await store.readReport(input.intent, call)),
+            ),
           ),
         ),
       ),

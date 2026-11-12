@@ -9,21 +9,13 @@ import { EMPTY_REPORT } from "../src/store/memos";
 export function stubStore(): TenantStore {
   return {
     appOrigin: "http://localhost:3001",
-    readCoverSheet: async () => ({
-      text: "",
-      version: 0,
-      memos: 0,
-      tweaks: 0,
-      keep_memos: true,
-      is_empty: true,
-    }),
     readReport: async () => ({
-      report_id: "00000000-0000-4000-8000-000000000000",
       text: EMPTY_REPORT,
       is_empty: true,
       examples: [],
-      tweaks: [],
       kinds: [],
+      memos: 0,
+      keep_memos: true,
     }),
     saveMemo: async () => {
       throw new Error("The stub store saves nothing.");
@@ -36,12 +28,18 @@ export async function checkMcp(client: Client) {
   const { tools } = await client.listTools();
   assert.deepEqual(tools.map((tool) => tool.name).sort(), [
     "create_memo",
-    "get_cover_sheet",
     "get_report",
   ]);
   const reply = await client.callTool({
-    name: "get_cover_sheet",
-    arguments: {},
+    name: "get_report",
+    arguments: {
+      intent: {
+        situation: "confirming what is on file",
+        medium: "email",
+        audience: "the person",
+        purpose: "check the connection",
+      },
+    },
   });
   assert.notEqual(reply.isError, true, "TPS read failed");
   const content = z
@@ -53,8 +51,8 @@ export async function checkMcp(client: Client) {
     .parse(reply);
   z.object({
     text: z.string(),
-    version: z.number(),
     is_empty: z.boolean(),
+    memos: z.number().int().min(0),
   }).parse(JSON.parse(content.content[0]!.text));
-  return "initialize: instructions present; tools: exactly three; current cover sheet read answered; no save performed";
+  return "initialize: instructions present; tools: exactly two; current report read answered; no save performed";
 }

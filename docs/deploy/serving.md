@@ -41,6 +41,12 @@ release's record goes in [history](../history.md). How to release and roll back:
 - **Schedules and settings:** `milton-e2e-daily` at `7 2,14 * * *` UTC; Turnstile off (no
   keys); every service keeps one warm instance.
 
+- **For the memos-and-tweaks release** (not yet released): its rollback target is the
+  revisions serving now, above, for app, MCP, admission, the job, auth and the site. They
+  stay good until the later cleanup revokes the unused write grants and drops the retired
+  tables and columns; after that it is fix forward. The rollback is degraded, with its order
+  and limits in [releases](releases.md#rolling-back-memos-and-tweaks-only).
+
 ## The floor
 
 - **App, MCP and admission never roll back below #76** (`milton-*-memos-bdac60f`,

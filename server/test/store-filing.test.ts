@@ -11,7 +11,7 @@ import {
   vendorIntent,
 } from "./store-fixtures";
 import { change, scoreboard, tier } from "../src/store/score";
-import { tpsStore } from "../src/store/tps";
+import { LISTED_MEMOS, tpsStore } from "../src/store/tps";
 import {
   createStoreMemoTools,
   intentInput,
@@ -2298,6 +2298,42 @@ test("no new-version save, read or TPS change inserts into or updates a retired 
         )
       ).rows[0]!.n,
     ).toBe(0);
+  } finally {
+    await local.dispose();
+  }
+});
+
+test("TPS.md holds every memo, past the page's 200, in order, word for word", async () => {
+  const local = await localStore();
+  try {
+    await seedUsers(local.pg, "many");
+    const count = LISTED_MEMOS + 7;
+    for (let i = 0; i < count; i++)
+      await local.pg.query(
+        `INSERT INTO memos(user_id,id,medium,summary,first_draft_state,final,tier,client_json,request_id,created_at)
+         VALUES ('many',$1,'email',$2,'none',$3,'own','{}',$4,timestamptz '2026-01-01T00:00:00Z'+$5*interval '1 hour')`,
+        [
+          `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`,
+          `fictional note ${i}`,
+          `Fictional final ${i}.`,
+          crypto.randomUUID(),
+          i,
+        ],
+      );
+    const tps = tpsStore(local.db, "many");
+    expect((await tps.read()).memos).toHaveLength(LISTED_MEMOS);
+    const day = (i: number) =>
+      new Date(Date.UTC(2026, 0, 1, i)).toISOString().slice(0, 10);
+    const expected =
+      ["# TPS report", "## Email"]
+        .concat(
+          Array.from({ length: count }, (_, k) => count - 1 - k).map(
+            (i) =>
+              `### ${day(i)}\nfictional note ${i}\n\n> Fictional final ${i}.`,
+          ),
+        )
+        .join("\n\n") + "\n";
+    expect(await tps.exportTps()).toBe(expected);
   } finally {
     await local.dispose();
   }

@@ -142,3 +142,13 @@ test("the privacy page limits 'no longer served' to reports and discloses the hi
     "Milton returns that stored receipt as it was, which can include those notes, rounds or your cover sheet’s text, marked as a past receipt, not current guidance",
   );
 });
+
+test("the homepage demo's footer qualifies the same-request claim as its provenance does", () => {
+  const home = read("apps/site/src/pages/index.astro");
+  expect(home).toContain(
+    '"Same request, made on different days (one company name changed); the model may have changed. Em dashes added for dramatic effect."',
+  );
+  expect(read("apps/site/src/data/try-it.json")).toContain(
+    "except Bill's employer",
+  );
+});

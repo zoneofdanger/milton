@@ -16,6 +16,8 @@ node --experimental-strip-types apps/auth/scripts/integration.ts
 
 The integration command requires Node 26 and local PostgreSQL 18 binaries (`PG_BIN`, default `/opt/homebrew/opt/postgresql@18/bin`). It checks port 55543 is free, creates a uniquely named disposable directory/cluster/database, uses separate SCRAM runtime logins, runs actual product modules/native handlers and reviewed migrations, checks ports 19911/19912 before owned HTTPS and standalone bundle listeners, and stops/removes only that owned cluster/listeners in `finally`. It loads no dotenv file, reads no live configuration and refuses external network except explicitly mocked mail/admission/social boundaries. Run with a clean environment. Do not point it at another database. Native rate windows are owner-cleared between independent flow groups; production limits remain enabled. Temporary native read wrappers in the script pause actual library reads; there are no request/environment fault controls in product code.
 
+The auth image is built from the repository's `apps/auth/Dockerfile`, whose two base images (`oven/bun:1.4.4` and `node:26.13.0-bookworm-slim`) are pinned by digest.
+
 The production entry point is `dist/cloud-run.js`. The build includes local theme CSS, fonts, favicon, native library dependencies and the local common-password hash list. It bundles for Node, not Bun. No runtime schema migration, provisioning, runtime dependency download or third-party asset fetch occurs.
 
 ## Fixed protocol contract

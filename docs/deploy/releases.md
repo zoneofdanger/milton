@@ -65,7 +65,8 @@ revision and its imported image, then verify startup again when assigning traffi
 
 ## Auth image: the service and both jobs
 
-An auth release moves `milton-auth`, `milton-auth-mail` and `milton-auth-maint` to the same
+Build the auth image from `apps/auth/Dockerfile` as committed, from the repository root; its
+base images are pinned by digest. An auth release moves `milton-auth`, `milton-auth-mail` and `milton-auth-maint` to the same
 image in the same step. Keep `AUTH_ADMISSION_URL` (a plain variable on the service and the
 mail job, see [cloud](cloud.md#admission-service-milton-admit)); the image refuses to start
 in production without it.

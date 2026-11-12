@@ -252,3 +252,30 @@ test("fresh outcomes carry no replayed label: a save, a dedupe unchanged, a cont
     await local.dispose();
   }
 });
+
+test("a rollout-boundary refusal's receipt lookup is the account's own: the same request_id held by another account reads as none", async () => {
+  const local = await localStore();
+  try {
+    await seedUsers(local.pg, "holder", "other");
+    const holder = fixtureStore(local.db, "holder");
+    const other = fixtureStore(local.db, "other");
+    const shared = memoSave({ final: "Held by the holder." });
+    expect((await holder.saveMemo(shared)).status).toBe("saved");
+    const stale = {
+      ...memoSave({ first_draft: "A draft.", mode: "draft" }),
+      request_id: shared.request_id,
+    };
+    stale.memo = { ...stale.memo!, rounds: 1 } as never;
+    expect(await other.requestReceipt(shared.request_id)).toBe(false);
+    await expect(other.saveMemo(stale)).rejects.toMatchObject({
+      details: { field: "removed_unsaved" },
+    });
+    // The holder's own lookup finds it.
+    expect(await holder.requestReceipt(shared.request_id)).toBe(true);
+    await expect(holder.saveMemo(stale)).rejects.toMatchObject({
+      details: { field: "removed" },
+    });
+  } finally {
+    await local.dispose();
+  }
+});

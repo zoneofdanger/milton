@@ -167,11 +167,11 @@ sheet, report, AI) and plain text on security screens and anything an AI reads.
       [migrations](docs/deploy/migrations.md), and check every stored request passes first.
 
 - [ ] #39 (server, low) **Run the save's change check after the access gate.**
-      `create_memo` compares the first draft with the final and matches every quote
-      (`checkMemo`, `server/src/store/compiled.ts`) before the save reaches the trial gate
-      and the account lock, so an account with no access can still make the server do that
-      work. The cost is bounded since #109 (a quote's occurrences are capped at 50: 10 ms at
-      80 KB), which is why this is low. Moving it changes which refusal such an account sees
+      `create_memo` diffs the first draft against the final (`checkMemo` in
+      `server/src/store/save.ts`, called from `server/src/store/compiled.ts`) before the
+      save reaches the trial gate and the account lock, so an account with no access can
+      still make the server do that work. The cost is bounded by `changeList`'s own limits
+      since #109 (worst case about 50 ms in its review), which is why this is low. Moving it changes which refusal such an account sees
       first, and refusals today come before any database work
       ([saves](docs/saves.md)): decide that order before building.
 

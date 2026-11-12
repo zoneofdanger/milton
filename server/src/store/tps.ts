@@ -280,10 +280,14 @@ export function tpsStore(db: StoreDatabase, userId: string) {
           .split("\n")
           .map((l) => (l === "" ? ">" : `> ${l}`))
           .join("\n");
-      // A request's later lines are indented four spaces, so none can start
-      // a heading, list, quote or fence: the request stays in its memo.
-      const asked = (request: string) =>
-        `Asked: ${request.split("\n").join("\n    ")}`;
+      // A request goes in a fenced block, so Markdown renders it as literal
+      // text: no heading, list, quote or inline HTML can come from it. The
+      // fence is longer than any run of tildes inside it.
+      const asked = (request: string) => {
+        const runs = request.match(/~+/g) ?? [];
+        const fence = "~".repeat(Math.max(3, ...runs.map((r) => r.length + 1)));
+        return `Asked:\n${fence}text\n${request}\n${fence}`;
+      };
       const parts = ["# TPS report"];
       if (row!.cover?.text.trim())
         parts.push("## Cover sheet", row!.cover.text);

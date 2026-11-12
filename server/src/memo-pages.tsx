@@ -620,9 +620,16 @@ function whatChanged(m: FullMemo) {
         </p>
       ) : m.changes.length ? (
         <ol class="change-list">{m.changes.map(changeRow)}</ol>
-      ) : (
+      ) : m.first_draft === m.final ? (
         <p class="small-note">
           Nothing: you accepted the first draft as it was.
+        </p>
+      ) : (
+        // The diff compares words and marks, so an edit of spacing or line
+        // breaks alone lists nothing; the texts still differ.
+        <p class="small-note">
+          Only spacing or line breaks changed; compare the first draft and final
+          above.
         </p>
       )}
     </section>

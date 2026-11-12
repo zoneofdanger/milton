@@ -61,7 +61,9 @@ What each change does to memos, tweaks and the cover sheet is in [memos](memos.m
   one side is empty. A Markdown-only spot says "formatting". A side cut at 300
   characters ends in "…" and the row says "shortened to 300 characters", so a cut is
   never hidden. A `too_large` memo says "Too many changes to list; the first draft and
-  final above show them all."; an untouched final says nothing changed. A memo saved
+  final above show them all."; an untouched final says nothing changed. The diff compares
+  words and marks, so an edit of spacing or line breaks alone lists no row; the page then
+  says only spacing or line breaks changed, never that nothing did. A memo saved
   before changes were listed, or without a kept first draft, has no "What changed".
   There is no typed share and no tweak line on a change.
 - The cover sheet is shown read only, one ruled line per line as written, blank lines
@@ -91,9 +93,9 @@ What each change does to memos, tweaks and the cover sheet is in [memos](memos.m
   is paused: the cover sheet, the tweaks with counts (most cited first; a served one as
   `- text (N memos; served S, needed again M)`), then every memo's final grouped by medium,
   newest first, each under its kind and date with its summary and, when it has one,
-  `Asked: ` and its request, each later line indented four spaces so none can start a
-  heading or other Markdown block outside the memo. First drafts and changes are not in
-  it.
+  `Asked:` and its request in a `~~~text` fence longer than any run of tildes in it, so
+  Markdown shows it as literal text: no heading, list or inline HTML comes from it. First
+  drafts and changes are not in it.
 
 ## Connected AIs
 

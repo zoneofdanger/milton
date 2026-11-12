@@ -1783,7 +1783,36 @@ test("a memo page lists code's changes unlabelled and what the person asked, and
     ])
       expect(page).not.toContain(text);
     expect(await fixture.store.exportTps()).toContain(
-      `decline a vendor's meeting request\nAsked: ${"Say no to the call, politely. ".repeat(5)}\n    Keep it short.\n\n> Dana`,
+      `decline a vendor's meeting request\nAsked:\n~~~text\n${"Say no to the call, politely. ".repeat(5)}\nKeep it short.\n~~~\n\n> Dana`,
+    );
+    // An edit of spacing alone lists no change, and never claims the first
+    // draft was accepted as it was.
+    const spacing = await fixture.author.saveMemo(
+      memoSave({
+        first_draft: "One line.\n\nAnother line.",
+        final: "One line. Another line.",
+        mode: "draft",
+        rounds: 1,
+      }),
+    );
+    const spaced = await (
+      await fixture.send(`/tps/memo/${spacing.memo!.memo_id}`)
+    ).text();
+    expect(spaced).toContain("Only spacing or line breaks changed");
+    expect(spaced).not.toContain("you accepted the first draft as it was");
+    // A request's HTML and fences reach TPS.md as literal text in a fence
+    // longer than any run of tildes inside it.
+    await fixture.author.saveMemo(
+      memoSave({
+        first_draft: "Draft.",
+        final: "Final.",
+        mode: "draft",
+        rounds: 1,
+        request: "<h1>Big</h1> <script>x</script>\n~~~\n# not a heading",
+      }),
+    );
+    expect(await fixture.store.exportTps()).toContain(
+      "Asked:\n~~~~text\n<h1>Big</h1> <script>x</script>\n~~~\n# not a heading\n~~~~\n",
     );
     // Remove takes the CSRF and Origin checks, then reloads the memo.
     expect(
@@ -1805,7 +1834,7 @@ test("a memo page lists code's changes unlabelled and what the person asked, and
     ).text();
     expect(after).toContain('<p role="status">Request removed.</p>');
     expect(after).not.toContain("Keep it short.");
-    expect(await fixture.store.exportTps()).not.toContain("Asked:");
+    expect(await fixture.store.exportTps()).not.toContain("Say no to the call");
     // A memo saved before changes were listed shows no list; a too-large one
     // says the changes were too many to list.
     await fixture.db.query(

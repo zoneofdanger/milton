@@ -10,27 +10,28 @@ covers:
 
 Rewritten in place by the release coordinator at every release, never appended to; the
 release's record goes in [history](../history.md). How to release and roll back:
-[releases](releases.md). As of 2026-11-12 06:03Z (after #114).
+[releases](releases.md). As of 2026-11-12 18:16Z (after #116).
 
 ## Services
 
-- **App, MCP, admission, daily check:** `milton-app-changes-b1d2760`,
-  `milton-mcp-changes-b1d2760`, `milton-admit-00013-c6k` and job `milton-e2e-daily`, all on
-  image `sha256:9c451e73f93a6d1aa90bfd499239f03c40d4e812cf0604d0cb9e890230ec1f30` (#114,
-  `b1d2760`; Cloud Run shows the amd64 manifest digest `sha256:44fcf717…`, not this index
-  digest). Rollback, code only, all four together: `milton-app-evidence-4668940`,
-  `milton-mcp-evidence-4668940`, `milton-admit-00012-4km` and the job to image
-  `sha256:eb45b83fd3509cd751be9622c88c00b0845fe2bf893d0a714f8590024f6b5744` (#109, `4668940`).
-  No schema change between them. On it, reports serve no changes and the line-break fix for
-  report text is gone (finals quoted on LF only), and the memo page loses its "Your AIs may
-  see" line; the site's privacy and terms still say changes may be served, so roll the site
-  back to `4668940` with it.
+- **App, MCP, admission, daily check:** `milton-app-oneline-6b7a679`,
+  `milton-mcp-oneline-6b7a679`, `milton-admit-00014-v25` and job `milton-e2e-daily`, all on
+  image `sha256:b59a4123b1f7f8b2baf9099b8fbf0b180342ce1cb71b10a0751788a7a8ddfbe6` (#116,
+  `6b7a679`; Cloud Run shows the amd64 manifest digest `sha256:d03dafd1…`, not this index
+  digest). Rollback, code only, all four together: `milton-app-changes-b1d2760`,
+  `milton-mcp-changes-b1d2760`, `milton-admit-00013-c6k` and the job to image
+  `sha256:9c451e73f93a6d1aa90bfd499239f03c40d4e812cf0604d0cb9e890230ec1f30` (#114, `b1d2760`).
+  No schema or site change between them. On it, one-line fields keep U+2028 and U+2029 as sent
+  again, tool results carry those separators literally, and receipts written since
+  hash the mapped fields, so an identical retry of such a save across the rollback is
+  refused with `request_id_reused`.
 - **Auth and its jobs:** `milton-auth-00021-2gc`, `milton-auth-mail` and `milton-auth-maint`
   on image `sha256:d394050c2687a6872655b6075d1e3de9f4c2defe4a05353721dd0ea31ec0a832` (#102,
   `735937f`; Cloud Run shows the amd64 manifest digest, not this index digest). Rollback,
   code only, service and both jobs together: `milton-auth-00020-k77` and image
   `sha256:11946548b6e3fc563c11b8e6d2933566a7f90a83d83156e2e4ccf8a0d1d9bf56` (#86).
-- **Site:** Vercel production deployment of `b1d2760` (#114's privacy and terms: snippets of
+- **Site:** Vercel production deployment of `6b7a679`, content unchanged since `b1d2760`
+  (#114's privacy and terms: snippets of
   what you changed, including words you removed, may be served to your connected AIs).
 - **Secrets:** app `milton-app-env` 4 / `milton-app-key` 2, MCP `milton-mcp-env` 4 /
   `milton-mcp-key` 2 and auth `milton-auth-env` 2 / `milton-auth-key` 1, as at the 2026-11-07

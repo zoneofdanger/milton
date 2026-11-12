@@ -23,6 +23,36 @@ Earlier records are in git history: the last runbook holding them is at commit 4
 (`git show 492b96a:server/deploy/README.md`), and the runbook's later versions are in
 `git log -p server/deploy/README.md` until 2026-11-10, when this file began.
 
+## 2026-11-12: one-line fields turn invisible line separators into a space (PR #116)
+
+- **#116 (Peter's "go" to building it, answering milton-overlord's plan "invisible line
+  separators become a single space. Ordinary line breaks and control characters are still
+  refused, with no change from today. No database change.", and "ship 116.", answering
+  "The line-break fix (#116) has passed its independent review, and CI is green. … Say
+  "ship 116" to release it.", both typed in milton-overlord's pane wH:p1F on 2026-11-12 and
+  relayed verbatim by milton-overlord; built by a temporary builder; independent review
+  Codex gpt-6-astra: FAIL at `383fcb0` on two findings, fixed at `ea86c27` and rechecked by
+  milton-duo), `6b7a679`:** each run of U+2028 and U+2029 in a one-line field becomes one
+  space before the trim and before the request hash; a cover sheet remove matches by the
+  same mapping; the cover sheet and `get_cover_sheet` show stored separators as a space;
+  every tool result escapes U+2028 and U+2029 in its JSON. `create_memo`'s description now
+  promises only final and first_draft unchanged. Accepted rollout limit, with no
+  compatibility path: an identical retry, straddling the deploy, of a save whose one-line
+  field held a separator gets `request_id_reused` ([saves](saves.md#receipts)).
+  - **Schema:** none. **Site:** content unchanged.
+  - **Image** `sha256:b59a4123b1f7f8b2baf9099b8fbf0b180342ce1cb71b10a0751788a7a8ddfbe6`
+    (amd64 `sha256:d03dafd1…`): admit `milton-admit-00014-v25` at 18:15:45Z, app and MCP
+    `milton-*-oneline-6b7a679` as tagged no-traffic revisions, traffic moved at 18:16:28Z,
+    `milton-e2e-daily` at 18:16:30Z.
+  - **Live:** app and MCP `/health` and auth `/api/auth/ok` 200, app home 200, MCP 401
+    unauthenticated, admit 403 without a token, forms probe PASS, `milton-e2e-daily-ttc7t`
+    passed. Gate at 18:26Z: clean; no request reached an older revision after 18:18:45Z; no error, `store_unavailable` or `permission denied` lines since 18:15Z.
+  - **Checks** on `ea86c27`, whose tree `6b7a679` has (main had not moved): types, 137
+    server tests, format and agent-docs 0; PR CI green.
+  - **Not observed:** a real AI app sending or displaying a line separator.
+  - **Rollback**, code only, all four together: `milton-*-changes-b1d2760`,
+    `milton-admit-00013-c6k` and the daily job to image `sha256:9c451e73…`.
+
 ## 2026-11-12: what they changed, served under drafted examples (PR #114)
 
 - **#114 (Peter's "Ship it", answering milton-overlord's plan "Write the rule first… Have it

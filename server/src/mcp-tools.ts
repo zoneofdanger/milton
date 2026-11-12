@@ -290,9 +290,11 @@ export function removedFields(args: unknown): string | undefined {
 
 /** A rollout-boundary refusal (docs/saves.md, "Rollout boundary"): a removed
  * field or a bidi control. Whether a receipt exists under the request id
- * decides its words: with none, nothing was saved under it, so the AI resends
- * fixed; with one, or when the lookup failed, an earlier save may have
- * committed, so the person checks first. Nothing of a receipt is returned. */
+ * decides its words: with none, no save under it has finished, so the AI
+ * resends fixed under the same id (a delayed attempt that then commits meets
+ * the resend as request_id_reused, not a second memo); with one, or when the
+ * lookup failed, an earlier save may have committed, so the person checks
+ * first. Nothing of a receipt is returned. */
 export function boundaryRefusal(
   kind: "removed" | "bidi",
   detail: string,
@@ -307,7 +309,7 @@ export function boundaryRefusal(
     : {
         error: "invalid_input",
         field: `${kind}_unsaved`,
-        message: `create_memo: ${detail} Nothing was saved under this request_id. Send it again without ${kind === "removed" ? "those fields" : "those characters"}, with a new request_id.`,
+        message: `create_memo: ${detail} No save under this request_id has finished. Send it again without ${kind === "removed" ? "those fields" : "those characters"}, with the same request_id.`,
       };
 }
 

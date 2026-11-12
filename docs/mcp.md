@@ -148,8 +148,9 @@ a reconnect.
   (object, JSON-object string, flattened, `memo_context`).
 - Each such refusal names its guidance, and its words follow a receipt lookup under the
   call's request id ([saves](saves.md#rollout-boundary)): with no receipt, `field` is
-  `removed_unsaved` or `bidi_unsaved` and the message says nothing was saved under this
-  request_id, so send it again fixed, with a new request_id; with a receipt, or when the
+  `removed_unsaved` or `bidi_unsaved` and the message says no save under this
+  request_id has finished, so send it again fixed, with the same request_id; with a
+  receipt, or when the
   lookup fails, `field` is `removed` or `bidi` and the message carries the
   rollout-boundary sentence. Nothing of a receipt is returned.
 
@@ -186,8 +187,9 @@ a reconnect.
   unexpected-failure step. A memo refusal with a `field` takes that field's step when
   the table has one: `invalid_input.request` (send only what the person typed, or leave
   request out, and the rest unchanged); `invalid_input.removed_unsaved` and
-  `invalid_input.bidi_unsaved` (`fix_input`: nothing was saved under this request_id,
-  send it again fixed with a new one, with no question for the person); and
+  `invalid_input.bidi_unsaved` (`fix_input`: no save under this request_id has
+  finished, so send it again fixed with the same one, with no question for the
+  person); and
   `invalid_input.removed` and `invalid_input.bidi` (`ask_user`: an earlier save may
   exist, so the person checks their TPS page and TPS.md before a save with a new
   request_id). `tool_replaced` rereads with `get_report`.

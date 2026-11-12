@@ -407,7 +407,7 @@ test("a stale client's get_cover_sheet, and each removed create_memo field in ev
             expect(refused.value.message).not.toContain("Held earlier");
           } else {
             expect(refused.value.message).toContain(
-              "Nothing was saved under this request_id.",
+              "No save under this request_id has finished. Send it again without those fields, with the same request_id.",
             );
             expect(refused.value.message).not.toContain("TPS");
           }
@@ -482,7 +482,7 @@ test("a stale client's get_cover_sheet, and each removed create_memo field in ev
                 message: expect.stringContaining(
                   wasHeld
                     ? "Milton can't recover an earlier outcome for this request. Before saving again with a new request_id, ask the person to check their TPS page and, if it isn't there, the full TPS.md export (the page lists the latest 200 memos), for this memo."
-                    : "Nothing was saved under this request_id.",
+                    : "No save under this request_id has finished. Send it again without those characters, with the same request_id.",
                 ),
                 next: expect.objectContaining({
                   action: wasHeld ? "ask_user" : "fix_input",
@@ -492,6 +492,77 @@ test("a stale client's get_cover_sheet, and each removed create_memo field in ev
           ]);
         }
       expect(await receipts()).toBe(receiptsBefore);
+      // With no receipt, the resend goes under the same request_id. The plain
+      // path: it saves.
+      const plainId = crypto.randomUUID();
+      const plainMemo = {
+        final: "Resent without the field.",
+        context: memo.context,
+      };
+      expect(
+        (
+          await call("create_memo", {
+            request_id: plainId,
+            memo: { ...plainMemo, report_id: crypto.randomUUID() },
+          })
+        ).value,
+      ).toMatchObject({
+        field: "removed_unsaved",
+        next: { action: "fix_input" },
+      });
+      expect(
+        (await call("create_memo", { request_id: plainId, memo: plainMemo }))
+          .value,
+      ).toMatchObject({ status: "saved" });
+      // The delayed commit: no receipt when the lookup runs, then the
+      // pre-release attempt under that id commits (as the code before the
+      // release wrote it: rounds, its receipt). The resend under the same id
+      // meets that receipt as request_id_reused, never a second memo.
+      const delayedId = crypto.randomUUID();
+      const delayedMemo = {
+        final: "Delayed fictional final.",
+        first_draft: "Hi! Delayed fictional draft.",
+        mode: "draft",
+        context: memo.context,
+      };
+      expect(
+        (
+          await call("create_memo", {
+            request_id: delayedId,
+            memo: { ...delayedMemo, rounds: 1 },
+          })
+        ).value,
+      ).toMatchObject({ field: "removed_unsaved" });
+      await local.pg.query(
+        `INSERT INTO memos(user_id,id,medium,summary,mode,first_draft,first_draft_state,final,rounds,change,tier,client_json,request_id)
+         VALUES ('u',$1,'email',$2,'draft',$3,'kept',$4,1,0.5,'steered','{}',$5)`,
+        [
+          crypto.randomUUID(),
+          memo.context.summary,
+          delayedMemo.first_draft,
+          delayedMemo.final,
+          delayedId,
+        ],
+      );
+      await local.pg.query(
+        `INSERT INTO save_requests(user_id,request_id,input_hash,result_json) VALUES ('u',$1,repeat('a',64),'{"status":"saved"}')`,
+        [delayedId],
+      );
+      const memosBefore = (
+        await local.pg.query("SELECT 1 FROM memos WHERE user_id='u'")
+      ).rows.length;
+      expect(
+        (
+          await call("create_memo", {
+            request_id: delayedId,
+            memo: delayedMemo,
+          })
+        ).value,
+      ).toMatchObject({ error: "request_id_reused" });
+      expect(
+        (await local.pg.query("SELECT 1 FROM memos WHERE user_id='u'")).rows
+          .length,
+      ).toBe(memosBefore);
       // A final, first draft or request that says "rounds" or "tweaks" saves.
       expect(
         await call("create_memo", {

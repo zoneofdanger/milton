@@ -59,10 +59,12 @@ limit below. Its words follow one lookup:
   `save_requests` holds a row under `(user_id, request_id)`, this account's. It passes
   no trial gate, as a replay doesn't, admits no call and records no usage. An id the
   database's checks refuse cannot hold a receipt, so it needs no lookup.
-- **No receipt.** Nothing was saved under this id: "Nothing was saved under this
-  request_id. Send it again without those fields (or characters), with a new
+- **No receipt.** No save under this id has finished: "No save under this request_id
+  has finished. Send it again without those fields (or characters), with the same
   request_id." Its next step is `fix_input`, with no question for the person (#121, a
-  stale Claude Code client stopped to ask about a memo never at risk).
+  stale Claude Code client stopped to ask about a memo never at risk). The resend keeps
+  the id, so an earlier attempt that commits after the lookup meets it as
+  `request_id_reused` rather than a second memo (milton-overlord, 2026-11-12).
 - **A receipt, or a failed lookup.** The earlier attempt may have committed, the retry
   across the release this boundary exists for: "Milton can't recover an earlier outcome
   for this request. Before saving again with a new request_id, ask the person to check
@@ -71,12 +73,11 @@ limit below. Its words follow one lookup:
   page's list doesn't prove the earlier save failed. The receipt's stored hash is of the
   old shape, so it is never this call's outcome, and nothing of it is returned.
 - **The race.** The lock waits for a save of this id already holding it, so its receipt
-  is seen. An attempt under the same id that has not yet taken the lock when the lookup
-  runs (a pre-release attempt still on its way to an old MCP during the switch) can
-  commit after a "nothing was saved" answer. The resend then goes under a new
-  request_id, and the content check returns the memo on file as `unchanged` when its
-  words match, so the same memo is not kept twice; a resend with other words is a
-  second memo.
+  is seen; the integration suite runs that schedule on two connections. An attempt
+  under the same id that has not yet taken the lock when the lookup runs (a pre-release
+  attempt still on its way to an old MCP during the switch) can commit after the "no
+  save has finished" answer. The resend under the same id then meets its receipt as
+  `request_id_reused` and saves nothing.
 
 ## The transaction
 
@@ -134,6 +135,12 @@ A save runs in one transaction:
   field held U+2028 or U+2029, made before the deploy and retried identically after it
   to recover an uncertain outcome, is refused with `request_id_reused`. Only that
   straddling retry is affected.
+- The remaining gap of the rollout boundary, accepted (milton-overlord, 2026-11-12):
+  after that `request_id_reused`, an AI that follows its step and saves with a new
+  request_id can keep the memo twice when the delayed attempt's words differ (the
+  content check returns the memo on file as `unchanged` only when they match, and only
+  while it is still on file). That needs the narrow race above; `request_id_reused`'s
+  step is unchanged.
 - Rollback limits, accepted (milton-overlord, 2026-11-12) as a degraded emergency
   fallback: after a rollback to the code before this release, non-UUID ids fail its
   schema and drafted requests without `rounds` fail its preflight before lookup; for

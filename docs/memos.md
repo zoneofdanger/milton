@@ -97,8 +97,15 @@ are served as examples, and their size cap, is in [reports](reports.md#examples)
 | Request                        | 600 characters, 12 lines                          |
 | Memos per forget               | 100                                               |
 
-Words are stored exactly as sent; invalid Unicode and NUL are refused before a driver
-could replace them.
+A memo's words (its final and first draft) and its request are stored exactly as sent;
+invalid Unicode and NUL are refused before a driver could replace them. A one-line field
+(an intent's situation, audience and purpose, a context's summary, audience and purpose,
+`new_kind`, a tweak's text, a cover sheet line an AI adds, and the TPS page's reword)
+follows the one-line rule instead: each run of the invisible line and paragraph separators
+U+2028 and U+2029 becomes one space, then the value is trimmed and checked against its
+bound. Any other control character in it, an ordinary line break or tab among them, is
+refused as before (Peter, 2026-11-12). The input is hashed after the rule
+([saves](saves.md)).
 
 ## Tiers
 
@@ -229,7 +236,9 @@ changes: the AI-labelled changes and quote matching the spec proposed were left 
   page shows it read only (Peter, 2026-11-10).
 - `cover_sheet` from an AI carries `expected_version` and either `add` (one line, at most
   300 characters) or `remove` (one whole existing line, copied exactly). The AI never
-  resends the whole text.
+  resends the whole text. Both pass the separator part of the one-line rule (`remove` is
+  not trimmed), and each stored line is compared with its separators shown as one space,
+  so a line kept before the rule is removed by its exact copy or by its served form.
 - A stale `expected_version` returns `conflict` with the current version and text.
 - Adding a line already present is `unchanged`; removing a line not present is
   `line_not_found`. Removing the last line empties the cover sheet (Peter, 2026-11-10);

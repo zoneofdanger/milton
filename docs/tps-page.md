@@ -75,7 +75,8 @@ What each change does to memos, tweaks and the cover sheet is in [memos](memos.m
   says "No cover sheet yet." and how to start one. There is no cover sheet form
   (Peter, 2026-11-10; [memos](memos.md)).
 - The person can forget one memo, remove a memo's request (`/tps/request/remove`,
-  which returns to the memo with "Request removed."), and delete or reword a tweak.
+  which returns to the memo with "Request removed."), and delete or reword a tweak. A
+  reword follows the one-line rule an AI's tweak does ([memos](memos.md#bounds)).
 - An empty TPS page links to the Connected AIs page and shows the shared setup prompt
   ([setup](setup.md)) to copy; an account with memos gets a shorter prompt for the next
   draft instead.

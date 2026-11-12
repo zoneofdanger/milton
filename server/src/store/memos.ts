@@ -115,7 +115,8 @@ export async function readCoverSheet(
   if (!row.open) throw accountUnavailable();
   const text = row.cover?.text ?? "";
   return {
-    text,
+    // As served; the stored text is unchanged.
+    text: joinSeparators(text),
     version: row.cover?.version ?? 0,
     memos: row.memos,
     tweaks: row.tweaks,
@@ -208,6 +209,14 @@ export const quote = (body: string) =>
 /** A one-line field (context, kind label, tweak) as report text: each line
  * break, which older saves could hold, becomes one space. */
 export const flat = (text: string) => text.replace(LINE_BREAK, " ");
+/** A run of the invisible line and paragraph separators, U+2028 and U+2029:
+ * the only code points in Zl and Zp. */
+const SEPARATOR_RUN = /[\p{Zl}\p{Zp}]+/gu;
+/** The one-line rule (docs/memos.md, "Bounds"), before the trim: each run of
+ * separators becomes one space. Also how a cover sheet line is matched and
+ * served, so one stored before the rule breaks no line either. */
+export const joinSeparators = (text: string) =>
+  text.replace(SEPARATOR_RUN, " ");
 const exampleHeader = (m: Candidate, kind: string | undefined, n: number) =>
   [
     `## ${n}. ${[kind && flat(kind), m.medium, TIER_LABEL[m.tier as "own"], m.at.slice(0, 10)].filter(Boolean).join(" · ")}`,
@@ -385,7 +394,7 @@ export async function readReport(
       return r ? [{ id: m.id, rows: r }] : [];
     }),
   );
-  const cover = row.cover?.text.trim() ? row.cover.text : "";
+  const cover = row.cover?.text.trim() ? joinSeparators(row.cover.text) : "";
   const parts = [
     ...(cover ? ["# Cover sheet", cover] : []),
     ...(served.length

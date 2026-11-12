@@ -23,6 +23,8 @@ What a memo, tier and tweak are is in [memos](memos.md); the tool envelopes are 
   no transaction and take no lock.
 - `get_cover_sheet` is then one statement: whether the account is active, the current
   cover sheet, the memo and tweak counts and the Keep memos switch. It writes nothing.
+  Its `text` shows each run of U+2028 and U+2029, which a line kept before the one-line
+  rule ([memos](memos.md#bounds)) could hold, as one space; the stored text is unchanged.
 - `get_report` is then two statements outside a transaction: one loads the account and
   kind checks, the cover sheet, the kinds, every memo's ranking fields (not its words)
   and its citations, and every tweak's count and score ([memos](memos.md)); the second
@@ -80,9 +82,10 @@ A report ranks every memo by, in order:
   each break kept as sent and every segment, empty ones included, starting with `>`
   (`> ` before text). Kind labels, context fields and tweak text are one line: each break
   in one, which older saves could hold, is printed as a space; the stored text is
-  unchanged. So outside the cover sheet, which is the person's own text served as
-  written, memo text never starts a report line. The example size bound counts the same
-  breaks. Plain LF text prints as before; a final with other breaks, such as an empty
+  unchanged. The cover sheet is the person's own text served as written, except that
+  each run of U+2028 and U+2029 in it prints as one space, so each of its stored lines
+  is one report line. So outside the cover sheet, memo text never starts a report line.
+  The example size bound counts the same breaks. Plain LF text prints as before; a final with other breaks, such as an empty
   CRLF line (`>` where it was `> `), prints differently, and the corrected count can
   change which examples fit.
 - A report serves no tweak examples and no request. It never fetches a memo's first

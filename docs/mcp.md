@@ -141,6 +141,12 @@ How a person creates and revokes keys is in [accounts](accounts.md).
   another change or an unknown argument, and memo fields beside an object `memo` are
   refused (`invalid_input`) with how to send it. So is a flattened memo still malformed
   once read as nested, naming what is malformed.
+- One-line fields pass the one-line rule as they are parsed, before hashing: each run of
+  U+2028 and U+2029 becomes one space, then the value is trimmed; other control
+  characters are refused ([memos](memos.md#bounds)). The served schemas are unchanged.
+- Every tool result escapes U+2028 and U+2029 in its JSON, which JSON.stringify leaves
+  literal, so a value stored before the rule breaks no line of the result; parsed,
+  values are unchanged.
 
 ## Outcomes and next steps
 

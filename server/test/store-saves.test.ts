@@ -205,3 +205,50 @@ test("a save and its receipt commit together: a lost acknowledgment replays the 
     await local.dispose();
   }
 });
+
+test("fresh outcomes carry no replayed label: a save, a dedupe unchanged, a context correction, a forget and a durable refusal", async () => {
+  const local = await localStore();
+  try {
+    await seedUsers(local.pg, "fresh");
+    const store = fixtureStore(local.db, "fresh");
+    const saved = await store.saveMemo(
+      memoSave({
+        first_draft: "Hi! A draft.",
+        final: "A final.",
+        mode: "draft",
+      }),
+    );
+    const fresh = [
+      saved,
+      await store.saveMemo(
+        memoSave({
+          first_draft: "Hi! A draft.",
+          final: "A final.",
+          mode: "draft",
+        }),
+      ),
+      await store.saveMemo({
+        request_id: crypto.randomUUID(),
+        memo_context: {
+          memo_id: saved.memo!.memo_id,
+          context: { summary: "a corrected note", medium: "chat" },
+        },
+      }),
+      await store.saveMemo({
+        request_id: crypto.randomUUID(),
+        forget_memos: [saved.memo!.memo_id],
+      }),
+      await store.saveMemo(memoSave({ kind_id: "not-a-kind" })),
+    ];
+    expect(fresh.map((o) => o.status)).toEqual([
+      "saved",
+      "unchanged",
+      "saved",
+      "saved",
+      "failed",
+    ]);
+    for (const outcome of fresh) expect(outcome).not.toHaveProperty("replayed");
+  } finally {
+    await local.dispose();
+  }
+});

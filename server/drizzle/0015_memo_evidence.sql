@@ -6,11 +6,13 @@
 -- names the new table or columns, so it runs unchanged beside it; traffic may stay open.
 -- Grants: migrations/016-memo-evidence-roles.sql, applied by the owner right after this
 -- and before the code that reads them. Rollback is the pre-migration snapshot; there is
--- no down script. Adding the columns is a catalog change; the two memos checks scan memos
--- once, and the foreign keys take SHARE ROW EXCLUSIVE on memos and tweak_citations until
--- commit. Lock limits are set inside the migration's transaction, because Neon drops the
--- limits a client passes at connect: a lock not free within 5 s fails this migration
--- whole instead of queueing saves behind it. Nothing touches neon_auth.
+-- no down script. Locks, each held until commit: adding the columns takes ACCESS
+-- EXCLUSIVE on memos and tweaks (no reads or writes); the citation foreign key takes SHARE
+-- ROW EXCLUSIVE on tweak_citations (no writes); the two memos checks each scan memos under
+-- its lock. The 5 s lock_timeout is set inside the migration's transaction, because Neon
+-- drops the limits a client passes at connect. It bounds only the wait to acquire each
+-- lock (one not free in time fails this migration whole), not how long a lock, once
+-- taken, blocks others. Nothing touches neon_auth.
 SET LOCAL lock_timeout = '5s';
 --> statement-breakpoint
 CREATE TABLE "memo_changes" (
@@ -32,7 +34,7 @@ CREATE TABLE "memo_changes" (
 	CONSTRAINT "memo_changes_offsets" CHECK (("memo_changes"."draft_start" IS NULL) = ("memo_changes"."draft_end" IS NULL) AND ("memo_changes"."final_start" IS NULL) = ("memo_changes"."final_end" IS NULL) AND ("memo_changes"."draft_start" IS NULL OR 0 <= "memo_changes"."draft_start" AND "memo_changes"."draft_start" <= "memo_changes"."draft_end") AND ("memo_changes"."final_start" IS NULL OR 0 <= "memo_changes"."final_start" AND "memo_changes"."final_start" <= "memo_changes"."final_end")),
 	CONSTRAINT "memo_changes_sides" CHECK (char_length("memo_changes"."before") <= 300 AND char_length("memo_changes"."after") <= 300 AND ("memo_changes"."before" <> '' OR "memo_changes"."after" <> '')),
 	CONSTRAINT "memo_changes_labels" CHECK (("memo_changes"."about" IS NULL OR "memo_changes"."about" IN ('voice','content','format')) AND ("memo_changes"."by" IS NULL OR "memo_changes"."by" IN ('person','asked','unasked')) AND ("memo_changes"."by" IS NULL) = ("memo_changes"."about" IS NULL OR "memo_changes"."about" = 'format')),
-	CONSTRAINT "memo_changes_tweak" CHECK ("memo_changes"."tweak_id" IS NULL OR ("memo_changes"."about" = 'voice' AND "memo_changes"."by" IN ('person','asked')))
+	CONSTRAINT "memo_changes_tweak" CHECK ("memo_changes"."tweak_id" IS NULL OR ("memo_changes"."about" = 'voice' AND "memo_changes"."by" IN ('person','asked')) IS TRUE)
 );
 --> statement-breakpoint
 ALTER TABLE "memos" ADD COLUMN "request" text;--> statement-breakpoint

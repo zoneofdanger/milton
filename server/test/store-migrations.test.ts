@@ -1088,6 +1088,8 @@ test("0015 adds memo_changes and the request, changes state and reword columns, 
       // A tweak on a content change, or on a change it doesn't cite.
       `INSERT INTO memo_changes(user_id,memo_id,n,"before","after",about,"by",tweak_id) VALUES ('evidence','${saved.memo_id}',5,'a','b','content','person','${tweak}')`,
       `INSERT INTO memo_changes(user_id,memo_id,n,"before","after",about,"by",tweak_id) VALUES ('evidence','${saved.memo_id}',5,'a','b','voice','person','not-cited')`,
+      // A cited tweak on a row with no labels: NULL labels must not pass.
+      `INSERT INTO memo_changes(user_id,memo_id,n,"before","after",tweak_id) VALUES ('evidence','${saved.memo_id}',5,'a','b','${tweak}')`,
       // A format spot labelled by someone; a label without its other half.
       `INSERT INTO memo_changes(user_id,memo_id,n,"before","after",about,"by") VALUES ('evidence','${saved.memo_id}',5,'','**','format','person')`,
       `INSERT INTO memo_changes(user_id,memo_id,n,"before","after",about) VALUES ('evidence','${saved.memo_id}',5,'a','b','voice')`,

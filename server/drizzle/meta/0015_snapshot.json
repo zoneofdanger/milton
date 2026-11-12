@@ -549,7 +549,7 @@
         },
         "memo_changes_tweak": {
           "name": "memo_changes_tweak",
-          "value": "\"memo_changes\".\"tweak_id\" IS NULL OR (\"memo_changes\".\"about\" = 'voice' AND \"memo_changes\".\"by\" IN ('person','asked'))"
+          "value": "\"memo_changes\".\"tweak_id\" IS NULL OR (\"memo_changes\".\"about\" = 'voice' AND \"memo_changes\".\"by\" IN ('person','asked')) IS TRUE"
         }
       },
       "isRLSEnabled": false

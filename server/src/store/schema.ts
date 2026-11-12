@@ -519,7 +519,8 @@ export const memoChanges = pgTable(
     ),
     check(
       "memo_changes_tweak",
-      sql`${t.tweakId} IS NULL OR (${t.about} = 'voice' AND ${t.by} IN ('person','asked'))`,
+      // IS TRUE: with about and by NULL the test is NULL, which a CHECK passes.
+      sql`${t.tweakId} IS NULL OR (${t.about} = 'voice' AND ${t.by} IN ('person','asked')) IS TRUE`,
     ),
   ],
 );

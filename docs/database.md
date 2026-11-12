@@ -126,7 +126,8 @@ production order and snapshots are in [migrations](deploy/migrations.md).
   `memo_changes` rows (key: account, memo, `n` from 0 to 119) cascade from their memo;
   each side is at most 300 characters and not both empty, offsets come in start/end
   pairs with start at most end, `by` is set exactly when `about` is `voice` or
-  `content`, and a tweak sits only on a voice change by the person or asked for. A
+  `content`, and a tweak sits only on a voice change by the person or asked for (the
+  check is `IS TRUE`, so a row without labels, where the test is NULL, holds none). A
   row's tweak references its memo's citation (`(user_id, memo_id, tweak_id)` →
   `tweak_citations`), so it is always one the memo cites, and deleting the tweak sets
   only `tweak_id` to null (PostgreSQL 15's column list).

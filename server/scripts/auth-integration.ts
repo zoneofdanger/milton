@@ -2220,6 +2220,92 @@ try {
     assert.deepEqual(await usageRows(saverId, leaving), [saverId]);
     await owner.query("DELETE FROM users WHERE id=$1", [saverId]);
   }
+  stage = "a boundary refusal's receipt lookup waits for a same-id save";
+  {
+    // A save holds the account lock under a request id, paused before its
+    // receipt is written. A stale save under the same id is refused for a
+    // removed field; its receipt lookup takes the same lock, so it waits for
+    // the save, then sees the receipt and keeps the ask-the-person words.
+    const racer = "m_00000000-0000-4000-8000-0000000000c9";
+    await owner.query("INSERT INTO users(id) VALUES($1)", [racer]);
+    await owner.query(
+      "INSERT INTO identities(provider,subject,user_id) VALUES('fictional-race','racer',$1)",
+      [racer],
+    );
+    await owner.query(
+      "INSERT INTO trial_accounts(user_id,started_at,subscription_status) VALUES($1,now(),'active')",
+      [racer],
+    );
+    const dialect = new PgDialect();
+    const base = postgresDatabase(mcpConfig.DATABASE_URL);
+    let pauseSave = true;
+    let locked!: () => void, resume!: () => void;
+    const saveLocked = new Promise<void>((resolve) => (locked = resolve));
+    const resumed = new Promise<void>((resolve) => (resume = resolve));
+    const pausing = (session: StoreSession): StoreSession => ({
+      async query<Row extends Record<string, unknown>>(statement: SQL) {
+        const rows = await session.query<Row>(statement);
+        if (
+          pauseSave &&
+          / FOR NO KEY UPDATE$/.test(dialect.sqlToQuery(statement).sql)
+        ) {
+          pauseSave = false;
+          locked();
+          await resumed;
+        }
+        return rows;
+      },
+    });
+    const auth = await lookupIdentityAccount(mcpConfig, {
+      provider: "fictional-race",
+      subject: "racer",
+    });
+    const actor = { issuer: "fixture", clientId: "fictional-racer" };
+    const saver = await storeForCurrentRequest(
+      {
+        ...mcpConfig,
+        storeDatabase: {
+          ...base,
+          transaction: (work) => base.transaction((tx) => work(pausing(tx))),
+        },
+      },
+      auth,
+      actor,
+    );
+    const stale = await storeForCurrentRequest(mcpConfig, auth, actor);
+    const requestId = randomUUID();
+    const context = {
+      summary: "Fictional race note",
+      medium: "email" as const,
+    };
+    const saving = saver.saveMemo({
+      request_id: requestId,
+      memo: { final: "Fictional raced final.", context },
+    });
+    await saveLocked;
+    const refusal = stale
+      .saveMemo({
+        request_id: requestId,
+        memo: { final: "Fictional raced final.", context, rounds: 1 },
+      } as never)
+      .then(
+        () => "saved",
+        (error: { details?: { field?: string } }) => error.details?.field,
+      );
+    const early = await within(refusal, 500);
+    resume();
+    assert.equal(early, "waited", "the lookup waits for the save's lock");
+    assert.equal((await saving).status, "saved");
+    assert.equal(
+      await refusal,
+      "removed",
+      "after the save commits, the lookup sees its receipt",
+    );
+    await owner.query("DELETE FROM users WHERE id=$1", [racer]);
+  }
+  pass(
+    "a removed-field refusal's receipt lookup takes the account lock, waits for a same-id save holding it on another connection, and then sees its receipt",
+  );
   stage = "read-only native authorization";
   const readGrant = await authorizeAssistant(
     "openid offline_access milton:read",

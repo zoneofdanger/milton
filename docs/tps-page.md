@@ -66,6 +66,10 @@ What each change does to memos, tweaks and the cover sheet is in [memos](memos.m
   says only spacing or line breaks changed, never that nothing did. A memo saved
   before changes were listed, or without a kept first draft, has no "What changed".
   There is no typed share and no tweak line on a change.
+- Under the list, a memo whose changes a report may serve (the report's own
+  `servesChanges` and `servableRow`, [reports](reports.md#what-they-changed)) says "Your
+  AIs may see a few of these changes when this memo is used as an example." "May",
+  because which changes a report serves depends on its budget. Other memos say nothing.
 - The cover sheet is shown read only, one ruled line per line as written, blank lines
   kept, with a note that an AI connected with Read and write changes it; an empty one
   says "No cover sheet yet." and how to start one. There is no cover sheet form

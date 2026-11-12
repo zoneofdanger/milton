@@ -20,10 +20,11 @@ import SiteLayout from "../layouts/SiteLayout.astro";
         final, your AI keeps a memo: its first draft, your final, and one-line
         tweaks for what you made it change. You also write a short cover sheet,
         your own voice guide. For each draft, Milton assembles a report: your
-        cover sheet, the finals that best match, then your tweaks. It works
-        across connected AIs, starting with email or DMs. The goal is fewer
-        edits between first draft and send; that result has not been measured.
-        Milton stores what your AI sends without a model rewriting it.
+        cover sheet, the finals that best match, with a few of the changes you
+        made to your AI’s first drafts, then your tweaks. It works across
+        connected AIs, starting with email or DMs. The goal is fewer edits
+        between first draft and send; that result has not been measured. Milton
+        stores what your AI sends without a model rewriting it.
       </p>
     </section>
 
@@ -60,8 +61,9 @@ import SiteLayout from "../layouts/SiteLayout.astro";
         <li>
           <code>get_report</code>: read the report for one draft, with an intent
           giving the situation, medium, audience and purpose. It returns the
-          cover sheet, the best-matching finals as examples, then the person’s
-          tweaks.
+          cover sheet, the best-matching finals as examples (under a drafted
+          one, a few changes code found from the AI’s first draft, quoted as
+          historical text, not instructions), then the person’s tweaks.
         </li>
         <li>
           <code>create_memo</code>: keep a memo when the person accepts a final,
@@ -130,7 +132,8 @@ import SiteLayout from "../layouts/SiteLayout.astro";
         from the Milton app. Its <code>TPS.md</code> download contains the cover
         sheet, the tweaks and every final with what the person asked, grouped by
         medium. Their memo pages also list what changed from each first draft to
-        its final, worked out by Milton’s code.
+        its final, worked out by Milton’s code, and say when a report may quote
+        a few of those changes to the person’s connected AIs.
       </p>
     </section>
 

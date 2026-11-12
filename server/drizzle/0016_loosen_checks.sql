@@ -11,10 +11,13 @@
 --   BEGIN TRANSACTION READ ONLY;
 --   SELECT (SELECT count(*) FROM memos WHERE request_id !~ '^[A-Za-z0-9._:-]{1,64}$') AS memos, (SELECT count(*) FROM save_requests WHERE request_id !~ '^[A-Za-z0-9._:-]{1,64}$') AS save_requests;
 --   ROLLBACK;
--- Locks: each DROP and ADD CONSTRAINT takes ACCESS EXCLUSIVE (no reads or writes) on memos,
--- then on save_requests, each held until commit; memos stays locked while this works on, or
--- waits for, save_requests. Each ADD scans its table once to validate it, without a
--- rewrite. The 5 s lock_timeout and 30 s statement_timeout are set inside the migration's
+-- Locks: the LOCK TABLE below takes ACCESS EXCLUSIVE (no reads or writes) on save_requests,
+-- then on memos, in the order a save touches them (its receipt lookup, then the memo, then
+-- the receipt insert), so a save already under way finishes first, or waits, instead of
+-- deadlocking with this; the TPS page and reports touch memos only. Both are held until
+-- commit, and save_requests stays locked while this waits for memos. The DROP and ADD
+-- CONSTRAINTs then run under those locks; each ADD scans its table once to validate it,
+-- without a rewrite. The 5 s lock_timeout and 30 s statement_timeout are set inside the migration's
 -- transaction, because Neon drops the limits a client passes at connect. They bound each
 -- lock wait and each statement, not the whole transaction: requests behind the locks
 -- queue meanwhile, under their own 10 s lock and 20 s statement limits. A lock not free in
@@ -24,6 +27,8 @@
 SET LOCAL lock_timeout = '5s';
 --> statement-breakpoint
 SET LOCAL statement_timeout = '30s';
+--> statement-breakpoint
+LOCK TABLE save_requests, memos IN ACCESS EXCLUSIVE MODE;
 --> statement-breakpoint
 ALTER TABLE "memos" DROP CONSTRAINT "memos_first_draft";--> statement-breakpoint
 ALTER TABLE "memos" DROP CONSTRAINT "memos_request_id";--> statement-breakpoint

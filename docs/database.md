@@ -131,6 +131,12 @@ production order and snapshots are in [migrations](deploy/migrations.md).
   row's tweak references its memo's citation (`(user_id, memo_id, tweak_id)` →
   `tweak_citations`), and deleting the tweak sets only `tweak_id` to null (PostgreSQL
   15's column list).
+- `0016` loosened three checks, ahead of code that needs them: `memos_first_draft` lets a
+  kept or missing first draft go without `rounds` (a memo with no first draft still has
+  none), and `memos_request_id` and `save_request_id` take any `request_id` of 1 to 64
+  ASCII letters, digits and `.`, `_`, `:`, `-` (`^[A-Za-z0-9._:-]{1,64}$`) instead of
+  exactly 36 characters. Today's code still writes only UUIDs, and rounds whenever there
+  is a first draft.
 - In this release the save writes only code's rows: offsets, the two cut sides,
   `truncated`, and `about` = `format` for a Markdown-only spot, else NULL. The label
   columns (`by`, and `about`'s `voice` and `content`) and `tweak_id` exist but are
@@ -158,7 +164,7 @@ production order and snapshots are in [migrations](deploy/migrations.md).
 
 ## Migrations
 
-- There are three tracks: Drizzle (`server/drizzle/`, `0000` to `0015`), owner files
+- There are three tracks: Drizzle (`server/drizzle/`, `0000` to `0016`), owner files
   (`server/migrations/`, numbered up to `016`) and native auth (`apps/auth/migrations/`,
   `000` to `008`).
 - Fresh installs use one Drizzle baseline (`0000_baseline.sql`: the original 14 tables,
@@ -177,6 +183,9 @@ production order and snapshots are in [migrations](deploy/migrations.md).
   replay still returns its stored outcome. `0014_drop_source_hash` dropped
   `save_requests.source_hash`. `0015_memo_evidence` added `memo_changes`,
   `memos.request`, `memos.changes_state` and `tweaks.text_changed_at`, additive.
+  `0016_loosen_checks` replaced the three checks above, validating rows without
+  rewriting them; it runs with traffic open after the request-id preflight in
+  [migrations](deploy/migrations.md#additive-and-incompatible-changes).
 - The unread `deleted_identities` table (`0005`), the legacy mapping tables (owner file
   `008`), the generated `payload_bytes` columns (`0006`), the daily allowance's
   `usage_daily` table and `daily_calls` key (`0008`) and the app session's stored native

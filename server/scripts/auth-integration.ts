@@ -44,6 +44,8 @@ import {
   type StoreSession,
 } from "../src/store/database";
 import { PgDialect } from "drizzle-orm/pg-core";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { migrate } from "drizzle-orm/node-postgres/migrator";
 import {
   database,
   lockActiveAccount,
@@ -394,6 +396,179 @@ try {
   );
   assert.deepEqual(await trialTableGrants(), []);
   pass("0005 and 008 drop the unread trial tables, leaving no grants behind");
+  // 0016 through Drizzle's migrator, as db:migrate runs it, on a database of
+  // its own at 0015, against a second connection: it locks save_requests then
+  // memos first, in a save's order, so a save under way finishes instead of
+  // deadlocking; a held table fails it in its 5 s lock limit, leaving the old
+  // checks and journal; every statement runs under both of its limits.
+  stage = "0016 lock order and lock limits";
+  {
+    await admin.query("CREATE DATABASE milton_0016");
+    const folder = join(root, "drizzle-0016");
+    cpSync(new URL("./drizzle/", sourceRoot), folder, { recursive: true });
+    const entries = journal.entries;
+    const at = entries.findIndex((e) => e.tag.startsWith("0016_"));
+    assert.ok(at > 0, "the journal lists 0016");
+    const through = (count: number) =>
+      writeFileSync(
+        join(folder, "meta/_journal.json"),
+        JSON.stringify({ ...journal, entries: entries.slice(0, count) }),
+      );
+    // The runner's connection: its 20 s statement limit at connect, which
+    // the migration's own limits must undercut.
+    const connect = async (statement_timeout?: number) => {
+      const c = new pg.Client({
+        host: root,
+        port,
+        user: "disposable_cluster",
+        database: "milton_0016",
+        ...(statement_timeout ? { statement_timeout } : {}),
+      });
+      await c.connect();
+      return c;
+    };
+    const runner = await connect(20000),
+      other = await connect();
+    const run = () =>
+      migrate(drizzle(runner), { migrationsFolder: folder }).then(
+        () => ({ ok: true as const }),
+        (e: { cause?: { code?: string } }) => ({
+          ok: false as const,
+          code: e.cause?.code,
+        }),
+      );
+    try {
+      through(at);
+      assert.deepEqual(await run(), { ok: true });
+      const person = "m_00000000-0000-4000-8000-000000000016";
+      await other.query("INSERT INTO users(id) VALUES($1)", [person]);
+      // Records the limits each later DDL statement runs under.
+      await other.query(
+        `CREATE TABLE ddl_limits(command text, statement_limit text, lock_limit text);
+         CREATE FUNCTION ddl_limits() RETURNS event_trigger LANGUAGE plpgsql AS $$
+         BEGIN
+           INSERT INTO ddl_limits SELECT tg_tag, current_setting('statement_timeout'), current_setting('lock_timeout');
+         END $$;
+         CREATE EVENT TRIGGER ddl_limits ON ddl_command_end EXECUTE FUNCTION ddl_limits();`,
+      );
+      const checks = async () =>
+        (
+          await other.query(
+            "SELECT conname,pg_get_constraintdef(oid) def FROM pg_constraint WHERE conname IN ('memos_first_draft','memos_request_id','save_request_id') ORDER BY 1",
+          )
+        ).rows;
+      const applied = async () =>
+        (
+          await other.query(
+            "SELECT id,hash,created_at FROM drizzle.__drizzle_migrations ORDER BY id",
+          )
+        ).rows;
+      const oldChecks = await checks(),
+        oldJournal = await applied();
+      assert.equal(oldJournal.length, at);
+      const runnerPid = (await runner.query("SELECT pg_backend_pid() pid"))
+        .rows[0].pid;
+      // The runner's locks on the two tables, once it waits for one.
+      const waiting = async () => {
+        for (let n = 0; n < 500; n++) {
+          const rows = (
+            await other.query(
+              "SELECT relation::regclass::text tbl,mode,granted FROM pg_locks WHERE pid=$1 AND relation IN ('memos'::regclass,'save_requests'::regclass) ORDER BY 1",
+              [runnerPid],
+            )
+          ).rows;
+          if (rows.some((r) => !r.granted)) return rows;
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        throw new Error("0016_never_waited");
+      };
+      through(at + 1);
+      for (const [held, locks] of [
+        [
+          "save_requests",
+          [
+            {
+              tbl: "save_requests",
+              mode: "AccessExclusiveLock",
+              granted: false,
+            },
+          ],
+        ],
+        [
+          "memos",
+          [
+            { tbl: "memos", mode: "AccessExclusiveLock", granted: false },
+            {
+              tbl: "save_requests",
+              mode: "AccessExclusiveLock",
+              granted: true,
+            },
+          ],
+        ],
+      ] as const) {
+        // An open write transaction on one table.
+        await other.query(`BEGIN; LOCK TABLE ${held} IN ROW EXCLUSIVE MODE`);
+        const started = Date.now();
+        const failed = run();
+        assert.deepEqual(await waiting(), locks, `0016 waits on ${held}`);
+        const result = await failed;
+        const elapsed = Date.now() - started;
+        await other.query("ROLLBACK");
+        assert.deepEqual(result, { ok: false, code: "55P03" });
+        assert.ok(
+          elapsed >= 4500 && elapsed < 10000,
+          `0016's lock limit fired at ${elapsed} ms`,
+        );
+        assert.deepEqual(await checks(), oldChecks);
+        assert.deepEqual(await applied(), oldJournal);
+      }
+      // A save under way: its receipt lookup, then, while 0016 waits, its
+      // memo and receipt inserts. It commits, then 0016 does.
+      const request = randomUUID();
+      await other.query("BEGIN; SET LOCAL lock_timeout = '10s'");
+      await other.query(
+        "SELECT 1 FROM save_requests WHERE user_id=$1 AND request_id=$2",
+        [person, request],
+      );
+      const migrated = run();
+      await waiting();
+      await other.query(
+        "INSERT INTO memos(user_id,id,medium,summary,first_draft_state,final,tier,client_json,request_id) VALUES ($1,$2,'email','a fictional note','none','Fictional final.','own','{}',$3)",
+        [person, randomUUID(), request],
+      );
+      await other.query(
+        `INSERT INTO save_requests(user_id,request_id,input_hash,result_json) VALUES ($1,$2,repeat('a',64),'{"status":"saved"}')`,
+        [person, request],
+      );
+      await other.query("COMMIT");
+      assert.deepEqual(await migrated, { ok: true });
+      assert.equal((await applied()).length, at + 1);
+      assert.notDeepEqual(await checks(), oldChecks);
+      assert.deepEqual(
+        (
+          await other.query(
+            "SELECT command,statement_limit,lock_limit,count(*)::int n FROM ddl_limits WHERE command='ALTER TABLE' GROUP BY 1,2,3",
+          )
+        ).rows,
+        [
+          {
+            command: "ALTER TABLE",
+            statement_limit: "30s",
+            lock_limit: "5s",
+            n: 6,
+          },
+        ],
+        "every 0016 statement runs under its 30 s statement and 5 s lock limits",
+      );
+    } finally {
+      await other.query("ROLLBACK").catch(() => {});
+      await Promise.allSettled([runner.end(), other.end()]);
+    }
+    await admin.query("DROP DATABASE milton_0016");
+  }
+  pass(
+    "0016 takes save_requests then memos first, so a save under way commits before it; a held table fails it in 5 s with the old checks and journal; its statements run under 30 s and 5 s limits",
+  );
   // 012 then 013: sessions no longer store the native access token, and the
   // column is gone. Rerunning each converges.
   const tokenColumn = async () =>

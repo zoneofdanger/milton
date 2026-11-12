@@ -21,8 +21,9 @@ are in [serving](serving.md); applied one-time migrations are recorded in
   step), record its name, and rehearse on a throwaway Neon branch or disposable database
   (`server/scripts/check-auth-integration.ts` applies the migrations on PostgreSQL 18; PR
   CI runs it as `integration`).
-- Run one migrator at a time, and open no other owner session while a migration runs (the
-  migrator's advisory lock keeps a second migrator out, but not owner DDL in another
+- Run one migrator at a time, and open no other owner session while a migration runs (one
+  migrator is the operator's rule: the Drizzle runner takes no advisory lock, and the
+  native auth migrator's keeps out only a second native run, never owner DDL in another
   session). No service migrates on startup.
 - Keep the owner URL only in the process environment (from `neonctl connection-string`,
   checked by role, database and host, then unset), never typed on a command line, never in
@@ -55,6 +56,29 @@ For an additive, backward-compatible migration, foreground traffic may stay open
 source publication remains atomic and version-fenced. Take a
 backup, check source parity, and verify the old runtime can still serve the resulting
 source schema before selecting the new revisions.
+
+A replaced check is additive only if every stored row passes the new one. Where the new
+check refuses a value the old one took, run a read-only preflight on production first:
+any row it finds stops the migration for Peter's decision. Drizzle `0016` is such a
+migration, run ahead of its code with traffic open: a 36-character `request_id` holding
+a character such as `/` passes its old checks and fails its new ones. Its preflight must
+return 0 and 0:
+
+```sql
+BEGIN TRANSACTION READ ONLY;
+SELECT (SELECT count(*) FROM memos WHERE request_id !~ '^[A-Za-z0-9._:-]{1,64}$') AS memos, (SELECT count(*) FROM save_requests WHERE request_id !~ '^[A-Za-z0-9._:-]{1,64}$') AS save_requests;
+ROLLBACK;
+```
+
+Before `0016`, also record both tables' row counts and sizes, and compare the applied
+journal with the checkout to prove exactly `0016` pending
+(`SELECT count(*), max(created_at) FROM drizzle.__drizzle_migrations;` returns 16 and
+`0015`'s `when`, 1794423465584). It locks `save_requests` and then `memos`
+in `ACCESS EXCLUSIVE` mode first, the order a save touches them, and holds both until it
+commits, scanning `memos` twice and `save_requests` once; rehearsed on PostgreSQL 18 with
+50,000 rows in each (80 MB and 26 MB), the locks were held for about 0.7 s. A save already
+under way finishes before it, and a new one waits for it. A lock not free within 5 s fails
+it whole, with the old checks and journal kept; rerun it.
 
 ## The runners
 

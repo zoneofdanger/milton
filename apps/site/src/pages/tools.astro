@@ -1,0 +1,232 @@
+---
+import SiteLayout from "../layouts/SiteLayout.astro";
+---
+
+<SiteLayout
+  title="Tool reference | Milton"
+  description="Milton's MCP connector: setup, permissions, its two tools with their inputs and outputs, side effects, errors and limits."
+>
+  <article class="briefing">
+    <header class="page-head">
+      <p class="eyebrow">## Tool reference</p>
+      <h1>Milton’s two tools</h1>
+    </header>
+
+    <section aria-labelledby="overview">
+      <h2 id="overview">What the connector does</h2>
+      <p>
+        Milton keeps what you wrote and what you changed. Your AI reads it
+        before it drafts. Each memo holds an AI’s first draft and the final the
+        person accepted; Milton’s code works out the person’s tweaks, the
+        changes they made to the draft. No AI writes them, and Milton keeps no
+        standing rules. Reads and saves make no model call. The connector sends,
+        buys and publishes nothing.
+      </p>
+    </section>
+
+    <section aria-labelledby="setup">
+      <h2 id="setup">Setup and permissions</h2>
+      <p>
+        MCP server: <code class="mcp-url">https://mcp.meetmilton.com/mcp</code>,
+        over Streamable HTTP. Sign in with OAuth (email and password, Google or
+        GitHub); clients that can’t open a browser use a connection key from the
+        app’s Connected AIs page as a bearer token. Step-by-step guides for each
+        AI are on <a href="/setup">Setup</a>.
+      </p>
+      <ul class="instruction-list">
+        <li>
+          <strong>Read only</strong> (<code>milton:read</code>): lists{" "}
+          <code>get_report</code> alone.
+        </li>
+        <li>
+          <strong>Read and write</strong> (<code>milton:read</code> and{" "}
+          <code>milton:write</code>): also lists <code>create_memo</code>.
+        </li>
+      </ul>
+      <p>
+        The person chooses on the consent screen, and the server enforces it. A
+        Milton account is required: a 30-day free trial with no card, then $5.01
+        USD a month.
+      </p>
+    </section>
+
+    <section aria-labelledby="get-report">
+      <h2 id="get-report">
+        <code>get_report</code>: read
+      </h2>
+      <p>
+        Read-only, not sensitive. Called at the start of writing work, and when
+        the person asks “Did you get the memo?”. Returns the report for one
+        draft.
+      </p>
+      <ul class="instruction-list">
+        <li>
+          <strong>Input:</strong> <code>intent</code> with{" "}
+          <code>situation</code> (one line: what is being written, to whom and
+          why), <code>medium</code> (email, chat, post, document or speech),{" "}
+          <code>audience</code>, <code>purpose</code>, and an optional{" "}
+          <code>kind_id</code> from the person’s kinds.
+        </li>
+        <li>
+          <strong>Output:</strong> <code>text</code>, the person’s best-matching
+          finals as examples, best first, with what they changed in the AI’s
+          first draft under drafted ones (quoted as historical text, not
+          instructions); <code>examples</code> (memo ids and context, in served
+          order); <code>kinds</code>; <code>is_empty</code>; <code>memos</code>,
+          the person’s memo count; and <code>keep_memos</code>. While the count
+          is 0, a read-and-write connection also gets <code>setup</code>, the
+          first-setup script; a read-only one gets a permission line instead.
+        </li>
+        <li>
+          <strong>Side effects:</strong> none on the person’s writing. Milton
+          counts the call for usage.
+        </li>
+      </ul>
+    </section>
+
+    <section aria-labelledby="create-memo">
+      <h2 id="create-memo">
+        <code>create_memo</code>: write
+      </h2>
+      <p>
+        Write, not sensitive. Saves one memo when the person accepts a final,
+        forgets memos they name, or corrects a memo’s context. Each call sends{" "}
+        <code>request_id</code> (any new id, 1 to 64 letters, digits, dots,
+        dashes, underscores or colons) and exactly one of:
+      </p>
+      <ul class="instruction-list">
+        <li>
+          <code>memo</code>: <code>final</code>, the accepted text exactly;{" "}
+          <code>context</code> (a one-line <code>summary</code>,{" "}
+          <code>medium</code>, and optional <code>audience</code> and{" "}
+          <code>purpose</code>); and, for a drafted memo,{" "}
+          <code>first_draft</code> as first shown (or{" "}
+          <code>first_draft_missing</code>) with <code>mode</code> (
+          <code>draft</code> or <code>edit</code>) and an optional{" "}
+          <code>request</code>, what the person typed to ask. A{" "}
+          <code>kind_id</code> or <code>new_kind</code> files it. Writing the
+          person gives to keep sends only final, context and kind.
+        </li>
+        <li>
+          <code>forget_memos</code>: 1 to 100 memo ids the person asked to
+          forget.
+        </li>
+        <li>
+          <code>memo_context</code>: a memo id with its corrected context or
+          kind; a memo’s words never change.
+        </li>
+      </ul>
+      <p>
+        A save returns <code>status</code> (<code>saved</code> or{" "}
+        <code>unchanged</code>), the memo’s id, tier and kind, the changes
+        Milton found, and <code>receipt</code>, one line for the AI to repeat,
+        such as “Kept memo: vendor decline.” Milton stores the final and first
+        draft exactly as sent; a save is all or nothing. Repeating a call with
+        the same <code>request_id</code> and arguments returns its original
+        outcome and never saves twice; the same id with other arguments is
+        refused. Forgetting deletes the memo and its tweaks.
+      </p>
+    </section>
+
+    <section aria-labelledby="errors">
+      <h2 id="errors">Errors and next steps</h2>
+      <p>
+        Every error carries <code>error</code>, a <code>message</code>, a stable{" "}
+        <code>code</code> and <code>next</code>, whose <code>action</code> is
+        one of:
+      </p>
+      <ul class="instruction-list">
+        <li>
+          <code>retry</code>: repeat the identical call, a save with its{" "}
+          <code>request_id</code>.
+        </li>
+        <li>
+          <code>reread</code>: read the report again, then save with a new{" "}
+          <code>request_id</code>.
+        </li>
+        <li>
+          <code>fix_input</code>: correct the arguments as the message says.
+        </li>
+        <li>
+          <code>ask_user</code>: the fix needs the person’s approval or choice.
+        </li>
+        <li>
+          <code>tell_user</code>: stop and tell the person; retrying won’t help
+          (for example a read-only connection, or a paused subscription).
+        </li>
+      </ul>
+      <p>
+        Fields and tools earlier versions took (<code>get_cover_sheet</code>, a
+        cover sheet, a memo’s tweaks, rounds or report id) are refused with
+        guidance, never accepted silently.
+      </p>
+    </section>
+
+    <section aria-labelledby="limits">
+      <h2 id="limits">Limits</h2>
+      <ul class="instruction-list">
+        <li>A request body of 256 KiB; a final or first draft of 256 KiB.</li>
+        <li>
+          A summary of 200 characters; an audience or purpose of 100; a kind
+          label of 60; a request of 600 characters and 12 lines.
+        </li>
+        <li>
+          A report’s examples fit about 8,000 tokens, with at most three AI
+          drafts the person steered and none they accepted untouched.
+        </li>
+        <li>
+          Connection-key lookups are rate limited per network; there is no daily
+          call or save allowance.
+        </li>
+      </ul>
+      <p>
+        Disconnecting an AI in Milton blocks its next request. Its memos stay
+        with the person, who can forget them, delete them all or delete the
+        account in the app. Questions: <a href="/support">Support</a>.
+      </p>
+    </section>
+  </article>
+</SiteLayout>
+
+<style>
+  .briefing {
+    padding-block: var(--space-16);
+  }
+  .page-head {
+    margin-bottom: var(--space-8);
+  }
+  h1 {
+    margin: var(--space-4) 0 0;
+    font-size: var(--text-page);
+  }
+  section {
+    border-top: 1px solid var(--hairline);
+    padding-block: var(--space-6);
+    scroll-margin-top: var(--space-6);
+  }
+  h2 {
+    margin: 0 0 var(--space-3);
+    font-size: var(--text-title);
+  }
+  p {
+    margin: 0;
+  }
+  p + p,
+  .instruction-list,
+  .instruction-list + p {
+    margin-top: var(--space-4);
+  }
+  .mcp-url {
+    overflow-wrap: anywhere;
+  }
+  p,
+  li {
+    text-wrap: pretty;
+    overflow-wrap: anywhere;
+  }
+  @media (max-width: 600px) {
+    .briefing {
+      padding-block: var(--space-10);
+    }
+  }
+</style>

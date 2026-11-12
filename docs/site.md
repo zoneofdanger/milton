@@ -29,9 +29,14 @@ Local commands and landing content are in [apps/site/README.md](../apps/site/REA
 
 - Every static page, including 404, shows the same shared footer navigation, and every
   page loads Vercel Analytics.
-- `/for-agents` serves a static product briefing, alternatives, the three tools, when
+- `/for-agents` serves a static product briefing, alternatives, the two tools, when
   memos are saved, export, price, evidence limits and an optional first writing task in
   the initial HTML.
+- `/tools` is the public connector reference the AI directories ask for: setup and
+  permissions (Read only, Read and write), `get_report` and `create_memo` with their
+  inputs, outputs and side effects, the error `next` actions, the retired calls refused,
+  and limits. `/support` gives the support address, what to include, and how to delete
+  an account. Both are linked from the footer.
 - Every page's header holds the brand, "How it works", "Pricing" and a "Sign in" text link
   to the app; on screens 600px wide or less it is one row, the brand and "Sign in".
 - The homepage, top to bottom: the headline band with the intro and the "Try Milton free"

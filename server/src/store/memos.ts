@@ -7,7 +7,6 @@ import { accountUnavailable } from "./accounts";
 import { StoreError } from "./errors";
 import { utf8Bytes } from "./limits";
 import { tokens, type Tier } from "./score";
-import { exampleLine } from "./changes";
 
 export const MEDIA = ["email", "chat", "post", "document", "speech"] as const;
 export type Medium = (typeof MEDIA)[number];
@@ -25,10 +24,6 @@ export const MAX_STEERED = 3;
 /** Tweaks come from this many best-matching memos, at most this many served. */
 export const TWEAK_MEMOS = 10;
 export const MAX_TWEAKS = 10;
-/** Tweak examples fill in served order within this many UTF-8 bytes (about
- * 10% of a full report), each side at most EXAMPLE_SIDE characters. */
-export const TWEAK_EXAMPLE_BUDGET = 3072;
-export const EXAMPLE_SIDE = 160;
 
 export type ReportIntent = {
   situation: string;
@@ -264,28 +259,6 @@ export function selectTweaks(
     });
 }
 
-/** One example line per served tweak, in served order within the budget:
- * first the tweaks needed again at least once, then the rest. A tweak whose
- * example doesn't fit, or that has none, is printed without one. */
-export function selectTweakExamples(
-  served: { tweak_id: string; needed_again: number }[],
-  examples: Map<string, string>,
-  budget = TWEAK_EXAMPLE_BUDGET,
-) {
-  const chosen = new Map<string, string>();
-  for (const pass of [true, false])
-    for (const t of served) {
-      const line = examples.get(t.tweak_id);
-      if (!line || chosen.has(t.tweak_id) || t.needed_again >= 1 !== pass)
-        continue;
-      const size = utf8Bytes(`  ${line}\n`);
-      if (size > budget) continue;
-      budget -= size;
-      chosen.set(t.tweak_id, line);
-    }
-  return chosen;
-}
-
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
 export const EMPTY_REPORT =
   "Nothing similar is on file yet. Write from the cover sheet and the request, and don't claim to know the person's voice.";
@@ -341,33 +314,14 @@ export async function readReport(
   const scores = new Map(row.tweaks.map((t) => [t.id, t]));
   const tweaks = selectTweaks(ranked, scores);
   const reportId = randomUUID();
-  const tweakIds = sql.param(tweaks.map((t) => t.tweak_id));
-  // Each served tweak's example: among the voice changes naming it with both
-  // sides short enough, the newest from the intent's medium, else the newest.
-  const fetched = (
-    await session.query<{
-      finals: { id: string; final: string }[];
-      examples: { tweak_id: string; before: string; after: string }[];
-    }>(sql`WITH served AS (
+  const finals = new Map(
+    (
+      await session.query<{ id: string; final: string }>(sql`WITH served AS (
         INSERT INTO served_reports(user_id,id,tweak_ids)
-        VALUES (${userId},${reportId},${tweakIds}::text[]))
-      SELECT (SELECT coalesce(json_agg(json_build_object('id',id,'final',final)),'[]'::json)
-          FROM memos WHERE user_id=${userId}
-          AND id=ANY(${sql.param(examples.map((m) => m.id))}::text[])) AS finals,
-        (SELECT coalesce(json_agg(json_build_object('tweak_id',e.tweak_id,'before',e.before,'after',e.after)),'[]'::json)
-          FROM (SELECT DISTINCT ON (c.tweak_id) c.tweak_id,c."before" AS before,c."after" AS after
-            FROM memo_changes c JOIN memos m ON m.user_id=c.user_id AND m.id=c.memo_id
-            WHERE c.user_id=${userId} AND c.tweak_id=ANY(${tweakIds}::text[]) AND c.about='voice'
-              AND char_length(c."before")<=${EXAMPLE_SIDE} AND char_length(c."after")<=${EXAMPLE_SIDE}
-            ORDER BY c.tweak_id,(m.medium=${intent.medium}) DESC,m.created_at DESC,m.id,c.n) e) AS examples`)
-  )[0]!;
-  const finals = new Map(fetched.finals.map((m) => [m.id, m.final]));
-  const tweakExamples = selectTweakExamples(
-    tweaks.map((t) => ({
-      tweak_id: t.tweak_id,
-      needed_again: scores.get(t.tweak_id)!.needed_again,
-    })),
-    new Map(fetched.examples.map((e) => [e.tweak_id, exampleLine(e)])),
+        VALUES (${userId},${reportId},${sql.param(tweaks.map((t) => t.tweak_id))}::text[]))
+        SELECT id,final FROM memos WHERE user_id=${userId}
+          AND id=ANY(${sql.param(examples.map((m) => m.id))}::text[])`)
+    ).map((m) => [m.id, m.final]),
   );
   const served = examples.filter((m) => finals.has(m.id));
   const cover = row.cover?.text.trim() ? row.cover.text : "";
@@ -386,12 +340,11 @@ export async function readReport(
     ...(tweaks.length
       ? [
           "# Your tweaks",
-          `What the person made an AI change in similar memos, best match first. ${tweakExamples.size ? '"was → now" shows a change the person made; ' : ""}"needed again" counts drafts that were given the tweak and still needed it.`,
+          'What the person made an AI change in similar memos, best match first. "needed again" counts drafts that were given the tweak and still needed it.',
           tweaks
             .map((t) => {
               const { served, needed_again } = scores.get(t.tweak_id)!;
-              const example = tweakExamples.get(t.tweak_id);
-              return `- ${t.text} (${plural(t.memos, "memo")}${needed_again ? `; needed again ${needed_again} of ${served}` : ""})${example ? `\n  ${example}` : ""}`;
+              return `- ${t.text} (${plural(t.memos, "memo")}${needed_again ? `; needed again ${needed_again} of ${served}` : ""})`;
             })
             .join("\n"),
         ]

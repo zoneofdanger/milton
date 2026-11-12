@@ -4,15 +4,13 @@ import {
   fixtureStore,
   memoSave,
   seedUsers,
-  teach,
   vendorIntent,
 } from "./store-fixtures";
 import { change, scoreboard, tier } from "../src/store/score";
 import { tpsStore } from "../src/store/tps";
-import type { ChangeInput, MemoInput } from "../src/mcp-tools";
-import { changeList, exampleLine } from "../src/store/changes";
+import type { MemoInput } from "../src/mcp-tools";
+import { changeList, MAX_CHANGED_TOKENS } from "../src/store/changes";
 import { checkMemo } from "../src/store/save";
-import { selectTweakExamples } from "../src/store/memos";
 
 const draft =
   "Hi there! Hope your week is going well. Thanks so much for reaching out about a call. Unfortunately we won't be able to make Thursday work, but we'd love to stay in touch.";
@@ -29,11 +27,10 @@ test("a memo keeps both drafts word for word, scores the change, sets its tier a
       mode: "draft",
       rounds: 2,
       new_kind: "vendor decline",
-      changes: teach(
-        "Hi there!",
+      tweaks: [
         { text: "Vendor replies: no warm-up opener." },
         { text: "declines: 2–3 sentences" },
-      ),
+      ],
     });
     const saved = await store.saveMemo(input);
     expect(saved).toMatchObject({
@@ -123,7 +120,7 @@ test("tiers come from the memo's source; shapes that contradict it are refused b
     await seedUsers(local.pg, "u");
     const store = fixtureStore(local.db, "u");
     const cases: [Partial<MemoInput>, RegExp][] = [
-      [{ mode: "draft" }, /takes no mode, rounds or changes/],
+      [{ mode: "draft" }, /takes no mode, rounds or tweaks/],
       [{ first_draft: draft }, /send mode/],
       [
         {
@@ -131,9 +128,9 @@ test("tiers come from the memo's source; shapes that contradict it are refused b
           final,
           mode: "draft",
           rounds: 0,
-          changes: teach("Thanks", { text: "x" }),
+          tweaks: [{ text: "x" }],
         },
-        /nothing changed; omit changes/,
+        /teaches no tweaks/,
       ],
       [
         {
@@ -174,7 +171,7 @@ test("tweaks reuse ids and exact wordings, count citations, and forgetting a mem
         first_draft: draft,
         mode: "draft",
         rounds: 1,
-        changes: teach("Hi there!", { text: "No warm-up opener" }),
+        tweaks: [{ text: "No warm-up opener" }],
       }),
     );
     const opener = first.memo!.tweaks[0]!.tweak_id;
@@ -184,11 +181,7 @@ test("tweaks reuse ids and exact wordings, count citations, and forgetting a mem
         final: final + " ",
         mode: "draft",
         rounds: 1,
-        changes: teach(
-          "Hi there!",
-          { text: "no  warm-up opener." },
-          { text: "Sign off –P" },
-        ),
+        tweaks: [{ text: "no  warm-up opener." }, { text: "Sign off –P" }],
       }),
     );
     expect(second.memo!.tweaks.map((t) => t.tweak_id)).toContain(opener);
@@ -198,7 +191,7 @@ test("tweaks reuse ids and exact wordings, count citations, and forgetting a mem
         final: "Thanks. Not this time.\n\n–P",
         mode: "draft",
         rounds: 1,
-        changes: teach("Hi there!", { tweak_id: opener }),
+        tweaks: [{ tweak_id: opener }],
       }),
     );
     expect(third.memo!.tweaks).toEqual([
@@ -210,7 +203,7 @@ test("tweaks reuse ids and exact wordings, count citations, and forgetting a mem
         first_draft: draft,
         mode: "draft",
         rounds: 1,
-        changes: teach("Hi there!", { text: "Shorter" }),
+        tweaks: [{ text: "Shorter" }],
       }),
     );
     expect(
@@ -220,9 +213,7 @@ test("tweaks reuse ids and exact wordings, count citations, and forgetting a mem
           final: "No.",
           mode: "draft",
           rounds: 1,
-          changes: teach("Hi there!", {
-            tweak_id: foreign.memo!.tweaks[0]!.tweak_id,
-          }),
+          tweaks: [{ tweak_id: foreign.memo!.tweaks[0]!.tweak_id }],
         }),
       ),
     ).toMatchObject({ status: "failed", error: "invalid_tweak" });
@@ -250,13 +241,13 @@ test("tweaks reuse ids and exact wordings, count citations, and forgetting a mem
   }
 });
 
-test("an empty changes list and a null kind_id save as if omitted, and a retry sending them replays the omitted save", async () => {
+test("an empty tweaks list and a null kind_id save as if omitted, and a retry sending them replays the omitted save", async () => {
   const local = await localStore();
   try {
     await seedUsers(local.pg, "u");
     const store = fixtureStore(local.db, "u");
     // Sent by AI clients in testing (corpus-test, learning-test reports).
-    const lenient = { changes: [], kind_id: null as unknown as string };
+    const lenient = { tweaks: [], kind_id: null as unknown as string };
     const drafted = memoSave({ first_draft: draft, mode: "draft", rounds: 1 });
     const saved = await store.saveMemo(drafted);
     expect(saved).toMatchObject({ status: "saved", memo: { tweaks: [] } });
@@ -268,7 +259,7 @@ test("an empty changes list and a null kind_id save as if omitted, and a retry s
         memo: { ...drafted.memo!, ...lenient },
       }),
     ).toEqual(saved);
-    // Shapes that refuse changes accept [] as none: writing the person gave,
+    // Shapes that refuse tweaks accept [] as none: writing the person gave,
     // and a final equal to its first draft.
     expect(
       await store.saveMemo(memoSave({ final: "My own words.", ...lenient })),
@@ -476,11 +467,7 @@ test("a report serves tweaks from the ten best-matching memos that cite one, and
             summary: `memo ${i}`,
             medium: i < 11 ? "email" : "post",
           },
-          changes: teach(
-            "first",
-            { text: `tweak ${i}` },
-            { text: "shared tweak" },
-          ),
+          tweaks: [{ text: `tweak ${i}` }, { text: "shared tweak" }],
         }),
       );
     const report = await store.readReport(vendorIntent);
@@ -523,11 +510,7 @@ test("a tweak's served and needed-again counts come from kept-draft memos of its
         memoSave({ first_draft: draft, mode: "draft", rounds: 1, ...memo }),
       );
     const first = await drafted({
-      changes: teach(
-        "Hi there!",
-        { text: "No warm-up opener" },
-        { text: "Sign off –P" },
-      ),
+      tweaks: [{ text: "No warm-up opener" }, { text: "Sign off –P" }],
     });
     const opener = first.memo!.tweaks[0]!.tweak_id;
     // Served both and cited neither.
@@ -539,31 +522,23 @@ test("a tweak's served and needed-again counts come from kept-draft memos of its
     await drafted({
       final: "Thanks, no.",
       report_id: (await store.readReport(vendorIntent)).report_id,
-      changes: teach("Hi there!", { tweak_id: opener }),
+      tweaks: [{ tweak_id: opener }],
     });
-    // Without a kept first draft, a served and cited memo does not count
-    // (saves no longer let one cite a tweak; older memos may).
-    const missing = await store.saveMemo(
+    // Without a kept first draft, a served and cited memo does not count.
+    await store.saveMemo(
       memoSave({
         first_draft_missing: true,
         mode: "draft",
         rounds: 1,
         final: "We'll pass.",
         report_id: (await store.readReport(vendorIntent)).report_id,
+        tweaks: [{ tweak_id: opener }],
       }),
-    );
-    await local.pg.query(
-      "INSERT INTO tweak_citations(user_id,memo_id,tweak_id) VALUES ('u',$1,$2)",
-      [missing.memo!.memo_id, opener],
     );
     // Cited but not served.
     await drafted({
       final: "No, thanks.",
-      changes: teach(
-        "Hi there!",
-        { tweak_id: opener },
-        { text: "Short paragraphs" },
-      ),
+      tweaks: [{ tweak_id: opener }, { text: "Short paragraphs" }],
     });
     // Another account's memo naming this tweak id is not counted.
     const foreign = await fixtureStore(local.db, "other").saveMemo(
@@ -575,7 +550,7 @@ test("a tweak's served and needed-again counts come from kept-draft memos of its
     );
     const report = await store.readReport(vendorIntent);
     expect(report.text).toContain(
-      'What the person made an AI change in similar memos, best match first. "was → now" shows a change the person made; "needed again" counts drafts that were given the tweak and still needed it.',
+      'What the person made an AI change in similar memos, best match first. "needed again" counts drafts that were given the tweak and still needed it.',
     );
     expect(report.text).toContain(
       "- No warm-up opener (4 memos; needed again 1 of 2)",
@@ -601,7 +576,7 @@ test("a tweak's served and needed-again counts come from kept-draft memos of its
       ["Sign off –P", 1, 2, 0],
     ]);
     expect(await tps.exportTps()).toContain(
-      '## Tweaks\n\n- No warm-up opener (4 memos; served 2, needed again 1)\n  cut: "Hi there!"\n- Short paragraphs (1 memo)\n  cut: "Hi there!"\n- Sign off –P (1 memo; served 2, needed again 0)\n  cut: "Hi there!"\n',
+      "## Tweaks\n\n- No warm-up opener (4 memos; served 2, needed again 1)\n- Short paragraphs (1 memo)\n- Sign off –P (1 memo; served 2, needed again 0)\n",
     );
   } finally {
     await local.dispose();
@@ -803,303 +778,214 @@ test("code lists what changed: merged spots, Markdown-only spots about format, i
   expect(changeList(words(1500, "a"), words(1500, "b"))).toEqual({
     state: "too_large",
   });
-  // An example line shows both sides on one line.
-  expect(exampleLine({ before: "Hi!\nThanks", after: "Thanks" })).toBe(
-    '"Hi! / Thanks" → "Thanks"',
-  );
-  expect(exampleLine({ before: "", after: "–S" })).toBe('added: "–S"');
-  expect(exampleLine({ before: "Best,", after: "" })).toBe('cut: "Best,"');
 });
 
-test("a change's quotes are located where the texts differ, folded only to find them, and stored as code cuts them; every other spot stays unlabelled", async () => {
-  const first =
-    "Hi Dana, I hope you’re well!\n\nThanks so much for reaching out — we can't meet Thursday. Thanks again.\n\nBest,\nAI";
-  const final =
-    "Dana -\n\nThanks for the note, but we can't meet **Thursday**. Thanks again.\n\nBest,\n–S";
-  const memo = (changes: ChangeInput[]): MemoInput => ({
-    ...memoSave().memo!,
-    first_draft: first,
-    final,
-    mode: "draft",
-    rounds: 1,
-    changes,
-  });
-  const change = (
-    before: string,
-    after: string,
-    rest: Partial<ChangeInput> = {},
-  ): ChangeInput => ({ before, after, about: "voice", by: "person", ...rest });
-  const ok = checkMemo(
-    memo([
-      // Curly against straight, a dash typed as a hyphen, a line break as a
-      // space: folded to locate, stored as written.
-      change("Hi Dana, I hope you're well!", "Dana -", {
-        tweak: { text: "no warm-up opener" },
-      }),
-      // Two changes on one spot are both kept.
-      change("so much for reaching out -", "for the note, but", {
-        about: "content",
-        by: "asked",
-      }),
-      change("Thanks so much", "", { about: "voice", by: "unasked" }),
-      // Markdown marks dropped to locate; an insertion quotes only after.
-      change("", "–S", { tweak: { text: "sign off –S" } }),
-    ]),
-  );
-  expect(ok.ok).toBe(true);
-  const evidence = ok.ok ? ok.evidence! : undefined;
-  expect(evidence?.state).toBe("itemized");
-  expect(
-    evidence?.rows.map((r) => [r.before, r.after, r.about, r.by, r.tweakOf]),
-  ).toEqual([
-    ["Hi Dana, I hope you’re well!", "Dana -", "voice", "person", 0],
-    [
-      "so much for reaching out —",
-      "for the note, but",
-      "content",
-      "asked",
-      undefined,
-    ],
-    ["Thanks so much", "", "voice", "unasked", undefined],
-    ["", "–S", "voice", "person", 3],
-    // A spot no change covers: Markdown only.
-    ["Thursday", "**Thursday**", "format", null, undefined],
-  ]);
-  // Every refusal names the change; none is a database refusal.
-  const refused = (changes: ChangeInput[], extra: Partial<MemoInput> = {}) => {
-    const r = checkMemo({ ...memo(changes), ...extra });
-    return r.ok
-      ? undefined
-      : [r.code, r.message, ...(r.field ? [r.field] : [])];
-  };
-  expect(refused([change("Hello Dana", "")])).toEqual([
-    "invalid_change",
-    "change 1: a quote is not in its text (before from the first draft, after from the final).",
-  ]);
-  expect(refused([change("", "meet Thursday")])).toMatchObject([
-    "invalid_change",
-    "change 1: the quote is in its text, but not where the two texts differ.",
-  ]);
-  // A quote twice in its text, once where the texts differ, is that one.
-  // Markdown marks alone locate nothing.
-  expect(
-    checkMemo({
-      ...memo([change("Yes.", "")]),
-      first_draft: "Yes. Fine. Yes.",
-      final: "Yes. Fine.",
-    }),
-  ).toMatchObject({
-    ok: true,
-    evidence: { rows: [{ before: "Yes.", draftStart: 11 }] },
-  });
-  expect(refused([change("", "**")])).toMatchObject([
-    "invalid_change",
-    expect.any(String),
-  ]);
-  // A quote at two changed places is ambiguous.
-  const twice = checkMemo({
-    ...memo([change("No", "")]),
-    first_draft: "No. This is fine. No.",
-    final: "This is fine.",
-  });
-  expect(twice).toMatchObject({
-    ok: false,
-    code: "invalid_change",
-    message: expect.stringContaining("more than one changed place"),
-  });
-  // A moved, reworded sentence: the diff sees a cut at one spot and an
-  // addition at another, and one change covering both is kept, both sides cut.
-  const moved = checkMemo({
-    ...memo([
-      change(
-        "Although it is relatively small, it is not entirely straightforward, and I thought you would be well placed to help.",
-        "The estate is modest but not straightforward, so an hour should do.",
-      ),
-    ]),
-    first_draft:
-      "Dear Ms Rowe,\n\nI am writing about my late aunt's estate. Although it is relatively small, it is not entirely straightforward, and I thought you would be well placed to help. Could we speak next week?\n\nKind regards,\nSam",
-    final:
-      "Dear Ms Rowe,\n\nI am writing about my late aunt's estate, and I thought you would be well placed to help. Could we speak next week? The estate is modest but not straightforward, so an hour should do.\n\nKind regards,\nSam",
-  });
-  expect(
-    moved.ok
-      ? moved.evidence!.rows.map((r) => [r.before, r.after, r.by])
-      : moved,
-  ).toEqual([
-    [
-      "Although it is relatively small, it is not entirely straightforward, and I thought you would be well placed to help.",
-      "The estate is modest but not straightforward, so an hour should do.",
-      "person",
-    ],
-  ]);
-  expect(refused([change(" ", "")])).toMatchObject([
-    "invalid_input",
-    "change 1: before and after can't both be empty.",
-  ]);
-  for (const label of [
-    { about: "content" as const },
-    { by: "unasked" as const },
-  ])
-    expect(
-      refused([change("Hi Dana", "", { ...label, tweak: { text: "x" } })]),
-    ).toMatchObject([
-      "invalid_input",
-      expect.stringContaining("a tweak goes only on a voice change"),
+test("the diff's work stays bounded on the largest texts a save can carry", () => {
+  // Both texts together fit one 256 KiB request. Each case aims at one bound:
+  // the score's cell bound after the shared prefix and suffix, the diff's
+  // MAX_CHANGED_TOKENS, long snakes between edits, and one-character tokens.
+  const words = (n: number, w: string) =>
+    Array.from({ length: n }, (_, i) => `${w}${i}`).join(" ");
+  const shared = words(5000, "p");
+  const middle = words(4400, "m");
+  const edited = middle
+    .split(" ")
+    .map((w, i) => (i % 4 === 0 ? `e${i}` : w))
+    .join(" ");
+  const cases: [string, string, string][] = [
+    // About 4,400 tokens a side between long shared text, every fourth
+    // replaced: about 2,200 changed tokens, past MAX_CHANGED_TOKENS.
+    ["edits", `${shared} ${middle} ${shared}`, `${shared} ${edited} ${shared}`],
+    // The same middle, wholly different: the cell bound's edge.
+    ["different", middle, words(4400, "n")],
+    // One-character tokens, 120,000 a side, differing at both ends.
+    ["marks", `a${".".repeat(120_000)}a`, `b${",".repeat(120_000)}b`],
+    // A long text against a short one, under the cell bound.
+    ["lopsided", words(16_000, "q"), words(1200, "r")],
+  ];
+  for (const [name, first, final] of cases) {
+    expect(first.length + final.length).toBeLessThan(262_144);
+    const started = performance.now();
+    const list = changeList(first, final);
+    const ms = performance.now() - started;
+    expect([name, list.state]).toEqual([name, "too_large"]);
+    // Generous for CI's slower runners; locally each takes well under 100 ms.
+    expect([name, ms < 2000]).toEqual([name, true]);
+  }
+  // Just inside the bound, the list is kept.
+  const inside = middle
+    .split(" ")
+    .map((w, i) => (i < MAX_CHANGED_TOKENS / 2 ? `e${i}` : w))
+    .join(" ");
+  expect(changeList(middle, inside).state).toBe("itemized");
+});
+
+test("a drafted memo stores code's own changes, unlabelled: Markdown-only ones marked format, long sides cut at 300 and marked; past the bounds none, too_large", async () => {
+  const local = await localStore();
+  try {
+    await seedUsers(local.pg, "u");
+    const store = fixtureStore(local.db, "u");
+    const tps = tpsStore(local.db, "u");
+    const first =
+      "Hi Dana, I hope you're well!\n\nWe can't meet Thursday.\n\nBest,\nAI";
+    const final = "Dana —\n\nWe can't meet **Thursday**.\n\nBest,\nAI\n–S";
+    const input = memoSave({
+      first_draft: first,
+      final,
+      mode: "draft",
+      rounds: 1,
+      tweaks: [{ text: "no warm-up opener" }],
+    });
+    const saved = await store.saveMemo(input);
+    // Counts only: the Markdown-only row is not counted as found.
+    expect(saved.memo!.changes).toEqual({ state: "itemized", found: 2 });
+    const rows = async (memo: string) =>
+      (
+        await local.pg.query(
+          `SELECT n,draft_start,draft_end,final_start,final_end,"before","after",truncated,about,"by",tweak_id
+            FROM memo_changes WHERE memo_id=$1 ORDER BY n`,
+          [memo],
+        )
+      ).rows;
+    // Each row is code's own cut of the stored texts at its offsets; no row
+    // carries a label or a tweak, even on a memo that teaches one.
+    expect(await rows(saved.memo!.memo_id)).toEqual([
+      {
+        n: 0,
+        draft_start: 0,
+        draft_end: 28,
+        final_start: 0,
+        final_end: 6,
+        before: "Hi Dana, I hope you're well!",
+        after: "Dana —",
+        truncated: false,
+        about: null,
+        by: null,
+        tweak_id: null,
+      },
+      {
+        n: 1,
+        draft_start: 44,
+        draft_end: 52,
+        final_start: 22,
+        final_end: 34,
+        before: "Thursday",
+        after: "**Thursday**",
+        truncated: false,
+        about: "format",
+        by: null,
+        tweak_id: null,
+      },
+      {
+        n: 2,
+        draft_start: 63,
+        draft_end: 63,
+        final_start: 46,
+        final_end: 48,
+        before: "",
+        after: "–S",
+        truncated: false,
+        about: null,
+        by: null,
+        tweak_id: null,
+      },
     ]);
-  expect(
-    refused([change("Hi Dana", "", { tweak: { text: "!!" } })]),
-  ).toMatchObject([
-    "invalid_input",
-    "change 1: a tweak needs words, not only punctuation.",
-  ]);
-  // At most three distinct tweaks; a repeat of one (by id or wording) is one.
-  const tweaks = ["one", "Two", "two.", "three"].map((text) =>
-    change("Hi Dana", "", { tweak: { text } }),
-  );
-  expect(refused(tweaks)).toBeUndefined();
-  expect(
-    refused([...tweaks, change("Hi Dana", "", { tweak: { tweak_id: "t" } })]),
-  ).toEqual([
-    "invalid_input",
-    "This memo names 4 tweaks; a memo teaches at most 3.",
-    "changes.tweak",
-  ]);
-  // changes need a kept first draft that differs from the final.
-  expect(
-    refused([change("Hi", "")], {
-      first_draft: undefined,
-      first_draft_missing: true,
-    }),
-  ).toMatchObject([
-    "invalid_input",
-    expect.stringContaining("first_draft_missing"),
-  ]);
-  expect(refused([change("Hi", "")], { final: first })).toMatchObject([
-    "invalid_input",
-    expect.stringContaining("nothing changed"),
-  ]);
-  // Too large: each quote must occur once, and the sides differ unfolded.
-  const long = Array.from({ length: 101 }, (_, i) => `w${i} keep keep keep`);
-  const big = (changes: ChangeInput[]) =>
-    checkMemo({
-      ...memo(changes),
-      first_draft: long.join(" ") + " Best, AI",
-      final: long.map((w) => `x${w}`).join(" ") + " Best — S",
-    });
-  expect(big([change("Best, AI", "Best — S")])).toMatchObject({
-    ok: true,
-    evidence: {
-      state: "too_large",
-      rows: [{ before: "Best, AI", after: "Best — S" }],
-    },
-  });
-  expect(big([change("keep keep", "")])).toMatchObject({
-    ok: false,
-    code: "invalid_change",
-  });
-  expect(big([change("Best", "Best")])).toMatchObject({
-    ok: false,
-    code: "invalid_change",
-  });
-  // A stored side is cut at 300 characters, marked truncated.
-  const longDraft = "x".repeat(400);
-  expect(
-    checkMemo({ ...memo([]), first_draft: longDraft, final: "y" }),
-  ).toMatchObject({
-    ok: true,
-    evidence: {
-      rows: [{ before: "x".repeat(300), after: "y", truncated: true }],
-    },
-  });
-});
-
-test("a quote must reach a changed word, not only the unchanged words a spot joins, and quotes that cut the same text on both sides are refused", () => {
-  const save = (
-    first_draft: string,
-    final: string,
-    before: string,
-    after: string,
-  ) =>
-    checkMemo({
-      ...memoSave().memo!,
-      first_draft,
-      final,
-      mode: "draft",
-      rounds: 1,
-      changes: [
-        { before, after, about: "voice", by: "person", tweak: { text: "x y" } },
-      ],
-    });
-  const notAtChange = {
-    ok: false,
-    code: "invalid_change",
-    message: expect.stringContaining("not where the two texts differ"),
-  };
-  // red → blue and car → van are one spot, joined by the unchanged "small".
-  expect(
-    save("red small car", "blue small van", "small", "small"),
-  ).toMatchObject(notAtChange);
-  expect(
-    save("red small car", "blue small van", "small", "small van"),
-  ).toMatchObject(notAtChange);
-  for (const [before, after] of [
-    ["red small car", "blue small van"],
-    ["red", "blue"],
-  ])
+    // A replay reads the counts back from the stored rows.
     expect(
-      save("red small car", "blue small van", before!, after!),
+      await store.saveMemo({ ...input, request_id: crypto.randomUUID() }),
     ).toMatchObject({
-      ok: true,
-      evidence: { rows: [{ before, after }] },
+      status: "unchanged",
+      memo: { changes: { state: "itemized", found: 2 } },
     });
-  // Too large: quotes that differ only in whitespace cut the same stored text.
-  const long = Array.from({ length: 101 }, (_, i) => `w${i} keep keep keep`);
-  expect(
-    save(
-      long.join(" ") + " Best, AI",
-      long.map((w) => `x${w}`).join(" ") + " Best, AI",
-      "Best, AI",
-      "Best,  AI",
-    ),
-  ).toMatchObject(notAtChange);
+    expect(await tps.readMemo(saved.memo!.memo_id)).toMatchObject({
+      changes_state: "itemized",
+      changes: [
+        { n: 0, about: null, truncated: false },
+        { n: 1, about: "format" },
+        { n: 2, before: "", after: "–S" },
+      ],
+      change_count: 3,
+    });
+    // A long spot keeps its offsets and its first 300 characters, marked.
+    const long = await store.saveMemo(
+      memoSave({
+        first_draft: "Hello. " + "x".repeat(400),
+        final: "Hello. y",
+        mode: "draft",
+        rounds: 1,
+      }),
+    );
+    expect(await rows(long.memo!.memo_id)).toMatchObject([
+      {
+        draft_start: 7,
+        draft_end: 407,
+        before: "x".repeat(300),
+        after: "y",
+        truncated: true,
+      },
+    ]);
+    // Past a hundred spots: too_large, with no rows.
+    const spots = Array.from({ length: 101 }, (_, i) => `w${i} keep keep keep`);
+    const big = await store.saveMemo(
+      memoSave({
+        first_draft: spots.join(" "),
+        final: spots.map((w) => `x${w}`).join(" "),
+        mode: "draft",
+        rounds: 1,
+      }),
+    );
+    expect(big.memo!.changes).toEqual({ state: "too_large", found: 0 });
+    expect(await rows(big.memo!.memo_id)).toEqual([]);
+    expect(await tps.readMemo(big.memo!.memo_id)).toMatchObject({
+      changes_state: "too_large",
+      changes: [],
+    });
+    // An untouched final is itemized with nothing listed; a missing first
+    // draft or writing the person gave lists nothing at all.
+    const untouched = await store.saveMemo(
+      memoSave({
+        first_draft: "Same.",
+        final: "Same.",
+        mode: "edit",
+        rounds: 0,
+      }),
+    );
+    expect(untouched.memo!.changes).toEqual({ state: "itemized", found: 0 });
+    for (const memo of [
+      memoSave({
+        final: "Gone.",
+        first_draft_missing: true,
+        mode: "draft",
+        rounds: 1,
+      }),
+      memoSave({ final: "My own." }),
+    ]) {
+      const kept = await store.saveMemo(memo);
+      expect(kept.memo).not.toHaveProperty("changes");
+      expect(await tps.readMemo(kept.memo!.memo_id)).not.toHaveProperty(
+        "changes_state",
+      );
+    }
+  } finally {
+    await local.dispose();
+  }
 });
 
-test("locating a quote stays fast however often it repeats: past the occurrence cap it is ambiguous, below it unchanged", () => {
-  const change: ChangeInput = {
-    before: "a",
-    after: "a",
-    about: "voice",
-    by: "person",
-  };
-  const save = (first_draft: string, final: string, c = change) =>
+test("a memo names at most three distinct tweaks, a repeat by id or wording counting once", () => {
+  const memo = (tweaks: MemoInput["tweaks"]) =>
     checkMemo({
       ...memoSave().memo!,
-      first_draft,
-      final,
+      first_draft: draft,
       mode: "draft",
       rounds: 1,
-      changes: [c],
+      tweaks,
     });
-  // One letter, every occurrence at the one changed spot: it once paired
-  // every occurrence with every other, quadratic in time and memory.
-  const started = performance.now();
-  const flood = save("a".repeat(20000), "a".repeat(20001));
-  expect(performance.now() - started).toBeLessThan(500);
-  expect(flood).toMatchObject({
+  const three = ["one", "Two", "two.", "three"].map((text) => ({ text }));
+  expect(memo(three)).toMatchObject({ ok: true });
+  expect(memo([...three, { tweak_id: "t" }])).toEqual({
     ok: false,
-    code: "invalid_change",
-    message: expect.stringContaining("more than one changed place"),
-  });
-  // A quote three times in its text, once where the texts differ, is that one.
-  expect(
-    save("Yes. Fine. Yes. Fine. Yes.", "Yes. Fine. Yes. Fine.", {
-      ...change,
-      before: "Yes.",
-      after: "",
-    }),
-  ).toMatchObject({
-    ok: true,
-    evidence: { rows: [{ before: "Yes.", draftStart: 22 }] },
+    message: "This memo names 4 tweaks; a memo teaches at most 3.",
+    field: "tweaks",
   });
 });
 
@@ -1128,7 +1014,6 @@ test("a request is the person's typed ask on a drafted memo: trimmed, capped, ne
   for (const [request, says] of requests)
     expect(drafted(request)).toMatchObject({
       ok: false,
-      code: "invalid_input",
       field: "request",
       message: expect.stringContaining(says),
     });
@@ -1145,11 +1030,11 @@ test("a request is the person's typed ask on a drafted memo: trimmed, capped, ne
       mode: "draft",
       rounds: 1,
       request: "  Say no to the vendor's call, nicely.  ",
-      changes: teach("Hi there!", { text: "no warm-up opener" }),
+      tweaks: [{ text: "no warm-up opener" }],
     });
     const saved = await store.saveMemo(input);
     // The result and its receipt hold counts, never the request or a quote.
-    expect(saved.memo!.changes).toEqual({ found: 2, labelled: 1 });
+    expect(saved.memo!.changes).toEqual({ state: "itemized", found: 2 });
     const receipt = (
       await local.pg.query<{ result: string }>(
         "SELECT result_json::text AS result FROM save_requests WHERE user_id='asker'",
@@ -1157,44 +1042,19 @@ test("a request is the person's typed ask on a drafted memo: trimmed, capped, ne
     ).rows[0]!.result;
     expect(receipt).not.toContain("vendor's call");
     expect(receipt).not.toContain("Hi there!");
-    // Trimmed before hashing and storing; a resave of the same words is
-    // unchanged, with the counts on file, and new labels are ignored.
+    // Trimmed before hashing and storing.
     expect(
       (await local.pg.query("SELECT request FROM memos WHERE user_id='asker'"))
         .rows,
     ).toEqual([{ request: "Say no to the vendor's call, nicely." }]);
-    expect(
-      await store.saveMemo({
-        ...input,
-        request_id: crypto.randomUUID(),
-        memo: { ...input.memo!, changes: undefined },
-      }),
-    ).toMatchObject({
-      status: "unchanged",
-      memo: { changes: { found: 2, labelled: 1 } },
-    });
     // Never served.
     const report = await store.readReport(vendorIntent);
     expect(JSON.stringify(report)).not.toContain("vendor's call");
-    // The TPS page shows it, with the changes and the typed share, and the
-    // person can remove it.
+    // The TPS page shows it, and the person can remove it.
     const tps = tpsStore(local.db, "asker");
-    const shown = await tps.readMemo(saved.memo!.memo_id);
-    expect(shown).toMatchObject({
+    expect(await tps.readMemo(saved.memo!.memo_id)).toMatchObject({
       request: "Say no to the vendor's call, nicely.",
-      changes_state: "itemized",
-      changes: [
-        {
-          n: 0,
-          before: "Hi there!",
-          after: "",
-          about: "voice",
-          by: "person",
-          tweak: { text: "no warm-up opener" },
-        },
-        { n: 1, about: null, by: null },
-      ],
-      typed_share: 0,
+      asked: "Say no to the vendor's call, nicely.",
     });
     expect(await tps.removeRequest(saved.memo!.memo_id)).toBe(true);
     expect(await tps.readMemo(saved.memo!.memo_id)).not.toHaveProperty(
@@ -1205,24 +1065,7 @@ test("a request is the person's typed ask on a drafted memo: trimmed, capped, ne
   }
 });
 
-test("a report serves each served tweak's newest voice example within 3 KiB, needed-again tweaks first; a reword restarts the score, not the examples", async () => {
-  expect(
-    [
-      ...selectTweakExamples(
-        [
-          { tweak_id: "a", needed_again: 0 },
-          { tweak_id: "b", needed_again: 2 },
-          { tweak_id: "c", needed_again: 0 },
-        ],
-        new Map([
-          ["a", "x".repeat(2100)],
-          ["b", "y".repeat(1000)],
-          ["c", "z".repeat(50)],
-        ]),
-      ).keys(),
-    ],
-    // b first (needed again), then a would pass 3 KiB, so c.
-  ).toEqual(["b", "c"]);
+test("a reword restarts a tweak's score from the new text; the same text keeps it", async () => {
   const local = await localStore();
   try {
     await seedUsers(local.pg, "u");
@@ -1233,56 +1076,34 @@ test("a report serves each served tweak's newest voice example within 3 KiB, nee
     const taught = await save({
       first_draft: "Hi! Hope you're well. We'll pass.",
       final: "We'll pass.",
-      changes: teach("Hi! Hope you're well.", { text: "no warm-up opener" }),
+      tweaks: [{ text: "no warm-up opener" }],
     });
     const opener = taught.memo!.tweaks[0]!.tweak_id;
-    // A newer example in another medium, and a content change naming none.
-    await save({
-      first_draft: "Hello friend! We'll pass.",
-      final: "We'll pass, friend.",
-      context: { summary: "a fictional chat decline", medium: "chat" },
-      changes: [
-        {
-          before: "Hello friend!",
-          after: "",
-          about: "voice",
-          by: "asked",
-          tweak: { tweak_id: opener },
-        },
-        { before: "", after: ", friend", about: "content", by: "person" },
-      ],
-    });
-    const report = await store.readReport(vendorIntent);
-    expect(report.text).toContain(
-      '- no warm-up opener (2 memos)\n  cut: "Hi! Hope you\'re well."',
-    );
-    expect(report.tweaks).toEqual([
-      { tweak_id: opener, text: "no warm-up opener", memos: 2 },
-    ]);
-    expect(
-      (await store.readReport({ ...vendorIntent, medium: "chat" })).text,
-    ).toContain('  cut: "Hello friend!"');
-    // Needed again once, then reworded: the counts restart; the example stays.
+    // Served and needed again once.
     await save({
       first_draft: "Hi! Hope you're well. Not now.",
       final: "Not now.",
-      report_id: report.report_id,
-      changes: teach("Hi!", { tweak_id: opener }),
+      report_id: (await store.readReport(vendorIntent)).report_id,
+      tweaks: [{ tweak_id: opener }],
     });
     expect((await tps.read()).tweaks[0]).toMatchObject({
       served: 1,
       needed_again: 1,
     });
+    // The same text, resent, changes nothing.
+    expect(await tps.rewordTweak(opener, "no warm-up opener")).toBe(true);
+    expect((await tps.read()).tweaks[0]).toMatchObject({ served: 1 });
     expect(await tps.rewordTweak(opener, "No warm-up opener at all")).toBe(
       true,
     );
     expect((await tps.read()).tweaks[0]).toMatchObject({
       text: "No warm-up opener at all",
+      memos: 2,
       served: 0,
       needed_again: 0,
     });
-    expect((await store.readReport(vendorIntent)).text).toContain(
-      '- No warm-up opener at all (3 memos)\n  cut: "Hi!"',
+    expect((await store.readReport(vendorIntent)).text).toMatch(
+      /^- No warm-up opener at all \(2 memos\)$/m,
     );
   } finally {
     await local.dispose();

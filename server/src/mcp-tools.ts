@@ -192,6 +192,17 @@ export const saveMemoInput = z
     { message: oneChange },
   );
 export type SaveMemoInput = z.infer<typeof saveMemoInput>;
+/** The refusal for create_memo arguments whose one-line fields hold a
+ * bidirectional span control (rule B), or undefined. It is a rollout
+ * boundary like a removed field (docs/saves.md): refused before any receipt
+ * lookup, so it says it can't recover an earlier outcome. */
+export function bidiRefusal(args: unknown): string | undefined {
+  const issues = (saveMemoInput.safeParse(args).error?.issues ?? []).filter(
+    (i) => i.message === BIDI_MESSAGE,
+  );
+  if (!issues.length) return;
+  return `create_memo: ${[...new Set(issues.map((i) => i.path.join(".")))].join(", ")} ${BIDI_MESSAGE} (U+202A to U+202E or U+2066 to U+2069); send it without them. Nothing was changed. ${NO_RECOVERY}`;
+}
 export type MemoInput = z.infer<typeof memoInput>;
 export type MemoContextInput = z.infer<typeof memoContextInput>;
 

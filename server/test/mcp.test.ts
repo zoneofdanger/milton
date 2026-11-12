@@ -382,6 +382,73 @@ test("a stale client's get_cover_sheet, and each removed create_memo field in ev
         expect(refused.isError).toBe(true);
         expect(refused.value.field).toBeUndefined();
       }
+      // A bidirectional control in a one-line field (rule B) is refused at
+      // dispatch in every form, with the rollout-boundary sentence, and
+      // writes nothing; even under a request id that already holds a receipt.
+      const RLO = String.fromCharCode(0x202e);
+      const PDI = String.fromCharCode(0x2069);
+      const bidiMemo = {
+        ...memo,
+        context: { ...memo.context, summary: `accepting${RLO} a day` },
+      };
+      const { final: bidiFinal, ...bidiRest } = bidiMemo;
+      const held = crypto.randomUUID();
+      expect(
+        (
+          await call("create_memo", {
+            request_id: held,
+            memo: { final: "Held earlier.", context: memo.context },
+          })
+        ).value.status,
+      ).toBe("saved");
+      const receipts = async () =>
+        (await local.pg.query("SELECT 1 FROM save_requests")).rows.length;
+      const receiptsBefore = await receipts();
+      for (const [form, args] of [
+        ["object", { memo: bidiMemo }],
+        ["JSON-object string", { memo: JSON.stringify(bidiMemo) }],
+        ["flattened", { memo: bidiFinal, ...bidiRest }],
+        [
+          "memo_context",
+          {
+            memo_context: {
+              memo_id: "m",
+              context: { summary: "a day", medium: "email" },
+              new_kind: `meeting${PDI}`,
+            },
+          },
+        ],
+        [
+          "memo_context as a JSON-object string",
+          {
+            memo_context: JSON.stringify({
+              memo_id: "m",
+              context: { summary: `a${RLO}day`, medium: "email" },
+            }),
+          },
+        ],
+        ["a held request id", { request_id: held, memo: bidiMemo }],
+      ] as const) {
+        const refused = await call("create_memo", {
+          request_id: crypto.randomUUID(),
+          ...args,
+        });
+        expect([form, refused]).toEqual([
+          form,
+          {
+            isError: true,
+            value: expect.objectContaining({
+              error: "invalid_input",
+              field: "bidi",
+              message: expect.stringContaining(
+                "Milton can't recover an earlier outcome for this request. Before saving again with a new request_id, ask the person to check their TPS page and, if it isn't there, the full TPS.md export",
+              ),
+              next: expect.objectContaining({ action: "ask_user" }),
+            }),
+          },
+        ]);
+      }
+      expect(await receipts()).toBe(receiptsBefore);
       // A final, first draft or request that says "rounds" or "tweaks" saves.
       expect(
         await call("create_memo", {

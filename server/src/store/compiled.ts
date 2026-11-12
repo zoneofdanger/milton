@@ -9,8 +9,7 @@ import { checkMemo, runSave, type SaveOutcome } from "./save";
 import type { CallUsage } from "./usage";
 // The save schema is served to AIs, so it lives with the MCP tools.
 import {
-  BIDI_MESSAGE,
-  NO_RECOVERY,
+  bidiRefusal,
   oneChange,
   removedFields,
   saveMemoInput,
@@ -72,11 +71,14 @@ export function compiledMemos(
         throw new StoreError("invalid_input", removed, 400, {
           field: "removed",
         });
+      const bidi = bidiRefusal(raw);
+      if (bidi)
+        throw new StoreError("invalid_input", bidi, 400, { field: "bidi" });
       const parsed = saveMemoInput.safeParse(raw);
       if (!parsed.success)
         throw new StoreError(
           "invalid_input",
-          (parsed.error.issues.find((i) => i.message === oneChange)
+          parsed.error.issues.find((i) => i.message === oneChange)
             ? oneChange + " Nothing was changed."
             : `create_memo: ${[
                 ...new Set(
@@ -86,10 +88,7 @@ export function compiledMemos(
                 .slice(0, 5)
                 .join(", ")} ${
                 parsed.error.issues.length === 1 ? "is" : "are"
-              } malformed; see the input schema. Nothing was changed.`) +
-            (parsed.error.issues.some((i) => i.message === BIDI_MESSAGE)
-              ? ` A one-line field ${BIDI_MESSAGE}. ${NO_RECOVERY}`
-              : ""),
+              } malformed; see the input schema. Nothing was changed.`,
           400,
         );
       const checked = parsed.data.memo && checkMemo(parsed.data.memo);

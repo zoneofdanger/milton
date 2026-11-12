@@ -135,6 +135,11 @@ export const nextSteps: Record<string, NextStep> = {
   ),
   // A field create_memo no longer takes: drop it, and check before saving
   // again, since the refusal can't tell whether an earlier attempt saved.
+  // A bidirectional control in a one-line field: also a rollout boundary.
+  "invalid_input.bidi": step(
+    "ask_user",
+    "Send the fields message names without the bidi controls. Ask the person to check their TPS page and TPS.md before saving again with a new request_id.",
+  ),
   "invalid_input.removed": step(
     "ask_user",
     "Drop the fields message names and refresh your tool list. Ask the person to check their TPS page before saving again with a new request_id.",

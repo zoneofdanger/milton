@@ -9,7 +9,7 @@ import {
   malformedIntent,
   memoInput,
   missingIntent,
-  NO_RECOVERY,
+  bidiRefusal,
   removedFields,
   reportInput,
   saveMemoInput,
@@ -171,16 +171,14 @@ function flattenedMemo(params: unknown): string | undefined {
   values.memo = memo;
   // Read as nested but still malformed (no context, say): the refusal names
   // what is wrong beside the shape, not the SDK's text alone.
+  // A bidirectional control is left to its own refusal (bidiRefusal).
   const issues = saveMemoInput.safeParse(values).error?.issues ?? [];
-  if (issues.length)
-    return (
-      memoShape(
-        [...new Set(issues.map((i) => i.path.join(".") || i.message))].slice(
-          0,
-          5,
-        ),
-      ) +
-      (issues.some((i) => i.message === BIDI_MESSAGE) ? ` ${NO_RECOVERY}` : "")
+  if (issues.length && !issues.some((i) => i.message === BIDI_MESSAGE))
+    return memoShape(
+      [...new Set(issues.map((i) => i.path.join(".") || i.message))].slice(
+        0,
+        5,
+      ),
     );
 }
 
@@ -289,6 +287,25 @@ export function createMiltonServer(
             }
           }
           if (!options.readOnly) unreadMemo = flattenedMemo(params);
+          // Checked here, in every form once decoded and unflattened, so the
+          // SDK's own validation never answers it without the rollout
+          // boundary's guidance.
+          const bidi =
+            !unreadMemo &&
+            !options.readOnly &&
+            params.name === "create_memo" &&
+            bidiRefusal(params.arguments);
+          if (bidi && callId !== undefined) {
+            await transport.send({
+              jsonrpc: "2.0",
+              id: callId,
+              result: storeResult(
+                { error: "invalid_input", field: "bidi", message: bidi },
+                true,
+              ),
+            });
+            return;
+          }
         }
         if (unreadMemo && "id" in message && message.id !== undefined) {
           await transport.send({

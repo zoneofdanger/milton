@@ -185,15 +185,14 @@ test("an SDK client receives instructions, discovers the three tools, and reads 
       save.inputSchema.properties as Record<string, { properties?: object }>
     ).memo!;
     expect(Object.keys(memoSchema.properties ?? {})).toContain("report_id");
-    // Clients may send changes: [] and kind_id: null for none; memo_context's
+    // Clients may send tweaks: [] and kind_id: null for none; memo_context's
     // kind_id still takes only an id.
     const fields = (schema: object | undefined) =>
       (schema as { properties: Record<string, Record<string, unknown>> })
         .properties;
     const memoFields = fields(memoSchema);
-    expect(memoFields).not.toHaveProperty("tweaks");
-    expect(memoFields.changes).toMatchObject({ type: "array", maxItems: 20 });
-    expect(memoFields.changes).not.toHaveProperty("minItems");
+    expect(memoFields.tweaks).toMatchObject({ type: "array", maxItems: 10 });
+    expect(memoFields.tweaks).not.toHaveProperty("minItems");
     expect(memoFields.kind_id!.anyOf).toContainEqual({ type: "null" });
     expect(fields(save.inputSchema.properties!.memo_context).kind_id).toEqual({
       type: "string",
@@ -205,9 +204,9 @@ test("an SDK client receives instructions, discovers the three tools, and reads 
     for (const field of [
       "save one when the person accepts a final, without asking",
       "send first_draft_missing: true instead",
-      "A tweak is rare (most memos teach one or none, at most three)",
-      "named plainly, with a condition only if it doesn't hold in all their writing",
-      "Every change is kept either way",
+      "{tweak_id} reuses a served tweak",
+      "likely to recur, at most three, named plainly, with a condition only if it doesn't hold everywhere; most memos teach one or none",
+      "request: only what they typed to ask, no pasted text",
       "A memo holds only these: never secrets, the transcript, the person's correction messages or other people's text",
       "never add tweaks or your inferences",
       "carries receipt: tell the person that line",
@@ -382,12 +381,12 @@ test("an object argument sent as a JSON string is read as that object; any other
     });
     expect(reply.isError).toBeUndefined();
     expect(saved).toEqual([{ request_id, memo }]);
-    // changes: [] and kind_id: null arrive as omitted, even inside the string.
+    // tweaks: [] and kind_id: null arrive as omitted, even inside the string.
     const lenient = await client.callTool({
       name: "create_memo",
       arguments: {
         request_id,
-        memo: JSON.stringify({ ...memo, changes: [], kind_id: null }),
+        memo: JSON.stringify({ ...memo, tweaks: [], kind_id: null }),
       },
     });
     expect(lenient.isError).toBeUndefined();
@@ -445,15 +444,7 @@ test("a memo sent flattened (the final as a string memo, its fields beside it) s
       first_draft: "Hi Sam! Hope you're well. Friday could work for me.",
       mode: "draft",
       rounds: 1,
-      changes: [
-        {
-          before: "Hi Sam! Hope you're well.",
-          after: "",
-          about: "voice",
-          by: "person",
-          tweak: { text: "replies to Sam: no warm-up opener" },
-        },
-      ],
+      tweaks: [{ text: "replies to Sam: no warm-up opener" }],
       context: {
         summary: "accepting a fictional meeting day",
         medium: "email",
@@ -508,7 +499,7 @@ test("a memo sent flattened (the final as a string memo, its fields beside it) s
   }
 });
 
-test("a memo with the old tweaks field, quotes that miss the texts, a pasted request or a fourth tweak is refused with its own next step; the old field also refreshes the tool list", async () => {
+test("a pasted request or a fourth tweak is refused with its own next step, before any write", async () => {
   const local = await localStore();
   const calls: ToolCall[] = [];
   const store = fixtureStore(local.db, "u");
@@ -517,10 +508,6 @@ test("a memo with the old tweaks field, quotes that miss the texts, a pasted req
     (call) => calls.push(call),
   );
   const client = new Client({ name: "sdk-test", version: "0.0.0" });
-  let changed = 0;
-  client.setNotificationHandler(ToolListChangedNotificationSchema, () => {
-    changed++;
-  });
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
   try {
@@ -545,40 +532,6 @@ test("a memo with the old tweaks field, quotes that miss the texts, a pasted req
         medium: "email",
       },
     };
-    const change = (tweak: string) => ({
-      before: "Hi Sam!",
-      after: "",
-      about: "voice",
-      by: "person",
-      tweak: { text: tweak },
-    });
-    // An AI holding the definition from before changes.
-    const old = await save({
-      ...memo,
-      tweaks: [{ text: "no warm-up opener" }],
-    });
-    expect(old).toMatchObject({
-      error: "invalid_input",
-      field: "tweaks",
-      next: {
-        action: "fix_input",
-        text: "tweaks now go on changes: quote before and after and add tweak there, or save without tweaks; new request_id.",
-      },
-    });
-    expect(changed).toBe(1);
-    expect(
-      await save({
-        ...memo,
-        changes: [{ ...change("x"), before: "Hello Sam!" }],
-      }),
-    ).toMatchObject({
-      error: "invalid_change",
-      message: expect.stringContaining("change 1: a quote is not in its text"),
-      next: {
-        action: "fix_input",
-        text: expect.stringContaining("or leave that change out"),
-      },
-    });
     expect(
       await save({ ...memo, request: "Reply yes.\n> On Friday we could meet" }),
     ).toMatchObject({
@@ -588,20 +541,24 @@ test("a memo with the old tweaks field, quotes that miss the texts, a pasted req
         text: "Send only what the person typed to ask, without pasted or quoted text, or leave request out; send the rest unchanged and save with a new request_id.",
       },
     });
+    // The list takes ten, as the released definition did; a fourth distinct
+    // tweak is refused, never cut.
     expect(
       await save({
         ...memo,
-        changes: ["one", "two", "three", "four"].map(change),
+        tweaks: ["one", "two", "three", "four"].map((text) => ({ text })),
       }),
     ).toMatchObject({
       error: "invalid_input",
-      field: "changes.tweak",
-      next: { text: expect.stringContaining("Keep the three tweaks") },
+      field: "tweaks",
+      message:
+        "This memo names 4 tweaks; a memo teaches at most 3. Nothing was changed.",
+      next: {
+        action: "fix_input",
+        text: "Keep the three tweaks most likely to recur and drop the rest; send the rest unchanged and save with a new request_id.",
+      },
     });
-    expect(changed).toBe(1);
     expect(calls.map((c) => [c.outcome, c.error_code])).toEqual([
-      ["refused", "invalid_input"],
-      ["refused", "invalid_change"],
       ["refused", "invalid_input"],
       ["refused", "invalid_input"],
     ]);
@@ -1040,13 +997,7 @@ test("a setup request makes one database round trip and a tool call four, by tok
           final: `Not this time, thanks. ${tweaks.length}`,
           mode: "draft",
           rounds: 1,
-          changes: tweaks.map((text) => ({
-            before: "Hi!",
-            after: "",
-            about: "voice",
-            by: "person",
-            tweak: { text },
-          })),
+          tweaks: tweaks.map((text) => ({ text })),
           context: { summary: "a fictional decline", medium: "email" },
         },
       },

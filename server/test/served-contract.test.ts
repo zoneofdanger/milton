@@ -5,7 +5,6 @@ import { setupScript } from "../src/store/setup";
 import { SETUP_PROMPT } from "../src/store/setup";
 import { checkMemo, receiptLine } from "../src/store/save";
 import {
-  changeInput,
   coverSheet,
   memoInput,
   missingIntent,
@@ -29,7 +28,7 @@ test("the served text uses one word for each thing and describes the memo workfl
     "Edit mode",
     'Asked "Did you get the memo?" or "Did you get that memo?"',
     "Memos",
-    "Changes",
+    "Tweaks",
     "After saved, tell them in one line, with no question",
     "Cover sheet",
     "Forget",
@@ -44,11 +43,10 @@ test("the served text uses one word for each thing and describes the memo workfl
     "A revision you just showed is not accepted yet",
     "Show the receipt word for word, however long",
     "send first_draft_missing instead of rebuilding it",
-    "reuse a served tweak's id for the same habit",
-    'named plainly ("no warm-up opener")',
-    "before and after quoted exactly, with about (voice or content) and by (person, asked or unasked)",
-    "Tweak only a habit likely to recur, at most three",
-    "request: only what they typed to ask",
+    "Reuse a served tweak's id for the same change",
+    'list each habit they made you change that is likely to recur, at most three, named plainly ("no warm-up opener"), with a condition only if it doesn\'t hold everywhere. Most memos teach one or none.',
+    "Skip one-off facts and your unasked changes",
+    "request: only what they typed to ask, no pasted text",
     "Kept memo: vendor decline, 2 rounds, tweaks: no warm-up opener.",
     "A correction during a draft is a tweak, not a cover sheet line",
     "Never add tweaks or your own inferences, or offer to",
@@ -75,34 +73,23 @@ test("the served text uses one word for each thing and describes the memo workfl
   ).toBe(
     "Kept memo: vendor reply, 1 round, tweaks: state the trial duration; no warm-up opener.",
   );
-  // The field descriptions carry the detail: recurring habits only, never
-  // "when requested", reuse served ids, at most three; quotes copied exactly;
-  // each by; the request's cut rule.
-  const tweakField = changeInput.shape.tweak.description ?? "";
+  // The tweaks field says the same, with the detail: recurring habits only,
+  // at most three, never "when requested", reuse served ids; and the
+  // request's cut rule.
+  const tweaksField = memoInput.shape.tweaks.description ?? "";
   for (const part of [
-    "for a habit likely to recur in their other writing; skip one-off facts",
-    "Most memos teach one or none; every change is kept either way",
-    "{tweak_id} reuses a served tweak for the same habit, even in a new situation",
-    '{text} adds one: the habit named plainly ("no warm-up opener"), with when it applies only if it doesn\'t hold in all their writing',
-    'Never "when requested"',
-    "At most three distinct tweaks per memo",
+    "each habit the person made you change that is likely to recur, at most three",
+    'named plainly ("no warm-up opener")',
+    'never "when requested". Most memos teach one or none.',
+    "Skip one-off facts they added",
+    "reuse a served tweak's id",
   ])
-    expect(tweakField).toContain(part);
-  expect(memoInput.shape.changes.description).toContain(
-    "Every change is kept either way; most memos teach one tweak or none, at most three.",
-  );
-  expect(changeInput.shape.before.description).toContain(
-    "a few words, copied exactly; for an insertion leave before empty",
-  );
-  for (const by of ["person:", "asked:", "unasked:"])
-    expect(changeInput.shape.by.description).toContain(by);
+    expect(tweaksField).toContain(part);
   expect(memoInput.shape.request.description).toContain("marking each cut […]");
-  // A retired phrase: these quotes are not that removed feature.
+  // A retired phrase: the served text never names that removed feature.
   for (const served of [
     storeInstructions,
-    ...[memoInput.shape, changeInput.shape].flatMap((shape) =>
-      Object.values(shape).map((field) => field.description ?? ""),
-    ),
+    ...Object.values(memoInput.shape).map((field) => field.description ?? ""),
   ])
     expect(served).not.toMatch(/exact[\s_-]+edits?/i);
   expect(readOnlyInstructions).toContain("read only");
@@ -197,30 +184,15 @@ test("setup offers once, finds sent emails only with a mail tool and approval, a
 test("every memo shape the instructions describe parses, and contradicting shapes are named", () => {
   const context = { summary: "a fictional decline", medium: "email" };
   const shapes = [
-    // A drafted memo with changes teaching tweaks, new and reused, and the
-    // person's typed request.
+    // A drafted memo with tweaks, new and reused, and the person's typed
+    // request.
     {
       final: "No, thanks.",
       first_draft: "Hi! Unfortunately we can't.",
       mode: "draft",
       rounds: 2,
       request: "Decline their call politely, short.",
-      changes: [
-        {
-          before: "Hi!",
-          after: "",
-          about: "voice",
-          by: "person",
-          tweak: { text: "no warm-up opener" },
-        },
-        {
-          before: "Unfortunately we can't.",
-          after: "No, thanks.",
-          about: "voice",
-          by: "asked",
-          tweak: { tweak_id: "t1" },
-        },
-      ],
+      tweaks: [{ text: "no warm-up opener" }, { tweak_id: "t1" }],
       context,
       new_kind: "vendor decline",
     },

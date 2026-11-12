@@ -35,7 +35,6 @@ export const loggedErrorCodes = new Set([
   "account_unavailable",
   "subscription_required",
   "invalid_input",
-  "invalid_change",
   "invalid_kind",
   "request_too_large",
   "request_id_reused",
@@ -64,7 +63,6 @@ const refusals = new Set([
   "account_unavailable",
   "subscription_required",
   "invalid_input",
-  "invalid_change",
   "invalid_kind",
   "request_too_large",
   "request_id_reused",
@@ -155,15 +153,7 @@ export const nextSteps: Record<string, NextStep> = {
   ),
   "invalid_input.tweaks": step(
     "fix_input",
-    "tweaks now go on changes: quote before and after and add tweak there, or save without tweaks; new request_id.",
-  ),
-  "invalid_input.changes.tweak": step(
-    "fix_input",
-    "Keep the three tweaks most likely to recur; the other changes stay labelled without a tweak. Save with a new request_id.",
-  ),
-  invalid_change: step(
-    "fix_input",
-    "Copy before from the first draft and after from the final exactly, add a few words if it appears twice, or leave that change out; save with a new request_id.",
+    "Keep the three tweaks most likely to recur and drop the rest; send the rest unchanged and save with a new request_id.",
   ),
   invalid_arguments: fixArguments,
   check_violation: fixArguments,
@@ -177,7 +167,7 @@ export const nextSteps: Record<string, NextStep> = {
   ),
   request_too_large: step(
     "fix_input",
-    "Save the memo again with the final alone: send first_draft_missing instead of first_draft, and no changes, with a new request_id.",
+    "Save the memo again with the final alone: send first_draft_missing instead of first_draft, with a new request_id.",
   ),
   // Codes only the TPS page meets.
   tweak_exists: step(

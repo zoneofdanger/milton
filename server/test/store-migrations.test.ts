@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { localStore, storeDatabase } from "./local-store";
-import { fixtureStore, memoSave, seedUsers, teach } from "./store-fixtures";
+import { fixtureStore, memoSave, seedUsers } from "./store-fixtures";
 import { migrationUrl } from "../scripts/migrate";
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
@@ -916,7 +916,7 @@ test("0012 adds empty memo tables the legacy group cannot reach; 014 grants the 
           final: `Fictional final ${n}.`,
           mode: "draft",
           rounds: 1,
-          changes: teach("Hi!", { text: `fictional tweak ${n}` }),
+          tweaks: [{ text: `fictional tweak ${n}` }],
         }),
       );
       return saved.memo!;
@@ -1046,7 +1046,8 @@ test("0015 adds memo_changes and the request, changes state and reword columns, 
         "tweaks.text_changed_at:UPDATE",
       ],
     });
-    // A drafted memo with two changes, one teaching a tweak, and its request.
+    // A drafted memo teaching a tweak, with its request: code stores its one
+    // spot unlabelled.
     await seedUsers(pg, "evidence");
     const store = fixtureStore(local.db, "evidence");
     const saved = (
@@ -1057,32 +1058,28 @@ test("0015 adds memo_changes and the request, changes state and reword columns, 
           mode: "draft",
           rounds: 1,
           request: "Write a short fictional note.",
-          changes: [
-            ...teach("Hi!", { text: "no warm-up opener" }),
-            {
-              before: "long and warm",
-              after: "short",
-              about: "content",
-              by: "asked",
-            },
-          ],
+          tweaks: [{ text: "no warm-up opener" }],
         }),
       )
     ).memo!;
     const rows = () =>
       pg.query<{
         n: number;
-        about: string;
-        by: string;
+        about: string | null;
+        by: string | null;
         tweak_id: string | null;
       }>(
         `SELECT n,about,"by",tweak_id FROM memo_changes WHERE user_id='evidence' ORDER BY n`,
       );
     const tweak = saved.tweaks[0]!.tweak_id;
     expect((await rows()).rows).toEqual([
-      { n: 0, about: "voice", by: "person", tweak_id: tweak },
-      { n: 1, about: "content", by: "asked", tweak_id: null },
+      { n: 0, about: null, by: null, tweak_id: null },
     ]);
+    // The label and tweak columns stay unused in this release; the schema
+    // still takes a labelled row whose tweak its memo cites.
+    await pg.query(
+      `INSERT INTO memo_changes(user_id,memo_id,n,"before","after",about,"by",tweak_id) VALUES ('evidence','${saved.memo_id}',1,'Hi!','','voice','person','${tweak}')`,
+    );
     // The schema refuses what the save path refuses.
     for (const bad of [
       // A tweak on a content change, or on a change it doesn't cite.
@@ -1124,8 +1121,8 @@ test("0015 adds memo_changes and the request, changes state and reword columns, 
     );
     await pg.exec("RESET ROLE");
     expect((await rows()).rows).toEqual([
-      { n: 0, about: "voice", by: "person", tweak_id: null },
-      { n: 1, about: "content", by: "asked", tweak_id: null },
+      { n: 0, about: null, by: null, tweak_id: null },
+      { n: 1, about: "voice", by: "person", tweak_id: null },
     ]);
     // Forgetting the memo (MCP) removes its changes through the cascade.
     await pg.exec("SET ROLE milton_mcp_runtime");

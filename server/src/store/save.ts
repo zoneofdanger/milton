@@ -5,20 +5,10 @@
 import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
-import type {
-  ChangeInput,
-  MemoContextInput,
-  MemoInput,
-  SaveMemoInput,
-} from "../mcp-tools";
+import type { MemoContextInput, MemoInput, SaveMemoInput } from "../mcp-tools";
 import {
-  changeCounts,
   changeList,
   changeRows,
-  fold,
-  locate,
-  locateProblem,
-  MAX_MEMO_TWEAKS,
   type ChangeList,
   type ChangeRow,
 } from "./changes";
@@ -56,7 +46,12 @@ const outcomeSchema = z.object({
       change: z.number().optional(),
       tweaks: z.array(savedTweak),
       /** Counts only: a receipt outlives forgetting, so it holds no quote. */
-      changes: z.object({ found: z.number(), labelled: z.number() }).optional(),
+      changes: z
+        .object({
+          state: z.enum(["itemized", "too_large"]),
+          found: z.number(),
+        })
+        .optional(),
     })
     .optional(),
   /** The one line the AI tells the person after a saved memo. */
@@ -77,22 +72,16 @@ async function receipt(tx: StoreSession, userId: string, id: string) {
   )[0];
 }
 
-/** What a memo save brings beyond its words: the changes code found between
- * a kept first draft and its final, and the tweak each change names. */
-export type Evidence = {
-  state: ChangeList["state"];
-  rows: ChangeRow[];
-  /** Each change's tweak, by its index in memo.changes. */
-  tweaks: (ChangeInput["tweak"] | undefined)[];
-};
+/** What a memo save with a kept first draft brings beyond its words: the
+ * spots code found between it and its final, each an unlabelled row. */
+export type Evidence = { state: ChangeList["state"]; rows: ChangeRow[] };
 export type MemoCheck =
   | { ok: true; evidence?: Evidence }
   | {
       ok: false;
-      code: "invalid_input" | "invalid_change";
       message: string;
       /** Selects the refusal's own next step (mcp-outcomes, nextSteps). */
-      field?: "request" | "changes.tweak";
+      field?: "request" | "tweaks";
     };
 
 /** Lines a typed ask never holds: quoted mail, an "On … wrote:" line, or a
@@ -102,19 +91,26 @@ const PASTED = [/^\s*>/m, /^\s*On\b.*\bwrote:\s*$/im, /^\s*(From|Subject):/im];
  * doesn't (docs/memos.md). */
 export const MAX_REQUEST_CHARS = 600;
 export const MAX_REQUEST_LINES = 12;
+/** At most this many distinct tweaks per memo: most teach one or none. The
+ * schema's list takes ten, as the released definition did, so a save naming
+ * more is refused here with its own next step, not as a schema error. */
+export const MAX_MEMO_TWEAKS = 3;
 
 /** Everything a memo save gets wrong that its input alone shows, checked
  * before any database work, or the evidence it will store. Only the first
  * draft decides the rest: with one (or first_draft_missing), mode and rounds
  * are required and request is allowed; without, writing the person gave, none
- * of them. changes need a kept first draft that differs from the final, and
- * each must quote the two texts where code found they differ. */
+ * of mode, rounds, request or tweaks. With a kept first draft, code lists what
+ * changed here, bounded by changeList's own limits. */
 export function checkMemo(memo: MemoInput): MemoCheck {
   const refuse = (
     message: string,
-    code: "invalid_input" | "invalid_change" = "invalid_input",
-    field?: "request" | "changes.tweak",
-  ): MemoCheck => ({ ok: false, code, message, ...(field ? { field } : {}) });
+    field?: "request" | "tweaks",
+  ): MemoCheck => ({
+    ok: false,
+    message,
+    ...(field ? { field } : {}),
+  });
   if (memo.kind_id !== undefined && memo.new_kind !== undefined)
     return refuse("A memo takes kind_id or new_kind, not both.");
   const drafted =
@@ -125,14 +121,13 @@ export function checkMemo(memo: MemoInput): MemoCheck {
     if (memo.request !== undefined)
       return refuse(
         "Writing the person gave you (no first_draft) takes no request.",
-        "invalid_input",
         "request",
       );
     return memo.mode !== undefined ||
       memo.rounds !== undefined ||
-      memo.changes !== undefined
+      memo.tweaks !== undefined
       ? refuse(
-          "Writing the person gave you (no first_draft) takes no mode, rounds or changes; for a draft you wrote, send first_draft, or first_draft_missing if you no longer have it verbatim.",
+          "Writing the person gave you (no first_draft) takes no mode, rounds or tweaks; for a draft you wrote, send first_draft, or first_draft_missing if you no longer have it verbatim.",
         )
       : { ok: true };
   }
@@ -153,67 +148,30 @@ export function checkMemo(memo: MemoInput): MemoCheck {
             : PASTED.some((pattern) => pattern.test(request))
               ? 'request holds quoted or pasted mail (a line starting >, an "On … wrote:" line or a From or Subject header)'
               : undefined;
-    if (problem) return refuse(`${problem}.`, "invalid_input", "request");
+    if (problem) return refuse(`${problem}.`, "request");
   }
-  if (memo.first_draft === undefined)
-    return memo.changes === undefined
-      ? { ok: true }
-      : refuse(
-          "changes need the first draft itself; without it (first_draft_missing) send no changes.",
-        );
-  const first = memo.first_draft;
-  const final = memo.final;
-  const changes = memo.changes ?? [];
-  if (changes.length && first === final)
+  if (memo.tweaks !== undefined && memo.first_draft === memo.final)
     return refuse(
-      "The final equals the first draft, so nothing changed; omit changes.",
+      "The final equals the first draft, so this memo teaches no tweaks; omit tweaks.",
     );
-  const tweaks = new Set<string>();
-  for (const [i, change] of changes.entries()) {
-    const n = `change ${i + 1}`;
-    if (!change.before.trim() && !change.after.trim())
-      return refuse(`${n}: before and after can't both be empty.`);
-    if (!change.tweak) continue;
-    if (change.about !== "voice" || change.by === "unasked")
-      return refuse(
-        `${n}: a tweak goes only on a voice change the person typed or asked for (about voice, by person or asked).`,
-      );
-    if ("tweak_id" in change.tweak) tweaks.add(`id:${change.tweak.tweak_id}`);
-    else {
-      const norm = normalizeTweak(change.tweak.text);
-      if (!norm)
-        return refuse(`${n}: a tweak needs words, not only punctuation.`);
-      tweaks.add(`text:${norm}`);
-    }
-  }
-  if (tweaks.size > MAX_MEMO_TWEAKS)
+  // A repeat of one tweak, by id or wording, is one.
+  const distinct = new Set(
+    (memo.tweaks ?? []).map((t) =>
+      "tweak_id" in t ? `id:${t.tweak_id}` : `text:${normalizeTweak(t.text)}`,
+    ),
+  ).size;
+  if (distinct > MAX_MEMO_TWEAKS)
     return refuse(
-      `This memo names ${tweaks.size} tweaks; a memo teaches at most ${MAX_MEMO_TWEAKS}.`,
-      "invalid_input",
-      "changes.tweak",
+      `This memo names ${distinct} tweaks; a memo teaches at most ${MAX_MEMO_TWEAKS}.`,
+      "tweaks",
     );
-  const list = changeList(first, final);
-  const texts = { first: fold(first), final: fold(final) };
-  const accepted: Parameters<typeof changeRows>[3] = [];
-  for (const [i, change] of changes.entries()) {
-    const located = locate(list, texts, change);
-    if (!located.ok)
-      return refuse(
-        `change ${i + 1}: ${locateProblem[located.why]}.`,
-        "invalid_change",
-      );
-    accepted.push({
-      located,
-      label: { about: change.about, by: change.by },
-      tweak: change.tweak !== undefined,
-    });
-  }
+  if (memo.first_draft === undefined) return { ok: true };
+  const list = changeList(memo.first_draft, memo.final);
   return {
     ok: true,
     evidence: {
       state: list.state,
-      rows: changeRows(first, final, list, accepted),
-      tweaks: changes.map((c) => c.tweak),
+      rows: changeRows(memo.first_draft, memo.final, list),
     },
   };
 }
@@ -442,16 +400,13 @@ async function saveMemo(save: Save, memo: MemoInput): Promise<SaveOutcome> {
     });
   const kind =
     named ?? (await resolveKind(tx, userId, { new_kind: memo.new_kind }));
-  // Tweaks, in the order the changes name them: reused ids must be the
-  // account's; new text reuses an exact match after normalizing, or is added.
+  // Tweaks: reused ids must be the account's; new text reuses an exact match
+  // after normalizing, or is added.
   const ids: string[] = [];
   const texts = new Map<string, string>();
-  const tweakIds = new Map<number, string>();
-  for (const [i, ref] of (evidence?.tweaks ?? []).entries()) {
-    if (!ref) continue;
-    let found: { id: string; text: string } | undefined;
+  for (const ref of memo.tweaks ?? []) {
     if ("tweak_id" in ref) {
-      [found] = await tx.query<{ id: string; text: string }>(
+      const [found] = await tx.query<{ id: string; text: string }>(
         sql`SELECT id,text FROM tweaks WHERE user_id=${userId} AND id=${ref.tweak_id}`,
       );
       if (!found)
@@ -460,18 +415,25 @@ async function saveMemo(save: Save, memo: MemoInput): Promise<SaveOutcome> {
           `tweak_id ${JSON.stringify(ref.tweak_id.slice(0, 64))} is not one of this person's tweaks. Nothing was saved.`,
           400,
         );
-    } else {
-      const norm = normalizeTweak(ref.text);
-      [found] = await tx.query<{ id: string; text: string }>(sql`
-        WITH added AS (
-          INSERT INTO tweaks(user_id,id,text,norm,client_json)
-          VALUES (${userId},${randomUUID()},${ref.text},${norm},${client(actor)})
-          ON CONFLICT (user_id,norm) DO NOTHING RETURNING id,text)
-        SELECT id,text FROM added
-        UNION ALL SELECT id,text FROM tweaks WHERE user_id=${userId} AND norm=${norm}
-        LIMIT 1`);
+      if (!texts.has(found.id))
+        (ids.push(found.id), texts.set(found.id, found.text));
+      continue;
     }
-    tweakIds.set(i, found!.id);
+    const norm = normalizeTweak(ref.text);
+    if (!norm)
+      throw new StoreError(
+        "invalid_input",
+        "A tweak needs words, not only punctuation. Nothing was saved.",
+        400,
+      );
+    const [found] = await tx.query<{ id: string; text: string }>(sql`
+      WITH added AS (
+        INSERT INTO tweaks(user_id,id,text,norm,client_json)
+        VALUES (${userId},${randomUUID()},${ref.text},${norm},${client(actor)})
+        ON CONFLICT (user_id,norm) DO NOTHING RETURNING id,text)
+      SELECT id,text FROM added
+      UNION ALL SELECT id,text FROM tweaks WHERE user_id=${userId} AND norm=${norm}
+      LIMIT 1`);
     if (!texts.has(found!.id))
       (ids.push(found!.id), texts.set(found!.id, found!.text));
   }
@@ -498,13 +460,14 @@ async function saveMemo(save: Save, memo: MemoInput): Promise<SaveOutcome> {
   if (ids.length)
     await tx.query(sql`INSERT INTO tweak_citations(user_id,memo_id,tweak_id)
       SELECT ${userId}::text,${id}::text,t FROM unnest(${sql.param(ids)}::text[]) AS t`);
-  // After the citations: a change's tweak is one its memo cites.
+  // Code's own list: offsets, the cut sides and the format marker; the
+  // label, tweak and quote columns stay NULL in this release.
   const rows = evidence?.rows ?? [];
   if (rows.length)
     await tx.query(sql`INSERT INTO memo_changes(user_id,memo_id,n,draft_start,draft_end,final_start,final_end,
-        "before","after",truncated,about,"by",tweak_id)
+        "before","after",truncated,about)
       SELECT ${userId}::text,${id}::text,r.n,r.draft_start,r.draft_end,r.final_start,r.final_end,
-        r.before,r.after,r.truncated,r.about,r.by,r.tweak_id
+        r.before,r.after,r.truncated,r.about
       FROM json_to_recordset(${JSON.stringify(
         rows.map((r) => ({
           n: r.n,
@@ -516,11 +479,9 @@ async function saveMemo(save: Save, memo: MemoInput): Promise<SaveOutcome> {
           after: r.after,
           truncated: r.truncated,
           about: r.about,
-          by: r.by,
-          tweak_id: r.tweakOf === undefined ? null : tweakIds.get(r.tweakOf)!,
         })),
       )}::json) AS r(n smallint,draft_start int,draft_end int,final_start int,final_end int,
-        "before" text,"after" text,truncated boolean,about text,"by" text,tweak_id text)`);
+        "before" text,"after" text,truncated boolean,about text)`);
   const tweaks = ids.map((tweak_id) => ({
     tweak_id,
     text: texts.get(tweak_id)!,
@@ -535,7 +496,14 @@ async function saveMemo(save: Save, memo: MemoInput): Promise<SaveOutcome> {
         ? { change: Math.round(score * 1000) / 1000 }
         : {}),
       tweaks,
-      ...(evidence ? { changes: changeCounts(rows) } : {}),
+      ...(evidence
+        ? {
+            changes: {
+              state: evidence.state,
+              found: rows.filter((r) => r.about !== "format").length,
+            },
+          }
+        : {}),
     },
     receipt: receiptLine({
       label: kind?.label ?? memo.context.medium,
@@ -554,11 +522,10 @@ async function memoSummary(tx: StoreSession, userId: string, id: string) {
     rounds: number | null;
     change: number | null;
     tweaks: { tweak_id: string; text: string }[];
-    changes: { found: number; labelled: number } | null;
+    changes: { state: "itemized" | "too_large"; found: number } | null;
   }>(sql`SELECT m.tier,m.kind_id,k.label AS kind,m.rounds,m.change,
-      CASE WHEN m.changes_state IS NOT NULL THEN (SELECT json_build_object(
-        'found',count(*) FILTER (WHERE c.about IS DISTINCT FROM 'format'),
-        'labelled',count(*) FILTER (WHERE c."by" IS NOT NULL))
+      CASE WHEN m.changes_state IS NOT NULL THEN (SELECT json_build_object('state',m.changes_state,
+        'found',count(*) FILTER (WHERE c.about IS DISTINCT FROM 'format'))
         FROM memo_changes c WHERE c.user_id=m.user_id AND c.memo_id=m.id) END AS changes,
       (SELECT coalesce(json_agg(json_build_object('tweak_id',t.id,'text',t.text) ORDER BY t.id),'[]'::json)
         FROM tweak_citations c JOIN tweaks t ON t.user_id=c.user_id AND t.id=c.tweak_id

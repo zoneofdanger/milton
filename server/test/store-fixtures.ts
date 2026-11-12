@@ -2,7 +2,7 @@ import type { PGlite } from "@electric-sql/pglite";
 import { sql } from "drizzle-orm";
 import { compiledMemos } from "../src/store/compiled";
 import type { StoreDatabase } from "../src/store/database";
-import type { ChangeInput, MemoInput, SaveMemoInput } from "../src/mcp-tools";
+import type { MemoInput, SaveMemoInput } from "../src/mcp-tools";
 import { requireActiveAccount } from "../src/store/accounts";
 import { readLimits } from "../src/store/limits";
 import {
@@ -78,19 +78,6 @@ export const memoSave = (
   },
   ...rest,
 });
-// Changes as an AI labels them: each quotes `before` from the first draft,
-// voice typed by the person, and teaches one of `tweaks` (none without).
-export const teach = (
-  before: string,
-  ...tweaks: NonNullable<ChangeInput["tweak"]>[]
-): ChangeInput[] =>
-  (tweaks.length ? tweaks : [undefined]).map((tweak) => ({
-    before,
-    after: "",
-    about: "voice",
-    by: "person",
-    ...(tweak ? { tweak } : {}),
-  }));
 // An intent for get_report, fictional.
 export const vendorIntent = {
   situation: "declining a vendor's meeting request",

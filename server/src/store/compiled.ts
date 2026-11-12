@@ -14,12 +14,7 @@ import {
 import { checkMemo, runSave, type SaveOutcome } from "./save";
 import type { CallUsage } from "./usage";
 // The save schema is served to AIs, so it lives with the MCP tools.
-import {
-  oldTweaks,
-  oneChange,
-  saveMemoInput,
-  type SaveMemoInput,
-} from "../mcp-tools";
+import { oneChange, saveMemoInput, type SaveMemoInput } from "../mcp-tools";
 export type { SaveMemoInput } from "../mcp-tools";
 export type { SaveOutcome } from "./save";
 
@@ -76,11 +71,6 @@ export function compiledMemos(
       }
     },
     async saveMemo(raw: SaveMemoInput, call?: CallUsage): Promise<SaveOutcome> {
-      // An AI holding the tool definition from before changes.
-      if (oldTweaks(raw))
-        throw new StoreError("invalid_input", oldTweaks.message, 400, {
-          field: "tweaks",
-        });
       const parsed = saveMemoInput.safeParse(raw);
       if (!parsed.success)
         throw new StoreError(
@@ -101,7 +91,7 @@ export function compiledMemos(
       const checked = parsed.data.memo && checkMemo(parsed.data.memo);
       if (checked && !checked.ok)
         throw new StoreError(
-          checked.code,
+          "invalid_input",
           `${checked.message} Nothing was changed.`,
           400,
           checked.field ? { field: checked.field } : undefined,

@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { sql } from "drizzle-orm";
+import type { PGlite } from "@electric-sql/pglite";
 import { localStore } from "./local-store";
 import {
   fixtureStore,
@@ -28,7 +29,9 @@ import { checkMemo } from "../src/store/save";
 import {
   LINE_BREAK,
   lineBreaks,
+  MAX_EXAMPLE_BYTES,
   quote,
+  selectExamples,
   servesChanges,
 } from "../src/store/memos";
 import { utf8Bytes } from "../src/store/limits";
@@ -1120,12 +1123,119 @@ const asStored = (rows: ReturnType<typeof changeRows>): StoredChange[] =>
     final_end: r.finalEnd,
   }));
 
-test("a report serves whole stored changes under drafted examples: each line decodes to its memo's exact slices, picked and budgeted by the rule, the same on every read", async () => {
-  // Generated drafts and finals, fictional words with the characters that
-  // could break a line or a quote.
-  let seed = 20261111;
-  const rand = (k: number) =>
-    (seed = (seed * 1103515245 + 12345) % 2 ** 31) % k;
+// The rule written a second time, apart from the code it checks: eligibility,
+// encoding, picking and the budget (docs/reports.md, "What they changed").
+const ORACLE_ESCAPE = new Set([
+  0x2028, 0x2029, 0x061c, 0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x202d,
+  0x202e, 0x2066, 0x2067, 0x2068, 0x2069,
+]);
+const SHORT: Record<string, string> = {
+  "\b": "\\b",
+  "\f": "\\f",
+  "\n": "\\n",
+  "\r": "\\r",
+  "\t": "\\t",
+  '"': '\\"',
+  "\\": "\\\\",
+};
+const oracleSide = (side: string) =>
+  `"${Array.from(side, (ch) => {
+    const c = ch.codePointAt(0)!;
+    if (SHORT[ch]) return SHORT[ch];
+    if (c < 0x20 || (c >= 0x7f && c <= 0x9f) || ORACLE_ESCAPE.has(c))
+      return `\\u${c.toString(16).padStart(4, "0")}`;
+    return ch;
+  }).join("")}"`;
+const oracleOk = (c: StoredChange) => {
+  const inner = (s: string) => Array.from(oracleSide(s)).length - 2;
+  const blank = (s: string) => /^[\s\u0085]*$/.test(s);
+  return (
+    c.about === null &&
+    c.by === null &&
+    c.tweak_id === null &&
+    !c.truncated &&
+    [c.draft_start, c.draft_end, c.final_start, c.final_end].every(
+      (x) => x !== null,
+    ) &&
+    Array.from(c.before).length <= 160 &&
+    Array.from(c.after).length <= 160 &&
+    inner(c.before) <= 160 &&
+    inner(c.after) <= 160 &&
+    !(blank(c.before) && blank(c.after)) &&
+    c.before.normalize("NFC") !== c.after.normalize("NFC")
+  );
+};
+const oracleLine = (c: StoredChange) =>
+  c.before === ""
+    ? `- added: ${oracleSide(c.after)}`
+    : c.after === ""
+      ? `- cut: ${oracleSide(c.before)}`
+      : `- ${oracleSide(c.before)} → ${oracleSide(c.after)}`;
+/** Expected blocks by memo id, and the code points they and the guidance
+ * add, for qualifying memos in served order. */
+const oracleBlocks = (memos: { id: string; rows: StoredChange[] }[]) => {
+  const heading = "What they changed in the AI's first draft:";
+  const guidance = 1 + Array.from(CHANGES_GUIDANCE).length;
+  let left = 3000 - guidance;
+  const blocks = new Map<string, string[]>();
+  for (const m of memos) {
+    const ok = m.rows.filter(oracleOk).sort((a, b) => a.n - b.n);
+    const picked = ok.length > 3 ? [ok[0]!, ok[1]!, ok[ok.length - 1]!] : ok;
+    const lines: string[] = [];
+    for (const row of picked) {
+      const line = oracleLine(row);
+      const cost =
+        (lines.length ? 0 : 2 + heading.length) + 1 + Array.from(line).length;
+      if (cost <= left) {
+        left -= cost;
+        lines.push(line);
+      }
+    }
+    if (lines.length) blocks.set(m.id, lines);
+  }
+  const text = new Map(
+    [...blocks].map(([id, lines]) => [
+      id,
+      `\n\n${heading}\n${lines.join("\n")}`,
+    ]),
+  );
+  return { text, added: blocks.size ? 3000 - left : 0 };
+};
+type GenMemo = {
+  id: string;
+  first_draft: string;
+  final: string;
+  mode: "draft";
+  first_draft_state: "kept";
+  changes_state: "itemized" | "too_large";
+  tier: "steered";
+  bytes: number;
+  changes: StoredChange[];
+};
+const accountMemos = async (pg: PGlite, user: string) =>
+  new Map(
+    (
+      await pg.query<GenMemo>(
+        `SELECT m.id,m.first_draft,m.final,m.mode,m.first_draft_state,m.changes_state,m.tier,
+           octet_length(m.final) AS bytes,
+           (SELECT coalesce(json_agg(c.* ORDER BY c.n),'[]'::json) FROM memo_changes c
+             WHERE c.user_id=m.user_id AND c.memo_id=m.id) AS changes
+         FROM memos m WHERE m.user_id=$1`,
+        [user],
+      )
+    ).rows.map((m) => [m.id, m]),
+  );
+
+test("a report serves whole stored changes under drafted examples: each line decodes to its memo's exact slices, picked and budgeted as an independent reading of the rule expects, the same on every read", async () => {
+  // Generated drafts and finals (xorshift32, integer-safe), fictional words
+  // with the characters that could break a line, a quote or an offset.
+  let state = 20261111;
+  const rand = (k: number) => {
+    state ^= state << 13;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    return (state >>> 0) % k;
+  };
   const WORDS = [
     "Hi",
     "Dana",
@@ -1135,7 +1245,7 @@ test("a report serves whole stored changes under drafted examples: each line dec
     "can't",
     "meet",
     "café",
-    "café",
+    "cafe\u0301",
     '"quoted"',
     "back\\slash",
     "→",
@@ -1145,27 +1255,35 @@ test("a report serves whole stored changes under drafted examples: each line dec
     "x".repeat(120),
     "\u202eflip",
     "🙂",
+    "𝒜",
   ];
   const GAPS = [" ", " ", " ", "\n", "\r\n", "\r", "\u2028", "\u0085", "\n\n"];
+  const used = new Set<string>();
+  const pick = <T extends string>(list: T[]) => {
+    const x = list[rand(list.length)]!;
+    used.add(x);
+    return x;
+  };
   const text = (k: number) =>
-    Array.from(
-      { length: k },
-      () => WORDS[rand(WORDS.length)]! + GAPS[rand(GAPS.length)]!,
-    ).join("");
+    Array.from({ length: k }, () => pick(WORDS) + pick(GAPS)).join("");
+  const edits: number[] = [];
   const mutate = (s: string) => {
     const w = s.split(" ");
-    for (let e = 1 + rand(4); e > 0; e--) {
+    const n = 2 + rand(3);
+    edits.push(n);
+    for (let e = 0; e < n; e++) {
       const i = rand(w.length);
       const r = rand(3);
       if (r === 0) w.splice(i, 1);
-      else if (r === 1) w.splice(i, 0, WORDS[rand(WORDS.length)]!);
-      else w[i] = WORDS[rand(WORDS.length)]!;
+      else if (r === 1) w.splice(i, 0, pick(WORDS));
+      else w[i] = pick(WORDS);
     }
-    w.push(["Best,", "Thanks!", "–P"][rand(3)]!);
+    w.push(pick(["Best,", "Thanks!", "–P"]));
     return w.join(" ");
   };
   const local = await localStore();
   let lines = 0;
+  let astral = 0;
   try {
     for (let a = 0; a < 24; a++) {
       const user = `g${a}`;
@@ -1184,69 +1302,74 @@ test("a report serves whole stored changes under drafted examples: each line dec
       }
       const report = await store.readReport(vendorIntent);
       expect((await store.readReport(vendorIntent)).text).toBe(report.text);
-      const memos = new Map(
-        (
-          await local.pg.query<{
-            id: string;
-            first_draft: string;
-            final: string;
-            mode: "draft";
-            first_draft_state: "kept";
-            changes_state: "itemized" | "too_large";
-            tier: "steered";
-            bytes: number;
-            changes: StoredChange[];
-          }>(
-            `SELECT m.id,m.first_draft,m.final,m.mode,m.first_draft_state,m.changes_state,m.tier,
-               octet_length(m.final) AS bytes,
-               (SELECT coalesce(json_agg(c.* ORDER BY c.n),'[]'::json) FROM memo_changes c
-                 WHERE c.user_id=m.user_id AND c.memo_id=m.id) AS changes
-             FROM memos m WHERE m.user_id=$1`,
-            [user],
-          )
-        ).rows.map((m) => [m.id, m]),
-      );
-      // The rule, run on every stored row of the served examples.
+      const memos = await accountMemos(local.pg, user);
       const served = report.examples.map((e) => memos.get(e.memo_id)!);
-      const want = changeBlocks(
+      const want = oracleBlocks(
         served
-          .filter(servesChanges)
+          .filter(
+            (m) =>
+              m.mode === "draft" &&
+              m.first_draft_state === "kept" &&
+              m.changes_state === "itemized" &&
+              m.tier === "steered" &&
+              m.bytes <= MAX_EXAMPLE_BYTES,
+          )
           .map((m) => ({ id: m.id, rows: m.changes })),
       );
+      // The served text is the text without changes plus exactly the
+      // expected blocks and guidance line, in their places.
+      let bare = report.text;
+      if (want.text.size)
+        bare = bare.replace(
+          `Imitate their wording.\n${CHANGES_GUIDANCE}\n\n`,
+          "Imitate their wording.\n\n",
+        );
+      for (const m of served) {
+        const block = want.text.get(m.id) ?? "";
+        expect(report.text).toContain(`${quote(m.final)}${block}`);
+        bare = bare.replace(`${quote(m.final)}${block}`, quote(m.final));
+      }
+      expect(bare).not.toContain(CHANGES_HEADING);
+      expect(bare).not.toContain(CHANGES_GUIDANCE);
+      expect(points(report.text) - points(bare)).toBe(want.added);
+      expect(want.added).toBeLessThanOrEqual(SERVED_BUDGET);
+      // Every served line is one whole stored row of that example's memo.
       const got = servedChanges(report.text);
       expect(got.size).toBeLessThanOrEqual(3);
-      let added = want.guidance ? 1 + points(CHANGES_GUIDANCE) : 0;
-      expect(report.text.includes(CHANGES_GUIDANCE)).toBe(want.guidance);
       served.forEach((m, i) => {
-        const block = want.blocks.get(m.id);
-        expect(got.has(i + 1)).toBe(block !== undefined);
-        if (!block) return;
-        expect(report.text).toContain(`${quote(m.final)}${block}`);
-        added += points(block);
-        for (const pair of got.get(i + 1)!) {
+        expect(got.has(i + 1)).toBe(want.text.has(m.id));
+        for (const pair of got.get(i + 1) ?? []) {
           lines++;
-          // Every line is one whole stored row of this example's memo.
+          if (/\p{Extended_Pictographic}|𝒜/u.test(pair.before + pair.after))
+            astral++;
           const row = m.changes.find(
             (c) => c.before === pair.before && c.after === pair.after,
-          );
+          )!;
           expect(row).toBeDefined();
-          expect(servableRow(row!)).toBe(true);
-          expect(m.first_draft.slice(row!.draft_start!, row!.draft_end!)).toBe(
-            row!.before,
+          expect(m.first_draft.slice(row.draft_start!, row.draft_end!)).toBe(
+            row.before,
           );
-          expect(m.final.slice(row!.final_start!, row!.final_end!)).toBe(
-            row!.after,
+          expect(m.final.slice(row.final_start!, row.final_end!)).toBe(
+            row.after,
           );
           expect(pair.before).not.toBe(pair.after);
           expect(pair.before.normalize("NFC")).not.toBe(
             pair.after.normalize("NFC"),
           );
-          expect(pickChanges(m.changes)).toContainEqual(row!);
         }
       });
-      expect(added).toBeLessThanOrEqual(SERVED_BUDGET);
     }
+    // What the generator reached: every word and break, several edits per
+    // memo, astral characters in served lines.
+    expect([...used].filter((x) => WORDS.includes(x)).length).toBe(
+      WORDS.length,
+    );
+    for (const gap of GAPS) expect(used).toContain(gap);
+    expect(Math.min(...edits)).toBeGreaterThanOrEqual(2);
+    expect(new Set(edits).size).toBe(3);
+    expect(edits.length).toBeGreaterThan(70);
     expect(lines).toBeGreaterThan(60);
+    expect(astral).toBeGreaterThan(0);
   } finally {
     await local.dispose();
   }
@@ -1389,6 +1512,191 @@ test("what qualifies: drafted, kept, itemized, steered memos small enough to ser
   } finally {
     await local.dispose();
   }
+});
+
+test("the change query: scoped to the account, for at most three memos, at most 360 rows, never a first draft; the served text adds exactly what it charges, up to 3,000", async () => {
+  const local = await localStore();
+  try {
+    await seedUsers(local.pg, "A", "B");
+    const a = fixtureStore(local.db, "A");
+    for (let i = 0; i < 4; i++)
+      await a.saveMemo(
+        memoSave({
+          first_draft: `Hi Dana, I hope this finds you well. Draft ${i}.`,
+          final: `Dana — draft ${i}.`,
+          mode: "draft",
+          rounds: 1,
+        }),
+      );
+    // Account B holds a memo under the same id as one of A's, with changes
+    // of its own.
+    const first = (await a.readReport(vendorIntent)).examples[0]!.memo_id;
+    await fixtureStore(local.db, "B").saveMemo(
+      memoSave({
+        first_draft: "Hello Bob, BMARKER cheers.",
+        final: "Bob — cheers.",
+        mode: "draft",
+        rounds: 1,
+      }),
+    );
+    await local.pg.exec(`
+      CREATE TEMP TABLE b_changes AS SELECT * FROM memo_changes WHERE user_id='B';
+      DELETE FROM memo_changes WHERE user_id='B';
+      UPDATE memos SET id='${first}' WHERE user_id='B';
+      UPDATE b_changes SET memo_id='${first}';
+      INSERT INTO memo_changes SELECT * FROM b_changes;`);
+    // What the finals statement returns, as the report reads it.
+    let fetched: Record<string, unknown>[] = [];
+    const watched = {
+      ...local.db,
+      async query<Row extends Record<string, unknown>>(
+        statement: Parameters<typeof local.db.query>[0],
+      ) {
+        const rows = await local.db.query<Row>(statement);
+        if (rows[0] && "final" in rows[0]) fetched = rows;
+        return rows;
+      },
+    };
+    const read = () => fixtureStore(watched, "A").readReport(vendorIntent);
+    const report = await read();
+    expect(report.examples).toHaveLength(3);
+    expect(report.text).toContain(
+      '- "Hi Dana, I hope this finds you well. Draft" → "Dana — draft"',
+    );
+    expect(report.text).not.toContain("BMARKER");
+    expect(fetched).toHaveLength(3);
+    for (const row of fetched) {
+      expect(Object.keys(row).sort()).toEqual(["changes", "final", "id"]);
+      expect(JSON.stringify(row)).not.toContain("BMARKER");
+    }
+    // 120 rows on each served memo, the schema's most: 360 fetched, three
+    // picked from each.
+    const ids = report.examples.map((e) => e.memo_id);
+    const rows = async (
+      id: string,
+      list: { before: string; after: string }[],
+    ) => {
+      await local.pg.query(
+        "DELETE FROM memo_changes WHERE user_id='A' AND memo_id=$1",
+        [id],
+      );
+      for (const [n, r] of list.entries())
+        await local.pg.query(
+          `INSERT INTO memo_changes(user_id,memo_id,n,draft_start,draft_end,final_start,final_end,"before","after")
+           VALUES ('A',$1,$2,0,0,0,0,$3,$4)`,
+          [id, n, r.before, r.after],
+        );
+    };
+    for (const id of ids)
+      await rows(
+        id,
+        Array.from({ length: 120 }, (_, n) => ({
+          before: `p${n}`,
+          after: `q${n}`,
+        })),
+      );
+    const full = await read();
+    expect(
+      fetched.reduce((s, r) => s + (r.changes as unknown[]).length, 0),
+    ).toBe(360);
+    expect(servedChanges(full.text).get(1)).toEqual([
+      { before: "p0", after: "q0" },
+      { before: "p1", after: "q1" },
+      { before: "p119", after: "q119" },
+    ]);
+    // The budget, measured on the served text: with no rows the report is
+    // bare; with rows built to fill it, it is exactly 3,000 code points
+    // longer. The third block's second line doesn't fit, its last does, and
+    // the row between them is never shown.
+    for (const id of ids) await rows(id, []);
+    const bare = (await read()).text;
+    expect(bare).not.toContain(CHANGES_HEADING);
+    const max = { before: "a".repeat(160), after: "b".repeat(160) };
+    await rows(ids[0]!, [max, max, max]);
+    await rows(ids[1]!, [max, max, max]);
+    await rows(ids[2]!, [
+      max,
+      max,
+      { before: "never", after: "shown" },
+      { before: "a".repeat(160), after: "c".repeat(107) },
+    ]);
+    const filled = (await read()).text;
+    expect(points(filled) - points(bare)).toBe(SERVED_BUDGET);
+    expect(filled).toContain(
+      `Imitate their wording.\n${CHANGES_GUIDANCE}\n\n## 1. `,
+    );
+    expect(filled).not.toContain('"never"');
+    expect([...servedChanges(filled).values()].map((l) => l.length)).toEqual([
+      3, 3, 2,
+    ]);
+    // One code point less room: the exact line no longer fits.
+    await rows(ids[2]!, [
+      max,
+      max,
+      { before: "a".repeat(160), after: "c".repeat(108) },
+    ]);
+    const over = (await read()).text;
+    expect(points(over) - points(bare)).toBe(SERVED_BUDGET - 277);
+  } finally {
+    await local.dispose();
+  }
+});
+
+test("plain LF report text is unchanged, and the example size bound measures the flattened header, to the byte", async () => {
+  const local = await localStore();
+  try {
+    await seedUsers(local.pg, "L");
+    const store = fixtureStore(local.db, "L");
+    await store.saveMemo({
+      request_id: crypto.randomUUID(),
+      cover_sheet: { add: "Short lines.", expected_version: 0 },
+    });
+    await store.saveMemo(memoSave());
+    const report = await store.readReport(vendorIntent);
+    expect(report.text).toBe(
+      `# Cover sheet\n\nShort lines.\n\n# Examples\n\nThe person's finals that best match this draft, best first. Imitate their wording.\n\n## 1. email · your words · ${report.examples[0]!.date}\nSituation: decline a vendor's meeting request\nAudience: a vendor · Purpose: decline\n\n> Thanks for thinking of us. We'll pass this quarter.\n>\n> –P`,
+    );
+  } finally {
+    await local.dispose();
+  }
+  // A header holding U+2028 is measured as printed, one space.
+  const at = "2026-11-11T00:00:00.000000Z";
+  const candidate = (id: string, summary: string, final: string) => ({
+    id,
+    kind_id: null,
+    medium: "email" as const,
+    tier: "own" as const,
+    summary,
+    audience: null,
+    purpose: null,
+    at,
+    bytes: utf8Bytes(final),
+    lines: final.match(LINE_BREAK)?.length ?? 0,
+    lexical: 0,
+    tweaks: [],
+    mode: null,
+    first_draft_state: "none" as const,
+    changes_state: null,
+  });
+  const finals = ["One.\r\nTwo.", "Three\u0085four."];
+  const c1 = candidate("1", "first", finals[0]!);
+  const c2 = candidate("2", "a\u2028b", finals[1]!);
+  const printed = [
+    `## 1. email · your words · 2026-11-11\nSituation: first`,
+    `## 2. email · your words · 2026-11-11\nSituation: a b`,
+  ];
+  const size = (i: number, c: typeof c1) =>
+    utf8Bytes(printed[i]!) + c.bytes + 2 * (c.lines + 1) + 2;
+  const budget = size(0, c1) + size(1, c2);
+  const chosen = (b: number) =>
+    selectExamples([c1, c2], new Map(), b).map((m) => m.id);
+  expect(chosen(budget)).toEqual(["1", "2"]);
+  expect(chosen(budget - 1)).toEqual(["1"]);
+  // The bound holds for what is printed: header, blank line, quoted final.
+  for (const [i, final] of finals.entries())
+    expect(utf8Bytes(`${printed[i]}\n\n${quote(final)}`)).toBeLessThanOrEqual(
+      size(i, i ? c2 : c1),
+    );
 });
 
 test("change blocks: rows picked first, second and last after every check, charged exactly within the budget, a line that doesn't fit skipped with no backfill", () => {

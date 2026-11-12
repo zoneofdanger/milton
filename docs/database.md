@@ -71,6 +71,13 @@ production order and snapshots are in [migrations](deploy/migrations.md).
     citations itself: forgetting a memo, deleting a tweak and account erasure remove
     them through the foreign keys' cascades, which run as the table owner.
   - `015-drop-guide-roles.sql` dropped the guide roles; none exists.
+  - `016-memo-evidence-roles.sql` (after `0015`): restates 014's whole set for the memo
+    tables, revoking first, so rerun it after any rerun of 014. It adds MCP insert and
+    read on `memo_changes`, and app read on `memo_changes`, `UPDATE(request)` on
+    `memos` (the TPS page's Remove) and `UPDATE(text_changed_at)` on `tweaks` (a
+    reword). Neither runtime can change or delete a stored change; forgetting a memo,
+    deleting a tweak and account erasure remove or unlink them through the foreign keys'
+    actions, as the owner.
 - `trial_accounts.stripe_revision` (Drizzle `0011`) needs no grant file: app's
   table-wide grant on `trial_accounts` (005) covers it, and MCP's column list leaves it
   out.
@@ -112,7 +119,23 @@ production order and snapshots are in [migrations](deploy/migrations.md).
   tier, and served tweaks only with a report id. Kind labels and tweak forms are unique
   per account (labels in any letter case), and cover sheet versions are positive.
 - A memo's search vector (summary, purpose, audience and final, English) is a generated
-  column ([reports](reports.md)).
+  column ([reports](reports.md)); the request is not in it.
+- `0015` checks a memo's `request` (only on a drafted memo, 1 to 600 characters, trimmed
+  of spaces and line breaks, no control characters but line breaks) and
+  `changes_state` (`itemized` or `too_large`, only with a kept first draft).
+  `memo_changes` rows (key: account, memo, `n` from 0 to 119) cascade from their memo;
+  each side is at most 300 characters and not both empty, offsets come in start/end
+  pairs with start at most end, `by` is set exactly when `about` is `voice` or
+  `content`, and a tweak sits only on a voice change by the person or asked for (the
+  check is `IS TRUE`, so a row without labels, where the test is NULL, holds none). A
+  row's tweak references its memo's citation (`(user_id, memo_id, tweak_id)` →
+  `tweak_citations`), and deleting the tweak sets only `tweak_id` to null (PostgreSQL
+  15's column list).
+- In this release the save writes only code's rows: offsets, the two cut sides,
+  `truncated`, and `about` = `format` for a Markdown-only spot, else NULL. The label
+  columns (`by`, and `about`'s `voice` and `content`) and `tweak_id` exist but are
+  unused and stay NULL; the checks and the citation key above stay in place for a later
+  release ([memos](memos.md#changes)).
 - Account erasure cascades every memo, kind, tweak, citation, served report, cover sheet
   version and switch row ([deletion](deletion.md)).
 - A receipt is written once with its outcome and cannot change; `save_request_hashes`
@@ -135,8 +158,8 @@ production order and snapshots are in [migrations](deploy/migrations.md).
 
 ## Migrations
 
-- There are three tracks: Drizzle (`server/drizzle/`, `0000` to `0014`), owner files
-  (`server/migrations/`, numbered up to `015`) and native auth (`apps/auth/migrations/`,
+- There are three tracks: Drizzle (`server/drizzle/`, `0000` to `0015`), owner files
+  (`server/migrations/`, numbered up to `016`) and native auth (`apps/auth/migrations/`,
   `000` to `008`).
 - Fresh installs use one Drizzle baseline (`0000_baseline.sql`: the original 14 tables,
   seven guard functions and triggers, the `milton_runtime` role and its grants, and the
@@ -144,14 +167,16 @@ production order and snapshots are in [migrations](deploy/migrations.md).
   are unsupported.
 - Fresh installs apply every migration in `drizzle/` in order, with the owner files
   through 015 between `0012` and `0013` (005 grants on tables 0013 drops; 015 runs
-  first, as in the release). After `0013`, `005-app-roles.sql` is never rerun.
+  first, as in the release), and 016 after `0015`. After `0013`, `005-app-roles.sql` is
+  never rerun.
 - `0012_memos` adds the memo, kind, tweak, citation, served-report, cover sheet and Keep
   memos tables. `0013_drop_old_writing` dropped the writing tables memos replaced
   (cards, card versions, accepted changes, sample kinds, samples, sample versions and the
   guide tables), their guards, sequence and the eight functions only they used, and
   deleted the old store's save receipts; every receipt the memo code wrote stays, so a
   replay still returns its stored outcome. `0014_drop_source_hash` dropped
-  `save_requests.source_hash`.
+  `save_requests.source_hash`. `0015_memo_evidence` added `memo_changes`,
+  `memos.request`, `memos.changes_state` and `tweaks.text_changed_at`, additive.
 - The unread `deleted_identities` table (`0005`), the legacy mapping tables (owner file
   `008`), the generated `payload_bytes` columns (`0006`), the daily allowance's
   `usage_daily` table and `daily_calls` key (`0008`) and the app session's stored native

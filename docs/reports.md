@@ -8,6 +8,7 @@ covers:
   - server/src/store/trials.ts
   - server/src/store/schema.ts
   - server/drizzle/0012_memos.sql
+  - server/drizzle/0015_memo_evidence.sql
 ---
 
 # Reports
@@ -71,6 +72,8 @@ A report ranks every memo by, in order:
   "needed again" counts drafts that were given the tweak and still needed it, then one
   bullet per tweak with its memo count, and `; needed again M of S` after it when M is at
   least 1). The `tweaks` envelope stays tweak id, text and memo count.
+- A report serves no tweak examples, no request and no stored change; a memo's first
+  draft is never served ([memos](memos.md#changes)).
 - Tier labels in report text are "your words" and "steered by you"; kind labels appear
   in example headers.
 - With no example and no tweak, `is_empty` is true and the text ends with a fixed line

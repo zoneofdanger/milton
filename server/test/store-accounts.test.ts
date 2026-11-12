@@ -846,6 +846,7 @@ test("account deletion removes every tenant row, waits for an in-flight save and
       "memo_kinds",
       "tweaks",
       "tweak_citations",
+      "memo_changes",
       "memo_settings",
       "save_requests",
       "usage_calls",

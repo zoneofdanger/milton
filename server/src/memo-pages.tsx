@@ -3,7 +3,7 @@ import { billingItem, page, type BillingItem } from "./pages";
 import type { Child } from "hono/jsx";
 import type { PersonStore } from "./store";
 import type { TrialStatus } from "./store/trials";
-import type { FullMemo, TpsMemo, TpsView } from "./store/tps";
+import type { FullMemo, TpsChange, TpsMemo, TpsView } from "./store/tps";
 import { LISTED_MEMOS } from "./store/tps";
 import { SCOREBOARD_MIN, type Scoreboard, type ScoreLine } from "./store/score";
 import { SETUP_PROMPT } from "@milton/theme/setup-prompt";
@@ -12,7 +12,12 @@ import { clientHost } from "./auth-assistants";
 // The TPS page's routes. "/" also serves the signed-out landing page, so the
 // browser router sends it here only for a signed-in person.
 const GETS = ["/", "/download", "/tps-report"];
-const POSTS = ["/tps/forget", "/tps/tweaks/delete", "/tps/tweaks/reword"];
+const POSTS = [
+  "/tps/forget",
+  "/tps/request/remove",
+  "/tps/tweaks/delete",
+  "/tps/tweaks/reword",
+];
 const MEMO_PATH = /^\/tps\/memo\/([^/]+)$/;
 const ID = /^[0-9a-f-]{36}$/;
 /** The one method a TPS route answers, or undefined for any other path. */
@@ -30,6 +35,7 @@ type PageStore = Pick<
   | "readMemo"
   | "exportTps"
   | "forgetMemo"
+  | "removeRequest"
   | "deleteTweak"
   | "rewordTweak"
 > &
@@ -195,6 +201,14 @@ const clientLabel = (client: TpsMemo["client"]) =>
 /** "2 rounds" for a memo with a first draft; "your words" otherwise. */
 const roundsLabel = (m: TpsMemo) =>
   m.rounds === undefined ? undefined : counted(m.rounds, "round");
+/** "You asked:" with the request's first line, on a listed memo. */
+const askedLine = (m: TpsMemo) =>
+  m.asked !== undefined && (
+    <p class="memo-tweaks">
+      <span class="tweak-label">You asked:</span>{" "}
+      <span class="typed">{m.asked}</span>
+    </p>
+  );
 const tweakList = (label: string, tweaks: { text: string }[]) =>
   tweaks.length > 0 && (
     <p class="memo-tweaks">
@@ -388,8 +402,16 @@ function sheet({ view, email, date, comment, csrf, notices }: SheetView) {
                   <span class="report-counts">{when(m.at)}</span>
                 </p>
                 <p class="typed">{m.summary}</p>
+                {askedLine(m)}
                 <p class="report-counts">
-                  {[clientLabel(m.client), roundsLabel(m), TIER[m.tier]]
+                  {[
+                    clientLabel(m.client),
+                    roundsLabel(m),
+                    m.change_count
+                      ? counted(m.change_count, "listed change")
+                      : "",
+                    TIER[m.tier],
+                  ]
                     .filter(Boolean)
                     .join(" · ")}
                 </p>
@@ -550,8 +572,72 @@ const notFound = (ctx: MemoPageContext, message: string) =>
     { ...chrome(ctx), wide: true },
   );
 
+/** One side of a change, verbatim; "…" where it was cut at 300 characters. */
+const side = (text: string, c: TpsChange) => (
+  <span class="typed">{`“${text}${c.truncated && Array.from(text).length >= 300 ? "…" : ""}”`}</span>
+);
+/** One spot code found, unlabelled: before → after, or added or cut when a
+ * side is empty; a Markdown-only spot says "formatting", and a cut side says
+ * so (docs/memos.md, "Changes"). */
+const changeRow = (c: TpsChange) => {
+  const notes = [
+    ...(c.about === "format" ? ["formatting"] : []),
+    ...(c.truncated ? ["shortened to 300 characters"] : []),
+  ];
+  return (
+    <li class="change-row">
+      <p>
+        {!c.before ? (
+          <>added: {side(c.after, c)}</>
+        ) : !c.after ? (
+          <>cut: {side(c.before, c)}</>
+        ) : (
+          <>
+            {side(c.before, c)} → {side(c.after, c)}
+          </>
+        )}
+      </p>
+      {notes.length > 0 && (
+        <p class="report-counts change-notes">
+          {notes.map((note) => (
+            <span>{note}</span>
+          ))}
+        </p>
+      )}
+    </li>
+  );
+};
+/** "What changed": code's own list, for a memo saved since it was kept. */
+function whatChanged(m: FullMemo) {
+  if (!m.changes_state) return null;
+  return (
+    <section aria-labelledby="memo-changes">
+      <h2 id="memo-changes">What changed</h2>
+      {m.changes_state === "too_large" ? (
+        <p class="small-note">
+          Too many changes to list; the first draft and final above show them
+          all.
+        </p>
+      ) : m.changes.length ? (
+        <ol class="change-list">{m.changes.map(changeRow)}</ol>
+      ) : m.first_draft === m.final ? (
+        <p class="small-note">
+          Nothing: you accepted the first draft as it was.
+        </p>
+      ) : (
+        // The diff compares words and marks, so an edit of spacing or line
+        // breaks alone lists nothing; the texts still differ.
+        <p class="small-note">
+          Only spacing or line breaks changed; compare the first draft and final
+          above.
+        </p>
+      )}
+    </section>
+  );
+}
+
 /** The full memo: both texts word for word, its context and its tweaks. */
-function memoPage(ctx: MemoPageContext, m: FullMemo) {
+function memoPage(ctx: MemoPageContext, m: FullMemo, notice?: Child) {
   const facts: [string, Child][] = [
     ["Medium", MEDIUM[m.medium]],
     ...(m.kind ? [["Kind", m.kind] as [string, Child]] : []),
@@ -616,6 +702,26 @@ function memoPage(ctx: MemoPageContext, m: FullMemo) {
           </dl>
         )}
       </section>
+      {(m.request !== undefined || notice) && (
+        <section aria-labelledby="memo-asked">
+          <h2 id="memo-asked">You asked</h2>
+          {notice}
+          {m.request !== undefined && (
+            <>
+              {plain(m.request)}
+              <p class="small-note">
+                What your AI kept as your ask for this; it is asked to keep only
+                what you typed. Shown only to you, never sent to an AI.
+              </p>
+              <form method="post" action="/tps/request/remove">
+                {ctx.csrf()}
+                <input type="hidden" name="memo" value={m.id} />
+                <button class="secondary">Remove</button>
+              </form>
+            </>
+          )}
+        </section>
+      )}
       <section aria-labelledby="memo-first">
         <h2 id="memo-first">First draft</h2>
         {m.first_draft !== undefined ? (
@@ -633,6 +739,7 @@ function memoPage(ctx: MemoPageContext, m: FullMemo) {
         <h2 id="memo-final">Final</h2>
         {plain(m.final)}
       </section>
+      {whatChanged(m)}
       <section aria-labelledby="memo-served">
         <h2 id="memo-served">Served tweaks</h2>
         {tweaks(m.served, "No tweaks were served for this memo.")}
@@ -644,8 +751,8 @@ function memoPage(ctx: MemoPageContext, m: FullMemo) {
       <section aria-labelledby="memo-forget">
         <h2 id="memo-forget">Forget this memo</h2>
         <p>
-          Removes the memo, its example and its tweak citations. A tweak no
-          other memo taught goes too.
+          Removes the memo, what you asked, its changes, its example and its
+          tweak citations. A tweak no other memo taught goes too.
         </p>
         <form method="post" action="/tps/forget">
           {ctx.csrf()}
@@ -684,7 +791,13 @@ export async function memoPages(
   if (memoId !== undefined) {
     const found = ID.test(memoId) ? await store.readMemo(memoId) : undefined;
     return found
-      ? memoPage(ctx, found)
+      ? memoPage(
+          ctx,
+          found,
+          url.searchParams.get("done") === "request-removed" ? (
+            <p role="status">Request removed.</p>
+          ) : undefined,
+        )
       : notFound(ctx, "This memo is forgotten or does not exist.");
   }
   if (request.method === "POST") {
@@ -701,6 +814,15 @@ export async function memoPages(
           "This memo is already forgotten or does not exist.",
         );
       return back("forgot", "memos");
+    }
+    if (path === "/tps/request/remove") {
+      const memo = id("memo");
+      if (!memo || !(await store.removeRequest(memo)))
+        return notFound(ctx, "This memo is forgotten or does not exist.");
+      return Response.redirect(
+        `${ctx.appOrigin}/tps/memo/${memo}?done=request-removed#memo-asked`,
+        303,
+      );
     }
     const tweak = id("tweak");
     if (path === "/tps/tweaks/delete") {

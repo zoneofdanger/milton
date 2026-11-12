@@ -11,7 +11,7 @@ import {
   readReport,
   type ReportIntent,
 } from "./memos";
-import { memoShapeProblem, runSave, type SaveOutcome } from "./save";
+import { checkMemo, runSave, type SaveOutcome } from "./save";
 import type { CallUsage } from "./usage";
 // The save schema is served to AIs, so it lives with the MCP tools.
 import { oneChange, saveMemoInput, type SaveMemoInput } from "../mcp-tools";
@@ -88,12 +88,13 @@ export function compiledMemos(
               } malformed; see the input schema. Nothing was changed.`,
           400,
         );
-      const problem = parsed.data.memo && memoShapeProblem(parsed.data.memo);
-      if (problem)
+      const checked = parsed.data.memo && checkMemo(parsed.data.memo);
+      if (checked && !checked.ok)
         throw new StoreError(
           "invalid_input",
-          `${problem} Nothing was changed.`,
+          `${checked.message} Nothing was changed.`,
           400,
+          checked.field ? { field: checked.field } : undefined,
         );
       if (!actor)
         throw new StoreError(
@@ -106,6 +107,7 @@ export function compiledMemos(
         userId,
         actor,
         parsed.data,
+        checked ? checked.evidence : undefined,
         () => admit?.(call),
         gated,
       );

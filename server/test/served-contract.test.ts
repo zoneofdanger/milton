@@ -3,7 +3,7 @@ import { readOnlyInstructions, storeInstructions } from "../src/mcp";
 import { nextSteps } from "../src/mcp-outcomes";
 import { setupScript } from "../src/store/setup";
 import { SETUP_PROMPT } from "../src/store/setup";
-import { memoShapeProblem, receiptLine } from "../src/store/save";
+import { checkMemo, receiptLine } from "../src/store/save";
 import {
   coverSheet,
   memoInput,
@@ -43,8 +43,10 @@ test("the served text uses one word for each thing and describes the memo workfl
     "A revision you just showed is not accepted yet",
     "Show the receipt word for word, however long",
     "send first_draft_missing instead of rebuilding it",
-    "Reuse a served tweak's id",
-    'never "when requested". Skip one-off facts they added and changes you made unasked.',
+    "Reuse a served tweak's id for the same change",
+    'list each habit they made you change that is likely to recur, at most three, named plainly ("no warm-up opener"), with a condition only if it doesn\'t hold everywhere. Most memos teach one or none.',
+    "Skip one-off facts and your unasked changes",
+    "request: only what they typed to ask, no pasted text",
     "Kept memo: vendor decline, 2 rounds, tweaks: no warm-up opener.",
     "A correction during a draft is a tweak, not a cover sheet line",
     "Never add tweaks or your own inferences, or offer to",
@@ -71,10 +73,25 @@ test("the served text uses one word for each thing and describes the memo workfl
   ).toBe(
     "Kept memo: vendor reply, 1 round, tweaks: state the trial duration; no warm-up opener.",
   );
-  // The tweaks field says the same: habits, not one-off facts; reuse served ids.
+  // The tweaks field says the same, with the detail: recurring habits only,
+  // at most three, never "when requested", reuse served ids; and the
+  // request's cut rule.
   const tweaksField = memoInput.shape.tweaks.description ?? "";
-  expect(tweaksField).toContain("Skip one-off facts they added");
-  expect(tweaksField).toContain("reuse a served tweak's id");
+  for (const part of [
+    "each habit the person made you change that is likely to recur, at most three",
+    'named plainly ("no warm-up opener")',
+    'never "when requested". Most memos teach one or none.',
+    "Skip one-off facts they added",
+    "reuse a served tweak's id",
+  ])
+    expect(tweaksField).toContain(part);
+  expect(memoInput.shape.request.description).toContain("marking each cut […]");
+  // A retired phrase: the served text never names that removed feature.
+  for (const served of [
+    storeInstructions,
+    ...Object.values(memoInput.shape).map((field) => field.description ?? ""),
+  ])
+    expect(served).not.toMatch(/exact[\s_-]+edits?/i);
   expect(readOnlyInstructions).toContain("read only");
   expect(readOnlyInstructions).not.toContain("create_memo");
 });
@@ -147,7 +164,7 @@ test("setup offers once, finds sent emails only with a mail tool and approval, a
   );
   const parsed = saveMemoInput.safeParse(example);
   expect(parsed.error?.issues ?? []).toEqual([]);
-  expect(memoShapeProblem(parsed.data!.memo!)).toBeUndefined();
+  expect(checkMemo(parsed.data!.memo!)).toEqual({ ok: true });
   expect(example.memo.first_draft).toBeUndefined();
   // Setup is served only while the account is empty.
   const read = {
@@ -167,12 +184,14 @@ test("setup offers once, finds sent emails only with a mail tool and approval, a
 test("every memo shape the instructions describe parses, and contradicting shapes are named", () => {
   const context = { summary: "a fictional decline", medium: "email" };
   const shapes = [
-    // A drafted memo with tweaks, new and reused.
+    // A drafted memo with tweaks, new and reused, and the person's typed
+    // request.
     {
       final: "No, thanks.",
       first_draft: "Hi! Unfortunately we can't.",
       mode: "draft",
       rounds: 2,
+      request: "Decline their call politely, short.",
       tweaks: [{ text: "no warm-up opener" }, { tweak_id: "t1" }],
       context,
       new_kind: "vendor decline",
@@ -191,7 +210,7 @@ test("every memo shape the instructions describe parses, and contradicting shape
   for (const memo of shapes) {
     const parsed = memoInput.safeParse(memo);
     expect(parsed.error?.issues ?? []).toEqual([]);
-    expect(memoShapeProblem(parsed.data!)).toBeUndefined();
+    expect(checkMemo(parsed.data!)).toMatchObject({ ok: true });
   }
   for (const other of [
     { cover_sheet: { add: "No em dashes", expected_version: 0 } },

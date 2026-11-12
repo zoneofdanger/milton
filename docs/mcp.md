@@ -115,10 +115,13 @@ How a person creates and revokes keys is in [accounts](accounts.md).
   kind.
 - `create_memo` takes a UUID `request_id` and exactly one of `memo`, `cover_sheet`,
   `forget_memos` or `memo_context`; `memo.report_id` names the `get_report` read before
-  the draft. What each change does is in [memos](memos.md) and
-  [deletion](deletion.md).
+  the draft, `memo.tweaks` is the released list (at most 10 items, three distinct) and
+  `memo.request` carries the person's ask ([memos](memos.md#the-request)). What each
+  change does is in [memos](memos.md) and [deletion](deletion.md).
 - `create_memo` returns `saved`, `unchanged`, `conflict` or `failed`, with the request
-  ID. `saved` confirms a committed write; `unchanged` confirms no write was needed.
+  ID. `saved` confirms a committed write; `unchanged` confirms no write was needed. A
+  memo with a kept first draft adds `changes: {state, found}`, code's own count
+  ([memos](memos.md#changes)).
 - A read-only connection lists no `create_memo`; a direct call to it is refused with
   `insufficient_scope` and `required_permission: read_write`.
 
@@ -145,7 +148,10 @@ How a person creates and revokes keys is in [accounts](accounts.md).
   `reread` (read again, then save with a new request ID), `fix_input`, `ask_user` or
   `tell_user`. The mapping is one table, `nextSteps` in `mcp-outcomes.ts`; a test checks
   every code in the source has an entry, and an unknown code gets the
-  unexpected-failure step.
+  unexpected-failure step. A memo refusal with a `field` takes that field's step when
+  the table has one: `invalid_input.request` (send only what the person typed, or leave
+  request out, and the rest unchanged) and `invalid_input.tweaks` (keep the three most
+  likely to recur, and the rest unchanged).
 - The SDK's plain-text argument refusals become such bodies, `invalid_arguments` with
   the SDK's text as `message`.
 - Memo codes get their own steps: `request_too_large` resaves the memo with the final
@@ -176,7 +182,10 @@ How a person creates and revokes keys is in [accounts](accounts.md).
   the tool descriptions in `tools/list`, the descriptions on the input fields, and the
   `next` step on every error result. What the guidance tells the AI is in
   [memos](memos.md) and [setup](setup.md). These are behavioural instructions, not
-  server enforcement, and no extra setup tool or prompt capability exists.
+  server enforcement, and no extra setup tool or prompt capability exists. The detail
+  of a save (the tweak and request rules) lives in the field descriptions, which the
+  budget test does not measure. Asking the AI for only what the person typed is
+  guidance; Milton checks only what [memos](memos.md#the-request) lists.
 - There are two instruction variants, read-write and read-only. Both stay under 3,500
   characters, well inside the 4,096 at which Claude Code truncates; a test enforces this
   and that no error handling is left in them. Error handling lives in each error result's

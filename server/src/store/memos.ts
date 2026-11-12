@@ -66,14 +66,15 @@ export const keepMemos = (userId: string) =>
   sql`coalesce((SELECT keep_memos FROM memo_settings WHERE user_id=${userId}),true)`;
 
 /** A tweak's score, for a query over `tweaks t` (docs/reports.md): among
- * the account's memos with a kept first draft saved since the tweak was
- * created, s.served counts those whose report served it and s.needed_again
- * those of them that cite it too. Computed at read, never stored. */
+ * the account's memos with a kept first draft saved since the tweak's text was
+ * last set (created or reworded), s.served counts those whose report served it
+ * and s.needed_again those of them that cite it too. Computed at read, never
+ * stored. */
 export const tweakScore = sql`LEFT JOIN LATERAL (SELECT count(*) AS served,
     count(*) FILTER (WHERE EXISTS(SELECT 1 FROM tweak_citations c
       WHERE c.user_id=m.user_id AND c.memo_id=m.id AND c.tweak_id=t.id)) AS needed_again
     FROM memos m WHERE m.user_id=t.user_id AND m.first_draft_state='kept'
-      AND t.id=ANY(m.served_tweak_ids) AND m.created_at>=t.created_at) s ON true`;
+      AND t.id=ANY(m.served_tweak_ids) AND m.created_at>=coalesce(t.text_changed_at,t.created_at)) s ON true`;
 
 /** The refusal for an intent kind_id the account does not have. */
 export const invalidKind = () =>

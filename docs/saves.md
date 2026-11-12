@@ -22,7 +22,11 @@ or not at all.
 ## Before the transaction
 
 - The input schema is strict ([mcp](mcp.md)), and a save's shape is checked before any
-  database work; those refusals write no receipt.
+  database work; those refusals write no receipt. That check covers everything the input
+  alone shows: the memo's shape, its request's bounds and the mail-like lines it refuses
+  ([memos](memos.md#the-request)), and the cap of three distinct tweaks. With a kept
+  first draft it also computes code's list of what changed, within its bounds
+  ([memos](memos.md#changes)); that list is the one the save stores.
 - Only AIs can call `create_memo`: a save through the web app's store is refused with
   `assistant_required`. The TPS page's own changes go through its store, under the same
   account lock ([TPS page](tps-page.md)).
@@ -43,7 +47,7 @@ A save runs in one transaction:
 4. Decide the outcome. A request over 256 KiB is `request_too_large`. Otherwise the
    change runs after a savepoint: a refusal (such as `invalid_kind`, `invalid_tweak`,
    `memos_off` or `cover_sheet_limit`) rolls back to it, so nothing changes. A memo, its
-   new kind, its new tweaks and its citations are written together.
+   new kind, its new tweaks, its citations and its changes are written together.
 5. Write the receipt last, once, with the outcome, refusals and cover sheet conflicts
    included, so the same request ID and input replay that outcome.
 
@@ -63,6 +67,10 @@ A save runs in one transaction:
 ## Receipts
 
 - A receipt (`save_requests`) holds the account, request ID, input hash, outcome and
-  time. The outcome can hold a memo's kind and tweaks or the cover sheet's text.
+  time. The outcome can hold a memo's kind, tweaks and its changes' state and count or
+  the cover sheet's text, never a request or a change's text, since receipts outlive
+  forgetting.
+- The hashed input includes `tweaks` and `request`; an empty `tweaks` list is read as
+  omitted first, so a retry sending `[]` replays.
 - A receipt is written once and cannot change.
 - A save of a known request is not counted as usage again ([billing](billing.md)).

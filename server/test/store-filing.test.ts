@@ -9,6 +9,8 @@ import {
 import { change, scoreboard, tier } from "../src/store/score";
 import { tpsStore } from "../src/store/tps";
 import type { MemoInput } from "../src/mcp-tools";
+import { changeList, MAX_CHANGED_TOKENS } from "../src/store/changes";
+import { checkMemo } from "../src/store/save";
 
 const draft =
   "Hi there! Hope your week is going well. Thanks so much for reaching out about a call. Unfortunately we won't be able to make Thursday work, but we'd love to stay in touch.";
@@ -735,4 +737,375 @@ test("the scoreboard appears at ten scored memos, compares first five with lates
   });
   expect(edits).toEqual({ mode: "edit", count: 1 });
   expect(scoreboard(memos.slice(0, 9))[0]).toEqual({ mode: "draft", count: 9 });
+});
+
+test("code lists what changed: merged spots, Markdown-only spots about format, insertions and deletions; past its bounds the list is too large", () => {
+  const list = changeList(
+    "Hi Dana, I hope you're well!\n\nWe can't meet Thursday.\n\nBest,\nAI",
+    "Dana —\n\nWe can't meet **Thursday**.\n\nBest,\nAI\n–S",
+  );
+  expect(list.state).toBe("itemized");
+  const spots = list.state === "itemized" ? list.spots : [];
+  const first =
+    "Hi Dana, I hope you're well!\n\nWe can't meet Thursday.\n\nBest,\nAI";
+  const final = "Dana —\n\nWe can't meet **Thursday**.\n\nBest,\nAI\n–S";
+  expect(
+    spots.map((s) => [
+      first.slice(s.draftStart, s.draftEnd),
+      final.slice(s.finalStart, s.finalEnd),
+      s.format,
+    ]),
+  ).toEqual([
+    // Edits within two unchanged tokens on one line are one spot.
+    ["Hi Dana, I hope you're well!", "Dana —", false],
+    // Bold added around a word: only Markdown marks differ.
+    ["Thursday", "**Thursday**", true],
+    // An insertion has an empty first-draft side.
+    ["", "–S", false],
+  ]);
+  // Case counts; identical tokens are no change.
+  expect(changeList("hi there", "Hi there")).toMatchObject({
+    spots: [{ format: false }],
+  });
+  expect(changeList("a  b", "a b")).toEqual({ state: "itemized", spots: [] });
+  // Over a hundred spots, or past the diff's bound, nothing is listed.
+  const many = Array.from({ length: 101 }, (_, i) => `w${i} keep keep keep`);
+  expect(
+    changeList(many.join(" "), many.map((w) => `x${w}`).join(" ")),
+  ).toEqual({ state: "too_large" });
+  const words = (n: number, w: string) =>
+    Array.from({ length: n }, (_, i) => `${w}${i}`).join(" ");
+  expect(changeList(words(1500, "a"), words(1500, "b"))).toEqual({
+    state: "too_large",
+  });
+});
+
+test("the diff's work stays bounded on the largest texts a save can carry", () => {
+  // Both texts together fit one 256 KiB request. Each case aims at one bound:
+  // the score's cell bound after the shared prefix and suffix, the diff's
+  // MAX_CHANGED_TOKENS, long snakes between edits, and one-character tokens.
+  const words = (n: number, w: string) =>
+    Array.from({ length: n }, (_, i) => `${w}${i}`).join(" ");
+  const shared = words(5000, "p");
+  const middle = words(4400, "m");
+  const edited = middle
+    .split(" ")
+    .map((w, i) => (i % 4 === 0 ? `e${i}` : w))
+    .join(" ");
+  const cases: [string, string, string][] = [
+    // About 4,400 tokens a side between long shared text, every fourth
+    // replaced: about 2,200 changed tokens, past MAX_CHANGED_TOKENS.
+    ["edits", `${shared} ${middle} ${shared}`, `${shared} ${edited} ${shared}`],
+    // The same middle, wholly different: the cell bound's edge.
+    ["different", middle, words(4400, "n")],
+    // One-character tokens, 120,000 a side, differing at both ends.
+    ["marks", `a${".".repeat(120_000)}a`, `b${",".repeat(120_000)}b`],
+    // A long text against a short one, under the cell bound.
+    ["lopsided", words(16_000, "q"), words(1200, "r")],
+  ];
+  for (const [name, first, final] of cases) {
+    expect(first.length + final.length).toBeLessThan(262_144);
+    const started = performance.now();
+    const list = changeList(first, final);
+    const ms = performance.now() - started;
+    expect([name, list.state]).toEqual([name, "too_large"]);
+    // Generous for CI's slower runners; locally each takes well under 100 ms.
+    expect([name, ms < 2000]).toEqual([name, true]);
+  }
+  // Just inside the bound, the list is kept.
+  const inside = middle
+    .split(" ")
+    .map((w, i) => (i < MAX_CHANGED_TOKENS / 2 ? `e${i}` : w))
+    .join(" ");
+  expect(changeList(middle, inside).state).toBe("itemized");
+});
+
+test("a drafted memo stores code's own changes, unlabelled: Markdown-only ones marked format, long sides cut at 300 and marked; past the bounds none, too_large", async () => {
+  const local = await localStore();
+  try {
+    await seedUsers(local.pg, "u");
+    const store = fixtureStore(local.db, "u");
+    const tps = tpsStore(local.db, "u");
+    const first =
+      "Hi Dana, I hope you're well!\n\nWe can't meet Thursday.\n\nBest,\nAI";
+    const final = "Dana —\n\nWe can't meet **Thursday**.\n\nBest,\nAI\n–S";
+    const input = memoSave({
+      first_draft: first,
+      final,
+      mode: "draft",
+      rounds: 1,
+      tweaks: [{ text: "no warm-up opener" }],
+    });
+    const saved = await store.saveMemo(input);
+    // Counts only: the Markdown-only row is not counted as found.
+    expect(saved.memo!.changes).toEqual({ state: "itemized", found: 2 });
+    const rows = async (memo: string) =>
+      (
+        await local.pg.query(
+          `SELECT n,draft_start,draft_end,final_start,final_end,"before","after",truncated,about,"by",tweak_id
+            FROM memo_changes WHERE memo_id=$1 ORDER BY n`,
+          [memo],
+        )
+      ).rows;
+    // Each row is code's own cut of the stored texts at its offsets; no row
+    // carries a label or a tweak, even on a memo that teaches one.
+    expect(await rows(saved.memo!.memo_id)).toEqual([
+      {
+        n: 0,
+        draft_start: 0,
+        draft_end: 28,
+        final_start: 0,
+        final_end: 6,
+        before: "Hi Dana, I hope you're well!",
+        after: "Dana —",
+        truncated: false,
+        about: null,
+        by: null,
+        tweak_id: null,
+      },
+      {
+        n: 1,
+        draft_start: 44,
+        draft_end: 52,
+        final_start: 22,
+        final_end: 34,
+        before: "Thursday",
+        after: "**Thursday**",
+        truncated: false,
+        about: "format",
+        by: null,
+        tweak_id: null,
+      },
+      {
+        n: 2,
+        draft_start: 63,
+        draft_end: 63,
+        final_start: 46,
+        final_end: 48,
+        before: "",
+        after: "–S",
+        truncated: false,
+        about: null,
+        by: null,
+        tweak_id: null,
+      },
+    ]);
+    // A replay reads the counts back from the stored rows.
+    expect(
+      await store.saveMemo({ ...input, request_id: crypto.randomUUID() }),
+    ).toMatchObject({
+      status: "unchanged",
+      memo: { changes: { state: "itemized", found: 2 } },
+    });
+    expect(await tps.readMemo(saved.memo!.memo_id)).toMatchObject({
+      changes_state: "itemized",
+      changes: [
+        { n: 0, about: null, truncated: false },
+        { n: 1, about: "format" },
+        { n: 2, before: "", after: "–S" },
+      ],
+      change_count: 3,
+    });
+    // A long spot keeps its offsets and its first 300 characters, marked.
+    const long = await store.saveMemo(
+      memoSave({
+        first_draft: "Hello. " + "x".repeat(400),
+        final: "Hello. y",
+        mode: "draft",
+        rounds: 1,
+      }),
+    );
+    expect(await rows(long.memo!.memo_id)).toMatchObject([
+      {
+        draft_start: 7,
+        draft_end: 407,
+        before: "x".repeat(300),
+        after: "y",
+        truncated: true,
+      },
+    ]);
+    // Past a hundred spots: too_large, with no rows.
+    const spots = Array.from({ length: 101 }, (_, i) => `w${i} keep keep keep`);
+    const big = await store.saveMemo(
+      memoSave({
+        first_draft: spots.join(" "),
+        final: spots.map((w) => `x${w}`).join(" "),
+        mode: "draft",
+        rounds: 1,
+      }),
+    );
+    expect(big.memo!.changes).toEqual({ state: "too_large", found: 0 });
+    expect(await rows(big.memo!.memo_id)).toEqual([]);
+    expect(await tps.readMemo(big.memo!.memo_id)).toMatchObject({
+      changes_state: "too_large",
+      changes: [],
+    });
+    // An untouched final is itemized with nothing listed; a missing first
+    // draft or writing the person gave lists nothing at all.
+    const untouched = await store.saveMemo(
+      memoSave({
+        first_draft: "Same.",
+        final: "Same.",
+        mode: "edit",
+        rounds: 0,
+      }),
+    );
+    expect(untouched.memo!.changes).toEqual({ state: "itemized", found: 0 });
+    for (const memo of [
+      memoSave({
+        final: "Gone.",
+        first_draft_missing: true,
+        mode: "draft",
+        rounds: 1,
+      }),
+      memoSave({ final: "My own." }),
+    ]) {
+      const kept = await store.saveMemo(memo);
+      expect(kept.memo).not.toHaveProperty("changes");
+      expect(await tps.readMemo(kept.memo!.memo_id)).not.toHaveProperty(
+        "changes_state",
+      );
+    }
+  } finally {
+    await local.dispose();
+  }
+});
+
+test("a memo names at most three distinct tweaks, a repeat by id or wording counting once", () => {
+  const memo = (tweaks: MemoInput["tweaks"]) =>
+    checkMemo({
+      ...memoSave().memo!,
+      first_draft: draft,
+      mode: "draft",
+      rounds: 1,
+      tweaks,
+    });
+  const three = ["one", "Two", "two.", "three"].map((text) => ({ text }));
+  expect(memo(three)).toMatchObject({ ok: true });
+  expect(memo([...three, { tweak_id: "t" }])).toEqual({
+    ok: false,
+    message: "This memo names 4 tweaks; a memo teaches at most 3.",
+    field: "tweaks",
+  });
+});
+
+test("a request is the person's typed ask on a drafted memo: trimmed, capped, never pasted mail, kept unserved, and removable on the TPS page", async () => {
+  const drafted = (request: string, rest: Partial<MemoInput> = {}) =>
+    checkMemo({
+      ...memoSave().memo!,
+      first_draft_missing: true,
+      mode: "draft",
+      rounds: 1,
+      request,
+      ...rest,
+    });
+  expect(drafted("Decline their call, short and kind.")).toEqual({ ok: true });
+  expect(drafted("Line one\nLine two")).toEqual({ ok: true });
+  const requests: [string, string][] = [
+    ["", "request is empty"],
+    ["x".repeat(601), "over 600 characters"],
+    [Array(13).fill("line").join("\n"), "over 12 lines"],
+    ["Reply to this\r\nplease", "control characters"],
+    ["Reply to this:\n> Can we meet Friday?", "quoted or forwarded mail"],
+    ["Answer it.\nOn Tue, Sam wrote:", "quoted or forwarded mail"],
+    ["Reply.\nFrom: Sam", "quoted or forwarded mail"],
+    ["subject: lunch", "quoted or forwarded mail"],
+  ];
+  for (const [request, says] of requests)
+    expect(drafted(request)).toMatchObject({
+      ok: false,
+      field: "request",
+      message: expect.stringContaining(says),
+    });
+  // Writing the person gave takes none.
+  expect(
+    checkMemo({ ...memoSave().memo!, request: "Keep this." }),
+  ).toMatchObject({ ok: false, field: "request" });
+  const local = await localStore();
+  try {
+    await seedUsers(local.pg, "asker");
+    const store = fixtureStore(local.db, "asker");
+    const input = memoSave({
+      first_draft: draft,
+      mode: "draft",
+      rounds: 1,
+      request: "  Say no to the vendor's call, nicely.  ",
+      tweaks: [{ text: "no warm-up opener" }],
+    });
+    const saved = await store.saveMemo(input);
+    // The result and its receipt hold counts, never the request or a quote.
+    expect(saved.memo!.changes).toEqual({ state: "itemized", found: 2 });
+    const receipt = (
+      await local.pg.query<{ result: string }>(
+        "SELECT result_json::text AS result FROM save_requests WHERE user_id='asker'",
+      )
+    ).rows[0]!.result;
+    expect(receipt).not.toContain("vendor's call");
+    expect(receipt).not.toContain("Hi there!");
+    // Trimmed before hashing and storing.
+    expect(
+      (await local.pg.query("SELECT request FROM memos WHERE user_id='asker'"))
+        .rows,
+    ).toEqual([{ request: "Say no to the vendor's call, nicely." }]);
+    // Never served.
+    const report = await store.readReport(vendorIntent);
+    expect(JSON.stringify(report)).not.toContain("vendor's call");
+    // The TPS page shows it, and the person can remove it.
+    const tps = tpsStore(local.db, "asker");
+    expect(await tps.readMemo(saved.memo!.memo_id)).toMatchObject({
+      request: "Say no to the vendor's call, nicely.",
+      asked: "Say no to the vendor's call, nicely.",
+    });
+    expect(await tps.removeRequest(saved.memo!.memo_id)).toBe(true);
+    expect(await tps.readMemo(saved.memo!.memo_id)).not.toHaveProperty(
+      "request",
+    );
+  } finally {
+    await local.dispose();
+  }
+});
+
+test("a reword restarts a tweak's score from the new text; the same text keeps it", async () => {
+  const local = await localStore();
+  try {
+    await seedUsers(local.pg, "u");
+    const store = fixtureStore(local.db, "u");
+    const tps = tpsStore(local.db, "u");
+    const save = (memo: Partial<MemoInput>) =>
+      store.saveMemo(memoSave({ mode: "draft", rounds: 1, ...memo }));
+    const taught = await save({
+      first_draft: "Hi! Hope you're well. We'll pass.",
+      final: "We'll pass.",
+      tweaks: [{ text: "no warm-up opener" }],
+    });
+    const opener = taught.memo!.tweaks[0]!.tweak_id;
+    // Served and needed again once.
+    await save({
+      first_draft: "Hi! Hope you're well. Not now.",
+      final: "Not now.",
+      report_id: (await store.readReport(vendorIntent)).report_id,
+      tweaks: [{ tweak_id: opener }],
+    });
+    expect((await tps.read()).tweaks[0]).toMatchObject({
+      served: 1,
+      needed_again: 1,
+    });
+    // The same text, resent, changes nothing.
+    expect(await tps.rewordTweak(opener, "no warm-up opener")).toBe(true);
+    expect((await tps.read()).tweaks[0]).toMatchObject({ served: 1 });
+    expect(await tps.rewordTweak(opener, "No warm-up opener at all")).toBe(
+      true,
+    );
+    expect((await tps.read()).tweaks[0]).toMatchObject({
+      text: "No warm-up opener at all",
+      memos: 2,
+      served: 0,
+      needed_again: 0,
+    });
+    expect((await store.readReport(vendorIntent)).text).toMatch(
+      /^- No warm-up opener at all \(2 memos\)$/m,
+    );
+  } finally {
+    await local.dispose();
+  }
 });

@@ -823,3 +823,82 @@ This week's working files (internal working notes, not published):
 - back-draft-test `back-draft-results.md`: simulated pairs, length 2.6×, kill-list limits;
 - exact-edits-build `report.md`: the retired anchored-replacement design, whose
   uniqueness and no-fuzzy-match rules this matcher shares.
+
+---
+
+## Follow-up notes (after approval)
+
+Added on 2026-11-11, after the offline test; the text above is unchanged.
+
+- **The offline test (E1)** ran on `chat-latest` and spent $2.63 of its $4 cap. Under
+  the one-label-per-spot rule above, 30 of 35 first saves were refused ("two changes
+  label the same spot differently"): on a rewrite, one code spot holds several changes
+  an AI names separately. milton-overlord therefore adopted **per-change rows**: one
+  stored row per accepted change, cut from the stored texts at its quotes and still
+  required to overlap a changed spot, plus an unlabelled row for each spot no change
+  covers. Several changes may share a spot. It also adopted the **locating fold**:
+  `*`, `_` and backticks dropped and em and en dashes read as hyphens, for locating
+  only; stored text stays code's cut.
+- **Tweak inflation.** E1's AI put a tweak on 147 of 150 changes. Peter approved,
+  typing in milton-overlord's pane on 2026-11-11 ("Go with all four, how do we fix
+  inflation?"), shipping the examples, a cap of three tweaks per memo, and "recurring
+  habits only" guidance: a tweak is the exception, most memos teach one or none, and
+  every change is recorded either way.
+- **Plainer tweak wording.** Later that day Peter approved, typing in milton-overlord's
+  pane ("go on the re-run and the wording"), served text that names a tweak's habit
+  plainly ("no warm-up opener") and adds a condition only when the habit doesn't hold in
+  all the person's writing, in place of "with when it applies".
+- **The re-run.** The same 35 saves, run against slice 2's served text and save checks
+  as built ($1.30 of a $2 cap): tweaks per memo fell from about 4.2 to 1.5 (26 new
+  tweaks instead of 130), served tweak ids were reused 28 times instead of 7, the cap of
+  three was never hit, 29 of 35 saved on the first try and 136 of 138 quotes matched.
+- **Reuse before new, tested and set aside.** A save-time check that refuses a new
+  tweak worded like an existing one, offering up to three candidates, was replayed on
+  E1's tweaks (word overlap on the habit at 0.2 or more caught 46 of 54 hand-labelled
+  repeats with no false alarm) and run in the re-run, where it refused 2 of 35 saves and
+  the AI then picked correctly both times. With the cap and the wording, too few repeats
+  were left to justify another refusal path, so milton-overlord set it aside.
+- **A moved sentence.** The re-run found an AI correctly pairing a sentence the person
+  moved and reworded, which code sees as a deletion at one spot and an insertion at
+  another; requiring both quotes to share a spot refused it. Each quote must still
+  overlap a changed spot on its own side, but the two sides may now sit at different
+  spots, as "spots the quotes jointly cover" above allows.
+- **Examples for every served tweak.** Decision 8's split needs a real account switched
+  on, which was not cleared, so slice 2 serves examples for every served tweak.
+
+## Follow-up note: the link deferred (2026-11-11)
+
+Added on 2026-11-11, after the reviews of slice 2; the text above is unchanged.
+
+- **Deferred by Peter's choice.** The link between a tweak and the change it came from
+  (items 1 and 2: the AI's labels on each change, quote matching, and before-and-after
+  examples served with tweaks) is left out of #109. Offered three choices by
+  milton-overlord (keep fixing it; make it stricter; leave that part out for now), Peter
+  answered, typing in milton-overlord's pane on 2026-11-11: "go with choice 3 for now".
+- **Why.** Four independent reviews each found a way for a quote-cut row to present
+  unchanged text as a change, and a stricter rule built from whole units labelled only 37
+  of 145 replayed changes, so most tweaks would have had no example:
+  - Review 1: a quote of unchanged words inside a merged spot (`small` → `small` in `red
+small car` → `blue small van`) was accepted as tweak evidence and hid the real edits;
+    in a `too_large` memo, whitespace in the quotes got past the equality check; and
+    0015's tweak check passed a row with no labels.
+  - Review 2: after the fix, an empty side against unchanged words (`""` → `red`) was
+    still accepted, while a real insertion beside a quote and a valid later occurrence
+    were refused.
+  - Review 3: overlapping a changed token counted as holding changed text (`s` → `s` in
+    `cats` → `dogs`); the `too_large` uniqueness rule admitted wholly unchanged text;
+    truncation could cut every changed word from both sides and keep the tweak; one
+    accepted fragment hid the rest of its spot; and a crafted 17 KB memo took 23 seconds
+    to check.
+  - Review 4, of the stricter rule: split and leftover rows could pair unaligned spans
+    and show kept words as deleted, complete coverage could not fit the 300-character
+    side limit, and hunks inside a change took labels the AI never gave.
+- **What ships instead.** `create_memo` takes main's `memo.tweaks` list again (the
+  released definition keeps working), with at most three distinct tweaks and the plainer
+  wording; the typed request, shown only to the person, never served, removable; the
+  tweak score, restarting on a reword; and, on each memo's page, code's own list of what
+  changed, unlabelled, with Markdown-only spots marked and sides cut at 300 characters
+  marked as cut. No change is labelled, matched to a quote or served. 0015 and 016 ship
+  as approved; their label and tweak columns stay NULL.
+- **Later.** Examples and labels come back as their own small spec, designed against
+  real memos.

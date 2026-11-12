@@ -1666,7 +1666,9 @@ test("the TPS page lists memos newest first, escaped, opens each only for its ow
     const html = await (await fixture.send("/tps-report")).text();
     expect(html).not.toContain("<script>");
     expect(html).toContain("Email · vendor decline");
-    expect(html).toContain("ai.example · 2 rounds · steered by you");
+    expect(html).toContain(
+      "ai.example · 2 rounds · 3 listed changes · steered by you",
+    );
     expect(html).toContain("ai.example · 0 rounds · accepted untouched");
     expect(html).toContain("ai.example · your words");
     expect(html).toContain(
@@ -1725,6 +1727,131 @@ test("the TPS page lists memos newest first, escaped, opens each only for its ow
     expect(text).toBe(await fixture.store.exportTps());
     expect(text).toContain("> No, thanks. <script>alert('final')</script>");
     expect(text).not.toContain("Alpha");
+  } finally {
+    await fixture.dispose();
+  }
+}, 30000);
+
+test("a memo page lists code's changes unlabelled and what the person asked, and Remove clears the request", async () => {
+  const fixture = await memoPageFixture();
+  try {
+    const asked =
+      "Say no to the call, politely. ".repeat(5) + "\nKeep it short.";
+    const long = "We looked at it closely. ".repeat(14).trim();
+    const saved = await fixture.author.saveMemo(
+      memoSave({
+        first_draft: `Hi Dana, I hope you're well! Thanks so much for the demo. It was a **useful** look at the tool.\n\n${long}\n\nWe can't take a call this month.\n\nBest,\nSam`,
+        final:
+          "Dana — thanks for the demo. It was a useful look at the tool.\n\nWe'll pass for now.\n\n–S",
+        mode: "draft",
+        rounds: 2,
+        request: asked,
+        tweaks: [{ text: "no warm-up opener" }],
+      }),
+    );
+    const id = saved.memo!.memo_id;
+    const list = await (await fixture.send("/")).text();
+    expect(list).toContain(
+      `<span class="tweak-label">You asked:</span> <span class="typed">${"Say no to the call, politely. ".repeat(4)}…</span>`,
+    );
+    const page = await (await fixture.send(`/tps/memo/${id}`)).text();
+    // The list's count is every row the memo page lists, formatting included.
+    const rows = page.match(/<li class="change-row/g)?.length ?? 0;
+    expect(rows).toBeGreaterThan(3);
+    expect(list).toContain(
+      `ai.example · 2 rounds · ${rows} listed changes · steered by you`,
+    );
+    for (const text of [
+      '<h2 id="memo-asked">You asked</h2>',
+      "Keep it short.",
+      'action="/tps/request/remove"',
+      '<h2 id="memo-changes">What changed</h2>',
+      '<span class="typed">“Hi Dana, I hope you&#39;re well! Thanks so much”</span> → <span class="typed">“Dana — thanks”</span>',
+      // A Markdown-only spot says so; a side cut at 300 characters says so.
+      "<span>formatting</span>",
+      "…”</span>",
+      "<span>shortened to 300 characters</span>",
+    ])
+      expect(page).toContain(text);
+    // No labels, no typed share, no tweak line on a change.
+    for (const text of [
+      "how it sounds",
+      "<span>you typed</span>",
+      "not labelled",
+      "% of this final",
+      '<span class="tweak-label">Tweak:</span>',
+    ])
+      expect(page).not.toContain(text);
+    expect(await fixture.store.exportTps()).toContain(
+      `decline a vendor's meeting request\nAsked:\n~~~text\n${"Say no to the call, politely. ".repeat(5)}\nKeep it short.\n~~~\n\n> Dana`,
+    );
+    // An edit of spacing alone lists no change, and never claims the first
+    // draft was accepted as it was.
+    const spacing = await fixture.author.saveMemo(
+      memoSave({
+        first_draft: "One line.\n\nAnother line.",
+        final: "One line. Another line.",
+        mode: "draft",
+        rounds: 1,
+      }),
+    );
+    const spaced = await (
+      await fixture.send(`/tps/memo/${spacing.memo!.memo_id}`)
+    ).text();
+    expect(spaced).toContain("Only spacing or line breaks changed");
+    expect(spaced).not.toContain("you accepted the first draft as it was");
+    // A request's HTML and fences reach TPS.md as literal text in a fence
+    // longer than any run of tildes inside it.
+    await fixture.author.saveMemo(
+      memoSave({
+        first_draft: "Draft.",
+        final: "Final.",
+        mode: "draft",
+        rounds: 1,
+        request: "<h1>Big</h1> <script>x</script>\n~~~\n# not a heading",
+      }),
+    );
+    expect(await fixture.store.exportTps()).toContain(
+      "Asked:\n~~~~text\n<h1>Big</h1> <script>x</script>\n~~~\n# not a heading\n~~~~\n",
+    );
+    // Remove takes the CSRF and Origin checks, then reloads the memo.
+    expect(
+      (
+        await fixture.send(
+          "/tps/request/remove",
+          { memo: id },
+          { Origin: "https://evil.example" },
+        )
+      ).status,
+    ).toBe(403);
+    const removed = await fixture.send("/tps/request/remove", { memo: id });
+    expect(removed.status).toBe(303);
+    expect(removed.headers.get("Location")).toBe(
+      `${appOrigin}/tps/memo/${id}?done=request-removed#memo-asked`,
+    );
+    const after = await (
+      await fixture.send(`/tps/memo/${id}?done=request-removed`)
+    ).text();
+    expect(after).toContain('<p role="status">Request removed.</p>');
+    expect(after).not.toContain("Keep it short.");
+    expect(await fixture.store.exportTps()).not.toContain("Say no to the call");
+    // A memo saved before changes were listed shows no list; a too-large one
+    // says the changes were too many to list.
+    await fixture.db.query(
+      sql`UPDATE memos SET changes_state=NULL WHERE id=${id}`,
+    );
+    expect(await (await fixture.send(`/tps/memo/${id}`)).text()).not.toContain(
+      "What changed",
+    );
+    await fixture.db.query(sql`DELETE FROM memo_changes WHERE memo_id=${id}`);
+    await fixture.db.query(
+      sql`UPDATE memos SET changes_state='too_large' WHERE id=${id}`,
+    );
+    const large = await (await fixture.send(`/tps/memo/${id}`)).text();
+    expect(large).toContain(
+      "Too many changes to list; the first draft and final above show them all.",
+    );
+    expect(large).not.toContain('<li class="change-row');
   } finally {
     await fixture.dispose();
   }

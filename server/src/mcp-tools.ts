@@ -131,6 +131,13 @@ export const memoInput = z
       .describe(
         "How many times you redrafted after the first draft. Required with a first draft.",
       ),
+    request: z
+      .string()
+      .trim()
+      .optional()
+      .describe(
+        "Only with first_draft or first_draft_missing: what the person typed to ask for this writing, exactly as typed, at most 600 characters and 12 lines. Cut pasted or quoted text (an email, a thread, a document) and anything secret, marking each cut […]; change nothing else. In edit mode, their instruction, never the text to edit. Never their later corrections.",
+      ),
     tweaks: z
       .array(
         z.union([
@@ -138,12 +145,14 @@ export const memoInput = z
           z.strictObject({ text: oneLine(200) }),
         ]),
       )
+      // Ten, as the released definition took, so a save naming more than
+      // MAX_MEMO_TWEAKS (save.ts) gets that refusal's own next step.
       .max(10)
       // An empty list, as some clients send for none, is read as omitted.
       .transform((tweaks) => (tweaks.length ? tweaks : undefined))
       .optional()
       .describe(
-        'Only when the final differs from the first draft: each habit the person made you change, one line each with when it applies ("vendor replies: no warm-up opener"). Skip one-off facts they added. When it is the same change, reuse a served tweak\'s id with {tweak_id}; {text} adds one only when none fits.',
+        'Only when the final differs from the first draft: each habit the person made you change that is likely to recur, at most three, one line each, named plainly ("no warm-up opener"), with when it applies only if it doesn\'t hold in all their writing ("vendor replies: no price talk"); never "when requested". Most memos teach one or none. Skip one-off facts they added. When it is the same change, reuse a served tweak\'s id with {tweak_id}; {text} adds one only when none fits.',
       ),
     context: memoContextInput,
     ...kindFields,
@@ -158,7 +167,7 @@ export const memoInput = z
       .describe("The report_id of the get_report read before this draft."),
   })
   .describe(
-    'One accepted final. Omit first_draft, first_draft_missing, mode, rounds and tweaks for writing the person gave you to keep (setup, "remember this email").',
+    'One accepted final. Omit first_draft, first_draft_missing, mode, rounds, request and tweaks for writing the person gave you to keep (setup, "remember this email").',
   );
 export const coverSheetChangeInput = z
   .strictObject({

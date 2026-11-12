@@ -1132,16 +1132,38 @@ test("two authenticated clients isolate tenants and save once", async () => {
       };
     };
     const discovered = (await clients[0]!.listTools()).tools;
+    // Each tool carries a display title, both where the current specification
+    // puts it and in annotations for clients that read only that, and a
+    // closed world: the tools reach only this person's own Milton account.
     expect(
-      discovered.find((t) => t.name === "get_report")?.annotations,
-    ).toMatchObject({
-      readOnlyHint: true,
-      idempotentHint: false,
-      openWorldHint: true,
-    });
-    expect(discovered.map((t) => t.name).sort()).toEqual([
-      "create_memo",
-      "get_report",
+      discovered.map(({ name, title, annotations }) => ({
+        name,
+        title,
+        annotations,
+      })),
+    ).toEqual([
+      {
+        name: "get_report",
+        title: "Get report",
+        annotations: {
+          title: "Get report",
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: false,
+          openWorldHint: false,
+        },
+      },
+      {
+        name: "create_memo",
+        title: "Save memo",
+        annotations: {
+          title: "Save memo",
+          readOnlyHint: false,
+          destructiveHint: true,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+      },
     ]);
     const check = {
       intent: {
@@ -1257,8 +1279,24 @@ test("scopes control discovery and direct calls; original binding revocation sur
     // Over HTTP too, read only or not, server info carries the description.
     expect(reader.getServerVersion()?.description).toBe(serverDescription);
     expect(readOnlyInstructions.length).toBeLessThanOrEqual(4096);
-    expect((await reader.listTools()).tools.map((t) => t.name)).toEqual([
-      "get_report",
+    expect(
+      (await reader.listTools()).tools.map(({ name, title, annotations }) => ({
+        name,
+        title,
+        annotations,
+      })),
+    ).toEqual([
+      {
+        name: "get_report",
+        title: "Get report",
+        annotations: {
+          title: "Get report",
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: false,
+          openWorldHint: false,
+        },
+      },
     ]);
     const cover = JSON.parse(
       (

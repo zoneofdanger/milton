@@ -371,11 +371,15 @@ export function createMiltonServer(
       instructions: options.readOnly ? readOnlyInstructions : storeInstructions,
     },
   );
+  // openWorldHint is false: both tools reach only this person's own Milton
+  // account, never outside entities. The title is in annotations too, for
+  // clients that read only that; the specification shows the top-level first.
   const readOnly = {
+    title: "Get report",
     readOnlyHint: true,
     destructiveHint: false,
     idempotentHint: false,
-    openWorldHint: true,
+    openWorldHint: false,
   };
   const storeTools = createStoreMemoTools(store, {
     readOnly: options.readOnly,
@@ -383,6 +387,7 @@ export function createMiltonServer(
   server.registerTool(
     "get_report",
     {
+      title: "Get report",
       description: options.readOnly
         ? "Read at the start of writing work and when asked \"Did you get the memo?\": the report for one draft. intent needs situation (one line: what you are writing, to whom and why), medium, audience and purpose; add kind_id from kinds when one fits. Returns text (the person's best-matching finals as examples, with what they changed in an AI's first draft), examples, kinds, is_empty, memos (their memo count) and keep_memos. Imitate the examples. Empty means nothing similar yet; never guess their voice. This connection is read only. No model call, no write."
         : "Read at the start of writing work and when asked \"Did you get the memo?\": the report for one draft. intent needs situation (one line: what you are writing, to whom and why), medium, audience and purpose; add kind_id from kinds when one fits. A vague intent gets worse examples. Returns text (the person's best-matching finals as examples, best first, with what they changed in an AI's first draft), examples (memo ids and context, in served order), kinds (the person's kinds as {kind_id, kind}), is_empty, memos (how many memos they have) and keep_memos (false: save only writing the person asks you to remember). While memos is 0, setup holds the first-setup script: offer it once. Imitate the examples and heed what they changed. Empty means nothing similar yet; never guess their voice. No model call, no write.",
@@ -395,14 +400,16 @@ export function createMiltonServer(
     server.registerTool(
       "create_memo",
       {
+        title: "Save memo",
         description:
           "Save writing the person settled on, or forget memos. Send exactly one of memo, forget_memos or memo_context, with request_id: any new id for each save, up to 64 letters, digits, dots, dashes, underscores or colons; resend the same one only to recover an uncertain outcome. Milton keeps final and first_draft unchanged; saves are all or nothing. memo: save one when the person accepts a final. final is the accepted text exactly, hand edits included. first_draft is your first version exactly as shown (in edit mode, your first edit of their text); if you no longer have it verbatim, send first_draft_missing: true instead. Send mode with either. Milton works out the person's changes (their tweaks) from first_draft and final. For writing the person gives you to keep (setup, \"remember this email\"), send only final, context and kind. request: only what they typed to ask, no pasted text. context: summary (one placeholder-safe line on the situation and the text replied to), medium, audience, purpose. kind_id from kinds, or new_kind when none fits. A memo holds only these: never secrets, the transcript, the person's correction messages or other people's text. Don't save a final holding a secret (say why; never redact). forget_memos: memo ids the person asked you to forget. memo_context: a corrected context or kind for one memo; its words never change. A saved memo result carries receipt: tell the person that line. An error result's next says what to do.",
         inputSchema: saveMemoInput,
         annotations: {
+          title: "Save memo",
           readOnlyHint: false,
           destructiveHint: true,
           idempotentHint: true,
-          openWorldHint: true,
+          openWorldHint: false,
         },
       },
       (input) => storeTools.create_memo(input),

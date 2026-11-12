@@ -96,6 +96,12 @@ How a person creates and revokes keys is in [accounts](accounts.md).
 
 - Exactly two tools: `get_report` and `create_memo`; a read-only connection lists
   `get_report` alone.
+- Their display titles are "Get report" and "Save memo", set both as the tool's
+  `title` and as `annotations.title`: the specification shows `title` first, and
+  Claude's directory flags a tool without one. Both carry every hint explicitly:
+  `get_report` read only, `create_memo` destructive and idempotent, and both
+  `openWorldHint: false`, since they reach only the person's own Milton account. A
+  test reads them from `tools/list` over HTTP.
 - `get_report` requires `intent`: `situation` (one line, at most 200 characters),
   `medium` (`email`, `chat`, `post`, `document` or `speech`), `audience` and `purpose`
   (one line, at most 100 characters each, required because vague intents rank worse)

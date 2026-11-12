@@ -147,17 +147,20 @@ gave.
   `` ` `` dropped, em and en dashes as hyphens. The fold only locates; what is stored is
   always code's cut of the stored texts, so a dash habit is never lost.
   - `itemized`: each sent side must occur in its text overlapping a non-format spot on
-    that side; an empty side is matched by the other alone. The two sides need not
-    share a spot, since a moved sentence is a cut at one spot and an addition at
-    another; the change covers every spot its sides touch. Of several occurrences, the
-    one overlapping a spot wins; occurrences at different spots are ambiguous, unless
-    only one shares a spot with the other side. More than 50 occurrences at spots are
-    always ambiguous: a real quote of a few words recurs a handful of times, and the
-    cap bounds the check, which runs before the trial gate and the account lock (one
-    letter repeated in an 8 KB request once took a second and a gigabyte). Several
-    changes may cover the same spot.
-  - `too_large`: each sent side must occur exactly once in its text, and the two sides
-    must differ as sent (unfolded).
+    that side, at a changed word, not only the unchanged words a spot joins (in
+    `red small car` → `blue small van`, `small` alone names no change); an empty side
+    is matched by the other alone. The two sides need not share a spot, since a moved
+    sentence is a cut at one spot and an addition at another; the change covers every
+    spot its sides touch. Of several occurrences, the one overlapping a spot wins;
+    occurrences at different spots are ambiguous, unless only one shares a spot with
+    the other side. More than 50 occurrences at spots are always ambiguous: a real
+    quote of a few words recurs a handful of times, and the cap bounds the check,
+    which runs before the trial gate and the account lock (one letter repeated in an
+    8 KB request once took a second and a gigabyte). Several changes may cover the
+    same spot.
+  - `too_large`: each sent side must occur exactly once in its text.
+  - Either way, when both sides are sent, the stored texts they locate must differ, so a
+    dash or a Markdown mark is a change and quotes differing only in spacing are not.
   - A quote that fails is refused with `invalid_change` naming the change by number: not
     in its text, in it but not where the texts differ, or at more than one changed
     place ([saves](saves.md)).

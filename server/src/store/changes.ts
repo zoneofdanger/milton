@@ -40,6 +40,9 @@ export type Spot = {
   finalEnd: number;
   /** The sides differ only in Markdown marks and whitespace. */
   format: boolean;
+  /** The edits the spot joins, before merging, as offsets in the same way:
+   * a quote must touch one of these, not only the unchanged words between. */
+  edits: { draft: Range; final: Range }[];
 };
 export type ChangeList =
   { state: "itemized"; spots: Spot[] } | { state: "too_large" };
@@ -138,7 +141,7 @@ export function changeList(first: string, final: string): ChangeList {
     else open.b1 = ++j;
   }
   if (open) hunks.push(open);
-  const merged: Hunk[] = [];
+  const merged: (Hunk & { raw: Hunk[] })[] = [];
   for (const h of hunks) {
     const p = merged.at(-1);
     if (p && h.a0 - p.a1 <= MERGE_GAP) {
@@ -153,10 +156,11 @@ export function changeList(first: string, final: string): ChangeList {
       if (!gapA.includes("\n") && !gapB.includes("\n")) {
         p.a1 = h.a1;
         p.b1 = h.b1;
+        p.raw.push(h);
         continue;
       }
     }
-    merged.push({ ...h });
+    merged.push({ ...h, raw: [h] });
   }
   if (merged.length > MAX_SPOTS) return { state: "too_large" };
   // An empty side sits right after the token before it.
@@ -178,6 +182,10 @@ export function changeList(first: string, final: string): ChangeList {
         format:
           unmarked(first.slice(draftStart, draftEnd)) ===
           unmarked(final.slice(finalStart, finalEnd)),
+        edits: h.raw.map((r) => ({
+          draft: at(A, r.a0, r.a1),
+          final: at(B, r.b0, r.b1),
+        })),
       };
     }),
   };
@@ -188,8 +196,9 @@ export function changeList(first: string, final: string): ChangeList {
 /** A text folded for locating quotes only: NFC, curly quotes straight, every
  * whitespace run one space, the Markdown marks * _ ` dropped and em and en
  * dashes as hyphens. Each folded character keeps the offsets of the original
- * characters it came from, so a match maps back to the stored text. */
-type Folded = { f: string; starts: number[]; ends: number[] };
+ * characters it came from, so a match maps back to the stored text, which is
+ * kept as `text`. */
+type Folded = { text: string; f: string; starts: number[]; ends: number[] };
 export function fold(text: string): Folded {
   let f = "";
   const starts: number[] = [];
@@ -213,7 +222,7 @@ export function fold(text: string): Folded {
       f += c;
     }
   }
-  return { f, starts, ends };
+  return { text, f, starts, ends };
 }
 
 export type Range = [number, number];
@@ -249,13 +258,15 @@ export type Located =
     };
 
 /** Where one change's quotes are. Itemized: each quote occurs in its text
- * overlapping a changed spot on that side (an empty side is matched by the
- * other alone); an occurrence overlapping no spot is passed over, and
+ * overlapping one of a changed spot's edits on that side, not only the
+ * unchanged words the spot joins (an empty side is matched by the other
+ * alone); an occurrence overlapping no edit is passed over, and
  * occurrences at different spots are ambiguous, unless only one of them
  * shares a spot with the other side; more than MAX_OCCURRENCES at spots
  * always are. The two sides need not share a spot (a moved sentence is a cut
  * at one and an addition at another); the change covers every spot its sides
- * touch. Too large: each quote occurs exactly once and the two differ. */
+ * touch. Too large: each quote occurs exactly once. Either way, two sides
+ * that cut the same stored text are no change. */
 export function locate(
   list: ChangeList,
   texts: { first: Folded; final: Folded },
@@ -265,6 +276,12 @@ export function locate(
     ["before", change.before, texts.first],
     ["after", change.after, texts.final],
   ] as const;
+  // Compared as stored, so a dash or a Markdown mark is a change.
+  const same = (r: { before?: Range; after?: Range }) =>
+    r.before !== undefined &&
+    r.after !== undefined &&
+    texts.first.text.slice(...r.before) === texts.final.text.slice(...r.after);
+  const notAtChange = { ok: false, why: "not_at_change" } as const;
   if (list.state === "too_large") {
     const ranges: { before?: Range; after?: Range } = {};
     for (const [name, quote, folded] of sides) {
@@ -277,36 +294,50 @@ export function locate(
       if (!found) return { ok: false, why: "not_in_text" };
       ranges[name] = found;
     }
-    // Unfolded, so a dash or a Markdown mark is a change.
-    if (change.before.trim() === change.after.trim())
-      return { ok: false, why: "not_at_change" };
-    return { ok: true, spots: [], ...ranges };
+    return same(ranges) ? notAtChange : { ok: true, spots: [], ...ranges };
   }
   type Hit = { range: Range; spots: number[] };
   const key = (spots: number[]) => spots.join(",");
   const hits: Partial<Record<"before" | "after", Hit[]>> = {};
   for (const [name, quote, folded] of sides) {
     if (!quote.trim()) continue;
-    const side = list.spots.map((spot): Range =>
-      name === "before"
-        ? [spot.draftStart, spot.draftEnd]
-        : [spot.finalStart, spot.finalEnd],
-    );
+    // Each non-format spot's edits on this side, with the spot they are in.
+    // An occurrence counts at a spot when it touches both the spot and one of
+    // its edits (an edit cut just before a spot's first word sits at a point
+    // outside it), so a merged spot only ever accepts less than it did.
+    const side = list.spots.flatMap((spot, n) => {
+      if (spot.format) return [];
+      const whole: Range =
+        name === "before"
+          ? [spot.draftStart, spot.draftEnd]
+          : [spot.finalStart, spot.finalEnd];
+      return spot.edits.map((e) => ({
+        range: name === "before" ? e.draft : e.final,
+        whole,
+        n,
+      }));
+    });
     // Only the first occurrence on each set of spots is kept: later ones on
     // the same spots give the same answer.
     const first = new Map<string, Hit>();
     let any = false;
     let atSpots = 0;
-    // Spots run in text order on each side and occurrences arrive in order,
-    // so the spots an occurrence can touch form a window that only moves on.
+    // Edits run in text order on each side and occurrences arrive in order,
+    // so the edits an occurrence can touch form a window that only moves on.
     let lo = 0;
     for (const range of occurrences(folded, quote)) {
       any = true;
-      while (lo < side.length && side[lo]![1] < range[0]) lo++;
+      while (lo < side.length && side[lo]!.range[1] < range[0]) lo++;
       const spots: number[] = [];
-      for (let n = lo; n < side.length && side[n]![0] <= range[1]; n++)
-        if (!list.spots[n]!.format && touches(...range, ...side[n]!))
+      for (let k = lo; k < side.length && side[k]!.range[0] <= range[1]; k++) {
+        const { range: edit, whole, n } = side[k]!;
+        if (
+          spots.at(-1) !== n &&
+          touches(...range, ...edit) &&
+          touches(...range, ...whole)
+        )
           spots.push(n);
+      }
       if (!spots.length) continue;
       if (++atSpots > MAX_OCCURRENCES) return { ok: false, why: "ambiguous" };
       if (!first.has(key(spots))) first.set(key(spots), { range, spots });
@@ -332,23 +363,19 @@ export function locate(
       if (new Set(pairs.map((p) => key(p.spots))).size > 1)
         return { ok: false, why: "ambiguous" };
       const [p] = pairs;
-      return {
-        ok: true,
-        spots: p!.spots,
-        before: p!.b.range,
-        after: p!.a.range,
-      };
+      const ranges = { before: p!.b.range, after: p!.a.range };
+      return same(ranges)
+        ? notAtChange
+        : { ok: true, spots: p!.spots, ...ranges };
     }
     // No shared spot: each side stands on its own.
     const b = single(hits.before);
     const a = single(hits.after);
     if (!b || !a) return { ok: false, why: "ambiguous" };
-    return {
-      ok: true,
-      spots: union(b.spots, a.spots),
-      before: b.range,
-      after: a.range,
-    };
+    const ranges = { before: b.range, after: a.range };
+    return same(ranges)
+      ? notAtChange
+      : { ok: true, spots: union(b.spots, a.spots), ...ranges };
   }
   const name = hits.before ? "before" : "after";
   const one = single(hits[name]!);

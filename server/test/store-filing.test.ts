@@ -1013,6 +1013,57 @@ test("a change's quotes are located where the texts differ, folded only to find 
   });
 });
 
+test("a quote must reach a changed word, not only the unchanged words a spot joins, and quotes that cut the same text on both sides are refused", () => {
+  const save = (
+    first_draft: string,
+    final: string,
+    before: string,
+    after: string,
+  ) =>
+    checkMemo({
+      ...memoSave().memo!,
+      first_draft,
+      final,
+      mode: "draft",
+      rounds: 1,
+      changes: [
+        { before, after, about: "voice", by: "person", tweak: { text: "x y" } },
+      ],
+    });
+  const notAtChange = {
+    ok: false,
+    code: "invalid_change",
+    message: expect.stringContaining("not where the two texts differ"),
+  };
+  // red → blue and car → van are one spot, joined by the unchanged "small".
+  expect(
+    save("red small car", "blue small van", "small", "small"),
+  ).toMatchObject(notAtChange);
+  expect(
+    save("red small car", "blue small van", "small", "small van"),
+  ).toMatchObject(notAtChange);
+  for (const [before, after] of [
+    ["red small car", "blue small van"],
+    ["red", "blue"],
+  ])
+    expect(
+      save("red small car", "blue small van", before!, after!),
+    ).toMatchObject({
+      ok: true,
+      evidence: { rows: [{ before, after }] },
+    });
+  // Too large: quotes that differ only in whitespace cut the same stored text.
+  const long = Array.from({ length: 101 }, (_, i) => `w${i} keep keep keep`);
+  expect(
+    save(
+      long.join(" ") + " Best, AI",
+      long.map((w) => `x${w}`).join(" ") + " Best, AI",
+      "Best, AI",
+      "Best,  AI",
+    ),
+  ).toMatchObject(notAtChange);
+});
+
 test("locating a quote stays fast however often it repeats: past the occurrence cap it is ambiguous, below it unchanged", () => {
   const change: ChangeInput = {
     before: "a",

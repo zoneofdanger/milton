@@ -1243,7 +1243,7 @@ test("a report serves whole stored changes under drafted examples: each line dec
           expect(pair.before.normalize("NFC")).not.toBe(
             pair.after.normalize("NFC"),
           );
-          expect(pickChanges(m.changes)).toContainEqual(row);
+          expect(pickChanges(m.changes)).toContainEqual(row!);
         }
       });
       expect(added).toBeLessThanOrEqual(SERVED_BUDGET);

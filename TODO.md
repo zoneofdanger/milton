@@ -10,7 +10,7 @@ landed and the item is still open), `blocked: <why or #id>`. A bolded headline o
 or fewer states the task; one item is one landing. **A section heading and its preamble are
 shared context for every item beneath it.**
 
-**next-id: 41.** Ids are never reused, so this counter survives deleting the newest item.
+**next-id: 42.** Ids are never reused, so this counter survives deleting the newest item.
 
 ## MVP
 
@@ -187,6 +187,25 @@ sheet, report, AI) and plain text on security screens and anything an AI reads.
       protection there is what exists: the request is shown only to the person, never served
       and removable. ⚠ Kept requests are never served to an AI or pooled across accounts
       without a new decision from Peter (2026-11-11).
+
+- [ ] #41 (server, low, founder, blocked: Peter's real memos, about 15 or more)
+      **Craft rules automatically from recurring tweaks.** Peter, 2026-11-12: "i still feel
+      like we should, over time, automatically craft rules for the user once we are confident
+      enough - rather than having the user explicitly define them". When the same change
+      keeps recurring across a person's memos, Milton states it as a rule and serves it on
+      every draft; the person never writes or approves one and can only delete one. Plain
+      code counts the stored changes at read time, so no tool changes and the server stays
+      model-free. What the November 2026 offline tests on fictional people found: at five
+      memos a person about one generated rule in four was junk and the gain over no rules was
+      within noise, so "confident enough" needs volume (most habits 10 to 15 examples, a
+      "never" about 20). Counting worked for how a person opens and signs off, punctuation
+      and phrases they keep adding; it can't see tone or rules that depend on the reader. A
+      line served at the top of a report with priority was obeyed about 97% of the time,
+      while the same kind of line as a low-priority note did nothing. Cuts such as "no
+      subject line" were right for everyone, so they are defaults, not personal rules.
+      ⚠ Not tamper-proof: Milton sees only what AIs send, so a tricked AI could save
+      made-up memos; thresholds lower that risk and can't remove it. Before any build: a
+      spec, the rule and its cases reviewed first, and the test repeated on real memos.
 
 ## From the audit of 2026-11-02
 

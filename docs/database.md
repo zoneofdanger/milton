@@ -69,7 +69,11 @@ production order and snapshots are in [migrations](deploy/migrations.md).
     read, delete and reword tweaks, read and append cover sheet versions, and read and
     set the switch. Neither runtime can change a memo's words, and neither deletes
     citations itself: forgetting a memo, deleting a tweak and account erasure remove
-    them through the foreign keys' cascades, which run as the table owner.
+    them through the foreign keys' cascades, which run as the table owner. The code
+    uses a subset: it inserts and updates no cover sheet version, legacy tweak, citation
+    or served report, and rewords no tweak ([saves](saves.md)). Those grants stay,
+    unused, until a later cleanup, on Peter's word, revokes them and drops the retired
+    tables and columns ([memos](memos.md#legacy-data)).
   - `015-drop-guide-roles.sql` dropped the guide roles; none exists.
   - `016-memo-evidence-roles.sql` (after `0015`): restates 014's whole set for the memo
     tables, revoking first, so rerun it after any rerun of 014. It adds MCP insert and
@@ -135,8 +139,9 @@ production order and snapshots are in [migrations](deploy/migrations.md).
   kept or missing first draft go without `rounds` (a memo with no first draft still has
   none), and `memos_request_id` and `save_request_id` take any `request_id` of 1 to 64
   ASCII letters, digits and `.`, `_`, `:`, `-` (`^[A-Za-z0-9._:-]{1,64}$`) instead of
-  exactly 36 characters. Today's code still writes only UUIDs, and rounds whenever there
-  is a first draft.
+  exactly 36 characters. The code before memos and tweaks only wrote only UUIDs, and
+  rounds whenever there was a first draft; the code now writes any such id and never
+  rounds, so the previous revisions still satisfy every loosened check.
 - In this release the save writes only code's rows: offsets, the two cut sides,
   `truncated`, and `about` = `format` for a Markdown-only spot, else NULL. The label
   columns (`by`, and `about`'s `voice` and `content`) and `tweak_id` exist but are

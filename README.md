@@ -3,10 +3,11 @@
 **Make your agents write like you.**
 
 You bring what you want to say. Milton helps your AI write emails and messages in
-your voice. Every time you accept a final, your AI keeps a memo: its first draft, your
-final, and the tweaks between them ("no warm-up opener in vendor replies"). Next time,
-in any AI you connect, Milton hands it your cover sheet, the finals that best match the
-draft and the tweaks you keep making.
+your voice. Milton keeps what you wrote and what you changed. Your AI reads it before it
+drafts. Every time you accept a final, your AI keeps a memo: its first draft and your
+final, and Milton works out your tweaks, the changes you made to the draft. Next time,
+in any AI you connect, Milton hands it the finals that best match the draft, with what
+you changed in them.
 
 I built Milton because I was tired of telling Claude to stop using em dashes for the 100th time.
 
@@ -15,29 +16,26 @@ hands over the right one.
 
 ## How it works
 
-- **Write a short cover sheet.** It's your own voice guide: hard lines every draft
-  follows, such as "no em dashes" or "sign off –P". Tell your AI "remember …" or "add to
-  my cover sheet" and it adds your exact line, or ask it to remove one. Your TPS page
-  shows it. It's capped at 1,500 characters.
 - **Accept a final; your AI keeps a memo.** When you approve a draft, say it's done or
   copy it to use, your AI saves a memo with `create_memo` without asking and tells you
-  in one line ("Kept memo: vendor decline, 2 rounds, tweaks: no warm-up opener."). A
-  memo is the AI's first draft exactly as shown, your final, one-line tweaks for what
-  you made it change, and a one-line summary of the situation. Writing you paste, or ask
-  it to remember, is a memo with only a final. Milton stores what the AI sends, with no
-  model.
-- **Each draft gets its own report.** Before writing, your AI reads `get_cover_sheet`,
-  then `get_report` with the situation, medium, audience and purpose. Milton ranks your
-  memos and returns the cover sheet, the best-matching finals as examples (your own
-  words ahead of equally matching ones, at most three AI drafts you steered, never
-  untouched AI drafts), then the tweaks your best-matching memos taught. Reads make no
-  model call. AIs decide when to read and how to apply them; Milton does not guarantee
-  their adherence.
-- **See and control what's on file.** Your TPS page shows the cover sheet, your memos
-  (newest first, with their rounds, the tweaks served and the tweaks taught), your
-  tweaks with counts and a scoreboard of how much your first drafts change. You can
-  forget a memo, delete or reword a tweak, turn **Keep memos** off, delete all memos,
-  and download everything as `TPS.md`. Memos are kept until you forget them, delete all
+  in one line ("Kept memo: vendor decline."). A memo is the AI's first draft exactly as shown, your
+  final, the request you typed and a one-line summary of the situation. Writing you
+  paste, or ask it to remember, is a memo with only a final. Milton stores what the AI
+  sends, with no model.
+- **Your tweaks come from your edits.** Milton's code compares the first draft with
+  your final and keeps each change you made as a tweak. No AI writes them, and Milton
+  keeps no standing rules: when you ask your AI to remember a preference, it keeps that
+  in its own memory or instructions.
+- **Each draft gets its own report.** Before writing, your AI calls `get_report` with
+  the situation, medium, audience and purpose. Milton ranks your memos and returns the
+  best-matching finals as examples (your own words ahead of equally matching ones, at
+  most three AI drafts you steered, never untouched AI drafts), with what you changed in
+  the AI's first draft under the drafted ones. Reads make no model call. AIs decide
+  when to read and how to apply them; Milton does not guarantee their adherence.
+- **See and control what's on file.** Your TPS page shows your recent memos (newest
+  first, each with its request and its tweaks) and a scoreboard of how much your first
+  drafts change. You can forget a memo, turn **Keep memos** off, delete all memos, and
+  download every memo as `TPS.md`. Memos are kept until you forget them, delete all
   memos or delete your account.
 
 The hosted service is at [meetmilton.com](https://meetmilton.com), in early access.
@@ -49,11 +47,10 @@ The hosted service is at [meetmilton.com](https://meetmilton.com), in early acce
 2. Add `https://mcp.meetmilton.com/mcp` in your AI's MCP or connector settings,
    then complete sign-in and approve the connection. Availability depends on the
    AI and your plan.
-3. Ask your AI to read your Milton cover sheet. An empty account offers setup once:
-   if your AI can already search your email, it offers to find about five emails you
-   sent and keeps only the ones you approve, exactly as shown; otherwise paste a few,
-   kept exactly as pasted. Then start your cover sheet in your words. Milton never
-   reads your inbox, and none of this has to happen before your AI helps. No emails
+3. Ask your AI "Did you get the memo?" An empty account offers setup once: if your AI
+   can already search your email, it offers to find about five emails you sent and
+   keeps only the ones you approve, exactly as shown; otherwise paste a few, kept
+   exactly as pasted. Milton never reads your inbox, and none of this has to happen before your AI helps. No emails
    to start? Just write. Each final you accept becomes a memo, and drafts sound like
    you within a handful of them.
 4. For the next email or DM, give your AI the facts. It reads the report for that
@@ -63,8 +60,8 @@ The app's **Connected AIs** page shows the connection address and links to the s
 guide for your AI. An empty TPS page links there and shows a setup prompt to copy.
 
 Milton supplies usage instructions when your AI connects, plus descriptions for its
-tools and their arguments. These explain when to read, when to keep a memo, how
-to write tweaks, how to run first setup, and how to recover an uncertain save. Clients
+tools and their arguments. These explain when to read, when to keep a memo, how to
+run first setup, and how to recover an uncertain save. Clients
 decide how to present that guidance to their models. If your AI needs a persistent
 reminder, add this to its custom instructions or project setup file:
 

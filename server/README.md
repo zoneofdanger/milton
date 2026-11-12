@@ -1,8 +1,9 @@
 # Self-hosting Milton
 
 This directory contains the MCP server and the TPS page web app, rendered with Hono JSX
-and Vite-built theme assets on Node 26 LTS. Postgres stores memos, tweaks, the cover
-sheet and request receipts. The self-hosted auth service in `apps/auth` handles sign-in
+and Vite-built theme assets on Node 26 LTS. Postgres stores memos, their tweaks and
+request receipts, and keeps the retired cover sheets and AI-written notes of earlier
+versions for TPS.md ([memos](../docs/memos.md#legacy-data)). The self-hosted auth service in `apps/auth` handles sign-in
 and authorization ([its README](../apps/auth/README.md)).
 
 This file covers local setup and operation. How Milton behaves is in the concept files
@@ -119,9 +120,9 @@ origin. Sign in once before connecting an AI.
 
 ## The first user
 
-The first sign-in creates an account with an empty cover sheet and no memos
+The first sign-in creates an account with no memos
 ([accounts](../docs/accounts.md)). The browser shows the TPS page; connected AIs save
-memos and the person's cover sheet lines.
+memos.
 
 ## Connect an AI
 

@@ -1,7 +1,7 @@
 # Milton: instructions for agents
 
 Milton keeps how a person writes and serves it to their connected AIs through an MCP
-server with three tools. The [README](README.md) introduces it and [TODO.md](TODO.md) is
+server with two tools. The [README](README.md) introduces it and [TODO.md](TODO.md) is
 the backlog. The concept files indexed below hold everything else.
 
 ## Read before you act
@@ -19,11 +19,10 @@ the backlog. The concept files indexed below hold everything else.
 ## Stop first
 
 - Everything saved is served to outside AIs. Never put employers, investors, customers,
-  secrets or other people's private details in a memo, tweak, cover sheet line, fixture,
-  commit message or log.
-- Memos and the cover sheet belong to the person. Their AI saves a memo when they accept a
-  final and changes the cover sheet only in their words; Milton never rewrites what it is
-  sent. Never save to Peter's account on your own initiative. His writing lives on the
+  secrets or other people's private details in a memo, tweak, fixture, commit message or
+  log.
+- Memos belong to the person. Their AI saves a memo when they accept a final, and Milton's
+  code, not an AI, works out its tweaks; Milton never rewrites what it is sent. Never save to Peter's account on your own initiative. His writing lives on the
   server (`https://mcp.meetmilton.com/mcp`), never in files or this repository.
 - Only the release coordinator, `milton-duo`, merges, pushes main, releases or deletes
   landed task branches. Force-pushes and history rewrites need Peter's explicit approval.

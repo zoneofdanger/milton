@@ -153,15 +153,15 @@ All under `server/scripts/`.
   (following redirects, Continue pages and native's JSON redirects, which native sends
   because Node's fetch always says `Sec-Fetch-Mode: cors`, only to the app and auth
   origins) that must show the account and list the key's public id before the key is
-  sent anywhere; an MCP connection with that key listing exactly the three tools; then a
-  gate before any write (no cover sheet, no tweaks, and at most 5 memos, every one this
-  check's own: kind `e2e check`, your words); forgetting those leftovers; an empty
-  baseline; a marked fictional final-only memo saved (tier `own`, receipt
-  `Kept memo: e2e check, your words.`), read fresh by a new session with its summary and
+  sent anywhere; an MCP connection with that key listing exactly the two tools; then a
+  gate before any write (the report's memo count at most 5 and equal to the examples it
+  serves, every one this check's own: kind `e2e check`, your words); forgetting those
+  leftovers; an empty baseline; a marked fictional final-only memo saved (tier `own`,
+  receipt `Kept memo: e2e check.`), read fresh by a new session with its summary and
   quoted final as the only example; a marked edit-mode memo with a first draft saved
-  (changes itemized with one found, receipt `Kept memo: e2e check, 0 rounds.`) and its
-  one change found on its memo page; both forgotten; and a final read equal to the baseline
-  (empty, same cover sheet version, no memos, tweaks or examples). It prints one JSON line
+  (changes itemized with one found, the same receipt) and its one change found on its
+  memo page; both forgotten; and a final read of an empty report with no memos
+  ([e2e](deploy/e2e.md)). It prints one JSON line
   per step with no secret or memo text; a key under 30 days from expiry warns; it exits 0
   only when every step passes, and 1 for a refusal, a failed step, a crash or a run past
   240 s.

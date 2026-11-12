@@ -17,3 +17,8 @@ type: rule
 - Claims the evidence supports (2026-11-09): sounding like you within a handful of memos, and a
   fix carrying across AIs. A retention test found no gain past about 10 memos, so don't claim
   it gets better the more you use it.
+- The story line, where a page states one: "Milton keeps what you wrote and what you
+  changed. Your AI reads it before it drafts." (2026-11-12, with memos and tweaks only).
+  Milton keeps memos and their tweaks and no standing rules, so copy offers no cover sheet,
+  rules or notes an AI writes, and says "tweak" only for a change the person made to an
+  AI's draft.

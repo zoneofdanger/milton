@@ -97,15 +97,16 @@ are served as examples, and their size cap, is in [reports](reports.md#examples)
 | Request                        | 600 characters, 12 lines                          |
 | Memos per forget               | 100                                               |
 
-A memo's words (its final and first draft) and its request are stored exactly as sent;
-invalid Unicode and NUL are refused before a driver could replace them. A one-line field
-(an intent's situation, audience and purpose, a context's summary, audience and purpose,
-`new_kind`, a tweak's text, a cover sheet line an AI adds, and the TPS page's reword)
-follows the one-line rule instead: each run of the invisible line and paragraph separators
+A memo's words (its final and first draft) are stored exactly as sent, and its request
+as sent less surrounding whitespace ([the request](#the-request)); invalid Unicode and
+NUL are refused before a driver could replace them. A one-line field (an intent's
+situation, audience and purpose, a context's summary, audience and purpose, `new_kind`, a
+tweak's text, a cover sheet line an AI adds, and the TPS page's reword) follows the
+one-line rule instead: each run of the invisible line and paragraph separators
 U+2028 and U+2029 becomes one space, then the value is trimmed and checked against its
-bound. Any other control character in it, an ordinary line break or tab among them, is
-refused as before (Peter, 2026-11-12). The input is hashed after the rule
-([saves](saves.md)).
+bound. Control characters left after the trim, an ordinary line break or tab among them,
+are refused as before, so a trailing line break is trimmed away, not refused (Peter,
+2026-11-12). The input is hashed after the rule ([saves](saves.md)).
 
 ## Tiers
 

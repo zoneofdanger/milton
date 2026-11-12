@@ -10,7 +10,7 @@ landed and the item is still open), `blocked: <why or #id>`. A bolded headline o
 or fewer states the task; one item is one landing. **A section heading and its preamble are
 shared context for every item beneath it.**
 
-**next-id: 40.** Ids are never reused, so this counter survives deleting the newest item.
+**next-id: 41.** Ids are never reused, so this counter survives deleting the newest item.
 
 ## MVP
 
@@ -174,6 +174,19 @@ sheet, report, AI) and plain text on security screens and anything an AI reads.
       since #109 (worst case about 50 ms in its review), which is why this is low. Moving it changes which refusal such an account sees
       first, and refusals today come before any database work
       ([saves](docs/saves.md)): decide that order before building.
+
+- [ ] #40 (server, low) **Refuse a request that repeats the draft or final.** A memo keeps
+      what the person typed to ask (#109), and the AI is asked to send only that. The server
+      refuses mail-like lines and anything over 600 characters or 12 lines
+      (`server/src/store/save.ts`), but it can't tell typed text from pasted text. Add one
+      precise rule: refuse a request when a long run of it also appears word for word in the
+      first draft or the final, which is a "here's my text, fix it" paste. Measure it first on
+      the fake pastes from #109's scripted client test. Skip guesses about what "looks like"
+      an instruction: a wrong guess refuses a good save. This is tidiness, not a privacy fix:
+      it can't catch someone else's pasted email, which never appears in the reply. The
+      protection there is what exists: the request is shown only to the person, never served
+      and removable. ⚠ Kept requests are never served to an AI or pooled across accounts
+      without a new decision from Peter (2026-11-11).
 
 ## From the audit of 2026-11-02
 

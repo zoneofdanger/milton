@@ -23,6 +23,45 @@ Earlier records are in git history: the last runbook holding them is at commit 4
 (`git show 492b96a:server/deploy/README.md`), and the runbook's later versions are in
 `git log -p server/deploy/README.md` until 2026-11-10, when this file began.
 
+## 2026-11-12: what they changed, served under drafted examples (PR #114)
+
+- **#114 (Peter's "Ship it", answering milton-overlord's plan "Write the rule first… Have it
+  reviewed before any code is written. Build it, test it with real AIs, then release." and
+  "Say "ship it" and I'll start a builder on that plan.", and "1", choosing to keep removed
+  text with a guard line knowing "That lowers the risk but can't guarantee it.", both typed
+  in milton-overlord's pane wH:p1F on 2026-11-11 and relayed verbatim by milton-overlord;
+  built by milton-changes; independent review Codex gpt-6-astra: the rule UNSOUND at v1,
+  SOUND WITH CHANGES at v2, the code PASS WITH CHANGES at `578aac8` and `3e0de3a` (its ask
+  to build the unused switch's off branch overruled after Peter's "1"), the last test fixes
+  at `f2afdcc` checked by milton-duo by rerunning the two mutations; milton-designer
+  approved the memo-page line at `578aac8` (PR comment); milton-qa's real-client run E3 at
+  `578aac8`: no planted instruction followed in 20 of 20 exposed conversations across
+  Claude Code and Codex, 20 of 20 memos saved, one draft in 20 lost a fact the control kept,
+  accepted by milton-overlord as borderline and reported to Peter), `b1d2760`:** under each
+  served drafted example (kept first draft, itemized changes, steered; at most three), a
+  report quotes up to three of code's own stored change rows, whole and JSON-encoded, the
+  first two and the last, within 3,000 code points, with one guard line in the Examples
+  intro. Its own commits quote finals at every line break (CRLF, CR, LF, VT, FF, NEL,
+  U+2028, U+2029) and flatten header fields and tweak text, closing a way for memo text to
+  start report lines. The memo page says when its changes may be served. Privacy, terms,
+  FAQ and For agents say words you removed may reach your connected AIs.
+  - **Schema:** none.
+  - **Image** `sha256:9c451e73f93a6d1aa90bfd499239f03c40d4e812cf0604d0cb9e890230ec1f30`
+    (amd64 `sha256:44fcf717…`): admit `milton-admit-00013-c6k` at 06:02:27Z, app and MCP
+    `milton-*-changes-b1d2760` as tagged no-traffic revisions, traffic moved at 06:03:12Z,
+    `milton-e2e-daily` at 06:03:15Z. Site: Vercel production deployment of `b1d2760`
+    (privacy and terms live with "including words you removed").
+  - **Live:** app and MCP `/health` and auth `/api/auth/ok` 200, app home 200, MCP 401
+    unauthenticated, admit 403 without a token, forms probe PASS, `milton-e2e-daily-gk4r7`
+    passed. Gate at 06:13Z: clean; no request reached an older revision after 06:05:30Z; no error, `store_unavailable` or `permission denied` lines since 06:02Z.
+  - **Checks** on `f2afdcc`, whose tree `b1d2760` has (main had not moved): types, 135
+    server tests, format and agent-docs 0; PR CI green.
+  - **Not observed:** a real person's report carrying change lines; Safari and screen
+    readers.
+  - **Rollback**, code only, all four together: `milton-*-evidence-4668940`,
+    `milton-admit-00012-4km` and the daily job to image `sha256:eb45b83f…`, with the site
+    back to `4668940`.
+
 ## 2026-11-12: memo evidence without the quote link, and the tweak score (PRs #109, #107)
 
 - **#109 with #107 (Peter's "ship 109 when it's ready", about 2:45 PM, and for the narrower

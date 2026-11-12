@@ -2,8 +2,9 @@
  * the fictional test account (test-account.ts). It signs in as a browser does,
  * connects to MCP with the account's connection key, refuses to write unless the
  * account holds nothing but this check's own marked leftovers, then saves a
- * marked final-only memo, reads it fresh, saves a marked edit-mode memo with one
- * change so the change check runs, forgets both and confirms the account is
+ * marked final-only memo, reads it fresh, saves a marked edit-mode memo with a
+ * first draft so code lists its one change, finds that change on the memo's
+ * page, forgets both and confirms the account is
  * back where the run began. One JSON line per step on stdout (`step`, `ok`,
  * `ms`, `severity`), never a password, key, cookie or memo text. Exit 0 only when every step passed. */
 import { randomUUID } from "node:crypto";
@@ -131,7 +132,7 @@ async function mcpSession(origins: Origins, key: string, fetcher: Fetch) {
           memo_id: string;
           tier: string;
           kind?: string;
-          changes?: { found: number; labelled: number };
+          changes?: { state: string; found: number };
         };
         receipt?: string;
         forgotten?: string[];
@@ -289,9 +290,10 @@ export async function runE2E(options: {
       fail("memo_not_served_exactly");
     done();
 
-    // A drafted memo with one change, so code's diff and the quote check run
-    // in production: edit mode, so it is the person's words and a crashed
-    // run's leftover is recognized like the first; no tweak, so none is left.
+    // A drafted memo whose final differs from its first draft in one spot,
+    // so code's diff runs in production and stores one change row: edit
+    // mode, so it is the person's words and a crashed run's leftover is
+    // recognized like the first; no tweaks, so none is left.
     step = "save_drafted";
     const lead = `Fictional reminder for the ${MARKER}, run ${run}: the spare key`;
     const drafted = await first.save({
@@ -300,14 +302,6 @@ export async function runE2E(options: {
         final: `${lead} hangs by the shed door.`,
         mode: "edit",
         rounds: 0,
-        changes: [
-          {
-            before: "is by the door",
-            after: "hangs by the shed door",
-            about: "content",
-            by: "person",
-          },
-        ],
         context: { summary, medium: INTENT.medium },
         new_kind: KIND,
       },
@@ -315,11 +309,25 @@ export async function runE2E(options: {
     if (
       drafted.memo?.tier !== "own" ||
       drafted.memo.kind !== KIND ||
-      drafted.memo.changes?.found !== 1 ||
-      drafted.memo.changes.labelled !== 1 ||
+      drafted.memo.changes?.state !== "itemized" ||
+      drafted.memo.changes.found !== 1 ||
       drafted.receipt !== `Kept memo: ${KIND}, 0 rounds.`
     )
       fail("drafted_memo_not_saved_as_sent");
+    done();
+
+    // The stored row, as the person's memo page lists it.
+    step = "drafted_changes";
+    const page = await b.follow(
+      `${origins.app}/tps/memo/${drafted.memo.memo_id}`,
+    );
+    if (
+      page.status !== 200 ||
+      page.html.split('<li class="change-row">').length !== 2 ||
+      !page.html.includes("“is by the”") ||
+      !page.html.includes("“hangs by the shed”")
+    )
+      fail("drafted_changes_not_listed");
     done();
 
     step = "forget_memo";

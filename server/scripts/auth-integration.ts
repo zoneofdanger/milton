@@ -1718,9 +1718,9 @@ try {
     JSON.parse(served.result.content![0]!.text) as { report_id: string }
   ).report_id;
   stage = "MCP save";
-  // A memo with a new kind, its request and a change teaching a tweak, citing
-  // the report it was drafted from, then a cover sheet line: every memo table
-  // the MCP role writes.
+  // A memo with a new kind, its request and a tweak, citing the report it was
+  // drafted from, so code stores its changes, then a cover sheet line: every
+  // memo table the MCP role writes.
   for (const change of [
     {
       memo: {
@@ -1730,15 +1730,7 @@ try {
         rounds: 1,
         new_kind: "fictional note",
         request: "Write a fictional pickup note for the trays.",
-        changes: [
-          {
-            before: "Hi! Hope you're well.",
-            after: "",
-            about: "voice",
-            by: "person",
-            tweak: { text: "pickup notes: no warm-up opener" },
-          },
-        ],
+        tweaks: [{ text: "pickup notes: no warm-up opener" }],
         context: { summary: "Fictional pickup note", medium: "email" },
         report_id: reportId,
       },
@@ -3678,6 +3670,7 @@ try {
       "save_memo",
       "fresh_read",
       "save_drafted",
+      "drafted_changes",
       "forget_memo",
       "cleanup",
       "done",
@@ -3840,7 +3833,7 @@ try {
     error: "account_holds_foreign_data",
   });
   pass(
-    "e2e check: browser sign-in, MCP key, safety gate, a marked memo saved and read fresh, a marked drafted memo with one change saved, both forgotten, restored baseline; bounded per-run footprint; marked leftovers forgotten; expiring key warns; an unmarked memo of its kind and other foreign data refused without saving",
+    "e2e check: browser sign-in, MCP key, safety gate, a marked memo saved and read fresh, a marked drafted memo saved with its one change listed on its page, both forgotten, restored baseline; bounded per-run footprint; marked leftovers forgotten; expiring key warns; an unmarked memo of its kind and other foreign data refused without saving",
   );
   stage = "test account exempt from trials and billing";
   // Trials stay on. The test account's access never depends on a trial: repeated
@@ -4358,15 +4351,7 @@ try {
         mode: "draft",
         rounds: 1,
         new_kind: "fictional note",
-        changes: [
-          {
-            before: "Hi! Hope you are well.",
-            after: "",
-            about: "voice",
-            by: "person",
-            tweak: { text: `${m} tweak ${n}: ${tweak}` },
-          },
-        ],
+        tweaks: [{ text: `${m} tweak ${n}: ${tweak}` }],
         context: {
           summary: `${m} summary ${n === "one" ? "old" : "two"}`,
           medium: "email",
@@ -4520,15 +4505,7 @@ try {
               first_draft: "Fictional takeover draft.",
               mode: "draft",
               rounds: 1,
-              changes: [
-                {
-                  before: "draft",
-                  after: "",
-                  about: "voice",
-                  by: "person",
-                  tweak: { tweak_id: target.tweak },
-                },
-              ],
+              tweaks: [{ tweak_id: target.tweak }],
             },
           },
           "invalid_tweak",

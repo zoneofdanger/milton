@@ -158,7 +158,10 @@ leftover). So a release that changes what MCP lists or answers, and its rollback
 job out of the switch ([releases](releases.md) gives the order): no active or pending
 execution and no manual start while services change, the whole switch finishing before the
 next scheduled run, and the job's image moved only after the matching services serve and
-older requests have drained, followed by one manual execution.
+older requests have drained, followed by one manual execution. The integration suite tests both
+directions before writing: a new check against an old MCP's listing or a report without
+`memos`, and the released check (`server/scripts/e2e-released.ts`, main's `e2e.ts`
+frozen) against the new MCP, which it refuses at `mcp_connect` with `tools_unexpected`.
 
 For the release that retires `get_cover_sheet` (memos and tweaks only), milton-duo also
 checks the account as the owner, read-only, before the release:

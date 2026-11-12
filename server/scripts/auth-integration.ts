@@ -88,6 +88,7 @@ import {
   type Fetch,
 } from "./e2e-http";
 import { readSecrets, runE2E, type Line } from "./e2e";
+import { runE2E as runReleasedE2E } from "./e2e-released";
 
 const port = 55623;
 // The milton-admit service's deterministic run.app URL; never fetched here.
@@ -4130,6 +4131,31 @@ try {
     altered((method, name, v) =>
       method === "tools/call" && name === "get_report" ? memos(v) : v,
     );
+  // The released job image (main's e2e.ts) against the new MCP fails closed
+  // before writing: its exact three-tool listing check refuses the two tools.
+  {
+    const held = await footprint();
+    checkLines.length = 0;
+    await assert.rejects(
+      runReleasedE2E({
+        secrets,
+        fetch: dispatch,
+        report: (l) => checkLines.push(l),
+      }),
+      (e) => e instanceof CheckError && e.code === "tools_unexpected",
+      "the released check refuses the new listing",
+    );
+    await backgroundSettled();
+    assert.deepEqual(
+      { ...grew(held, await footprint()), usage: 0 },
+      none,
+      "the released check writes nothing against the new MCP",
+    );
+    assert.deepEqual(
+      [checkLines.at(-1)!.step, checkLines.at(-1)!.ok],
+      ["mcp_connect", false],
+    );
+  }
   // A new check against an old MCP fails closed before writing: the old
   // listing (with get_cover_sheet), or a report without the memo count.
   await refused(

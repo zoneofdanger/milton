@@ -68,6 +68,9 @@ export function malformedIntent(intent: unknown) {
   const broken = new Set(
     issues.map((issue) => {
       const field = String(issue.path[0] ?? "");
+      // A report is a read: no save guidance, only what to remove.
+      if (issue.message === BIDI_MESSAGE)
+        return `${field} holds a text-direction control character (U+202A to U+202E or U+2066 to U+2069); remove it and resend`;
       return field === "situation"
         ? "situation must be one line of at most 200 characters"
         : field === "medium"

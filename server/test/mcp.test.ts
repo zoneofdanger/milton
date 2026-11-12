@@ -642,6 +642,16 @@ test("get_report requires an intent: without a well-formed one it refuses, sayin
         { situation: "a reply", medium: "email", audience: "a client" },
         "purpose is required: one line of at most 100 characters",
       ],
+      // A bidi control says which field and why, with no save guidance: a
+      // report is a read.
+      [
+        { ...goodIntent, audience: `a${String.fromCharCode(0x202e)}client` },
+        "audience holds a text-direction control character (U+202A to U+202E or U+2066 to U+2069); remove it and resend",
+      ],
+      [
+        { ...goodIntent, situation: `a${String.fromCharCode(0x2066)}reply` },
+        "situation holds a text-direction control character (U+202A to U+202E or U+2066 to U+2069); remove it and resend",
+      ],
     ] as const) {
       const message = await refused({ report_id: "email", intent });
       expect(message).toBe(`get_report intent: ${says}. Nothing was read.`);
@@ -649,7 +659,7 @@ test("get_report requires an intent: without a well-formed one it refuses, sayin
     expect(intents).toEqual([]);
     expect(changed).toBe(1);
     expect(calls.map((c) => [c.outcome, c.error_code])).toEqual(
-      Array(4).fill(["refused", "invalid_input"]),
+      Array(6).fill(["refused", "invalid_input"]),
     );
     const read = await client.callTool({
       name: "get_report",

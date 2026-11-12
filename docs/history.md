@@ -23,6 +23,49 @@ Earlier records are in git history: the last runbook holding them is at commit 4
 (`git show 492b96a:server/deploy/README.md`), and the runbook's later versions are in
 `git log -p server/deploy/README.md` until 2026-11-10, when this file began.
 
+## 2026-11-12: memo evidence without the quote link, and the tweak score (PRs #109, #107)
+
+- **#109 with #107 (Peter's "ship 109 when it's ready", about 2:45 PM, and for the narrower
+  scope "go with choice 3 for now", about 5:30 PM, choice 3 being "Leave that part out for
+  now. Ship everything else, and come back to examples once you have real memos to test
+  on.", both typed in milton-overlord's pane wH:p1F on 2026-11-11 and relayed verbatim by
+  milton-overlord; built by milton-evidence; independent review Codex gpt-6-astra: three
+  FAILs on the quote matcher and one UNSOUND on its rule, after which Peter dropped the
+  quote link; FAIL on two findings at `c7d6df2`, fixed at `b00f168` and rechecked;
+  milton-designer approved at `b00f168` (PR comment 6812383728); milton-qa's real-client
+  run E2 met its bar at `c7d6df2`, 20 of 20 memos saved across Claude Code and Codex, valid
+  for `b00f168`, whose fix touches neither the save path nor the tool), `4668940`:** the
+  tweak score (#107, merged first as `d7260c6`); `create_memo` takes main's `memo.tweaks`
+  again, more than three distinct refused; a memo keeps the person's typed request, which
+  the TPS page can remove; the memo page lists code's own unlabelled changes (whole diff
+  spots, cut at 300 characters, `too_large` at the diff's bounds). The AI's quotes,
+  labels, served before-and-after examples and typed share are not in it; `memo_changes`'
+  label, tweak and quote columns stay NULL.
+  - **Schema.** Snapshot `snap-dry-block-b8hc81mt` (`before-0015-memo-evidence-pr109`) at
+    02:16:00Z, plus a private `pg_dump` checkpoint. Before: journal 15, 0 memos, 0 tweaks, 0
+    citations. Drizzle `0015_memo_evidence` with `db:migrate` 02:16:51–54Z (journal 16), owner
+    file `016-memo-evidence-roles.sql` with `psql` at 02:16:56Z. Check: the three new columns
+    and `memo_changes` present, `memo_changes_tweak` with `IS TRUE`, `memo_changes` granted
+    SELECT/INSERT to MCP and SELECT to app, app UPDATE on `memos.request` and
+    `tweaks.text_changed_at` added, the 26 earlier table grants unchanged;
+    `check-runtime-role` ok for app and MCP. Rehearsed twice on throwaway Neon branches of
+    production (0015 through the migrator, 016 twice; schema diff additive only), then
+    deleted; 0015 and 016 are byte-identical to the second rehearsal. No floor change.
+  - **Image** `sha256:eb45b83fd3509cd751be9622c88c00b0845fe2bf893d0a714f8590024f6b5744`
+    (amd64 `sha256:3b1f4ffd…`): admit `milton-admit-00012-4km` at 02:17:45Z, app and MCP
+    `milton-*-evidence-4668940` as tagged no-traffic revisions, traffic moved at 02:18:25Z,
+    `milton-e2e-daily` at 02:18:27Z. Site: Vercel production deployment of `4668940`
+    (privacy and terms dated November 11, 2026, live).
+  - **Live:** app and MCP `/health` and auth `/api/auth/ok` 200, app home 200, MCP 401
+    unauthenticated, admit 403 without a token, forms probe PASS, `milton-e2e-daily-lb4nz`
+    passed and left 0 memos, 0 change rows and 0 tweaks. Gate at 02:28Z: clean; no request reached an older revision after 02:20:30Z; no error, `store_unavailable` or `permission denied` lines since 02:16Z.
+  - **Checks** on `b00f168` merged with main `336f2ee` (the tree merged): types, 170 tests,
+    format, agent-docs and the migration guard 0; PR CI green.
+  - **Not observed:** a real person's save in the new shape; Safari and screen readers.
+  - **Rollback**, code only, all four together: `milton-*-own-82ef571`,
+    `milton-admit-00011-jd9` and the daily job to image `sha256:e70e8e76…`, on the new
+    schema. Restoring the snapshot is not a code rollback (fix forward).
+
 ## 2026-11-11: served instructions reuse the person's own words (PR #108)
 
 - **#108 (Peter's "ship 108", typed in milton-overlord's pane wH:p1F on 2026-11-11 after

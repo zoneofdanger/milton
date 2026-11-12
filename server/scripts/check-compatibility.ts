@@ -35,17 +35,27 @@ const pass = (line: string) => {
 try {
   // Today's code, as the ref holds it, with this checkout's installed
   // dependencies; its workspace links resolve inside the scratch copy.
-  execFileSync(
-    "sh",
+  // No shell: the ref is one argument, resolved to a commit first (a ref
+  // starting with "-" is never read as an option), and the archive's bytes
+  // go to tar on its standard input.
+  const sha = execFileSync(
+    "git",
     [
-      "-c",
-      `git -C "${repo}" archive "${ref}" server packages package.json | tar -x -C "${scratch}"`,
+      "-C",
+      repo,
+      "rev-parse",
+      "--verify",
+      "--end-of-options",
+      `${ref}^{commit}`,
     ],
-    { stdio: "inherit" },
+    { encoding: "utf8" },
+  ).trim();
+  const archive = execFileSync(
+    "git",
+    ["-C", repo, "archive", sha, "server", "packages", "package.json"],
+    { maxBuffer: 1 << 30 },
   );
-  const sha = execFileSync("git", ["-C", repo, "rev-parse", ref], {
-    encoding: "utf8",
-  }).trim();
+  execFileSync("tar", ["-x", "-C", scratch], { input: archive });
   symlinkSync(join(repo, "node_modules"), join(scratch, "node_modules"));
   const modules = join(repo, "server/node_modules");
   mkdirSync(join(scratch, "server/node_modules"));

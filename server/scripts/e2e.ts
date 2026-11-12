@@ -1,11 +1,11 @@
 /** The daily end-to-end check, safe against production because it touches only
  * the fictional test account (test-account.ts). It signs in as a browser does,
- * connects to MCP with the account's connection key, refuses to write unless the
- * account holds nothing but this check's own marked leftovers, then saves a
- * marked final-only memo, reads it fresh, saves a marked edit-mode memo with a
- * first draft so code lists its one change, finds that change on the memo's
- * page, forgets both and confirms the account is
- * back where the run began. One JSON line per step on stdout (`step`, `ok`,
+ * connects to MCP with the account's connection key, refuses to write unless
+ * the report's memo count shows the account holds nothing but this check's own
+ * marked leftovers, then saves a marked final-only memo, reads it fresh, saves
+ * a marked edit-mode memo with a first draft so code lists its one change,
+ * finds that change on the memo's page, forgets both and confirms the account
+ * is back where the run began (docs/deploy/e2e.md). One JSON line per step on stdout (`step`, `ok`,
  * `ms`, `severity`), never a password, key, cookie or memo text. Exit 0 only when every step passed. */
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -40,7 +40,7 @@ export const RUN_MS = 240_000;
 export const KEY_WARN_DAYS = 30;
 /** More leftovers than this means something other than crashed runs. */
 const MAX_LEFTOVERS = 5;
-const TOOLS = ["create_memo", "get_cover_sheet", "get_report"];
+const TOOLS = ["create_memo", "get_report"];
 
 type Severity = "INFO" | "WARNING" | "ERROR";
 export type Line = {
@@ -68,18 +68,21 @@ export async function readSecrets(path: string) {
   return { email, password, key, keyId: parsed[1]! };
 }
 
-type Cover = {
-  text: string;
-  version: number;
-  memos: number;
-  tweaks: number;
-  is_empty: boolean;
-};
 type Report = {
-  report_id: string;
   text: string;
+  is_empty: boolean;
   examples: { memo_id: string; kind?: string; tier: string }[];
+  /** The account's total memo count, whatever the report serves. */
+  memos: unknown;
 };
+/** A memo count as the current MCP serves it; anything else (missing, as an
+ * older MCP answers, or malformed) is no count, and the check stops. */
+const count = (listed: Report) =>
+  typeof listed.memos === "number" &&
+  Number.isInteger(listed.memos) &&
+  listed.memos >= 0
+    ? listed.memos
+    : fail("memo_count_unreadable");
 
 /** One MCP connection with the key: initialize, then calls, each bounded. */
 async function mcpSession(origins: Origins, key: string, fetcher: Fetch) {
@@ -123,7 +126,6 @@ async function mcpSession(origins: Origins, key: string, fetcher: Fetch) {
       (await client.listTools(undefined, { timeout: REQUEST_MS })).tools
         .map((t) => t.name)
         .sort(),
-    cover: () => call<Cover>("get_cover_sheet"),
     report: () => call<Report>("get_report", { intent: INTENT }),
     save: async (args: object) => {
       const outcome = await call<{
@@ -232,19 +234,20 @@ export async function runE2E(options: {
     if ((await first.tools()).join() !== TOOLS.join()) fail("tools_unexpected");
     done({ tools: TOOLS.length });
 
-    // Nothing is written until the account holds only this check's marked
-    // leftovers: no cover sheet, no tweaks, and every memo one of this
-    // check's, by kind and run marker (a few small ones all fit in one
-    // report).
+    // Nothing is written until every memo on the account is one of this
+    // check's marked leftovers: the report's total count, at most five, must
+    // equal both the examples it serves and the recognized leftovers among
+    // them (by kind and run marker, each id once). A few small own-words
+    // memos all fit in one report, so a foreign memo the report doesn't
+    // serve (untouched, oversized) still shows in the count and stops it.
     step = "safety_gate";
-    const cover = await first.cover();
     const listed = await first.report();
+    const total = count(listed);
     const stale = leftovers(listed);
     if (
-      cover.text !== "" ||
-      cover.tweaks !== 0 ||
-      cover.memos > MAX_LEFTOVERS ||
-      stale.length !== cover.memos ||
+      total > MAX_LEFTOVERS ||
+      new Set(stale.map((e) => e.memo_id)).size !== stale.length ||
+      stale.length !== total ||
       stale.length !== listed.examples.length
     )
       fail("account_holds_foreign_data");
@@ -256,8 +259,9 @@ export async function runE2E(options: {
     done({ forgotten: stale.length });
 
     step = "baseline";
-    const start = await first.cover();
-    if (!start.is_empty || start.memos !== 0) fail("account_not_empty");
+    const start = await first.report();
+    if (!start.is_empty || count(start) !== 0 || start.examples.length !== 0)
+      fail("account_not_empty");
     done();
 
     step = "save_memo";
@@ -273,7 +277,7 @@ export async function runE2E(options: {
     if (
       saved.memo?.tier !== "own" ||
       saved.memo.kind !== KIND ||
-      saved.receipt !== `Kept memo: ${KIND}, your words.`
+      saved.receipt !== `Kept memo: ${KIND}.`
     )
       fail("memo_not_saved_as_sent");
     done({ run });
@@ -293,7 +297,8 @@ export async function runE2E(options: {
     // A drafted memo whose final differs from its first draft in one spot,
     // so code's diff runs in production and stores one change row: edit
     // mode, so it is the person's words and a crashed run's leftover is
-    // recognized like the first; no tweaks, so none is left.
+    // recognized like the first (draft mode would be steered, and the
+    // report serves at most three of those).
     step = "save_drafted";
     const lead = `Fictional reminder for the ${MARKER}, run ${run}: the spare key`;
     const drafted = await first.save({
@@ -301,7 +306,6 @@ export async function runE2E(options: {
         first_draft: `${lead} is by the door.`,
         final: `${lead} hangs by the shed door.`,
         mode: "edit",
-        rounds: 0,
         context: { summary, medium: INTENT.medium },
         new_kind: KIND,
       },
@@ -311,7 +315,7 @@ export async function runE2E(options: {
       drafted.memo.kind !== KIND ||
       drafted.memo.changes?.state !== "itemized" ||
       drafted.memo.changes.found !== 1 ||
-      drafted.receipt !== `Kept memo: ${KIND}, 0 rounds.`
+      drafted.receipt !== `Kept memo: ${KIND}.`
     )
       fail("drafted_memo_not_saved_as_sent");
     done();
@@ -338,16 +342,8 @@ export async function runE2E(options: {
     done();
 
     step = "cleanup";
-    const last = await session();
-    const end = await last.cover();
-    const endReport = await last.report();
-    if (
-      !end.is_empty ||
-      end.version !== start.version ||
-      end.memos !== 0 ||
-      end.tweaks !== 0 ||
-      endReport.examples.length !== 0
-    )
+    const end = await (await session()).report();
+    if (!end.is_empty || count(end) !== 0 || end.examples.length !== 0)
       fail("baseline_not_restored");
     done();
 

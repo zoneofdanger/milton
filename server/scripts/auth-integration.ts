@@ -3788,6 +3788,7 @@ try {
           (select count(*) from memo_kinds where user_id=$1)::int kinds,
           (select count(*) from tweaks where user_id=$1)::int tweaks,
           (select count(*) from memo_changes where user_id=$1)::int changes,
+          (select count(*) from tweak_citations where user_id=$1)::int citations,
           (select count(*) from cover_sheets where user_id=$1)::int covers,
           (select count(*) from served_reports where user_id=$1)::int reports,
           (select count(*) from save_requests where user_id=$1)::int receipts,
@@ -3817,18 +3818,20 @@ try {
     return grew(counted, await footprint());
   };
   // A run leaves no memo behind: it saves two and forgets them, with the
-  // drafted one's change. Its receipts (two saves, forget) and served-report
-  // records (three reads) stay.
+  // drafted one's change. Its receipts (two saves, forget) stay; its four
+  // report reads record usage and nothing else.
   const perRun = {
     memos: 0,
     kinds: 0,
     tweaks: 0,
     changes: 0,
+    citations: 0,
     covers: 0,
-    reports: 3,
+    reports: 0,
     receipts: 3,
-    usage: 9,
+    usage: 7,
   };
+  const none = Object.fromEntries(Object.keys(perRun).map((k) => [k, 0]));
   // First run: the kind is made once; every later run reuses it.
   assert.deepEqual(await check(), { ...perRun, kinds: 1 });
   assert.deepEqual(
@@ -3990,32 +3993,242 @@ try {
     "an unmarked memo of the check's kind is not forgotten",
   );
   await testSave({ forget_memos: [unmarked] });
-  // Foreign data (a legacy cover sheet line nobody marked, as an earlier
-  // version wrote one) refuses before any save; only the gate's own report
-  // read is recorded.
+  // A run refused before any write: its only footprint is the gate's report
+  // read, and its last line names the gate.
+  const refused = async (
+    fetcher: Fetch,
+    code: string,
+    last = "safety_gate",
+  ) => {
+    const held = await footprint();
+    await assert.rejects(
+      check(fetcher),
+      (e) => e instanceof CheckError && e.code === code,
+      code,
+    );
+    assert.deepEqual(
+      { ...grew(held, await footprint()), usage: 0 },
+      none,
+      `${code}: refused without writing`,
+    );
+    assert.deepEqual(
+      [
+        checkLines.at(-1)!.step,
+        checkLines.at(-1)!.ok,
+        checkLines.at(-1)!.error,
+      ],
+      [last, false, code],
+    );
+  };
+  // Every memo the account holds must be served and recognized: a foreign
+  // memo no report serves (untouched, or a final over 128 KiB) still counts,
+  // so the gate refuses even when the memo carries the run marker and kind.
+  const marked = {
+    context: { summary: "Milton e2e check, run hidden00", medium: "document" },
+    new_kind: "e2e check",
+  };
+  const hidden = [
+    {
+      ...marked,
+      first_draft: "Fictional note an AI drafted and nobody changed.",
+      final: "Fictional note an AI drafted and nobody changed.",
+      mode: "draft",
+    },
+    {
+      ...marked,
+      final: "Fictional long note for the check. ".repeat(4000),
+    },
+  ];
+  for (const memo of hidden) {
+    await owner.query(
+      'delete from milton_auth."rateLimit"; delete from milton_guard.rate_bucket',
+    );
+    const id = (
+      await testKeyCall("create_memo", { request_id: randomUUID(), memo })
+    ).memo.memo_id as string;
+    await refused(dispatch, "account_holds_foreign_data");
+    await testSave({ forget_memos: [id] });
+  }
+  // More than five marked leftovers is not crashed runs: refused, none
+  // forgotten.
+  const many: string[] = [];
+  for (let i = 0; i < 6; i++)
+    many.push(
+      (
+        await testKeyCall("create_memo", {
+          request_id: randomUUID(),
+          memo: {
+            ...marked,
+            context: {
+              ...marked.context,
+              summary: `Milton e2e check, run many0000`,
+            },
+            final: `Fictional leftover ${i} of a crashed run.`,
+          },
+        })
+      ).memo.memo_id,
+    );
+  await refused(dispatch, "account_holds_foreign_data");
+  await testSave({ forget_memos: many });
+  // Another MCP's answers, for the transition and malformed cases: each
+  // tools/list or tools/call reply the check reads passes through `change`.
+  const altered =
+    (
+      change: (
+        method: string,
+        name: string | undefined,
+        value: Record<string, any>,
+      ) => Record<string, unknown>,
+    ): Fetch =>
+    async (target, init) => {
+      const response = await dispatch(target, init);
+      if (
+        new URL(target).host !== "mcp.meetmilton.com" ||
+        typeof init.body !== "string"
+      )
+        return response;
+      const sent = JSON.parse(init.body);
+      if (sent.method !== "tools/list" && sent.method !== "tools/call")
+        return response;
+      const edit = (m: Record<string, any>) => {
+        if (m.id !== sent.id || !m.result) return m;
+        if (sent.method === "tools/list")
+          return { ...m, result: change(sent.method, undefined, m.result) };
+        const [content] = m.result.content;
+        const value = change(
+          sent.method,
+          sent.params.name,
+          JSON.parse(content.text),
+        );
+        return {
+          ...m,
+          result: {
+            ...m.result,
+            content: [{ ...content, text: JSON.stringify(value) }],
+          },
+        };
+      };
+      const text = await response.text();
+      const body =
+        text.startsWith("event:") || text.startsWith("data:")
+          ? text
+              .split("\n")
+              .map((l) =>
+                l.startsWith("data: ")
+                  ? "data: " + JSON.stringify(edit(JSON.parse(l.slice(6))))
+                  : l,
+              )
+              .join("\n")
+          : JSON.stringify(edit(JSON.parse(text)));
+      const headers = new Headers(response.headers);
+      headers.delete("content-length");
+      return new Response(body, { status: response.status, headers });
+    };
+  const reportAs = (
+    memos: (v: Record<string, any>) => Record<string, unknown>,
+  ) =>
+    altered((method, name, v) =>
+      method === "tools/call" && name === "get_report" ? memos(v) : v,
+    );
+  // A new check against an old MCP fails closed before writing: the old
+  // listing (with get_cover_sheet), or a report without the memo count.
+  await refused(
+    altered((method, _name, v) =>
+      method === "tools/list"
+        ? {
+            ...v,
+            tools: [...v.tools, { ...v.tools[0], name: "get_cover_sheet" }],
+          }
+        : v,
+    ),
+    "tools_unexpected",
+    "mcp_connect",
+  );
+  await refused(
+    reportAs(({ memos: _memos, ...v }) => v),
+    "memo_count_unreadable",
+  );
+  // A malformed count is no count.
+  for (const memos of ["0", -1, 1.5, null])
+    await refused(
+      reportAs((v) => ({ ...v, memos })),
+      "memo_count_unreadable",
+    );
+  // One leftover listed twice is not two leftovers: the gate refuses and
+  // forgets nothing.
+  await testSave({
+    memo: {
+      ...marked,
+      context: { ...marked.context, summary: "Milton e2e check, run twice000" },
+      final: "Fictional leftover a crashed run saved once.",
+    },
+  });
+  await refused(
+    reportAs((v) => {
+      if (v.examples.length !== 1) return v;
+      const section = v.text.slice(v.text.indexOf("## 1. "));
+      return {
+        ...v,
+        text: `${v.text}\n\n${section.replace("## 1. ", "## 2. ")}`,
+        examples: [v.examples[0], v.examples[0]],
+        memos: 2,
+      };
+    }),
+    "account_holds_foreign_data",
+  );
+  // A run caught mid-way by a change of MCP (here an old receipt after its
+  // first save) fails after writing, having forgotten the leftover above; its
+  // own marked memo is the next run's leftover, forgotten before that run
+  // passes.
+  await assert.rejects(
+    check(
+      altered((method, name, v) =>
+        method === "tools/call" && name === "create_memo" && v.memo
+          ? { ...v, receipt: "Kept memo: e2e check, your words." }
+          : v,
+      ),
+    ),
+    (e) => e instanceof CheckError && e.code === "memo_not_saved_as_sent",
+  );
+  assert.equal(checkLines.at(-1)!.step, "save_memo");
+  assert.equal((await check()).memos, -1, "leftover forgotten, then the run");
+  assert.equal(checkLines.find((l) => l.step === "safety_gate")!.leftovers, 1);
+  // Legacy writing an earlier version left (a cover sheet, a note from edits,
+  // a served report, a receipt with rounds) is outside the report's gate: the
+  // release's owner preflight covers it. A run never reads it and adds only
+  // its receipts; the uncited note goes with the run's forget, as any forget
+  // removes uncited notes (docs/deletion.md).
   await owner.query(
     `INSERT INTO cover_sheets(user_id,version,text,actor_json) VALUES ($1,1,'Fictional foreign line.','{"kind":"ai"}')`,
     [provisioned.userId],
   );
-  const held = await footprint();
-  await assert.rejects(
-    check(),
-    (e) => e instanceof CheckError && e.code === "account_holds_foreign_data",
+  await owner.query(
+    `INSERT INTO tweaks(user_id,id,text,norm,client_json) VALUES ($1,gen_random_uuid()::text,'Fictional old note.','fictional old note.','{"issuer":"fixture","client_id":"fixture"}')`,
+    [provisioned.userId],
+  );
+  await owner.query(
+    "INSERT INTO served_reports(user_id,id,tweak_ids) VALUES ($1,gen_random_uuid()::text,'{}')",
+    [provisioned.userId],
+  );
+  await owner.query(
+    `INSERT INTO save_requests(user_id,request_id,input_hash,result_json) VALUES ($1,gen_random_uuid()::text,repeat('a',64),'{"status":"saved","memo":{"memo_id":"m","tier":"steered","rounds":2,"tweaks":[]},"receipt":"Kept memo: email, 2 rounds."}')`,
+    [provisioned.userId],
   );
   assert.deepEqual(
-    { ...grew(held, await footprint()), usage: 0 },
-    { ...perRun, reports: 1, receipts: 0, usage: 0 },
-    "refused without saving",
+    await check(),
+    { ...perRun, tweaks: -1 },
+    "legacy rows kept, none added",
   );
-  assert.deepEqual(checkLines.at(-1), {
-    ...checkLines.at(-1),
-    step: "safety_gate",
-    ok: false,
-    severity: "ERROR",
-    error: "account_holds_foreign_data",
-  });
+  assert(
+    !JSON.stringify(checkLines).includes("Fictional foreign line"),
+    "legacy text is never read into the run",
+  );
+  for (const table of ["cover_sheets", "served_reports"])
+    await owner.query(`delete from ${table} where user_id=$1`, [
+      provisioned.userId,
+    ]);
   pass(
-    "e2e check: browser sign-in, MCP key, safety gate, a marked memo saved and read fresh, a marked drafted memo saved with its one change listed on its page, both forgotten, restored baseline; bounded per-run footprint; marked leftovers forgotten; expiring key warns; an unmarked memo of its kind and other foreign data refused without saving",
+    "e2e check: browser sign-in, MCP key, two tools, the memo-count gate, a marked memo saved and read fresh, a marked drafted memo saved with its one change listed on its page, both forgotten, restored baseline; bounded per-run footprint with no served reports; marked leftovers forgotten, one left mid-run included; expiring key warns; an unmarked memo of its kind, hidden (untouched, oversized) memos, six leftovers, a duplicated id, malformed or missing counts and the old listing refused without writing; legacy rows kept and unread",
   );
   stage = "test account exempt from trials and billing";
   // Trials stay on. The test account's access never depends on a trial: repeated
@@ -4756,6 +4969,14 @@ try {
         "INSERT INTO memo_settings(user_id,keep_memos) VALUES($1,false)",
         [alder.userId],
       );
+      // Legacy writing this release no longer makes, as an earlier version
+      // left it: a cover sheet, a note from edits and a served report.
+      for (const insert of [
+        `INSERT INTO cover_sheets(user_id,version,text,actor_json) VALUES ($1,1,'Fictional retired line.','{"kind":"ai"}')`,
+        `INSERT INTO tweaks(user_id,id,text,norm,client_json) VALUES ($1,gen_random_uuid()::text,'Fictional old note.','fictional old note.','{"issuer":"fixture","client_id":"fixture"}')`,
+        "INSERT INTO served_reports(user_id,id,tweak_ids) VALUES ($1,gen_random_uuid()::text,'{}')",
+      ])
+        await owner.query(insert, [alder.userId]);
       const authCookie = (s: Side) =>
         [...s.cookies]
           .filter(([k, v]) => k.startsWith("auth.meetmilton.com\t") && v)
@@ -4982,7 +5203,7 @@ try {
       assert.equal(await assistantTools(), 2, "the assistant reaches MCP");
       assert.equal(
         await toolsWith(birchGrant.access_token),
-        3,
+        2,
         "Birch's assistant reaches MCP",
       );
       assert.equal(
@@ -5225,7 +5446,7 @@ try {
       // Birch can authorize it again.
       assert.equal(
         await toolsWith(birchGrant.access_token),
-        3,
+        2,
         "Birch's assistant still reaches MCP",
       );
       const refreshed = await oidc.refreshTokenGrant(
@@ -5235,12 +5456,12 @@ try {
       );
       assert.equal(
         await toolsWith(refreshed.access_token),
-        3,
+        2,
         "Birch's refreshed token reaches MCP",
       );
       assert.equal(
         await toolsWith((await connect(birch, shared)).access_token),
-        3,
+        2,
         "Birch reconnects the cleared registration",
       );
       assert.deepEqual(outbound, [], "no request left the machine");

@@ -10,27 +10,28 @@ covers:
 
 Rewritten in place by the release coordinator at every release, never appended to; the
 release's record goes in [history](../history.md). How to release and roll back:
-[releases](releases.md). As of 2026-11-12 02:18Z (after #109).
+[releases](releases.md). As of 2026-11-12 06:03Z (after #114).
 
 ## Services
 
-- **App, MCP, admission, daily check:** `milton-app-evidence-4668940`,
-  `milton-mcp-evidence-4668940`, `milton-admit-00012-4km` and job `milton-e2e-daily`, all on
-  image `sha256:eb45b83fd3509cd751be9622c88c00b0845fe2bf893d0a714f8590024f6b5744` (#109 with
-  #107, `4668940`; Cloud Run shows the amd64 manifest digest `sha256:3b1f4ffd…`, not this
-  index digest). Rollback, code only, all four together: `milton-app-own-82ef571`,
-  `milton-mcp-own-82ef571`, `milton-admit-00011-jd9` and the job to image
-  `sha256:e70e8e769eaaa5032bbe5a0341e4253017a4badaadaaf55685ed1b108df02cf8` (#108, `82ef571`).
-  That code runs on the schema after 0015 and 016 (additive; it never names the new table or
-  columns); on it a kept request and the memo page's change list are not shown, and the
-  tweak score is not served. An emptied cover sheet stays readable on it.
+- **App, MCP, admission, daily check:** `milton-app-changes-b1d2760`,
+  `milton-mcp-changes-b1d2760`, `milton-admit-00013-c6k` and job `milton-e2e-daily`, all on
+  image `sha256:9c451e73f93a6d1aa90bfd499239f03c40d4e812cf0604d0cb9e890230ec1f30` (#114,
+  `b1d2760`; Cloud Run shows the amd64 manifest digest `sha256:44fcf717…`, not this index
+  digest). Rollback, code only, all four together: `milton-app-evidence-4668940`,
+  `milton-mcp-evidence-4668940`, `milton-admit-00012-4km` and the job to image
+  `sha256:eb45b83fd3509cd751be9622c88c00b0845fe2bf893d0a714f8590024f6b5744` (#109, `4668940`).
+  No schema change between them. On it, reports serve no changes and the line-break fix for
+  report text is gone (finals quoted on LF only), and the memo page loses its "Your AIs may
+  see" line; the site's privacy and terms still say changes may be served, so roll the site
+  back to `4668940` with it.
 - **Auth and its jobs:** `milton-auth-00021-2gc`, `milton-auth-mail` and `milton-auth-maint`
   on image `sha256:d394050c2687a6872655b6075d1e3de9f4c2defe4a05353721dd0ea31ec0a832` (#102,
   `735937f`; Cloud Run shows the amd64 manifest digest, not this index digest). Rollback,
   code only, service and both jobs together: `milton-auth-00020-k77` and image
   `sha256:11946548b6e3fc563c11b8e6d2933566a7f90a83d83156e2e4ccf8a0d1d9bf56` (#86).
-- **Site:** Vercel production deployment of `4668940` (#109's privacy and terms, dated
-  November 11, 2026).
+- **Site:** Vercel production deployment of `b1d2760` (#114's privacy and terms: snippets of
+  what you changed, including words you removed, may be served to your connected AIs).
 - **Secrets:** app `milton-app-env` 4 / `milton-app-key` 2, MCP `milton-mcp-env` 4 /
   `milton-mcp-key` 2 and auth `milton-auth-env` 2 / `milton-auth-key` 1, as at the 2026-11-07
   cutover (no release since recorded a change; confirm before the next one); admission

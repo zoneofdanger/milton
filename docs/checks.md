@@ -76,6 +76,9 @@ CI that fails.
 - The shared-facts check fails when README lacks the standing line or a site page or app
   page states another trial length or price than `packages/theme/facts.ts`
   ([setup](setup.md)).
+- The privacy check fails when the privacy page claims legacy data is never served or
+  drops its disclosure that an exact resend of a pre-release save returns that stored
+  receipt, marked as a past receipt ([saves](saves.md#receipts)).
 
 ## Theme
 

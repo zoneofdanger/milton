@@ -703,8 +703,8 @@ function memoPage(ctx: MemoPageContext, m: FullMemo, notice?: Child) {
             <>
               {plain(m.request)}
               <p class="small-note">
-                What you typed to ask for this, without anything you pasted.
-                Shown only to you, never sent to an AI.
+                What your AI kept as your ask for this; it is asked to keep only
+                what you typed. Shown only to you, never sent to an AI.
               </p>
               <form method="post" action="/tps/request/remove">
                 {ctx.csrf()}

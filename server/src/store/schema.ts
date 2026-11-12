@@ -339,11 +339,12 @@ export const memos = pgTable(
     requestId: text("request_id").notNull(),
     createdAt: createdAt(),
     contextUpdatedAt: timestamp("context_updated_at", { withTimezone: true }),
-    // What the person typed to ask for the writing (drafted memos only), never
-    // served to an AI; the person can clear it.
+    // The ask the AI sent for the writing, asked to be only what the person
+    // typed (drafted memos only), never served to an AI; the person can clear
+    // it.
     request: text("request"),
-    // itemized: memo_changes lists every spot code found; too_large: only the
-    // changes the AI named. NULL before 0015 and without a kept first draft.
+    // itemized: memo_changes lists every spot code found; too_large: past the
+    // diff's bounds, none. NULL before 0015 and without a kept first draft.
     changesState: text("changes_state"),
     search: tsvector("search").generatedAlwaysAs(
       sql`to_tsvector('english'::regconfig, summary || ' ' || coalesce(purpose, '') || ' ' || coalesce(audience, '') || ' ' || final)`,
@@ -462,11 +463,12 @@ export const tweakCitations = pgTable(
   ],
 );
 // What changed from a memo's kept first draft to its final (0015): one row per
-// change the AI named, cut from the two stored texts at its quotes, then one
-// per spot code found that no change covers. Offsets are UTF-16 indices into
-// first_draft and final (NULL for an empty side code could not place); each
-// side is cut to 300 characters. A change's tweak is always one its memo
-// cites; deleting the tweak keeps the change and clears the link.
+// spot code found, in text order. Offsets are UTF-16 indices into first_draft
+// and final; each side is cut to 300 characters, with truncated set. about is
+// 'format' for a Markdown-only spot and otherwise NULL; the label columns (by,
+// and about's voice and content) and tweak_id are unused in this release and
+// stay NULL. The schema still allows a labelled row whose tweak its memo cites;
+// deleting that tweak would keep the change and clear the link.
 export const memoChanges = pgTable(
   "memo_changes",
   {
@@ -480,10 +482,10 @@ export const memoChanges = pgTable(
     before: text("before").notNull(),
     after: text("after").notNull(),
     truncated: boolean("truncated").notNull().default(false),
-    // voice or content, from the AI; format, from code, for a Markdown-only
-    // spot; NULL for a spot no change covers.
+    // format, from code, for a Markdown-only spot; voice and content are
+    // unused in this release.
     about: text("about"),
-    // person, asked or unasked, from the AI, with voice or content only.
+    // Unused in this release (person, asked or unasked).
     by: text("by"),
     tweakId: text("tweak_id"),
   },

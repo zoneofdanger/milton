@@ -79,7 +79,8 @@ export type TpsChange = {
 export type FullMemo = TpsMemo & {
   first_draft?: string;
   final: string;
-  /** What the person typed to ask for it; never served to an AI. */
+  /** The ask the AI sent for it (asked to be only what the person typed);
+   * never served to an AI. */
   request?: string;
   /** itemized or too_large; absent for a memo saved before changes were
    * listed or without a kept first draft. */

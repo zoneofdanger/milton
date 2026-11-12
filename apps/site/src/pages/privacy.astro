@@ -78,18 +78,21 @@ import SiteLayout from "../layouts/SiteLayout.astro";
     it change; and a one-line summary of the situation, with its medium,
     audience, purpose, kind and how many rounds it took. Milton’s code lists
     what changed between the first draft and the final, shown only to you on the
-    memo’s page. A memo can also hold the instruction you typed to ask for the
-    writing, without anything you pasted, at most 600 characters. It is shown
-    only to you, never sent to an AI, and you can remove it from a memo. By
-    default your AI keeps a memo when you accept a final, without asking; it can
-    also keep writing you paste or ask it to remember. Milton stores it exactly
-    as sent. If your AI already has access to your email, it can offer at setup
-    to find a few emails you sent; only the ones you approve reach Milton,
-    exactly as shown. Milton itself never reads your inbox. Whether your AI
-    tells you in one line that it kept a memo depends on the AI app you use.
-    Your AI is told to summarize other people’s text, such as an email you are
-    replying to, rather than send it, and never to send secrets; Milton cannot
-    check what an AI sends, and it does not remove names or other details.
+    memo’s page. A memo can also hold the instruction you gave to ask for the
+    writing. Your AI is asked to send only what you typed; Milton refuses one
+    that looks like quoted or forwarded mail (email header lines, lines starting
+    with “>”, or an “On … wrote:” line) or that is over 600 characters or 12
+    lines, but cannot otherwise tell typed from pasted text. It is shown only to
+    you, never sent to an AI, and you can remove it from a memo. By default your
+    AI keeps a memo when you accept a final, without asking; it can also keep
+    writing you paste or ask it to remember. Milton stores it exactly as sent.
+    If your AI already has access to your email, it can offer at setup to find a
+    few emails you sent; only the ones you approve reach Milton, exactly as
+    shown. Milton itself never reads your inbox. Whether your AI tells you in
+    one line that it kept a memo depends on the AI app you use. Your AI is told
+    to summarize other people’s text, such as an email you are replying to,
+    rather than send it, and never to send secrets; Milton cannot check what an
+    AI sends, and it does not remove names or other details.
   </p>
   <p style="text-wrap:pretty">
     Memos are kept until you forget them, choose Delete all memos, or delete

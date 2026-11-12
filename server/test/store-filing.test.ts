@@ -1006,10 +1006,10 @@ test("a request is the person's typed ask on a drafted memo: trimmed, capped, ne
     ["x".repeat(601), "over 600 characters"],
     [Array(13).fill("line").join("\n"), "over 12 lines"],
     ["Reply to this\r\nplease", "control characters"],
-    ["Reply to this:\n> Can we meet Friday?", "quoted or pasted mail"],
-    ["Answer it.\nOn Tue, Sam wrote:", "quoted or pasted mail"],
-    ["Reply.\nFrom: Sam", "quoted or pasted mail"],
-    ["subject: lunch", "quoted or pasted mail"],
+    ["Reply to this:\n> Can we meet Friday?", "quoted or forwarded mail"],
+    ["Answer it.\nOn Tue, Sam wrote:", "quoted or forwarded mail"],
+    ["Reply.\nFrom: Sam", "quoted or forwarded mail"],
+    ["subject: lunch", "quoted or forwarded mail"],
   ];
   for (const [request, says] of requests)
     expect(drafted(request)).toMatchObject({

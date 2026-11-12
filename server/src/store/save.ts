@@ -84,11 +84,13 @@ export type MemoCheck =
       field?: "request" | "tweaks";
     };
 
-/** Lines a typed ask never holds: quoted mail, an "On … wrote:" line, or a
- * From or Subject header, which mean pasted text. */
+/** Lines that look like quoted or forwarded mail: a line starting >, an "On
+ * … wrote:" line, or a From or Subject header. This is all the check sees; it
+ * cannot tell other pasted text from typed text, so the AI is asked to send
+ * only what the person typed (docs/memos.md, "The request"). */
 const PASTED = [/^\s*>/m, /^\s*On\b.*\bwrote:\s*$/im, /^\s*(From|Subject):/im];
-/** At most this many characters and lines: a typed ask fits, a pasted thread
- * doesn't (docs/memos.md). */
+/** At most this many characters and lines: a typed ask fits; a long paste is
+ * refused, a short one may not be (docs/memos.md). */
 export const MAX_REQUEST_CHARS = 600;
 export const MAX_REQUEST_LINES = 12;
 /** At most this many distinct tweaks per memo: most teach one or none. The
@@ -146,7 +148,7 @@ export function checkMemo(memo: MemoInput): MemoCheck {
           : !request.isWellFormed() || /[^\P{Cc}\n]/u.test(request)
             ? "request holds control characters"
             : PASTED.some((pattern) => pattern.test(request))
-              ? 'request holds quoted or pasted mail (a line starting >, an "On … wrote:" line or a From or Subject header)'
+              ? 'request looks like quoted or forwarded mail (a line starting >, an "On … wrote:" line or a From or Subject header)'
               : undefined;
     if (problem) return refuse(`${problem}.`, "request");
   }

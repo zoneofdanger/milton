@@ -1,7 +1,7 @@
 // Memos as AIs read them: the cover sheet read, and the report Milton assembles
 // for one draft (docs/reports.md). Reads run no model.
 import { randomUUID } from "node:crypto";
-import { sql } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
 import type { StoreSession } from "./database";
 import { accountUnavailable } from "./accounts";
 import { StoreError } from "./errors";
@@ -193,8 +193,11 @@ const TIER_LABEL = { own: "your words", steered: "steered by you" } as const;
  * break lines at any of them, so memo text may start a line only inside a
  * quoted final. */
 export const LINE_BREAK = /\r\n|[\n\r\v\f\u0085\u2028\u2029]/g;
-/** LINE_BREAK as a PostgreSQL regular expression, for counting in SQL. */
-export const LINE_BREAK_SQL = "\\r\\n|[\\n\\r\\v\\f\\u0085\\u2028\\u2029]";
+/** How many LINE_BREAKs a text holds, in SQL: every break character,
+ * less one per CRLF. Plain string functions, not a regular expression,
+ * which took six times as long on a 256 KiB final of short lines. */
+export const lineBreaks = (text: SQL) =>
+  sql`(length(${text})-length(translate(${text},${"\n\r\v\f\u0085\u2028\u2029"},''))-(length(${text})-length(replace(${text},${"\r\n"},'')))/2)`;
 /** A final as report text: every line, empty ones included, starts with `>`;
  * each line break is kept as sent. */
 export const quote = (body: string) =>
@@ -335,7 +338,7 @@ export async function readReport(
         'summary',m.summary,'audience',m.audience,'purpose',m.purpose,
         'at',to_char(m.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
         'bytes',octet_length(m.final),
-        'lines',regexp_count(m.final,${LINE_BREAK_SQL}),
+        'lines',${lineBreaks(sql`m.final`)},
         'lexical',ts_rank(m.search,${query}),
         'mode',m.mode,'first_draft_state',m.first_draft_state,'changes_state',m.changes_state,
         'tweaks',(SELECT coalesce(array_agg(c.tweak_id ORDER BY c.tweak_id),'{}') FROM tweak_citations c

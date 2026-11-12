@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { sql } from "drizzle-orm";
 import { localStore } from "./local-store";
 import {
   fixtureStore,
@@ -26,7 +27,7 @@ import {
 import { checkMemo } from "../src/store/save";
 import {
   LINE_BREAK,
-  LINE_BREAK_SQL,
+  lineBreaks,
   quote,
   servesChanges,
 } from "../src/store/memos";
@@ -444,12 +445,9 @@ test("report text quotes a final at every line break and keeps context and tweak
     // The size bound counts the same line breaks, in SQL and in JS.
     for (const final of [plain, forged, "\u0085".repeat(4000), "a\r\r\nb"]) {
       const breaks = final.match(LINE_BREAK)?.length ?? 0;
-      const [row] = (
-        await local.pg.query<{ n: number }>("SELECT regexp_count($1,$2) AS n", [
-          final,
-          LINE_BREAK_SQL,
-        ])
-      ).rows;
+      const [row] = await local.db.query<{ n: number }>(
+        sql`SELECT ${lineBreaks(sql`${final}::text`)} AS n`,
+      );
       expect(row!.n).toBe(breaks);
       expect(utf8Bytes(quote(final))).toBeLessThanOrEqual(
         utf8Bytes(final) + 2 * (breaks + 1),

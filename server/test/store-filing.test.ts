@@ -212,7 +212,8 @@ test("a null kind_id saves as if omitted and a retry sending it replays; tweaks 
     ).toMatchObject({ status: "saved", memo: { tier: "untouched" } });
     // tweaks, rounds and report_id are refused whatever their value, the
     // empty list some clients send for none included, with what to do
-    // instead and the rule-A4 sentence, and nothing is written.
+    // instead, and nothing is written. With no receipt under the id, nothing
+    // was saved under it; under a held id, the rule-A4 sentence.
     const before = (await local.pg.query("SELECT 1 FROM save_requests")).rows
       .length;
     for (const [field, value, says] of [
@@ -227,12 +228,16 @@ test("a null kind_id saves as if omitted and a retry sending it replays; tweaks 
         ),
       ).rejects.toMatchObject({
         code: "invalid_input",
-        details: { field: "removed" },
+        details: { field: "removed_unsaved" },
         message: expect.stringContaining(says),
       });
     await expect(
-      store.saveMemo(memoSave({ tweaks: [] } as never)),
+      store.saveMemo({
+        ...memoSave({ tweaks: [] } as never),
+        request_id: drafted.request_id,
+      }),
     ).rejects.toMatchObject({
+      details: { field: "removed" },
       message: expect.stringContaining(
         "Milton can't recover an earlier outcome for this request.",
       ),

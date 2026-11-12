@@ -367,6 +367,9 @@ export interface TenantStore {
    * appended alongside the work (see recordToolUsage). */
   readReport(intent: ReportIntent, call?: CallUsage): Promise<ReportRead>;
   saveMemo(input: SaveMemoInput, call?: CallUsage): Promise<SaveOutcome>;
+  /** Whether a save receipt exists under this request id, for a
+   * rollout-boundary refusal's words (docs/saves.md); never its contents. */
+  requestReceipt(requestId: string): Promise<boolean>;
 }
 
 /** The store for an `auth` this request just looked up, which required an
@@ -431,6 +434,7 @@ export function tenantStore(
     },
     readReport: compiled.readReport,
     saveMemo: compiled.saveMemo,
+    requestReceipt: compiled.requestReceipt,
   };
 }
 

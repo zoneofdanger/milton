@@ -341,33 +341,80 @@ test("a stale client's get_cover_sheet, and each removed create_memo field in ev
         const { final, ...rest } = memo;
         sent.push([field, { memo: final, ...rest, [field]: value }]);
       }
-      for (const [field, args] of sent) {
-        const changes = changed.length;
-        const refused = await call("create_memo", {
-          request_id: crypto.randomUUID(),
-          ...args,
+      // Receipts that already exist under an id: a UUID one, as a save
+      // before the release made it, and a named one.
+      const heldIds = [crypto.randomUUID(), "save-held-earlier.1"];
+      for (const [i, id] of heldIds.entries())
+        expect(
+          (
+            await call("create_memo", {
+              request_id: id,
+              memo: { final: `Held earlier ${i}.`, context: memo.context },
+            })
+          ).value.status,
+        ).toBe("saved");
+      const receiptCount = async () =>
+        (await local.pg.query("SELECT 1 FROM save_requests")).rows.length;
+      const heldReceipts = await receiptCount();
+      // No receipt under the id, a UUID, a named one or one the schema
+      // refuses: nothing was saved under it, so send it again without the
+      // fields, with no question for the person.
+      const unsaved = (field: keyof typeof guidance) =>
+        expect.objectContaining({
+          error: "invalid_input",
+          field: "removed_unsaved",
+          message: expect.stringContaining(guidance[field]),
+          next: expect.objectContaining({ action: "fix_input" }),
         });
-        expect([field, refused]).toEqual([
-          field,
-          {
-            isError: true,
-            value: expect.objectContaining({
-              error: "invalid_input",
-              field: "removed",
-              message: expect.stringContaining(guidance[field]),
-              next: expect.objectContaining({ action: "ask_user" }),
-            }),
-          },
-        ]);
-        expect(refused.value.message).toContain(
-          "Milton can't recover an earlier outcome for this request. Before saving again with a new request_id, ask the person to check their TPS page and, if it isn't there, the full TPS.md export (the page lists the latest 200 memos), for this memo.",
-        );
-        await Bun.sleep(5);
-        expect(changed.length).toBe(changes + 1);
-      }
-      expect(
-        (await local.pg.query("SELECT 1 FROM save_requests")).rows,
-      ).toEqual([]);
+      // A receipt exists: the earlier save may have committed, so the person
+      // checks first, and nothing of the receipt comes back.
+      const held = (field: keyof typeof guidance) =>
+        expect.objectContaining({
+          error: "invalid_input",
+          field: "removed",
+          message: expect.stringContaining(guidance[field]),
+          next: expect.objectContaining({ action: "ask_user" }),
+        });
+      for (const [field, args] of sent)
+        for (const [id, branch] of [
+          [crypto.randomUUID(), unsaved],
+          ["save-never-sent.1", unsaved],
+          ["not a valid id", unsaved],
+          [heldIds[0]!, held],
+          [heldIds[1]!, held],
+        ] as const) {
+          const changes = changed.length;
+          const refused = await call("create_memo", {
+            request_id: id,
+            ...args,
+          });
+          expect([field, id, refused]).toEqual([
+            field,
+            id,
+            { isError: true, value: branch(field) },
+          ]);
+          if (branch === held) {
+            expect(refused.value.message).toContain(
+              "Milton can't recover an earlier outcome for this request. Before saving again with a new request_id, ask the person to check their TPS page and, if it isn't there, the full TPS.md export (the page lists the latest 200 memos), for this memo.",
+            );
+            expect(Object.keys(refused.value).sort()).toEqual([
+              "code",
+              "error",
+              "field",
+              "message",
+              "next",
+            ]);
+            expect(refused.value.message).not.toContain("Held earlier");
+          } else {
+            expect(refused.value.message).toContain(
+              "Nothing was saved under this request_id.",
+            );
+            expect(refused.value.message).not.toContain("TPS");
+          }
+          await Bun.sleep(5);
+          expect(changed.length).toBe(changes + 1);
+        }
+      expect(await receiptCount()).toBe(heldReceipts);
       // Unknown keys deeper down meet the strict schema; none is a removed
       // field at its position.
       for (const args of [
@@ -392,17 +439,7 @@ test("a stale client's get_cover_sheet, and each removed create_memo field in ev
         context: { ...memo.context, summary: `accepting${RLO} a day` },
       };
       const { final: bidiFinal, ...bidiRest } = bidiMemo;
-      const held = crypto.randomUUID();
-      expect(
-        (
-          await call("create_memo", {
-            request_id: held,
-            memo: { final: "Held earlier.", context: memo.context },
-          })
-        ).value.status,
-      ).toBe("saved");
-      const receipts = async () =>
-        (await local.pg.query("SELECT 1 FROM save_requests")).rows.length;
+      const receipts = receiptCount;
       const receiptsBefore = await receipts();
       for (const [form, args] of [
         ["object", { memo: bidiMemo }],
@@ -427,27 +464,33 @@ test("a stale client's get_cover_sheet, and each removed create_memo field in ev
             }),
           },
         ],
-        ["a held request id", { request_id: held, memo: bidiMemo }],
-      ] as const) {
-        const refused = await call("create_memo", {
-          request_id: crypto.randomUUID(),
-          ...args,
-        });
-        expect([form, refused]).toEqual([
-          form,
-          {
-            isError: true,
-            value: expect.objectContaining({
-              error: "invalid_input",
-              field: "bidi",
-              message: expect.stringContaining(
-                "Milton can't recover an earlier outcome for this request. Before saving again with a new request_id, ask the person to check their TPS page and, if it isn't there, the full TPS.md export",
-              ),
-              next: expect.objectContaining({ action: "ask_user" }),
-            }),
-          },
-        ]);
-      }
+      ] as const)
+        for (const id of [crypto.randomUUID(), ...heldIds]) {
+          const refused = await call("create_memo", {
+            request_id: id,
+            ...args,
+          });
+          const wasHeld = heldIds.includes(id);
+          expect([form, id, refused]).toEqual([
+            form,
+            id,
+            {
+              isError: true,
+              value: expect.objectContaining({
+                error: "invalid_input",
+                field: wasHeld ? "bidi" : "bidi_unsaved",
+                message: expect.stringContaining(
+                  wasHeld
+                    ? "Milton can't recover an earlier outcome for this request. Before saving again with a new request_id, ask the person to check their TPS page and, if it isn't there, the full TPS.md export (the page lists the latest 200 memos), for this memo."
+                    : "Nothing was saved under this request_id.",
+                ),
+                next: expect.objectContaining({
+                  action: wasHeld ? "ask_user" : "fix_input",
+                }),
+              }),
+            },
+          ]);
+        }
       expect(await receipts()).toBe(receiptsBefore);
       // A final, first draft or request that says "rounds" or "tweaks" saves.
       expect(
@@ -474,6 +517,65 @@ test("a stale client's get_cover_sheet, and each removed create_memo field in ev
     }),
   ]);
   await local.dispose();
+});
+
+test("a removed-field or bidi refusal whose receipt lookup fails takes the cautious branch; a closing account gets account_unavailable", async () => {
+  const local = await localStore();
+  try {
+    await seedUsers(local.pg, "u");
+    let failing = true;
+    const flaky = {
+      ...local.db,
+      transaction: (async (work: never) => {
+        if (failing) throw new Error("Fictional connection lost");
+        return local.db.transaction(work);
+      }) as typeof local.db.transaction,
+    };
+    const server = createMiltonServer({
+      ...fixtureStore(flaky, "u"),
+      appOrigin: stubStore().appOrigin,
+    });
+    const client = new Client({ name: "sdk-test", version: "0.0.0" });
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    const memo = {
+      final: "Friday works.",
+      context: { summary: "accepting a fictional day", medium: "email" },
+    };
+    const save = async (args: Record<string, unknown>) =>
+      read(
+        (await client.callTool({
+          name: "create_memo",
+          arguments: { request_id: crypto.randomUUID(), ...args },
+        })) as never,
+      );
+    const RLO = String.fromCharCode(0x202e);
+    const bidi = {
+      memo: { ...memo, context: { ...memo.context, summary: `a${RLO}b` } },
+    };
+    for (const [args, field] of [
+      [{ memo: { ...memo, rounds: 1 } }, "removed"],
+      [bidi, "bidi"],
+    ] as const)
+      expect(await save(args)).toMatchObject({
+        error: "invalid_input",
+        field,
+        message: expect.stringContaining(
+          "Milton can't recover an earlier outcome for this request.",
+        ),
+        next: { action: "ask_user" },
+      });
+    failing = false;
+    await local.pg.query("UPDATE users SET status='deleting' WHERE id='u'");
+    for (const args of [{ memo: { ...memo, rounds: 1 } }, bidi])
+      expect(await save(args)).toMatchObject({ error: "account_unavailable" });
+    await client.close();
+    await server.close();
+  } finally {
+    await local.dispose();
+  }
 });
 
 const goodIntent = {
@@ -1130,6 +1232,43 @@ test("scopes control discovery and direct calls; original binding revocation sur
     const written = await reportText(writer);
     expect(written).toContain("What they changed in the AI's first draft:");
     expect(await reportText(reader)).toBe(written);
+    // A read-only connection's stale save, removed fields and a bidi
+    // control included, meets its scope refusal before any receipt lookup.
+    const staleSave = await handler(
+      new Request(resource, {
+        method: "POST",
+        headers: {
+          Host: "localhost:3001",
+          Authorization: "Bearer " + readToken,
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: {
+            name: "create_memo",
+            arguments: {
+              request_id: crypto.randomUUID(),
+              memo: {
+                final: "Stale.",
+                rounds: 1,
+                context: {
+                  summary: `a${String.fromCharCode(0x202e)}b`,
+                  medium: "email",
+                },
+              },
+            },
+          },
+        }),
+      }),
+    );
+    expect(staleSave.status).toBe(403);
+    expect(await staleSave.json()).toMatchObject({
+      error: "insufficient_scope",
+      required_permission: "read_write",
+    });
     const request = (token: string) =>
       handler(
         new Request(resource, {

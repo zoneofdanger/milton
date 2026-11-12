@@ -22,7 +22,8 @@ or not at all.
 ## Before the transaction
 
 - The input schema is strict ([mcp](mcp.md)), and a save's shape is checked before any
-  database work; those refusals write no receipt. That check covers everything the input
+  database work, except the rollout-boundary refusals' receipt lookup (below); those
+  refusals write no receipt. That check covers everything the input
   alone shows: the memo's shape, its request's bounds and the mail-like lines it refuses
   ([memos](memos.md#the-request)). With a kept first draft it also computes code's list
   of what changed, within its bounds ([memos](memos.md#changes)); that list is the one
@@ -46,14 +47,36 @@ or not at all.
 
 A request carrying a field `create_memo` no longer takes ([mcp](mcp.md#retired-calls)),
 or a one-line field holding a newly refused bidirectional control
-([memos](memos.md#bounds)), is refused before its receipt is looked up, retries of
-earlier saves included. Such a refusal says nothing about whether an earlier attempt
-committed, and its guidance says so: "Milton can't recover an earlier outcome for this
-request. Before saving again with a new request_id, ask the person to check their TPS
-page and, if it isn't there, the full TPS.md export (the page lists the latest 200
-memos), for this memo." Absence from the page's list doesn't prove the earlier save
-failed. Accepted (2026-11-12) with no compatibility path, like the one-line rule's limit
-below.
+([memos](memos.md#bounds)), is refused and never replayed, retries of earlier saves
+included. Accepted (2026-11-12) with no compatibility path, like the one-line rule's
+limit below. Its words follow one lookup:
+
+- **Order.** Authentication, the connection's scope and the active account come first:
+  the handler checks the token or key before the MCP server is built, so a read-only
+  connection gets `insufficient_scope` (403) and never reaches the lookup. Then, at
+  dispatch, the lookup takes the account lock a save takes (`FOR NO KEY UPDATE`, which
+  also refuses a closing account with `account_unavailable`) and asks only whether
+  `save_requests` holds a row under `(user_id, request_id)`, this account's. It passes
+  no trial gate, as a replay doesn't, admits no call and records no usage. An id the
+  database's checks refuse cannot hold a receipt, so it needs no lookup.
+- **No receipt.** Nothing was saved under this id: "Nothing was saved under this
+  request_id. Send it again without those fields (or characters), with a new
+  request_id." Its next step is `fix_input`, with no question for the person (#121, a
+  stale Claude Code client stopped to ask about a memo never at risk).
+- **A receipt, or a failed lookup.** The earlier attempt may have committed, the retry
+  across the release this boundary exists for: "Milton can't recover an earlier outcome
+  for this request. Before saving again with a new request_id, ask the person to check
+  their TPS page and, if it isn't there, the full TPS.md export (the page lists the
+  latest 200 memos), for this memo." Its next step is `ask_user`. Absence from the
+  page's list doesn't prove the earlier save failed. The receipt's stored hash is of the
+  old shape, so it is never this call's outcome, and nothing of it is returned.
+- **The race.** The lock waits for a save of this id already holding it, so its receipt
+  is seen. An attempt under the same id that has not yet taken the lock when the lookup
+  runs (a pre-release attempt still on its way to an old MCP during the switch) can
+  commit after a "nothing was saved" answer. The resend then goes under a new
+  request_id, and the content check returns the memo on file as `unchanged` when its
+  words match, so the same memo is not kept twice; a resend with other words is a
+  second memo.
 
 ## The transaction
 

@@ -192,16 +192,16 @@ export const saveMemoInput = z
     { message: oneChange },
   );
 export type SaveMemoInput = z.infer<typeof saveMemoInput>;
-/** The refusal for create_memo arguments whose one-line fields hold a
- * bidirectional span control (rule B), or undefined. It is a rollout
- * boundary like a removed field (docs/saves.md): refused before any receipt
- * lookup, so it says it can't recover an earlier outcome. */
-export function bidiRefusal(args: unknown): string | undefined {
+/** What is wrong with create_memo arguments whose one-line fields hold a
+ * bidirectional span control (rule B), or undefined. Like a removed field,
+ * it is a rollout boundary (docs/saves.md): never replayed, so its words
+ * follow boundaryRefusal. */
+export function bidiFields(args: unknown): string | undefined {
   const issues = (saveMemoInput.safeParse(args).error?.issues ?? []).filter(
     (i) => i.message === BIDI_MESSAGE,
   );
   if (!issues.length) return;
-  return `create_memo: ${[...new Set(issues.map((i) => i.path.join(".")))].join(", ")} ${BIDI_MESSAGE} (U+202A to U+202E or U+2066 to U+2069); send it without them. Nothing was changed. ${NO_RECOVERY}`;
+  return `${[...new Set(issues.map((i) => i.path.join(".")))].join(", ")} ${BIDI_MESSAGE} (U+202A to U+202E or U+2066 to U+2069); send it without them.`;
 }
 export type MemoInput = z.infer<typeof memoInput>;
 export type MemoContextInput = z.infer<typeof memoContextInput>;
@@ -263,7 +263,7 @@ const REMOVED = [
   ["rounds", "rounds is no longer sent."],
   ["report_id", "report_id is no longer sent."],
 ] as const;
-/** The refusal for create_memo arguments holding a removed field at its
+/** The guidance for create_memo arguments holding a removed field at its
  * documented position, or undefined. `args` is already decoded (a memo sent
  * as a JSON-object string is an object here). Only key names are looked at,
  * never the words of a final, first draft or request. */
@@ -282,7 +282,52 @@ export function removedFields(args: unknown): string | undefined {
       : Object.hasOwn(memo, key) || Object.hasOwn(top, key),
   );
   if (!found.length) return;
-  return `create_memo: ${found.map(([, guidance]) => guidance).join(" ")} Nothing was changed. ${NO_RECOVERY}`;
+  return found.map(([, guidance]) => guidance).join(" ");
+}
+
+/** A rollout-boundary refusal (docs/saves.md, "Rollout boundary"): a removed
+ * field or a bidi control. Whether a receipt exists under the request id
+ * decides its words: with none, nothing was saved under it, so the AI resends
+ * fixed; with one, or when the lookup failed, an earlier save may have
+ * committed, so the person checks first. Nothing of a receipt is returned. */
+export function boundaryRefusal(
+  kind: "removed" | "bidi",
+  detail: string,
+  held: boolean,
+) {
+  return held
+    ? {
+        error: "invalid_input",
+        field: kind,
+        message: `create_memo: ${detail} Nothing was changed. ${NO_RECOVERY}`,
+      }
+    : {
+        error: "invalid_input",
+        field: `${kind}_unsaved`,
+        message: `create_memo: ${detail} Nothing was saved under this request_id. Send it again without ${kind === "removed" ? "those fields" : "those characters"}, with a new request_id.`,
+      };
+}
+
+/** Whether a receipt may exist under this call's request id: false only
+ * when it provably doesn't (an id the database's checks refuse holds none,
+ * or the lookup found none); true when one exists or the lookup failed.
+ * A closing account's refusal is thrown. */
+export async function receiptMayExist(
+  store: Pick<TenantStore, "requestReceipt">,
+  args: unknown,
+) {
+  const id =
+    typeof args === "object" && args !== null
+      ? (args as { request_id?: unknown }).request_id
+      : undefined;
+  if (typeof id !== "string" || !REQUEST_ID.test(id)) return false;
+  try {
+    return await store.requestReceipt(id);
+  } catch (error) {
+    if (error instanceof StoreError && error.code === "account_unavailable")
+      throw error;
+    return true;
+  }
 }
 
 export function createStoreMemoTools(

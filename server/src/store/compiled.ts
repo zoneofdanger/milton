@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { accountUnavailable } from "./accounts";
+import { accountUnavailable, requireActiveAccount } from "./accounts";
 import type { StoreDatabase } from "./database";
 import { databaseFailure } from "./database";
 import { StoreError } from "./errors";
@@ -9,8 +9,11 @@ import { checkMemo, runSave, type SaveOutcome } from "./save";
 import type { CallUsage } from "./usage";
 // The save schema is served to AIs, so it lives with the MCP tools.
 import {
-  bidiRefusal,
+  bidiFields,
+  boundaryRefusal,
   oneChange,
+  receiptMayExist,
+  REQUEST_ID,
   removedFields,
   saveMemoInput,
   type SaveMemoInput,
@@ -53,7 +56,28 @@ export function compiledMemos(
     }
     admit?.(call);
   }
+  /** Whether this account holds a receipt under `requestId`, read under the
+   * account lock a save takes, so a save of that id in flight commits first.
+   * Nothing of the receipt is read. A closing account is refused. */
+  async function requestReceipt(requestId: string) {
+    if (!REQUEST_ID.test(requestId)) return false;
+    try {
+      return await db.transaction(async (tx) => {
+        await requireActiveAccount(tx, userId, { lock: true });
+        return (
+          (
+            await tx.query(
+              sql`SELECT 1 FROM save_requests WHERE user_id=${userId} AND request_id=${requestId}`,
+            )
+          ).length > 0
+        );
+      });
+    } catch (error) {
+      throw databaseFailure(error);
+    }
+  }
   return {
+    requestReceipt,
     async readReport(intent: ReportIntent, call?: CallUsage) {
       try {
         await gate(call, intent.kind_id);
@@ -63,17 +87,22 @@ export function compiledMemos(
       }
     },
     async saveMemo(raw: SaveMemoInput, call?: CallUsage): Promise<SaveOutcome> {
-      // Removed fields and newly refused characters are refused before any
-      // receipt lookup, retries of earlier saves included (docs/saves.md,
-      // "Rollout boundary"), so their refusal says it can't recover one.
+      // Removed fields and newly refused characters are never replayed,
+      // retries of earlier saves included (docs/saves.md, "Rollout
+      // boundary"); whether a receipt may exist under the id picks the
+      // refusal's words.
       const removed = removedFields(raw);
-      if (removed)
-        throw new StoreError("invalid_input", removed, 400, {
-          field: "removed",
+      const bidi = removed ? undefined : bidiFields(raw);
+      if (removed || bidi) {
+        const refusal = boundaryRefusal(
+          removed ? "removed" : "bidi",
+          (removed ?? bidi)!,
+          await receiptMayExist({ requestReceipt }, raw),
+        );
+        throw new StoreError(refusal.error, refusal.message, 400, {
+          field: refusal.field,
         });
-      const bidi = bidiRefusal(raw);
-      if (bidi)
-        throw new StoreError("invalid_input", bidi, 400, { field: "bidi" });
+      }
       const parsed = saveMemoInput.safeParse(raw);
       if (!parsed.success)
         throw new StoreError(

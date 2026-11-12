@@ -135,6 +135,16 @@ export const nextSteps: Record<string, NextStep> = {
   ),
   // A field create_memo no longer takes: drop it, and check before saving
   // again, since the refusal can't tell whether an earlier attempt saved.
+  // A rollout-boundary refusal with no receipt under its request id:
+  // nothing was saved under it, so resend fixed; no question for the person.
+  "invalid_input.removed_unsaved": step(
+    "fix_input",
+    "Nothing was saved under this request_id: send it again without the fields message names, with a new request_id.",
+  ),
+  "invalid_input.bidi_unsaved": step(
+    "fix_input",
+    "Nothing was saved under this request_id: send it again without the bidi controls, with a new request_id.",
+  ),
   // A bidirectional control in a one-line field: also a rollout boundary.
   "invalid_input.bidi": step(
     "ask_user",

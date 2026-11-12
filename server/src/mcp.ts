@@ -9,12 +9,15 @@ import {
   malformedIntent,
   memoInput,
   missingIntent,
-  bidiRefusal,
+  bidiFields,
+  boundaryRefusal,
+  receiptMayExist,
   removedFields,
   reportInput,
   saveMemoInput,
 } from "./mcp-tools";
 import { z } from "zod";
+import type { StoreError } from "./store/errors";
 
 import {
   finalToolCall,
@@ -171,7 +174,7 @@ function flattenedMemo(params: unknown): string | undefined {
   values.memo = memo;
   // Read as nested but still malformed (no context, say): the refusal names
   // what is wrong beside the shape, not the SDK's text alone.
-  // A bidirectional control is left to its own refusal (bidiRefusal).
+  // A bidirectional control is left to its own refusal (bidiFields).
   const issues = saveMemoInput.safeParse(values).error?.issues ?? [];
   if (issues.length && !issues.some((i) => i.message === BIDI_MESSAGE))
     return memoShape(
@@ -271,6 +274,26 @@ export function createMiltonServer(
           });
           return;
         }
+        // A rollout-boundary refusal's words follow whether a receipt may
+        // exist under the request id (mcp-tools, boundaryRefusal). The
+        // lookup runs after authentication and scope (the handler, before
+        // this server is built) and checks the account under its lock; it
+        // passes no trial gate and records no usage, as a replay doesn't.
+        const boundary = async (
+          kind: "removed" | "bidi",
+          detail: string,
+        ): Promise<Record<string, unknown>> => {
+          try {
+            return boundaryRefusal(
+              kind,
+              detail,
+              await receiptMayExist(store, params?.arguments),
+            );
+          } catch (error) {
+            const refusal = error as StoreError;
+            return { error: refusal.code, message: refusal.message };
+          }
+        };
         let unreadMemo: string | undefined;
         if (params) {
           parsedObjectArguments(params);
@@ -278,11 +301,7 @@ export function createMiltonServer(
           if (!options.readOnly && params.name === "create_memo") {
             const removed = removedFields(params.arguments);
             if (removed && callId !== undefined) {
-              await refuse(callId, {
-                error: "invalid_input",
-                field: "removed",
-                message: removed,
-              });
+              await refuse(callId, await boundary("removed", removed));
               return;
             }
           }
@@ -294,15 +313,12 @@ export function createMiltonServer(
             !unreadMemo &&
             !options.readOnly &&
             params.name === "create_memo" &&
-            bidiRefusal(params.arguments);
+            bidiFields(params.arguments);
           if (bidi && callId !== undefined) {
             await transport.send({
               jsonrpc: "2.0",
               id: callId,
-              result: storeResult(
-                { error: "invalid_input", field: "bidi", message: bidi },
-                true,
-              ),
+              result: storeResult(await boundary("bidi", bidi), true),
             });
             return;
           }

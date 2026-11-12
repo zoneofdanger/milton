@@ -139,13 +139,19 @@ a reconnect.
   `tool_replaced`: "get_cover_sheet was replaced by get_report. Call get_report with
   intent." It reaches no store and records no usage.
 - `create_memo` arguments holding a removed field at its documented position are
-  refused at dispatch with `invalid_input` and `field: "removed"`, before the schema and
-  before any receipt lookup: `cover_sheet` beside the change, and a memo's `tweaks` (any
-  value, `[]` included), `rounds` or `report_id`, in the nested memo, a memo sent as a
-  JSON-object string, or beside a flattened memo. Only key names are looked at, never
-  the words of a final, first draft or request. Each names its guidance and adds the
-  rollout-boundary sentence ([saves](saves.md#rollout-boundary)). Unknown keys elsewhere
-  meet the strict schema.
+  refused at dispatch with `invalid_input`, before the SDK's schema and never replayed:
+  `cover_sheet` beside the change, and a memo's `tweaks` (any value, `[]` included),
+  `rounds` or `report_id`, in the nested memo, a memo sent as a JSON-object string, or
+  beside a flattened memo. Only key names are looked at, never the words of a final,
+  first draft or request. Unknown keys elsewhere meet the strict schema.
+- A one-line field holding a bidi span control is refused the same way, in every form
+  (object, JSON-object string, flattened, `memo_context`).
+- Each such refusal names its guidance, and its words follow a receipt lookup under the
+  call's request id ([saves](saves.md#rollout-boundary)): with no receipt, `field` is
+  `removed_unsaved` or `bidi_unsaved` and the message says nothing was saved under this
+  request_id, so send it again fixed, with a new request_id; with a receipt, or when the
+  lookup fails, `field` is `removed` or `bidi` and the message carries the
+  rollout-boundary sentence. Nothing of a receipt is returned.
 
 ## Argument repair
 
@@ -179,9 +185,12 @@ a reconnect.
   every code in the source has an entry, and an unknown code gets the
   unexpected-failure step. A memo refusal with a `field` takes that field's step when
   the table has one: `invalid_input.request` (send only what the person typed, or leave
-  request out, and the rest unchanged) and `invalid_input.removed` (drop the removed
-  fields, refresh the tool list, and have the person check their TPS page before saving
-  again). `tool_replaced` rereads with `get_report`.
+  request out, and the rest unchanged); `invalid_input.removed_unsaved` and
+  `invalid_input.bidi_unsaved` (`fix_input`: nothing was saved under this request_id,
+  send it again fixed with a new one, with no question for the person); and
+  `invalid_input.removed` and `invalid_input.bidi` (`ask_user`: an earlier save may
+  exist, so the person checks their TPS page and TPS.md before a save with a new
+  request_id). `tool_replaced` rereads with `get_report`.
 - The SDK's plain-text argument refusals become such bodies, `invalid_arguments` with
   the SDK's text as `message`.
 - Memo codes get their own steps: `request_too_large` resaves the memo with the final

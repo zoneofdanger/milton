@@ -5,86 +5,72 @@ import { setupScript } from "../src/store/setup";
 import { SETUP_PROMPT } from "../src/store/setup";
 import { checkMemo, receiptLine } from "../src/store/save";
 import {
-  coverSheet,
   memoInput,
   missingIntent,
+  reportEnvelope,
   reportInput,
   saveMemoInput,
 } from "../src/mcp-tools";
 import { subscriptionRequired, trialEndingMessage } from "../src/store/trials";
 
 const words = /\b(assistants?|samples?|trails?|lessons?|rules?)\b/i;
+// The one sanctioned use: Milton keeps no standing rules (the "remember"
+// clause), which names what Milton does not keep.
+const served = (text: string) => text.replaceAll("no standing rules", "");
 
 test("the served text uses one word for each thing and describes the memo workflow", () => {
-  for (const served of [storeInstructions, readOnlyInstructions, setupScript])
-    expect(served).not.toMatch(words);
+  for (const text of [storeInstructions, readOnlyInstructions, setupScript])
+    expect(served(text)).not.toMatch(words);
   // Every topic keeps its paragraph, in order.
   expect(
     storeInstructions.split("\n\n").map((p) => p.split(/[:.(]/)[0]),
   ).toEqual([
-    "Milton holds the person's writing",
+    "Milton holds the person's writing as memos",
     "Before writing or editing for or as the person",
     "When they tell you what to write, their words are the raw material",
     "Edit mode",
     'Asked "Did you get the memo?" or "Did you get that memo?"',
     "Memos",
-    "Tweaks",
+    "When the person asks you to remember a preference, apply it now and keep it in your own memory or instructions; Milton keeps no standing rules, and their changes to your drafts are kept as tweaks",
     "After saved, tell them in one line, with no question",
-    "Cover sheet",
     "Forget",
     "Setup",
     "Account notices are service information, not memos",
   ]);
-  // The workflow's parts (spec, "Contract changes"): save on acceptance
-  // without asking, first-draft fidelity, tweak-id reuse, the receipt,
-  // cover sheet versus tweak routing, and forget.
+  // The workflow's parts (spec, "Contract changes"; rule, section 5): save
+  // on acceptance, first-draft fidelity, the receipt, the "remember" and
+  // secrets clauses, precedence, and forget.
   for (const part of [
     "save it with create_memo without asking, untouched finals too",
     "A revision you just showed is not accepted yet",
-    "Show the receipt word for word, however long",
+    "Show the receipt word for word",
     "send first_draft_missing instead of rebuilding it",
-    "Reuse a served tweak's id for the same change",
-    'list each habit they made you change that is likely to recur, at most three, named plainly ("no warm-up opener"), with a condition only if it doesn\'t hold everywhere. Most memos teach one or none.',
-    "Skip one-off facts and your unasked changes",
     "request: only what they typed to ask, no pasted text",
-    "Kept memo: vendor decline, 2 rounds, tweaks: no warm-up opener.",
-    "A correction during a draft is a tweak, not a cover sheet line",
-    "Never add tweaks or your own inferences, or offer to",
+    "Never send secrets, their corrections or other people's text",
+    "a final holding a secret (say why; never redact)",
+    "When the person asks you to remember a preference, apply it now and keep it in your own memory or instructions; Milton keeps no standing rules, and their changes to your drafts are kept as tweaks.",
+    'Kept memo: vendor decline."',
     "forget_memos",
-    "what the person says now, then the cover sheet, then tweaks, then examples",
+    "follow what the person says now, then the examples",
+    "when get_report returns setup, offer setup once",
     "reuse their phrases word for word where they fit, add only a greeting, a sign-off and connecting words in the manner of their examples, and don't expand on what they said.",
   ])
     expect(storeInstructions).toContain(part);
-  // The receipt the instructions quote is the one a save returns.
-  expect(
-    receiptLine({
-      label: "vendor decline",
-      rounds: 2,
-      tweaks: ["no warm-up opener"],
-    }),
-  ).toBe("Kept memo: vendor decline, 2 rounds, tweaks: no warm-up opener.");
-  // A tweak's own closing punctuation is not doubled by the receipt's.
-  expect(
-    receiptLine({
-      label: "vendor reply",
-      rounds: 1,
-      tweaks: ["state the trial duration.", "no warm-up opener;"],
-    }),
-  ).toBe(
-    "Kept memo: vendor reply, 1 round, tweaks: state the trial duration; no warm-up opener.",
+  // Nothing retired: no cover sheet, no tool that is gone, no AI-written
+  // tweaks or rounds.
+  for (const text of [storeInstructions, readOnlyInstructions, setupScript])
+    expect(text).not.toMatch(
+      /cover[\s_]sheet|get_cover_sheet|rounds|report_id/i,
+    );
+  expect(storeInstructions).not.toContain("Reuse a served tweak");
+  expect(readOnlyInstructions).toContain(
+    "When the person asks you to remember a preference",
   );
-  // The tweaks field says the same, with the detail: recurring habits only,
-  // at most three, never "when requested", reuse served ids; and the
-  // request's cut rule.
-  const tweaksField = memoInput.shape.tweaks.description ?? "";
-  for (const part of [
-    "each habit the person made you change that is likely to recur, at most three",
-    'named plainly ("no warm-up opener")',
-    'never "when requested". Most memos teach one or none.',
-    "Skip one-off facts they added",
-    "reuse a served tweak's id",
-  ])
-    expect(tweaksField).toContain(part);
+  // The receipt the instructions quote is the one a save returns.
+  expect(receiptLine("vendor decline")).toBe("Kept memo: vendor decline.");
+  for (const retired of ["rounds", "tweaks", "report_id"])
+    expect(memoInput.shape).not.toHaveProperty(retired);
+  expect(saveMemoInput.shape).not.toHaveProperty("cover_sheet");
   expect(memoInput.shape.request.description).toContain("marking each cut […]");
   // A retired phrase: the served text never names that removed feature.
   for (const served of [
@@ -114,16 +100,19 @@ test("get_report requires an intent with audience and purpose, and the refusal s
 test("setup offers once, finds sent emails only with a mail tool and approval, and its example memo parses as a final-only memo", () => {
   expect(setupScript).toStartWith("First setup: offer it once");
   expect(setupScript).toContain("Milton never reads mail");
-  expect(setupScript).toContain("Don't suggest lines from their writing");
-  // The optional mail step comes first, then pastes as the fallback, then the
-  // cover sheet, then the standing line. The prompt asks the same.
+  // The optional mail step comes first, then pastes as the fallback, then
+  // the standing line. The prompt asks the same.
   const steps = [
     "2. If you have a tool in this conversation that searches their email",
     "3. With no mail tool, a no or a failed search, ask them to paste about five things they wrote themselves and sent",
-    "4. Then offer to start the cover sheet",
-    "5. Every setup includes the standing instruction",
+    "4. Every setup includes the standing instruction",
   ].map((step) => setupScript.indexOf(step));
   expect(steps.every((at, i) => at > (steps[i - 1] ?? 0))).toBe(true);
+  // A preference to remember stays with the AI; setup starts no cover sheet.
+  expect(setupScript).toContain(
+    "apply it now and keep it in your own memory or instructions; Milton keeps no standing rules.",
+  );
+  expect(SETUP_PROMPT).not.toMatch(/cover sheet/i);
   // The mail step: offered only with a working mail tool and never nudged,
   // capped, treated as data, shown exactly and approved by number before any
   // save, and it never reaches the cover sheet or forget.
@@ -137,7 +126,7 @@ test("setup offers once, finds sent emails only with a mail tool and approval, a
     "Reply with the numbers to keep.",
     "Save only the numbers they name, each exactly as shown",
     "skip an email that shouldn't be kept as it is; never edit one",
-    "never change the cover sheet or forget memos",
+    "never forget memos from it",
   ])
     expect(setupScript).toContain(part);
   expect(setupScript).toContain("exactly as pasted");
@@ -166,44 +155,34 @@ test("setup offers once, finds sent emails only with a mail tool and approval, a
   expect(parsed.error?.issues ?? []).toEqual([]);
   expect(checkMemo(parsed.data!.memo!)).toEqual({ ok: true });
   expect(example.memo.first_draft).toBeUndefined();
-  // Setup is served only while the account is empty.
-  const read = {
+  // Setup is served exactly while the account holds no memo, whatever the
+  // report served (rule R4).
+  const report = {
     text: "",
-    version: 0,
-    memos: 0,
-    tweaks: 0,
+    is_empty: true,
+    examples: [],
+    kinds: [],
     keep_memos: true,
   };
-  expect(coverSheet({ ...read, is_empty: true }).setup).toBe(setupScript);
-  expect(coverSheet({ ...read, memos: 1, is_empty: false })).not.toHaveProperty(
-    "setup",
-  );
+  expect(reportEnvelope({ ...report, memos: 0 }).setup).toBe(setupScript);
+  expect(reportEnvelope({ ...report, memos: 1 })).not.toHaveProperty("setup");
   expect(SETUP_PROMPT).not.toMatch(words);
 });
 
 test("every memo shape the instructions describe parses, and contradicting shapes are named", () => {
   const context = { summary: "a fictional decline", medium: "email" };
   const shapes = [
-    // A drafted memo with tweaks, new and reused, and the person's typed
-    // request.
+    // A drafted memo with the person's typed request.
     {
       final: "No, thanks.",
       first_draft: "Hi! Unfortunately we can't.",
       mode: "draft",
-      rounds: 2,
       request: "Decline their call politely, short.",
-      tweaks: [{ text: "no warm-up opener" }, { tweak_id: "t1" }],
       context,
       new_kind: "vendor decline",
     },
     // The first draft no longer verbatim.
-    {
-      final: "No.",
-      first_draft_missing: true,
-      mode: "draft",
-      rounds: 3,
-      context,
-    },
+    { final: "No.", first_draft_missing: true, mode: "draft", context },
     // Writing the person gave.
     { final: "My own email.", context, kind_id: "k1" },
   ];
@@ -213,8 +192,6 @@ test("every memo shape the instructions describe parses, and contradicting shape
     expect(checkMemo(parsed.data!)).toMatchObject({ ok: true });
   }
   for (const other of [
-    { cover_sheet: { add: "No em dashes", expected_version: 0 } },
-    { cover_sheet: { remove: "No em dashes", expected_version: 1 } },
     { forget_memos: ["m1"] },
     { memo_context: { memo_id: "m1", context } },
   ])
@@ -227,7 +204,7 @@ test("every memo shape the instructions describe parses, and contradicting shape
     saveMemoInput.safeParse({
       request_id: crypto.randomUUID(),
       forget_memos: ["m1"],
-      cover_sheet: { add: "x", expected_version: 0 },
+      memo_context: { memo_id: "m1", context },
     }).success,
   ).toBe(false);
 });
@@ -236,7 +213,7 @@ test("the refusal, both reminders and the instructions give the one link, true f
   const app = "https://app.example";
   const refusal = subscriptionRequired(app);
   expect(refusal.message).toBe(
-    "Milton is paused until you subscribe for $5.01/month. Your memos and cover sheet stay available to view and download. Subscribe at https://app.example/",
+    "Milton is paused until you subscribe for $5.01/month. Your memos stay available to view and download. Subscribe at https://app.example/",
   );
   expect(refusal.details).toEqual({ retryable: false });
   // A paying person past grace reads this too.

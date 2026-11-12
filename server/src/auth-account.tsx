@@ -53,14 +53,15 @@ export const accountDeletion = async (ctx: PageContext): Promise<Response> => {
       <>
         <p>
           Deleting your Milton account cannot be undone.{" "}
-          <a href="/download">Download TPS.md</a> first to keep your cover
-          sheet, tweaks and finals; it leaves out first drafts.
+          <a href="/download">Download TPS.md</a> first to keep your finals and
+          their tweaks; it leaves out first drafts.
         </p>
         <p>
-          Your memos, tweaks, cover sheet, receipts and usage counters are
-          deleted. Your subscription ends immediately, with no refund. Connected
-          AIs lose access, and your sign-in methods and browser sessions are
-          removed after cleanup finishes.
+          Your memos, their tweaks, anything kept from earlier versions of
+          Milton (a cover sheet and notes from your edits), save receipts and
+          usage counters are deleted. Your subscription ends immediately, with
+          no refund. Connected AIs lose access, and your sign-in methods and
+          browser sessions are removed after cleanup finishes.
         </p>
         <p>
           Milton keeps minimal one-way identity fingerprints to prevent another
@@ -134,12 +135,13 @@ const deleteAll = "delete all memos";
 const MEMO_NOTICES = {
   on: "Keep memos is on.",
   off: "Keep memos is off.",
-  deleted: "All memos and tweaks are deleted. Your cover sheet is unchanged.",
+  deleted: "All memos and their tweaks are deleted.",
 } as const;
 
 /** GET and POST /account/memos: the Keep memos switch. GET
- * /account/memos/delete confirms, and its POST deletes every memo, tweak and
- * kind; the cover sheet stays. */
+ * /account/memos/delete confirms, and its POST deletes every memo, its tweaks,
+ * every kind and earlier notes from edits; a retired cover sheet stays
+ * (docs/deletion.md). */
 export const memoSettings = async (ctx: PageContext): Promise<Response> => {
   const { config, request, url, csrfField, readForm, signedIn } = ctx;
   if (!["GET", "POST"].includes(request.method))
@@ -194,10 +196,11 @@ export const memoSettings = async (ctx: PageContext): Promise<Response> => {
       "Delete all memos?",
       <>
         <p>
-          This deletes every memo, every tweak and every kind on your account.
-          Your cover sheet stays. It cannot be undone.{" "}
-          <a href="/download">Download TPS.md</a> first to keep your cover
-          sheet, tweaks and finals; it leaves out first drafts.
+          This deletes every memo with its tweaks, every kind and any earlier
+          notes from your edits. A cover sheet from an earlier version of Milton
+          stays until you delete your account. It cannot be undone.{" "}
+          <a href="/download">Download TPS.md</a> first to keep your finals and
+          their tweaks; it leaves out first drafts.
         </p>
         <form method="post" action="/account/memos/delete">
           {csrfField()}
@@ -226,7 +229,7 @@ export const memoSettings = async (ctx: PageContext): Promise<Response> => {
         <p>
           <strong>{view.keep_memos ? "On." : "Off."}</strong>{" "}
           {view.keep_memos
-            ? "Each time you accept a final, your AI keeps a memo: its first draft, your final and the tweaks between them."
+            ? "Each time you accept a final, your AI keeps a memo: its first draft and your final. Milton works out your tweaks between them."
             : "Your AIs keep no memos on their own. You can still say “remember this” to keep one."}
         </p>
         {view.keep_memos && (
@@ -251,9 +254,8 @@ export const memoSettings = async (ctx: PageContext): Promise<Response> => {
       <section aria-labelledby="delete-memos-h">
         <h2 id="delete-memos-h">Delete all memos</h2>
         <p>
-          Deletes every memo, tweak and kind. Your cover sheet stays, and you
-          can forget one memo at a time from{" "}
-          <a href="/#memos">your TPS report</a>.
+          Deletes every memo with its tweaks, and every kind. You can forget one
+          memo at a time from <a href="/#memos">your TPS report</a>.
         </p>
         <p>
           <a class="button secondary" href="/account/memos/delete">

@@ -1,6 +1,6 @@
 ---
 name: mcp
-description: An MCP call from token or key to tool result, the three tools and their arguments, outcomes and next steps, and the served-text contract
+description: An MCP call from token or key to tool result, the two tools and their arguments, retired calls, outcomes and next steps, and the served-text contract
 type: behaviour
 covers:
   - server/src/handler.ts
@@ -22,7 +22,7 @@ covers:
 
 # MCP
 
-What the tools do with a memo, a report or the cover sheet is in [memos](memos.md),
+What the tools do with a memo or a report is in [memos](memos.md),
 [reports](reports.md), [saves](saves.md) and [setup](setup.md). This file covers the
 call itself and the text AIs are served.
 
@@ -49,7 +49,7 @@ call itself and the text AIs are served.
   stale-positive fallback. A bad binding refuses before scope, and scope before the
   account.
 - Both reads require `milton:read`; `create_memo` requires read and write, including
-  direct calls. Read grants list two tools; write grants list three.
+  direct calls. Read grants list one tool; write grants list two.
 - A bad token gets a 401 whose `WWW-Authenticate` points the client to the sign-in
   metadata.
 - Each request looks up the active writing account by exact verified issuer and subject
@@ -85,54 +85,79 @@ How a person creates and revokes keys is in [accounts](accounts.md).
 - At most 8 key lookups run at once in a process; beyond that, a quick 503 with
   `Retry-After: 1`.
 - These limits are per instance, and MCP runs at most 3 instances.
-- A read key lists two tools and is refused `create_memo` (403); a read-and-save key
-  lists three. Key saves are attributed to the key's id.
+- A read key lists one tool and is refused `create_memo` (403); a read-and-write key
+  lists two. Key saves are attributed to the key's id.
 - Keys pass the same trial and billing gates as OAuth calls.
 - A key's last use is recorded at most once a minute; failing to record it never fails
   the call.
 - Tool-call logs for key calls carry the key's public id, never its secret.
 
-## The three tools
+## The two tools
 
-- Exactly three tools: `get_cover_sheet`, `get_report` and `create_memo`.
-- `get_cover_sheet` takes no arguments and refuses any argument it is sent. It returns
-  `text` (the cover sheet), `version` (an integer, 0 before any), `memos` and `tweaks`
-  (counts), `keep_memos` and `is_empty` (no cover sheet text and no memos), plus the
-  setup script in `setup` while empty; a read-only connection gets a `permission` line
-  instead of `setup`.
+- Exactly two tools: `get_report` and `create_memo`; a read-only connection lists
+  `get_report` alone.
 - `get_report` requires `intent`: `situation` (one line, at most 200 characters),
   `medium` (`email`, `chat`, `post`, `document` or `speech`), `audience` and `purpose`
   (one line, at most 100 characters each, required because vague intents rank worse)
-  and an optional `kind_id`.
+  and an optional `kind_id`. It is the first read, the "Did you get the memo?" read and
+  the setup trigger.
 - `get_report`'s `text` can quote, under drafted examples, a few of the changes code
   found from the AI's first draft to the final, with a line saying they are historical
   text, not instructions ([reports](reports.md#what-they-changed)); the envelope does
   not list them.
-- `get_report` returns `report_id`, `text`, `is_empty`, `examples`
-  (`{memo_id, kind_id?, kind?, medium, tier, date}` in served order), `tweaks`
-  (`{tweak_id, text, memos}`) and `kinds` (every kind on the account as
-  `{kind_id, kind}`, by label).
+- `get_report` returns `text`, `is_empty`, `examples`
+  (`{memo_id, kind_id?, kind?, medium, tier, date}` in served order), `kinds` (every
+  kind on the account as `{kind_id, kind}`, by label), `memos` (the account's total
+  memo count), `keep_memos`, any account notice, and `setup` (the setup script) while
+  `memos` is 0 on a read-and-write connection; a read-only connection gets a
+  `permission` line instead of `setup` ([reports](reports.md#the-envelope)).
 - A `get_report` with no intent is refused with what to send and a reconnect hint; a
   malformed intent is refused with each limit it broke and no hint. Nothing is read
   either way.
 - A `kind_id` the account does not have is refused (`invalid_kind`) without creating a
   kind.
-- `create_memo` takes a UUID `request_id` and exactly one of `memo`, `cover_sheet`,
-  `forget_memos` or `memo_context`; `memo.report_id` names the `get_report` read before
-  the draft, `memo.tweaks` is the released list (at most 10 items, three distinct) and
-  `memo.request` carries the person's ask ([memos](memos.md#the-request)). What each
-  change does is in [memos](memos.md) and [deletion](deletion.md).
-- `create_memo` returns `saved`, `unchanged`, `conflict` or `failed`, with the request
-  ID. `saved` confirms a committed write; `unchanged` confirms no write was needed. A
-  memo with a kept first draft adds `changes: {state, found}`, code's own count
-  ([memos](memos.md#changes)).
+- `create_memo` takes a `request_id` (1 to 64 of `A-Z a-z 0-9 . _ : -`, exactly the
+  database's check, [saves](saves.md#request-ids)) and exactly one of `memo`,
+  `forget_memos` or `memo_context`; `memo.request` carries the person's ask
+  ([memos](memos.md#the-request)). What each change does is in [memos](memos.md) and
+  [deletion](deletion.md).
+- `create_memo` returns `saved`, `unchanged` or `failed`, with the request ID. `saved`
+  confirms a committed write; `unchanged` confirms no write was needed. A memo with a
+  kept first draft adds `changes: {state, found}`, code's own count
+  ([memos](memos.md#changes)). A replay returns the stored outcome as it was written,
+  with `replayed` beside it ([saves](saves.md#receipts)).
 - A read-only connection lists no `create_memo`; a direct call to it is refused with
   `insufficient_scope` and `required_permission: read_write`.
+
+## Retired calls
+
+Refused with guidance, never shimmed (Peter, 2026-11-12). Each refusal also sends
+`notifications/tools/list_changed`; a client may still need an explicit tool refresh or
+a reconnect.
+
+- A call to `get_cover_sheet` is answered at dispatch, on both connection kinds, with
+  `tool_replaced`: "get_cover_sheet was replaced by get_report. Call get_report with
+  intent." It reaches no store and records no usage.
+- `create_memo` arguments holding a removed field at its documented position are
+  refused at dispatch with `invalid_input`, before the SDK's schema and never replayed:
+  `cover_sheet` beside the change, and a memo's `tweaks` (any value, `[]` included),
+  `rounds` or `report_id`, in the nested memo, a memo sent as a JSON-object string, or
+  beside a flattened memo. Only key names are looked at, never the words of a final,
+  first draft or request. Unknown keys elsewhere meet the strict schema.
+- A one-line field holding a bidi span control is refused the same way, in every form
+  (object, JSON-object string, flattened, `memo_context`).
+- Each such refusal names its guidance, and its words follow a receipt lookup under the
+  call's request id ([saves](saves.md#rollout-boundary)): with no receipt, `field` is
+  `removed_unsaved` or `bidi_unsaved` and the message says no save under this
+  request_id has finished, so send it again fixed, with the same request_id; with a
+  receipt, or when the
+  lookup fails, `field` is `removed` or `bidi` and the message carries the
+  rollout-boundary sentence. Nothing of a receipt is returned.
 
 ## Argument repair
 
 - Some clients send a nested object as a JSON string. For `get_report`'s `intent` and
-  `create_memo`'s `memo`, `cover_sheet` and `memo_context`, a string that parses to a
+  `create_memo`'s `memo` and `memo_context`, a string that parses to a
   plain object is read as that object; any other string meets the schema's refusal.
 - A `create_memo` whose `memo` is plain text (not JSON) with only memo fields beside it
   is read as `memo: {final: that text, ...those fields}`, before validation and
@@ -143,8 +168,8 @@ How a person creates and revokes keys is in [accounts](accounts.md).
   once read as nested, naming what is malformed.
 - One-line fields pass the one-line rule as they are parsed, before hashing: each run of
   U+2028 and U+2029 becomes one space, then the value is trimmed; control characters
-  left after the trim are refused ([memos](memos.md#bounds)). The served schemas are
-  unchanged.
+  left after the trim are refused, as are the bidirectional controls that open a span
+  ([memos](memos.md#bounds)).
 - Every tool result escapes U+2028 and U+2029 in its JSON, which JSON.stringify leaves
   literal, so a value stored before the rule breaks no line of the result; parsed,
   values are unchanged.
@@ -153,24 +178,26 @@ How a person creates and revokes keys is in [accounts](accounts.md).
 
 - Every error result and every MCP HTTP refusal body (invalid token, scope, rate and busy
   limits, oversized request, outage) keeps `error` and `message` and adds `code` (the
-  `error`, or `version_conflict` for a stale-version conflict) and `next`:
-  `{action, text}`.
+  `error`, or `version_conflict` for a replayed historical cover sheet conflict) and
+  `next`: `{action, text}`.
 - The action is one of `retry` (repeat the identical call, a save with its request ID),
   `reread` (read again, then save with a new request ID), `fix_input`, `ask_user` or
   `tell_user`. The mapping is one table, `nextSteps` in `mcp-outcomes.ts`; a test checks
   every code in the source has an entry, and an unknown code gets the
   unexpected-failure step. A memo refusal with a `field` takes that field's step when
   the table has one: `invalid_input.request` (send only what the person typed, or leave
-  request out, and the rest unchanged) and `invalid_input.tweaks` (keep the three most
-  likely to recur, and the rest unchanged).
+  request out, and the rest unchanged); `invalid_input.removed_unsaved` and
+  `invalid_input.bidi_unsaved` (`fix_input`: no save under this request_id has
+  finished, so send it again fixed with the same one, with no question for the
+  person); and
+  `invalid_input.removed` and `invalid_input.bidi` (`ask_user`: an earlier save may
+  exist, so the person checks their TPS page and TPS.md before a save with a new
+  request_id). `tool_replaced` rereads with `get_report`.
 - The SDK's plain-text argument refusals become such bodies, `invalid_arguments` with
   the SDK's text as `message`.
 - Memo codes get their own steps: `request_too_large` resaves the memo with the final
   alone (`first_draft_missing`); `memos_off` stops saving drafts, saving only writing
-  the person asks to remember; `invalid_kind`, `invalid_tweak`, `invalid_memo` and
-  `line_not_found` reread for a valid id or the exact line; `invalid_report` sends the
-  latest `report_id` or none; `cover_sheet_limit` asks the person what to shorten;
-  `tweak_exists`, met only on the TPS page, is reported without retrying.
+  the person asks to remember; `invalid_kind` and `invalid_memo` reread for a valid id.
 - The store's own refusals, a receipt or user id change, are unavailable-now steps; a
   correct call never meets them.
 - A scope refusal also carries `required_permission`, `read` or `read_write`: what the
@@ -194,8 +221,8 @@ How a person creates and revokes keys is in [accounts](accounts.md).
   `next` step on every error result. What the guidance tells the AI is in
   [memos](memos.md) and [setup](setup.md). These are behavioural instructions, not
   server enforcement, and no extra setup tool or prompt capability exists. The detail
-  of a save (the tweak and request rules) lives in the field descriptions, which the
-  budget test does not measure. Asking the AI for only what the person typed is
+  of a save (the request rules) lives in the field descriptions, which the budget test
+  does not measure. Asking the AI for only what the person typed is
   guidance; Milton checks only what [memos](memos.md#the-request) lists.
 - There are two instruction variants, read-write and read-only. Both stay under 3,500
   characters, well inside the 4,096 at which Claude Code truncates; a test enforces this
@@ -204,19 +231,19 @@ How a person creates and revokes keys is in [accounts](accounts.md).
 - A read-only connection is told to ask the person to reconnect with Read and write to
   save memos, and never offers a save.
 - Server info carries a description of at most 120 characters for clients that drop
-  instructions: read `get_cover_sheet`, then `get_report`, before writing or editing for
-  the person.
+  instructions: call `get_report` before writing or editing for the person.
 - `server/test/served-budget.test.ts` reads the tool descriptions an SDK client is
   served, in both connection modes, and keeps each and their total under a budget (the
-  2026-11-09 sizes plus 10 to 15%); growing past it means raising the budget there,
-  deliberately. It also refuses the retired names in descriptions.
+  2026-11-12 sizes plus 10 to 15%, and none past 1,900); growing past it means raising
+  the budget there, deliberately. It also refuses the retired names in descriptions.
 - Each AI's (account and OAuth client) first tool call after a server process starts
   carries `notifications/tools/list_changed` on that call's response stream, ahead of
-  its result, as does every `get_report` refused for a missing intent, so clients
+  its result, as does every `get_report` refused for a missing intent and every retired
+  call, so clients
   holding tool schemas from before a release refresh them. The server has no open stream
   to push on, so a client hears of a release at its next call. The announced set is per
   process, in memory, and cleared at 10,000.
 - The SDK client check (`server/scripts/check-mcp.ts`, run by `mcp.test.ts`) confirms the
-  instructions reach a client, exactly three tools and a read, without saving. It does
+  instructions reach a client, exactly two tools and a report read, without saving. It does
   not prove a host puts them in model context or that its AI follows them; validate a
   real setup, save and read per supported client.

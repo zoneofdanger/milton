@@ -58,7 +58,7 @@ user and its password credential in one owner transaction (native's own scrypt h
 step that makes sign-in possible, so no one can ever sign in to an account that is not
 already marked and trial-free; checks that binding again; signs in over HTTPS exactly as a
 browser does (app `/login`, the auth sign-in page and form, the app's code flow) and checks
-the app shows this account; mints a read-and-save key expiring in 365 days through the
+the app shows this account; mints a read-and-write key expiring in 365 days through the
 app's key form; checks as the owner that exactly this account is marked, active, without a
 trial row and holds that key; and appends `E2E_CONNECTION_KEY`. Exit 0 only when every
 step passed.
@@ -104,43 +104,79 @@ body), each request bounded at 15 s:
    sent, so another account's key supplied by mistake is never authenticated or marked
    used. It reports `key_days_left` and, under 30, `warning: key_expires_within_30_days` at
    severity `WARNING` without failing.
-4. `mcp_connect`: initialize with the key; `tools/list` must list exactly `create_memo`,
-   `get_cover_sheet` and `get_report`.
-   `safety_gate`, before any write: the cover sheet must be empty with no tweaks, and every
-   memo must be one of the check's (kind `e2e check`, summary `Milton e2e check, run …`), at
-   most five. Anything else stops the run with `account_holds_foreign_data`, having written
-   nothing.
+4. `mcp_connect`: initialize with the key; `tools/list` must list exactly `create_memo`
+   and `get_report`, so a check on this image stops against an MCP still listing
+   `get_cover_sheet`.
+   `safety_gate`, before any write: `get_report`'s `memos`, the account's total memo count,
+   must be a non-negative integer and at most five (a missing or malformed count stops the
+   run with `memo_count_unreadable`), and must equal both the number of examples the report
+   serves and the number of the check's own leftovers among them (kind `e2e check`, tier
+   `own`, summary `Milton e2e check, run …`, each memo id once). A memo no report serves
+   (untouched, or a final over 128 KiB) still counts, so it stops the run too. Anything
+   else stops it with `account_holds_foreign_data`, having written nothing. The count sees
+   memos only; that the account holds no legacy cover sheet or notes comes from the owner
+   check at each release (below).
 5. `forget_leftovers`: forgets marked memos a crashed run left, reporting the count.
-6. `baseline`: the account must now be empty; its cover sheet version is the baseline.
+6. `baseline`: the report must now be empty, with `memos` 0.
 7. `save_memo`: `create_memo` saves a fictional final-only memo marked with this run; it
-   must come back as kind `e2e check`, tier `own`, receipt `Kept memo: e2e check, your words.`
+   must come back as kind `e2e check`, tier `own`, receipt `Kept memo: e2e check.`
 8. `fresh_read`: a new MCP session's `get_report` must serve exactly that memo, its
    situation line and its words.
 9. `save_drafted`: `create_memo` saves a fictional edit-mode memo marked with this run, a
-   first draft and a final differing in one place, with no tweaks, so code's diff runs
-   in production. It must come back as kind `e2e check`, tier `own`, changes
-   `{state: "itemized", found: 1}`, receipt `Kept memo: e2e check, 0 rounds.` Edit mode
-   keeps it the person's words, so a crashed run's leftover passes the safety gate like
-   the first.
+   first draft and a final differing in one place, so code's diff runs in production. It
+   must come back as kind `e2e check`, tier `own`, changes `{state: "itemized", found: 1}`,
+   receipt `Kept memo: e2e check.` Edit mode keeps it the person's words, so a crashed
+   run's leftover passes the safety gate like the first, and up to five leftovers all
+   appear in one report (draft mode would make it steered, and a report serves at most
+   three of those).
 10. `drafted_changes`: the signed-in browser session opens that memo's page, which must
     list exactly one change, the spot as code cut it, so the stored row is read back.
 11. `forget_memo`, `cleanup`: `forget_memos` removes both, with the change; a new
-    session must read an empty account (no memos, no tweaks, an empty report) with the
-    baseline's version.
+    session must read an empty report with `memos` 0.
 
 Exit 0 only when every step passed; otherwise the last line names the failing step and a
 fixed error code, and the exit is 1.
 
 **Footprint per run**, measured on the rehearsal (`auth-integration.ts` asserts it). No memo
 stays: the run saves two and forgets them. Rows that stay as long as the account: 3
-`save_requests` receipts (two saves, forget) and 3 `served_reports` (three reads), about 12
-small rows a day; one `memo_kinds` row on the first run only; no cover sheet, tweak, citation
-or change. A crashed run's leftover forget adds one more receipt. Pruned: 9 `usage_calls`
-rows (deleted after 90 days); the memo page read is not a tool call. Short-lived auth rows: one native session
+`save_requests` receipts (two saves, forget), about 6 small rows a day; one `memo_kinds` row
+on the first run only; no served report, cover sheet, note, citation or change. The 3
+`served_reports` rows each run before this release added stay, with the earlier receipts.
+A crashed run's leftover forget adds one more receipt. Pruned: 7 `usage_calls` rows
+(deleted after 90 days; four report reads, three saves); the memo page read is not a tool
+call. Short-lived auth rows: one native session
 (7 days), one app session (1 hour), one admission correlation (1 day), the app's code-flow
 token and binding rows, all removed by expiry, later sign-ins and the maintenance job; at most about eight native sessions are live at once,
 under the 64-per-user cap. The key's `last_used_at` is updated. Nothing is mailed and
 nothing calls Stripe.
+
+## Across a release
+
+A check on one image can fail against the other image's MCP, and a run already past its
+gate when the MCP changes can fail after writing (its marked memo is then the next run's
+leftover). So a release that changes what MCP lists or answers, and its rollback, keep the
+job out of the switch ([releases](releases.md) gives the order): no active or pending
+execution and no manual start while services change, the whole switch finishing before the
+next scheduled run, and the job's image moved only after the matching services serve and
+older requests have drained, followed by one manual execution. The integration suite tests both
+directions before writing: a new check against an old MCP's listing or a report without
+`memos`, and the released check (`server/scripts/e2e-released.ts`, main's `e2e.ts`
+frozen) against the new MCP, which it refuses at `mcp_connect` with `tools_unexpected`.
+
+For the release that retires `get_cover_sheet` (memos and tweaks only), milton-duo also
+checks the account as the owner, read-only, before the release:
+
+1. Resolve the account: the native user by email `e2e@milton-test.invalid`, then the
+   configured issuer and subject through identities to `public.users.id` (`public.users`
+   has no email column). Exactly one active, marked test account with the file's key
+   binding; anything else stops the release.
+2. It holds no row in `cover_sheets`, `tweaks` or `tweak_citations`. Check again after the
+   old app and MCP have drained and before the first run on the new image. Unexpected data
+   stops the release; it doesn't authorize cleanup.
+3. Record its `served_reports` and `save_requests` counts as the baseline. They are kept,
+   legacy values inside them included. After the first new run, `served_reports` is
+   unchanged and `save_requests` has grown by that run's receipts (3, plus one per leftover
+   forgotten), and no cover sheet, note or citation exists.
 
 ## The job: `milton-e2e-daily`
 
@@ -150,7 +186,8 @@ nothing with them but the scheduler's invoker. Project `milton-510506`, region `
 
 - **Image.** The runtime image (`server/Dockerfile`) carries `server/dist/e2e.js`, the check
   bundled for Node with the MCP SDK and no database driver. It runs the same image as app
-  and MCP, and moves with them at every release and rollback ([releases](releases.md)).
+  and MCP, and moves after them at every release and rollback ([releases](releases.md);
+  [across a release](#across-a-release)).
 - **Exit.** 0 only when every step passed; 1 for a refused gate, a failed step, a crash or a
   run past 240 s; one task, `--max-retries=0` and a 300 s task timeout, so one failure is
   one failed execution. Each stdout line is JSON with `severity`, which Cloud Logging reads
@@ -232,7 +269,7 @@ afterwards.
 ## Renew the key
 
 Renew the key before it expires (the check warns from 30 days out): sign in to the app as
-the test account with the file's password, create a new 365-day read-and-save key, replace
+the test account with the file's password, create a new 365-day read-and-write key, replace
 `E2E_CONNECTION_KEY` and revoke the old one. A renewed key is a new secret version:
 `gcloud secrets versions add` from the updated file, then
 `gcloud run jobs update milton-e2e-daily --set-secrets=/run/milton-e2e/account.env=milton-e2e-account:<n>`

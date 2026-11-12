@@ -6,17 +6,19 @@ import { localStore } from "./local-store";
 import {
   fixtureStore,
   memoSave,
+  seedLegacy,
   seedUsers,
   vendorIntent,
 } from "./store-fixtures";
 import { change, scoreboard, tier } from "../src/store/score";
-import { tpsStore } from "../src/store/tps";
+import { LISTED_MEMOS, tpsStore } from "../src/store/tps";
 import {
   createStoreMemoTools,
   intentInput,
   memoContextInput,
   memoInput,
   oneLine,
+  REQUEST_ID,
   saveMemoInput,
   type MemoInput,
 } from "../src/mcp-tools";
@@ -58,20 +60,17 @@ test("a memo keeps both drafts word for word, scores the change, sets its tier a
       first_draft: draft,
       final,
       mode: "draft",
-      rounds: 2,
       new_kind: "vendor decline",
-      tweaks: [
-        { text: "Vendor replies: no warm-up opener." },
-        { text: "declines: 2–3 sentences" },
-      ],
     });
     const saved = await store.saveMemo(input);
     expect(saved).toMatchObject({
       status: "saved",
-      memo: { tier: "steered", kind: "vendor decline", rounds: 2 },
-      receipt:
-        "Kept memo: vendor decline, 2 rounds, tweaks: Vendor replies: no warm-up opener; declines: 2–3 sentences.",
+      memo: { tier: "steered", kind: "vendor decline" },
+      receipt: "Kept memo: vendor decline.",
     });
+    // A fresh outcome carries no retired field.
+    expect(saved.memo).not.toHaveProperty("rounds");
+    expect(saved.memo).not.toHaveProperty("tweaks");
     expect(saved.memo!.change).toBeGreaterThan(0.5);
     const row = (
       await local.pg.query<{
@@ -81,10 +80,16 @@ test("a memo keeps both drafts word for word, scores the change, sets its tier a
       }>("SELECT first_draft,final,tier FROM memos WHERE user_id='u'")
     ).rows;
     expect(row).toEqual([{ first_draft: draft, final, tier: "steered" }]);
-    // The same request replays its outcome; a different input under it is refused.
-    expect(await store.saveMemo(input)).toEqual(saved);
+    // The same request replays its outcome, labelled; a different input under
+    // it is refused.
+    expect(await store.saveMemo(input)).toEqual({
+      ...saved,
+      replayed: expect.stringContaining(
+        "A stored outcome from an earlier save",
+      ),
+    });
     await expect(
-      store.saveMemo({ ...input, memo: { ...input.memo!, rounds: 3 } }),
+      store.saveMemo({ ...input, memo: { ...input.memo!, mode: "edit" } }),
     ).rejects.toMatchObject({ code: "request_id_reused" });
     // The same words saved again keep one memo.
     expect(
@@ -139,12 +144,10 @@ test("tiers come from the memo's source; shapes that contradict it are refused b
   expect(tier({ state: "kept", mode: "draft", firstDraft: final, final })).toBe(
     "untouched",
   );
-  expect(tier({ state: "missing", mode: "draft", final, rounds: 1 })).toBe(
-    "steered",
-  );
-  expect(tier({ state: "missing", mode: "draft", final, rounds: 0 })).toBe(
-    "untouched",
-  );
+  // Rule D: a missing first draft in draft mode is steered; in edit mode,
+  // the person's own words.
+  expect(tier({ state: "missing", mode: "draft", final })).toBe("steered");
+  expect(tier({ state: "missing", mode: "edit", final })).toBe("own");
   expect(change("a b c d", "a b c d")).toBe(0);
   expect(change("a b c d", "a x c d")).toBe(0.25);
   expect(change("", "one two")).toBe(1);
@@ -153,27 +156,14 @@ test("tiers come from the memo's source; shapes that contradict it are refused b
     await seedUsers(local.pg, "u");
     const store = fixtureStore(local.db, "u");
     const cases: [Partial<MemoInput>, RegExp][] = [
-      [{ mode: "draft" }, /takes no mode, rounds or tweaks/],
+      [{ mode: "draft" }, /takes no mode/],
       [{ first_draft: draft }, /send mode/],
+      [{ first_draft_missing: true }, /send mode/],
       [
-        {
-          first_draft: final,
-          final,
-          mode: "draft",
-          rounds: 0,
-          tweaks: [{ text: "x" }],
-        },
-        /teaches no tweaks/,
-      ],
-      [
-        {
-          first_draft: draft,
-          first_draft_missing: true,
-          mode: "draft",
-          rounds: 1,
-        },
+        { first_draft: draft, first_draft_missing: true, mode: "draft" },
         /not both/,
       ],
+      [{ kind_id: "k", new_kind: "vendor decline" }, /not both/],
     ];
     for (const [memo, message] of cases)
       await expect(store.saveMemo(memoSave(memo))).rejects.toMatchObject({
@@ -184,7 +174,7 @@ test("tiers come from the memo's source; shapes that contradict it are refused b
       store.saveMemo({
         ...memoSave(),
         cover_sheet: { add: "x", expected_version: 0 },
-      }),
+      } as never),
     ).rejects.toMatchObject({ code: "invalid_input" });
     expect(
       (await local.pg.query("SELECT 1 FROM save_requests")).rows.length,
@@ -194,120 +184,67 @@ test("tiers come from the memo's source; shapes that contradict it are refused b
   }
 });
 
-test("tweaks reuse ids and exact wordings, count citations, and forgetting a memo takes what it taught", async () => {
-  const local = await localStore();
-  try {
-    await seedUsers(local.pg, "u", "other");
-    const store = fixtureStore(local.db, "u");
-    const first = await store.saveMemo(
-      memoSave({
-        first_draft: draft,
-        mode: "draft",
-        rounds: 1,
-        tweaks: [{ text: "No warm-up opener" }],
-      }),
-    );
-    const opener = first.memo!.tweaks[0]!.tweak_id;
-    const second = await store.saveMemo(
-      memoSave({
-        first_draft: draft + " Best!",
-        final: final + " ",
-        mode: "draft",
-        rounds: 1,
-        tweaks: [{ text: "no  warm-up opener." }, { text: "Sign off –P" }],
-      }),
-    );
-    expect(second.memo!.tweaks.map((t) => t.tweak_id)).toContain(opener);
-    const third = await store.saveMemo(
-      memoSave({
-        first_draft: draft,
-        final: "Thanks. Not this time.\n\n–P",
-        mode: "draft",
-        rounds: 1,
-        tweaks: [{ tweak_id: opener }],
-      }),
-    );
-    expect(third.memo!.tweaks).toEqual([
-      { tweak_id: opener, text: "No warm-up opener" },
-    ]);
-    // Another account's tweak id is not this one's.
-    const foreign = await fixtureStore(local.db, "other").saveMemo(
-      memoSave({
-        first_draft: draft,
-        mode: "draft",
-        rounds: 1,
-        tweaks: [{ text: "Shorter" }],
-      }),
-    );
-    expect(
-      await store.saveMemo(
-        memoSave({
-          first_draft: draft,
-          final: "No.",
-          mode: "draft",
-          rounds: 1,
-          tweaks: [{ tweak_id: foreign.memo!.tweaks[0]!.tweak_id }],
-        }),
-      ),
-    ).toMatchObject({ status: "failed", error: "invalid_tweak" });
-    const report = await store.readReport(vendorIntent);
-    expect(report.tweaks.find((t) => t.tweak_id === opener)).toMatchObject({
-      memos: 3,
-    });
-    expect(report.text).toContain("- No warm-up opener (3 memos)");
-    // Forgetting the memo that alone cites "Sign off –P" deletes that tweak.
-    expect(
-      await store.saveMemo({
-        request_id: crypto.randomUUID(),
-        forget_memos: [second.memo!.memo_id, "unknown"],
-      }),
-    ).toMatchObject({ status: "saved", forgotten: [second.memo!.memo_id] });
-    expect(
-      (
-        await local.pg.query<{ text: string; n: number }>(
-          "SELECT t.text,count(c.*)::int n FROM tweaks t LEFT JOIN tweak_citations c ON c.user_id=t.user_id AND c.tweak_id=t.id WHERE t.user_id='u' GROUP BY t.text",
-        )
-      ).rows,
-    ).toEqual([{ text: "No warm-up opener", n: 2 }]);
-  } finally {
-    await local.dispose();
-  }
-});
-
-test("an empty tweaks list and a null kind_id save as if omitted, and a retry sending them replays the omitted save", async () => {
+test("a null kind_id saves as if omitted and a retry sending it replays; tweaks of any value, [] included, are refused before any write", async () => {
   const local = await localStore();
   try {
     await seedUsers(local.pg, "u");
     const store = fixtureStore(local.db, "u");
     // Sent by AI clients in testing (corpus-test, learning-test reports).
-    const lenient = { tweaks: [], kind_id: null as unknown as string };
-    const drafted = memoSave({ first_draft: draft, mode: "draft", rounds: 1 });
+    const lenient = { kind_id: null as unknown as string };
+    const drafted = memoSave({ first_draft: draft, mode: "draft" });
     const saved = await store.saveMemo(drafted);
-    expect(saved).toMatchObject({ status: "saved", memo: { tweaks: [] } });
+    expect(saved).toMatchObject({ status: "saved", memo: { tier: "steered" } });
     expect(saved.memo!.kind_id).toBeUndefined();
-    // The same request with [] and null is the same input: it replays.
+    // The same request with null is the same input: it replays.
     expect(
       await store.saveMemo({
         ...drafted,
         memo: { ...drafted.memo!, ...lenient },
       }),
-    ).toEqual(saved);
-    // Shapes that refuse tweaks accept [] as none: writing the person gave,
-    // and a final equal to its first draft.
+    ).toMatchObject({ ...saved, replayed: expect.any(String) });
     expect(
       await store.saveMemo(memoSave({ final: "My own words.", ...lenient })),
-    ).toMatchObject({ status: "saved", memo: { tier: "own", tweaks: [] } });
+    ).toMatchObject({ status: "saved", memo: { tier: "own" } });
     expect(
       await store.saveMemo(
-        memoSave({
-          first_draft: final,
-          final,
-          mode: "draft",
-          rounds: 0,
-          ...lenient,
-        }),
+        memoSave({ first_draft: final, final, mode: "draft", ...lenient }),
       ),
     ).toMatchObject({ status: "saved", memo: { tier: "untouched" } });
+    // tweaks, rounds and report_id are refused whatever their value, the
+    // empty list some clients send for none included, with what to do
+    // instead, and nothing is written. With no receipt under the id, nothing
+    // was saved under it; under a held id, the rule-A4 sentence.
+    const before = (await local.pg.query("SELECT 1 FROM save_requests")).rows
+      .length;
+    for (const [field, value, says] of [
+      ["tweaks", [], "tweaks are no longer sent"],
+      ["tweaks", [{ text: "no warm-up opener" }], "tweaks are no longer sent"],
+      ["rounds", 0, "rounds is no longer sent."],
+      ["report_id", crypto.randomUUID(), "report_id is no longer sent."],
+    ] as const)
+      await expect(
+        store.saveMemo(
+          memoSave({ first_draft: draft, mode: "draft", [field]: value }),
+        ),
+      ).rejects.toMatchObject({
+        code: "invalid_input",
+        details: { field: "removed_unsaved" },
+        message: expect.stringContaining(says),
+      });
+    await expect(
+      store.saveMemo({
+        ...memoSave({ tweaks: [] } as never),
+        request_id: drafted.request_id,
+      }),
+    ).rejects.toMatchObject({
+      details: { field: "removed" },
+      message: expect.stringContaining(
+        "Milton can't recover an earlier outcome for this request.",
+      ),
+    });
+    expect(
+      (await local.pg.query("SELECT 1 FROM save_requests")).rows.length,
+    ).toBe(before);
     expect(
       (await local.pg.query("SELECT 1 FROM memos WHERE kind_id IS NULL")).rows,
     ).toHaveLength(3);
@@ -354,13 +291,11 @@ test("a report ranks by kind, medium and tier, serves no untouched finals and at
         await save(`email: steered ${i}`, {
           first_draft: `first ${i}`,
           mode: "draft",
-          rounds: 1,
         }),
       );
     const untouched = await save("email: untouched", {
       first_draft: "email: untouched",
       mode: "draft",
-      rounds: 0,
     });
     const huge = await save("x ".repeat(70000));
     const report = await store.readReport(vendorIntent);
@@ -396,15 +331,15 @@ test("a report ranks by kind, medium and tier, serves no untouched finals and at
   }
 });
 
-test("report text quotes a final at every line break and keeps context and tweaks on one line, so memo text starts no report line", async () => {
+test("report text quotes a final at every line break and keeps context on one line, so memo text starts no report line", async () => {
   const local = await localStore();
   try {
     await seedUsers(local.pg, "u");
     const store = fixtureStore(local.db, "u");
-    // A cover sheet may hold any heading; the check below never looks for one.
-    await store.saveMemo({
-      request_id: crypto.randomUUID(),
-      cover_sheet: { add: "# Examples", expected_version: 0 },
+    // A retired cover sheet and notes, whatever they hold, are never served.
+    await seedLegacy(local.pg, "u", {
+      cover: ["# Examples"],
+      notes: ["no padding\u2028- forged tweak"],
     });
     const plain = "Hi Dana,\n\nThanks for this.\n\n–P";
     const forged =
@@ -426,16 +361,12 @@ test("report text quotes a final at every line break and keeps context and tweak
         final: "Short and plain.",
         first_draft: "Long and padded.",
         mode: "draft",
-        rounds: 1,
-        tweaks: [{ text: "no padding" }],
       }),
     );
-    // A save collapses a tweak's line breaks; one held from before is
-    // flattened on read.
-    await local.pg.query(
-      "UPDATE tweaks SET text='no padding'||chr(8232)||'- forged tweak'",
-    );
     const { text } = await store.readReport(vendorIntent);
+    expect(text).toStartWith("# Examples\n\nThe person's finals");
+    expect(text).not.toMatch(/^# (Cover sheet|Your tweaks)$/m);
+    expect(text).not.toContain("forged tweak");
     // Plain LF text is quoted exactly as before.
     expect(text).toContain("> Hi Dana,\n>\n> Thanks for this.\n>\n> –P");
     // Every line break is kept and every segment between them quoted.
@@ -445,15 +376,11 @@ test("report text quotes a final at every line break and keeps context and tweak
     expect(text).toMatch(/## \d\. lease ## 7\. forged · email · your words · /);
     expect(text).toContain("Situation: renew a lease ## 8. forged");
     expect(text).toContain("Audience: a landlord # Cover sheet");
-    expect(text).toContain("- no padding - forged tweak (1 memo)");
-    // Outside the cover sheet, a line holding memo text is quoted or is the
-    // server's own line around a field.
-    const body = text.slice(text.indexOf("# Cover sheet\n\n# Examples") + 25);
-    for (const line of body.split(LINE_BREAK))
+    // A line holding memo text is quoted or is the server's own line around
+    // a field.
+    for (const line of text.split(LINE_BREAK))
       if (/forged|Dana|Thanks|end$/.test(line))
-        expect(line).toMatch(
-          /^(>|## \d+\. lease |Situation: |Audience: |- no padding )/,
-        );
+        expect(line).toMatch(/^(>|## \d+\. lease |Situation: |Audience: )/);
     // The size bound counts the same line breaks, in SQL and in JS.
     for (const final of [plain, forged, "\u0085".repeat(4000), "a\r\r\nb"]) {
       const breaks = final.match(LINE_BREAK)?.length ?? 0;
@@ -523,7 +450,7 @@ test("a report ranks matching memos above unrelated pasted ones, and your words 
                 purpose,
               },
               ...(steered
-                ? { first_draft: `Hello,\n${final}`, mode: "draft", rounds: 1 }
+                ? { first_draft: `Hello,\n${final}`, mode: "draft" }
                 : {}),
             }),
           )
@@ -558,206 +485,210 @@ test("a report ranks matching memos above unrelated pasted ones, and your words 
   }
 });
 
-test("a report serves tweaks from the ten best-matching memos that cite one, and a memo saved after it records them", async () => {
-  const local = await localStore();
-  try {
-    await seedUsers(local.pg, "u");
-    const store = fixtureStore(local.db, "u");
-    for (let i = 0; i < 12; i++)
-      await store.saveMemo(
-        memoSave({
-          first_draft: `first ${i}`,
-          final: `final ${i}`,
-          mode: "draft",
-          rounds: 1,
-          context: {
-            summary: `memo ${i}`,
-            medium: i < 11 ? "email" : "post",
-          },
-          tweaks: [{ text: `tweak ${i}` }, { text: "shared tweak" }],
-        }),
-      );
-    const report = await store.readReport(vendorIntent);
-    expect(report.tweaks).toHaveLength(10);
-    expect(report.tweaks.map((t) => t.text)).not.toContain("tweak 11");
-    const saved = await store.saveMemo(
-      memoSave({
-        first_draft: "a",
-        final: "b",
-        mode: "draft",
-        rounds: 1,
-        report_id: report.report_id,
-      }),
-    );
-    expect(
-      (
-        await local.pg.query<{ served: string[] }>(
-          "SELECT served_tweak_ids served FROM memos WHERE id=$1",
-          [saved.memo!.memo_id],
-        )
-      ).rows[0]!.served,
-    ).toEqual(report.tweaks.map((t) => t.tweak_id));
-    expect(
-      await store.saveMemo(
-        memoSave({ final: "c", report_id: crypto.randomUUID() }),
-      ),
-    ).toMatchObject({ status: "failed", error: "invalid_report" });
-  } finally {
-    await local.dispose();
-  }
-});
-
-test("a tweak's served and needed-again counts come from kept-draft memos of its account, in report text, the TPS read and TPS.md", async () => {
+test("a report serves examples only, whatever legacy notes and cover sheets hold: it writes nothing, counts every memo and sets is_empty by what it served", async () => {
   const local = await localStore();
   try {
     await seedUsers(local.pg, "u", "other");
     const store = fixtureStore(local.db, "u");
-    const drafted = (memo: Partial<MemoInput>) =>
-      store.saveMemo(
-        memoSave({ first_draft: draft, mode: "draft", rounds: 1, ...memo }),
-      );
-    const first = await drafted({
-      tweaks: [{ text: "No warm-up opener" }, { text: "Sign off –P" }],
-    });
-    const opener = first.memo!.tweaks[0]!.tweak_id;
-    // Served both and cited neither.
-    await drafted({
-      final: "Not this time.",
-      report_id: (await store.readReport(vendorIntent)).report_id,
-    });
-    // Served both and cited the opener: needed again.
-    await drafted({
-      final: "Thanks, no.",
-      report_id: (await store.readReport(vendorIntent)).report_id,
-      tweaks: [{ tweak_id: opener }],
-    });
-    // Without a kept first draft, a served and cited memo does not count.
+    const tables = async () =>
+      (
+        await local.pg.query<Record<string, number>>(
+          `SELECT (SELECT count(*)::int FROM served_reports) AS served,
+            (SELECT count(*)::int FROM cover_sheets) AS covers,
+            (SELECT count(*)::int FROM tweaks) AS notes,
+            (SELECT count(*)::int FROM tweak_citations) AS citations,
+            (SELECT count(*)::int FROM save_requests) AS receipts`,
+        )
+      ).rows[0]!;
+    // No memos: the empty line, the count and no examples, a legacy cover
+    // sheet or not.
+    const empty = {
+      text: "Nothing similar is on file yet. Write from the request, and don't claim to know the person's voice.",
+      is_empty: true,
+      examples: [],
+      memos: 0,
+    };
+    expect(await store.readReport(vendorIntent)).toMatchObject(empty);
+    await seedLegacy(local.pg, "u", { cover: ["No em dashes", "Sign off –P"] });
+    expect(await store.readReport(vendorIntent)).toMatchObject(empty);
+    // Only untouched or oversized memos: an empty report, but a count.
     await store.saveMemo(
       memoSave({
-        first_draft_missing: true,
+        first_draft: "Fine by me.",
+        final: "Fine by me.",
         mode: "draft",
-        rounds: 1,
-        final: "We'll pass.",
-        report_id: (await store.readReport(vendorIntent)).report_id,
-        tweaks: [{ tweak_id: opener }],
       }),
     );
-    // Cited but not served.
-    await drafted({
-      final: "No, thanks.",
-      tweaks: [{ tweak_id: opener }, { text: "Short paragraphs" }],
+    await store.saveMemo(memoSave({ final: "z ".repeat(70000) }));
+    expect(await store.readReport(vendorIntent)).toMatchObject({
+      ...empty,
+      memos: 2,
     });
-    // Another account's memo naming this tweak id is not counted.
-    const foreign = await fixtureStore(local.db, "other").saveMemo(
-      memoSave({ first_draft: draft, mode: "draft", rounds: 1 }),
+    // Memos and legacy notes from edits: examples and their changes only.
+    const kept = await store.saveMemo(
+      memoSave({ first_draft: draft, final, mode: "draft" }),
     );
-    await local.pg.query(
-      "UPDATE memos SET report_id=$1,served_tweak_ids=ARRAY[$2] WHERE id=$3",
-      [crypto.randomUUID(), opener, foreign.memo!.memo_id],
-    );
+    await seedLegacy(local.pg, "u", {
+      notes: ["No warm-up opener", "Sign off –P"],
+      citedBy: kept.memo!.memo_id,
+    });
+    // Another account's memos never count.
+    await fixtureStore(local.db, "other").saveMemo(memoSave());
+    const before = await tables();
     const report = await store.readReport(vendorIntent);
-    expect(report.text).toContain(
-      'What the person made an AI change in similar memos, best match first. "needed again" counts drafts that were given the tweak and still needed it.',
-    );
-    expect(report.text).toContain(
-      "- No warm-up opener (4 memos; needed again 1 of 2)",
-    );
-    expect(report.text).toMatch(/^- Sign off –P \(1 memo\)$/m);
-    expect(report.text).toContain("- Short paragraphs (1 memo)");
-    expect(report.tweaks.find((t) => t.tweak_id === opener)).toEqual({
-      tweak_id: opener,
-      text: "No warm-up opener",
-      memos: 4,
+    expect(report).toMatchObject({
+      is_empty: false,
+      memos: 3,
+      keep_memos: true,
     });
-    const tps = tpsStore(local.db, "u");
-    expect(
-      (await tps.read()).tweaks.map(({ text, memos, served, needed_again }) => [
-        text,
-        memos,
-        served,
-        needed_again,
-      ]),
-    ).toEqual([
-      ["No warm-up opener", 4, 2, 1],
-      ["Short paragraphs", 1, 0, 0],
-      ["Sign off –P", 1, 2, 0],
-    ]);
-    expect(await tps.exportTps()).toContain(
-      "## Tweaks\n\n- No warm-up opener (4 memos; served 2, needed again 1)\n- Short paragraphs (1 memo)\n- Sign off –P (1 memo; served 2, needed again 0)\n",
+    expect(report.examples.map((e) => e.memo_id)).toEqual([kept.memo!.memo_id]);
+    expect(report.text).toStartWith("# Examples\n");
+    expect(report.text).toContain(CHANGES_HEADING);
+    for (const retired of [
+      "Cover sheet",
+      "No em dashes",
+      "No warm-up opener",
+      "Your tweaks",
+    ])
+      expect(report.text).not.toContain(retired);
+    expect(Object.keys(report).sort()).toEqual(
+      ["examples", "is_empty", "keep_memos", "kinds", "memos", "text"].sort(),
     );
+    // Same state, same text; the read wrote nothing.
+    expect((await store.readReport(vendorIntent)).text).toBe(report.text);
+    expect(await tables()).toEqual(before);
   } finally {
     await local.dispose();
   }
 });
 
-test("the cover sheet takes whole lines from an AI, fenced by version and capped, and removing the last line empties it", async () => {
+test("the TPS read lists each memo with its tweaks and no retired data; TPS.md lists every memo's tweaks, then the retired cover sheet and notes only when present", async () => {
   const local = await localStore();
   try {
     await seedUsers(local.pg, "u");
     const store = fixtureStore(local.db, "u");
-    const cover = (change: {
-      add?: string;
-      remove?: string;
-      expected_version: number;
-    }) =>
-      store.saveMemo({ request_id: crypto.randomUUID(), cover_sheet: change });
-    expect(await store.readCoverSheet()).toMatchObject({
-      text: "",
-      version: 0,
-      is_empty: true,
-      keep_memos: true,
-    });
-    expect(
-      await cover({ add: "No em dashes", expected_version: 0 }),
-    ).toMatchObject({
-      status: "saved",
-      cover_sheet: { version: 1, text: "No em dashes" },
-    });
-    expect(
-      await cover({ add: "Sign off –P", expected_version: 0 }),
-    ).toMatchObject({
-      status: "conflict",
-      cover_sheet: { version: 1 },
-    });
-    await cover({ add: "Sign off –P", expected_version: 1 });
-    expect(
-      await cover({ add: "Sign off –P", expected_version: 2 }),
-    ).toMatchObject({
-      status: "unchanged",
-    });
-    expect(
-      await cover({ remove: "Sign off", expected_version: 2 }),
-    ).toMatchObject({
-      status: "failed",
-      error: "line_not_found",
-    });
-    expect(
-      await cover({ remove: "No em dashes", expected_version: 2 }),
-    ).toMatchObject({ status: "saved", cover_sheet: { text: "Sign off –P" } });
-    // Removing the last line empties it, as a new version.
-    expect(
-      await cover({ remove: "Sign off –P", expected_version: 3 }),
-    ).toMatchObject({ status: "saved", cover_sheet: { version: 4, text: "" } });
-    expect(await store.readCoverSheet()).toMatchObject({
-      text: "",
-      version: 4,
-      is_empty: true,
-    });
-    let version = 4;
-    let last;
-    for (let i = 0; i < 6; i++)
-      last = await cover({
-        add: `${i}${"z".repeat(290)}`,
-        expected_version: version++,
-      });
-    expect(last).toMatchObject({
-      status: "failed",
-      error: "cover_sheet_limit",
-    });
-    expect((await store.readCoverSheet()).text.length).toBeLessThanOrEqual(
-      1500,
+    const tps = tpsStore(local.db, "u");
+    const at = (day: number, id: string) =>
+      local.pg.query(
+        `UPDATE memos SET created_at=timestamptz '2026-10-01T00:00:00Z'+$1*interval '1 day' WHERE id=$2`,
+        [day, id],
+      );
+    const own = await store.saveMemo(memoSave({ final: "My own words." }));
+    const drafted = await store.saveMemo(
+      memoSave({
+        first_draft: draft,
+        final,
+        mode: "draft",
+        request: "Decline the call, short.",
+      }),
     );
-    expect((await store.readCoverSheet()).is_empty).toBe(false);
+    const edited = await store.saveMemo(
+      memoSave({
+        first_draft: "Thanks, see you **Friday**.",
+        final: "Thanks, see you Friday!",
+        mode: "edit",
+      }),
+    );
+    const accepted = await store.saveMemo(
+      memoSave({ first_draft: "As is.", final: "As is.", mode: "draft" }),
+    );
+    const missing = await store.saveMemo(
+      memoSave({
+        final: "No draft kept.",
+        first_draft_missing: true,
+        mode: "draft",
+      }),
+    );
+    // Before #109: a kept first draft with no recorded changes.
+    const early = await store.saveMemo(
+      memoSave({
+        first_draft: "Old draft.",
+        final: "Old final.",
+        mode: "draft",
+      }),
+    );
+    await local.pg.query("DELETE FROM memo_changes WHERE memo_id=$1", [
+      early.memo!.memo_id,
+    ]);
+    await local.pg.query("UPDATE memos SET changes_state=NULL WHERE id=$1", [
+      early.memo!.memo_id,
+    ]);
+    const huge = await store.saveMemo(
+      memoSave({
+        first_draft: Array.from({ length: 4000 }, (_, i) => `w${i}`).join(" "),
+        final: Array.from({ length: 4000 }, (_, i) => `v${i}`).join(" "),
+        mode: "draft",
+      }),
+    );
+    const ids = [own, drafted, edited, accepted, missing, early, huge].map(
+      (m) => m.memo!.memo_id,
+    );
+    for (const [i, id] of ids.entries()) await at(i, id);
+    // A truncated side, as a long change stores it.
+    await local.pg.query(
+      `UPDATE memo_changes SET truncated=true WHERE memo_id=$1 AND n=(SELECT min(n) FROM memo_changes WHERE memo_id=$1)`,
+      [drafted.memo!.memo_id],
+    );
+    const view = await tps.read();
+    expect(Object.keys(view).sort()).toEqual([
+      "keep_memos",
+      "memos",
+      "scoreboard",
+    ]);
+    const listed = view.memos.find((m) => m.id === drafted.memo!.memo_id)!;
+    expect(listed.changes.length).toBeGreaterThan(0);
+    expect(listed).not.toHaveProperty("rounds");
+    expect(listed).not.toHaveProperty("served");
+    // TPS.md without legacy data: no legacy section.
+    expect(await tps.exportTps()).not.toContain("(no longer used)");
+    await seedLegacy(local.pg, "u", {
+      cover: ["Old line", "Current line\n## not a heading"],
+      notes: ["No warm-up opener", "# not a heading either"],
+      citedBy: drafted.memo!.memo_id,
+    });
+    const md = await tps.exportTps();
+    // Every memo, newest first, each with its tweaks or why none are listed:
+    // nothing for writing the person gave or a missing first draft.
+    expect(md).toStartWith("# TPS report\n\n## Email\n\n### ");
+    expect(md.match(/^### /gm)).toHaveLength(7);
+    const finals = [
+      "v0 ",
+      "Old final.",
+      "No draft kept.",
+      "As is.",
+      "Thanks, see you Friday!",
+      "Thanks for reaching out.",
+      "My own words.",
+    ];
+    const positions = finals.map((f) => md.indexOf(`> ${f}`));
+    expect(positions.every((i, n) => i > (positions[n - 1] ?? 0))).toBe(true);
+    expect(md).toContain("Changes were not recorded for this memo.");
+    expect(md).toContain("No changes were listed.");
+    expect(md).toContain("Too many changes to list.");
+    const fences = md.match(/^Tweaks:\n~~~text\n[\s\S]*?\n~~~$/gm) ?? [];
+    // The drafted memo's rows, and the edit's (formatting included).
+    expect(fences).toHaveLength(2);
+    expect(fences.join("\n")).toContain(" … [shortened]");
+    expect(fences.join("\n")).toContain('"**Friday**."');
+    // First drafts stay out; the retired data comes last, fenced.
+    expect(md).not.toContain(draft);
+    expect(md).not.toContain("w100 ");
+    expect(md.indexOf("## Cover sheet (no longer used)")).toBeGreaterThan(
+      md.lastIndexOf("### "),
+    );
+    expect(md).toContain(
+      "## Cover sheet (no longer used)\n\n~~~text\nCurrent line\n## not a heading\n~~~",
+    );
+    expect(md).not.toContain("Old line");
+    const notes = md.slice(
+      md.indexOf(
+        "## Earlier notes from your edits (no longer used)\n\n~~~text\n",
+      ),
+    );
+    expect(notes).toEndWith("\n~~~\n");
+    expect(notes).toContain("\n- No warm-up opener\n");
+    expect(notes).toContain("\n- # not a heading either\n");
+    expect(md).not.toMatch(/served \d|needed again|\d memos?\)/);
   } finally {
     await local.dispose();
   }
@@ -805,10 +736,10 @@ test("memo_context corrects context and kind but never words; Keep memos off ref
     await local.pg.query(
       "INSERT INTO memo_settings(user_id,keep_memos) VALUES ('u',false)",
     );
-    expect((await store.readCoverSheet()).keep_memos).toBe(false);
+    expect((await store.readReport(vendorIntent)).keep_memos).toBe(false);
     expect(
       await store.saveMemo(
-        memoSave({ first_draft: "a", final: "b", mode: "draft", rounds: 1 }),
+        memoSave({ first_draft: "a", final: "b", mode: "draft" }),
       ),
     ).toMatchObject({ status: "failed", error: "memos_off" });
     expect(
@@ -823,24 +754,20 @@ test("the scoreboard appears at ten scored memos, compares first five with lates
   const at = (day: number) => new Date(Date.UTC(2026, 10, day));
   const memos = Array.from({ length: 10 }, (_, i) => ({
     mode: "draft" as const,
-    rounds: i < 5 ? 3 : 1,
     change: i < 5 ? 0.5 : 0.1,
     untouched: i >= 8,
     at: at(i + 1),
   }));
   const [drafts, edits] = scoreboard(
-    [
-      ...memos,
-      { mode: "edit", rounds: 0, change: 0, untouched: true, at: at(1) },
-    ],
+    [...memos, { mode: "edit", change: 0, untouched: true, at: at(1) }],
     at(20),
   );
   expect(drafts).toEqual({
     mode: "draft",
     count: 10,
     basis: "first-five",
-    latest: { rounds: 1, change: 0.1, accepted: 0.4 },
-    earlier: { rounds: 3, change: 0.5, accepted: 0 },
+    latest: { change: 0.1, accepted: 0.4 },
+    earlier: { change: 0.5, accepted: 0 },
   });
   expect(edits).toEqual({ mode: "edit", count: 1 });
   expect(scoreboard(memos.slice(0, 9))[0]).toEqual({ mode: "draft", count: 9 });
@@ -940,8 +867,6 @@ test("a drafted memo stores code's own changes, unlabelled: Markdown-only ones m
       first_draft: first,
       final,
       mode: "draft",
-      rounds: 1,
-      tweaks: [{ text: "no warm-up opener" }],
     });
     const saved = await store.saveMemo(input);
     // Counts only: the Markdown-only row is not counted as found.
@@ -955,7 +880,7 @@ test("a drafted memo stores code's own changes, unlabelled: Markdown-only ones m
         )
       ).rows;
     // Each row is code's own cut of the stored texts at its offsets; no row
-    // carries a label or a tweak, even on a memo that teaches one.
+    // carries a label or a link to a legacy note.
     expect(await rows(saved.memo!.memo_id)).toEqual([
       {
         n: 0,
@@ -1011,7 +936,6 @@ test("a drafted memo stores code's own changes, unlabelled: Markdown-only ones m
         { n: 1, about: "format" },
         { n: 2, before: "", after: "–S" },
       ],
-      change_count: 3,
     });
     // A long spot keeps its offsets and its first 300 characters, marked.
     const long = await store.saveMemo(
@@ -1019,7 +943,6 @@ test("a drafted memo stores code's own changes, unlabelled: Markdown-only ones m
         first_draft: "Hello. " + "x".repeat(400),
         final: "Hello. y",
         mode: "draft",
-        rounds: 1,
       }),
     );
     expect(await rows(long.memo!.memo_id)).toMatchObject([
@@ -1038,7 +961,6 @@ test("a drafted memo stores code's own changes, unlabelled: Markdown-only ones m
         first_draft: spots.join(" "),
         final: spots.map((w) => `x${w}`).join(" "),
         mode: "draft",
-        rounds: 1,
       }),
     );
     expect(big.memo!.changes).toEqual({ state: "too_large", found: 0 });
@@ -1054,7 +976,6 @@ test("a drafted memo stores code's own changes, unlabelled: Markdown-only ones m
         first_draft: "Same.",
         final: "Same.",
         mode: "edit",
-        rounds: 0,
       }),
     );
     expect(untouched.memo!.changes).toEqual({ state: "itemized", found: 0 });
@@ -1063,7 +984,6 @@ test("a drafted memo stores code's own changes, unlabelled: Markdown-only ones m
         final: "Gone.",
         first_draft_missing: true,
         mode: "draft",
-        rounds: 1,
       }),
       memoSave({ final: "My own." }),
     ]) {
@@ -1318,7 +1238,6 @@ test("a report serves whole stored changes under drafted examples: each line dec
             first_draft: first,
             final: mutate(first),
             mode: "draft",
-            rounds: 1,
           }),
         );
       }
@@ -1485,7 +1404,7 @@ test("what qualifies: drafted, kept, itemized, steered memos small enough to ser
       await seedUsers(local.pg, user);
       const store = fixtureStore(local.db, user);
       const saved = await store.saveMemo(
-        memoSave({ mode: "draft", rounds: 1, ...c.memo }),
+        memoSave({ mode: "draft", ...c.memo }),
       );
       const id = saved.memo!.memo_id;
       // Stored states no save writes today, set by hand for this account.
@@ -1510,7 +1429,6 @@ test("what qualifies: drafted, kept, itemized, steered memos small enough to ser
           first_draft: "Hi Dana, I hope this finds you well.",
           final: "Dana —",
           mode: "draft",
-          rounds: 1,
         }),
       )
     ).memo!.memo_id;
@@ -1547,7 +1465,6 @@ test("the change query: scoped to the account, for at most three memos, at most 
           first_draft: `Hi Dana, I hope this finds you well. Draft ${i}.`,
           final: `Dana — draft ${i}.`,
           mode: "draft",
-          rounds: 1,
         }),
       );
     // Account B holds a memo under the same id as one of A's, with changes
@@ -1558,7 +1475,6 @@ test("the change query: scoped to the account, for at most three memos, at most 
         first_draft: "Hello Bob, BMARKER cheers.",
         final: "Bob — cheers.",
         mode: "draft",
-        rounds: 1,
       }),
     );
     await local.pg.exec(`
@@ -1612,7 +1528,8 @@ test("the change query: scoped to the account, for at most three memos, at most 
     const fetch = changeReads[0]!;
     expect(statements.indexOf(fetch)).toBe(statements.length - 1);
     expect(statements.length - 1).toBe(ranking + 1);
-    expect(fetch.sql).toContain("INSERT INTO served_reports");
+    // The report writes nothing: no served record beside the fetch.
+    expect(fetch.sql).not.toMatch(/INSERT|UPDATE|DELETE/);
     for (const x of statements)
       expect(x.sql).not.toMatch(/first_draft(?!_state)/);
     const sub =
@@ -1718,14 +1635,11 @@ test("plain LF report text is unchanged, and the example size bound measures the
   try {
     await seedUsers(local.pg, "L");
     const store = fixtureStore(local.db, "L");
-    await store.saveMemo({
-      request_id: crypto.randomUUID(),
-      cover_sheet: { add: "Short lines.", expected_version: 0 },
-    });
+    await seedLegacy(local.pg, "L", { cover: ["Short lines."] });
     await store.saveMemo(memoSave());
     const report = await store.readReport(vendorIntent);
     expect(report.text).toBe(
-      `# Cover sheet\n\nShort lines.\n\n# Examples\n\nThe person's finals that best match this draft, best first. Imitate their wording.\n\n## 1. email · your words · ${report.examples[0]!.date}\nSituation: decline a vendor's meeting request\nAudience: a vendor · Purpose: decline\n\n> Thanks for thinking of us. We'll pass this quarter.\n>\n> –P`,
+      `# Examples\n\nThe person's finals that best match this draft, best first. Imitate their wording.\n\n## 1. email · your words · ${report.examples[0]!.date}\nSituation: decline a vendor's meeting request\nAudience: a vendor · Purpose: decline\n\n> Thanks for thinking of us. We'll pass this quarter.\n>\n> –P`,
     );
   } finally {
     await local.dispose();
@@ -1744,7 +1658,6 @@ test("plain LF report text is unchanged, and the example size bound measures the
     bytes: utf8Bytes(final),
     lines: final.match(LINE_BREAK)?.length ?? 0,
     lexical: 0,
-    tweaks: [],
     mode: null,
     first_draft_state: "none" as const,
     changes_state: null,
@@ -1874,31 +1787,12 @@ test("change blocks: rows picked first, second and last after every check, charg
   );
 });
 
-test("a memo names at most three distinct tweaks, a repeat by id or wording counting once", () => {
-  const memo = (tweaks: MemoInput["tweaks"]) =>
-    checkMemo({
-      ...memoSave().memo!,
-      first_draft: draft,
-      mode: "draft",
-      rounds: 1,
-      tweaks,
-    });
-  const three = ["one", "Two", "two.", "three"].map((text) => ({ text }));
-  expect(memo(three)).toMatchObject({ ok: true });
-  expect(memo([...three, { tweak_id: "t" }])).toEqual({
-    ok: false,
-    message: "This memo names 4 tweaks; a memo teaches at most 3.",
-    field: "tweaks",
-  });
-});
-
 test("a request is the person's typed ask on a drafted memo: trimmed, capped, never pasted mail, kept unserved, and removable on the TPS page", async () => {
   const drafted = (request: string, rest: Partial<MemoInput> = {}) =>
     checkMemo({
       ...memoSave().memo!,
       first_draft_missing: true,
       mode: "draft",
-      rounds: 1,
       request,
       ...rest,
     });
@@ -1931,9 +1825,7 @@ test("a request is the person's typed ask on a drafted memo: trimmed, capped, ne
     const input = memoSave({
       first_draft: draft,
       mode: "draft",
-      rounds: 1,
       request: "  Say no to the vendor's call, nicely.  ",
-      tweaks: [{ text: "no warm-up opener" }],
     });
     const saved = await store.saveMemo(input);
     // The result and its receipt hold counts, never the request or a quote.
@@ -1968,51 +1860,6 @@ test("a request is the person's typed ask on a drafted memo: trimmed, capped, ne
   }
 });
 
-test("a reword restarts a tweak's score from the new text; the same text keeps it", async () => {
-  const local = await localStore();
-  try {
-    await seedUsers(local.pg, "u");
-    const store = fixtureStore(local.db, "u");
-    const tps = tpsStore(local.db, "u");
-    const save = (memo: Partial<MemoInput>) =>
-      store.saveMemo(memoSave({ mode: "draft", rounds: 1, ...memo }));
-    const taught = await save({
-      first_draft: "Hi! Hope you're well. We'll pass.",
-      final: "We'll pass.",
-      tweaks: [{ text: "no warm-up opener" }],
-    });
-    const opener = taught.memo!.tweaks[0]!.tweak_id;
-    // Served and needed again once.
-    await save({
-      first_draft: "Hi! Hope you're well. Not now.",
-      final: "Not now.",
-      report_id: (await store.readReport(vendorIntent)).report_id,
-      tweaks: [{ tweak_id: opener }],
-    });
-    expect((await tps.read()).tweaks[0]).toMatchObject({
-      served: 1,
-      needed_again: 1,
-    });
-    // The same text, resent, changes nothing.
-    expect(await tps.rewordTweak(opener, "no warm-up opener")).toBe(true);
-    expect((await tps.read()).tweaks[0]).toMatchObject({ served: 1 });
-    expect(await tps.rewordTweak(opener, "No warm-up opener at all")).toBe(
-      true,
-    );
-    expect((await tps.read()).tweaks[0]).toMatchObject({
-      text: "No warm-up opener at all",
-      memos: 2,
-      served: 0,
-      needed_again: 0,
-    });
-    expect((await store.readReport(vendorIntent)).text).toMatch(
-      /^- No warm-up opener at all \(2 memos\)$/m,
-    );
-  } finally {
-    await local.dispose();
-  }
-});
-
 // The invisible line and paragraph separators, built from their code points so
 // this file holds neither literally.
 const LS = String.fromCharCode(0x2028);
@@ -2024,6 +1871,13 @@ const isControl = (c: string) => {
   const n = c.charCodeAt(0);
   return n < 0x20 || (n >= 0x7f && n <= 0x9f);
 };
+/** The bidirectional controls rule B refuses, by code point: embeddings
+ * and overrides, then isolates. */
+const BIDI = [
+  0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069,
+].map((n) => String.fromCharCode(n));
+/** The marks rule B keeps: they open no span. */
+const MARKS = [0x200e, 0x200f, 0x061c].map((n) => String.fromCharCode(n));
 /** The one-line rule (docs/memos.md, "Bounds") written out a second way: the
  * value, or undefined when it is refused. */
 const oneLineRule = (input: string, max: number) => {
@@ -2032,12 +1886,15 @@ const oneLineRule = (input: string, max: number) => {
     if (c !== LS && c !== PS) joined += c;
     else if (!joined.endsWith(LS)) joined += LS;
   const value = joined.split(LS).join(" ").trim();
-  return value.length >= 1 && value.length <= max && ![...value].some(isControl)
+  return value.length >= 1 &&
+    value.length <= max &&
+    ![...value].some(isControl) &&
+    ![...value].some((c) => BIDI.includes(c))
     ? value
     : undefined;
 };
 
-test("one-line fields turn each run of U+2028 and U+2029 into one space, then trim; control characters are refused as before, on every write path", async () => {
+test("one-line fields turn each run of U+2028 and U+2029 into one space, then trim; control characters and bidi span controls are refused, marks kept, on every write path", async () => {
   const x = (n: number) => "x".repeat(n);
   // The rule's table, on a 200-character field.
   const table: [string, string | undefined][] = [
@@ -2052,22 +1909,29 @@ test("one-line fields turn each run of U+2028 and U+2029 into one space, then tr
     ),
     [`${x(199)}${LS}x`, undefined],
     [`${x(200)}${LS}`, x(200)],
+    // Rule B: refused, never stripped; the marks stay.
+    ...BIDI.map((c) => [`a${c}b`, undefined] as [string, undefined]),
+    ...MARKS.map((c) => [`a${c}b`, `a${c}b`] as [string, string]),
   ];
   for (const [input, value] of table) {
     expect([input, oneLine(200).safeParse(input).data]).toEqual([input, value]);
     expect(oneLineRule(input, 200)).toBe(value);
   }
-  // The request is longer text: kept as sent, separators included.
-  const request = `Decline it${LS}politely.\nShort.`;
-  expect(
-    memoInput.parse({
-      ...memoSave().memo!,
-      first_draft: "Long.",
-      mode: "draft",
-      rounds: 1,
-      request,
-    }).request,
-  ).toBe(request);
+  // The request, final and first draft are longer text: kept as sent,
+  // separators and bidi controls included.
+  const request = `Decline it${LS}politely.\nShort ${BIDI[4]}abc${BIDI[2]}.`;
+  const kept = memoInput.parse({
+    ...memoSave().memo!,
+    final: `We'll pass ${BIDI[4]}cba${BIDI[2]}.`,
+    first_draft: `Long ${BIDI[5]}x${BIDI[8]}.`,
+    mode: "draft",
+    request,
+  });
+  expect([kept.request, kept.final, kept.first_draft]).toEqual([
+    request,
+    `We'll pass ${BIDI[4]}cba${BIDI[2]}.`,
+    `Long ${BIDI[5]}x${BIDI[8]}.`,
+  ]);
 
   // Generated: every one-line field, parsed as the MCP server parses it,
   // holds exactly what the rule gives, so never a separator or control.
@@ -2078,6 +1942,7 @@ test("one-line fields turn each run of U+2028 and U+2029 into one space, then tr
   };
   const alphabet = ["a", "b", " ", LS, PS, "\n", "\r", "\t", "\v", "\f", NEL];
   alphabet.push("\0", "\x1b", "\x7f", String.fromCharCode(0xa0), "é");
+  alphabet.push(...BIDI, ...MARKS);
   const generated = Array.from({ length: 1500 }, (_, i) => {
     const s = Array.from(
       { length: Math.floor(random() * 10) },
@@ -2126,23 +1991,12 @@ test("one-line fields turn each run of U+2028 and U+2029 into one space, then tr
           ?.new_kind,
     ],
     [
-      200,
-      (v) => {
-        const tweak = memoInput.safeParse({
-          final: "f",
-          context,
-          tweaks: [{ text: v }],
-        }).data?.tweaks?.[0];
-        return tweak && "text" in tweak ? tweak.text : undefined;
-      },
-    ],
-    [
-      300,
+      60,
       (v) =>
         saveMemoInput.safeParse({
-          request_id: crypto.randomUUID(),
-          cover_sheet: { add: v, expected_version: 0 },
-        }).data?.cover_sheet?.add,
+          request_id: "r",
+          memo_context: { memo_id: "m", context, new_kind: v },
+        }).data?.memo_context?.new_kind,
     ],
   ];
   for (const s of generated)
@@ -2150,16 +2004,17 @@ test("one-line fields turn each run of U+2028 and U+2029 into one space, then tr
       const value = parse(s);
       expect([s, value]).toEqual([s, oneLineRule(s, max)]);
       if (value !== undefined)
-        expect([...value].some((c) => SEPARATORS.test(c) || isControl(c))).toBe(
-          false,
-        );
+        expect(
+          [...value].some(
+            (c) => SEPARATORS.test(c) || isControl(c) || BIDI.includes(c),
+          ),
+        ).toBe(false);
     }
 
   const local = await localStore();
   try {
     await seedUsers(local.pg, "u");
     const store = fixtureStore(local.db, "u");
-    const tps = tpsStore(local.db, "u");
     // Each save goes through the tool's schema first, as the MCP server's does.
     const save = (input: unknown) => store.saveMemo(saveMemoInput.parse(input));
     const request_id = crypto.randomUUID();
@@ -2169,7 +2024,6 @@ test("one-line fields turn each run of U+2028 and U+2029 into one space, then tr
         final: "We'll pass.",
         first_draft: "Hi! Hope you're well. We'll pass.",
         mode: "draft",
-        rounds: 1,
         context: {
           summary: `decline a vendor${LS}their email asked for a call`,
           medium: "email",
@@ -2177,13 +2031,12 @@ test("one-line fields turn each run of U+2028 and U+2029 into one space, then tr
           purpose: `decline${LS}${PS}`,
         },
         new_kind: `vendor${PS}${LS}decline`,
-        tweaks: [{ text: `no warm-up${LS}opener` }],
       },
     };
     const saved = await save(sent);
     expect(saved).toMatchObject({
       status: "saved",
-      memo: { tweaks: [{ text: "no warm-up opener" }] },
+      memo: { kind: "vendor decline" },
     });
     // The hash is of the value after the rule: the same save sent with plain
     // spaces replays it; other spacing is different input.
@@ -2193,8 +2046,10 @@ test("one-line fields turn each run of U+2028 and U+2029 into one space, then tr
     replayed.memo.context.audience = "a vendor";
     replayed.memo.context.purpose = "decline";
     replayed.memo.new_kind = "vendor decline";
-    replayed.memo.tweaks = [{ text: "no warm-up opener" }];
-    expect(await save(replayed)).toEqual(saved);
+    expect(await save(replayed)).toEqual({
+      ...saved,
+      replayed: expect.any(String),
+    });
     replayed.memo.new_kind = "vendor  decline";
     await expect(save(replayed)).rejects.toMatchObject({
       code: "request_id_reused",
@@ -2213,119 +2068,277 @@ test("one-line fields turn each run of U+2028 and U+2029 into one space, then tr
         kind_id: saved.memo!.kind_id,
       },
     });
-    // The person's reword on the TPS page follows the same rule.
-    const tweakId = saved.memo!.tweaks[0]!.tweak_id;
-    expect(await tps.rewordTweak(tweakId, ` no${LS}${PS}opener${PS}`)).toBe(
-      true,
-    );
-    for (const text of ["no\nopener", "no\topener", `no${NEL}opener`, LS])
-      await expect(tps.rewordTweak(tweakId, text)).rejects.toMatchObject({
+    // A bidi control in a one-line field is refused before any receipt
+    // lookup, with the rule-A4 sentence, and writes nothing; a mark is kept.
+    const receipts = async () =>
+      (await local.pg.query("SELECT 1 FROM save_requests")).rows.length;
+    const counted = await receipts();
+    for (const c of BIDI) {
+      const bad = structuredClone(sent);
+      bad.memo.context.summary = `decline${c}a vendor`;
+      await expect(store.saveMemo(bad as never)).rejects.toMatchObject({
+        code: "invalid_input",
+        message: expect.stringContaining(
+          "Milton can't recover an earlier outcome for this request.",
+        ),
+      });
+      // Even under a request id that already holds a receipt.
+      bad.request_id = request_id;
+      await expect(store.saveMemo(bad as never)).rejects.toMatchObject({
         code: "invalid_input",
       });
-    // A cover sheet line: added sanitised, then matched in that form.
+    }
+    expect(await receipts()).toBe(counted);
     expect(
-      await save({
-        request_id: crypto.randomUUID(),
-        cover_sheet: { add: `Sign off${LS}–P`, expected_version: 0 },
-      }),
-    ).toMatchObject({ status: "saved", cover_sheet: { text: "Sign off –P" } });
-    expect(
-      await save({
-        request_id: crypto.randomUUID(),
-        cover_sheet: { add: "Sign off –P", expected_version: 1 },
-      }),
-    ).toMatchObject({ status: "unchanged" });
-    expect(
-      await save({
-        request_id: crypto.randomUUID(),
-        cover_sheet: { remove: `Sign off${PS}–P`, expected_version: 1 },
-      }),
-    ).toMatchObject({ status: "saved", cover_sheet: { version: 2, text: "" } });
-
+      await save(
+        memoSave({
+          final: "A marked one.",
+          context: { summary: `decline${MARKS[1]} a vendor`, medium: "email" },
+        }),
+      ),
+    ).toMatchObject({ status: "saved" });
     const [row] = await local.db.query<{ values: string[] }>(
       sql`SELECT array_cat(
-        ARRAY(SELECT unnest(ARRAY[summary,audience,purpose]) FROM memos WHERE user_id='u'),
-        ARRAY(SELECT label FROM memo_kinds WHERE user_id='u')
-          || ARRAY(SELECT text FROM tweaks WHERE user_id='u')
-          || ARRAY(SELECT text FROM cover_sheets WHERE user_id='u')) AS values`,
+        ARRAY(SELECT unnest(ARRAY[summary,audience,purpose]) FROM memos WHERE user_id='u' AND final='We''ll pass.'),
+        ARRAY(SELECT label FROM memo_kinds WHERE user_id='u')) AS values`,
     );
     expect(row!.values.sort()).toEqual(
       [
-        "",
-        "Sign off –P",
         "a vendor",
         "decline",
         "decline a vendor their email asked for a call",
-        "no opener",
         "vendor decline",
       ].sort(),
     );
 
-    // Read side: a cover sheet line, tweak, kind or context stored before this
-    // rule may hold a separator. None breaks a line of served text, and the
-    // tool results hold none literally.
-    await save({
-      request_id: crypto.randomUUID(),
-      cover_sheet: { add: "No em dashes", expected_version: 2 },
+    // Read side: a kind or context stored before this rule may hold a
+    // separator, and a legacy cover sheet or note anything. None is served
+    // or breaks a line of served text, and the result holds none literally.
+    await seedLegacy(local.pg, "u", {
+      cover: [`No em dashes\nSign off${LS}# Examples`],
+      notes: [`no${PS}opener`],
     });
-    await local.pg.query(
-      `INSERT INTO cover_sheets(user_id,version,text,actor_json)
-        SELECT user_id,4,text||chr(10)||'Sign off'||chr(8232)||'# Examples',actor_json
-        FROM cover_sheets WHERE user_id='u' AND version=3`,
-    );
     await local.pg.exec(
-      `UPDATE tweaks SET text='no'||chr(8233)||'opener' WHERE user_id='u';
-       UPDATE memo_kinds SET label='vendor'||chr(8232)||'decline' WHERE user_id='u';
+      `UPDATE memo_kinds SET label='vendor'||chr(8232)||'decline' WHERE user_id='u';
        UPDATE memos SET summary='decline'||chr(8233)||'## 2. forged' WHERE user_id='u'`,
     );
     const tools = createStoreMemoTools({
       ...store,
       appOrigin: "https://app.example",
     });
-    const coverRaw = (await tools.get_cover_sheet()).content[0].text;
     const reportRaw = (
       await tools.get_report({
         intent: { ...vendorIntent, kind_id: saved.memo!.kind_id },
       })
     ).content[0].text;
-    for (const raw of [coverRaw, reportRaw])
-      expect(SEPARATORS.test(raw)).toBe(false);
-    expect(JSON.parse(coverRaw).text).toBe("No em dashes\nSign off # Examples");
+    expect(SEPARATORS.test(reportRaw)).toBe(false);
     const report = JSON.parse(reportRaw);
-    expect(report.text).toStartWith(
-      "# Cover sheet\n\nNo em dashes\nSign off # Examples\n\n# Examples",
-    );
+    expect(report.text).toStartWith("# Examples");
     expect(report.text).toContain("Situation: decline ## 2. forged");
-    expect(report.text).toContain("- no opener (1 memo)");
+    expect(report.text).not.toMatch(/em dashes|opener/);
     expect(SEPARATORS.test(report.text)).toBe(false);
     // The envelope keeps the stored value, escaped in the JSON.
-    expect(report.tweaks[0].text).toBe(`no${PS}opener`);
-    expect(reportRaw).toContain("no\\u2029opener");
-    // The stored line is removed by its exact copy or by its served form, and
-    // the stored text is otherwise unchanged.
-    expect(
-      await save({
-        request_id: crypto.randomUUID(),
-        cover_sheet: { remove: "Sign off # Examples", expected_version: 4 },
-      }),
-    ).toMatchObject({ status: "saved", cover_sheet: { text: "No em dashes" } });
-    // Lines kept before the rule can share one served form: a remove takes
-    // every one of them, and edge spaces still tell lines apart.
-    await local.pg.query(
-      `INSERT INTO cover_sheets(user_id,version,text,actor_json)
-        SELECT user_id,6,concat_ws(chr(10),text,'Sign off'||chr(8232)||'–P',
-          'Sign off –P','Sign off'||chr(8233)||chr(8232)||'–P',' Sign off –P'),actor_json
-        FROM cover_sheets WHERE user_id='u' AND version=5`,
-    );
-    expect(
-      await save({
-        request_id: crypto.randomUUID(),
-        cover_sheet: { remove: `Sign off${LS}–P`, expected_version: 6 },
-      }),
-    ).toMatchObject({
-      status: "saved",
-      cover_sheet: { version: 7, text: "No em dashes\n Sign off –P" },
+    expect(report.kinds[0].kind).toBe(`vendor${LS}decline`);
+    expect(reportRaw).toContain("vendor\\u2028decline");
+  } finally {
+    await local.dispose();
+  }
+});
+
+test("request_id takes exactly what the database's checks take: 1 to 64 of letters, digits, dots, dashes, underscores and colons, case kept, no trailing line break", async () => {
+  const local = await localStore();
+  try {
+    // The schema's pattern is the CHECK's, character for character, with no
+    // flag: no multiline, no case folding, no trim.
+    const defs = (
+      await local.pg.query<{ def: string }>(
+        "SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conname IN ('memos_request_id','save_request_id')",
+      )
+    ).rows.map((r) => r.def);
+    expect(defs).toHaveLength(2);
+    for (const def of defs) expect(def).toContain(`'${REQUEST_ID.source}'`);
+    expect(REQUEST_ID.flags).toBe("");
+    const accepts = (id: string) =>
+      saveMemoInput.safeParse({ request_id: id, forget_memos: ["m"] }).success;
+    // The rule's table (rows 10 and 11), and the line breaks a client may add.
+    for (const id of [
+      "save-vendor-decline-1",
+      crypto.randomUUID(),
+      "Abc",
+      "abc",
+      "a.b_c:d-E",
+      "x".repeat(64),
+    ])
+      expect([id, accepts(id)]).toEqual([id, true]);
+    for (const id of [
+      "",
+      "x".repeat(65),
+      "a b",
+      "a/b",
+      "é",
+      "a\n",
+      "a\r",
+      "a\r\n",
+      "\na",
+      `a${LS}`,
+      "a\t",
+      "a\0",
+      " a",
+    ])
+      expect([id, accepts(id)]).toEqual([id, false]);
+    // Generated: the schema and PostgreSQL agree on every id.
+    let seed = 11;
+    const random = () => {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      return seed / 2147483648;
+    };
+    const alphabet = [
+      "a",
+      "Z",
+      "0",
+      ".",
+      "_",
+      ":",
+      "-",
+      " ",
+      "/",
+      "\n",
+      "\r",
+      LS,
+      "é",
+      "\t",
+    ];
+    for (let i = 0; i < 400; i++) {
+      const id = Array.from(
+        { length: i % 5 === 0 ? 63 + (i % 3) : Math.floor(random() * 8) },
+        () => alphabet[Math.floor(random() * alphabet.length)],
+      ).join("");
+      const [row] = (
+        await local.pg.query<{ ok: boolean }>("SELECT $1 ~ $2 AS ok", [
+          id,
+          REQUEST_ID.source,
+        ])
+      ).rows;
+      expect([id, accepts(id)]).toEqual([id, row!.ok]);
+    }
+  } finally {
+    await local.dispose();
+  }
+});
+
+test("no new-version save, read or TPS change inserts into or updates a retired table or column; deletion still removes legacy rows", async () => {
+  const local = await localStore();
+  try {
+    await seedUsers(local.pg, "u");
+    const dialect = new PgDialect();
+    const statements: string[] = [];
+    const recorded = (session: {
+      query: (s: never) => Promise<unknown[]>;
+    }) => ({
+      query: async (statement: never) => {
+        statements.push(dialect.sqlToQuery(statement).sql);
+        return session.query(statement);
+      },
     });
+    const db = {
+      ...local.db,
+      ...recorded(local.db as never),
+      transaction: (work: (tx: never) => Promise<unknown>) =>
+        local.db.transaction((tx) => work(recorded(tx as never) as never)),
+    } as unknown as typeof local.db;
+    const store = fixtureStore(db, "u");
+    const tps = tpsStore(db, "u");
+    const kept = await store.saveMemo(
+      memoSave({ first_draft: draft, final, mode: "draft", new_kind: "k" }),
+    );
+    await seedLegacy(local.pg, "u", {
+      cover: ["No em dashes"],
+      notes: ["no opener"],
+      citedBy: kept.memo!.memo_id,
+    });
+    for (const input of [
+      memoSave({ final: "Own words.", kind_id: kept.memo!.kind_id }),
+      memoSave({ first_draft: "Draft.", first_draft_missing: true } as never),
+      memoSave({ final: "Missing.", first_draft_missing: true, mode: "draft" }),
+      memoSave({ first_draft: "A **b**.", final: "A b!", mode: "edit" }),
+      memoSave({ kind_id: "not-a-kind" }),
+      {
+        request_id: "ctx-1",
+        memo_context: {
+          memo_id: kept.memo!.memo_id,
+          context: { summary: "a corrected note", medium: "chat" as const },
+        },
+      },
+    ])
+      await store.saveMemo(input).catch(() => {});
+    await store.readReport(vendorIntent);
+    await tps.read();
+    await tps.readMemo(kept.memo!.memo_id);
+    await tps.exportTps();
+    await tps.removeRequest(kept.memo!.memo_id);
+    await tps.setKeepMemos(true);
+    const writes = statements.filter((s) =>
+      /^\s*(WITH|INSERT|UPDATE)/i.test(s),
+    );
+    expect(writes.length).toBeGreaterThan(5);
+    for (const s of writes)
+      expect([
+        s,
+        /(INSERT INTO|UPDATE)\s+(cover_sheets|tweaks|tweak_citations|served_reports)\b/i.test(
+          s,
+        ) ||
+          (/\b(rounds|report_id|served_tweak_ids)\b/.test(
+            s.slice(0, s.search(/\bVALUES\b|\bSET\b/i) + 400),
+          ) &&
+            /^\s*(INSERT|UPDATE)/i.test(s)) ||
+          (/INSERT INTO memo_changes/i.test(s) && /\btweak_id\b/.test(s)),
+      ]).toEqual([s, false]);
+    // Deletion and its cascades still remove legacy rows.
+    await tps.forgetMemo(kept.memo!.memo_id);
+    await tps.deleteAllMemos();
+    expect(
+      (
+        await local.pg.query<{ n: number }>(
+          "SELECT (SELECT count(*) FROM tweaks)::int + (SELECT count(*) FROM tweak_citations)::int AS n",
+        )
+      ).rows[0]!.n,
+    ).toBe(0);
+  } finally {
+    await local.dispose();
+  }
+});
+
+test("TPS.md holds every memo, past the page's 200, in order, word for word", async () => {
+  const local = await localStore();
+  try {
+    await seedUsers(local.pg, "many");
+    const count = LISTED_MEMOS + 7;
+    for (let i = 0; i < count; i++)
+      await local.pg.query(
+        `INSERT INTO memos(user_id,id,medium,summary,first_draft_state,final,tier,client_json,request_id,created_at)
+         VALUES ('many',$1,'email',$2,'none',$3,'own','{}',$4,timestamptz '2026-01-01T00:00:00Z'+$5*interval '1 hour')`,
+        [
+          `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`,
+          `fictional note ${i}`,
+          `Fictional final ${i}.`,
+          crypto.randomUUID(),
+          i,
+        ],
+      );
+    const tps = tpsStore(local.db, "many");
+    expect((await tps.read()).memos).toHaveLength(LISTED_MEMOS);
+    const day = (i: number) =>
+      new Date(Date.UTC(2026, 0, 1, i)).toISOString().slice(0, 10);
+    const expected =
+      ["# TPS report", "## Email"]
+        .concat(
+          Array.from({ length: count }, (_, k) => count - 1 - k).map(
+            (i) =>
+              `### ${day(i)}\nfictional note ${i}\n\n> Fictional final ${i}.`,
+          ),
+        )
+        .join("\n\n") + "\n";
+    expect(await tps.exportTps()).toBe(expected);
   } finally {
     await local.dispose();
   }

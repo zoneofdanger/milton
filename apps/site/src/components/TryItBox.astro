@@ -19,7 +19,6 @@ type Person = {
   id: string;
   name: string;
   role: string;
-  coverSheet: string[];
   pastes: { situation: string; text: string }[];
   pairs: Record<string, Pair>;
 };
@@ -174,12 +173,6 @@ const { requests, defaults } = data;
           <details class="setup-emails">
             <summary>See what Milton has on file for {person.name}</summary>
             <div class="setup-content">
-              <p class="eyebrow">Cover sheet</p>
-              <ul class="setup-list">
-                {person.coverSheet.map((line) => (
-                  <li>{line}</li>
-                ))}
-              </ul>
               <p class="eyebrow">Emails on file</p>
               <ol class="setup-list">
                 {person.pastes.map((paste) => (

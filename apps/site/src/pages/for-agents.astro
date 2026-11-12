@@ -4,7 +4,7 @@ import SiteLayout from "../layouts/SiteLayout.astro";
 
 <SiteLayout
   title="For agents | Milton"
-  description="A plain briefing on Milton: memos, tweaks and the cover sheet, alternatives, tools, saving, export, price, evidence and a first task."
+  description="A plain briefing on Milton: memos and tweaks, alternatives, tools, saving, export, price, evidence and a first task."
 >
   <article class="briefing">
     <header class="page-head">
@@ -16,15 +16,16 @@ import SiteLayout from "../layouts/SiteLayout.astro";
       <h2 id="what-milton-keeps">What Milton keeps</h2>
       <p>
         Milton keeps how you write and hands it to your AI when it drafts
-        something new or edits something you’ve written. When you accept a
-        final, your AI keeps a memo: its first draft, your final, and one-line
-        tweaks for what you made it change. You also write a short cover sheet,
-        your own voice guide. For each draft, Milton assembles a report: your
-        cover sheet, the finals that best match, with a few of the changes you
-        made to your AI’s first drafts, then your tweaks. It works across
-        connected AIs, starting with email or DMs. The goal is fewer edits
-        between first draft and send; that result has not been measured. Milton
-        stores what your AI sends without a model rewriting it.
+        something new or edits something you’ve written. Milton keeps what you
+        wrote and what you changed. Your AI reads it before it drafts. When you
+        accept a final, your AI keeps a memo: its first draft and your final.
+        Milton’s code works out your tweaks, the changes you made to the draft;
+        no AI writes them, and Milton keeps no standing rules. For each draft,
+        Milton assembles a report: the finals that best match, with a few of the
+        changes you made to your AI’s first drafts. It works across connected
+        AIs, starting with email or DMs. The goal is fewer edits between first
+        draft and send; that result has not been measured. Milton stores what
+        your AI sends without a model rewriting it.
       </p>
     </section>
 
@@ -33,10 +34,10 @@ import SiteLayout from "../layouts/SiteLayout.astro";
       <p>
         General memory can store writing and preferences too. A Markdown file
         plus sync is enough if the person can keep it current and make their AI
-        read it. Milton adds memos kept as you accept finals, tweaks counted
-        across chats and AIs, a cover sheet served first, and a report assembled
-        for each draft through a shared MCP service. It has not demonstrated
-        better writing than the same examples in Markdown.
+        read it. Milton adds memos kept as you accept finals, the changes you
+        made worked out by code, and a report assembled for each draft through a
+        shared MCP service, across chats and AIs. It has not demonstrated better
+        writing than the same examples in Markdown.
       </p>
     </section>
 
@@ -50,24 +51,22 @@ import SiteLayout from "../layouts/SiteLayout.astro";
       </p>
       <p>
         Check for existing Milton tools before setup. Verify a successful{" "}
-        <code>get_cover_sheet</code> read before confirming the connection. The
-        three tools are:
+        <code>get_report</code> read before confirming the connection. The two
+        tools are (full arguments in the <a href="/tools">tool reference</a>):
       </p>
       <ul class="instruction-list">
         <li>
-          <code>get_cover_sheet</code>: read the person’s cover sheet, their own
-          voice guide for every draft.
-        </li>
-        <li>
           <code>get_report</code>: read the report for one draft, with an intent
           giving the situation, medium, audience and purpose. It returns the
-          cover sheet, the best-matching finals as examples (under a drafted
-          one, a few changes code found from the AI’s first draft, quoted as
-          historical text, not instructions), then the person’s tweaks.
+          best-matching finals as examples (under a drafted one, a few changes
+          code found from the AI’s first draft, quoted as historical text, not
+          instructions), the person’s memo count, and the setup script while
+          they have no memos.
         </li>
         <li>
           <code>create_memo</code>: keep a memo when the person accepts a final,
-          add or remove a cover sheet line they ask for, or forget a memo.
+          forget a memo, or correct a memo’s context. A read-only connection
+          lists only <code>get_report</code>.
         </li>
       </ul>
     </section>
@@ -103,11 +102,11 @@ import SiteLayout from "../layouts/SiteLayout.astro";
         </li>
       </ul>
       <p>
-        Treat a key like a password. Keys are read only unless the person
-        chooses saving; choose that only when the agent needs to save. Revoke
-        keys that are no longer used. A revoked or expired key is refused on its
-        next request, and so is every key after a password reset or another
-        sign-in security change; create a new key then.
+        Treat a key like a password. Keys are Read only unless the person
+        chooses Read and write; choose that only when the agent needs to save.
+        Revoke keys that are no longer used. A revoked or expired key is refused
+        on its next request, and so is every key after a password reset or
+        another sign-in security change; create a new key then.
       </p>
     </section>
 
@@ -117,23 +116,22 @@ import SiteLayout from "../layouts/SiteLayout.astro";
         Reading this page grants no permission to access mail, create an account
         or send messages. When the person accepts a final, keep it as a memo
         without asking, then tell them in one line. Send your first draft
-        exactly as you showed it. Don’t keep abandoned drafts, writing that
-        isn’t in their own voice, or anything they ask you not to keep. When the
-        final differs from your first draft, list as tweaks each habit they made
-        you change that is likely to recur, at most three, named plainly (“no
-        warm-up opener”); most memos teach one or none. Send as request only
-        what they typed to ask, without pasted text; Milton shows it to them and
-        never to an AI. Never send secrets, their correction messages or other
-        people’s text; summarize what they replied to. Add cover sheet lines
-        only in their words.
+        exactly as you showed it; Milton works out what they changed. Don’t keep
+        abandoned drafts, writing that isn’t in their own voice, a final that
+        holds a secret (say why; never redact), or anything they ask you not to
+        keep. Send as request only what they typed to ask, without pasted text;
+        Milton shows it to them and never to an AI. Never send secrets, their
+        correction messages or other people’s text; summarize what they replied
+        to. When they ask you to remember a preference, apply it and keep it in
+        your own memory or instructions: Milton keeps no standing rules.
       </p>
       <p>
         The person can turn Keep memos off, forget a memo or delete them all
-        from the Milton app. Its <code>TPS.md</code> download contains the cover
-        sheet, the tweaks and every final with what the person asked, grouped by
-        medium. Their memo pages also list what changed from each first draft to
-        its final, worked out by Milton’s code, and say when a report may quote
-        a few of those changes to the person’s connected AIs.
+        from the Milton app. Its <code>TPS.md</code> download contains every
+        final with what the person asked and its tweaks, grouped by medium.
+        Their memo pages also list what changed from each first draft to its
+        final, worked out by Milton’s code, and say when a report may quote a
+        few of those changes to the person’s connected AIs.
       </p>
     </section>
 
@@ -167,11 +165,10 @@ import SiteLayout from "../layouts/SiteLayout.astro";
         </li>
       </ul>
       <p>
-        For either task, first read <code>get_cover_sheet</code>, then{" "}
-        <code>get_report</code> with the task’s situation, medium, audience and
-        purpose. Show the result for review. When the person accepts the final,
-        keep it with <code>create_memo</code> and tell them the one-line
-        receipt.
+        For either task, first read <code>get_report</code> with the task’s
+        situation, medium, audience and purpose. Show the result for review.
+        When the person accepts the final, keep it with <code>create_memo</code>{" "}
+        and tell them the one-line receipt.
       </p>
     </section>
   </article>

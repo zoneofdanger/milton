@@ -1,6 +1,6 @@
 // One create_memo save, one transaction: replay a known request ID, or check
-// the gates, then save a memo, change the cover sheet, forget memos or correct
-// one memo's context, and write the receipt with its result. A receipt commits
+// the gates, then save a memo, forget memos or correct one memo's context, and
+// write the receipt with its result. A receipt commits
 // with the change or not at all, so a stored receipt always holds the outcome.
 import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
@@ -21,13 +21,8 @@ import { StoreError } from "./errors";
 import { MAX_REQUEST_BYTES } from "../http";
 import { utf8Bytes } from "./limits";
 import { requireActiveAccount } from "./accounts";
-import {
-  COVER_SHEET_CHARS,
-  coverSheetJson,
-  joinSeparators,
-  keepMemos,
-} from "./memos";
-import { change, normalizeTweak, tier } from "./score";
+import { keepMemos } from "./memos";
+import { change, tier } from "./score";
 import { createHash } from "node:crypto";
 import { assertTrialAccess, type TrialStatus } from "./trials";
 
@@ -35,6 +30,10 @@ export const hash = (value: unknown) =>
   createHash("sha256").update(JSON.stringify(value)).digest("hex");
 
 const savedTweak = z.object({ tweak_id: z.string(), text: z.string() });
+/** A stored outcome as the decoder reads it. Outcomes saved before this
+ * release may hold fields Milton no longer writes (a memo's rounds and
+ * tweaks, a cover_sheet), so the decoder keeps accepting them; a fresh outcome
+ * has none of them. */
 const outcomeSchema = z.object({
   status: z.enum(["saved", "unchanged", "conflict", "failed"]),
   request_id: z.string(),
@@ -47,9 +46,11 @@ const outcomeSchema = z.object({
       tier: z.enum(["own", "steered", "untouched"]),
       kind_id: z.string().optional(),
       kind: z.string().optional(),
+      /** Historical receipts only. */
       rounds: z.number().optional(),
       change: z.number().optional(),
-      tweaks: z.array(savedTweak),
+      /** Historical receipts only: tweaks an AI wrote. */
+      tweaks: z.array(savedTweak).optional(),
       /** Counts only: a receipt outlives forgetting, so it holds no quote. */
       changes: z
         .object({
@@ -61,10 +62,17 @@ const outcomeSchema = z.object({
     .optional(),
   /** The one line the AI tells the person after a saved memo. */
   receipt: z.string().optional(),
+  /** Historical receipts only: a cover sheet change. */
   cover_sheet: z.object({ version: z.number(), text: z.string() }).optional(),
   forgotten: z.array(z.string()).optional(),
 });
-export type SaveOutcome = z.infer<typeof outcomeSchema>;
+/** What a replay adds beside the stored outcome, which it returns as stored
+ * (docs/saves.md, "Replay"). */
+export const REPLAYED =
+  "A stored outcome from an earlier save. Fields Milton no longer uses, such as rounds and tweaks, are not current guidance, and this receipt doesn't prove the memo is still on file.";
+export type SaveOutcome = z.infer<typeof outcomeSchema> & {
+  replayed?: string;
+};
 type Receipt = { input_hash: string; result_json: unknown };
 /** The AI a save is attributed to. */
 export type Actor = { issuer: string; clientId: string };
@@ -86,7 +94,7 @@ export type MemoCheck =
       ok: false;
       message: string;
       /** Selects the refusal's own next step (mcp-outcomes, nextSteps). */
-      field?: "request" | "tweaks";
+      field?: "request";
     };
 
 /** Lines that look like quoted or forwarded mail: a line starting >, an "On
@@ -98,22 +106,15 @@ const PASTED = [/^\s*>/m, /^\s*On\b.*\bwrote:\s*$/im, /^\s*(From|Subject):/im];
  * refused, a short one may not be (docs/memos.md). */
 export const MAX_REQUEST_CHARS = 600;
 export const MAX_REQUEST_LINES = 12;
-/** At most this many distinct tweaks per memo: most teach one or none. The
- * schema's list takes ten, as the released definition did, so a save naming
- * more is refused here with its own next step, not as a schema error. */
-export const MAX_MEMO_TWEAKS = 3;
 
 /** Everything a memo save gets wrong that its input alone shows, checked
  * before any database work, or the evidence it will store. Only the first
- * draft decides the rest: with one (or first_draft_missing), mode and rounds
- * are required and request is allowed; without, writing the person gave, none
- * of mode, rounds, request or tweaks. With a kept first draft, code lists what
- * changed here, bounded by changeList's own limits. */
+ * draft decides the rest: with one (or first_draft_missing), mode is required
+ * and request is allowed; without, writing the person gave, neither. With a
+ * kept first draft, code lists what changed here, bounded by changeList's own
+ * limits. */
 export function checkMemo(memo: MemoInput): MemoCheck {
-  const refuse = (
-    message: string,
-    field?: "request" | "tweaks",
-  ): MemoCheck => ({
+  const refuse = (message: string, field?: "request"): MemoCheck => ({
     ok: false,
     message,
     ...(field ? { field } : {}),
@@ -130,18 +131,14 @@ export function checkMemo(memo: MemoInput): MemoCheck {
         "Writing the person gave you (no first_draft) takes no request.",
         "request",
       );
-    return memo.mode !== undefined ||
-      memo.rounds !== undefined ||
-      memo.tweaks !== undefined
+    return memo.mode !== undefined
       ? refuse(
-          "Writing the person gave you (no first_draft) takes no mode, rounds or tweaks; for a draft you wrote, send first_draft, or first_draft_missing if you no longer have it verbatim.",
+          "Writing the person gave you (no first_draft) takes no mode; for a draft you wrote, send first_draft, or first_draft_missing if you no longer have it verbatim.",
         )
       : { ok: true };
   }
-  if (memo.mode === undefined || memo.rounds === undefined)
-    return refuse(
-      "With a first draft, send mode (draft or edit) and rounds (your redrafts after the first draft).",
-    );
+  if (memo.mode === undefined)
+    return refuse("With a first draft, send mode (draft or edit).");
   if (memo.request !== undefined) {
     const request = memo.request;
     const problem = !request
@@ -157,21 +154,6 @@ export function checkMemo(memo: MemoInput): MemoCheck {
               : undefined;
     if (problem) return refuse(`${problem}.`, "request");
   }
-  if (memo.tweaks !== undefined && memo.first_draft === memo.final)
-    return refuse(
-      "The final equals the first draft, so this memo teaches no tweaks; omit tweaks.",
-    );
-  // A repeat of one tweak, by id or wording, is one.
-  const distinct = new Set(
-    (memo.tweaks ?? []).map((t) =>
-      "tweak_id" in t ? `id:${t.tweak_id}` : `text:${normalizeTweak(t.text)}`,
-    ),
-  ).size;
-  if (distinct > MAX_MEMO_TWEAKS)
-    return refuse(
-      `This memo names ${distinct} tweaks; a memo teaches at most ${MAX_MEMO_TWEAKS}.`,
-      "tweaks",
-    );
   if (memo.first_draft === undefined) return { ok: true };
   const list = changeList(memo.first_draft, memo.final);
   return {
@@ -207,6 +189,9 @@ export async function runSave(
       503,
       { request_id: input.request_id },
     );
+  /** The stored outcome, labelled as a replay. Every receipt read back is
+   * labelled, the one found after a lost acknowledgment included: that
+   * lookup can't tell this invocation's commit from an earlier save's. */
   const replay = (existing: Receipt) => {
     if (existing.input_hash !== inputHash)
       throw new StoreError(
@@ -217,7 +202,9 @@ export async function runSave(
     const stored = outcomeSchema.safeParse(existing.result_json);
     // Unreadable only for an outcome stored before memos.
     if (!stored.success) throw unknown();
-    return stored.data;
+    // Returned as stored, old fields included (a receipt promises its
+    // outcome), with the one label beside it.
+    return { ...(existing.result_json as SaveOutcome), replayed: REPLAYED };
   };
   try {
     return await db.transaction(async (tx) => {
@@ -251,7 +238,6 @@ export async function runSave(
         try {
           const save = { tx, userId, actor, input, evidence, result };
           if (input.memo) return await saveMemo(save, input.memo);
-          if (input.cover_sheet) return await saveCoverSheet(save);
           if (input.forget_memos) return await forgetMemos(save);
           return await correctContext(save, input.memo_context!);
         } catch (error) {
@@ -334,28 +320,9 @@ async function resolveKind(
   return { id, label: kind.new_kind };
 }
 
-/** The one-line receipt the AI repeats: "Kept memo: vendor decline, 2
- * rounds, tweaks: no warm-up opener." */
-export function receiptLine(memo: {
-  label: string;
-  rounds?: number;
-  tweaks: string[];
-}) {
-  // A tweak's own closing punctuation would double the receipt's.
-  const shown = memo.tweaks
-    .slice(0, 3)
-    .map((tweak) => tweak.replace(/[\s.;,:]+$/u, ""));
-  const more = memo.tweaks.length - shown.length;
-  return `Kept memo: ${[
-    memo.label,
-    memo.rounds === undefined
-      ? "your words"
-      : `${memo.rounds} round${memo.rounds === 1 ? "" : "s"}`,
-    ...(shown.length
-      ? [`tweaks: ${shown.join("; ")}${more ? ` and ${more} more` : ""}`]
-      : []),
-  ].join(", ")}.`;
-}
+/** The one-line receipt the AI repeats: "Kept memo: vendor decline." The
+ * label is the memo's kind, or its medium when it has none. */
+export const receiptLine = (label: string) => `Kept memo: ${label}.`;
 
 async function saveMemo(save: Save, memo: MemoInput): Promise<SaveOutcome> {
   const { tx, userId, actor, input, evidence, result } = save;
@@ -381,21 +348,7 @@ async function saveMemo(save: Save, memo: MemoInput): Promise<SaveOutcome> {
     memo.kind_id !== undefined
       ? await resolveKind(tx, userId, { kind_id: memo.kind_id })
       : undefined;
-  let served: string[] = [];
-  if (memo.report_id !== undefined) {
-    const [report] = await tx.query<{ tweak_ids: string[] }>(
-      sql`SELECT tweak_ids FROM served_reports WHERE user_id=${userId} AND id=${memo.report_id}`,
-    );
-    if (!report)
-      throw new StoreError(
-        "invalid_report",
-        "report_id must come from one of this person's get_report results. Nothing was saved.",
-        400,
-      );
-    served = report.tweak_ids;
-  }
-  // The same words already on file: a repeated save keeps one memo, so its
-  // tweaks are not counted twice.
+  // The same words already on file: a repeated save keeps one memo.
   const [same] = await tx.query<{ id: string }>(
     sql`SELECT id FROM memos WHERE user_id=${userId} AND final=${memo.final}
       AND first_draft_state=${state} AND first_draft IS NOT DISTINCT FROM ${memo.first_draft ?? null}
@@ -407,68 +360,29 @@ async function saveMemo(save: Save, memo: MemoInput): Promise<SaveOutcome> {
     });
   const kind =
     named ?? (await resolveKind(tx, userId, { new_kind: memo.new_kind }));
-  // Tweaks: reused ids must be the account's; new text reuses an exact match
-  // after normalizing, or is added.
-  const ids: string[] = [];
-  const texts = new Map<string, string>();
-  for (const ref of memo.tweaks ?? []) {
-    if ("tweak_id" in ref) {
-      const [found] = await tx.query<{ id: string; text: string }>(
-        sql`SELECT id,text FROM tweaks WHERE user_id=${userId} AND id=${ref.tweak_id}`,
-      );
-      if (!found)
-        throw new StoreError(
-          "invalid_tweak",
-          `tweak_id ${JSON.stringify(ref.tweak_id.slice(0, 64))} is not one of this person's tweaks. Nothing was saved.`,
-          400,
-        );
-      if (!texts.has(found.id))
-        (ids.push(found.id), texts.set(found.id, found.text));
-      continue;
-    }
-    const norm = normalizeTweak(ref.text);
-    if (!norm)
-      throw new StoreError(
-        "invalid_input",
-        "A tweak needs words, not only punctuation. Nothing was saved.",
-        400,
-      );
-    const [found] = await tx.query<{ id: string; text: string }>(sql`
-      WITH added AS (
-        INSERT INTO tweaks(user_id,id,text,norm,client_json)
-        VALUES (${userId},${randomUUID()},${ref.text},${norm},${client(actor)})
-        ON CONFLICT (user_id,norm) DO NOTHING RETURNING id,text)
-      SELECT id,text FROM added
-      UNION ALL SELECT id,text FROM tweaks WHERE user_id=${userId} AND norm=${norm}
-      LIMIT 1`);
-    if (!texts.has(found!.id))
-      (ids.push(found!.id), texts.set(found!.id, found!.text));
-  }
   const memoTier = tier({
     state,
     mode: memo.mode,
     firstDraft: memo.first_draft,
     final: memo.final,
-    rounds: memo.rounds,
   });
   const score =
     memo.first_draft !== undefined
       ? change(memo.first_draft, memo.final)
       : undefined;
   const id = randomUUID();
+  // rounds and report_id stay NULL and served_tweak_ids empty (their
+  // defaults): this release writes none of them (docs/memos.md).
   await tx.query(sql`INSERT INTO memos(user_id,id,kind_id,medium,summary,audience,purpose,mode,
-      first_draft,first_draft_state,final,rounds,change,tier,report_id,served_tweak_ids,client_json,request_id,
+      first_draft,first_draft_state,final,change,tier,client_json,request_id,
       request,changes_state)
     VALUES (${userId},${id},${kind?.id ?? null},${memo.context.medium},${memo.context.summary},
       ${memo.context.audience ?? null},${memo.context.purpose ?? null},${memo.mode ?? null},
-      ${memo.first_draft ?? null},${state},${memo.final},${memo.rounds ?? null},${score ?? null},
-      ${memoTier},${memo.report_id ?? null},${sql.param(served)}::text[],${client(actor)},${input.request_id},
+      ${memo.first_draft ?? null},${state},${memo.final},${score ?? null},
+      ${memoTier},${client(actor)},${input.request_id},
       ${memo.request ?? null},${evidence?.state ?? null})`);
-  if (ids.length)
-    await tx.query(sql`INSERT INTO tweak_citations(user_id,memo_id,tweak_id)
-      SELECT ${userId}::text,${id}::text,t FROM unnest(${sql.param(ids)}::text[]) AS t`);
-  // Code's own list: offsets, the cut sides and the format marker; the
-  // label, tweak and quote columns stay NULL in this release.
+  // Code's own list, the memo's tweaks: offsets, the cut sides and the
+  // format marker; the label, tweak and quote columns stay NULL.
   const rows = evidence?.rows ?? [];
   if (rows.length)
     await tx.query(sql`INSERT INTO memo_changes(user_id,memo_id,n,draft_start,draft_end,final_start,final_end,
@@ -489,20 +403,14 @@ async function saveMemo(save: Save, memo: MemoInput): Promise<SaveOutcome> {
         })),
       )}::json) AS r(n smallint,draft_start int,draft_end int,final_start int,final_end int,
         "before" text,"after" text,truncated boolean,about text)`);
-  const tweaks = ids.map((tweak_id) => ({
-    tweak_id,
-    text: texts.get(tweak_id)!,
-  }));
   return result("saved", {
     memo: {
       memo_id: id,
       tier: memoTier,
       ...(kind ? { kind_id: kind.id, kind: kind.label } : {}),
-      ...(memo.rounds !== undefined ? { rounds: memo.rounds } : {}),
       ...(score !== undefined
         ? { change: Math.round(score * 1000) / 1000 }
         : {}),
-      tweaks,
       ...(evidence
         ? {
             changes: {
@@ -512,93 +420,34 @@ async function saveMemo(save: Save, memo: MemoInput): Promise<SaveOutcome> {
           }
         : {}),
     },
-    receipt: receiptLine({
-      label: kind?.label ?? memo.context.medium,
-      rounds: memo.rounds,
-      tweaks: tweaks.map((t) => t.text),
-    }),
+    receipt: receiptLine(kind?.label ?? memo.context.medium),
   });
 }
 
-/** A memo already on file, as a saved result describes one. */
+/** A memo already on file, as a fresh outcome describes one: never its
+ * retired rounds or tweaks, whatever an old row holds. */
 async function memoSummary(tx: StoreSession, userId: string, id: string) {
   const [row] = await tx.query<{
     tier: "own" | "steered" | "untouched";
     kind_id: string | null;
     kind: string | null;
-    rounds: number | null;
     change: number | null;
-    tweaks: { tweak_id: string; text: string }[];
     changes: { state: "itemized" | "too_large"; found: number } | null;
-  }>(sql`SELECT m.tier,m.kind_id,k.label AS kind,m.rounds,m.change,
+  }>(sql`SELECT m.tier,m.kind_id,k.label AS kind,m.change,
       CASE WHEN m.changes_state IS NOT NULL THEN (SELECT json_build_object('state',m.changes_state,
         'found',count(*) FILTER (WHERE c.about IS DISTINCT FROM 'format'))
-        FROM memo_changes c WHERE c.user_id=m.user_id AND c.memo_id=m.id) END AS changes,
-      (SELECT coalesce(json_agg(json_build_object('tweak_id',t.id,'text',t.text) ORDER BY t.id),'[]'::json)
-        FROM tweak_citations c JOIN tweaks t ON t.user_id=c.user_id AND t.id=c.tweak_id
-        WHERE c.user_id=m.user_id AND c.memo_id=m.id) AS tweaks
+        FROM memo_changes c WHERE c.user_id=m.user_id AND c.memo_id=m.id) END AS changes
     FROM memos m LEFT JOIN memo_kinds k ON k.user_id=m.user_id AND k.id=m.kind_id
     WHERE m.user_id=${userId} AND m.id=${id}`);
   return {
     memo_id: id,
     tier: row!.tier,
     ...(row!.kind_id ? { kind_id: row!.kind_id, kind: row!.kind ?? "" } : {}),
-    ...(row!.rounds !== null ? { rounds: row!.rounds } : {}),
     ...(row!.change !== null
       ? { change: Math.round(row!.change * 1000) / 1000 }
       : {}),
-    tweaks: row!.tweaks,
     ...(row!.changes ? { changes: row!.changes } : {}),
   };
-}
-
-/** The cover sheet's lines, as add and remove see them. */
-export const coverLines = (text: string) =>
-  text === "" ? [] : text.split("\n");
-const coverSheetLimit = (length: number) =>
-  new StoreError(
-    "cover_sheet_limit",
-    `The cover sheet would be ${length.toLocaleString("en-US")} characters, over its ${COVER_SHEET_CHARS.toLocaleString("en-US")}-character limit. Nothing was changed.`,
-    422,
-  );
-
-async function saveCoverSheet(save: Save): Promise<SaveOutcome> {
-  const { tx, userId, actor, input, result } = save;
-  const change = input.cover_sheet!;
-  const [row] = await tx.query<{
-    cover: { version: number; text: string } | null;
-  }>(sql`SELECT ${coverSheetJson(userId)} AS cover`);
-  const current = {
-    version: row!.cover?.version ?? 0,
-    text: row!.cover?.text ?? "",
-  };
-  if (change.expected_version !== current.version)
-    return result("conflict", { cover_sheet: current });
-  const lines = coverLines(current.text);
-  // A line is matched as served: add and remove passed the separator rule,
-  // and a line stored before it may hold a separator (memos.ts).
-  const served = lines.map(joinSeparators);
-  let next: string[];
-  if (change.add !== undefined) {
-    if (served.includes(change.add))
-      return result("unchanged", { cover_sheet: current });
-    next = [...lines, change.add];
-  } else {
-    if (!served.includes(change.remove!))
-      throw new StoreError(
-        "line_not_found",
-        "remove must be one whole line copied exactly from the current cover sheet. Nothing was changed.",
-        409,
-      );
-    // Removing the last line may empty it (docs/memos.md).
-    next = lines.filter((_, i) => served[i] !== change.remove);
-  }
-  const text = next.join("\n");
-  if (text.length > COVER_SHEET_CHARS) throw coverSheetLimit(text.length);
-  const version = current.version + 1;
-  await tx.query(sql`INSERT INTO cover_sheets(user_id,version,text,actor_json)
-    VALUES (${userId},${version},${text},${JSON.stringify({ kind: "ai", ...JSON.parse(client(actor)) })})`);
-  return result("saved", { cover_sheet: { version, text } });
 }
 
 /** Deletes memos and, through the citations' cascade, what they taught; a

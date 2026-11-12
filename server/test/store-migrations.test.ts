@@ -1,6 +1,11 @@
 import { expect, test } from "bun:test";
 import { localStore, storeDatabase } from "./local-store";
-import { fixtureStore, memoSave, seedUsers } from "./store-fixtures";
+import {
+  fixtureStore,
+  memoSave,
+  seedLegacy,
+  seedUsers,
+} from "./store-fixtures";
 import { migrationUrl } from "../scripts/migrate";
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
@@ -909,17 +914,20 @@ test("0012 adds empty memo tables the legacy group cannot reach; 014 grants the 
     // deleting a tweak (app) removes them through the owner's cascades.
     await seedUsers(pg, "cascade");
     const store = fixtureStore(local.db, "cascade");
+    // A memo with a legacy note citing it, as earlier versions wrote them.
     const cited = async (n: number) => {
       const saved = await store.saveMemo(
         memoSave({
           first_draft: `Hi! Fictional first draft ${n}.`,
           final: `Fictional final ${n}.`,
           mode: "draft",
-          rounds: 1,
-          tweaks: [{ text: `fictional tweak ${n}` }],
         }),
       );
-      return saved.memo!;
+      const [tweak_id] = await seedLegacy(pg, "cascade", {
+        notes: [`fictional tweak ${n}`],
+        citedBy: saved.memo!.memo_id,
+      });
+      return { ...saved.memo!, tweak_id: tweak_id! };
     };
     const citations = async () =>
       (
@@ -937,7 +945,7 @@ test("0012 adds empty memo tables the legacy group cannot reach; 014 grants the 
       ],
       [
         "milton_app_runtime",
-        `DELETE FROM tweaks WHERE user_id='cascade' AND id='${deleted.tweaks[0]!.tweak_id}'`,
+        `DELETE FROM tweaks WHERE user_id='cascade' AND id='${deleted.tweak_id}'`,
       ],
     ] as const) {
       await pg.exec(`SET ROLE ${role}`);
@@ -1056,12 +1064,14 @@ test("0015 adds memo_changes and the request, changes state and reword columns, 
           first_draft: "Hi! Fictional first draft, long and warm.",
           final: "Fictional final, short.",
           mode: "draft",
-          rounds: 1,
           request: "Write a short fictional note.",
-          tweaks: [{ text: "no warm-up opener" }],
         }),
       )
     ).memo!;
+    const [tweak] = await seedLegacy(pg, "evidence", {
+      notes: ["no warm-up opener"],
+      citedBy: saved.memo_id,
+    });
     const rows = () =>
       pg.query<{
         n: number;
@@ -1071,7 +1081,6 @@ test("0015 adds memo_changes and the request, changes state and reword columns, 
       }>(
         `SELECT n,about,"by",tweak_id FROM memo_changes WHERE user_id='evidence' ORDER BY n`,
       );
-    const tweak = saved.tweaks[0]!.tweak_id;
     expect((await rows()).rows).toEqual([
       { n: 0, about: null, by: null, tweak_id: null },
     ]);
@@ -1208,7 +1217,7 @@ test("0013 drops the old writing tables, their sequence and functions, and the o
       message: "The save request is too large. Nothing was changed.",
     });
     // The memo code's receipts: a memo saved then forgotten, a memo whose
-    // context was corrected twice, a refusal and a cover sheet line.
+    // context was corrected twice, and two refusals.
     await addMemoEvidence(pg);
     const store = fixtureStore(storeDatabase(pg), "kept");
     const forgottenSave = memoSave({ final: "Fictional forgotten final." });
@@ -1235,9 +1244,9 @@ test("0013 drops the old writing tables, their sequence and functions, and the o
     expect((await store.saveMemo(refused)).status).toBe("failed");
     const line = {
       request_id: crypto.randomUUID(),
-      cover_sheet: { add: "Fictional line.", expected_version: 0 },
+      forget_memos: ["not-a-memo"],
     };
-    expect((await store.saveMemo(line)).status).toBe("saved");
+    expect((await store.saveMemo(line)).status).toBe("failed");
     const receipts = async () =>
       (
         await pg.query<{ request_id: string }>(
@@ -1390,7 +1399,10 @@ test("0014 drops source_hash; save_request_hashes checks input_hash alone, every
     );
     // The replay returns the stored outcome, and the check still refuses a
     // malformed input_hash.
-    expect(await store.saveMemo(save)).toEqual(saved);
+    expect(await store.saveMemo(save)).toEqual({
+      ...saved,
+      replayed: expect.any(String),
+    });
     await expect(
       pg.query(
         "INSERT INTO save_requests(user_id,request_id,input_hash,result_json) VALUES ('kept',$1,'not-a-hash','{\"status\":\"saved\"}')",
@@ -1430,37 +1442,8 @@ test("0016 loosens the rounds and request id checks: today's rows stay as they a
       );
     await through(at);
     await migrate(drizzle(pg), { migrationsFolder: scratch });
-    // Today's code saves a memo in each first-draft state.
-    await seedUsers(pg, "kept");
-    const store = fixtureStore(storeDatabase(pg), "kept");
-    const drafted = { mode: "draft" as const, rounds: 2 };
-    for (const memo of [
-      {},
-      { ...drafted, first_draft: "Fictional first draft, warm." },
-      { ...drafted, first_draft_missing: true as const },
-    ])
-      expect((await store.saveMemo(memoSave(memo))).status).toBe("saved");
-    const definitions = () =>
-      pg.query<{ conname: string; definition: string }>(
-        "SELECT conname,pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE conname IN ('memos_first_draft','memos_request_id','save_request_id') ORDER BY conname",
-      );
-    const rows = async () => ({
-      memos: (await pg.query("SELECT * FROM memos ORDER BY id")).rows,
-      receipts: (
-        await pg.query("SELECT * FROM save_requests ORDER BY request_id")
-      ).rows,
-    });
-    const before = await rows();
-    expect(
-      (before.memos as { first_draft_state: string }[])
-        .map((m) => m.first_draft_state)
-        .sort(),
-    ).toEqual(["kept", "missing", "none"]);
-    const oldChecks = (await definitions()).rows;
-    const applied = async () =>
-      (await pg.query("SELECT hash FROM drizzle.__drizzle_migrations")).rows
-        .length;
-    // Rows as SQL, for shapes today's code never writes.
+    // Rows as SQL: the shapes the code before this release wrote, and ones
+    // no code writes.
     let n = 0;
     const memo = (columns: Record<string, string | number | null>) => {
       const row = {
@@ -1486,6 +1469,52 @@ test("0016 loosens the rounds and request id checks: today's rows stay as they a
         `INSERT INTO save_requests(user_id,request_id,input_hash,result_json) VALUES ('kept',$1,repeat('a',64),'{"status":"saved"}')`,
         [requestId],
       );
+    // A memo in each first-draft state as the code before this release saved
+    // them: rounds with a first draft, kept or missing.
+    await seedUsers(pg, "kept");
+    const store = fixtureStore(storeDatabase(pg), "kept");
+    expect((await store.saveMemo(memoSave())).status).toBe("saved");
+    await memo({
+      first_draft_state: "kept",
+      first_draft: "Fictional first draft, warm.",
+      mode: "draft",
+      tier: "steered",
+      rounds: 2,
+    });
+    await memo({
+      first_draft_state: "missing",
+      mode: "draft",
+      tier: "steered",
+      rounds: 2,
+    });
+    // This release's code saves drafted memos without rounds, which the old
+    // check refuses: 0016 runs first.
+    const drafted = { mode: "draft" as const };
+    expect(
+      await store.saveMemo(
+        memoSave({ ...drafted, first_draft: "Too early, fictional." }),
+      ),
+    ).toMatchObject({ status: "failed", error: "check_violation" });
+    const definitions = () =>
+      pg.query<{ conname: string; definition: string }>(
+        "SELECT conname,pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE conname IN ('memos_first_draft','memos_request_id','save_request_id') ORDER BY conname",
+      );
+    const rows = async () => ({
+      memos: (await pg.query("SELECT * FROM memos ORDER BY id")).rows,
+      receipts: (
+        await pg.query("SELECT * FROM save_requests ORDER BY request_id")
+      ).rows,
+    });
+    const before = await rows();
+    expect(
+      (before.memos as { first_draft_state: string }[])
+        .map((m) => m.first_draft_state)
+        .sort(),
+    ).toEqual(["kept", "missing", "none"]);
+    const oldChecks = (await definitions()).rows;
+    const applied = async () =>
+      (await pg.query("SELECT hash FROM drizzle.__drizzle_migrations")).rows
+        .length;
     // A retained 36-character id holding "/" passes the old check and fails
     // the new one, in either table: the preflight counts it, and 0016 fails
     // whole, leaving the old checks and the journal as they were.
@@ -1531,11 +1560,22 @@ test("0016 loosens the rounds and request id checks: today's rows stay as they a
         definition: `CHECK ((request_id ~ ${alphabet}))`,
       },
     ]);
-    // Today's code still saves, with rounds, and replays.
+    // A row as the code before this release writes it still passes, and
+    // this release's code saves without rounds and replays.
+    await memo({
+      first_draft_state: "kept",
+      first_draft: "Old code's fictional draft.",
+      mode: "draft",
+      tier: "steered",
+      rounds: 1,
+    });
     const save = memoSave({ ...drafted, first_draft: "Another fictional." });
     const saved = await store.saveMemo(save);
     expect(saved.status).toBe("saved");
-    expect(await store.saveMemo(save)).toEqual(saved);
+    expect(await store.saveMemo(save)).toEqual({
+      ...saved,
+      replayed: expect.any(String),
+    });
     // A kept or missing first draft may now lack rounds; a final alone still
     // may not have them.
     await memo({

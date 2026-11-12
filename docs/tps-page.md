@@ -18,7 +18,7 @@ covers:
 
 # TPS page
 
-What each change does to memos, tweaks and the cover sheet is in [memos](memos.md) and
+What each change does to memos and their tweaks is in [memos](memos.md) and
 [deletion](deletion.md); sign-in is in [accounts](accounts.md); billing items are in
 [billing](billing.md).
 
@@ -40,23 +40,22 @@ What each change does to memos, tweaks and the cover sheet is in [memos](memos.m
 
 ## The TPS page
 
-- It reads in one statement: the cover sheet and its version, the Keep memos switch, the
-  newest 200 memos (older ones stay in the export), every tweak with its count (most
-  cited first) and score, and the scoreboard ([memos](memos.md)).
-- Each tweak shows its text, then on its own row its memo count and, once it has been
-  served, "served S" and "needed again M", as raw counts, never a ratio. Rewording a
-  tweak restarts both counts ([memos](memos.md#tweaks)). No tweak shows an example.
+- It reads in one statement: the Keep memos switch, the newest 200 memos (older ones
+  stay in the export), each with its stored change rows, and the scoreboard
+  ([memos](memos.md)).
 - Each listed memo shows its medium, kind, time and summary; "You asked:" with its
-  request's first line cut to 120 characters; one line with its AI, rounds, "N
-  listed changes" (every row its memo page lists, formatting included, when it has any)
-  and tier; the tweaks its report
-  served (those still on file) and the tweaks it taught. Its first draft and final load
-  only when that memo is opened.
+  request's first line cut to 120 characters; one line with its AI and tier; and its
+  tweaks, every stored change row as its memo page lists them (a `too_large` memo says
+  there are too many to list). Its first draft and final load only when that memo is
+  opened.
+- There is no cover sheet section, no list of tweaks across memos, no reword form, no
+  tweak score and no rounds; legacy cover sheets and notes are listed in TPS.md only
+  (milton-overlord, 2026-11-12).
 - `/tps/memo/<id>` shows one memo in full: context; "You asked" with the request in
   full, a note that the AI is asked to keep only what the person typed and that it is
-  shown only to them and never sent to an AI, and **Remove**; first draft or why there is none; final; "What changed"; served and
-  taught tweaks; Forget. Another account's or an unknown id is a 404.
-- "What changed" lists code's stored changes in text order, with no labels
+  shown only to them and never sent to an AI, and **Remove**; first draft or why there
+  is none; final; "Tweaks"; Forget. Another account's or an unknown id is a 404.
+- "Tweaks" lists code's stored changes in text order, with no labels
   ([memos](memos.md#changes)). Each shows before → after, or `added:` or `cut:` when
   one side is empty. A Markdown-only spot says "formatting". A side cut at 300
   characters ends in "…" and the row says "shortened to 300 characters", so a cut is
@@ -64,27 +63,37 @@ What each change does to memos, tweaks and the cover sheet is in [memos](memos.m
   final above show them all."; an untouched final says nothing changed. The diff compares
   words and marks, so an edit of spacing or line breaks alone lists no row; the page then
   says only spacing or line breaks changed, never that nothing did. A memo saved
-  before changes were listed, or without a kept first draft, has no "What changed".
-  There is no typed share and no tweak line on a change.
+  before changes were listed, or without a kept first draft, has no "Tweaks".
 - Under the list, a memo whose changes a report may serve (the report's own
   `servesChanges` and `servableRow`, [reports](reports.md#what-they-changed)) says "Your
   AIs may see a few of these changes when this memo is used as an example." "May",
   because which changes a report serves depends on its budget. Other memos say nothing.
-- The cover sheet is shown read only, one ruled line per line as written, blank lines
-  kept, with a note that an AI connected with Read and write changes it; an empty one
-  says "No cover sheet yet." and how to start one. There is no cover sheet form
-  (Peter, 2026-11-10; [memos](memos.md)).
-- The person can forget one memo, remove a memo's request (`/tps/request/remove`,
-  which returns to the memo with "Request removed."), and delete or reword a tweak. A
-  reword follows the one-line rule an AI's tweak does ([memos](memos.md#bounds)).
+- The person can forget one memo and remove a memo's request (`/tps/request/remove`,
+  which returns to the memo with "Request removed."). Forgetting is the only delete.
+  The retired tweak delete and reword routes and any cover sheet route are gone with
+  their forms: a stale POST to one meets the browser router's not-found answer and
+  changes nothing.
 - An empty TPS page links to the Connected AIs page and shows the shared setup prompt
   ([setup](setup.md)) to copy; an account with memos gets a shorter prompt for the next
   draft instead.
 - Every TPS page change is a POST with the CSRF and Origin checks, then redirects back
   with a notice.
 - Every TPS page change runs in its own transaction under the account lock
-  ([saves](saves.md)): forgetting one memo, removing a request, Delete all memos,
-  deleting or rewording a tweak, and the Keep memos switch.
+  ([saves](saves.md)): forgetting one memo, removing a request, Delete all memos and
+  the Keep memos switch.
+
+## Scoreboard
+
+- Per [memos](memos.md#scoreboard): the median change and the share accepted as-is, no
+  rounds.
+- Rollback limit, accepted (milton-overlord, 2026-11-12) as a degraded emergency
+  fallback: the code before this release computes a median of rounds, and on an account
+  with 10 or more scored memos in a mode whose odd-sized window has a row without rounds
+  in the middle (NULL sorted as 0, ties in input order), its TPS page answers HTTP 503
+  through the browser error handler; an even window misstates rounds (two NULLs give 0).
+  No account meets it at release; one save after the release query can bring one into
+  it. `server/scripts/check-compatibility.ts` reproduces it, and the query and rollback
+  order are in [releases](deploy/releases.md).
 
 ## Memo settings
 
@@ -95,12 +104,22 @@ What each change does to memos, tweaks and the cover sheet is in [memos](memos.m
 ## TPS.md
 
 - `/download` returns the complete writing export as `TPS.md`, including when AI access
-  is paused: the cover sheet, the tweaks with counts (most cited first; a served one as
-  `- text (N memos; served S, needed again M)`), then every memo's final grouped by medium,
-  newest first, each under its kind and date with its summary and, when it has one,
-  `Asked:` and its request in a `~~~text` fence longer than any run of tildes in it, so
-  Markdown shows it as literal text: no heading, list or inline HTML comes from it. First
-  drafts and changes are not in it.
+  is paused: `# TPS report`, then every memo grouped by medium, newest first (then by
+  id), each under its kind and date with its summary, `Asked:` and its request when it
+  has one, and its final quoted. Text from a memo that Markdown could read as structure
+  goes in a `~~~text` fence longer than any run of tildes in it, so no heading, list,
+  quote or inline HTML comes from it.
+- Then its tweaks: every stored change row, formatting and edit-mode rows included,
+  without the report's filters or budget, in order, as the report's `changeLine` prints
+  it, under `Tweaks:` in such a fence. A cut row ends " … [shortened]", outside the
+  quoted strings. A kept first draft whose changes were never recorded (before #109)
+  says "Changes were not recorded for this memo."; an itemized memo with none says "No
+  changes were listed."; a `too_large` memo says "Too many changes to list."; a memo
+  without a kept first draft says nothing. First drafts are not in it.
+- Then, only when present: `## Cover sheet (no longer used)` with the current version,
+  and `## Earlier notes from your edits (no longer used)` with each legacy note's text,
+  no counts, each fenced. Older cover sheet versions and historical save receipts stay
+  stored until account deletion and are in neither view.
 
 ## Connected AIs
 

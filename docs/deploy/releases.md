@@ -48,11 +48,37 @@ MCP and admit roles and the browser assets.
 3. **App and MCP:** deploy the digest to `milton-app` and `milton-mcp` as a tagged revision
    with `gcloud run deploy --no-traffic`, check that revision, then move traffic with
    `gcloud run services update-traffic`. Note the UTC time traffic moved, for the release
-   gate.
-4. **The daily check in the same step:** move `milton-e2e-daily` to the same image with
+   gate. When MCP's tools or answers change, follow [the order below](#when-mcps-tools-change).
+4. **The daily check after the services:** move `milton-e2e-daily` to the same image with
    `gcloud run jobs update milton-e2e-daily --image=…@sha256:<digest>` (see
-   [e2e](e2e.md)). A check on one image can fail against the other image's MCP, and the job
-   pins its own image, so a service release or rollback does not move it.
+   [e2e](e2e.md#across-a-release)). A check on one image can fail against the other image's
+   MCP, and the job pins its own image, so a service release or rollback does not move it.
+
+## When MCP's tools change
+
+A release that changes the tool list, a tool's arguments or a receipt keeps the daily check
+out of the switch, and selects the services in this order. It needs no traffic split and no
+closed ingress; no route or split may keep sending requests to the side being left.
+
+1. **Stage every image first:** server, auth and the site's build, each pushed and
+   recorded, no traffic moved.
+2. **The daily check is idle.** `gcloud run jobs executions list --job=milton-e2e-daily`
+   shows no active or pending execution; nobody starts one by hand until step 6; and the
+   switch through step 6 finishes before the next scheduled run (`7 2,14 * * *` UTC).
+   Otherwise defer.
+3. **The new app** (with admission, on the same runtime image), then drain the old app:
+   wait out its revision's request timeout and confirm in its request log that nothing
+   reaches it.
+4. **The new MCP**, then drain the old MCP the same way, database work included.
+5. Any check the release's runbook asks for between the old writers draining and the first
+   run on the new image (for memos and tweaks only, the test account's owner check,
+   [e2e](e2e.md#across-a-release)).
+6. **The job image**, `gcloud run jobs update milton-e2e-daily --image=…`, checked with
+   `gcloud run jobs describe`, then one manual execution passing.
+7. **The auth service**, on its own (service and both jobs together, as below).
+8. **The site, last**: the release's site change merged to main publishes it ([site](../site.md)).
+
+Then [verify](#verify) and run the release gate.
 
 **Never apply `app.service.json` or `mcp.service.json` with `services replace`.** They are
 not kept current: they still pin the pre-cutover release (app `milton-app-edit-00223ec` and
@@ -65,8 +91,9 @@ revision and its imported image, then verify startup again when assigning traffi
 
 ## Auth image: the service and both jobs
 
-An auth release moves `milton-auth`, `milton-auth-mail` and `milton-auth-maint` to the same
-image in the same step. Keep `AUTH_ADMISSION_URL` (a plain variable on the service and the
+Build the auth image from `apps/auth/Dockerfile` as committed, from the repository root; its
+base images are pinned by digest. An auth release moves `milton-auth`, `milton-auth-mail`
+and `milton-auth-maint` to the same image in the same step. Keep `AUTH_ADMISSION_URL` (a plain variable on the service and the
 mail job, see [cloud](cloud.md#admission-service-milton-admit)); the image refuses to start
 in production without it.
 
@@ -146,13 +173,54 @@ Inspect revision readiness before selecting the recorded revision:
 gcloud run revisions list --service=milton-app --project=milton-510506 --region=us-east4
 ```
 
-- Roll `milton-e2e-daily` back with app and MCP (it pins its own image).
+- Roll `milton-e2e-daily` back after app and MCP (it pins its own image), under the same
+  conditions as forward: no active or pending execution, no manual start, the switch done
+  before the next scheduled run, then one manual execution.
 - Roll the auth service and both auth jobs back together (the mail note above).
 - If a revision is no longer available, restore its saved service manifest with its pinned
   image and matching secret versions using the release procedure above.
 - Do not restore the old Vercel CNAME: the project and its deployments no longer exist.
 
 See [Google's revision rollback guide](https://docs.cloud.google.com/run/docs/rollouts-rollbacks-traffic-migration).
+
+### Rolling back memos and tweaks only
+
+The release that retires `get_cover_sheet`, the cover sheet, notes written by AIs, rounds and
+the tweak score runs after `0016` (applied 2026-11-12, [serving](serving.md#schema-heads)),
+which only loosens checks, so the rollback is the previous revisions with no schema step.
+It is a **degraded emergency fallback** (milton-overlord, 2026-11-12): writing is kept, and
+memo pages, the export and deletion keep working, under two accepted limits, the scoreboard
+on the [TPS page](../tps-page.md#scoreboard) and replay and fresh saves in
+[saves](../saves.md). The rollback target is good until the later cleanup (revoking the
+unused grants and dropping the retired tables and columns); after it, fix forward.
+
+1. **The old MCP first**, then drain the new MCP's requests and database work, so no new
+   memo is saved under the new code from here on.
+2. **The query.** milton-duo runs it read-only. It lists every account that could then hit
+   the old scoreboard's 503 (candidates, not proven failures); it is a snapshot, not
+   clearance for later writes, which is why it runs only after step 1:
+
+   ```sql
+   SELECT user_id, mode, count(*) AS scored,
+          count(*) FILTER (WHERE rounds IS NULL) AS without_rounds
+   FROM memos
+   WHERE first_draft_state = 'kept' AND change IS NOT NULL
+   GROUP BY user_id, mode
+   HAVING count(*) >= 10 AND count(*) FILTER (WHERE rounds IS NULL) > 0;
+   ```
+
+   No rows: go on. Any row: say so to Peter and choose between rolling back with the TPS
+   page possibly answering 503 (and showing inaccurate rounds) for those accounts, and
+   fixing forward. Record the limits taken with the degraded fallback in the release record.
+
+3. **The old app** (with admission), then drain the new app.
+4. **The job image**, under the forward conditions (no active or pending execution, no
+   manual start, finished before the next scheduled run), then one manual execution.
+5. **The previous auth revision**, then **the previous site deployment**.
+
+After a rollback, AIs still holding the new contract may fail drafted saves even as fresh
+saves until their tools refresh, and old reports, the old writing tools and the old export
+return.
 
 ## Turnstile (separate go from Peter at release)
 

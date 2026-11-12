@@ -5,25 +5,17 @@ import { sql } from "drizzle-orm";
 import type { StoreDatabase, StoreSession } from "./database";
 import { databaseFailure } from "./database";
 import { accountUnavailable, requireActiveAccount } from "./accounts";
-import { StoreError } from "./errors";
 import {
   coverSheetJson,
-  joinSeparators,
   keepMemos,
   MEDIA,
   servesChanges,
-  tweakScore,
   type Medium,
 } from "./memos";
-import { servableRow } from "./changes";
+import { changeLine, servableRow } from "./changes";
 import { utf8Bytes } from "./limits";
 import { deleteMemos } from "./save";
-import {
-  normalizeTweak,
-  scoreboard,
-  type Scoreboard,
-  type Tier,
-} from "./score";
+import { scoreboard, type Scoreboard, type Tier } from "./score";
 
 export type TpsMemo = {
   id: string;
@@ -36,33 +28,20 @@ export type TpsMemo = {
   purpose?: string;
   mode?: "draft" | "edit";
   first_draft_state: "kept" | "missing" | "none";
-  rounds?: number;
   change?: number;
   tier: Tier;
   /** The request's first line, cut to ASKED_LINE characters. */
   asked?: string;
-  /** How many changes its memo page lists, Markdown-only ones included (none
-   * for a too_large memo); absent for a memo saved before changes were
-   * listed. */
-  change_count?: number;
-  /** Tweaks the report before it served, still on file. */
-  served: { id: string; text: string }[];
-  /** Tweaks it cites. */
-  taught: { id: string; text: string }[];
-};
-/** A tweak with its citation count and its score (docs/reports.md). */
-export type TpsTweak = {
-  id: string;
-  text: string;
-  memos: number;
-  served: number;
-  needed_again: number;
+  /** itemized or too_large; absent for a memo saved before changes were
+   * listed or without a kept first draft. */
+  changes_state?: "itemized" | "too_large";
+  /** Its tweaks: every stored change row, in order (docs/memos.md,
+   * "Changes"). */
+  changes: TpsChange[];
 };
 export type TpsView = {
-  cover_sheet: { text: string; version: number };
   keep_memos: boolean;
   memos: TpsMemo[];
-  tweaks: TpsTweak[];
   scoreboard: Scoreboard[];
 };
 /** One stored change, code's own spot, as the memo page lists it
@@ -88,10 +67,6 @@ export type FullMemo = TpsMemo & {
   /** The ask the AI sent for it (asked to be only what the person typed);
    * never served to an AI. */
   request?: string;
-  /** itemized or too_large; absent for a memo saved before changes were
-   * listed or without a kept first draft. */
-  changes_state?: "itemized" | "too_large";
-  changes: TpsChange[];
   /** Whether a report may serve some of these changes under it as an
    * example, by the report's own rule (docs/reports.md). */
   changes_served: boolean;
@@ -102,36 +77,35 @@ export const LISTED_MEMOS = 200;
 /** A listed memo shows its request's first line, cut to this many characters. */
 export const ASKED_LINE = 120;
 
+/** Every stored change row of memo `m`, in order. */
+const changeRowsJson = sql`(SELECT coalesce(json_agg(json_build_object('n',c.n,'before',c."before",'after',c."after",
+    'truncated',c.truncated,'about',c.about,'by',c.by,'tweak_id',c.tweak_id,
+    'draft_start',c.draft_start,
+    'draft_end',c.draft_end,'final_start',c.final_start,'final_end',c.final_end)
+    ORDER BY c.n),'[]'::json)
+    FROM memo_changes c WHERE c.user_id=m.user_id AND c.memo_id=m.id)`;
 const memoColumns = sql`m.id,to_char(m.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"') AS at,
   m.client_json::jsonb AS client,m.medium,k.label AS kind,m.summary,m.audience,m.purpose,m.mode,
-  m.first_draft_state,m.rounds,m.change,m.tier,
-  (SELECT coalesce(json_agg(json_build_object('id',t.id,'text',t.text) ORDER BY array_position(m.served_tweak_ids,t.id)),'[]'::json)
-    FROM tweaks t WHERE t.user_id=m.user_id AND t.id=ANY(m.served_tweak_ids)) AS served,
-  (SELECT coalesce(json_agg(json_build_object('id',t.id,'text',t.text) ORDER BY t.text,t.id),'[]'::json)
-    FROM tweak_citations c JOIN tweaks t ON t.user_id=c.user_id AND t.id=c.tweak_id
-    WHERE c.user_id=m.user_id AND c.memo_id=m.id) AS taught,
+  m.first_draft_state,m.change,m.tier,
   split_part(m.request,E'\n',1) AS asked,
-  CASE WHEN m.changes_state IS NOT NULL THEN (SELECT count(*)::int FROM memo_changes c
-    WHERE c.user_id=m.user_id AND c.memo_id=m.id) END AS change_count`;
+  m.changes_state,${changeRowsJson} AS changes`;
 type MemoRow = Omit<
   TpsMemo,
   | "kind"
   | "audience"
   | "purpose"
   | "mode"
-  | "rounds"
   | "change"
   | "asked"
-  | "change_count"
+  | "changes_state"
 > & {
   kind: string | null;
   audience: string | null;
   purpose: string | null;
   mode: "draft" | "edit" | null;
-  rounds: number | null;
   change: number | null;
   asked: string | null;
-  change_count: number | null;
+  changes_state: "itemized" | "too_large" | null;
 };
 const memo = (row: MemoRow): TpsMemo => {
   const {
@@ -139,10 +113,9 @@ const memo = (row: MemoRow): TpsMemo => {
     audience,
     purpose,
     mode,
-    rounds,
     change,
     asked,
-    change_count,
+    changes_state,
     ...rest
   } = row;
   const chars = asked === null ? [] : Array.from(asked);
@@ -152,7 +125,6 @@ const memo = (row: MemoRow): TpsMemo => {
     ...(audience !== null ? { audience } : {}),
     ...(purpose !== null ? { purpose } : {}),
     ...(mode !== null ? { mode } : {}),
-    ...(rounds !== null ? { rounds } : {}),
     ...(change !== null ? { change } : {}),
     ...(asked !== null
       ? {
@@ -162,20 +134,18 @@ const memo = (row: MemoRow): TpsMemo => {
               : asked,
         }
       : {}),
-    ...(change_count !== null ? { change_count } : {}),
+    ...(changes_state !== null ? { changes_state } : {}),
   };
 };
 
-// Each tweak with its count and score (docs/reports.md).
-const tweakColumns = (
-  userId: string,
-) => sql`(SELECT coalesce(json_agg(json_build_object('id',t.id,'text',t.text,'memos',
-    (SELECT count(*) FROM tweak_citations c WHERE c.user_id=t.user_id AND c.tweak_id=t.id),
-    'served',s.served,'needed_again',s.needed_again) ORDER BY t.text,t.id),'[]'::json)
-    FROM tweaks t ${tweakScore} WHERE t.user_id=${userId})`;
-/** Most cited first. */
-const tweakList = (rows: TpsTweak[]): TpsTweak[] =>
-  rows.toSorted((a, b) => b.memos - a.memos || a.text.localeCompare(b.text));
+/** Text Markdown shows literally: a fenced block whose fence is longer than
+ * any run of tildes inside it, so no heading, list, quote or inline HTML can
+ * come from it. */
+const fenced = (text: string) => {
+  const runs = text.match(/~+/g) ?? [];
+  const fence = "~".repeat(Math.max(3, ...runs.map((r) => r.length + 1)));
+  return `${fence}text\n${text}\n${fence}`;
+};
 
 export function tpsStore(db: StoreDatabase, userId: string) {
   /** One change in one transaction under the account lock. */
@@ -194,37 +164,27 @@ export function tpsStore(db: StoreDatabase, userId: string) {
       const row = (
         await db.query<{
           open: boolean;
-          cover: { version: number; text: string } | null;
           keep_memos: boolean;
           memos: MemoRow[];
-          tweaks: TpsTweak[];
           scored: {
             mode: "draft" | "edit";
-            rounds: number;
             change: number;
             untouched: boolean;
             at: string;
           }[];
         }>(sql`SELECT EXISTS(SELECT 1 FROM users WHERE id=${userId} AND status='active') AS open,
-          ${coverSheetJson(userId)} AS cover,
           ${keepMemos(userId)} AS keep_memos,
           (SELECT coalesce(json_agg(to_jsonb(r)-'created' ORDER BY r.created DESC,r.id),'[]'::json) FROM (
             SELECT ${memoColumns},m.created_at AS created FROM memos m LEFT JOIN memo_kinds k ON k.user_id=m.user_id AND k.id=m.kind_id
             WHERE m.user_id=${userId} ORDER BY m.created_at DESC,m.id LIMIT ${LISTED_MEMOS}) r) AS memos,
-          ${tweakColumns(userId)} AS tweaks,
-          (SELECT coalesce(json_agg(json_build_object('mode',mode,'rounds',rounds,'change',change,
+          (SELECT coalesce(json_agg(json_build_object('mode',mode,'change',change,
             'untouched',final=first_draft,'at',created_at) ORDER BY created_at),'[]'::json)
             FROM memos WHERE user_id=${userId} AND first_draft_state='kept' AND change IS NOT NULL) AS scored`)
       )[0]!;
       if (!row.open) throw accountUnavailable();
       return {
-        cover_sheet: {
-          text: row.cover?.text ?? "",
-          version: row.cover?.version ?? 0,
-        },
         keep_memos: row.keep_memos,
         memos: row.memos.map(memo),
-        tweaks: tweakList(row.tweaks),
         scoreboard: scoreboard(
           row.scored.map((s) => ({ ...s, at: new Date(s.at) })),
         ),
@@ -236,45 +196,32 @@ export function tpsStore(db: StoreDatabase, userId: string) {
           first_draft: string | null;
           final: string;
           request: string | null;
-          changes_state: "itemized" | "too_large" | null;
-          changes: TpsChange[];
         }
-      >(sql`SELECT ${memoColumns},m.first_draft,m.final,m.request,m.changes_state,
-        (SELECT coalesce(json_agg(json_build_object('n',c.n,'before',c."before",'after',c."after",
-          'truncated',c.truncated,'about',c.about,'by',c.by,'tweak_id',c.tweak_id,
-          'draft_start',c.draft_start,
-          'draft_end',c.draft_end,'final_start',c.final_start,'final_end',c.final_end)
-          ORDER BY c.n),'[]'::json)
-          FROM memo_changes c WHERE c.user_id=m.user_id AND c.memo_id=m.id) AS changes
+      >(sql`SELECT ${memoColumns},m.first_draft,m.final,m.request
         FROM memos m
         LEFT JOIN memo_kinds k ON k.user_id=m.user_id AND k.id=m.kind_id
         WHERE m.user_id=${userId} AND m.id=${id}`);
       if (!row) return undefined;
-      const { first_draft, final, request, changes_state, changes, ...rest } =
-        row;
+      const { first_draft, final, request, ...rest } = row;
       return {
         ...memo(rest),
         ...(first_draft !== null ? { first_draft } : {}),
         final,
         ...(request !== null ? { request } : {}),
-        ...(changes_state !== null ? { changes_state } : {}),
-        changes,
         changes_served:
-          servesChanges({
-            ...row,
-            changes_state,
-            bytes: utf8Bytes(final),
-          }) && changes.some(servableRow),
+          servesChanges({ ...row, bytes: utf8Bytes(final) }) &&
+          row.changes.some(servableRow),
       };
     },
-    /** TPS.md: the cover sheet, the tweaks, and every memo's final grouped by
-     * medium, newest first, with what the person asked. First drafts and
-     * changes stay out. */
+    /** TPS.md (docs/tps-page.md, "TPS.md"): every memo's final grouped by
+     * medium, newest first, with what the person asked and its tweaks, then
+     * the retired cover sheet and earlier notes, only when present. First
+     * drafts stay out. */
     async exportTps(): Promise<string> {
       const [row] = await db.query<{
         open: boolean;
         cover: { text: string } | null;
-        tweaks: TpsTweak[];
+        notes: string[];
         memos: {
           medium: Medium;
           kind: string | null;
@@ -282,12 +229,18 @@ export function tpsStore(db: StoreDatabase, userId: string) {
           at: string;
           final: string;
           request: string | null;
+          first_draft_state: "kept" | "missing" | "none";
+          changes_state: "itemized" | "too_large" | null;
+          changes: TpsChange[];
         }[];
       }>(sql`SELECT EXISTS(SELECT 1 FROM users WHERE id=${userId} AND status='active') AS open,
         ${coverSheetJson(userId)} AS cover,
-        ${tweakColumns(userId)} AS tweaks,
+        (SELECT coalesce(json_agg(t.text ORDER BY t.created_at,t.id),'[]'::json)
+          FROM tweaks t WHERE t.user_id=${userId}) AS notes,
         (SELECT coalesce(json_agg(json_build_object('medium',m.medium,'kind',k.label,'summary',m.summary,
-          'at',to_char(m.created_at AT TIME ZONE 'UTC','YYYY-MM-DD'),'final',m.final,'request',m.request) ORDER BY m.created_at DESC,m.id),'[]'::json)
+          'at',to_char(m.created_at AT TIME ZONE 'UTC','YYYY-MM-DD'),'final',m.final,'request',m.request,
+          'first_draft_state',m.first_draft_state,'changes_state',m.changes_state,
+          'changes',${changeRowsJson}) ORDER BY m.created_at DESC,m.id),'[]'::json)
           FROM memos m LEFT JOIN memo_kinds k ON k.user_id=m.user_id AND k.id=m.kind_id
           WHERE m.user_id=${userId}) AS memos`);
       if (!row!.open) throw accountUnavailable();
@@ -296,36 +249,39 @@ export function tpsStore(db: StoreDatabase, userId: string) {
           .split("\n")
           .map((l) => (l === "" ? ">" : `> ${l}`))
           .join("\n");
-      // A request goes in a fenced block, so Markdown renders it as literal
-      // text: no heading, list, quote or inline HTML can come from it. The
-      // fence is longer than any run of tildes inside it.
-      const asked = (request: string) => {
-        const runs = request.match(/~+/g) ?? [];
-        const fence = "~".repeat(Math.max(3, ...runs.map((r) => r.length + 1)));
-        return `Asked:\n${fence}text\n${request}\n${fence}`;
+      // A memo's tweaks: every stored row as changeLine prints it, without
+      // the report's filters or budget, or why there are none to list.
+      const tweaks = (m: NonNullable<typeof row>["memos"][number]) => {
+        if (m.first_draft_state !== "kept") return undefined;
+        if (m.changes_state === null)
+          return "Changes were not recorded for this memo.";
+        if (m.changes_state === "too_large") return "Too many changes to list.";
+        if (!m.changes.length) return "No changes were listed.";
+        return `Tweaks:\n${fenced(
+          m.changes
+            .map((c) => changeLine(c) + (c.truncated ? " … [shortened]" : ""))
+            .join("\n"),
+        )}`;
       };
       const parts = ["# TPS report"];
-      if (row!.cover?.text.trim())
-        parts.push("## Cover sheet", row!.cover.text);
-      if (row!.tweaks.length)
-        parts.push(
-          "## Tweaks",
-          tweakList(row!.tweaks)
-            .map(
-              (t) =>
-                `- ${t.text} (${t.memos} memo${t.memos === 1 ? "" : "s"}${t.served ? `; served ${t.served}, needed again ${t.needed_again}` : ""})`,
-            )
-            .join("\n"),
-        );
       for (const medium of MEDIA) {
         const mine = row!.memos.filter((m) => m.medium === medium);
         if (!mine.length) continue;
         parts.push(`## ${medium[0]!.toUpperCase()}${medium.slice(1)}`);
-        for (const m of mine)
+        for (const m of mine) {
+          const listed = tweaks(m);
           parts.push(
-            `### ${[m.kind, m.at].filter(Boolean).join(" · ")}\n${m.summary}${m.request !== null ? `\n${asked(m.request)}` : ""}\n\n${quote(m.final)}`,
+            `### ${[m.kind, m.at].filter(Boolean).join(" · ")}\n${m.summary}${m.request !== null ? `\nAsked:\n${fenced(m.request)}` : ""}\n\n${quote(m.final)}${listed ? `\n\n${listed}` : ""}`,
           );
+        }
       }
+      if (row!.cover?.text.trim())
+        parts.push("## Cover sheet (no longer used)", fenced(row!.cover.text));
+      if (row!.notes.length)
+        parts.push(
+          "## Earlier notes from your edits (no longer used)",
+          fenced(row!.notes.map((note) => `- ${note}`).join("\n")),
+        );
       return parts.join("\n\n") + "\n";
     },
     /** Clears a memo's request, the person's own ask; its words stay. */
@@ -346,48 +302,6 @@ export function tpsStore(db: StoreDatabase, userId: string) {
         await tx.query(sql`DELETE FROM tweaks WHERE user_id=${userId}`);
         await tx.query(sql`DELETE FROM memo_kinds WHERE user_id=${userId}`);
         return gone.length;
-      }),
-    deleteTweak: (id: string) =>
-      change(
-        async (tx) =>
-          (
-            await tx.query(
-              sql`DELETE FROM tweaks WHERE user_id=${userId} AND id=${id} RETURNING id`,
-            )
-          ).length > 0,
-      ),
-    /** A reworded tweak keeps its id and citations, and its score restarts
-     * from the new text. The text passes the one-line rule, as an AI's tweak
-     * does (mcp-tools.ts, oneLine). A wording another tweak already has is
-     * refused, so each wording stays one tweak. */
-    rewordTweak: (id: string, text: string) =>
-      change(async (tx) => {
-        const trimmed = joinSeparators(text).trim();
-        const norm = normalizeTweak(trimmed);
-        if (!norm || trimmed.length > 200 || /[\p{Cc}]/u.test(trimmed))
-          throw new StoreError(
-            "invalid_input",
-            "A tweak is one line of at most 200 characters.",
-            400,
-          );
-        const [other] = await tx.query(
-          sql`SELECT 1 FROM tweaks WHERE user_id=${userId} AND norm=${norm} AND id<>${id}`,
-        );
-        if (other)
-          throw new StoreError(
-            "tweak_exists",
-            "Another tweak already says that.",
-            409,
-          );
-        return (
-          (
-            await tx.query(
-              sql`UPDATE tweaks SET text=${trimmed},norm=${norm},
-                text_changed_at=CASE WHEN text IS DISTINCT FROM ${trimmed} THEN clock_timestamp() ELSE text_changed_at END
-                WHERE user_id=${userId} AND id=${id} RETURNING id`,
-            )
-          ).length > 0
-        );
       }),
     setKeepMemos: (keep: boolean) =>
       change(async (tx) => {

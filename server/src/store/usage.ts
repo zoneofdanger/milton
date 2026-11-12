@@ -2,7 +2,7 @@ import { sql } from "drizzle-orm";
 import { inBackground, type StoreDatabase } from "./database";
 import { logUnexpected } from "../error-log";
 
-export type ToolName = "get_cover_sheet" | "get_report" | "create_memo";
+export type ToolName = "get_report" | "create_memo";
 /** One tool call's usage: its tool, and once admitted, its row's append. */
 export type CallUsage = { tool: ToolName; recorded?: Promise<void> };
 

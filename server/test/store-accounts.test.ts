@@ -8,6 +8,7 @@ import {
   insideTransactions,
   memoSave,
   read,
+  seedLegacy,
   storeForCurrentRequest,
   vendorIntent,
 } from "./store-fixtures";
@@ -49,14 +50,13 @@ test("trial transition preserves saves and TPS while notices and access follow t
       }),
     );
     expect(
-      JSON.parse((await idleTools.get_cover_sheet()).content[0].text).error,
+      JSON.parse(
+        (await idleTools.get_report({ intent: vendorIntent })).content[0].text,
+      ).error,
     ).toBe("subscription_required");
     await expect(
       (await personStoreForCurrentRequest(local.env, neverSaved)).read(),
-    ).resolves.toMatchObject({
-      cover_sheet: { text: "", version: 0 },
-      memos: [],
-    });
+    ).resolves.toMatchObject({ memos: [] });
     const store = await storeForCurrentRequest(
       { appOrigin: "http://localhost:3001", storeDatabase: local.db },
       auth,
@@ -64,7 +64,7 @@ test("trial transition preserves saves and TPS while notices and access follow t
     );
     const person = await personStoreForCurrentRequest(local.env, auth);
     const tools = createStoreMemoTools(store);
-    const result = (r: Awaited<ReturnType<typeof tools.get_cover_sheet>>) =>
+    const result = (r: Awaited<ReturnType<typeof tools.get_report>>) =>
       JSON.parse(r.content[0].text);
     const account = async () =>
       (
@@ -94,7 +94,7 @@ test("trial transition preserves saves and TPS while notices and access follow t
     await local.db.query(
       sql`UPDATE trial_accounts SET subscription_status='trialing',trial_end=clock_timestamp()+interval '30 days' WHERE user_id=${auth.userId}`,
     );
-    const empty = result(await tools.get_cover_sheet());
+    const empty = result(await tools.get_report({ intent: vendorIntent }));
     expect(empty.notice).toBeUndefined();
     expect(
       result(await tools.create_memo(memoSave({ kind_id: "missing-kind" })))
@@ -104,8 +104,10 @@ test("trial transition preserves saves and TPS while notices and access follow t
     const input = memoSave();
     const saved = result(await tools.create_memo(input));
     expect(saved.status).toBe("saved");
+    // Every resend of it replays the stored outcome, labelled as one.
+    const replay = { ...saved, replayed: expect.any(String) };
     expect((await account()).started_at).toEqual(start);
-    expect(result(await tools.create_memo(input))).toEqual(saved);
+    expect(result(await tools.create_memo(input))).toEqual(replay);
     expect((await account()).started_at).toEqual(start);
     expect(
       result(
@@ -121,7 +123,7 @@ test("trial transition preserves saves and TPS while notices and access follow t
           trialNotice: () => Promise.reject(new Error("claim failed")),
         }).create_memo(input),
       ),
-    ).toEqual(saved);
+    ).toEqual(replay);
     const slowNotice = {
       code: "trial_ending_7_days",
       trial_ends_at: new Date(0).toISOString(),
@@ -159,7 +161,7 @@ test("trial transition preserves saves and TPS while notices and access follow t
             },
           }).create_memo(input),
         ),
-      ).toEqual({ ...saved, notice: slowNotice });
+      ).toEqual({ ...replay, notice: slowNotice });
     } finally {
       fakeSleep.mockRestore();
       fakeAbort.mockRestore();
@@ -176,15 +178,12 @@ test("trial transition preserves saves and TPS while notices and access follow t
       new Date(trialEnd).toISOString(),
     );
     const tps = await person.read();
-    // The AI's cover sheet and the person's TPS page count the same one memo.
-    const sheet = {
-      text: tps.cover_sheet.text,
-      version: tps.cover_sheet.version,
-      memos: tps.memos.length,
-      tweaks: tps.tweaks.length,
-    };
+    // The AI's report and the person's TPS page count the same one memo.
+    const sheet = { memos: tps.memos.length };
     expect(sheet.memos).toBe(1);
-    expect(result(await tools.get_cover_sheet())).toMatchObject(sheet);
+    expect(
+      result(await tools.get_report({ intent: vendorIntent })),
+    ).toMatchObject(sheet);
     // Move only fixture dates; Stripe's answer is the real writer of trial_end.
     await local.db.query(
       sql`UPDATE trial_accounts SET trial_end=clock_timestamp()+interval '6 days' WHERE user_id=${auth.userId}`,
@@ -197,21 +196,25 @@ test("trial transition preserves saves and TPS while notices and access follow t
     );
     const reads = await Promise.all([
       tools.create_memo(input),
-      otherTools.get_cover_sheet(),
+      otherTools.get_report({ intent: vendorIntent }),
     ]);
     expect(reads.map(result).filter((r) => r.notice).length).toBe(1);
     expect(reads.map(result).find((r) => r.notice).notice.code).toBe(
       "trial_ending_7_days",
     );
     expect(await person.read()).toEqual(tps);
-    expect(result(await tools.get_cover_sheet()).notice).toBeUndefined();
+    expect(
+      result(await tools.get_report({ intent: vendorIntent })).notice,
+    ).toBeUndefined();
     await local.db.query(
       sql`UPDATE trial_accounts SET trial_end=clock_timestamp()+interval '23 hours' WHERE user_id=${auth.userId}`,
     );
-    expect(result(await tools.get_cover_sheet()).notice.code).toBe(
-      "trial_ending_1_day",
-    );
-    expect(result(await tools.get_cover_sheet()).notice).toBeUndefined();
+    expect(
+      result(await tools.get_report({ intent: vendorIntent })).notice.code,
+    ).toBe("trial_ending_1_day");
+    expect(
+      result(await tools.get_report({ intent: vendorIntent })).notice,
+    ).toBeUndefined();
     // The subscription ends after the tools were built: the save's gate,
     // under the account lock, refuses it before any write or receipt.
     await local.db.query(
@@ -236,7 +239,7 @@ test("trial transition preserves saves and TPS while notices and access follow t
     expect(racingSave).not.toHaveProperty("subscription_url");
     expect(racingSave.message).toEndWith("Subscribe at http://localhost:3001/");
     expect(await person.read()).toEqual(tps);
-    const denied = await tools.get_cover_sheet();
+    const denied = await tools.get_report({ intent: vendorIntent });
     expect(denied.isError).toBe(true);
     expect(result(denied)).toMatchObject({
       error: "subscription_required",
@@ -251,7 +254,7 @@ test("trial transition preserves saves and TPS while notices and access follow t
     ).toBe("subscription_required");
     expect(await receipts()).toBe(receiptsBefore);
     // An accepted write's receipt stays recoverable even after access expires.
-    expect(result(await tools.create_memo(input))).toEqual(saved);
+    expect(result(await tools.create_memo(input))).toEqual(replay);
     expect(await person.read()).toEqual(tps);
     const expiredStart = (await account()).started_at;
     // A paid_through ahead no longer opens the gate; only the status does.
@@ -264,21 +267,29 @@ test("trial transition preserves saves and TPS while notices and access follow t
       sql`UPDATE trial_accounts SET subscription_status='active' WHERE user_id=${auth.userId}`,
     );
     expect((await person.trialStatus()).status).toBe("paid");
-    expect(result(await tools.get_cover_sheet())).toMatchObject(sheet);
+    expect(
+      result(await tools.get_report({ intent: vendorIntent })),
+    ).toMatchObject(sheet);
     expect((await account()).started_at).toEqual(expiredStart);
     await local.db.query(
       sql`UPDATE trial_accounts SET subscription_status='canceled' WHERE user_id=${auth.userId}`,
     );
     await local.pg.exec("UPDATE store_config SET trials_enabled=false");
-    expect(result(await tools.get_cover_sheet())).toMatchObject(sheet);
+    expect(
+      result(await tools.get_report({ intent: vendorIntent })),
+    ).toMatchObject(sheet);
     await local.pg.exec("UPDATE store_config SET trials_enabled=true");
     const earlyStore = await storeForCurrentRequest(local.env, early, {
       issuer: "fixture",
       clientId: "one",
     });
     expect(
-      result(await createStoreMemoTools(earlyStore).get_cover_sheet()).is_empty,
-    ).toBe(true);
+      result(
+        await createStoreMemoTools(earlyStore).get_report({
+          intent: vendorIntent,
+        }),
+      ),
+    ).toMatchObject({ is_empty: true, memos: 0, setup: expect.any(String) });
     expect(
       (
         await local.db.query(
@@ -304,17 +315,10 @@ async function tenantPair(local: Awaited<ReturnType<typeof localStore>>) {
         clientId: subject,
       }),
     );
-    const version = async (): Promise<number> =>
-      read(await tools.get_cover_sheet()).version;
-    // Everything this tenant's AI can read, as one string. Each report has a
-    // fresh id; the rest of it is what was read.
-    const everything = async () => {
-      const { report_id: _fresh, ...report } = read(
-        await tools.get_report({ intent: vendorIntent }),
-      );
-      return JSON.stringify([read(await tools.get_cover_sheet()), report]);
-    };
-    return { id: auth.userId, tools, version, everything };
+    // Everything this tenant's AI can read, as one string.
+    const everything = async () =>
+      JSON.stringify(read(await tools.get_report({ intent: vendorIntent })));
+    return { id: auth.userId, tools, everything };
   };
   return [
     await tenant("isolation-alpha"),
@@ -322,19 +326,13 @@ async function tenantPair(local: Awaited<ReturnType<typeof localStore>>) {
   ] as const;
 }
 
-const coverLine = (add: string, expected_version: number) => ({
-  request_id: crypto.randomUUID(),
-  cover_sheet: { add, expected_version },
-});
-// A draft the person steered, with a new kind and a new tweak.
+// A draft the person steered, with a new kind; its tweaks come from code.
 const steered = (who: string) =>
   memoSave({
     final: `${who} memo body.`,
-    first_draft: `${who} first draft.`,
+    first_draft: `${who} first draft, with a warm-up opener.`,
     mode: "draft",
-    rounds: 1,
     new_kind: "follow-up",
-    tweaks: [{ text: `${who} drops the warm-up opener` }],
     context: {
       summary: `${who} context`,
       medium: "email",
@@ -343,41 +341,26 @@ const steered = (who: string) =>
     },
   });
 
-test("tenants with overlapping memo, kind, tweak and request IDs never read, change or replay each other", async () => {
+test("tenants with overlapping memo, kind and request IDs never read, change or replay each other", async () => {
   const local = await localStore();
   try {
     const [alpha, beta] = await tenantPair(local);
-    const alphaLine = coverLine("Alpha signs as Ada.", await alpha.version());
-    const alphaSaved = read(await alpha.tools.create_memo(alphaLine));
-    expect(alphaSaved.status).toBe("saved");
     const alphaMemo = steered("Alpha");
     const alphaMemoSaved = read(await alpha.tools.create_memo(alphaMemo));
     expect(alphaMemoSaved.status).toBe("saved");
     const memoId: string = alphaMemoSaved.memo.memo_id;
     const kindId: string = alphaMemoSaved.memo.kind_id;
-    const tweakId: string = alphaMemoSaved.memo.tweaks[0].tweak_id;
-    // Beta holds a memo, a kind and a tweak under Alpha's exact IDs.
+    // Beta holds a memo and a kind under Alpha's exact IDs.
     await local.db.query(
       sql`INSERT INTO memo_kinds(user_id,id,label) VALUES (${beta.id},${kindId},'follow-up')`,
     );
-    await local.db.query(
-      sql`INSERT INTO tweaks(user_id,id,text,norm,client_json) VALUES (${beta.id},${tweakId},'Beta keeps it short','beta keeps it short','{}')`,
-    );
     await local.db
-      .query(sql`INSERT INTO memos(user_id,id,kind_id,medium,summary,mode,first_draft,first_draft_state,final,rounds,tier,client_json,request_id)
-      VALUES (${beta.id},${memoId},${kindId},'email','Beta context','draft','Beta first draft.','kept','Beta memo body.',1,'steered','{}',${crypto.randomUUID()})`);
-    await local.db.query(
-      sql`INSERT INTO tweak_citations(user_id,memo_id,tweak_id) VALUES (${beta.id},${memoId},${tweakId})`,
-    );
-    // (c) The cover sheet and report show only the caller's own lines, memos
-    // and tweaks.
-    const alphaOwn = [
-      "Alpha signs as Ada",
-      "Alpha memo body",
-      "Alpha context",
-      "Alpha drops the warm-up opener",
-    ];
-    const betaOwn = ["Beta memo body", "Beta context", "Beta keeps it short"];
+      .query(sql`INSERT INTO memos(user_id,id,kind_id,medium,summary,mode,first_draft,first_draft_state,final,tier,client_json,request_id)
+      VALUES (${beta.id},${memoId},${kindId},'email','Beta context','draft','Beta first draft.','kept','Beta memo body.','steered','{}',${crypto.randomUUID()})`);
+    // (c) The report shows only the caller's own memos, kinds and changes,
+    // and counts only the caller's memos.
+    const alphaOwn = ["Alpha memo body", "Alpha context", "warm-up opener"];
+    const betaOwn = ["Beta memo body", "Beta context"];
     const alphaSees = await alpha.everything();
     const betaSees = await beta.everything();
     for (const text of alphaOwn) {
@@ -388,81 +371,48 @@ test("tenants with overlapping memo, kind, tweak and request IDs never read, cha
       expect(betaSees).toContain(text);
       expect(alphaSees).not.toContain(text);
     }
-    const alphaVersion = await alpha.version();
-    const betaVersion = await beta.version();
-    expect(betaVersion).not.toBe(alphaVersion);
-    // (c) Alpha's version is a conflict for Beta, answered with Beta's own sheet.
-    expect(
-      read(await beta.tools.create_memo(coverLine("Beta line.", alphaVersion))),
-    ).toMatchObject({
-      status: "conflict",
-      cover_sheet: { version: betaVersion, text: "" },
-    });
-    // (a) Alpha's request ID with Beta's own input saves fresh for Beta.
-    const betaReuse = {
-      ...coverLine("Beta signs as Bo.", betaVersion),
-      request_id: alphaLine.request_id,
+    expect(JSON.parse(betaSees).memos).toBe(1);
+    // (a) Alpha's request ID with Beta's own input saves fresh for Beta, and
+    // Alpha's kind ID names Beta's own kind.
+    const betaMemo = {
+      ...memoSave({
+        final: "Beta reuse body.",
+        first_draft: "Beta reuse draft.",
+        mode: "draft",
+        kind_id: kindId,
+        context: {
+          summary: "Beta reuse",
+          medium: "email",
+          audience: "a vendor",
+          purpose: "decline",
+        },
+      }),
+      request_id: alphaMemo.request_id,
     };
-    const betaSaved = read(await beta.tools.create_memo(betaReuse));
-    expect(betaSaved).toMatchObject({
-      status: "saved",
-      cover_sheet: { text: "Beta signs as Bo." },
-    });
-    // (a) Alpha's exact request from Beta meets Beta's own receipt for that
-    // request ID, never Alpha's.
-    const copied = read(await beta.tools.create_memo(alphaLine));
-    expect(copied.error).toBe("request_id_reused");
-    expect(JSON.stringify(copied)).not.toContain("Alpha");
-    // Alpha's kind and tweak IDs name Beta's own kind and tweak for Beta.
-    const betaMemo = memoSave({
-      final: "Beta reuse body.",
-      first_draft: "Beta reuse draft.",
-      mode: "draft",
-      rounds: 1,
-      kind_id: kindId,
-      tweaks: [{ tweak_id: tweakId }],
-      context: {
-        summary: "Beta reuse",
-        medium: "email",
-        audience: "a vendor",
-        purpose: "decline",
-      },
-    });
     const betaMemoSaved = read(await beta.tools.create_memo(betaMemo));
     expect(betaMemoSaved).toMatchObject({
       status: "saved",
-      memo: {
-        kind_id: kindId,
-        tweaks: [{ tweak_id: tweakId, text: "Beta keeps it short" }],
-      },
+      memo: { kind_id: kindId },
     });
+    // (a) Alpha's exact request from Beta meets Beta's own receipt for that
+    // request ID, never Alpha's.
+    const copied = read(await beta.tools.create_memo(alphaMemo));
+    expect(copied.error).toBe("request_id_reused");
+    expect(JSON.stringify(copied)).not.toContain("Alpha");
     // Each tenant's replay returns its own receipt; crossing inputs is reuse.
-    expect(read(await alpha.tools.create_memo(alphaLine))).toEqual(alphaSaved);
-    expect(read(await alpha.tools.create_memo(alphaMemo))).toEqual(
-      alphaMemoSaved,
-    );
-    expect(read(await beta.tools.create_memo(betaReuse))).toEqual(betaSaved);
-    expect(read(await beta.tools.create_memo(betaMemo))).toEqual(betaMemoSaved);
-    expect(read(await alpha.tools.create_memo(betaReuse)).error).toBe(
-      "request_id_reused",
-    );
+    expect(read(await alpha.tools.create_memo(alphaMemo))).toEqual({
+      ...alphaMemoSaved,
+      replayed: expect.any(String),
+    });
+    expect(read(await beta.tools.create_memo(betaMemo))).toEqual({
+      ...betaMemoSaved,
+      replayed: expect.any(String),
+    });
     expect(
       await local.db.query(
-        sql`SELECT count(DISTINCT user_id)::int AS n FROM save_requests WHERE request_id=${alphaLine.request_id}`,
+        sql`SELECT count(DISTINCT user_id)::int AS n FROM save_requests WHERE request_id=${alphaMemo.request_id}`,
       ),
     ).toEqual([{ n: 2 }]);
-    // (b) A line only Alpha's cover sheet has is not Beta's to remove.
-    expect(
-      read(
-        await beta.tools.create_memo({
-          request_id: crypto.randomUUID(),
-          cover_sheet: {
-            remove: "Alpha signs as Ada.",
-            expected_version: await beta.version(),
-          },
-        }),
-      ),
-    ).toMatchObject({ status: "failed", error: "line_not_found" });
     // (b) Beta's correction and forgetting under Alpha's memo ID change only
     // Beta's memo.
     const context = (userId: string) =>
@@ -498,11 +448,10 @@ test("tenants with overlapping memo, kind, tweak and request IDs never read, cha
       { summary: "Alpha context", medium: "email" },
     ]);
     expect(await context(beta.id)).toEqual([]);
-    // Alpha's reads and version are byte-identical after all of Beta's activity.
+    // Alpha's reads are byte-identical after all of Beta's activity.
     expect(await alpha.everything()).toBe(alphaSees);
     const betaAfter = await beta.everything();
     for (const text of alphaOwn) expect(betaAfter).not.toContain(text);
-    expect(betaAfter).toContain("Beta signs as Bo");
     expect(betaAfter).toContain("Beta reuse");
   } finally {
     await local.dispose();
@@ -596,7 +545,7 @@ test("identity lookup never admits or seeds an MCP caller", async () => {
     await expect(storeForCurrentRequest(local.env, auth)).rejects.toMatchObject(
       { code: "account_unavailable", status: 403 },
     );
-    await expect(store.readCoverSheet()).rejects.toMatchObject({
+    await expect(store.readReport(vendorIntent)).rejects.toMatchObject({
       code: "account_unavailable",
       status: 403,
     });
@@ -666,19 +615,21 @@ test("closing an account refuses its reads, saves and replays, fences a pending 
     const [alpha, beta] = await tenantPair(local);
     // Tools are built while Alpha is active, so every refusal below comes from
     // the per-call account lock, not from sign-in.
-    const accepted = coverLine("Alpha signs as Ada.", await alpha.version());
+    const accepted = memoSave({ final: "Alpha signs as Ada." });
     expect(read(await alpha.tools.create_memo(accepted)).status).toBe("saved");
     const alphaMemo = steered("Alpha");
     expect(read(await alpha.tools.create_memo(alphaMemo)).status).toBe("saved");
     expect(
       read(
-        await beta.tools.create_memo(
-          coverLine("Beta signs as Bo.", await beta.version()),
-        ),
+        await beta.tools.create_memo(memoSave({ final: "Beta signs as Bo." })),
       ).status,
     ).toBe("saved");
+    // Legacy rows from before this release, which the cascade still removes.
+    await seedLegacy(local.pg, alpha.id, {
+      cover: ["Alpha signs as Ada."],
+      notes: ["Alpha drops the warm-up opener"],
+    });
     const betaSees = await beta.everything();
-    const alphaVersion = await alpha.version();
     const sources = async (userId: string) => [
       await local.db.query(
         sql`SELECT version,text FROM cover_sheets WHERE user_id=${userId} ORDER BY version`,
@@ -699,17 +650,17 @@ test("closing an account refuses its reads, saves and replays, fences a pending 
     await local.db.query(
       sql`UPDATE users SET status='deleting' WHERE id=${alpha.id}`,
     );
-    const raced = coverLine("Applied after closing.", alphaVersion);
+    const raced = memoSave({ final: "Applied after closing." });
     const racedOutcome = read(await alpha.tools.create_memo(raced));
     expect(racedOutcome.status).toBeUndefined();
     expect(racedOutcome.error).toBe("account_unavailable");
     expect(await sources(alpha.id)).toEqual(alphaBefore);
     const refusals = async () => {
       for (const result of [
-        await alpha.tools.get_cover_sheet(),
+        await alpha.tools.get_report({ intent: vendorIntent }),
         await alpha.tools.get_report({ intent: vendorIntent }),
         await alpha.tools.create_memo(
-          coverLine("Fresh after closing.", alphaVersion),
+          memoSave({ final: "Fresh after closing." }),
         ),
         await alpha.tools.create_memo(memoSave()),
         await alpha.tools.create_memo(accepted),
@@ -736,17 +687,7 @@ test("closing an account refuses its reads, saves and replays, fences a pending 
     await refusals();
     expect(await beta.everything()).toBe(betaSees);
     // Beta can still file, even reusing the deleted account's request ID and text.
-    expect(
-      read(
-        await beta.tools.create_memo({
-          ...accepted,
-          cover_sheet: {
-            ...accepted.cover_sheet,
-            expected_version: await beta.version(),
-          },
-        }),
-      ).status,
-    ).toBe("saved");
+    expect(read(await beta.tools.create_memo(accepted)).status).toBe("saved");
     const betaAfter = await beta.everything();
     expect(betaAfter).toContain("Beta signs as Bo");
     expect(betaAfter).toContain("Alpha signs as Ada");
@@ -788,32 +729,25 @@ test("account deletion removes every tenant row, waits for an in-flight save and
     };
     const gone = await open("leaving");
     const kept = await open("staying");
-    // A row in every memo table: a cover sheet line, a served report, a
-    // steered memo with its kind and tweak citing that report, and the
-    // keep-memos switch.
-    expect(
-      (
-        await gone.store.saveMemo(
-          coverLine("Fictional line, with its exception.", 0),
-        )
-      ).status,
-    ).toBe("saved");
-    const served = await gone.store.readReport(vendorIntent);
-    expect(
-      (
-        await gone.store.saveMemo(
-          (({ memo, ...save }) => ({
-            ...save,
-            memo: { ...memo!, report_id: served.report_id },
-          }))(steered("Leaving")),
-        )
-      ).status,
-    ).toBe("saved");
+    // A row in every memo table: a steered memo with its kind and changes,
+    // the keep-memos switch, and the legacy rows earlier versions wrote (a
+    // cover sheet line, a served report, a note citing the memo).
+    const leaving = await gone.store.saveMemo(steered("Leaving"));
+    expect(leaving.status).toBe("saved");
+    await seedLegacy(local.pg, gone.auth.userId, {
+      cover: ["Fictional line, with its exception."],
+      notes: ["Leaving drops the warm-up opener"],
+      citedBy: leaving.memo!.memo_id,
+    });
+    await local.pg.query(
+      "INSERT INTO served_reports(user_id,id,tweak_ids) VALUES ($1,$2,'{}')",
+      [gone.auth.userId, crypto.randomUUID()],
+    );
     await personStoreForCurrentRequest(local.env, gone.auth).setKeepMemos(true);
     expect((await kept.store.saveMemo(memoSave())).status).toBe("saved");
     // An admitted read of each account appends a usage row.
     for (const { store } of [gone, kept])
-      await store.readCoverSheet({ tool: "get_cover_sheet" });
+      await store.readReport(vendorIntent, { tool: "get_report" });
     await backgroundSettled();
     const tenantTables = (
       await local.db.query<{ table_name: string }>(
@@ -888,7 +822,7 @@ test("account deletion removes every tenant row, waits for an in-flight save and
         kept.auth.userId,
       ]),
     ).rejects.toThrow("user_id_is_immutable");
-    expect((await kept.store.readCoverSheet()).is_empty).toBe(false);
+    expect((await kept.store.readReport(vendorIntent)).memos).toBe(1);
     // Re-signup with the same fingerprint: a fresh, empty account already
     // marked canceled, so assistant reads pause; a never-deleted identity's
     // row still waits for its trial.
@@ -896,11 +830,7 @@ test("account deletion removes every tenant row, waits for an in-flight save and
     const again = await lookupIdentityAccount(local.env, neon("leaving"));
     expect(again.userId).not.toBe(gone.auth.userId);
     const fresh = await personStoreForCurrentRequest(local.env, again);
-    expect(await fresh.read()).toMatchObject({
-      cover_sheet: { text: "", version: 0 },
-      memos: [],
-      tweaks: [],
-    });
+    expect(await fresh.read()).toMatchObject({ memos: [] });
     expect((await fresh.trialStatus()).status).toBe("expired");
     // The status alone marks it; no clock is written backwards.
     expect(
@@ -916,7 +846,9 @@ test("account deletion removes every tenant row, waits for an in-flight save and
       }),
     );
     expect(
-      JSON.parse((await againTools.get_cover_sheet()).content[0].text).error,
+      JSON.parse(
+        (await againTools.get_report({ intent: vendorIntent })).content[0].text,
+      ).error,
     ).toBe("subscription_required");
     expect(
       (

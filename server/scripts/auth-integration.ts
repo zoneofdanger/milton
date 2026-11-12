@@ -88,6 +88,7 @@ import {
   type Fetch,
 } from "./e2e-http";
 import { readSecrets, runE2E, type Line } from "./e2e";
+import { runE2E as runReleasedE2E } from "./e2e-released";
 
 const port = 55623;
 // The milton-admit service's deterministic run.app URL; never fetched here.
@@ -1862,18 +1863,19 @@ try {
   stage = "MCP tools/list";
   const list = await rpc(grant.access_token, "tools/list");
   assert.equal(list.status, 200, "actual native JWT profile and MCP role");
-  assert.equal((await result(list)).result.tools?.length, 3);
-  stage = "MCP cover sheet";
-  const read = await result(
+  assert.equal((await result(list)).result.tools?.length, 2);
+  stage = "MCP retired get_cover_sheet";
+  const retired = await result(
     await rpc(grant.access_token, "tools/call", {
       name: "get_cover_sheet",
       arguments: {},
     }),
   );
-  assert.equal(read.result.isError, undefined);
-  const cover = JSON.parse(read.result.content![0]!.text) as {
-    version: number;
-  };
+  assert.equal(retired.result.isError, true);
+  assert.equal(
+    (JSON.parse(retired.result.content![0]!.text) as { error: string }).error,
+    "tool_replaced",
+  );
   stage = "MCP report";
   const served = await result(
     await rpc(grant.access_token, "tools/call", {
@@ -1889,31 +1891,29 @@ try {
     }),
   );
   assert.equal(served.result.isError, undefined, "real-role report read");
-  const reportId = (
-    JSON.parse(served.result.content![0]!.text) as { report_id: string }
-  ).report_id;
+  assert.equal(
+    (JSON.parse(served.result.content![0]!.text) as { memos: number }).memos,
+    0,
+    "the real role reads the memo count",
+  );
   stage = "MCP save";
-  // A memo with a new kind, its request and a tweak, citing the report it was
-  // drafted from, so code stores its changes, then a cover sheet line: every
-  // memo table the MCP role writes.
+  // A memo with a new kind and its request, so code stores its changes, then
+  // writing the person gave: every memo table the MCP role writes now.
   for (const change of [
     {
       memo: {
         final: "Collect the fictional trays on Saturday.",
         first_draft: "Hi! Hope you're well. Collect the fictional trays.",
         mode: "draft",
-        rounds: 1,
         new_kind: "fictional note",
         request: "Write a fictional pickup note for the trays.",
-        tweaks: [{ text: "pickup notes: no warm-up opener" }],
         context: { summary: "Fictional pickup note", medium: "email" },
-        report_id: reportId,
       },
     },
     {
-      cover_sheet: {
-        add: "Keep fictional measurements explicit.",
-        expected_version: cover.version,
+      memo: {
+        final: "Keep fictional measurements explicit.",
+        context: { summary: "Fictional note of my own", medium: "email" },
       },
     },
   ]) {
@@ -1943,7 +1943,7 @@ try {
   ).rows as { user_id: string; tool: string }[];
   assert.deepEqual(
     usage.map((r) => r.tool),
-    ["get_cover_sheet", "get_report", "create_memo", "create_memo"],
+    ["get_report", "create_memo", "create_memo"],
   );
   const usageUser = usage[0]!.user_id;
   for (const statement of [
@@ -2060,7 +2060,7 @@ try {
         mcpConfig.DATABASE_URL,
         usageDb,
         first,
-        "get_cover_sheet",
+        "get_report",
       );
       await usageRan(sinceFirst);
       await lockFirst.query("COMMIT");
@@ -2070,7 +2070,7 @@ try {
         mcpConfig.DATABASE_URL,
         usageDb,
         second,
-        "get_cover_sheet",
+        "get_report",
       );
       appended = Promise.all([firstRow, secondRow]);
       await usageRan(sinceSecond);
@@ -2159,9 +2159,9 @@ try {
       const saving = saver
         .saveMemo({
           request_id: randomUUID(),
-          cover_sheet: {
-            add: "Keep fictional measurements explicit.",
-            expected_version: 0,
+          memo: {
+            final: "Keep fictional measurements explicit.",
+            context: { summary: "Fictional note of my own", medium: "email" },
           },
         })
         .then((outcome) => outcome.status);
@@ -2220,13 +2220,99 @@ try {
     assert.deepEqual(await usageRows(saverId, leaving), [saverId]);
     await owner.query("DELETE FROM users WHERE id=$1", [saverId]);
   }
+  stage = "a boundary refusal's receipt lookup waits for a same-id save";
+  {
+    // A save holds the account lock under a request id, paused before its
+    // receipt is written. A stale save under the same id is refused for a
+    // removed field; its receipt lookup takes the same lock, so it waits for
+    // the save, then sees the receipt and keeps the ask-the-person words.
+    const racer = "m_00000000-0000-4000-8000-0000000000c9";
+    await owner.query("INSERT INTO users(id) VALUES($1)", [racer]);
+    await owner.query(
+      "INSERT INTO identities(provider,subject,user_id) VALUES('fictional-race','racer',$1)",
+      [racer],
+    );
+    await owner.query(
+      "INSERT INTO trial_accounts(user_id,started_at,subscription_status) VALUES($1,now(),'active')",
+      [racer],
+    );
+    const dialect = new PgDialect();
+    const base = postgresDatabase(mcpConfig.DATABASE_URL);
+    let pauseSave = true;
+    let locked!: () => void, resume!: () => void;
+    const saveLocked = new Promise<void>((resolve) => (locked = resolve));
+    const resumed = new Promise<void>((resolve) => (resume = resolve));
+    const pausing = (session: StoreSession): StoreSession => ({
+      async query<Row extends Record<string, unknown>>(statement: SQL) {
+        const rows = await session.query<Row>(statement);
+        if (
+          pauseSave &&
+          / FOR NO KEY UPDATE$/.test(dialect.sqlToQuery(statement).sql)
+        ) {
+          pauseSave = false;
+          locked();
+          await resumed;
+        }
+        return rows;
+      },
+    });
+    const auth = await lookupIdentityAccount(mcpConfig, {
+      provider: "fictional-race",
+      subject: "racer",
+    });
+    const actor = { issuer: "fixture", clientId: "fictional-racer" };
+    const saver = await storeForCurrentRequest(
+      {
+        ...mcpConfig,
+        storeDatabase: {
+          ...base,
+          transaction: (work) => base.transaction((tx) => work(pausing(tx))),
+        },
+      },
+      auth,
+      actor,
+    );
+    const stale = await storeForCurrentRequest(mcpConfig, auth, actor);
+    const requestId = randomUUID();
+    const context = {
+      summary: "Fictional race note",
+      medium: "email" as const,
+    };
+    const saving = saver.saveMemo({
+      request_id: requestId,
+      memo: { final: "Fictional raced final.", context },
+    });
+    await saveLocked;
+    const refusal = stale
+      .saveMemo({
+        request_id: requestId,
+        memo: { final: "Fictional raced final.", context, rounds: 1 },
+      } as never)
+      .then(
+        () => "saved",
+        (error: { details?: { field?: string } }) => error.details?.field,
+      );
+    const early = await within(refusal, 500);
+    resume();
+    assert.equal(early, "waited", "the lookup waits for the save's lock");
+    assert.equal((await saving).status, "saved");
+    assert.equal(
+      await refusal,
+      "removed",
+      "after the save commits, the lookup sees its receipt",
+    );
+    await owner.query("DELETE FROM users WHERE id=$1", [racer]);
+  }
+  pass(
+    "a removed-field refusal's receipt lookup takes the account lock, waits for a same-id save holding it on another connection, and then sees its receipt",
+  );
   stage = "read-only native authorization";
   const readGrant = await authorizeAssistant(
     "openid offline_access milton:read",
   );
   const roList = await rpc(readGrant.access_token, "tools/list");
   assert.equal(roList.status, 200);
-  assert.equal((await result(roList)).result.tools?.length, 2);
+  assert.equal((await result(roList)).result.tools?.length, 1);
   assert.equal(
     (
       await rpc(readGrant.access_token, "tools/call", {
@@ -2259,7 +2345,7 @@ try {
     200,
   );
   pass(
-    "actual native controlled code/refresh grant reaches scoped product MCP: three/two tools, a report and model-free memo and cover sheet saves",
+    "actual native controlled code/refresh grant reaches scoped product MCP: two/one tools, the retired tool refused, a report and model-free memo saves",
   );
   // Connection keys against real native authority (native 007): created through
   // the app from a fresh session, checked by the real MCP role on every call.
@@ -3789,6 +3875,7 @@ try {
           (select count(*) from memo_kinds where user_id=$1)::int kinds,
           (select count(*) from tweaks where user_id=$1)::int tweaks,
           (select count(*) from memo_changes where user_id=$1)::int changes,
+          (select count(*) from tweak_citations where user_id=$1)::int citations,
           (select count(*) from cover_sheets where user_id=$1)::int covers,
           (select count(*) from served_reports where user_id=$1)::int reports,
           (select count(*) from save_requests where user_id=$1)::int receipts,
@@ -3818,18 +3905,20 @@ try {
     return grew(counted, await footprint());
   };
   // A run leaves no memo behind: it saves two and forgets them, with the
-  // drafted one's change. Its receipts (two saves, forget) and served-report
-  // records (three reads) stay.
+  // drafted one's change. Its receipts (two saves, forget) stay; its four
+  // report reads record usage and nothing else.
   const perRun = {
     memos: 0,
     kinds: 0,
     tweaks: 0,
     changes: 0,
+    citations: 0,
     covers: 0,
-    reports: 3,
+    reports: 0,
     receipts: 3,
-    usage: 9,
+    usage: 7,
   };
+  const none = Object.fromEntries(Object.keys(perRun).map((k) => [k, 0]));
   // First run: the kind is made once; every later run reuses it.
   assert.deepEqual(await check(), { ...perRun, kinds: 1 });
   assert.deepEqual(
@@ -3872,6 +3961,12 @@ try {
   );
   // A crashed run's marked leftover is forgotten first and reported, and a key
   // under 30 days from expiry warns without failing.
+  const checkIntent = {
+    situation: "confirming what is on file",
+    medium: "email",
+    audience: "the person",
+    purpose: "check",
+  };
   const testKeyCall = async (name: string, args: object) =>
     JSON.parse(
       (
@@ -3985,30 +4080,267 @@ try {
     "an unmarked memo of the check's kind is not forgotten",
   );
   await testSave({ forget_memos: [unmarked] });
-  // Foreign data (a cover sheet line nobody marked) refuses before any save;
-  // only the gate's own report read is recorded.
+  // A run refused before any write: its only footprint is the gate's report
+  // read, and its last line names the gate.
+  const refused = async (
+    fetcher: Fetch,
+    code: string,
+    last = "safety_gate",
+  ) => {
+    const held = await footprint();
+    await assert.rejects(
+      check(fetcher),
+      (e) => e instanceof CheckError && e.code === code,
+      code,
+    );
+    assert.deepEqual(
+      { ...grew(held, await footprint()), usage: 0 },
+      none,
+      `${code}: refused without writing`,
+    );
+    assert.deepEqual(
+      [
+        checkLines.at(-1)!.step,
+        checkLines.at(-1)!.ok,
+        checkLines.at(-1)!.error,
+      ],
+      [last, false, code],
+    );
+  };
+  // Every memo the account holds must be served and recognized: a foreign
+  // memo no report serves (untouched, or a final over 128 KiB) still counts,
+  // so the gate refuses even when the memo carries the run marker and kind.
+  const marked = {
+    context: { summary: "Milton e2e check, run hidden00", medium: "document" },
+    new_kind: "e2e check",
+  };
+  const hidden = [
+    {
+      ...marked,
+      first_draft: "Fictional note an AI drafted and nobody changed.",
+      final: "Fictional note an AI drafted and nobody changed.",
+      mode: "draft",
+    },
+    {
+      ...marked,
+      final: "Fictional long note for the check. ".repeat(4000),
+    },
+  ];
+  for (const memo of hidden) {
+    await owner.query(
+      'delete from milton_auth."rateLimit"; delete from milton_guard.rate_bucket',
+    );
+    const id = (
+      await testKeyCall("create_memo", { request_id: randomUUID(), memo })
+    ).memo.memo_id as string;
+    await refused(dispatch, "account_holds_foreign_data");
+    await testSave({ forget_memos: [id] });
+  }
+  // More than five marked leftovers is not crashed runs: refused, none
+  // forgotten.
+  const many: string[] = [];
+  for (let i = 0; i < 6; i++)
+    many.push(
+      (
+        await testKeyCall("create_memo", {
+          request_id: randomUUID(),
+          memo: {
+            ...marked,
+            context: {
+              ...marked.context,
+              summary: `Milton e2e check, run many0000`,
+            },
+            final: `Fictional leftover ${i} of a crashed run.`,
+          },
+        })
+      ).memo.memo_id,
+    );
+  await refused(dispatch, "account_holds_foreign_data");
+  await testSave({ forget_memos: many });
+  // Another MCP's answers, for the transition and malformed cases: each
+  // tools/list or tools/call reply the check reads passes through `change`.
+  const altered =
+    (
+      change: (
+        method: string,
+        name: string | undefined,
+        value: Record<string, any>,
+      ) => Record<string, unknown>,
+    ): Fetch =>
+    async (target, init) => {
+      const response = await dispatch(target, init);
+      if (
+        new URL(target).host !== "mcp.meetmilton.com" ||
+        typeof init.body !== "string"
+      )
+        return response;
+      const sent = JSON.parse(init.body);
+      if (sent.method !== "tools/list" && sent.method !== "tools/call")
+        return response;
+      const edit = (m: Record<string, any>) => {
+        if (m.id !== sent.id || !m.result) return m;
+        if (sent.method === "tools/list")
+          return { ...m, result: change(sent.method, undefined, m.result) };
+        const [content] = m.result.content;
+        const value = change(
+          sent.method,
+          sent.params.name,
+          JSON.parse(content.text),
+        );
+        return {
+          ...m,
+          result: {
+            ...m.result,
+            content: [{ ...content, text: JSON.stringify(value) }],
+          },
+        };
+      };
+      const text = await response.text();
+      const body =
+        text.startsWith("event:") || text.startsWith("data:")
+          ? text
+              .split("\n")
+              .map((l) =>
+                l.startsWith("data: ")
+                  ? "data: " + JSON.stringify(edit(JSON.parse(l.slice(6))))
+                  : l,
+              )
+              .join("\n")
+          : JSON.stringify(edit(JSON.parse(text)));
+      const headers = new Headers(response.headers);
+      headers.delete("content-length");
+      return new Response(body, { status: response.status, headers });
+    };
+  const reportAs = (
+    memos: (v: Record<string, any>) => Record<string, unknown>,
+  ) =>
+    altered((method, name, v) =>
+      method === "tools/call" && name === "get_report" ? memos(v) : v,
+    );
+  // The released job image (main's e2e.ts) against the new MCP fails closed
+  // before writing: its exact three-tool listing check refuses the two tools.
+  {
+    const held = await footprint();
+    checkLines.length = 0;
+    await assert.rejects(
+      runReleasedE2E({
+        secrets,
+        fetch: dispatch,
+        report: (l) => checkLines.push(l),
+      }),
+      (e) => e instanceof CheckError && e.code === "tools_unexpected",
+      "the released check refuses the new listing",
+    );
+    await backgroundSettled();
+    assert.deepEqual(
+      { ...grew(held, await footprint()), usage: 0 },
+      none,
+      "the released check writes nothing against the new MCP",
+    );
+    assert.deepEqual(
+      [checkLines.at(-1)!.step, checkLines.at(-1)!.ok],
+      ["mcp_connect", false],
+    );
+  }
+  // A new check against an old MCP fails closed before writing: the old
+  // listing (with get_cover_sheet), or a report without the memo count.
+  await refused(
+    altered((method, _name, v) =>
+      method === "tools/list"
+        ? {
+            ...v,
+            tools: [...v.tools, { ...v.tools[0], name: "get_cover_sheet" }],
+          }
+        : v,
+    ),
+    "tools_unexpected",
+    "mcp_connect",
+  );
+  await refused(
+    reportAs(({ memos: _memos, ...v }) => v),
+    "memo_count_unreadable",
+  );
+  // A malformed count is no count.
+  for (const memos of ["0", -1, 1.5, null])
+    await refused(
+      reportAs((v) => ({ ...v, memos })),
+      "memo_count_unreadable",
+    );
+  // One leftover listed twice is not two leftovers: the gate refuses and
+  // forgets nothing.
   await testSave({
-    cover_sheet: { add: "Fictional foreign line.", expected_version: 0 },
+    memo: {
+      ...marked,
+      context: { ...marked.context, summary: "Milton e2e check, run twice000" },
+      final: "Fictional leftover a crashed run saved once.",
+    },
   });
-  const held = await footprint();
+  await refused(
+    reportAs((v) => {
+      if (v.examples.length !== 1) return v;
+      const section = v.text.slice(v.text.indexOf("## 1. "));
+      return {
+        ...v,
+        text: `${v.text}\n\n${section.replace("## 1. ", "## 2. ")}`,
+        examples: [v.examples[0], v.examples[0]],
+        memos: 2,
+      };
+    }),
+    "account_holds_foreign_data",
+  );
+  // A run caught mid-way by a change of MCP (here an old receipt after its
+  // first save) fails after writing, having forgotten the leftover above; its
+  // own marked memo is the next run's leftover, forgotten before that run
+  // passes.
   await assert.rejects(
-    check(),
-    (e) => e instanceof CheckError && e.code === "account_holds_foreign_data",
+    check(
+      altered((method, name, v) =>
+        method === "tools/call" && name === "create_memo" && v.memo
+          ? { ...v, receipt: "Kept memo: e2e check, your words." }
+          : v,
+      ),
+    ),
+    (e) => e instanceof CheckError && e.code === "memo_not_saved_as_sent",
+  );
+  assert.equal(checkLines.at(-1)!.step, "save_memo");
+  assert.equal((await check()).memos, -1, "leftover forgotten, then the run");
+  assert.equal(checkLines.find((l) => l.step === "safety_gate")!.leftovers, 1);
+  // Legacy writing an earlier version left (a cover sheet, a note from edits,
+  // a served report, a receipt with rounds) is outside the report's gate: the
+  // release's owner preflight covers it. A run never reads it and adds only
+  // its receipts; the uncited note goes with the run's forget, as any forget
+  // removes uncited notes (docs/deletion.md).
+  await owner.query(
+    `INSERT INTO cover_sheets(user_id,version,text,actor_json) VALUES ($1,1,'Fictional foreign line.','{"kind":"ai"}')`,
+    [provisioned.userId],
+  );
+  await owner.query(
+    `INSERT INTO tweaks(user_id,id,text,norm,client_json) VALUES ($1,gen_random_uuid()::text,'Fictional old note.','fictional old note.','{"issuer":"fixture","client_id":"fixture"}')`,
+    [provisioned.userId],
+  );
+  await owner.query(
+    "INSERT INTO served_reports(user_id,id,tweak_ids) VALUES ($1,gen_random_uuid()::text,'{}')",
+    [provisioned.userId],
+  );
+  await owner.query(
+    `INSERT INTO save_requests(user_id,request_id,input_hash,result_json) VALUES ($1,gen_random_uuid()::text,repeat('a',64),'{"status":"saved","memo":{"memo_id":"m","tier":"steered","rounds":2,"tweaks":[]},"receipt":"Kept memo: email, 2 rounds."}')`,
+    [provisioned.userId],
   );
   assert.deepEqual(
-    { ...grew(held, await footprint()), usage: 0 },
-    { ...perRun, reports: 1, receipts: 0, usage: 0 },
-    "refused without saving",
+    await check(),
+    { ...perRun, tweaks: -1 },
+    "legacy rows kept, none added",
   );
-  assert.deepEqual(checkLines.at(-1), {
-    ...checkLines.at(-1),
-    step: "safety_gate",
-    ok: false,
-    severity: "ERROR",
-    error: "account_holds_foreign_data",
-  });
+  assert(
+    !JSON.stringify(checkLines).includes("Fictional foreign line"),
+    "legacy text is never read into the run",
+  );
+  for (const table of ["cover_sheets", "served_reports"])
+    await owner.query(`delete from ${table} where user_id=$1`, [
+      provisioned.userId,
+    ]);
   pass(
-    "e2e check: browser sign-in, MCP key, safety gate, a marked memo saved and read fresh, a marked drafted memo saved with its one change listed on its page, both forgotten, restored baseline; bounded per-run footprint; marked leftovers forgotten; expiring key warns; an unmarked memo of its kind and other foreign data refused without saving",
+    "e2e check: browser sign-in, MCP key, two tools, the memo-count gate, a marked memo saved and read fresh, a marked drafted memo saved with its one change listed on its page, both forgotten, restored baseline; bounded per-run footprint with no served reports; marked leftovers forgotten, one left mid-run included; expiring key warns; an unmarked memo of its kind, hidden (untouched, oversized) memos, six leftovers, a duplicated id, malformed or missing counts and the old listing refused without writing; legacy rows kept and unread",
   );
   stage = "test account exempt from trials and billing";
   // Trials stay on. The test account's access never depends on a trial: repeated
@@ -4070,7 +4402,7 @@ try {
       [testUser],
     );
     assert.equal(
-      (await testKeyCall("get_cover_sheet", {})).notice,
+      (await testKeyCall("get_report", { intent: checkIntent })).notice,
       undefined,
       "no trial notice",
     );
@@ -4303,12 +4635,7 @@ try {
       audience: "a vendor",
       purpose: "decline",
     } as const;
-    const surfaceNames = [
-      "get_cover_sheet",
-      "get_report",
-      "download",
-      "web",
-    ] as const;
+    const surfaceNames = ["get_report", "download", "web"] as const;
     type Surface = (typeof surfaceNames)[number];
     type Surfaces = Record<Surface, string>;
     // Each call is its own client behind the load balancer, so the key-lookup
@@ -4442,18 +4769,9 @@ try {
     type Side = typeof alder | typeof birch;
     const both = [alder, birch];
     const other = (s: Side) => (s === alder ? birch : alder);
-    // The latest report each account was served, by its report_id.
-    const lastReport = new Map<Side, string>();
     const surfaces = async (s: Side): Promise<Surfaces> => {
-      const { report_id, ...report } = JSON.parse(
-        await readTool(s.key, "get_report", { intent }),
-      ) as { report_id: string };
-      lastReport.set(s, report_id);
       const seen = {
-        get_cover_sheet: await readTool(s.key, "get_cover_sheet"),
-        // Every read is served under a fresh report_id; the rest is what it
-        // served.
-        get_report: JSON.stringify(report),
+        get_report: await readTool(s.key, "get_report", { intent }),
       } as Surfaces;
       const download = await s.browser.go(PRODUCTION.app + "/download");
       assert.equal(download.status, 200, "TPS.md download");
@@ -4472,11 +4790,7 @@ try {
     type Outcome = {
       status?: string;
       error?: string;
-      memo?: {
-        memo_id: string;
-        kind_id?: string;
-        tweaks: { tweak_id: string }[];
-      };
+      memo?: { memo_id: string; kind_id?: string };
     };
     const save = async (s: Side, args: object) =>
       JSON.parse(
@@ -4487,46 +4801,16 @@ try {
           })
         ).text,
       ) as Outcome;
-    const coverLine = async (
-      s: Side,
-      change: { add: string } | { remove: string },
-    ) =>
-      save(s, {
-        cover_sheet: {
-          ...change,
-          expected_version: (
-            JSON.parse(await readTool(s.key, "get_cover_sheet")) as {
-              version: number;
-            }
-          ).version,
-        },
-      });
-    // Where each kind of filed text shows: a cover sheet line everywhere; a
-    // final in the report and TPS.md; a memo's summary and its tweaks also on
-    // the web page.
-    const cover: Surface[] = [
-      "get_cover_sheet",
-      "get_report",
-      "download",
-      "web",
-    ];
+    // Where each kind of filed text shows: a final in the report and
+    // TPS.md; a memo's summary also on the web page.
     const final: Surface[] = ["get_report", "download"];
     const listed: Surface[] = ["get_report", "download", "web"];
-    const line = (m: string, age: "old" | "new") =>
-      `Sign fictional notes with ${m} cover ${age}.`;
-    const drafted = (
-      m: string,
-      n: "one" | "two",
-      body: string,
-      tweak: string,
-    ) => ({
+    const drafted = (m: string, n: "one" | "two", body: string) => ({
       memo: {
         final: `Fictional ${m} memo ${n}: ${body}`,
         first_draft: `Hi! Hope you are well. Fictional ${m} draft ${n}.`,
         mode: "draft",
-        rounds: 1,
         new_kind: "fictional note",
-        tweaks: [{ text: `${m} tweak ${n}: ${tweak}` }],
         context: {
           summary: `${m} summary ${n === "one" ? "old" : "two"}`,
           medium: "email",
@@ -4537,28 +4821,20 @@ try {
     });
     // Each filed text and the surfaces that must show it.
     const filed = (m: string): [string, Surface[]][] => [
-      [`${m} cover old`, cover],
       [`${m} memo one`, final],
       [`${m} summary old`, listed],
-      [`${m} tweak one`, listed],
       [`${m} memo two`, final],
       [`${m} summary two`, listed],
-      [`${m} tweak two`, listed],
     ];
-    // After a line replaced, memo one's context corrected and memo two
-    // forgotten (with the tweak only it cited).
+    // After memo one's context corrected and memo two forgotten.
     const edited = (m: string): [string, Surface[]][] => [
-      [`${m} cover new`, cover],
       [`${m} memo one`, final],
       [`${m} summary new`, listed],
-      [`${m} tweak one`, listed],
     ];
     const removed = (m: string) => [
-      `${m} cover old`,
       `${m} summary old`,
       `${m} memo two`,
       `${m} summary two`,
-      `${m} tweak two`,
     ];
     // Every miss at once, as surface and text, so a failure names them all.
     const shows = (
@@ -4595,30 +4871,22 @@ try {
         when + " isolation",
       );
     };
-    const ids = new Map<
-      Side,
-      { one: string; two: string; kind: string; tweak: string }
-    >();
+    const ids = new Map<Side, { one: string; two: string; kind: string }>();
     for (const s of both) {
       const m = s.marker;
-      assert.equal(
-        (await coverLine(s, { add: line(m, "old") })).status,
-        "saved",
-      );
       const one = await save(
         s,
-        drafted(m, "one", "the ladder hangs in the barn.", "no warm-up opener"),
+        drafted(m, "one", "the ladder hangs in the barn."),
       );
       const two = await save(
         s,
-        drafted(m, "two", "the gate sticks after rain.", "name the day"),
+        drafted(m, "two", "the gate sticks after rain."),
       );
       assert.deepEqual([one.status, two.status], ["saved", "saved"]);
       ids.set(s, {
         one: one.memo!.memo_id,
         two: two.memo!.memo_id,
         kind: one.memo!.kind_id!,
-        tweak: one.memo!.tweaks[0]!.tweak_id,
       });
     }
     for (const s of both) {
@@ -4630,8 +4898,6 @@ try {
       const m = s.marker;
       const own = ids.get(s)!;
       for (const outcome of [
-        await coverLine(s, { add: line(m, "new") }),
-        await coverLine(s, { remove: line(m, "old") }),
         await save(s, {
           memo_context: {
             memo_id: own.one,
@@ -4656,13 +4922,13 @@ try {
       settled.set(s, seen);
     }
     pass(
-      "over loopback HTTP to the production app, auth and MCP wrappers: a cover sheet line replaced, a memo's context corrected and a memo forgotten reach get_cover_sheet, get_report, the TPS.md download and the web TPS page: the old text is gone from all, the new text shows where it belongs",
+      "over loopback HTTP to the production app, auth and MCP wrappers: a memo's context corrected and a memo forgotten reach get_report, the TPS.md download and the web TPS page: the old text is gone from all, the new text shows where it belongs",
     );
     stage = "isolation: one account's key and session cannot address another's";
     {
-      // Alder's key aims at Birch's memo, kind, tweak, report and cover sheet
-      // line; Alder's session names Birch's account and memo. Nothing lands,
-      // nothing leaks, and both accounts still serve exactly what they did.
+      // Alder's key aims at Birch's memo and kind; Alder's session names
+      // Birch's account and memo. Nothing lands, nothing leaks, and both
+      // accounts still serve exactly what they did.
       const target = ids.get(birch)!;
       const context = {
         summary: "Fictional takeover",
@@ -4673,38 +4939,14 @@ try {
         [{ memo_context: { memo_id: target.one, context } }, "invalid_memo"],
         [{ forget_memos: [target.one] }, "invalid_memo"],
         [{ memo: { ...takeover, kind_id: target.kind } }, "invalid_kind"],
-        [
-          {
-            memo: {
-              ...takeover,
-              first_draft: "Fictional takeover draft.",
-              mode: "draft",
-              rounds: 1,
-              tweaks: [{ tweak_id: target.tweak }],
-            },
-          },
-          "invalid_tweak",
-        ],
-        [
-          { memo: { ...takeover, report_id: lastReport.get(birch)! } },
-          "invalid_report",
-        ],
       ] as const) {
         const outcome = await save(alder, args);
         assert.deepEqual(
           [outcome.status, outcome.error],
           ["failed", error],
-          "a save never reaches another account's memos, kinds, tweaks or reports",
+          "a save never reaches another account's memos or kinds",
         );
       }
-      const foreignLine = await coverLine(alder, {
-        remove: line(birch.marker, "new"),
-      });
-      assert.deepEqual(
-        [foreignLine.status, foreignLine.error],
-        ["failed", "line_not_found"],
-        "a save never removes another account's cover sheet line",
-      );
       const aimed = await callTool(alder.key, "get_report", {
         intent: { ...intent, kind_id: target.kind },
       });
@@ -4743,7 +4985,7 @@ try {
       }
     }
     pass(
-      "two accounts' reads (three tools, TPS.md, web) never show each other's markers, ids or emails, before or after a forget and a context edit; one account's key cannot correct, forget, cite or read another's memos, kind, tweaks, report or cover sheet, and its session cannot name another account or open its memo",
+      "two accounts' reads (the report, TPS.md, web) never show each other's markers, ids or emails, before or after a forget and a context edit; one account's key cannot correct, forget, file under or read another's memos or kind, and its session cannot name another account or open its memo",
     );
     stage = "account deletion leaves nothing of the account";
     {
@@ -4839,6 +5081,14 @@ try {
         "INSERT INTO memo_settings(user_id,keep_memos) VALUES($1,false)",
         [alder.userId],
       );
+      // Legacy writing this release no longer makes, as an earlier version
+      // left it: a cover sheet, a note from edits and a served report.
+      for (const insert of [
+        `INSERT INTO cover_sheets(user_id,version,text,actor_json) VALUES ($1,1,'Fictional retired line.','{"kind":"ai"}')`,
+        `INSERT INTO tweaks(user_id,id,text,norm,client_json) VALUES ($1,gen_random_uuid()::text,'Fictional old note.','fictional old note.','{"issuer":"fixture","client_id":"fixture"}')`,
+        "INSERT INTO served_reports(user_id,id,tweak_ids) VALUES ($1,gen_random_uuid()::text,'{}')",
+      ])
+        await owner.query(insert, [alder.userId]);
       const authCookie = (s: Side) =>
         [...s.cookies]
           .filter(([k, v]) => k.startsWith("auth.meetmilton.com\t") && v)
@@ -5062,10 +5312,10 @@ try {
         ).status;
       assert.equal(await userInfo(), 200, "the assistant's token works");
       const assistantTools = () => toolsWith(grant.access_token);
-      assert.equal(await assistantTools(), 3, "the assistant reaches MCP");
+      assert.equal(await assistantTools(), 2, "the assistant reaches MCP");
       assert.equal(
         await toolsWith(birchGrant.access_token),
-        3,
+        2,
         "Birch's assistant reaches MCP",
       );
       assert.equal(
@@ -5166,7 +5416,7 @@ try {
       // no longer authenticate.
       for (const [method, params] of [
         ["tools/list", {}],
-        ["tools/call", { name: "get_cover_sheet", arguments: {} }],
+        ["tools/call", { name: "get_report", arguments: { intent } }],
       ] as const) {
         const response = await mcpPost(alder.key, method, params);
         assert.equal(
@@ -5308,7 +5558,7 @@ try {
       // Birch can authorize it again.
       assert.equal(
         await toolsWith(birchGrant.access_token),
-        3,
+        2,
         "Birch's assistant still reaches MCP",
       );
       const refreshed = await oidc.refreshTokenGrant(
@@ -5318,12 +5568,12 @@ try {
       );
       assert.equal(
         await toolsWith(refreshed.access_token),
-        3,
+        2,
         "Birch's refreshed token reaches MCP",
       );
       assert.equal(
         await toolsWith((await connect(birch, shared)).access_token),
-        3,
+        2,
         "Birch reconnects the cleared registration",
       );
       assert.deepEqual(outbound, [], "no request left the machine");

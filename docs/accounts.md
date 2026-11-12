@@ -36,7 +36,7 @@ account are in [deletion](deletion.md); trials started at admission are in
 - Sign-ups are open and the only mode; the allow-list and closed modes are gone (Peter,
   2026-11-03).
 - Every successful sign-in creates or finds a Milton account; there is no admission
-  setting and no account-count cap. A new account starts with an empty cover sheet and
+  setting and no account-count cap. A new account starts with
   no memos, and gets the setup offer ([setup](setup.md)).
 
 ## The auth service
@@ -129,8 +129,9 @@ The app never handles passwords or native cookies.
   deletion ends an AI token's UserInfo at once rather than at its expiry.
 - The consent screen offers Read only, and Read and write only when the AI's request
   includes `milton:write`. It preselects Read and write when that is offered, otherwise
-  Read only; the person can still choose Read only. Connection keys keep their own
-  default ([Connection keys](#connection-keys)).
+  Read only; the person can still choose Read only. Read only reads memos as reports;
+  Read and write also saves a memo when the person accepts a final and forgets one when
+  they ask. Connection keys keep their own default ([Connection keys](#connection-keys)).
 
 ## Auth mail
 

@@ -146,7 +146,7 @@ test("both instruction variants stay under 3,500 characters, keep every topic an
   // The topics and their order: served-contract.test.ts.
 });
 
-test("an SDK client receives instructions, discovers the three tools, and reads the cover sheet", async () => {
+test("an SDK client receives instructions, discovers the two tools, and reads the report", async () => {
   const calls: string[] = [];
   const server = createMiltonServer(stubStore(), (call) =>
     calls.push(call.tool),
@@ -157,70 +157,87 @@ test("an SDK client receives instructions, discovers the three tools, and reads 
   try {
     await server.connect(serverTransport);
     await client.connect(clientTransport);
-    expect(await checkMcp(client)).toContain("exactly three");
-    expect(calls).toEqual(["get_cover_sheet"]);
+    expect(await checkMcp(client)).toContain("exactly two");
+    expect(calls).toEqual(["get_report"]);
     // For clients that drop instructions: a short description in server info
     // that still says to read before writing.
     const description = client.getServerVersion()?.description;
     expect(description).toBe(serverDescription);
     expect(serverDescription.length).toBeLessThanOrEqual(120);
     expect(serverDescription).toMatch(
-      /writing\. Before writing or editing .*get_cover_sheet.*get_report/,
+      /writing\. Before writing or editing .*get_report/,
     );
+    expect(serverDescription).not.toContain("get_cover_sheet");
     const tools = (await client.listTools()).tools;
-    // Assistants see cover sheet and reports, never the retired TPS name.
+    // AIs see reports, never the retired TPS name or cover sheet.
     for (const served of [client.getInstructions(), ...tools])
-      expect(JSON.stringify(served)).not.toMatch(/TPS|tps_report/);
+      expect(JSON.stringify(served)).not.toMatch(
+        /TPS|tps_report|cover[ _]sheet|report_id|rounds/,
+      );
     const save = tools.find((tool) => tool.name === "create_memo")!;
     expect(Object.keys(save.inputSchema.properties ?? {}).sort()).toEqual([
-      "cover_sheet",
       "forget_memos",
       "memo",
       "memo_context",
       "request_id",
     ]);
-    // report_id travels inside memo, where AIs put it (fidelity recheck: 6
-    // of 20 Claude first saves sent it there and were refused).
-    const memoSchema = (
-      save.inputSchema.properties as Record<string, { properties?: object }>
-    ).memo!;
-    expect(Object.keys(memoSchema.properties ?? {})).toContain("report_id");
-    // Clients may send tweaks: [] and kind_id: null for none; memo_context's
-    // kind_id still takes only an id.
     const fields = (schema: object | undefined) =>
       (schema as { properties: Record<string, Record<string, unknown>> })
         .properties;
-    const memoFields = fields(memoSchema);
-    expect(memoFields.tweaks).toMatchObject({ type: "array", maxItems: 10 });
-    expect(memoFields.tweaks).not.toHaveProperty("minItems");
-    expect(memoFields.kind_id!.anyOf).toContainEqual({ type: "null" });
+    const memoSchema = (
+      save.inputSchema.properties as Record<string, { properties?: object }>
+    ).memo!;
+    expect(Object.keys(memoSchema.properties ?? {}).sort()).toEqual(
+      [
+        "context",
+        "final",
+        "first_draft",
+        "first_draft_missing",
+        "kind_id",
+        "mode",
+        "new_kind",
+        "request",
+      ].sort(),
+    );
+    // Clients may send kind_id: null for none; memo_context's kind_id still
+    // takes only an id.
+    expect(fields(memoSchema).kind_id!.anyOf).toContainEqual({ type: "null" });
     expect(fields(save.inputSchema.properties!.memo_context).kind_id).toEqual({
       type: "string",
       minLength: 1,
       maxLength: 64,
       description: expect.any(String),
     });
-    // What a memo may hold, and what it never holds (spec, "Contract changes").
+    // The request id takes the database's alphabet.
+    expect(fields(save.inputSchema).request_id).toMatchObject({
+      type: "string",
+      pattern: "^[A-Za-z0-9._:-]{1,64}$",
+    });
+    // What a memo may hold, and what it never holds (rule, sections 2 and 5).
     for (const field of [
-      "save one when the person accepts a final, without asking",
+      "request_id: any new id for each save, up to 64 letters, digits, dots, dashes, underscores or colons; resend the same one only to recover an uncertain outcome.",
+      "save one when the person accepts a final.",
       "send first_draft_missing: true instead",
-      "{tweak_id} reuses a served tweak",
-      "likely to recur, at most three, named plainly, with a condition only if it doesn't hold everywhere; most memos teach one or none",
+      "Milton works out the person's changes (their tweaks) from first_draft and final",
       "request: only what they typed to ask, no pasted text",
       "A memo holds only these: never secrets, the transcript, the person's correction messages or other people's text",
-      "never add tweaks or your inferences",
+      "Don't save a final holding a secret (say why; never redact)",
       "carries receipt: tell the person that line",
     ])
       expect(save.description).toContain(field);
+    expect(save.description).not.toContain("without asking");
     // Error handling is in each result's next, not the description.
     expect(save.description).toEndWith(
       "An error result's next says what to do.",
     );
     const read = tools.find((tool) => tool.name === "get_report")!;
     expect(read.inputSchema.required).toEqual(["intent"]);
-    expect(read.description).toContain(
-      "pass it to create_memo when you save this draft's memo",
-    );
+    for (const part of [
+      'when asked "Did you get the memo?"',
+      "memos (how many memos they have)",
+      "While memos is 0, setup holds the first-setup script",
+    ])
+      expect(read.description).toContain(part);
     const text = client.getInstructions();
     expect(text).toContain('"Did you get the memo?"');
     expect(text).toContain('"Did you get that memo?"');
@@ -239,6 +256,396 @@ test("an SDK client receives instructions, discovers the three tools, and reads 
   } finally {
     await client.close();
     await server.close();
+  }
+});
+
+test("a stale client's get_cover_sheet, and each removed create_memo field in every supported form, is refused at dispatch with its guidance and a tool list change; nothing is written, and writing strings are never searched", async () => {
+  const local = await localStore();
+  const calls: ToolCall[] = [];
+  const store = fixtureStore(local.db, "u");
+  for (const readOnly of [false, true]) {
+    const server = createMiltonServer(
+      { ...store, appOrigin: stubStore().appOrigin },
+      (call) => calls.push(call),
+      { readOnly },
+    );
+    const client = new Client({ name: "sdk-test", version: "0.0.0" });
+    const changed: unknown[] = [];
+    client.setNotificationHandler(ToolListChangedNotificationSchema, (n) => {
+      changed.push(n);
+    });
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
+    try {
+      if (!readOnly) await seedUsers(local.pg, "u");
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+      expect(
+        (await client.listTools()).tools.map((t) => t.name).sort(),
+      ).toEqual(readOnly ? ["get_report"] : ["create_memo", "get_report"]);
+      const call = async (name: string, args: Record<string, unknown>) => {
+        const reply = await client.callTool({ name, arguments: args });
+        return { isError: reply.isError, value: read(reply as never) };
+      };
+      // The retired tool, on both connections.
+      const before = changed.length;
+      expect(await call("get_cover_sheet", {})).toEqual({
+        isError: true,
+        value: {
+          error: "tool_replaced",
+          code: "tool_replaced",
+          message:
+            "get_cover_sheet was replaced by get_report. Call get_report with intent.",
+          next: expect.objectContaining({ action: "reread" }),
+        },
+      });
+      await Bun.sleep(5);
+      expect(changed.length).toBe(before + 1);
+      if (readOnly) continue;
+      const memo = {
+        final: "Friday works. We had three rounds of tweaks on this.\n\n–P",
+        first_draft: "Hi Sam! Friday could work.",
+        mode: "draft",
+        request: "Say yes, mention the rounds and tweaks.",
+        context: {
+          summary: "accepting a fictional meeting day",
+          medium: "email",
+        },
+      };
+      const guidance = {
+        cover_sheet:
+          "There is no cover sheet. When the person asks you to remember a preference, keep it in your own memory or instructions; Milton keeps their changes as tweaks.",
+        tweaks:
+          "tweaks are no longer sent: Milton works out the person's changes from first_draft and final.",
+        rounds: "rounds is no longer sent.",
+        report_id: "report_id is no longer sent.",
+      };
+      const sent: [keyof typeof guidance, Record<string, unknown>][] = [];
+      sent.push([
+        "cover_sheet",
+        { cover_sheet: { add: "x", expected_version: 0 } },
+      ]);
+      sent.push(["cover_sheet", { cover_sheet: {}, memo }]);
+      for (const [field, value] of [
+        ["tweaks", []],
+        ["tweaks", [{ text: "no warm-up opener" }]],
+        ["rounds", 2],
+        ["report_id", crypto.randomUUID()],
+      ] as const) {
+        // Nested, as a JSON-object string, and flattened.
+        sent.push([field, { memo: { ...memo, [field]: value } }]);
+        sent.push([
+          field,
+          { memo: JSON.stringify({ ...memo, [field]: value }) },
+        ]);
+        const { final, ...rest } = memo;
+        sent.push([field, { memo: final, ...rest, [field]: value }]);
+      }
+      // Receipts that already exist under an id: a UUID one, as a save
+      // before the release made it, and a named one.
+      const heldIds = [crypto.randomUUID(), "save-held-earlier.1"];
+      for (const [i, id] of heldIds.entries())
+        expect(
+          (
+            await call("create_memo", {
+              request_id: id,
+              memo: { final: `Held earlier ${i}.`, context: memo.context },
+            })
+          ).value.status,
+        ).toBe("saved");
+      const receiptCount = async () =>
+        (await local.pg.query("SELECT 1 FROM save_requests")).rows.length;
+      const heldReceipts = await receiptCount();
+      // No receipt under the id, a UUID, a named one or one the schema
+      // refuses: nothing was saved under it, so send it again without the
+      // fields, with no question for the person.
+      const unsaved = (field: keyof typeof guidance) =>
+        expect.objectContaining({
+          error: "invalid_input",
+          field: "removed_unsaved",
+          message: expect.stringContaining(guidance[field]),
+          next: expect.objectContaining({ action: "fix_input" }),
+        });
+      // A receipt exists: the earlier save may have committed, so the person
+      // checks first, and nothing of the receipt comes back.
+      const held = (field: keyof typeof guidance) =>
+        expect.objectContaining({
+          error: "invalid_input",
+          field: "removed",
+          message: expect.stringContaining(guidance[field]),
+          next: expect.objectContaining({ action: "ask_user" }),
+        });
+      for (const [field, args] of sent)
+        for (const [id, branch] of [
+          [crypto.randomUUID(), unsaved],
+          ["save-never-sent.1", unsaved],
+          ["not a valid id", unsaved],
+          [heldIds[0]!, held],
+          [heldIds[1]!, held],
+        ] as const) {
+          const changes = changed.length;
+          const refused = await call("create_memo", {
+            request_id: id,
+            ...args,
+          });
+          expect([field, id, refused]).toEqual([
+            field,
+            id,
+            { isError: true, value: branch(field) },
+          ]);
+          if (branch === held) {
+            expect(refused.value.message).toContain(
+              "Milton can't recover an earlier outcome for this request. Before saving again with a new request_id, ask the person to check their TPS page and, if it isn't there, the full TPS.md export (the page lists the latest 200 memos), for this memo.",
+            );
+            expect(Object.keys(refused.value).sort()).toEqual([
+              "code",
+              "error",
+              "field",
+              "message",
+              "next",
+            ]);
+            expect(refused.value.message).not.toContain("Held earlier");
+          } else {
+            expect(refused.value.message).toContain(
+              "No save under this request_id has finished. Send it again without those fields, with the same request_id.",
+            );
+            expect(refused.value.message).not.toContain("TPS");
+          }
+          await Bun.sleep(5);
+          expect(changed.length).toBe(changes + 1);
+        }
+      expect(await receiptCount()).toBe(heldReceipts);
+      // Unknown keys deeper down meet the strict schema; none is a removed
+      // field at its position.
+      for (const args of [
+        { memo: { ...memo, context: { ...memo.context, rounds: 1 } } },
+        { memo_context: { memo_id: "m", context: memo.context, tweaks: [] } },
+        { memo: { ...memo, colour: "blue" } },
+      ]) {
+        const refused = await call("create_memo", {
+          request_id: crypto.randomUUID(),
+          ...args,
+        });
+        expect(refused.isError).toBe(true);
+        expect(refused.value.field).toBeUndefined();
+      }
+      // A bidirectional control in a one-line field (rule B) is refused at
+      // dispatch in every form, with the rollout-boundary sentence, and
+      // writes nothing; even under a request id that already holds a receipt.
+      const RLO = String.fromCharCode(0x202e);
+      const PDI = String.fromCharCode(0x2069);
+      const bidiMemo = {
+        ...memo,
+        context: { ...memo.context, summary: `accepting${RLO} a day` },
+      };
+      const { final: bidiFinal, ...bidiRest } = bidiMemo;
+      const receipts = receiptCount;
+      const receiptsBefore = await receipts();
+      for (const [form, args] of [
+        ["object", { memo: bidiMemo }],
+        ["JSON-object string", { memo: JSON.stringify(bidiMemo) }],
+        ["flattened", { memo: bidiFinal, ...bidiRest }],
+        [
+          "memo_context",
+          {
+            memo_context: {
+              memo_id: "m",
+              context: { summary: "a day", medium: "email" },
+              new_kind: `meeting${PDI}`,
+            },
+          },
+        ],
+        [
+          "memo_context as a JSON-object string",
+          {
+            memo_context: JSON.stringify({
+              memo_id: "m",
+              context: { summary: `a${RLO}day`, medium: "email" },
+            }),
+          },
+        ],
+      ] as const)
+        for (const id of [crypto.randomUUID(), ...heldIds]) {
+          const refused = await call("create_memo", {
+            request_id: id,
+            ...args,
+          });
+          const wasHeld = heldIds.includes(id);
+          expect([form, id, refused]).toEqual([
+            form,
+            id,
+            {
+              isError: true,
+              value: expect.objectContaining({
+                error: "invalid_input",
+                field: wasHeld ? "bidi" : "bidi_unsaved",
+                message: expect.stringContaining(
+                  wasHeld
+                    ? "Milton can't recover an earlier outcome for this request. Before saving again with a new request_id, ask the person to check their TPS page and, if it isn't there, the full TPS.md export (the page lists the latest 200 memos), for this memo."
+                    : "No save under this request_id has finished. Send it again without those characters, with the same request_id.",
+                ),
+                next: expect.objectContaining({
+                  action: wasHeld ? "ask_user" : "fix_input",
+                }),
+              }),
+            },
+          ]);
+        }
+      expect(await receipts()).toBe(receiptsBefore);
+      // With no receipt, the resend goes under the same request_id. The plain
+      // path: it saves.
+      const plainId = crypto.randomUUID();
+      const plainMemo = {
+        final: "Resent without the field.",
+        context: memo.context,
+      };
+      expect(
+        (
+          await call("create_memo", {
+            request_id: plainId,
+            memo: { ...plainMemo, report_id: crypto.randomUUID() },
+          })
+        ).value,
+      ).toMatchObject({
+        field: "removed_unsaved",
+        next: { action: "fix_input" },
+      });
+      expect(
+        (await call("create_memo", { request_id: plainId, memo: plainMemo }))
+          .value,
+      ).toMatchObject({ status: "saved" });
+      // The delayed commit: no receipt when the lookup runs, then the
+      // pre-release attempt under that id commits (as the code before the
+      // release wrote it: rounds, its receipt). The resend under the same id
+      // meets that receipt as request_id_reused, never a second memo.
+      const delayedId = crypto.randomUUID();
+      const delayedMemo = {
+        final: "Delayed fictional final.",
+        first_draft: "Hi! Delayed fictional draft.",
+        mode: "draft",
+        context: memo.context,
+      };
+      expect(
+        (
+          await call("create_memo", {
+            request_id: delayedId,
+            memo: { ...delayedMemo, rounds: 1 },
+          })
+        ).value,
+      ).toMatchObject({ field: "removed_unsaved" });
+      await local.pg.query(
+        `INSERT INTO memos(user_id,id,medium,summary,mode,first_draft,first_draft_state,final,rounds,change,tier,client_json,request_id)
+         VALUES ('u',$1,'email',$2,'draft',$3,'kept',$4,1,0.5,'steered','{}',$5)`,
+        [
+          crypto.randomUUID(),
+          memo.context.summary,
+          delayedMemo.first_draft,
+          delayedMemo.final,
+          delayedId,
+        ],
+      );
+      await local.pg.query(
+        `INSERT INTO save_requests(user_id,request_id,input_hash,result_json) VALUES ('u',$1,repeat('a',64),'{"status":"saved"}')`,
+        [delayedId],
+      );
+      const memosBefore = (
+        await local.pg.query("SELECT 1 FROM memos WHERE user_id='u'")
+      ).rows.length;
+      expect(
+        (
+          await call("create_memo", {
+            request_id: delayedId,
+            memo: delayedMemo,
+          })
+        ).value,
+      ).toMatchObject({ error: "request_id_reused" });
+      expect(
+        (await local.pg.query("SELECT 1 FROM memos WHERE user_id='u'")).rows
+          .length,
+      ).toBe(memosBefore);
+      // A final, first draft or request that says "rounds" or "tweaks" saves.
+      expect(
+        await call("create_memo", {
+          request_id: "save-vendor-decline-1",
+          memo,
+        }),
+      ).toMatchObject({
+        value: { status: "saved", receipt: "Kept memo: email." },
+      });
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  }
+  expect(calls.filter((c) => c.tool === "get_cover_sheet")).toEqual([
+    expect.objectContaining({
+      outcome: "refused",
+      error_code: "tool_replaced",
+    }),
+    expect.objectContaining({
+      outcome: "refused",
+      error_code: "tool_replaced",
+    }),
+  ]);
+  await local.dispose();
+});
+
+test("a removed-field or bidi refusal whose receipt lookup fails takes the cautious branch; a closing account gets account_unavailable", async () => {
+  const local = await localStore();
+  try {
+    await seedUsers(local.pg, "u");
+    let failing = true;
+    const flaky = {
+      ...local.db,
+      transaction: (async (work: never) => {
+        if (failing) throw new Error("Fictional connection lost");
+        return local.db.transaction(work);
+      }) as typeof local.db.transaction,
+    };
+    const server = createMiltonServer({
+      ...fixtureStore(flaky, "u"),
+      appOrigin: stubStore().appOrigin,
+    });
+    const client = new Client({ name: "sdk-test", version: "0.0.0" });
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    const memo = {
+      final: "Friday works.",
+      context: { summary: "accepting a fictional day", medium: "email" },
+    };
+    const save = async (args: Record<string, unknown>) =>
+      read(
+        (await client.callTool({
+          name: "create_memo",
+          arguments: { request_id: crypto.randomUUID(), ...args },
+        })) as never,
+      );
+    const RLO = String.fromCharCode(0x202e);
+    const bidi = {
+      memo: { ...memo, context: { ...memo.context, summary: `a${RLO}b` } },
+    };
+    for (const [args, field] of [
+      [{ memo: { ...memo, rounds: 1 } }, "removed"],
+      [bidi, "bidi"],
+    ] as const)
+      expect(await save(args)).toMatchObject({
+        error: "invalid_input",
+        field,
+        message: expect.stringContaining(
+          "Milton can't recover an earlier outcome for this request.",
+        ),
+        next: { action: "ask_user" },
+      });
+    failing = false;
+    await local.pg.query("UPDATE users SET status='deleting' WHERE id='u'");
+    for (const args of [{ memo: { ...memo, rounds: 1 } }, bidi])
+      expect(await save(args)).toMatchObject({ error: "account_unavailable" });
+    await client.close();
+    await server.close();
+  } finally {
+    await local.dispose();
   }
 });
 
@@ -306,6 +713,16 @@ test("get_report requires an intent: without a well-formed one it refuses, sayin
         { situation: "a reply", medium: "email", audience: "a client" },
         "purpose is required: one line of at most 100 characters",
       ],
+      // A bidi control says which field and why, with no save guidance: a
+      // report is a read.
+      [
+        { ...goodIntent, audience: `a${String.fromCharCode(0x202e)}client` },
+        "audience holds a text-direction control character (U+202A to U+202E or U+2066 to U+2069); remove it and resend",
+      ],
+      [
+        { ...goodIntent, situation: `a${String.fromCharCode(0x2066)}reply` },
+        "situation holds a text-direction control character (U+202A to U+202E or U+2066 to U+2069); remove it and resend",
+      ],
     ] as const) {
       const message = await refused({ report_id: "email", intent });
       expect(message).toBe(`get_report intent: ${says}. Nothing was read.`);
@@ -313,7 +730,7 @@ test("get_report requires an intent: without a well-formed one it refuses, sayin
     expect(intents).toEqual([]);
     expect(changed).toBe(1);
     expect(calls.map((c) => [c.outcome, c.error_code])).toEqual(
-      Array(4).fill(["refused", "invalid_input"]),
+      Array(6).fill(["refused", "invalid_input"]),
     );
     const read = await client.callTool({
       name: "get_report",
@@ -383,12 +800,19 @@ test("the server hands the store one-line fields after the rule: separators as o
           new_kind: `meeting${PS}yes`,
           first_draft: "Friday is fine.",
           mode: "draft",
-          rounds: 0,
-          tweaks: [{ text: `no${LS}exclamation` }],
         },
       },
-      { cover_sheet: { add: `Sign off${LS}–P`, expected_version: 0 } },
-      { cover_sheet: { remove: ` Sign off${LS}–P`, expected_version: 1 } },
+      {
+        memo_context: {
+          memo_id: "m",
+          context: {
+            summary: `a day${LS}`,
+            medium: "email",
+            audience: ` a${PS}client`,
+          },
+          new_kind: `meeting${LS}${PS}yes`,
+        },
+      },
     ])
       await client.callTool({
         name: "create_memo",
@@ -404,15 +828,15 @@ test("the server hands the store one-line fields after the rule: separators as o
           new_kind: "meeting yes",
           first_draft: "Friday is fine.",
           mode: "draft",
-          rounds: 0,
-          tweaks: [{ text: "no exclamation" }],
         },
       },
-      { request_id, cover_sheet: { add: "Sign off –P", expected_version: 0 } },
-      // remove is matched as sent, untrimmed.
       {
         request_id,
-        cover_sheet: { remove: " Sign off –P", expected_version: 1 },
+        memo_context: {
+          memo_id: "m",
+          context: { summary: "a day", medium: "email", audience: "a client" },
+          new_kind: "meeting yes",
+        },
       },
     ]);
     // What create_memo promises matches: only final and first_draft are kept
@@ -445,7 +869,7 @@ test("an object argument sent as a JSON string is read as that object; any other
       return {
         status: "saved",
         request_id: (input as { request_id: string }).request_id,
-        receipt: "Kept memo: email, your words.",
+        receipt: "Kept memo: email.",
       };
     },
   });
@@ -469,12 +893,12 @@ test("an object argument sent as a JSON string is read as that object; any other
     });
     expect(reply.isError).toBeUndefined();
     expect(saved).toEqual([{ request_id, memo }]);
-    // tweaks: [] and kind_id: null arrive as omitted, even inside the string.
+    // kind_id: null arrives as omitted, even inside the string.
     const lenient = await client.callTool({
       name: "create_memo",
       arguments: {
         request_id,
-        memo: JSON.stringify({ ...memo, tweaks: [], kind_id: null }),
+        memo: JSON.stringify({ ...memo, kind_id: null }),
       },
     });
     expect(lenient.isError).toBeUndefined();
@@ -531,8 +955,7 @@ test("a memo sent flattened (the final as a string memo, its fields beside it) s
     const fields = {
       first_draft: "Hi Sam! Hope you're well. Friday could work for me.",
       mode: "draft",
-      rounds: 1,
-      tweaks: [{ text: "replies to Sam: no warm-up opener" }],
+      request: "Say yes to Friday.",
       context: {
         summary: "accepting a fictional meeting day",
         medium: "email",
@@ -546,7 +969,10 @@ test("a memo sent flattened (the final as a string memo, its fields beside it) s
     expect(flat.value).toMatchObject({ status: "saved" });
     // The store got exactly the object form, so the same memo and hash.
     const nested = await save({ request_id, memo: { final, ...fields } });
-    expect(nested).toEqual(flat);
+    expect(nested).toEqual({
+      ...flat,
+      value: { ...flat.value, replayed: expect.any(String) },
+    });
     expect(JSON.stringify(saved[0])).toBe(JSON.stringify(saved[1]));
     expect(JSON.stringify(saved[0])).toBe(
       JSON.stringify(
@@ -554,7 +980,10 @@ test("a memo sent flattened (the final as a string memo, its fields beside it) s
       ),
     );
     // A retry of the flattened save replays; nothing is duplicated.
-    expect(await save({ request_id, memo: final, ...fields })).toEqual(flat);
+    expect(await save({ request_id, memo: final, ...fields })).toEqual({
+      ...flat,
+      value: { ...flat.value, replayed: expect.any(String) },
+    });
     expect((await local.pg.query("SELECT final FROM memos")).rows).toEqual([
       { final },
     ]);
@@ -587,7 +1016,7 @@ test("a memo sent flattened (the final as a string memo, its fields beside it) s
   }
 });
 
-test("a pasted request or a fourth tweak is refused with its own next step, before any write", async () => {
+test("a pasted request is refused with its own next step, before any write", async () => {
   const local = await localStore();
   const calls: ToolCall[] = [];
   const store = fixtureStore(local.db, "u");
@@ -614,7 +1043,6 @@ test("a pasted request or a fourth tweak is refused with its own next step, befo
       final: "Friday works.\n\n–S",
       first_draft: "Hi Sam! Hope you're well. Friday could work for me.",
       mode: "draft",
-      rounds: 1,
       context: {
         summary: "accepting a fictional meeting day",
         medium: "email",
@@ -629,25 +1057,7 @@ test("a pasted request or a fourth tweak is refused with its own next step, befo
         text: "Send only what the person typed to ask, without pasted or quoted text, or leave request out; send the rest unchanged and save with a new request_id.",
       },
     });
-    // The list takes ten, as the released definition did; a fourth distinct
-    // tweak is refused, never cut.
-    expect(
-      await save({
-        ...memo,
-        tweaks: ["one", "two", "three", "four"].map((text) => ({ text })),
-      }),
-    ).toMatchObject({
-      error: "invalid_input",
-      field: "tweaks",
-      message:
-        "This memo names 4 tweaks; a memo teaches at most 3. Nothing was changed.",
-      next: {
-        action: "fix_input",
-        text: "Keep the three tweaks most likely to recur and drop the rest; send the rest unchanged and save with a new request_id.",
-      },
-    });
     expect(calls.map((c) => [c.outcome, c.error_code])).toEqual([
-      ["refused", "invalid_input"],
       ["refused", "invalid_input"],
     ]);
     expect((await local.pg.query("SELECT 1 FROM save_requests")).rows).toEqual(
@@ -723,7 +1133,7 @@ test("two authenticated clients isolate tenants and save once", async () => {
     };
     const discovered = (await clients[0]!.listTools()).tools;
     expect(
-      discovered.find((t) => t.name === "get_cover_sheet")?.annotations,
+      discovered.find((t) => t.name === "get_report")?.annotations,
     ).toMatchObject({
       readOnlyHint: true,
       idempotentHint: false,
@@ -731,9 +1141,16 @@ test("two authenticated clients isolate tenants and save once", async () => {
     });
     expect(discovered.map((t) => t.name).sort()).toEqual([
       "create_memo",
-      "get_cover_sheet",
       "get_report",
     ]);
+    const check = {
+      intent: {
+        situation: "confirming what is on file",
+        medium: "email",
+        audience: "a client",
+        purpose: "check",
+      },
+    };
     expect(
       discovered.find((t) => t.name === "create_memo")?.annotations
         ?.idempotentHint,
@@ -741,46 +1158,27 @@ test("two authenticated clients isolate tenants and save once", async () => {
     // Connecting and listing tools announce nothing; each assistant's first
     // tool call after this process started does, and only that one.
     expect(changed).toEqual([0, 0]);
-    const first = (await call(0, "get_cover_sheet")).value;
-    const second = (await call(1, "get_cover_sheet")).value;
+    const first = (await call(0, "get_report", check)).value;
+    const second = (await call(1, "get_report", check)).value;
     expect(changed).toEqual([1, 1]);
-    expect(first.text).toBe("");
-    expect(second.text).toBe("");
-    // An empty account carries the first-setup script; it leaves after the first save.
-    expect(first.is_empty).toBe(true);
+    // An empty account carries the first-setup script; it leaves after the
+    // first save.
+    expect(first).toMatchObject({ is_empty: true, memos: 0 });
+    expect(second).toMatchObject({ is_empty: true, memos: 0 });
     expect(String(first.setup)).toStartWith("First setup");
     const input = {
       request_id: crypto.randomUUID(),
-      cover_sheet: { add: "Lead with the answer.", expected_version: 0 },
+      memo: {
+        final: "Lead with the answer.",
+        context: { summary: "a fictional note", medium: "email" },
+      },
     };
     const saved = await call(0, "create_memo", input);
     expect(saved.value.status).toBe("saved");
-    const filed = (await call(0, "get_cover_sheet")).value;
-    expect(filed).toMatchObject({ text: "Lead with the answer.", version: 1 });
+    const filed = (await call(0, "get_report", check)).value;
+    expect(filed).toMatchObject({ is_empty: false, memos: 1 });
     expect(filed.setup).toBeUndefined();
-    // get_cover_sheet takes no arguments: any argument is refused.
-    const stale = await clients[0]!.callTool({
-      name: "get_cover_sheet",
-      arguments: { event: "start" },
-    });
-    // The wording is the MCP SDK's; the refusal and the named key are ours to keep.
-    expect(stale.isError).toBe(true);
-    expect(
-      JSON.parse((stale.content as { text: string }[])[0]!.text).message,
-    ).toContain('"event"');
-    // A report starts with the cover sheet; with no memos it says so.
-    const report = (
-      await call(0, "get_report", {
-        intent: {
-          situation: "confirming what is on file",
-          medium: "email",
-          audience: "a client",
-          purpose: "check",
-        },
-      })
-    ).value;
-    expect(report).toMatchObject({ is_empty: true, examples: [] });
-    expect(report.text).toStartWith("# Cover sheet\n\nLead with the answer.");
+    expect(filed.text).toContain("> Lead with the answer.");
     // A field the old schema had is refused, with a next step.
     const unknownField = await clients[0]!.callTool({
       name: "get_report",
@@ -801,9 +1199,9 @@ test("two authenticated clients isolate tenants and save once", async () => {
       error: "invalid_arguments",
       next: { action: "fix_input" },
     });
-    expect((await call(1, "get_cover_sheet")).value.text).toBe("");
+    expect((await call(1, "get_report", check)).value.memos).toBe(0);
     expect(changed).toEqual([1, 1]);
-    expect((await call(1, "get_cover_sheet")).value.text).toBe("");
+    expect((await call(1, "get_report", check)).value.memos).toBe(0);
     expect(changed).toEqual([1, 1]);
     // A get_report from a client holding the schema before intent is refused
     // and told again that the tool list changed.
@@ -811,14 +1209,8 @@ test("two authenticated clients isolate tenants and save once", async () => {
       (await call(0, "get_report", { report_id: "email" })).value.error,
     ).toBe("invalid_input");
     expect(changed).toEqual([2, 1]);
-    expect(
-      (
-        await call(1, "create_memo", {
-          request_id: crypto.randomUUID(),
-          cover_sheet: { add: "Lead with the answer.", expected_version: 1 },
-        })
-      ).value.status,
-    ).toBe("conflict");
+    // The same words saved by the other tenant are its own first memo.
+    expect((await call(1, "create_memo", input)).value.status).toBe("saved");
   } finally {
     await Promise.all(clients.map((c) => c.close()));
     await local.dispose();
@@ -866,22 +1258,27 @@ test("scopes control discovery and direct calls; original binding revocation sur
     expect(reader.getServerVersion()?.description).toBe(serverDescription);
     expect(readOnlyInstructions.length).toBeLessThanOrEqual(4096);
     expect((await reader.listTools()).tools.map((t) => t.name)).toEqual([
-      "get_cover_sheet",
       "get_report",
     ]);
     const cover = JSON.parse(
       (
-        (await reader.callTool({ name: "get_cover_sheet", arguments: {} }))
-          .content as { text: string }[]
+        (
+          await reader.callTool({
+            name: "get_report",
+            arguments: { intent: goodIntent },
+          })
+        ).content as { text: string }[]
       )[0]!.text,
     );
+    // An empty account, read only: permission, never setup.
+    expect(cover.memos).toBe(0);
     expect(cover.setup).toBeUndefined();
     expect(cover.permission).toContain("Read only");
     await expect(
       reader.callTool({ name: "create_memo", arguments: {} }),
     ).rejects.toBeDefined();
     const writer = await connect(await fixture.token("alpha", "writer"));
-    expect((await writer.listTools()).tools).toHaveLength(3);
+    expect((await writer.listTools()).tools).toHaveLength(2);
     // A read-only connection reads the same report, served changes included.
     await writer.callTool({
       name: "create_memo",
@@ -891,7 +1288,6 @@ test("scopes control discovery and direct calls; original binding revocation sur
           first_draft: "Hi Dana, I hope this finds you well. Thanks!",
           final: "Dana — thanks!",
           mode: "draft",
-          rounds: 1,
           context: { summary: "thank a colleague", medium: "email" },
         },
       },
@@ -917,6 +1313,43 @@ test("scopes control discovery and direct calls; original binding revocation sur
     const written = await reportText(writer);
     expect(written).toContain("What they changed in the AI's first draft:");
     expect(await reportText(reader)).toBe(written);
+    // A read-only connection's stale save, removed fields and a bidi
+    // control included, meets its scope refusal before any receipt lookup.
+    const staleSave = await handler(
+      new Request(resource, {
+        method: "POST",
+        headers: {
+          Host: "localhost:3001",
+          Authorization: "Bearer " + readToken,
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: {
+            name: "create_memo",
+            arguments: {
+              request_id: crypto.randomUUID(),
+              memo: {
+                final: "Stale.",
+                rounds: 1,
+                context: {
+                  summary: `a${String.fromCharCode(0x202e)}b`,
+                  medium: "email",
+                },
+              },
+            },
+          },
+        }),
+      }),
+    );
+    expect(staleSave.status).toBe(403);
+    expect(await staleSave.json()).toMatchObject({
+      error: "insufficient_scope",
+      required_permission: "read_write",
+    });
     const request = (token: string) =>
       handler(
         new Request(resource, {
@@ -999,7 +1432,7 @@ test("scopes control discovery and direct calls; original binding revocation sur
 }, 30000);
 
 // Round trips per call, beyond the per-tweak statements.
-const TRIPS = { report: 5, save: 14 };
+const TRIPS = { report: 5, save: 13 };
 test("a setup request makes one database round trip and a tool call four, by token or connection key", async () => {
   const local = await localStore();
   try {
@@ -1077,24 +1510,6 @@ test("a setup request makes one database round trip and a tool call four, by tok
       expect(text).not.toContain('"isError":true');
       return trips;
     };
-    const cover = { name: "get_cover_sheet", arguments: {} };
-    const initialize = {
-      protocolVersion: "2025-06-18",
-      capabilities: {},
-      clientInfo: { name: "counted", version: "0" },
-    };
-    for (const bearer of [token, key]) {
-      // The first call records the key's last use; later ones within a minute do not.
-      await trips_for(bearer, "tools/call", cover);
-      expect(await trips_for(bearer, "initialize", initialize)).toBe(1);
-      expect(await trips_for(bearer, "notifications/initialized")).toBe(1);
-      expect(await trips_for(bearer, "tools/list", {})).toBe(1);
-      // Access, the trial gate and the snapshot in sequence, and the usage
-      // append (one statement) alongside the snapshot.
-      expect(await trips_for(bearer, "tools/call", cover)).toBe(4);
-    }
-    // A report: access, the trial gate, the candidates, then the chosen
-    // words with the served record, and the usage append alongside.
     const report = {
       name: "get_report",
       arguments: {
@@ -1106,34 +1521,48 @@ test("a setup request makes one database round trip and a tool call four, by tok
         },
       },
     };
-    expect(await trips_for(key, "tools/call", report)).toBe(TRIPS.report);
+    const initialize = {
+      protocolVersion: "2025-06-18",
+      capabilities: {},
+      clientInfo: { name: "counted", version: "0" },
+    };
+    for (const bearer of [token, key]) {
+      // The first call records the key's last use; later ones within a minute do not.
+      await trips_for(bearer, "tools/call", report);
+      expect(await trips_for(bearer, "initialize", initialize)).toBe(1);
+      expect(await trips_for(bearer, "notifications/initialized")).toBe(1);
+      expect(await trips_for(bearer, "tools/list", {})).toBe(1);
+      // An empty account's report: access, the trial gate and the
+      // candidates in sequence, and the usage append (one statement)
+      // alongside; with nothing to serve, no second statement.
+      expect(await trips_for(bearer, "tools/call", report)).toBe(4);
+    }
     // A memo save: access, then one transaction (the account lock, the
     // receipt, the trial gate, the savepoint, the keep-memos switch, the
-    // duplicate check, the memo, its citations, its changes, the receipt), with the usage
+    // duplicate check, the memo, its changes, the receipt), with the usage
     // append alongside. Its gate found no reminder due, so no notice claim.
-    const save = (tweaks: string[]) => ({
+    // No statement depends on what the person changed.
+    const save = (n: number) => ({
       name: "create_memo",
       arguments: {
         request_id: crypto.randomUUID(),
         memo: {
           first_draft: "Hi! Hope you're well. Unfortunately not this time.",
-          final: `Not this time, thanks. ${tweaks.length}`,
+          final: `Not this time, thanks. ${n}`,
           mode: "draft",
-          rounds: 1,
-          tweaks: tweaks.map((text) => ({ text })),
           context: { summary: "a fictional decline", medium: "email" },
         },
       },
     });
-    expect(await trips_for(key, "tools/call", save(["Shorter"]))).toBe(
-      TRIPS.save + 1,
-    );
-    // Each new tweak is one statement more.
-    const three = save(["Tweak 1", "Tweak 2", "Tweak 3"]);
-    expect(await trips_for(key, "tools/call", three)).toBe(TRIPS.save + 3);
+    expect(await trips_for(key, "tools/call", save(1))).toBe(TRIPS.save);
+    const again = save(2);
+    expect(await trips_for(key, "tools/call", again)).toBe(TRIPS.save);
     // A replay never reaches the gate, so its notice claim runs (a
     // transaction of the timeouts and the claim).
-    expect(await trips_for(key, "tools/call", three)).toBe(5 + 4);
+    expect(await trips_for(key, "tools/call", again)).toBe(5 + 4);
+    // A report with examples: access, the trial gate, the candidates, then
+    // the chosen words, and the usage append alongside. It writes nothing.
+    expect(await trips_for(key, "tools/call", report)).toBe(TRIPS.report);
   } finally {
     await local.dispose();
   }
@@ -1211,22 +1640,22 @@ test("an admitted call appends its usage alongside its work without a blocking l
         )
       ).rows.map((r) => r.tool);
     // The row commits before the reply: no draining needed.
-    const cover = await call("get_cover_sheet", {});
-    expect(cover.value.version).toBeNumber();
-    expect(await rows()).toEqual(["get_cover_sheet"]);
+    const cover = await call("get_report", { intent: goodIntent });
+    expect(cover.value.memos).toBeNumber();
+    expect(await rows()).toEqual(["get_report"]);
     // A read takes no row lock.
     expect(
       cover.statements.filter((s) => /FOR (NO KEY )?UPDATE/i.test(s)),
     ).toEqual([]);
     const save = await call("create_memo", {
       request_id: crypto.randomUUID(),
-      cover_sheet: {
-        add: "Keep fictional dates exact.",
-        expected_version: cover.value.version,
+      memo: {
+        final: "Keep fictional dates exact.",
+        context: { summary: "a fictional note", medium: "email" },
       },
     });
     expect(save.value.status).toBe("saved");
-    expect(await rows()).toEqual(["get_cover_sheet", "create_memo"]);
+    expect(await rows()).toEqual(["get_report", "create_memo"]);
     // A save's one lock is its own account lock, FOR NO KEY UPDATE, which a
     // usage row's foreign-key check does not wait on.
     expect(
@@ -1234,8 +1663,8 @@ test("an admitted call appends its usage alongside its work without a blocking l
     ).toEqual([expect.stringContaining("FOR NO KEY UPDATE")]);
     // A stalled append delays the reply by the bound, never more.
     hold = new Promise<void>((resolve) => (release = resolve));
-    const stalled = await call("get_cover_sheet", {});
-    expect(stalled.value.version).toBeNumber();
+    const stalled = await call("get_report", { intent: goodIntent });
+    expect(stalled.value.memos).toBeNumber();
     expect(stalled.ms).toBeGreaterThanOrEqual(240);
     expect(stalled.ms).toBeLessThan(2000);
     expect(await rows()).toHaveLength(2);
@@ -1272,7 +1701,10 @@ test("in one JSON-RPC batch, only the admitted call records usage", async () => 
     await server.connect(b);
     await client.connect(a);
     const [admitted, refused] = await Promise.all([
-      client.callTool({ name: "get_cover_sheet", arguments: {} }),
+      client.callTool({
+        name: "get_report",
+        arguments: { intent: goodIntent },
+      }),
       client.callTool({
         name: "get_report",
         arguments: {
@@ -1290,7 +1722,7 @@ test("in one JSON-RPC batch, only the admitted call records usage", async () => 
           miltonUserId,
         ])
       ).rows,
-    ).toEqual([{ tool: "get_cover_sheet" }]);
+    ).toEqual([{ tool: "get_report" }]);
   } finally {
     await client?.close();
     await backgroundSettled();
@@ -1327,7 +1759,7 @@ test("invalid store limits refuse a tool call and record no usage; a stored reti
               jsonrpc: "2.0",
               id: 1,
               method: "tools/call",
-              params: { name: "get_cover_sheet", arguments: {} },
+              params: { name: "get_report", arguments: { intent: goodIntent } },
             }),
           }),
         )
@@ -1438,13 +1870,13 @@ test("refused tool calls record no usage; each admitted call records one row", a
         )
       )[0]!.n;
     };
-    const version = (await call("get_cover_sheet", {})).version;
+    expect((await call("get_report", { intent: goodIntent })).memos).toBe(0);
     expect(await used()).toBe(1);
     const save = {
       request_id: crypto.randomUUID(),
-      cover_sheet: {
-        add: "Keep fictional dates exact.",
-        expected_version: version,
+      memo: {
+        final: "Keep fictional dates exact.",
+        context: { summary: "a fictional note", medium: "email" },
       },
     };
     const badKind = {
@@ -1476,7 +1908,7 @@ test("refused tool calls record no usage; each admitted call records one row", a
         action: value.next?.action,
         text: typeof value.next?.text,
       }).toEqual({ error, code: error, action, text: "string" });
-    const lapsed = await call("get_cover_sheet", {});
+    const lapsed = await call("get_report", { intent: goodIntent });
     refused(lapsed, "subscription_required", "tell_user");
     expect(lapsed.next.text).toContain("don't retry");
     refused(
@@ -1490,11 +1922,15 @@ test("refused tool calls record no usage; each admitted call records one row", a
     await local.db.query(
       sql`UPDATE trial_accounts SET subscription_status='active' WHERE user_id=${miltonUserId}`,
     );
-    // Input refusals: the SDK's schema check (its wording in message), a
-    // get_report without intent and an unknown kind.
-    const unexpected = await call("get_cover_sheet", { event: "start" });
+    // Input refusals: the SDK's schema check (its wording in message), the
+    // retired tool, a get_report without intent and an unknown kind.
+    const unexpected = await call("get_report", {
+      intent: goodIntent,
+      event: "start",
+    });
     refused(unexpected, "invalid_arguments", "fix_input");
     expect(unexpected.message).toContain('"event"');
+    refused(await call("get_cover_sheet", {}), "tool_replaced", "reread");
     refused(
       await call("get_report", { report_id: "email" }),
       "invalid_input",
@@ -1502,22 +1938,15 @@ test("refused tool calls record no usage; each admitted call records one row", a
     );
     refused(await call("get_report", badKind), "invalid_kind", "reread");
     expect(await used()).toBe(1);
-    // A save that ran is recorded, whether it saved or met a stale version.
+    // A save that ran is recorded, whether it saved or found its words on
+    // file.
     const filed = await call("create_memo", save);
     expect(filed.status).toBe("saved");
     expect(filed).not.toHaveProperty("next");
     expect(await used()).toBe(2);
     expect(
-      await call("create_memo", {
-        ...save,
-        request_id: crypto.randomUUID(),
-        cover_sheet: { add: "Another line.", expected_version: version },
-      }),
-    ).toMatchObject({
-      status: "conflict",
-      code: "version_conflict",
-      next: { action: "reread" },
-    });
+      await call("create_memo", { ...save, request_id: crypto.randomUUID() }),
+    ).toMatchObject({ status: "unchanged" });
     expect(await used()).toBe(3);
     // Replaying a recorded save records nothing.
     expect((await call("create_memo", save)).status).toBe("saved");
@@ -1589,19 +2018,15 @@ test("connection keys get exactly their scope's tools; revoked, expired, malform
     const read = await connect(reader.key);
     expect(read.getInstructions()).toBe(readOnlyInstructions);
     expect((await read.listTools()).tools.map((t) => t.name)).toEqual([
-      "get_cover_sheet",
       "get_report",
     ]);
-    await read.callTool({ name: "get_cover_sheet", arguments: {} });
+    await read.callTool({
+      name: "get_report",
+      arguments: { intent: goodIntent },
+    });
     const write = await connect(writer.key);
     expect(write.getInstructions()).toBe(storeInstructions);
-    expect((await write.listTools()).tools).toHaveLength(3);
-    const version = JSON.parse(
-      (
-        (await write.callTool({ name: "get_cover_sheet", arguments: {} }))
-          .content as { text: string }[]
-      )[0]!.text,
-    ).version;
+    expect((await write.listTools()).tools).toHaveLength(2);
     const save = {
       jsonrpc: "2.0",
       id: 1,
@@ -1610,9 +2035,9 @@ test("connection keys get exactly their scope's tools; revoked, expired, malform
         name: "create_memo",
         arguments: {
           request_id: crypto.randomUUID(),
-          cover_sheet: {
-            add: "Keep fictional notes short.",
-            expected_version: version,
+          memo: {
+            final: "Keep fictional notes short.",
+            context: { summary: "a fictional note", medium: "email" },
           },
         },
       },
@@ -1642,14 +2067,10 @@ test("connection keys get exactly their scope's tools; revoked, expired, malform
       '\\"status\\":\\"saved\\"',
     );
     const actors = await local.db.query<{ actor: string }>(
-      sql`SELECT actor_json AS actor FROM cover_sheets`,
+      sql`SELECT client_json AS actor FROM memos`,
     );
     expect(actors.map((row) => JSON.parse(row.actor))).toEqual([
-      {
-        kind: "ai",
-        issuer: "connection_key",
-        client_id: writer.record.id,
-      },
+      { issuer: "connection_key", client_id: writer.record.id },
     ]);
     // Logs name the key by its public id only.
     expect(logs.some((call) => call.connection_key === writer.record.id)).toBe(
@@ -2024,7 +2445,10 @@ test("tool dispatch logs bounded final outcomes, invalid arguments, and unknown 
   try {
     await server.connect(serverTransport);
     await client.connect(clientTransport);
-    await client.callTool({ name: "get_cover_sheet", arguments: {} });
+    await client.callTool({
+      name: "get_report",
+      arguments: { intent: goodIntent },
+    });
     const invalid = await client.callTool({
       name: "create_memo",
       arguments: { text: 1 },
@@ -2035,7 +2459,7 @@ test("tool dispatch logs bounded final outcomes, invalid arguments, and unknown 
       .catch(() => {});
     expect(calls).toEqual([
       {
-        tool: "get_cover_sheet",
+        tool: "get_report",
         outcome: "read",
         elapsed_ms: expect.any(Number),
       },
@@ -2080,8 +2504,8 @@ test("final outcomes include early refusal/read failure and a logging failure ca
     let refuse = true,
       failRead = false,
       throwLog = false;
-    const originalRead = store.readCoverSheet.bind(store);
-    store.readCoverSheet = async () => {
+    const originalRead = store.readReport.bind(store);
+    store.readReport = async (intent) => {
       if (refuse)
         throw new StoreError(
           "account_unavailable",
@@ -2093,7 +2517,7 @@ test("final outcomes include early refusal/read failure and a logging failure ca
           "store_unavailable",
           "Fictional private error prose.",
         );
-      return originalRead();
+      return originalRead(intent);
     };
     const memo = {
       request_id: crypto.randomUUID(),
@@ -2111,14 +2535,22 @@ test("final outcomes include early refusal/read failure and a logging failure ca
     await server.connect(b);
     await client.connect(a);
     expect(
-      (await client.callTool({ name: "get_cover_sheet", arguments: {} }))
-        .isError,
+      (
+        await client.callTool({
+          name: "get_report",
+          arguments: { intent: goodIntent },
+        })
+      ).isError,
     ).toBe(true);
     refuse = false;
     failRead = true;
     expect(
-      (await client.callTool({ name: "get_cover_sheet", arguments: {} }))
-        .isError,
+      (
+        await client.callTool({
+          name: "get_report",
+          arguments: { intent: goodIntent },
+        })
+      ).isError,
     ).toBe(true);
     failRead = false;
     const saved = await client.callTool({
@@ -2138,8 +2570,8 @@ test("final outcomes include early refusal/read failure and a logging failure ca
     expect(
       events.map((e) => [e.tool, e.outcome, e.error_code ?? null]),
     ).toEqual([
-      ["get_cover_sheet", "refused", "account_unavailable"],
-      ["get_cover_sheet", "failed", "store_unavailable"],
+      ["get_report", "refused", "account_unavailable"],
+      ["get_report", "failed", "store_unavailable"],
       ["create_memo", "saved", null],
       ["create_memo", "unchanged", null],
     ]);
@@ -2180,7 +2612,7 @@ test("final outcomes include early refusal/read failure and a logging failure ca
           id: 1,
           method: "tools/call",
           params: {
-            name: "get_cover_sheet",
+            name: "get_report",
             arguments: { task: "Fictional private task." },
           },
         }),
@@ -2193,7 +2625,7 @@ test("final outcomes include early refusal/read failure and a logging failure ca
     });
     expect(early).toHaveLength(1);
     expect(early[0]).toMatchObject({
-      tool: "get_cover_sheet",
+      tool: "get_report",
       outcome: "failed",
       error_code: "auth_unavailable",
     });

@@ -51,41 +51,28 @@ export type FirstDraftState = "kept" | "missing" | "none";
 /** Which examples a final can be, from the memo's source alone
  * (docs/memos.md): writing the person gave and edit-mode finals are their own
  * words; a drafted final is steered when it differs from its first draft and
- * untouched when it equals it. Without the first draft, a drafted final with
- * at least one redraft is steered, and one with none is untouched. */
+ * untouched when it equals it. Without the first draft, a drafted final is
+ * steered. Stored tiers are never recomputed. */
 export function tier(memo: {
   state: FirstDraftState;
   mode?: "draft" | "edit";
   firstDraft?: string;
   final: string;
-  rounds?: number;
 }): Tier {
   if (memo.state === "none" || memo.mode === "edit") return "own";
   if (memo.state === "kept")
     return memo.firstDraft === memo.final ? "untouched" : "steered";
-  return (memo.rounds ?? 0) > 0 ? "steered" : "untouched";
+  return "steered";
 }
-
-/** A tweak's identity: case, spacing and trailing punctuation folded, so an
- * exact repeat in any of those reuses the tweak. */
-export const normalizeTweak = (text: string) =>
-  text
-    .normalize("NFC")
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/[\s.!?;:,…]+$/u, "");
 
 /** One scored memo, oldest first, as the scoreboard reads it. */
 export type ScoredMemo = {
   mode: "draft" | "edit";
-  rounds: number;
   change: number;
   untouched: boolean;
   at: Date;
 };
 export type ScoreLine = {
-  rounds: number;
   change: number;
   accepted: number;
 };
@@ -113,7 +100,6 @@ const median = (values: number[]) => {
 const line = (memos: ScoredMemo[]): ScoreLine | undefined =>
   memos.length
     ? {
-        rounds: median(memos.map((m) => m.rounds)),
         change: median(memos.map((m) => m.change)),
         accepted: memos.filter((m) => m.untouched).length / memos.length,
       }

@@ -12,12 +12,9 @@ import { clientHost } from "./auth-assistants";
 // The TPS page's routes. "/" also serves the signed-out landing page, so the
 // browser router sends it here only for a signed-in person.
 const GETS = ["/", "/download", "/tps-report"];
-const POSTS = [
-  "/tps/forget",
-  "/tps/request/remove",
-  "/tps/tweaks/delete",
-  "/tps/tweaks/reword",
-];
+// The retired tweak and cover sheet routes are gone with their forms: a
+// stale POST to one meets the browser router's not-found answer.
+const POSTS = ["/tps/forget", "/tps/request/remove"];
 const MEMO_PATH = /^\/tps\/memo\/([^/]+)$/;
 const ID = /^[0-9a-f-]{36}$/;
 /** The one method a TPS route answers, or undefined for any other path. */
@@ -31,13 +28,7 @@ export const isMemoRoute = (path: string) => memoMethod(path) !== undefined;
 
 type PageStore = Pick<
   PersonStore,
-  | "read"
-  | "readMemo"
-  | "exportTps"
-  | "forgetMemo"
-  | "removeRequest"
-  | "deleteTweak"
-  | "rewordTweak"
+  "read" | "readMemo" | "exportTps" | "forgetMemo" | "removeRequest"
 > &
   Partial<Pick<PersonStore, "trialStatus">>;
 
@@ -78,7 +69,7 @@ function billingNote(
   );
   if (status?.status === "expired")
     return banner(
-      "AI reads and saves are paused until you subscribe for $5.01/month. Your memos, tweaks and cover sheet are still here to view and download.",
+      "AI reads and saves are paused until you subscribe for $5.01/month. Your memos and their tweaks are still here to view and download.",
     );
   const days = status?.days_left;
   if (status?.status !== "trial" || days === undefined || days > 7) return null;
@@ -144,7 +135,7 @@ export function connectSteps(empty: boolean, mcpUrl: string) {
             <p>
               {empty
                 ? SETUP_PROMPT
-                : "Read my Milton cover sheet and the report for my next email or DM, and draft it from what’s on file. Ask what the message should accomplish."}
+                : "Read my Milton report for my next email or DM, and draft it from what’s on file. Ask what the message should accomplish."}
             </p>
           </blockquote>
         </li>
@@ -198,22 +189,12 @@ const clientLabel = (client: TpsMemo["client"]) =>
   client.issuer === "connection_key"
     ? "Connection key"
     : clientHost(client.client_id) || "Connected AI";
-/** "2 rounds" for a memo with a first draft; "your words" otherwise. */
-const roundsLabel = (m: TpsMemo) =>
-  m.rounds === undefined ? undefined : counted(m.rounds, "round");
 /** "You asked:" with the request's first line, on a listed memo. */
 const askedLine = (m: TpsMemo) =>
   m.asked !== undefined && (
     <p class="memo-tweaks">
       <span class="tweak-label">You asked:</span>{" "}
       <span class="typed">{m.asked}</span>
-    </p>
-  );
-const tweakList = (label: string, tweaks: { text: string }[]) =>
-  tweaks.length > 0 && (
-    <p class="memo-tweaks">
-      <span class="tweak-label">{label}:</span>{" "}
-      <span class="typed">{tweaks.map((t) => t.text).join(" · ")}</span>
     </p>
   );
 
@@ -230,15 +211,13 @@ const forgetForm = (csrf: () => Child, m: TpsMemo) => (
   </form>
 );
 
-// Scoreboard numbers as the spec writes them: "1 round, 18% changed, 40%
-// accepted as-is". A median may fall between two counts.
-const rounds = (n: number) =>
-  `${Number.isInteger(n) ? n : n.toFixed(1)} round${n === 1 ? "" : "s"}`;
+// Scoreboard numbers as the spec writes them: "18% changed, 40% accepted
+// as-is".
 const percent = (n: number) => `${Math.round(n * 100)}%`;
 const scoreLine = (line: ScoreLine) =>
-  `${rounds(line.rounds)}, ${percent(line.change)} changed, ${percent(line.accepted)} accepted as-is`;
+  `${percent(line.change)} changed, ${percent(line.accepted)} accepted as-is`;
 const scoreShort = (line: ScoreLine) =>
-  `${rounds(line.rounds)}, ${percent(line.change)}, ${percent(line.accepted)}`;
+  `${percent(line.change)}, ${percent(line.accepted)}`;
 function scoreboardLine(score: Scoreboard) {
   const label = score.mode === "draft" ? "First drafts" : "Edits";
   if (!score.latest && !score.earlier && score.basis === undefined) {
@@ -253,11 +232,9 @@ function scoreboardLine(score: Scoreboard) {
 /** The line a change's redirect shows, in the section it changed. */
 const NOTICES = {
   forgot: ["memos", "Memo forgotten."],
-  "tweak-deleted": ["tweaks", "Tweak deleted."],
-  "tweak-reworded": ["tweaks", "Tweak reworded."],
 } as const;
 type Done = keyof typeof NOTICES;
-type Notices = Partial<Record<"memos" | "tweaks", Child>>;
+type Notices = Partial<Record<"memos", Child>>;
 
 type SheetView = {
   view: TpsView;
@@ -267,10 +244,10 @@ type SheetView = {
   csrf: () => Child;
   notices: Notices;
 };
-/** The signed-in TPS report as a printed form: the cover sheet, read only,
- * the scoreboard, the memos newest first and the person's tweaks. */
+/** The signed-in TPS report as a printed form: the scoreboard, then the
+ * memos newest first, each with its tweaks. */
 function sheet({ view, email, date, comment, csrf, notices }: SheetView) {
-  const empty = !view.cover_sheet.text && view.memos.length === 0;
+  const empty = view.memos.length === 0;
   const listed =
     view.memos.length >= LISTED_MEMOS
       ? `${LISTED_MEMOS}+`
@@ -291,7 +268,6 @@ function sheet({ view, email, date, comment, csrf, notices }: SheetView) {
         </dl>
         <dl class="row">
           {field("Memos", listed)}
-          {field("Tweaks", String(view.tweaks.length))}
           {field("Keep memos", view.keep_memos ? "On" : "Off", true)}
         </dl>
         <dl class="row">{field("Filed by", "Milton", true)}</dl>
@@ -315,9 +291,6 @@ function sheet({ view, email, date, comment, csrf, notices }: SheetView) {
           <p>On this report</p>
           <ul>
             <li>
-              <a href="#cover-sheet">Cover sheet</a>
-            </li>
-            <li>
               <a href="#scoreboard">Scoreboard</a>
             </li>
             <li>
@@ -326,48 +299,9 @@ function sheet({ view, email, date, comment, csrf, notices }: SheetView) {
                 <span class="report-counts">{listed}</span>
               </a>
             </li>
-            <li>
-              <a href="#tweaks">
-                <span>Tweaks</span>
-                <span class="report-counts">{String(view.tweaks.length)}</span>
-              </a>
-            </li>
           </ul>
         </nav>
       )}
-      <section class="form-section">
-        <h2 id="cover-sheet">Cover sheet</h2>
-        <p class="applies">
-          Your voice guide, served first to every AI. Keep it to short, hard
-          things your memos can’t show: “no em dashes”, “sign off –P”. Only you
-          write it, by telling your AI the exact words.
-        </p>
-        {/* Read only: AIs change it on the person's words (docs/memos.md).
-            One ruled line per line as written, blank lines included. */}
-        {view.cover_sheet.text.trim() ? (
-          <>
-            <div class="cover-lines">
-              {view.cover_sheet.text.split("\n").map((line) => (
-                <p class="line">
-                  <span class="typed">{line}</span>
-                </p>
-              ))}
-            </div>
-            <p class="small-note">
-              To change it, tell an AI you connected with Read and write which
-              line to add or remove.
-            </p>
-          </>
-        ) : (
-          <>
-            <p class="report-counts">No cover sheet yet.</p>
-            <p class="small-note">
-              To start one, tell an AI you connected with Read and write: “Add
-              to my cover sheet: no em dashes.”
-            </p>
-          </>
-        )}
-      </section>
       <section class="form-section">
         <h2 id="scoreboard">Scoreboard</h2>
         <p class="applies">
@@ -404,19 +338,9 @@ function sheet({ view, email, date, comment, csrf, notices }: SheetView) {
                 <p class="typed">{m.summary}</p>
                 {askedLine(m)}
                 <p class="report-counts">
-                  {[
-                    clientLabel(m.client),
-                    roundsLabel(m),
-                    m.change_count
-                      ? counted(m.change_count, "listed change")
-                      : "",
-                    TIER[m.tier],
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
+                  {[clientLabel(m.client), TIER[m.tier]].join(" · ")}
                 </p>
-                {tweakList("Served", m.served)}
-                {tweakList("Taught", m.taught)}
+                {memoTweaks(m)}
                 <div class="memo-actions">
                   <a href={`/tps/memo/${m.id}`}>Open memo</a>
                   {forgetForm(csrf, m)}
@@ -430,68 +354,6 @@ function sheet({ view, email, date, comment, csrf, notices }: SheetView) {
             This page lists your newest {LISTED_MEMOS} memos.{" "}
             <a href="/download">TPS.md</a> has every final.
           </p>
-        )}
-      </section>
-      <section class="form-section">
-        <h2 id="tweaks">Tweaks</h2>
-        <p class="applies">
-          What you made your AIs change, one line each, with how many memos
-          taught it. The next AI gets the ones from your closest memos. “Served”
-          counts drafts an AI was given a tweak for; “needed again”, how many of
-          those you still had to fix the same way.
-        </p>
-        {notices.tweaks}
-        {view.tweaks.length === 0 ? (
-          <p class="report-counts">No tweaks yet.</p>
-        ) : (
-          <ul class="tweak-list">
-            {view.tweaks.map((t) => (
-              <li class="tweak-row">
-                <p>
-                  <span class="typed">{t.text}</span>
-                </p>
-                <p class="report-counts tweak-counts">
-                  <span>{counted(t.memos, "memo")}</span>
-                  {t.served > 0 && (
-                    <>
-                      <span>served {String(t.served)}</span>
-                      <span>needed again {String(t.needed_again)}</span>
-                    </>
-                  )}
-                </p>
-                <div class="memo-actions">
-                  <form method="post" action="/tps/tweaks/delete">
-                    {csrf()}
-                    <input type="hidden" name="tweak" value={t.id} />
-                    <button
-                      class="secondary compact"
-                      aria-label={`Delete tweak: ${t.text}`}
-                    >
-                      Delete
-                    </button>
-                  </form>
-                  <details class="tweak-reword">
-                    <summary>Reword</summary>
-                    <form method="post" action="/tps/tweaks/reword">
-                      {csrf()}
-                      <input type="hidden" name="tweak" value={t.id} />
-                      <label>
-                        New wording
-                        <input
-                          name="text"
-                          value={t.text}
-                          maxlength={200}
-                          required
-                          autocomplete="off"
-                        />
-                      </label>
-                      <button class="compact">Save wording</button>
-                    </form>
-                  </details>
-                </div>
-              </li>
-            ))}
-          </ul>
         )}
       </section>
       <section class="form-section">
@@ -525,16 +387,16 @@ async function tpsPage(
     store.trialStatus?.().catch(() => undefined),
   ]);
   const paused = trial?.status === "expired";
-  const empty = !view.cover_sheet.text && view.memos.length === 0;
+  const empty = view.memos.length === 0;
   return page(
     "TPS report",
     <>
       {billingNote(ctx.csrf, ctx.billing ?? false, trial)}
       {!empty && !paused && (
         <p class="small-note sheet-meta">
-          When you accept a final from a connected AI, it keeps a memo here. The
-          next AI reads your cover sheet and your closest memos before it
-          drafts.
+          When you accept a final from a connected AI, it keeps a memo here,
+          with your tweaks: what you changed in its first draft. The next AI
+          reads your closest memos before it drafts.
         </p>
       )}
       {sheet({
@@ -607,12 +469,35 @@ const changeRow = (c: TpsChange) => {
     </li>
   );
 };
-/** "What changed": code's own list, for a memo saved since it was kept. */
+/** A listed memo's tweaks: code's own list of what the person changed in
+ * its first draft, as its memo page shows them; nothing for a memo saved
+ * before they were listed or without a kept first draft. */
+const memoTweaks = (m: TpsMemo) =>
+  m.changes_state === "too_large" ? (
+    <p class="memo-tweaks">
+      <span class="tweak-label">Tweaks:</span> too many to list.
+    </p>
+  ) : (
+    m.changes_state === "itemized" &&
+    m.changes.length > 0 && (
+      <div class="memo-tweaks">
+        <p>
+          <span class="tweak-label">Tweaks:</span>
+        </p>
+        <ol class="change-list">{m.changes.map(changeRow)}</ol>
+      </div>
+    )
+  );
+
+/** "Tweaks": code's own list, for a memo saved since it was kept. */
 function whatChanged(m: FullMemo) {
   if (!m.changes_state) return null;
   return (
     <section aria-labelledby="memo-changes">
-      <h2 id="memo-changes">What changed</h2>
+      <h2 id="memo-changes">Tweaks</h2>
+      <p class="small-note">
+        What you changed in your AI’s first draft, as Milton found it.
+      </p>
       {m.changes_state === "too_large" ? (
         <p class="small-note">
           Too many changes to list; the first draft and final above show them
@@ -661,24 +546,11 @@ function memoPage(ctx: MemoPageContext, m: FullMemo, notice?: Child) {
           ? "Your text, edited by your AI"
           : "Your own writing",
     ],
-    ...(m.rounds !== undefined
-      ? [["Rounds", String(m.rounds)] as [string, Child]]
-      : []),
     ...(m.change !== undefined
       ? [["Changed", percent(m.change)] as [string, Child]]
       : []),
     ["Tier", TIER[m.tier]],
   ];
-  const tweaks = (list: { text: string }[], none: string) =>
-    list.length ? (
-      <ul class="memo-tweak-list">
-        {list.map((t) => (
-          <li>{t.text}</li>
-        ))}
-      </ul>
-    ) : (
-      <p class="small-note">{none}</p>
-    );
   return page(
     "Memo",
     <>
@@ -750,19 +622,11 @@ function memoPage(ctx: MemoPageContext, m: FullMemo, notice?: Child) {
         {plain(m.final)}
       </section>
       {whatChanged(m)}
-      <section aria-labelledby="memo-served">
-        <h2 id="memo-served">Served tweaks</h2>
-        {tweaks(m.served, "No tweaks were served for this memo.")}
-      </section>
-      <section aria-labelledby="memo-taught">
-        <h2 id="memo-taught">Taught tweaks</h2>
-        {tweaks(m.taught, "This memo taught no tweaks.")}
-      </section>
       <section aria-labelledby="memo-forget">
         <h2 id="memo-forget">Forget this memo</h2>
         <p>
-          Removes the memo, what you asked, its changes, its example and its
-          tweak citations. A tweak no other memo taught goes too.
+          Removes the memo, what you asked and its tweaks; no AI is shown it
+          again.
         </p>
         <form method="post" action="/tps/forget">
           {ctx.csrf()}
@@ -825,28 +689,14 @@ export async function memoPages(
         );
       return back("forgot", "memos");
     }
-    if (path === "/tps/request/remove") {
-      const memo = id("memo");
-      if (!memo || !(await store.removeRequest(memo)))
-        return notFound(ctx, "This memo is forgotten or does not exist.");
-      return Response.redirect(
-        `${ctx.appOrigin}/tps/memo/${memo}?done=request-removed#memo-asked`,
-        303,
-      );
-    }
-    const tweak = id("tweak");
-    if (path === "/tps/tweaks/delete") {
-      if (!tweak || !(await store.deleteTweak(tweak)))
-        return notFound(
-          ctx,
-          "This tweak is already deleted or does not exist.",
-        );
-      return back("tweak-deleted", "tweaks");
-    }
-    // /tps/tweaks/reword
-    if (!tweak || !(await store.rewordTweak(tweak, form.get("text") ?? "")))
-      return notFound(ctx, "This tweak is deleted or does not exist.");
-    return back("tweak-reworded", "tweaks");
+    // /tps/request/remove
+    const memo = id("memo");
+    if (!memo || !(await store.removeRequest(memo)))
+      return notFound(ctx, "This memo is forgotten or does not exist.");
+    return Response.redirect(
+      `${ctx.appOrigin}/tps/memo/${memo}?done=request-removed#memo-asked`,
+      303,
+    );
   }
   const done = url.searchParams.get("done");
   const notice =

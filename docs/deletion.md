@@ -25,24 +25,23 @@ covers:
 
 - Memos are kept until forgotten, deleted with "Delete all memos", or removed with the
   account. There is no timer.
-- The cover sheet keeps every version until the account is deleted
-  ([memos](memos.md)).
+- A retired cover sheet keeps every version until the account is deleted
+  ([memos](memos.md#legacy-data)); TPS.md lists the current one.
 - Usage rows are pruned on the schedule in [billing](billing.md#usage).
 
 ## Forgetting and Delete all
 
 - Forgetting a memo (on the TPS page, or `forget_memos` from the AI) deletes it, its
-  citations, its stored changes, its request and any tweak left with none, so its
+  stored changes (its tweaks), its request, and its citations and any legacy note left
+  with none, so its
   example, the changes a report quoted under it and its scoreboard numbers go too. A
   report read before then, or already running, is not recalled
   ([reports](reports.md#reads)).
 - `forget_memos` takes 1 to 100 ids; when none is the account's, it is refused with
   `invalid_memo`. The result lists the ids forgotten.
-- Deleting a tweak on the TPS page removes it with its citations; no stored change
-  links to a tweak in this release.
 - Removing a memo's request on the TPS page clears it; the memo stays.
-- "Delete all memos" removes every memo, with its changes and request, and every tweak
-  and kind, not the cover sheet.
+- "Delete all memos" removes every memo, with its changes and request, every kind and
+  every legacy note, not a retired cover sheet.
 - Citations go through the foreign keys' cascades, which run as the table owner; no
   runtime deletes citations itself ([database](database.md)).
 
@@ -67,9 +66,9 @@ covers:
 - Writing and original-incarnation app credentials are never erased before Stripe
   cancellation succeeds. Without billing configured, deleting an account with a stored
   Stripe customer stops at the Stripe step and stays retryable.
-- Account erasure removes memos (with their requests and changes), kinds, tweaks,
-  citations, served-report records, the cover sheet and its versions, the Keep memos
-  switch and usage rows, through cascades from `users`.
+- Account erasure removes memos (with their requests and changes), kinds, legacy notes
+  and citations, served-report records, any cover sheet and its versions, save
+  receipts, the Keep memos switch and usage rows, through cascades from `users`.
 - A save's receipt outlives forgetting, so it holds only the changes' state and count,
   never a change's text or a request ([saves](saves.md#receipts)).
 - Native refusal and the progress billing reads commit in one transaction. Once they do,

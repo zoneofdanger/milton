@@ -24,7 +24,7 @@ const when = (date: Date) => (
   <time datetime={date.toISOString()}>{day.format(date)}</time>
 );
 const access = (scope: KeyScope) =>
-  scope === "read_write" ? "Read and save" : "Read only";
+  scope === "read_write" ? "Read and write" : "Read only";
 const expiry = (key: ConnectionKey) =>
   key.expiresAt === null ? (
     <strong>Never expires</strong>
@@ -142,7 +142,7 @@ export function keysSection(
             </label>
             <label class="choice">
               <input type="radio" name="scope" value="read_write" />
-              Read and save
+              Read and write
             </label>
           </fieldset>
           <fieldset>

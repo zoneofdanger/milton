@@ -528,6 +528,9 @@ test("consent preselects Read and write when the AI asks for milton:write, else 
     '<input type="radio" name="scope" value="openid milton:read" checked=""/>',
   );
   expect(read).not.toContain("Read and write");
+  // No cover sheet: the product keeps memos and their tweaks only.
+  for (const page of [write, read]) expect(page).not.toMatch(/cover sheet/i);
+  expect(write).toContain("Read your memos as reports for each draft.");
 });
 
 describe("OAuth profile refusals before database access", () => {

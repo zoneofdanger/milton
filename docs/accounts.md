@@ -129,8 +129,9 @@ The app never handles passwords or native cookies.
   deletion ends an AI token's UserInfo at once rather than at its expiry.
 - The consent screen offers Read only, and Read and write only when the AI's request
   includes `milton:write`. It preselects Read and write when that is offered, otherwise
-  Read only; the person can still choose Read only. Connection keys keep their own
-  default ([Connection keys](#connection-keys)).
+  Read only; the person can still choose Read only. Read only reads memos as reports;
+  Read and write also saves a memo when the person accepts a final and forgets one when
+  they ask. Connection keys keep their own default ([Connection keys](#connection-keys)).
 
 ## Auth mail
 

@@ -270,7 +270,7 @@ export function Consent({ query }: { query: URLSearchParams }) {
           <label class="choice">
             <input type="radio" name="scope" value={read} checked={!canWrite} />
             Read only
-            <span>Read your cover sheet and reports.</span>
+            <span>Read your memos as reports for each draft.</span>
           </label>
           {canWrite ? (
             <label class="choice">
@@ -298,8 +298,8 @@ export function Consent({ query }: { query: URLSearchParams }) {
         ) : null}
         <p>
           Writing permission lets an AI save a memo when you accept a final, and
-          change your cover sheet only when you ask. You can forget a memo or
-          disconnect an AI in Milton.
+          forget a memo when you ask. You can also forget a memo or disconnect
+          an AI in Milton.
         </p>
         <div class="actions">
           <button name="accept" value="true" type="submit">

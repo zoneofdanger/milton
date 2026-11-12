@@ -415,6 +415,15 @@ test("the server hands the store one-line fields after the rule: separators as o
         cover_sheet: { remove: " Sign off –P", expected_version: 1 },
       },
     ]);
+    // What create_memo promises matches: only final and first_draft are kept
+    // byte for byte.
+    const { tools } = await client.listTools();
+    const description =
+      tools.find((tool) => tool.name === "create_memo")?.description ?? "";
+    expect(description).toContain(
+      "Milton keeps final and first_draft unchanged; saves are all or nothing.",
+    );
+    expect(description).not.toContain("bytes unchanged");
   } finally {
     await client.close();
     await server.close();

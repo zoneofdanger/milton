@@ -1687,18 +1687,19 @@ try {
   stage = "MCP tools/list";
   const list = await rpc(grant.access_token, "tools/list");
   assert.equal(list.status, 200, "actual native JWT profile and MCP role");
-  assert.equal((await result(list)).result.tools?.length, 3);
-  stage = "MCP cover sheet";
-  const read = await result(
+  assert.equal((await result(list)).result.tools?.length, 2);
+  stage = "MCP retired get_cover_sheet";
+  const retired = await result(
     await rpc(grant.access_token, "tools/call", {
       name: "get_cover_sheet",
       arguments: {},
     }),
   );
-  assert.equal(read.result.isError, undefined);
-  const cover = JSON.parse(read.result.content![0]!.text) as {
-    version: number;
-  };
+  assert.equal(retired.result.isError, true);
+  assert.equal(
+    (JSON.parse(retired.result.content![0]!.text) as { error: string }).error,
+    "tool_replaced",
+  );
   stage = "MCP report";
   const served = await result(
     await rpc(grant.access_token, "tools/call", {
@@ -1714,31 +1715,29 @@ try {
     }),
   );
   assert.equal(served.result.isError, undefined, "real-role report read");
-  const reportId = (
-    JSON.parse(served.result.content![0]!.text) as { report_id: string }
-  ).report_id;
+  assert.equal(
+    (JSON.parse(served.result.content![0]!.text) as { memos: number }).memos,
+    0,
+    "the real role reads the memo count",
+  );
   stage = "MCP save";
-  // A memo with a new kind, its request and a tweak, citing the report it was
-  // drafted from, so code stores its changes, then a cover sheet line: every
-  // memo table the MCP role writes.
+  // A memo with a new kind and its request, so code stores its changes, then
+  // writing the person gave: every memo table the MCP role writes now.
   for (const change of [
     {
       memo: {
         final: "Collect the fictional trays on Saturday.",
         first_draft: "Hi! Hope you're well. Collect the fictional trays.",
         mode: "draft",
-        rounds: 1,
         new_kind: "fictional note",
         request: "Write a fictional pickup note for the trays.",
-        tweaks: [{ text: "pickup notes: no warm-up opener" }],
         context: { summary: "Fictional pickup note", medium: "email" },
-        report_id: reportId,
       },
     },
     {
-      cover_sheet: {
-        add: "Keep fictional measurements explicit.",
-        expected_version: cover.version,
+      memo: {
+        final: "Keep fictional measurements explicit.",
+        context: { summary: "Fictional note of my own", medium: "email" },
       },
     },
   ]) {
@@ -1768,7 +1767,7 @@ try {
   ).rows as { user_id: string; tool: string }[];
   assert.deepEqual(
     usage.map((r) => r.tool),
-    ["get_cover_sheet", "get_report", "create_memo", "create_memo"],
+    ["get_report", "create_memo", "create_memo"],
   );
   const usageUser = usage[0]!.user_id;
   for (const statement of [
@@ -1885,7 +1884,7 @@ try {
         mcpConfig.DATABASE_URL,
         usageDb,
         first,
-        "get_cover_sheet",
+        "get_report",
       );
       await usageRan(sinceFirst);
       await lockFirst.query("COMMIT");
@@ -1895,7 +1894,7 @@ try {
         mcpConfig.DATABASE_URL,
         usageDb,
         second,
-        "get_cover_sheet",
+        "get_report",
       );
       appended = Promise.all([firstRow, secondRow]);
       await usageRan(sinceSecond);
@@ -1984,9 +1983,9 @@ try {
       const saving = saver
         .saveMemo({
           request_id: randomUUID(),
-          cover_sheet: {
-            add: "Keep fictional measurements explicit.",
-            expected_version: 0,
+          memo: {
+            final: "Keep fictional measurements explicit.",
+            context: { summary: "Fictional note of my own", medium: "email" },
           },
         })
         .then((outcome) => outcome.status);
@@ -2051,7 +2050,7 @@ try {
   );
   const roList = await rpc(readGrant.access_token, "tools/list");
   assert.equal(roList.status, 200);
-  assert.equal((await result(roList)).result.tools?.length, 2);
+  assert.equal((await result(roList)).result.tools?.length, 1);
   assert.equal(
     (
       await rpc(readGrant.access_token, "tools/call", {
@@ -2084,7 +2083,7 @@ try {
     200,
   );
   pass(
-    "actual native controlled code/refresh grant reaches scoped product MCP: three/two tools, a report and model-free memo and cover sheet saves",
+    "actual native controlled code/refresh grant reaches scoped product MCP: two/one tools, the retired tool refused, a report and model-free memo saves",
   );
   // Connection keys against real native authority (native 007): created through
   // the app from a fresh session, checked by the real MCP role on every call.
@@ -3697,6 +3696,12 @@ try {
   );
   // A crashed run's marked leftover is forgotten first and reported, and a key
   // under 30 days from expiry warns without failing.
+  const checkIntent = {
+    situation: "confirming what is on file",
+    medium: "email",
+    audience: "the person",
+    purpose: "check",
+  };
   const testKeyCall = async (name: string, args: object) =>
     JSON.parse(
       (
@@ -3810,11 +3815,13 @@ try {
     "an unmarked memo of the check's kind is not forgotten",
   );
   await testSave({ forget_memos: [unmarked] });
-  // Foreign data (a cover sheet line nobody marked) refuses before any save;
-  // only the gate's own report read is recorded.
-  await testSave({
-    cover_sheet: { add: "Fictional foreign line.", expected_version: 0 },
-  });
+  // Foreign data (a legacy cover sheet line nobody marked, as an earlier
+  // version wrote one) refuses before any save; only the gate's own report
+  // read is recorded.
+  await owner.query(
+    `INSERT INTO cover_sheets(user_id,version,text,actor_json) VALUES ($1,1,'Fictional foreign line.','{"kind":"ai"}')`,
+    [provisioned.userId],
+  );
   const held = await footprint();
   await assert.rejects(
     check(),
@@ -3895,7 +3902,7 @@ try {
       [testUser],
     );
     assert.equal(
-      (await testKeyCall("get_cover_sheet", {})).notice,
+      (await testKeyCall("get_report", { intent: checkIntent })).notice,
       undefined,
       "no trial notice",
     );
@@ -4128,12 +4135,7 @@ try {
       audience: "a vendor",
       purpose: "decline",
     } as const;
-    const surfaceNames = [
-      "get_cover_sheet",
-      "get_report",
-      "download",
-      "web",
-    ] as const;
+    const surfaceNames = ["get_report", "download", "web"] as const;
     type Surface = (typeof surfaceNames)[number];
     type Surfaces = Record<Surface, string>;
     // Each call is its own client behind the load balancer, so the key-lookup
@@ -4267,18 +4269,9 @@ try {
     type Side = typeof alder | typeof birch;
     const both = [alder, birch];
     const other = (s: Side) => (s === alder ? birch : alder);
-    // The latest report each account was served, by its report_id.
-    const lastReport = new Map<Side, string>();
     const surfaces = async (s: Side): Promise<Surfaces> => {
-      const { report_id, ...report } = JSON.parse(
-        await readTool(s.key, "get_report", { intent }),
-      ) as { report_id: string };
-      lastReport.set(s, report_id);
       const seen = {
-        get_cover_sheet: await readTool(s.key, "get_cover_sheet"),
-        // Every read is served under a fresh report_id; the rest is what it
-        // served.
-        get_report: JSON.stringify(report),
+        get_report: await readTool(s.key, "get_report", { intent }),
       } as Surfaces;
       const download = await s.browser.go(PRODUCTION.app + "/download");
       assert.equal(download.status, 200, "TPS.md download");
@@ -4297,11 +4290,7 @@ try {
     type Outcome = {
       status?: string;
       error?: string;
-      memo?: {
-        memo_id: string;
-        kind_id?: string;
-        tweaks: { tweak_id: string }[];
-      };
+      memo?: { memo_id: string; kind_id?: string };
     };
     const save = async (s: Side, args: object) =>
       JSON.parse(
@@ -4312,46 +4301,16 @@ try {
           })
         ).text,
       ) as Outcome;
-    const coverLine = async (
-      s: Side,
-      change: { add: string } | { remove: string },
-    ) =>
-      save(s, {
-        cover_sheet: {
-          ...change,
-          expected_version: (
-            JSON.parse(await readTool(s.key, "get_cover_sheet")) as {
-              version: number;
-            }
-          ).version,
-        },
-      });
-    // Where each kind of filed text shows: a cover sheet line everywhere; a
-    // final in the report and TPS.md; a memo's summary and its tweaks also on
-    // the web page.
-    const cover: Surface[] = [
-      "get_cover_sheet",
-      "get_report",
-      "download",
-      "web",
-    ];
+    // Where each kind of filed text shows: a final in the report and
+    // TPS.md; a memo's summary also on the web page.
     const final: Surface[] = ["get_report", "download"];
     const listed: Surface[] = ["get_report", "download", "web"];
-    const line = (m: string, age: "old" | "new") =>
-      `Sign fictional notes with ${m} cover ${age}.`;
-    const drafted = (
-      m: string,
-      n: "one" | "two",
-      body: string,
-      tweak: string,
-    ) => ({
+    const drafted = (m: string, n: "one" | "two", body: string) => ({
       memo: {
         final: `Fictional ${m} memo ${n}: ${body}`,
         first_draft: `Hi! Hope you are well. Fictional ${m} draft ${n}.`,
         mode: "draft",
-        rounds: 1,
         new_kind: "fictional note",
-        tweaks: [{ text: `${m} tweak ${n}: ${tweak}` }],
         context: {
           summary: `${m} summary ${n === "one" ? "old" : "two"}`,
           medium: "email",
@@ -4362,28 +4321,20 @@ try {
     });
     // Each filed text and the surfaces that must show it.
     const filed = (m: string): [string, Surface[]][] => [
-      [`${m} cover old`, cover],
       [`${m} memo one`, final],
       [`${m} summary old`, listed],
-      [`${m} tweak one`, listed],
       [`${m} memo two`, final],
       [`${m} summary two`, listed],
-      [`${m} tweak two`, listed],
     ];
-    // After a line replaced, memo one's context corrected and memo two
-    // forgotten (with the tweak only it cited).
+    // After memo one's context corrected and memo two forgotten.
     const edited = (m: string): [string, Surface[]][] => [
-      [`${m} cover new`, cover],
       [`${m} memo one`, final],
       [`${m} summary new`, listed],
-      [`${m} tweak one`, listed],
     ];
     const removed = (m: string) => [
-      `${m} cover old`,
       `${m} summary old`,
       `${m} memo two`,
       `${m} summary two`,
-      `${m} tweak two`,
     ];
     // Every miss at once, as surface and text, so a failure names them all.
     const shows = (
@@ -4420,30 +4371,22 @@ try {
         when + " isolation",
       );
     };
-    const ids = new Map<
-      Side,
-      { one: string; two: string; kind: string; tweak: string }
-    >();
+    const ids = new Map<Side, { one: string; two: string; kind: string }>();
     for (const s of both) {
       const m = s.marker;
-      assert.equal(
-        (await coverLine(s, { add: line(m, "old") })).status,
-        "saved",
-      );
       const one = await save(
         s,
-        drafted(m, "one", "the ladder hangs in the barn.", "no warm-up opener"),
+        drafted(m, "one", "the ladder hangs in the barn."),
       );
       const two = await save(
         s,
-        drafted(m, "two", "the gate sticks after rain.", "name the day"),
+        drafted(m, "two", "the gate sticks after rain."),
       );
       assert.deepEqual([one.status, two.status], ["saved", "saved"]);
       ids.set(s, {
         one: one.memo!.memo_id,
         two: two.memo!.memo_id,
         kind: one.memo!.kind_id!,
-        tweak: one.memo!.tweaks[0]!.tweak_id,
       });
     }
     for (const s of both) {
@@ -4455,8 +4398,6 @@ try {
       const m = s.marker;
       const own = ids.get(s)!;
       for (const outcome of [
-        await coverLine(s, { add: line(m, "new") }),
-        await coverLine(s, { remove: line(m, "old") }),
         await save(s, {
           memo_context: {
             memo_id: own.one,
@@ -4481,13 +4422,13 @@ try {
       settled.set(s, seen);
     }
     pass(
-      "over loopback HTTP to the production app, auth and MCP wrappers: a cover sheet line replaced, a memo's context corrected and a memo forgotten reach get_cover_sheet, get_report, the TPS.md download and the web TPS page: the old text is gone from all, the new text shows where it belongs",
+      "over loopback HTTP to the production app, auth and MCP wrappers: a memo's context corrected and a memo forgotten reach get_report, the TPS.md download and the web TPS page: the old text is gone from all, the new text shows where it belongs",
     );
     stage = "isolation: one account's key and session cannot address another's";
     {
-      // Alder's key aims at Birch's memo, kind, tweak, report and cover sheet
-      // line; Alder's session names Birch's account and memo. Nothing lands,
-      // nothing leaks, and both accounts still serve exactly what they did.
+      // Alder's key aims at Birch's memo and kind; Alder's session names
+      // Birch's account and memo. Nothing lands, nothing leaks, and both
+      // accounts still serve exactly what they did.
       const target = ids.get(birch)!;
       const context = {
         summary: "Fictional takeover",
@@ -4498,38 +4439,14 @@ try {
         [{ memo_context: { memo_id: target.one, context } }, "invalid_memo"],
         [{ forget_memos: [target.one] }, "invalid_memo"],
         [{ memo: { ...takeover, kind_id: target.kind } }, "invalid_kind"],
-        [
-          {
-            memo: {
-              ...takeover,
-              first_draft: "Fictional takeover draft.",
-              mode: "draft",
-              rounds: 1,
-              tweaks: [{ tweak_id: target.tweak }],
-            },
-          },
-          "invalid_tweak",
-        ],
-        [
-          { memo: { ...takeover, report_id: lastReport.get(birch)! } },
-          "invalid_report",
-        ],
       ] as const) {
         const outcome = await save(alder, args);
         assert.deepEqual(
           [outcome.status, outcome.error],
           ["failed", error],
-          "a save never reaches another account's memos, kinds, tweaks or reports",
+          "a save never reaches another account's memos or kinds",
         );
       }
-      const foreignLine = await coverLine(alder, {
-        remove: line(birch.marker, "new"),
-      });
-      assert.deepEqual(
-        [foreignLine.status, foreignLine.error],
-        ["failed", "line_not_found"],
-        "a save never removes another account's cover sheet line",
-      );
       const aimed = await callTool(alder.key, "get_report", {
         intent: { ...intent, kind_id: target.kind },
       });
@@ -4568,7 +4485,7 @@ try {
       }
     }
     pass(
-      "two accounts' reads (three tools, TPS.md, web) never show each other's markers, ids or emails, before or after a forget and a context edit; one account's key cannot correct, forget, cite or read another's memos, kind, tweaks, report or cover sheet, and its session cannot name another account or open its memo",
+      "two accounts' reads (the report, TPS.md, web) never show each other's markers, ids or emails, before or after a forget and a context edit; one account's key cannot correct, forget, file under or read another's memos or kind, and its session cannot name another account or open its memo",
     );
     stage = "account deletion leaves nothing of the account";
     {
@@ -4887,7 +4804,7 @@ try {
         ).status;
       assert.equal(await userInfo(), 200, "the assistant's token works");
       const assistantTools = () => toolsWith(grant.access_token);
-      assert.equal(await assistantTools(), 3, "the assistant reaches MCP");
+      assert.equal(await assistantTools(), 2, "the assistant reaches MCP");
       assert.equal(
         await toolsWith(birchGrant.access_token),
         3,
@@ -4991,7 +4908,7 @@ try {
       // no longer authenticate.
       for (const [method, params] of [
         ["tools/list", {}],
-        ["tools/call", { name: "get_cover_sheet", arguments: {} }],
+        ["tools/call", { name: "get_report", arguments: { intent } }],
       ] as const) {
         const response = await mcpPost(alder.key, method, params);
         assert.equal(

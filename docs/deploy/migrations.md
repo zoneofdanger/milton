@@ -21,8 +21,9 @@ are in [serving](serving.md); applied one-time migrations are recorded in
   step), record its name, and rehearse on a throwaway Neon branch or disposable database
   (`server/scripts/check-auth-integration.ts` applies the migrations on PostgreSQL 18; PR
   CI runs it as `integration`).
-- Run one migrator at a time, and open no other owner session while a migration runs (the
-  migrator's advisory lock keeps a second migrator out, but not owner DDL in another
+- Run one migrator at a time, and open no other owner session while a migration runs (one
+  migrator is the operator's rule: the Drizzle runner takes no advisory lock, and the
+  native auth migrator's keeps out only a second native run, never owner DDL in another
   session). No service migrates on startup.
 - Keep the owner URL only in the process environment (from `neonctl connection-string`,
   checked by role, database and host, then unset), never typed on a command line, never in

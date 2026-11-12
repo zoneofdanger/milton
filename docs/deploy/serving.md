@@ -10,29 +10,30 @@ covers:
 
 Rewritten in place by the release coordinator at every release, never appended to; the
 release's record goes in [history](../history.md). How to release and roll back:
-[releases](releases.md). As of 2026-11-12 19:40Z (after #116, and 0016 from #119).
+[releases](releases.md). As of 2026-11-12 21:31Z (after #121).
 
 ## Services
 
-- **App, MCP, admission, daily check:** `milton-app-oneline-6b7a679`,
-  `milton-mcp-oneline-6b7a679`, `milton-admit-00014-v25` and job `milton-e2e-daily`, all on
-  image `sha256:b59a4123b1f7f8b2baf9099b8fbf0b180342ce1cb71b10a0751788a7a8ddfbe6` (#116,
-  `6b7a679`; Cloud Run shows the amd64 manifest digest `sha256:d03dafd1…`, not this index
-  digest). Rollback, code only, all four together: `milton-app-changes-b1d2760`,
-  `milton-mcp-changes-b1d2760`, `milton-admit-00013-c6k` and the job to image
-  `sha256:9c451e73f93a6d1aa90bfd499239f03c40d4e812cf0604d0cb9e890230ec1f30` (#114, `b1d2760`).
-  No schema or site change between them. On it, one-line fields keep U+2028 and U+2029 as sent
-  again, tool results carry those separators literally, and receipts written since
-  hash the mapped fields, so an identical retry of such a save across the rollback is
-  refused with `request_id_reused`.
-- **Auth and its jobs:** `milton-auth-00021-2gc`, `milton-auth-mail` and `milton-auth-maint`
-  on image `sha256:d394050c2687a6872655b6075d1e3de9f4c2defe4a05353721dd0ea31ec0a832` (#102,
-  `735937f`; Cloud Run shows the amd64 manifest digest, not this index digest). Rollback,
-  code only, service and both jobs together: `milton-auth-00020-k77` and image
-  `sha256:11946548b6e3fc563c11b8e6d2933566a7f90a83d83156e2e4ccf8a0d1d9bf56` (#86).
-- **Site:** Vercel production deployment of `6b7a679`, content unchanged since `b1d2760`
-  (#114's privacy and terms: snippets of
-  what you changed, including words you removed, may be served to your connected AIs).
+- **App, MCP, admission, daily check:** `milton-app-tweaks-bab745d`,
+  `milton-mcp-tweaks-bab745d`, `milton-admit-00015-cwp` and job `milton-e2e-daily`, all on
+  image `sha256:cbc0e41cd1aad421937dbb9d45a72ad7dbeefb725db6e866e8243973ead11d04` (#121,
+  `bab745d`, memos and tweaks only; Cloud Run shows the amd64 manifest digest
+  `sha256:aaf0770b…`, not this index digest). Rollback, degraded, in the order and with the
+  limits in [releases](releases.md#rolling-back-memos-and-tweaks-only): MCP and the job to
+  `milton-mcp-oneline-6b7a679` and image
+  `sha256:b59a4123b1f7f8b2baf9099b8fbf0b180342ce1cb71b10a0751788a7a8ddfbe6` (#116,
+  `6b7a679`), drain, rerun the affected-accounts query, then `milton-app-oneline-6b7a679` and
+  `milton-admit-00014-v25`. That target stays good until the later cleanup revokes the unused
+  write grants and drops the retired tables and columns; after that it is fix forward.
+- **Auth and its jobs:** `milton-auth-00034-dos`, `milton-auth-mail` and `milton-auth-maint`
+  on image `sha256:35ffb003f6a5918ced32bffd039fad9ff9315e108aa98b84c243d601efe2afbd` (#121,
+  `bab745d`, built from `apps/auth/Dockerfile` with both base images pinned by digest; amd64
+  `sha256:c0ca2a64…`). Rollback, code only, service and both jobs together:
+  `milton-auth-00021-2gc` and image
+  `sha256:d394050c2687a6872655b6075d1e3de9f4c2defe4a05353721dd0ea31ec0a832` (#102).
+- **Site:** Vercel production deployment of `bab745d` (#121's copy: no cover sheet, tweaks
+  worked out by code, the regenerated "with Milton" drafts, `/tools` and `/support`, the
+  privacy page's replay disclosure). Rollback: the deployment of `6b7a679`.
 - **Secrets:** app `milton-app-env` 4 / `milton-app-key` 2, MCP `milton-mcp-env` 4 /
   `milton-mcp-key` 2 and auth `milton-auth-env` 2 / `milton-auth-key` 1, as at the 2026-11-07
   cutover (no release since recorded a change; confirm before the next one); admission
@@ -40,12 +41,6 @@ release's record goes in [history](../history.md). How to release and roll back:
   `milton-e2e-account` 1; `milton-auth-maint` `milton-auth-owner-url` 1.
 - **Schedules and settings:** `milton-e2e-daily` at `7 2,14 * * *` UTC; Turnstile off (no
   keys); every service keeps one warm instance.
-
-- **For the memos-and-tweaks release** (not yet released): its rollback target is the
-  revisions serving now, above, for app, MCP, admission, the job, auth and the site. They
-  stay good until the later cleanup revokes the unused write grants and drops the retired
-  tables and columns; after that it is fix forward. The rollback is degraded, with its order
-  and limits in [releases](releases.md#rolling-back-memos-and-tweaks-only).
 
 ## The floor
 

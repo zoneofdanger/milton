@@ -23,6 +23,55 @@ Earlier records are in git history: the last runbook holding them is at commit 4
 (`git show 492b96a:server/deploy/README.md`), and the runbook's later versions are in
 `git log -p server/deploy/README.md` until 2026-11-10, when this file began.
 
+## 2026-11-12: memos and tweaks only (PR #121)
+
+- **#121 (Peter's "ship it", typed in milton-overlord's pane wH:p1F on 2026-11-12 at about
+  21:21 UTC, answering milton-overlord's "Nothing touches production until you say "ship
+  121". milton-duo is preparing its checks in the meantime." right after the release plan,
+  order, timing and rollback limits; relayed verbatim by milton-overlord; the redesign
+  approved in the build brief's addenda; built by milton-rules; the rule ruled by Codex
+  gpt-6-astra UNSOUND twice, then SOUND WITH CHANGES; the code FAIL at `a0fb191`,
+  `2ce0592` and `b44022a`, round 3 at `f326caf` checked by milton-duo; milton-designer
+  approved the UI at `a0fb191` and the demo at `d4cbae7` on the PR; milton-qa's real-client
+  run E4 at `a0fb191` and its stale-client rerun at `f326caf` met the bar), `bab745d`:**
+  memos and tweaks only. Two tools (`get_report`, `create_memo`); `get_cover_sheet` refused
+  at dispatch. No cover sheet, no AI-written notes, no rounds, no tweak score; tweaks are
+  the changes code works out from first draft to final. Request ids are 1 to 64 of
+  `[A-Za-z0-9._:-]`. Removed fields and bidi controls refused with rollout-boundary
+  guidance after a receipt lookup. Reports write nothing and carry the account's memo
+  count. Legacy rows are kept, unread except in TPS.md and historical replays (labelled
+  `replayed`). The auth consent screen and the site's copy follow; `/tools` and `/support`
+  are new; the homepage's "with Milton" drafts were regenerated as served.
+  - **Schema:** none in the release; 0016 (#119) went first. No grant changed.
+  - **Preflight**, read-only: the e2e account resolved to one marked test account (issuer
+    `https://auth.meetmilton.com/api/auth`), 0 cover sheets, tweaks and citations, baseline
+    60 `served_reports` and 49 `save_requests`; no e2e execution active or pending.
+  - **Order**, by the runbook's "When MCP's tools change": all images staged first; admit
+    `milton-admit-00015-cwp` and app `milton-app-tweaks-bab745d` at 21:24:40Z; the old app
+    drained (no request after 21:25:40Z); MCP `milton-mcp-tweaks-bab745d` at 21:26:32Z; the
+    old MCP drained (no request after 21:29:35Z, no busy runtime connection); the account
+    rechecked; `milton-e2e-daily` at 21:30:27Z, then `milton-e2e-daily-52x86` passed, leaving
+    `served_reports` at 60 and `save_requests` at 52 (its 3 receipts), still no cover sheet,
+    note or citation; auth `milton-auth-00034-dos` with `milton-auth-mail` and
+    `milton-auth-maint` at 21:31:25Z; main pushed at 21:31:40Z and the site published.
+  - **Images:** server `sha256:cbc0e41cd1aad421937dbb9d45a72ad7dbeefb725db6e866e8243973ead11d04`
+    (amd64 `sha256:aaf0770b…`); auth `sha256:35ffb003f6a5918ced32bffd039fad9ff9315e108aa98b84c243d601efe2afbd`
+    (amd64 `sha256:c0ca2a64…`), from the repo's `apps/auth/Dockerfile`, base images pinned
+    (bun 1.4.4 `sha256:1d22548f…`, node 26.13.0-bookworm-slim `sha256:add5c17c…`).
+  - **Live:** app and MCP `/health`, auth `/api/auth/ok`, app home, `/login` and `/signup`
+    200; MCP 401 unauthenticated and discovery 200; UserInfo 401 on a junk token; admit 403
+    without a token; forms probe PASS; site `/`, `/privacy`, `/terms`, `/tools` and
+    `/support` 200. Gate at 21:41Z: clean; no request reached an older app, MCP, admission or auth revision after 21:33Z; no error, `store_unavailable` or `permission denied` lines since 21:23Z.
+  - **Checks** on the local merge `bab745d` (tree as `f326caf`; main had not moved): types,
+    142 server and 33 auth tests, format, agent-docs and the migration guard 0; PR CI green.
+  - **Not observed:** a real person's save or report in the new shape.
+  - **Rollback**, degraded: MCP and the job to `milton-mcp-oneline-6b7a679` and image
+    `sha256:b59a4123…`, drain, rerun the affected-accounts query, then
+    `milton-app-oneline-6b7a679` and `milton-admit-00014-v25`; auth to
+    `milton-auth-00021-2gc` with both jobs; the site to `6b7a679`. Limits
+    ([releases](deploy/releases.md#rolling-back-memos-and-tweaks-only)): the TPS page can
+    return 503 for accounts the query lists, and new-shape saves fail until AIs refresh.
+
 ## 2026-11-12: Drizzle 0016 loosens the rounds and request id checks (PR #119)
 
 - **#119 (Peter's "ship 119", answering milton-overlord's "say "ship 119" and milton-duo

@@ -247,7 +247,7 @@ export const saveRequests = pgTable(
   (t) => [
     primaryKey({ columns: [t.userId, t.requestId] }),
     check("save_request_hashes", sql`${t.inputHash} ~ '^[a-f0-9]{64}$'`),
-    check("save_request_id", sql`length(${t.requestId}) = 36`),
+    check("save_request_id", sql`${t.requestId} ~ '^[A-Za-z0-9._:-]{1,64}$'`),
     check(
       "save_request_result",
       sql`jsonb_typeof(${t.result}) = 'object' AND octet_length(${t.result}::text) <= 65536`,
@@ -371,7 +371,7 @@ export const memos = pgTable(
     ),
     check(
       "memos_first_draft",
-      sql`${t.firstDraftState} IN ('kept','missing','none') AND (${t.firstDraft} IS NOT NULL) = (${t.firstDraftState} = 'kept') AND (${t.mode} IS NULL) = (${t.firstDraftState} = 'none') AND (${t.rounds} IS NULL) = (${t.firstDraftState} = 'none') AND (${t.change} IS NULL OR ${t.firstDraftState} = 'kept')`,
+      sql`${t.firstDraftState} IN ('kept','missing','none') AND (${t.firstDraft} IS NOT NULL) = (${t.firstDraftState} = 'kept') AND (${t.mode} IS NULL) = (${t.firstDraftState} = 'none') AND (${t.firstDraftState} <> 'none' OR ${t.rounds} IS NULL) AND (${t.change} IS NULL OR ${t.firstDraftState} = 'kept')`,
     ),
     check(
       "memos_mode",
@@ -398,7 +398,7 @@ export const memos = pgTable(
       "memos_client_object",
       sql`jsonb_typeof(${t.clientJson}::jsonb)='object'`,
     ),
-    check("memos_request_id", sql`length(${t.requestId}) = 36`),
+    check("memos_request_id", sql`${t.requestId} ~ '^[A-Za-z0-9._:-]{1,64}$'`),
     check(
       "memos_request",
       sql`${t.request} IS NULL OR (${t.firstDraftState} <> 'none' AND char_length(${t.request}) BETWEEN 1 AND 600 AND ${t.request} = btrim(${t.request}, ' ' || chr(10)) AND translate(${t.request}, chr(10), '') !~ '[[:cntrl:]]')`,

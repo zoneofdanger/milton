@@ -1404,6 +1404,194 @@ test("0014 drops source_hash; save_request_hashes checks input_hash alone, every
   }
 });
 
+// The read-only check run on production before 0016; its header and
+// docs/deploy/migrations.md carry the same text.
+const REQUEST_ID_PREFLIGHT =
+  "SELECT (SELECT count(*) FROM memos WHERE request_id !~ '^[A-Za-z0-9._:-]{1,64}$') AS memos, (SELECT count(*) FROM save_requests WHERE request_id !~ '^[A-Za-z0-9._:-]{1,64}$') AS save_requests;";
+
+test("0016 loosens the rounds and request id checks: today's rows stay as they are, today's writes pass, and a retained id outside the alphabet fails it whole", async () => {
+  const folder = new URL("../drizzle/", import.meta.url).pathname;
+  const scratch = await mkdtemp(join(tmpdir(), "milton-0016-"));
+  const pg = new PGlite();
+  try {
+    await cp(folder, scratch, { recursive: true });
+    const journal = await Bun.file(join(scratch, "meta/_journal.json")).json();
+    const entries = journal.entries as { tag: string }[];
+    const at = entries.findIndex((e) => e.tag.startsWith("0016_"));
+    expect(at).toBe(entries.length - 1);
+    const sqlFile = await Bun.file(
+      join(scratch, `${entries[at]!.tag}.sql`),
+    ).text();
+    expect(sqlFile).toContain(REQUEST_ID_PREFLIGHT);
+    const through = async (count: number) =>
+      writeFile(
+        join(scratch, "meta/_journal.json"),
+        JSON.stringify({ ...journal, entries: entries.slice(0, count) }),
+      );
+    await through(at);
+    await migrate(drizzle(pg), { migrationsFolder: scratch });
+    // Today's code saves a memo in each first-draft state.
+    await seedUsers(pg, "kept");
+    const store = fixtureStore(storeDatabase(pg), "kept");
+    const drafted = { mode: "draft" as const, rounds: 2 };
+    for (const memo of [
+      {},
+      { ...drafted, first_draft: "Fictional first draft, warm." },
+      { ...drafted, first_draft_missing: true as const },
+    ])
+      expect((await store.saveMemo(memoSave(memo))).status).toBe("saved");
+    const definitions = () =>
+      pg.query<{ conname: string; definition: string }>(
+        "SELECT conname,pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE conname IN ('memos_first_draft','memos_request_id','save_request_id') ORDER BY conname",
+      );
+    const rows = async () => ({
+      memos: (await pg.query("SELECT * FROM memos ORDER BY id")).rows,
+      receipts: (
+        await pg.query("SELECT * FROM save_requests ORDER BY request_id")
+      ).rows,
+    });
+    const before = await rows();
+    expect(
+      (before.memos as { first_draft_state: string }[])
+        .map((m) => m.first_draft_state)
+        .sort(),
+    ).toEqual(["kept", "missing", "none"]);
+    const oldChecks = (await definitions()).rows;
+    const applied = async () =>
+      (await pg.query("SELECT hash FROM drizzle.__drizzle_migrations")).rows
+        .length;
+    // Rows as SQL, for shapes today's code never writes.
+    let n = 0;
+    const memo = (columns: Record<string, string | number | null>) => {
+      const row = {
+        user_id: "kept",
+        id: `00000000-0000-4000-8000-${String(++n).padStart(12, "0")}`,
+        medium: "email",
+        summary: "a fictional note",
+        final: "Fictional final.",
+        tier: "own",
+        client_json: "{}",
+        request_id: crypto.randomUUID(),
+        first_draft_state: "none",
+        ...columns,
+      };
+      const names = Object.keys(row);
+      return pg.query(
+        `INSERT INTO memos(${names.join(",")}) VALUES (${names.map((_, i) => `$${i + 1}`).join(",")})`,
+        Object.values(row),
+      );
+    };
+    const receipt = (requestId: string) =>
+      pg.query(
+        `INSERT INTO save_requests(user_id,request_id,input_hash,result_json) VALUES ('kept',$1,repeat('a',64),'{"status":"saved"}')`,
+        [requestId],
+      );
+    // A retained 36-character id holding "/" passes the old check and fails
+    // the new one, in either table: the preflight counts it, and 0016 fails
+    // whole, leaving the old checks and the journal as they were.
+    const slash = "fictional/" + "x".repeat(26);
+    expect(slash).toHaveLength(36);
+    await through(at + 1);
+    for (const table of ["memos", "save_requests"]) {
+      await (table === "memos" ? memo({ request_id: slash }) : receipt(slash));
+      expect((await pg.query(REQUEST_ID_PREFLIGHT)).rows).toEqual([
+        {
+          memos: table === "memos" ? 1 : 0,
+          save_requests: table === "memos" ? 0 : 1,
+        },
+      ]);
+      await expect(
+        migrate(drizzle(pg), { migrationsFolder: scratch }),
+      ).rejects.toMatchObject({
+        cause: {
+          message: `check constraint "${table === "memos" ? "memos_request_id" : "save_request_id"}" of relation "${table}" is violated by some row`,
+        },
+      });
+      expect((await definitions()).rows).toEqual(oldChecks);
+      expect(await applied()).toBe(at);
+      await pg.query(`DELETE FROM ${table} WHERE request_id=$1`, [slash]);
+    }
+    expect(await rows()).toEqual(before);
+    await migrate(drizzle(pg), { migrationsFolder: scratch });
+    expect(await applied()).toBe(at + 1);
+    expect(await rows()).toEqual(before);
+    const alphabet = "'^[A-Za-z0-9._:-]{1,64}$'::text";
+    expect((await definitions()).rows).toEqual([
+      {
+        conname: "memos_first_draft",
+        definition:
+          "CHECK (((first_draft_state = ANY (ARRAY['kept'::text, 'missing'::text, 'none'::text])) AND ((first_draft IS NOT NULL) = (first_draft_state = 'kept'::text)) AND ((mode IS NULL) = (first_draft_state = 'none'::text)) AND ((first_draft_state <> 'none'::text) OR (rounds IS NULL)) AND ((change IS NULL) OR (first_draft_state = 'kept'::text))))",
+      },
+      {
+        conname: "memos_request_id",
+        definition: `CHECK ((request_id ~ ${alphabet}))`,
+      },
+      {
+        conname: "save_request_id",
+        definition: `CHECK ((request_id ~ ${alphabet}))`,
+      },
+    ]);
+    // Today's code still saves, with rounds, and replays.
+    const save = memoSave({ ...drafted, first_draft: "Another fictional." });
+    const saved = await store.saveMemo(save);
+    expect(saved.status).toBe("saved");
+    expect(await store.saveMemo(save)).toEqual(saved);
+    // A kept or missing first draft may now lack rounds; a final alone still
+    // may not have them.
+    await memo({
+      first_draft_state: "kept",
+      first_draft: "Fictional draft.",
+      mode: "draft",
+      tier: "steered",
+      rounds: null,
+    });
+    await memo({
+      first_draft_state: "missing",
+      mode: "edit",
+      tier: "steered",
+      rounds: null,
+    });
+    await expect(memo({ rounds: 0 })).rejects.toThrow(/memos_first_draft/);
+    // Any id of 1 to 64 letters, digits and . _ : - is taken in both tables;
+    // anything else is refused, checked one character at a time.
+    for (const id of [
+      "save-vendor-decline-1",
+      "a",
+      "A.b_c:d-9".repeat(7).slice(0, 64),
+    ]) {
+      await memo({ request_id: id });
+      await receipt(id);
+    }
+    const bad = [
+      "x".repeat(65),
+      "",
+      "save vendor",
+      "save/vendor",
+      "café",
+      "save-1\n",
+      "save-1\u0001",
+    ];
+    for (let c = 1; c < 128; c++) {
+      const id = `a${String.fromCharCode(c)}b`;
+      if (/^[A-Za-z0-9._:-]{3}$/.test(id)) await receipt(id);
+      else bad.push(id);
+    }
+    // Non-ASCII look-alikes and invisible spaces.
+    bad.push(
+      ..."\u00e9\uff21\u0430\u200b\u2028\u00a0".split("").map((c) => `a${c}b`),
+    );
+    for (const id of bad) {
+      await expect(memo({ request_id: id })).rejects.toThrow(
+        /memos_request_id/,
+      );
+      await expect(receipt(id)).rejects.toThrow(/save_request_id/);
+    }
+  } finally {
+    await pg.close();
+    await rm(scratch, { recursive: true, force: true });
+  }
+});
+
 test("native 008 links each authorized registration from what survives, by identity incarnation, and applies deletion's rule to deleted identities' registrations", async () => {
   const native = (name: string) =>
     Bun.file(

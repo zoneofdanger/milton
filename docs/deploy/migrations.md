@@ -56,6 +56,31 @@ source publication remains atomic and version-fenced. Take a
 backup, check source parity, and verify the old runtime can still serve the resulting
 source schema before selecting the new revisions.
 
+A replaced check is additive only if every stored row passes the new one. Where the new
+check refuses a value the old one took, run a read-only preflight on production first:
+any row it finds stops the migration for Peter's decision. Drizzle `0016` is such a
+migration, run ahead of its code with traffic open: a 36-character `request_id` holding
+a character such as `/` passes its old checks and fails its new ones. Its preflight must
+return 0 and 0:
+
+```sql
+BEGIN TRANSACTION READ ONLY;
+SELECT (SELECT count(*) FROM memos WHERE request_id !~ '^[A-Za-z0-9._:-]{1,64}$') AS memos, (SELECT count(*) FROM save_requests WHERE request_id !~ '^[A-Za-z0-9._:-]{1,64}$') AS save_requests;
+ROLLBACK;
+```
+
+Before `0016`, also record both tables' row counts and sizes, and compare the applied
+journal with the checkout to prove exactly `0016` pending
+(`SELECT count(*), max(created_at) FROM drizzle.__drizzle_migrations;` returns 16 and
+`0015`'s `when`, 1794423465584). It holds `ACCESS EXCLUSIVE`
+on `memos` and then `save_requests` until it commits, scanning each once; rehearsed on
+PostgreSQL 18 with 50,000 rows in each (80 MB and 26 MB), the locks were held for about
+0.66 s. A lock not free within 5 s fails it whole, with the old checks and journal kept;
+rerun it. While it holds `memos` and waits for `save_requests`, a save that has already
+read its receipt deadlocks with it when it reaches `memos`; in the rehearsal PostgreSQL
+aborted the save-shaped session after its 1 s deadlock check and `0016` committed (a
+save rolls back whole on that failure, so its retry can succeed).
+
 ## The runners
 
 - **Writing (Drizzle):** as `neondb_owner` (`MILTON_OWNER_DATABASE_URL`),

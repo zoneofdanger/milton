@@ -222,7 +222,8 @@ test("the matcher agrees with the reference on every quote pair of small random 
   console.log(
     `quote rule: ${cases} memos, ${pairs} pairs, ${accepted} accepted`,
   );
-});
+  // About 3 s locally and 9 s on CI's runner: past bun's 5 s default.
+}, 60_000);
 
 // The rule's table and the reviewers' cases, by name. Each expects the stored
 // text of both sides when accepted (an empty side stores nothing here), and

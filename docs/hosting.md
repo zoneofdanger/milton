@@ -129,6 +129,10 @@ All under `server/scripts/`.
 - `check-mcp.ts` holds the SDK client check `mcp.test.ts` runs ([mcp](mcp.md)).
 - `check-auth-integration.ts` builds actual product modules with production
   minification under Node 26 and PostgreSQL 18 and mocks only external boundaries.
+- `check-compatibility.ts` runs the code at a git ref (default `origin/main`), read into
+  a scratch folder, against rows this checkout's code writes, on a local PGlite migrated
+  by this checkout: the rollback check before a release whose rows today's code must
+  read ([saves](saves.md#receipts), [TPS page](tps-page.md#scoreboard)).
 - `check-runtime-role.ts` audits selected NOINHERIT app/MCP roles, ownership, DDL/TEMP,
   native and app credential and function boundaries, and the role's own 20 s statement
   and 10 s lock timeouts ([database](database.md)).

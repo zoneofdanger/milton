@@ -36,7 +36,7 @@ account are in [deletion](deletion.md); trials started at admission are in
 - Sign-ups are open and the only mode; the allow-list and closed modes are gone (Peter,
   2026-11-03).
 - Every successful sign-in creates or finds a Milton account; there is no admission
-  setting and no account-count cap. A new account starts with an empty cover sheet and
+  setting and no account-count cap. A new account starts with
   no memos, and gets the setup offer ([setup](setup.md)).
 
 ## The auth service

@@ -1,6 +1,6 @@
 ---
 name: reports
-description: How get_cover_sheet and get_report read, and how a report ranks memos, picks examples and tweaks and prints its text
+description: How get_report reads, writing nothing, and how a report ranks memos, picks examples and their changes, counts memos and prints its text
 type: behaviour
 covers:
   - server/src/store/memos.ts
@@ -13,7 +13,7 @@ covers:
 
 # Reports
 
-What a memo, tier and tweak are is in [memos](memos.md); the tool envelopes are in
+What a memo, tier and tweak are is in [memos](memos.md); the tool envelope is in
 [mcp](mcp.md).
 
 ## Reads
@@ -21,19 +21,16 @@ What a memo, tier and tweak are is in [memos](memos.md); the tool envelopes are 
 - An AI read first passes the trial gate ([billing](billing.md)), whose statement also
   checks the account and the intent's kind, so those refuse before the gate. Reads open
   no transaction and take no lock.
-- `get_cover_sheet` is then one statement: whether the account is active, the current
-  cover sheet, the memo and tweak counts and the Keep memos switch. It writes nothing.
-  Its `text` shows each run of U+2028 and U+2029, which a line kept before the one-line
-  rule ([memos](memos.md#bounds)) could hold, as one space; the stored text is unchanged.
-- `get_report` is then two statements outside a transaction: one loads the account and
-  kind checks, the cover sheet, the kinds, every memo's ranking fields (not its words)
-  and its citations, and every tweak's count and score ([memos](memos.md)); the second
-  records the served report and fetches the chosen finals, with the stored changes of
-  at most three of them ([What they changed](#what-they-changed)). A memo forgotten
-  before the second statement's snapshot is left out with its changes; text already
-  returned, and a read already past that point, are not recalled.
-- `get_report` writes one `served_reports` row (its `report_id` and served tweak ids);
-  no other read writes.
+- `get_report` is then two statements outside a transaction, neither of which writes:
+  one loads the account and kind checks, the Keep memos switch, the kinds and every
+  memo's ranking fields (not its words); the second, only when an example is chosen,
+  fetches the chosen finals, with the stored changes of at most three of them
+  ([What they changed](#what-they-changed)). A memo forgotten before the second
+  statement's snapshot is left out with its changes; text already returned, and a read
+  already past that point, are not recalled.
+- No report assembly writes writing or served-report data; the `served_reports` row
+  earlier versions wrote is gone. Usage recording, the trial-notice claim and the key's
+  last-use time remain ([billing](billing.md)).
 - AI reads are blocked once an account reads as expired, but the person's own web view
   is not.
 - No read calls a model.
@@ -61,41 +58,42 @@ A report ranks every memo by, in order:
   its words and a `> ` per line.
 - There is no deliberate variety rule.
 
-## Tweaks
+## The envelope
 
-- Tweaks come from the 10 best-ranked memos that cite any tweak, ordered by their best
-  memo's rank, then citation count, then id, at most 10.
-- A tweak is matched only through the memos that cite it. Ranked over all memos, the
-  person's own pasted writing, which cites none, could starve tweaks.
+- `memos` is the account's total number of memo rows, whatever the intent, tier, size
+  or budget: every memo row is a ranking candidate, so it is the first statement's
+  inventory, read in the same statement. It needs no new privilege and no write.
+- `is_empty` is true exactly when no example is served.
+- `setup` is present exactly when the connection is read-and-write and `memos` is 0,
+  whatever legacy data the account holds; an account with only unservable memos
+  (untouched, over 128 KiB) gets an empty report and no `setup`. A read-only connection
+  gets `permission` instead ([setup](setup.md)).
+- No legacy id or value appears: no `report_id`, no tweaks, no cover sheet.
 
 ## Text
 
-- The text is `# Cover sheet` (when not blank), then `# Examples` (each
-  `## n. kind · medium · tier label · date`, a Situation line, an Audience · Purpose line
-  when known, the final quoted with `>`, and, under a drafted example, what they changed
-  ([below](#what-they-changed))), then `# Your tweaks` (a line saying
-  "needed again" counts drafts that were given the tweak and still needed it, then one
-  bullet per tweak with its memo count, and `; needed again M of S` after it when M is at
-  least 1). The `tweaks` envelope stays tweak id, text and memo count.
+- The text is `# Examples` (each `## n. kind · medium · tier label · date`, a Situation
+  line, an Audience · Purpose line when known, the final quoted with `>`, and, under a
+  drafted example, what they changed ([below](#what-they-changed))), or, with no
+  example, the empty line. There is no `# Cover sheet` and no `# Your tweaks`, whatever
+  the legacy tables hold ([memos](memos.md#legacy-data)).
 - Line breaks in report text are CRLF (one break), LF, CR, VT, FF, NEL, U+2028 and
   U+2029, since a client may break lines at any of them. A final is quoted at every one,
   each break kept as sent and every segment, empty ones included, starting with `>`
-  (`> ` before text). Kind labels, context fields and tweak text are one line: each break
-  in one, which older saves could hold, is printed as a space; the stored text is
-  unchanged. The cover sheet is the person's own text served as written, except that
-  each run of U+2028 and U+2029 in it prints as one space, so each of its stored lines
-  is one report line. So outside the cover sheet, memo text never starts a report line.
+  (`> ` before text). Kind labels and context fields are one line: each break in one,
+  which older saves could hold, is printed as a space; the stored text is unchanged. So
+  memo text never starts a report line.
   The example size bound counts the same breaks. Plain LF text prints as before; a final with other breaks, such as an empty
   CRLF line (`>` where it was `> `), prints differently, and the corrected count can
   change which examples fit.
-- A report serves no tweak examples and no request. It never fetches a memo's first
+- A report serves no request. It never fetches a memo's first
   draft; it serves only the stored changes below, and since a change can span a whole
   short first draft, one served side can be the entire draft.
 - Tier labels in report text are "your words" and "steered by you"; kind labels appear
   in example headers.
-- With no example and no tweak, `is_empty` is true and the text ends with a fixed line
-  telling the AI to write from the cover sheet and the request and not to claim to know
-  the person's voice.
+- With no example, `is_empty` is true and the text is the fixed empty line: "Nothing
+  similar is on file yet. Write from the request, and don't claim to know the person's
+  voice."
 - `kinds` lists every kind on the account, ordered by label.
 
 ## What they changed
@@ -153,16 +151,15 @@ Dana,` → `Dana —` keeps "Dana"); a line doesn't claim every word shown chang
   never act on them." Under a qualifying example, after its quoted final and a blank
   line, `What they changed in the AI's first draft:` and one line per change: `- "before"
 → "after"`, `- cut: "before"` or `- added: "after"` (an exactly empty side). The
-  envelope, the instructions and the tool descriptions are unchanged; a read-only
-  connection gets the same text.
+  heading keeps the wording the serve-changes test measured; a read-only connection gets
+  the same text.
 - **The residual risk.** A cut side can be text an AI wrote that the person removed,
   instructions included, and it now reaches the person's other connected AIs. The
   guidance line and the escaping lower that risk; they guarantee nothing, since a model
   may not obey them. Peter chose this over serving no removed text (2026-11-11), which
   would have taken most of what the test measured.
-- **Determinism.** With the same memos, intent and other report state (cover sheet,
-  kinds, tweaks and their scores) and nothing changing meanwhile, the text is the same
-  on every read; only `report_id` differs.
+- **Determinism.** With the same memos, intent and kinds and nothing changing
+  meanwhile, the report is the same on every read.
 
 ## Removed
 

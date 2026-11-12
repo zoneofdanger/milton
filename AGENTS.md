@@ -56,10 +56,10 @@ the backlog. The concept files indexed below hold everything else.
 - [deploy/stripe](docs/deploy/stripe.md) — Operating Stripe for Milton: live mode, the Dashboard settings billing relies on, and the subscription backfill and resync
 - [history](docs/history.md) — Append-only record of Milton's production releases and applied one-time migrations, newest first, with revisions and snapshot names
 - [hosting](docs/hosting.md) — Where Milton runs (Cloud Run services, the Vercel site), startup and configuration, every HTTP request, static assets and the operation scripts
-- [mcp](docs/mcp.md) — An MCP call from token or key to tool result, the three tools and their arguments, outcomes and next steps, and the served-text contract
-- [memos](docs/memos.md) — What a memo, tweak, cover sheet and report are; what a memo holds, its tier and change score; tweaks, kinds, the cover sheet and when AIs save
+- [mcp](docs/mcp.md) — An MCP call from token or key to tool result, the two tools and their arguments, retired calls, outcomes and next steps, and the served-text contract
+- [memos](docs/memos.md) — What a memo, tweak and report are; what a memo holds, its tier, change score and tweaks; kinds, legacy data and when AIs save
 - [positioning](docs/positioning.md) — What Milton is for and how to judge features, copy and backlog against it: your AI writes like you
-- [reports](docs/reports.md) — How get_cover_sheet and get_report read, and how a report ranks memos, picks examples and tweaks and prints its text
+- [reports](docs/reports.md) — How get_report reads, writing nothing, and how a report ranks memos, picks examples and their changes, counts memos and prints its text
 - [research/derived-systems-2026](docs/research/derived-systems-2026.md) — November 2026: the embeddings, advisory graph, task retrieval and gardening Milton built, measured and removed, and what would justify rebuilding
 - [research/honcho-2026](docs/research/honcho-2026.md) — Honcho compared with Milton on 2026-11-05: a substantial overlap in person memory; Milton's distinction was a writing workflow on approved examples
 - [research/honcho-source-2026](docs/research/honcho-source-2026.md) — Honcho source read at a pinned commit, 2026-11-05: context delivery varied by client; no reason found to add embeddings or autonomous learning
@@ -74,7 +74,7 @@ the backlog. The concept files indexed below hold everything else.
 - [research/spiral-tool-library-pilot-2026-11-05](docs/research/spiral-tool-library-pilot-2026-11-05.md) — 2026-11-05 pilot: one Milton-assisted draft and three Spiral drafts of one essay brief, preserved exactly; small, unblinded and with no winner
 - [research/writing-evidence-2026](docs/research/writing-evidence-2026.md) — November 2026 reading of three papers and GBrain's record: examples beat nothing, formality is the default to override, and much is untested
 - [saves](docs/saves.md) — How a create_memo save commits: the account lock, receipts, replay and request hashing, refusals, savepoints and the request size
-- [setup](docs/setup.md) — First setup on an empty account (offered once, optional sent emails or about five pastes, cover sheet, standing line), setup prompt and shared facts
+- [setup](docs/setup.md) — First setup on an account with no memos (offered once, optional sent emails or about five pastes, the standing line), setup prompt and shared facts
 - [site](docs/site.md) — The static site at meetmilton.com: what Astro builds it from, what Vercel uploads and publishes, and what its pages do
 - [tps-page](docs/tps-page.md) — The web app a signed-in person sees: the TPS page, one memo, memo settings, the TPS.md export and the Connected AIs page
 

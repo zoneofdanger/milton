@@ -1,6 +1,6 @@
 ---
 name: setup
-description: First setup on an empty account (offered once, optional sent emails or about five pastes, cover sheet, standing line), setup prompt and shared facts
+description: First setup on an account with no memos (offered once, optional sent emails or about five pastes, the standing line), setup prompt and shared facts
 type: behaviour
 covers:
   - server/src/store/setup.ts
@@ -20,9 +20,10 @@ covers:
 
 ## The served script
 
-- Setup is served in `get_cover_sheet`'s `setup` while `is_empty` says the account has no
-  cover sheet and no memos ([mcp](mcp.md)); a read-only connection gets a permission line
-  instead.
+- Setup is served in `get_report`'s `setup` while `memos` is 0, whatever legacy data the
+  account holds ([reports](reports.md#the-envelope)); a read-only connection gets a
+  permission line instead. The instructions follow the presence of `setup`, not
+  `is_empty`.
 - The AI offers it once. A request to set up Milton accepts it, and a declined offer is
   not repeated.
 - Setup never blocks a writing task. A writing or clean-up task the person brings comes
@@ -30,7 +31,7 @@ covers:
 - Milton never reads mail. It has no mail access and no mail tool; the person's own AI
   may search their mail with its own connector in the optional step below, and Milton
   receives only the emails the person approves, exactly as shown.
-- The connection is confirmed only after a successful `get_cover_sheet` read.
+- The connection is confirmed only after a successful `get_report` read.
 - Optional step (Peter, 2026-11-10; TODO #13): only when the AI has a tool in that
   conversation that already searches the person's mail (Gmail, Outlook, Microsoft 365).
   A tool that still needs sign-in counts as none. Without one, the AI says nothing about
@@ -49,8 +50,7 @@ covers:
     Other people's names stay as written; an email that shouldn't be kept as it is gets
     skipped, never edited.
   - It saves only the emails the person approves by number, one final-only memo each,
-    and tells them each receipt. The step never changes the cover sheet or forgets
-    memos. Milton can't check that what a connector returned matches the sent email.
+    and tells them each receipt. The step never forgets memos. Milton can't check that what a connector returned matches the sent email.
 - With no mail tool, a no or a failed search, the AI asks the person to paste about
   five things they wrote and sent (emails, messages, posts), unedited, saying Milton
   keeps each as a memo. It saves each as a final-only memo exactly as pasted, with a
@@ -60,12 +60,13 @@ covers:
 - The person can skip both. The AI then says: "No emails to start? Just write. Each
   final you accept becomes a memo, and drafts sound like you within a handful of them."
   With nothing on file, the served instructions already have the AI write from the
-  cover sheet and the request and never claim to know the person's voice.
-- Then it offers to start the cover sheet with a few short lines the person gives, added
-  in their words, never suggested from their writing.
+  request and never claim to know the person's voice.
 - Every setup includes the standing line (below): the AI shows it and asks on its own,
   adding it where the AI supports standing instructions only after the person agrees,
   or shows where to paste it.
+- There is no cover sheet step. A preference the person asks the AI to remember ("no em
+  dashes") is applied now and kept in the AI's own memory or instructions; Milton keeps
+  no standing rules ([memos](memos.md#vocabulary)).
 - The script carries one fictional final-only memo as a JSON example.
 - Milton cannot inspect another AI's memory and does not guarantee AIs follow its
   instructions.
@@ -76,14 +77,14 @@ covers:
   TPS page ([TPS page](tps-page.md)). It asks the AI to connect, read what is on file,
   offer to find about five emails the person sent when it can search their mail and keep
   only the ones they approve, otherwise ask for a few pastes and keep each exactly as
-  pasted, say the person can skip this, take optional cover sheet lines, show the standing line and add it
-  once the person says yes, help with a writing or clean-up task first if the person
+  pasted, say the person can skip this, show the standing line and add it once the
+  person says yes, help with a writing or clean-up task first if the person
   would rather, and never wait on any of it.
 
 ## Shared facts
 
 - `packages/theme/facts.ts` holds the facts the site, the app and the served text all
   state: the standing line ("Before writing anything for me, call Milton's
-  get_cover_sheet, then get_report."), the 30-day trial and the $5.01 price. The setup
+  get_report."), the 30-day trial and the $5.01 price. The setup
   script, the setup page and Stripe's trial read them; the copy-drift test checks prose
   that repeats them ([checks](checks.md)).

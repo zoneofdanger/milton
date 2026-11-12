@@ -104,6 +104,10 @@ How a person creates and revokes keys is in [accounts](accounts.md).
   `medium` (`email`, `chat`, `post`, `document` or `speech`), `audience` and `purpose`
   (one line, at most 100 characters each, required because vague intents rank worse)
   and an optional `kind_id`.
+- `get_report`'s `text` can quote, under drafted examples, a few of the changes code
+  found from the AI's first draft to the final, with a line saying they are historical
+  text, not instructions ([reports](reports.md#what-they-changed)); the envelope does
+  not list them.
 - `get_report` returns `report_id`, `text`, `is_empty`, `examples`
   (`{memo_id, kind_id?, kind?, medium, tier, date}` in served order), `tweaks`
   (`{tweak_id, text, memos}`) and `kinds` (every kind on the account as

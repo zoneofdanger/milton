@@ -7,6 +7,12 @@ import { accountUnavailable } from "./accounts";
 import { StoreError } from "./errors";
 import { utf8Bytes } from "./limits";
 import { tokens, type Tier } from "./score";
+import {
+  changeBlocks,
+  CHANGES_GUIDANCE,
+  STORED_SERVABLE_SQL,
+  type StoredChange,
+} from "./changes";
 
 export const MEDIA = ["email", "chat", "post", "document", "speech"] as const;
 export type Medium = (typeof MEDIA)[number];
@@ -132,6 +138,9 @@ type Candidate = {
   lines: number;
   lexical: number;
   tweaks: string[];
+  mode: "draft" | "edit" | null;
+  first_draft_state: "kept" | "missing" | "none";
+  changes_state: "itemized" | "too_large" | null;
 };
 const STOPWORDS = new Set(
   "a an and as at by for from i in into is it me my of on or our the their this to with your".split(
@@ -211,6 +220,24 @@ const exampleHeader = (m: Candidate, kind: string | undefined, n: number) =>
         ]
       : []),
   ].join("\n");
+
+/** Whether a memo's stored changes may be served under it as an example
+ * (docs/reports.md, "What they changed"), whatever the report: drafted, with
+ * its first draft kept and its changes itemized, steered, and a final small
+ * enough to be an example at all. The report asks it of the examples it
+ * selected; the memo page asks it directly. */
+export const servesChanges = (m: {
+  mode: string | null;
+  first_draft_state: string;
+  changes_state: string | null;
+  tier: Tier;
+  bytes: number;
+}) =>
+  m.mode === "draft" &&
+  m.first_draft_state === "kept" &&
+  m.changes_state === "itemized" &&
+  m.tier === "steered" &&
+  m.bytes <= MAX_EXAMPLE_BYTES;
 
 /** Examples in rank order within the budget: never untouched finals or ones
  * over MAX_EXAMPLE_BYTES, at most MAX_STEERED steered ones, the top one always.
@@ -310,6 +337,7 @@ export async function readReport(
         'bytes',octet_length(m.final),
         'lines',regexp_count(m.final,${LINE_BREAK_SQL}),
         'lexical',ts_rank(m.search,${query}),
+        'mode',m.mode,'first_draft_state',m.first_draft_state,'changes_state',m.changes_state,
         'tweaks',(SELECT coalesce(array_agg(c.tweak_id ORDER BY c.tweak_id),'{}') FROM tweak_citations c
           WHERE c.user_id=m.user_id AND c.memo_id=m.id))),'[]'::json)
         FROM memos m WHERE m.user_id=${userId}) AS memos,
@@ -326,26 +354,44 @@ export async function readReport(
   const scores = new Map(row.tweaks.map((t) => [t.id, t]));
   const tweaks = selectTweaks(ranked, scores);
   const reportId = randomUUID();
-  const finals = new Map(
-    (
-      await session.query<{ id: string; final: string }>(sql`WITH served AS (
+  // At most MAX_STEERED memos: their changes come in the statement that
+  // fetches the finals, so a memo forgotten before it loses both.
+  const withChanges = examples.filter(servesChanges).map((m) => m.id);
+  const fetched = await session.query<{
+    id: string;
+    final: string;
+    changes: StoredChange[] | null;
+  }>(sql`WITH served AS (
         INSERT INTO served_reports(user_id,id,tweak_ids)
         VALUES (${userId},${reportId},${sql.param(tweaks.map((t) => t.tweak_id))}::text[]))
-        SELECT id,final FROM memos WHERE user_id=${userId}
-          AND id=ANY(${sql.param(examples.map((m) => m.id))}::text[])`)
-    ).map((m) => [m.id, m.final]),
-  );
+        SELECT m.id,m.final,CASE WHEN m.id=ANY(${sql.param(withChanges)}::text[]) THEN
+          (SELECT coalesce(json_agg(json_build_object('n',c.n,'before',c."before",'after',c."after",
+            'truncated',c.truncated,'about',c.about,'by',c.by,'tweak_id',c.tweak_id,
+            'draft_start',c.draft_start,'draft_end',c.draft_end,
+            'final_start',c.final_start,'final_end',c.final_end) ORDER BY c.n),'[]'::json)
+            FROM memo_changes c WHERE c.user_id=m.user_id AND c.memo_id=m.id
+              AND ${sql.raw(STORED_SERVABLE_SQL)}) END AS changes
+        FROM memos m WHERE m.user_id=${userId}
+          AND m.id=ANY(${sql.param(examples.map((m) => m.id))}::text[])`);
+  const finals = new Map(fetched.map((m) => [m.id, m.final]));
   const served = examples.filter((m) => finals.has(m.id));
+  const rows = new Map(fetched.map((m) => [m.id, m.changes]));
+  const { blocks, guidance } = changeBlocks(
+    served.flatMap((m) => {
+      const r = rows.get(m.id);
+      return r ? [{ id: m.id, rows: r }] : [];
+    }),
+  );
   const cover = row.cover?.text.trim() ? row.cover.text : "";
   const parts = [
     ...(cover ? ["# Cover sheet", cover] : []),
     ...(served.length
       ? [
           "# Examples",
-          "The person's finals that best match this draft, best first. Imitate their wording.",
+          `The person's finals that best match this draft, best first. Imitate their wording.${guidance ? `\n${CHANGES_GUIDANCE}` : ""}`,
           ...served.map(
             (m, i) =>
-              `${exampleHeader(m, labels.get(m.kind_id ?? ""), i + 1)}\n\n${quote(finals.get(m.id)!)}`,
+              `${exampleHeader(m, labels.get(m.kind_id ?? ""), i + 1)}\n\n${quote(finals.get(m.id)!)}${blocks.get(m.id) ?? ""}`,
           ),
         ]
       : []),

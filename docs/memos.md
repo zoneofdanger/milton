@@ -29,7 +29,8 @@ covers:
   warm-up opener"), with a condition only when the habit doesn't hold in all their
   writing ("vendor replies: no price talk").
 - A **change** is one spot where code found the first draft and the final differ. The
-  memo page lists them under "What changed"; no AI sends, labels or reads them.
+  memo page lists them under "What changed"; no AI sends or labels them, and a report
+  quotes a few of them under drafted examples ([reports](reports.md#what-they-changed)).
 - The **cover sheet** is the person's own voice guide, written only by them.
 - A **report** is what Milton assembles for one draft: the cover sheet, the
   best-matching finals as **examples**, then the tweaks ([reports](reports.md)). There
@@ -121,10 +122,11 @@ Milton sets each final's tier at save, from the memo's source alone:
 ## Changes
 
 What changed from a kept first draft to its final is found by code at save, once,
-before any database work, and shown only to the person. Nothing is computed for a
-missing first draft or writing the person gave. No AI sends, labels or reads changes
-in this release: the AI-labelled changes, quote matching and served examples the spec
-proposed were left out ([the spec's follow-up](research/memo-evidence-spec-2026-11-11.md)).
+before any database work, and shown to the person on the memo page; a report quotes a
+few of them under drafted examples ([reports](reports.md#what-they-changed)). Nothing is
+computed for a missing first draft or writing the person gave. No AI sends or labels
+changes: the AI-labelled changes and quote matching the spec proposed were left out
+([the spec's follow-up](research/memo-evidence-spec-2026-11-11.md)).
 
 - **Code's list.** Both texts are split into words and single punctuation marks, as the
   change score splits them, and case counts ("Hi" against "hi" is a change, since
@@ -142,13 +144,14 @@ proposed were left out ([the spec's follow-up](research/memo-evidence-spec-2026-
   side longer than 300 characters keeps its first 300, with `truncated` set, and the
   memo page marks the cut. A long spot is cut rather than making its memo `too_large`,
   which stays only for the bounds above: whole-spot rows would have pushed 8 of 37
-  replayed memos to `too_large`, and with no labels or served examples a marked cut
-  hides nothing. `about` is `format` for a Markdown-only spot, code's own marker, and
+  replayed memos to `too_large`, and a marked cut hides nothing on the memo page. A
+  report never serves a cut row. `about` is `format` for a Markdown-only spot, code's own marker, and
   NULL otherwise; `by` and `tweak_id` stay NULL ([database](database.md)).
 - A saved or unchanged result's `memo` carries `changes: {state, found}`: the state and
   the rows that are not format. A save's stored receipt holds only these, never a side
   ([saves](saves.md#receipts)).
-- Changes are never served to an AI and never rank or score anything.
+- Changes never rank or score anything. Which are served, and how, is in
+  [reports](reports.md#what-they-changed).
 
 ## The request
 

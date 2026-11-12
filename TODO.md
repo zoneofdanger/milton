@@ -17,10 +17,10 @@ shared context for every item beneath it.**
 Work that ships before sign-ups open widely. Use the product vocabulary (memo, tweak, cover
 sheet, report, AI) and plain text on security screens and anything an AI reads.
 
-- [ ] #2 (server, med) **Try first setup with a real AI.** A new account starts with an
-      empty cover sheet and no memos. Refresh connector discovery for get_cover_sheet,
-      get_report and create_memo. Run the setup script: paste about five pieces, kept as
-      final-only memos, start the cover sheet in the person's words, then the standing line.
+- [ ] #2 (server, med) **Try first setup with a real AI.** A new account starts with no
+      memos. Refresh connector discovery for get_report and create_memo (the two tools since
+      #121). Run the setup script: paste about five pieces, kept as final-only memos, then
+      the standing line. Setup asks the person to write nothing else.
       Then draft, accept a final, check the one-line receipt, read again in a fresh chat,
       forget a memo, and download TPS.md through the hosted service. Each write to a real
       account needs Peter's approval. Saves are model-free since 2026-11-02; rerun after the

@@ -23,6 +23,32 @@ Earlier records are in git history: the last runbook holding them is at commit 4
 (`git show 492b96a:server/deploy/README.md`), and the runbook's later versions are in
 `git log -p server/deploy/README.md` until 2026-11-10, when this file began.
 
+## 2026-11-12: Drizzle 0016 loosens the rounds and request id checks (PR #119)
+
+- **#119 (Peter's "ship 119", answering milton-overlord's "say "ship 119" and milton-duo
+  applies it once the three fixes pass its recheck. You can give the go now, and it won't
+  run before that recheck.", typed in milton-overlord's pane wH:p1F on 2026-11-12 and
+  relayed verbatim by milton-overlord; built by milton-rules; independent review Codex
+  gpt-6-astra: PASS WITH CHANGES at `06b3759`, three fixes at `e18ea8b` rechecked by
+  milton-duo, the new two-connection lock and timeout group passing in CI), `d0a5c6b`:**
+  the schema half of "expand now, contract later" for the memos-and-tweaks redesign.
+  `memos_first_draft` lets a kept or missing first draft go without rounds; `memos_request_id`
+  and `save_request_id` take 1 to 64 of `[A-Za-z0-9._:-]` instead of exactly 36 characters.
+  No row rewritten, no grant changed, nothing touching `neon_auth`, no code release.
+  - **Before:** snapshot `snap-curly-water-b8d140f8` (`before-0016-loosen-checks-pr119`) at
+    19:39:21Z, plus a private `pg_dump` checkpoint. 0 memos and 50 `save_requests`
+    (49,152 and 131,072 bytes). Read-only preflight: 0 and 0 request ids outside the new
+    alphabet. Journal 16, latest `0015`'s timestamp, against 17 in the checkout: only
+    0016 pending.
+  - **Run:** `db:migrate` from `e18ea8b` with traffic open, 19:40:19–19:40:22Z (2.6 s
+    including connection). After: journal 17; the three CHECK definitions as written;
+    `check-runtime-role` ok for app and MCP. Rehearsed lock-held time was 3 ms empty, 16 ms
+    at 1,000 rows and about 0.7 s at 50,000.
+  - **Rollback:** none needed for the serving code, which satisfies the looser checks. The
+    snapshot is the schema's restore point.
+  - The private `pg_dump` from #109's migration was deleted on Peter's "do it"
+    (2026-11-12), its snapshot `snap-dry-block-b8hc81mt` still kept.
+
 ## 2026-11-12: one-line fields turn invisible line separators into a space (PR #116)
 
 - **#116 (Peter's "go" to building it, answering milton-overlord's plan "invisible line

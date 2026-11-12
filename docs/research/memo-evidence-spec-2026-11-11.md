@@ -865,3 +865,40 @@ Added on 2026-11-11, after the offline test; the text above is unchanged.
   spots, as "spots the quotes jointly cover" above allows.
 - **Examples for every served tweak.** Decision 8's split needs a real account switched
   on, which was not cleared, so slice 2 serves examples for every served tweak.
+
+## Follow-up note: the link deferred (2026-11-11)
+
+Added on 2026-11-11, after the reviews of slice 2; the text above is unchanged.
+
+- **Deferred by Peter's choice.** The link between a tweak and the change it came from
+  (items 1 and 2: the AI's labels on each change, quote matching, and before-and-after
+  examples served with tweaks) is left out of #109. Offered three choices by
+  milton-overlord (keep fixing it; make it stricter; leave that part out for now), Peter
+  answered, typing in milton-overlord's pane on 2026-11-11: "go with choice 3 for now".
+- **Why.** Four independent reviews each found a way for a quote-cut row to present
+  unchanged text as a change, and a stricter rule built from whole units labelled only 37
+  of 145 replayed changes, so most tweaks would have had no example:
+  - Review 1: a quote of unchanged words inside a merged spot (`small` → `small` in `red
+small car` → `blue small van`) was accepted as tweak evidence and hid the real edits;
+    in a `too_large` memo, whitespace in the quotes got past the equality check; and
+    0015's tweak check passed a row with no labels.
+  - Review 2: after the fix, an empty side against unchanged words (`""` → `red`) was
+    still accepted, while a real insertion beside a quote and a valid later occurrence
+    were refused.
+  - Review 3: overlapping a changed token counted as holding changed text (`s` → `s` in
+    `cats` → `dogs`); the `too_large` uniqueness rule admitted wholly unchanged text;
+    truncation could cut every changed word from both sides and keep the tweak; one
+    accepted fragment hid the rest of its spot; and a crafted 17 KB memo took 23 seconds
+    to check.
+  - Review 4, of the stricter rule: split and leftover rows could pair unaligned spans
+    and show kept words as deleted, complete coverage could not fit the 300-character
+    side limit, and hunks inside a change took labels the AI never gave.
+- **What ships instead.** `create_memo` takes main's `memo.tweaks` list again (the
+  released definition keeps working), with at most three distinct tweaks and the plainer
+  wording; the typed request, shown only to the person, never served, removable; the
+  tweak score, restarting on a reword; and, on each memo's page, code's own list of what
+  changed, unlabelled, with Markdown-only spots marked and sides cut at 300 characters
+  marked as cut. No change is labelled, matched to a quote or served. 0015 and 016 ship
+  as approved; their label and tweak columns stay NULL.
+- **Later.** Examples and labels come back as their own small spec, designed against
+  real memos.

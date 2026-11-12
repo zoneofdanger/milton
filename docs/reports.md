@@ -26,8 +26,8 @@ What a memo, tier and tweak are is in [memos](memos.md); the tool envelopes are 
 - `get_report` is then two statements outside a transaction: one loads the account and
   kind checks, the cover sheet, the kinds, every memo's ranking fields (not its words)
   and its citations, and every tweak's count and score ([memos](memos.md)); the second
-  records the served report and fetches the chosen finals and each served tweak's
-  example. A memo forgotten between them is left out.
+  records the served report and fetches the chosen finals. A memo forgotten between them
+  is left out.
 - `get_report` writes one `served_reports` row (its `report_id` and served tweak ids);
   no other read writes.
 - AI reads are blocked once an account reads as expired, but the person's own web view
@@ -64,29 +64,16 @@ A report ranks every memo by, in order:
 - A tweak is matched only through the memos that cite it. Ranked over all memos, the
   person's own pasted writing, which cites none, could starve tweaks.
 
-## Tweak examples
-
-- Each served tweak can carry one example: among the stored changes that name it
-  ([memos](memos.md#changes)), labelled `voice`, with both sides at most 160
-  characters, the newest from the intent's medium, else the newest.
-- Examples fill in served order within 3 KiB (UTF-8), about a tenth of a full report:
-  first the tweaks needed again at least once, then the rest. A tweak whose example
-  doesn't fit, or that has none (memos saved before changes were listed), is printed
-  without one.
-- Content changes are never served: they may hold facts the person removed. Requests
-  are never served.
-
 ## Text
 
 - The text is `# Cover sheet` (when not blank), then `# Examples` (each
   `## n. kind · medium · tier label · date`, a Situation line, an Audience · Purpose line
   when known, and the final quoted with `>`), then `# Your tweaks` (a line saying
-  `"was → now" shows a change the person made` when any example is printed, and that
   "needed again" counts drafts that were given the tweak and still needed it, then one
   bullet per tweak with its memo count, and `; needed again M of S` after it when M is at
-  least 1, then its example on the next line, indented: `added: "…"` for an insertion,
-  `cut: "…"` for a deletion, else `"…" → "…"`, with line breaks shown as `/`). The
-  `tweaks` envelope stays tweak id, text and memo count.
+  least 1). The `tweaks` envelope stays tweak id, text and memo count.
+- A report serves no tweak examples, no request and no stored change; a memo's first
+  draft is never served ([memos](memos.md#changes)).
 - Tier labels in report text are "your words" and "steered by you"; kind labels appear
   in example headers.
 - With no example and no tweak, `is_empty` is true and the text ends with a fixed line

@@ -43,32 +43,27 @@ What each change does to memos, tweaks and the cover sheet is in [memos](memos.m
 - It reads in one statement: the cover sheet and its version, the Keep memos switch, the
   newest 200 memos (older ones stay in the export), every tweak with its count (most
   cited first) and score, and the scoreboard ([memos](memos.md)).
-- Each tweak shows its newest example under its text, in the report's form
-  (`"before" → "after"`, `added: "…"` or `cut: "…"`): among voice changes naming it
-  with both sides at most 160 characters, the newest memo's ([reports](reports.md)).
-  A tweak with none, such as one taught only by memos saved before changes were listed,
-  shows no example. Under that, its memo count and, once it has been served, "served
-  S" and "needed again M", as raw counts, never a ratio. Rewording a tweak restarts
-  both counts and keeps its examples ([memos](memos.md#tweaks)).
+- Each tweak shows its text, then on its own row its memo count and, once it has been
+  served, "served S" and "needed again M", as raw counts, never a ratio. Rewording a
+  tweak restarts both counts ([memos](memos.md#tweaks)). No tweak shows an example.
 - Each listed memo shows its medium, kind, time and summary; "You asked:" with its
   request's first line cut to 120 characters; one line with its AI, rounds, "N
-  listed changes" (every row its memo page lists, when it has any; for a memo too
-  different to list in full, only those its AI named) and tier; the tweaks its report
+  listed changes" (every row its memo page lists, formatting included, when it has any)
+  and tier; the tweaks its report
   served (those still on file) and the tweaks it taught. Its first draft and final load
   only when that memo is opened.
 - `/tps/memo/<id>` shows one memo in full: context; "You asked" with the request in
-  full, a note that it is shown only to the person and never sent to an AI, and
-  **Remove**; first draft or why there is none; final; "What changed"; served and
+  full, a note that the AI is asked to keep only what the person typed and that it is
+  shown only to them and never sent to an AI, and **Remove**; first draft or why there is none; final; "What changed"; served and
   taught tweaks; Forget. Another account's or an unknown id is a 404.
-- "What changed" lists the stored changes in order. Each shows before → after
-  (`added:` or `cut:` when one side is empty, "…" where a side was cut at 300
-  characters), "how it sounds", "what it says" or "formatting", then "you typed",
-  "you asked", "AI changed it unasked", or "not labelled" for a spot no change named,
-  and the tweak it taught while that tweak is on file. Several changes may sit on one
-  spot. "You typed N% of this final" (the typed share) heads the list when a change is
-  the person's. A `too_large` memo says "Too different to list every change; showing
-  the ones your AI named."; an untouched final says nothing changed. A memo saved
+- "What changed" lists code's stored changes in text order, with no labels
+  ([memos](memos.md#changes)). Each shows before → after, or `added:` or `cut:` when
+  one side is empty. A Markdown-only spot says "formatting". A side cut at 300
+  characters ends in "…" and the row says "shortened to 300 characters", so a cut is
+  never hidden. A `too_large` memo says "Too many changes to list; the first draft and
+  final above show them all."; an untouched final says nothing changed. A memo saved
   before changes were listed, or without a kept first draft, has no "What changed".
+  There is no typed share and no tweak line on a change.
 - The cover sheet is shown read only, one ruled line per line as written, blank lines
   kept, with a note that an AI connected with Read and write changes it; an empty one
   says "No cover sheet yet." and how to start one. There is no cover sheet form
@@ -94,12 +89,11 @@ What each change does to memos, tweaks and the cover sheet is in [memos](memos.m
 
 - `/download` returns the complete writing export as `TPS.md`, including when AI access
   is paused: the cover sheet, the tweaks with counts (most cited first; a served one as
-  `- text (N memos; served S, needed again M)`), each followed by its newest example
-  on an indented line as on the TPS page, then every memo's final grouped by medium,
+  `- text (N memos; served S, needed again M)`), then every memo's final grouped by medium,
   newest first, each under its kind and date with its summary and, when it has one,
   `Asked: ` and its request, each later line indented four spaces so none can start a
-  heading or other Markdown block outside the memo. First drafts are not in it; the
-  examples are the short quotes the tweaks rest on.
+  heading or other Markdown block outside the memo. First drafts and changes are not in
+  it.
 
 ## Connected AIs
 

@@ -129,8 +129,13 @@ production order and snapshots are in [migrations](deploy/migrations.md).
   `content`, and a tweak sits only on a voice change by the person or asked for (the
   check is `IS TRUE`, so a row without labels, where the test is NULL, holds none). A
   row's tweak references its memo's citation (`(user_id, memo_id, tweak_id)` →
-  `tweak_citations`), so it is always one the memo cites, and deleting the tweak sets
-  only `tweak_id` to null (PostgreSQL 15's column list).
+  `tweak_citations`), and deleting the tweak sets only `tweak_id` to null (PostgreSQL
+  15's column list).
+- In this release the save writes only code's rows: offsets, the two cut sides,
+  `truncated`, and `about` = `format` for a Markdown-only spot, else NULL. The label
+  columns (`by`, and `about`'s `voice` and `content`) and `tweak_id` exist but are
+  unused and stay NULL; the checks and the citation key above stay in place for a later
+  release ([memos](memos.md#changes)).
 - Account erasure cascades every memo, kind, tweak, citation, served report, cover sheet
   version and switch row ([deletion](deletion.md)).
 - A receipt is written once with its outcome and cannot change; `save_request_hashes`

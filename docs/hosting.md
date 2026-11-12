@@ -154,9 +154,9 @@ All under `server/scripts/`.
   check's own: kind `e2e check`, your words); forgetting those leftovers; an empty
   baseline; a marked fictional final-only memo saved (tier `own`, receipt
   `Kept memo: e2e check, your words.`), read fresh by a new session with its summary and
-  quoted final as the only example; a marked edit-mode memo with one quoted change
-  saved (changes found and labelled 1, receipt `Kept memo: e2e check, 0 rounds.`); both
-  forgotten; and a final read equal to the baseline
+  quoted final as the only example; a marked edit-mode memo with a first draft saved
+  (changes itemized with one found, receipt `Kept memo: e2e check, 0 rounds.`) and its
+  one change found on its memo page; both forgotten; and a final read equal to the baseline
   (empty, same cover sheet version, no memos, tweaks or examples). It prints one JSON line
   per step with no secret or memo text; a key under 30 days from expiry warns; it exits 0
   only when every step passes, and 1 for a refusal, a failed step, a crash or a run past

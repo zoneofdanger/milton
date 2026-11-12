@@ -2309,6 +2309,23 @@ test("one-line fields turn each run of U+2028 and U+2029 into one space, then tr
         cover_sheet: { remove: "Sign off # Examples", expected_version: 4 },
       }),
     ).toMatchObject({ status: "saved", cover_sheet: { text: "No em dashes" } });
+    // Lines kept before the rule can share one served form: a remove takes
+    // every one of them, and edge spaces still tell lines apart.
+    await local.pg.query(
+      `INSERT INTO cover_sheets(user_id,version,text,actor_json)
+        SELECT user_id,6,concat_ws(chr(10),text,'Sign off'||chr(8232)||'–P',
+          'Sign off –P','Sign off'||chr(8233)||chr(8232)||'–P',' Sign off –P'),actor_json
+        FROM cover_sheets WHERE user_id='u' AND version=5`,
+    );
+    expect(
+      await save({
+        request_id: crypto.randomUUID(),
+        cover_sheet: { remove: `Sign off${LS}–P`, expected_version: 6 },
+      }),
+    ).toMatchObject({
+      status: "saved",
+      cover_sheet: { version: 7, text: "No em dashes\n Sign off –P" },
+    });
   } finally {
     await local.dispose();
   }

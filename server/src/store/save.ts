@@ -189,9 +189,10 @@ export async function runSave(
       503,
       { request_id: input.request_id },
     );
-  /** The stored outcome; `labelled` for a replay, not for this request's own
-   * commit found after a lost acknowledgment. */
-  const replay = (existing: Receipt, labelled = true) => {
+  /** The stored outcome, labelled as a replay. Every receipt read back is
+   * labelled, the one found after a lost acknowledgment included: that
+   * lookup can't tell this invocation's commit from an earlier save's. */
+  const replay = (existing: Receipt) => {
     if (existing.input_hash !== inputHash)
       throw new StoreError(
         "request_id_reused",
@@ -203,8 +204,7 @@ export async function runSave(
     if (!stored.success) throw unknown();
     // Returned as stored, old fields included (a receipt promises its
     // outcome), with the one label beside it.
-    const outcome = existing.result_json as SaveOutcome;
-    return labelled ? { ...outcome, replayed: REPLAYED } : outcome;
+    return { ...(existing.result_json as SaveOutcome), replayed: REPLAYED };
   };
   try {
     return await db.transaction(async (tx) => {
@@ -271,7 +271,7 @@ export async function runSave(
       throw unknown();
     }
     if (!existing) throw failure;
-    return replay(existing, false);
+    return replay(existing);
   }
 }
 

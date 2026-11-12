@@ -99,8 +99,10 @@ A save runs in one transaction:
   `cover_sheet`), and adds one top-level field beside it, `replayed`: "A stored outcome
   from an earlier save. Fields Milton no longer uses, such as rounds and tweaks, are not
   current guidance, and this receipt doesn't prove the memo is still on file." The
-  outcome decoder keeps accepting the old fields. A save's own outcome found after a
-  lost acknowledgment carries no label.
+  outcome decoder keeps accepting the old fields. Every receipt read back is labelled,
+  including one found after a failure (a lost acknowledgment, or a transient failure
+  before the lookup), since that lookup can't tell this request's commit from an
+  earlier save's.
 - The hashed input includes `request`. One-line fields are hashed after the one-line
   rule ([memos](memos.md#bounds)), so a retry that spells a line separator as a space
   replays.

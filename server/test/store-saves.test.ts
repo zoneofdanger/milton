@@ -113,9 +113,10 @@ test("a save and its receipt commit together: a lost acknowledgment replays the 
   const local = await localStore();
   try {
     await seedUsers(local.pg, "uncertain");
-    // Each transaction takes the next cue: "abort" fails it before commit,
-    // "ack" loses the acknowledgment of its commit, "lookup" fails it unrun.
-    const cues: ("abort" | "ack" | "lookup" | undefined)[] = [];
+    // Each transaction takes the next cue: "early" fails it before its first
+    // statement, "abort" fails it before commit, "ack" loses the
+    // acknowledgment of its commit, "lookup" fails it unrun.
+    const cues: ("early" | "abort" | "ack" | "lookup" | undefined)[] = [];
     const flaky = {
       ...local.db,
       async transaction<T>(
@@ -124,6 +125,8 @@ test("a save and its receipt commit together: a lost acknowledgment replays the 
         const cue = cues.shift();
         if (cue === "lookup") throw new Error("Fictional unavailable lookup");
         const result = await local.db.transaction(async (tx) => {
+          if (cue === "early")
+            throw new Error("Fictional connection lost before the lookup");
           const done = await work(tx);
           if (cue === "abort")
             throw new Error("Fictional connection lost before commit");
@@ -156,12 +159,36 @@ test("a save and its receipt commit together: a lost acknowledgment replays the 
     cues.push("ack");
     const recovered = await store.saveMemo(lost);
     expect(recovered.status).toBe("saved");
-    // Its own outcome, not a replay; a resend is one.
-    expect(recovered).not.toHaveProperty("replayed");
-    expect(await store.saveMemo(lost)).toEqual({
-      ...recovered,
-      replayed: REPLAYED,
-    });
+    // Recovered outcomes are labelled: the recovery can't tell this
+    // invocation's commit from an earlier one's.
+    expect(recovered.replayed).toBe(REPLAYED);
+    expect(await store.saveMemo(lost)).toEqual(recovered);
+    // A receipt from before the release, recovered after a transient failure
+    // before the lookup, or after a lost acknowledgment while replaying it,
+    // comes back as stored, old fields included, and labelled.
+    const historical = memoSave({ final: "Kept before the release." });
+    const old = {
+      status: "saved",
+      request_id: historical.request_id,
+      memo: {
+        memo_id: "m-old",
+        tier: "own",
+        rounds: 2,
+        tweaks: [{ tweak_id: "t-old", text: "no warm-up opener" }],
+      },
+      receipt: "Kept memo: email, 2 rounds, tweaks: no warm-up opener.",
+    };
+    await local.pg.query(
+      "INSERT INTO save_requests(user_id,request_id,input_hash,result_json) VALUES ('uncertain',$1,$2,$3::jsonb)",
+      [historical.request_id, hash(historical), JSON.stringify(old)],
+    );
+    for (const cue of ["early", "ack"] as const) {
+      cues.push(cue);
+      expect([cue, (await store.saveMemo(historical)) as unknown]).toEqual([
+        cue,
+        { ...old, replayed: REPLAYED },
+      ]);
+    }
     // When the lookup fails too, the outcome is unknown until the same
     // request replays it.
     const unknown = memoSave({ final: "Unknown until replayed." });
@@ -172,7 +199,7 @@ test("a save and its receipt commit together: a lost acknowledgment replays the 
     });
     expect((await store.saveMemo(unknown)).status).toBe("saved");
     expect([await count("save_requests"), await count("memos")]).toEqual([
-      3, 3,
+      4, 3,
     ]);
   } finally {
     await local.dispose();

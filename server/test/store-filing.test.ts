@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { sql } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 import type { PGlite } from "@electric-sql/pglite";
 import { localStore } from "./local-store";
 import {
@@ -1257,7 +1258,20 @@ test("a report serves whole stored changes under drafted examples: each line dec
     "🙂",
     "𝒜",
   ];
-  const GAPS = [" ", " ", " ", "\n", "\r\n", "\r", "\u2028", "\u0085", "\n\n"];
+  const GAPS = [
+    " ",
+    " ",
+    " ",
+    "\n",
+    "\r\n",
+    "\r",
+    "\v",
+    "\f",
+    "\u2028",
+    "\u2029",
+    "\u0085",
+    "\n\n",
+  ];
   const used = new Set<string>();
   const pick = <T extends string>(list: T[]) => {
     const x = list[rand(list.length)]!;
@@ -1546,19 +1560,66 @@ test("the change query: scoped to the account, for at most three memos, at most 
       UPDATE b_changes SET memo_id='${first}';
       INSERT INTO memo_changes SELECT * FROM b_changes;`);
     // What the finals statement returns, as the report reads it.
+    // Every statement a report runs, and what the finals statement returns.
+    const dialect = new PgDialect();
+    let statements: { sql: string; params: unknown[] }[] = [];
     let fetched: Record<string, unknown>[] = [];
     const watched = {
       ...local.db,
       async query<Row extends Record<string, unknown>>(
         statement: Parameters<typeof local.db.query>[0],
       ) {
+        statements.push(dialect.sqlToQuery(statement));
         const rows = await local.db.query<Row>(statement);
         if (rows[0] && "final" in rows[0]) fetched = rows;
         return rows;
       },
     };
-    const read = () => fixtureStore(watched, "A").readReport(vendorIntent);
+    const read = () => {
+      statements = [];
+      return fixtureStore(watched, "A").readReport(vendorIntent);
+    };
     const report = await read();
+    // One statement reads changes: the finals statement, the last one, after
+    // ranking. Its changes come only for the qualifying ids, with the row's
+    // own fields, and no statement reads a first draft.
+    const ROW_FIELDS = [
+      "after",
+      "before",
+      "by",
+      "draft_end",
+      "draft_start",
+      "final_end",
+      "final_start",
+      "n",
+      "truncated",
+      "tweak_id",
+      "about",
+    ].sort();
+    const ranking = statements.findIndex((x) => x.sql.includes("ts_rank"));
+    const changeReads = statements.filter((x) =>
+      x.sql.includes("memo_changes"),
+    );
+    expect(changeReads).toHaveLength(1);
+    const fetch = changeReads[0]!;
+    expect(statements.indexOf(fetch)).toBe(statements.length - 1);
+    expect(statements.length - 1).toBe(ranking + 1);
+    expect(fetch.sql).toContain("INSERT INTO served_reports");
+    for (const x of statements)
+      expect(x.sql).not.toMatch(/first_draft(?!_state)/);
+    const sub =
+      /CASE WHEN m\.id=ANY\(\$(\d+)::text\[\]\) THEN([\s\S]*?) END AS changes/.exec(
+        fetch.sql,
+      )!;
+    expect(sub).not.toBeNull();
+    expect(sub[2]).toContain("FROM memo_changes c WHERE c.user_id=m.user_id");
+    expect(
+      [...sub[2]!.matchAll(/'(\w+)',c\./g)].map((m) => m[1]).sort(),
+    ).toEqual(ROW_FIELDS);
+    expect(fetch.sql.split("memo_changes")).toHaveLength(2);
+    expect([...(fetch.params[Number(sub[1]) - 1] as string[])].sort()).toEqual(
+      report.examples.map((e) => e.memo_id).sort(),
+    );
     expect(report.examples).toHaveLength(3);
     expect(report.text).toContain(
       '- "Hi Dana, I hope this finds you well. Draft" → "Dana — draft"',
@@ -1567,6 +1628,8 @@ test("the change query: scoped to the account, for at most three memos, at most 
     expect(fetched).toHaveLength(3);
     for (const row of fetched) {
       expect(Object.keys(row).sort()).toEqual(["changes", "final", "id"]);
+      for (const change of row.changes as Record<string, unknown>[])
+        expect(Object.keys(change).sort()).toEqual(ROW_FIELDS);
       expect(JSON.stringify(row)).not.toContain("BMARKER");
     }
     // 120 rows on each served memo, the schema's most: 360 fetched, three

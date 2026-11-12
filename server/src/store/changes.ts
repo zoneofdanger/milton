@@ -40,9 +40,11 @@ export type Spot = {
   finalEnd: number;
   /** The sides differ only in Markdown marks and whitespace. */
   format: boolean;
-  /** The edits the spot joins, before merging, as offsets in the same way:
-   * a quote must touch one of these, not only the unchanged words between. */
-  edits: { draft: Range; final: Range }[];
+  /** The edits the spot joins, before merging: each one's cut tokens in the
+   * first draft and added tokens in the final, as offsets. A side with no
+   * tokens (cut or added false) is instead the gap where the edit sits, from
+   * the end of the token before to the start of the token after. */
+  edits: { draft: Range; final: Range; cut: boolean; added: boolean }[];
 };
 export type ChangeList =
   { state: "itemized"; spots: Spot[] } | { state: "too_large" };
@@ -169,6 +171,11 @@ export function changeList(first: string, final: string): ChangeList {
     const p = s > 0 ? T[s - 1]!.e : (T[0]?.s ?? 0);
     return [p, p];
   };
+  // Between the token before index s and the token at it.
+  const gap = (T: Token[], s: number, length: number): Range => [
+    s > 0 ? T[s - 1]!.e : 0,
+    s < T.length ? T[s]!.s : length,
+  ];
   return {
     state: "itemized",
     spots: merged.map((h) => {
@@ -183,8 +190,10 @@ export function changeList(first: string, final: string): ChangeList {
           unmarked(first.slice(draftStart, draftEnd)) ===
           unmarked(final.slice(finalStart, finalEnd)),
         edits: h.raw.map((r) => ({
-          draft: at(A, r.a0, r.a1),
-          final: at(B, r.b0, r.b1),
+          draft: r.a0 < r.a1 ? at(A, r.a0, r.a1) : gap(A, r.a0, first.length),
+          final: r.b0 < r.b1 ? at(B, r.b0, r.b1) : gap(B, r.b0, final.length),
+          cut: r.a0 < r.a1,
+          added: r.b0 < r.b1,
         })),
       };
     }),
@@ -234,14 +243,12 @@ function* occurrences(folded: Folded, quote: string): Generator<Range> {
   for (let k = folded.f.indexOf(q); k >= 0; k = folded.f.indexOf(q, k + 1))
     yield [folded.starts[k]!, folded.ends[k + q.length - 1]!];
 }
-/** A quote at more changed-spot occurrences than this is ambiguous: so short
- * or repeated a quote names no one place (a real quote of a few words recurs
- * a handful of times), and stopping here bounds the scan and the pairing (one
- * letter repeated in an 8 KB request took a second and a gigabyte). */
+/** A quote with more occurrences than this that hold or touch a change is
+ * ambiguous: so short or repeated a quote names no one place (a real quote of
+ * a few words recurs a handful of times), and stopping here bounds the scan
+ * and the pairing (one letter repeated in an 8 KB request took a second and a
+ * gigabyte). */
 export const MAX_OCCURRENCES = 50;
-/** Whether [s, e) touches a spot side [a, b); an empty side is a point. */
-const touches = (s: number, e: number, a: number, b: number) =>
-  a === b ? s <= a && a <= e : s < b && a < e;
 
 export type Located =
   | {
@@ -257,16 +264,16 @@ export type Located =
       why: "not_in_text" | "not_at_change" | "ambiguous";
     };
 
-/** Where one change's quotes are. Itemized: each quote occurs in its text
- * overlapping one of a changed spot's edits on that side, not only the
- * unchanged words the spot joins (an empty side is matched by the other
- * alone); an occurrence overlapping no edit is passed over, and
- * occurrences at different spots are ambiguous, unless only one of them
- * shares a spot with the other side; more than MAX_OCCURRENCES at spots
- * always are. The two sides need not share a spot (a moved sentence is a cut
- * at one and an addition at another); the change covers every spot its sides
- * touch. Too large: each quote occurs exactly once. Either way, two sides
- * that cut the same stored text are no change. */
+/** Where one change's quotes are (docs/memos.md, "Locating a quote").
+ * Itemized: at least one quote holds a changed token of a non-format edit on
+ * its side; a sent quote holding none is context: it touches the gap where an
+ * edit sits on its side, and the other quote holds that edit's tokens. Two
+ * quotes cutting the same stored text must both hold changed tokens (an exact
+ * move). A change covers the spots of the edits its quotes hold. Of the pairs of
+ * occurrences that pass, those sharing an edit win, then those whose spots
+ * meet across the sides, then the rest (a moved sentence); within the best,
+ * different spots are ambiguous, and the first pair in text order is kept. Too
+ * large: each quote occurs exactly once, and the two stored sides differ. */
 export function locate(
   list: ChangeList,
   texts: { first: Folded; final: Folded },
@@ -276,12 +283,6 @@ export function locate(
     ["before", change.before, texts.first],
     ["after", change.after, texts.final],
   ] as const;
-  // Compared as stored, so a dash or a Markdown mark is a change.
-  const same = (r: { before?: Range; after?: Range }) =>
-    r.before !== undefined &&
-    r.after !== undefined &&
-    texts.first.text.slice(...r.before) === texts.final.text.slice(...r.after);
-  const notAtChange = { ok: false, why: "not_at_change" } as const;
   if (list.state === "too_large") {
     const ranges: { before?: Range; after?: Range } = {};
     for (const [name, quote, folded] of sides) {
@@ -294,93 +295,112 @@ export function locate(
       if (!found) return { ok: false, why: "not_in_text" };
       ranges[name] = found;
     }
-    return same(ranges) ? notAtChange : { ok: true, spots: [], ...ranges };
+    // Compared as stored, so a dash or a Markdown mark is a change.
+    if (
+      ranges.before &&
+      ranges.after &&
+      texts.first.text.slice(...ranges.before) ===
+        texts.final.text.slice(...ranges.after)
+    )
+      return { ok: false, why: "not_at_change" };
+    return { ok: true, spots: [], ...ranges };
   }
-  type Hit = { range: Range; spots: number[] };
-  const key = (spots: number[]) => spots.join(",");
-  const hits: Partial<Record<"before" | "after", Hit[]>> = {};
+  // Every non-format edit, numbered, with its spot.
+  const edits = list.spots.flatMap((spot, n) =>
+    spot.format ? [] : spot.edits.map((e) => ({ ...e, n })),
+  );
+  /** One occurrence of a quote: the edits it holds a changed token of, and
+   * those whose gap on its side it touches. */
+  type Occ = { range: Range; held: number[]; touched: number[] };
+  const found: { before?: Occ[]; after?: Occ[] } = {};
+  let ambiguous = false;
   for (const [name, quote, folded] of sides) {
     if (!quote.trim()) continue;
-    // Each non-format spot's edits on this side, with the spot they are in.
-    // An occurrence counts at a spot when it touches both the spot and one of
-    // its edits (an edit cut just before a spot's first word sits at a point
-    // outside it), so a merged spot only ever accepts less than it did.
-    const side = list.spots.flatMap((spot, n) => {
-      if (spot.format) return [];
-      const whole: Range =
-        name === "before"
-          ? [spot.draftStart, spot.draftEnd]
-          : [spot.finalStart, spot.finalEnd];
-      return spot.edits.map((e) => ({
-        range: name === "before" ? e.draft : e.final,
-        whole,
-        n,
-      }));
-    });
-    // Only the first occurrence on each set of spots is kept: later ones on
-    // the same spots give the same answer.
-    const first = new Map<string, Hit>();
+    const before = name === "before";
+    // Edits run in text order on each side, without overlap, and occurrences
+    // arrive in order, so the edits one can reach form a window that only
+    // moves on.
+    const side = edits.map((e, id) => ({
+      id,
+      range: before ? e.draft : e.final,
+      tokens: before ? e.cut : e.added,
+    }));
+    const occs: Occ[] = [];
     let any = false;
-    let atSpots = 0;
-    // Edits run in text order on each side and occurrences arrive in order,
-    // so the edits an occurrence can touch form a window that only moves on.
     let lo = 0;
     for (const range of occurrences(folded, quote)) {
       any = true;
-      while (lo < side.length && side[lo]!.range[1] < range[0]) lo++;
-      const spots: number[] = [];
-      for (let k = lo; k < side.length && side[k]!.range[0] <= range[1]; k++) {
-        const { range: edit, whole, n } = side[k]!;
-        if (
-          spots.at(-1) !== n &&
-          touches(...range, ...edit) &&
-          touches(...range, ...whole)
-        )
-          spots.push(n);
+      const [s, e] = range;
+      while (lo < side.length && side[lo]!.range[1] < s) lo++;
+      const held: number[] = [];
+      const touched: number[] = [];
+      for (let k = lo; k < side.length && side[k]!.range[0] <= e; k++) {
+        const {
+          id,
+          range: [a, b],
+          tokens,
+        } = side[k]!;
+        if (tokens) {
+          if (s < b && a < e) held.push(id);
+        } else if (s <= b && a <= e) touched.push(id);
       }
-      if (!spots.length) continue;
-      if (++atSpots > MAX_OCCURRENCES) return { ok: false, why: "ambiguous" };
-      if (!first.has(key(spots))) first.set(key(spots), { range, spots });
+      if (!held.length && !touched.length) continue;
+      if (occs.length === MAX_OCCURRENCES) {
+        ambiguous = true;
+        break;
+      }
+      occs.push({ range, held, touched });
     }
     if (!any) return { ok: false, why: "not_in_text" };
-    if (!atSpots) return { ok: false, why: "not_at_change" };
-    hits[name] = [...first.values()];
+    found[name] = occs;
   }
-  const union = (a: number[], b: number[]) =>
-    [...new Set([...a, ...b])].sort((x, y) => x - y);
-  // Several occurrences on the same spots are one answer: the first.
-  const single = (found: Hit[]) =>
-    new Set(found.map((h) => key(h.spots))).size > 1 ? undefined : found[0]!;
-  if (hits.before && hits.after) {
-    const pairs = hits.before.flatMap((b) =>
-      hits.after!.flatMap((a) =>
-        b.spots.some((n) => a.spots.includes(n))
-          ? [{ b, a, spots: union(b.spots, a.spots) }]
-          : [],
-      ),
-    );
-    if (pairs.length) {
-      if (new Set(pairs.map((p) => key(p.spots))).size > 1)
-        return { ok: false, why: "ambiguous" };
-      const [p] = pairs;
-      const ranges = { before: p!.b.range, after: p!.a.range };
-      return same(ranges)
-        ? notAtChange
-        : { ok: true, spots: p!.spots, ...ranges };
+  if (ambiguous) return { ok: false, why: "ambiguous" };
+  const meets = (x: number[], y: number[]) => x.some((v) => y.includes(v));
+  const spotsOf = (ids: number[]) => ids.map((id) => edits[id]!.n);
+  // An empty quote is one choice with nothing in it.
+  const choices = (occs: Occ[] | undefined) => occs ?? [undefined];
+  let best:
+    | { tier: number; keys: Set<string>; spots: number[]; b?: Occ; a?: Occ }
+    | undefined;
+  for (const b of choices(found.before))
+    for (const a of choices(found.after)) {
+      const hb = b?.held ?? [];
+      const ha = a?.held ?? [];
+      // A side holding nothing is context for an edit the other holds.
+      const okB = !b || hb.length > 0 || meets(b.touched, ha);
+      const okA = !a || ha.length > 0 || meets(a.touched, hb);
+      if (!okB || !okA || (!hb.length && !ha.length)) continue;
+      // The same stored text on both sides is a change only as an exact move.
+      if (
+        a &&
+        b &&
+        (!hb.length || !ha.length) &&
+        texts.first.text.slice(...b.range) ===
+          texts.final.text.slice(...a.range)
+      )
+        continue;
+      const tier =
+        meets(hb, ha) ||
+        (b !== undefined && !hb.length && meets(b.touched, ha)) ||
+        (a !== undefined && !ha.length && meets(a.touched, hb))
+          ? 1
+          : meets(spotsOf(hb), spotsOf(ha))
+            ? 2
+            : 3;
+      const spots = [...new Set(spotsOf([...hb, ...ha]))].sort((x, y) => x - y);
+      const key = spots.join(",");
+      if (best && tier > best.tier) continue;
+      if (best && tier === best.tier) best.keys.add(key);
+      else best = { tier, keys: new Set([key]), spots, b, a };
     }
-    // No shared spot: each side stands on its own.
-    const b = single(hits.before);
-    const a = single(hits.after);
-    if (!b || !a) return { ok: false, why: "ambiguous" };
-    const ranges = { before: b.range, after: a.range };
-    return same(ranges)
-      ? notAtChange
-      : { ok: true, spots: union(b.spots, a.spots), ...ranges };
-  }
-  const name = hits.before ? "before" : "after";
-  const one = single(hits[name]!);
-  if (!one) return { ok: false, why: "ambiguous" };
-  return { ok: true, spots: one.spots, [name]: one.range };
+  if (!best) return { ok: false, why: "not_at_change" };
+  if (best.keys.size > 1) return { ok: false, why: "ambiguous" };
+  return {
+    ok: true,
+    spots: best.spots,
+    ...(best.b ? { before: best.b.range } : {}),
+    ...(best.a ? { after: best.a.range } : {}),
+  };
 }
 
 /** Why a located change was refused, as invalid_change says it. */

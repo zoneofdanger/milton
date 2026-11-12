@@ -130,3 +130,15 @@ test("no tracked file links into untracked agent notes", () => {
   });
   expect(linking.sort()).toEqual(Object.keys(TMP_LINKS).sort());
 });
+
+test("the privacy page limits 'no longer served' to reports and discloses the historical replay", () => {
+  const privacy = read("apps/site/src/pages/privacy.astro").replace(
+    /\s+/g,
+    " ",
+  );
+  expect(privacy).not.toContain("no longer uses or serves any of it");
+  expect(privacy).toContain("no longer serves it in the reports your AIs read");
+  expect(privacy).toContain(
+    "Milton returns that stored receipt as it was, which can include those notes, rounds or your cover sheet’s text, marked as a past receipt, not current guidance",
+  );
+});

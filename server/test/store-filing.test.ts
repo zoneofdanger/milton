@@ -2220,3 +2220,85 @@ test("request_id takes exactly what the database's checks take: 1 to 64 of lette
     await local.dispose();
   }
 });
+
+test("no new-version save, read or TPS change inserts into or updates a retired table or column; deletion still removes legacy rows", async () => {
+  const local = await localStore();
+  try {
+    await seedUsers(local.pg, "u");
+    const dialect = new PgDialect();
+    const statements: string[] = [];
+    const recorded = (session: {
+      query: (s: never) => Promise<unknown[]>;
+    }) => ({
+      query: async (statement: never) => {
+        statements.push(dialect.sqlToQuery(statement).sql);
+        return session.query(statement);
+      },
+    });
+    const db = {
+      ...local.db,
+      ...recorded(local.db as never),
+      transaction: (work: (tx: never) => Promise<unknown>) =>
+        local.db.transaction((tx) => work(recorded(tx as never) as never)),
+    } as unknown as typeof local.db;
+    const store = fixtureStore(db, "u");
+    const tps = tpsStore(db, "u");
+    const kept = await store.saveMemo(
+      memoSave({ first_draft: draft, final, mode: "draft", new_kind: "k" }),
+    );
+    await seedLegacy(local.pg, "u", {
+      cover: ["No em dashes"],
+      notes: ["no opener"],
+      citedBy: kept.memo!.memo_id,
+    });
+    for (const input of [
+      memoSave({ final: "Own words.", kind_id: kept.memo!.kind_id }),
+      memoSave({ first_draft: "Draft.", first_draft_missing: true } as never),
+      memoSave({ final: "Missing.", first_draft_missing: true, mode: "draft" }),
+      memoSave({ first_draft: "A **b**.", final: "A b!", mode: "edit" }),
+      memoSave({ kind_id: "not-a-kind" }),
+      {
+        request_id: "ctx-1",
+        memo_context: {
+          memo_id: kept.memo!.memo_id,
+          context: { summary: "a corrected note", medium: "chat" as const },
+        },
+      },
+    ])
+      await store.saveMemo(input).catch(() => {});
+    await store.readReport(vendorIntent);
+    await tps.read();
+    await tps.readMemo(kept.memo!.memo_id);
+    await tps.exportTps();
+    await tps.removeRequest(kept.memo!.memo_id);
+    await tps.setKeepMemos(true);
+    const writes = statements.filter((s) =>
+      /^\s*(WITH|INSERT|UPDATE)/i.test(s),
+    );
+    expect(writes.length).toBeGreaterThan(5);
+    for (const s of writes)
+      expect([
+        s,
+        /(INSERT INTO|UPDATE)\s+(cover_sheets|tweaks|tweak_citations|served_reports)\b/i.test(
+          s,
+        ) ||
+          (/\b(rounds|report_id|served_tweak_ids)\b/.test(
+            s.slice(0, s.search(/\bVALUES\b|\bSET\b/i) + 400),
+          ) &&
+            /^\s*(INSERT|UPDATE)/i.test(s)) ||
+          (/INSERT INTO memo_changes/i.test(s) && /\btweak_id\b/.test(s)),
+      ]).toEqual([s, false]);
+    // Deletion and its cascades still remove legacy rows.
+    await tps.forgetMemo(kept.memo!.memo_id);
+    await tps.deleteAllMemos();
+    expect(
+      (
+        await local.pg.query<{ n: number }>(
+          "SELECT (SELECT count(*) FROM tweaks)::int + (SELECT count(*) FROM tweak_citations)::int AS n",
+        )
+      ).rows[0]!.n,
+    ).toBe(0);
+  } finally {
+    await local.dispose();
+  }
+});

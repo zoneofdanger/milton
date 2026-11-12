@@ -1,0 +1,96 @@
+{
+  "about": "The nine \"With Milton\" drafts in try-it.json exactly as the model returned them, before the display edit (bold markers around the subject line). Not imported by the site. Each was the first try; nothing was rejected.",
+  "served": "Milton's instructions, its two tools and one get_report result, from the server at commit 6a7e4724598d054fe44e2a1f61056ed6ac674e1e, after setup saved the person's five pastes as memos; no cover sheet",
+  "drafts": [
+    {
+      "person": "bill",
+      "request_id": "ask",
+      "generated_at": "2026-11-12T20:34:00.339Z",
+      "model_requested": "chat-latest",
+      "model_returned": "chat-latest",
+      "try": 1,
+      "request": "Can you write an email from me to Greg Nolan, an analyst on my team? Ask him for the vendor spend summary before my review.\n\nThe facts:\n- I'm Bill, a manager at Odderton Data Services. Greg is an analyst on my team.\n- I need the Q3 vendor spend summary, with the breakdown by department.\n- I need it by Thursday, November 12, because I'm reviewing it with my director on Friday, November 13, at 10.\n- He should put it in the team's shared folder.\n\nJust give me the email text, ready to send. A subject line is fine.",
+      "milton": "**Subject: Q3 Vendor Spend Summary – Needed by Thursday**\n\nHi Greg,\n\nYeahhh, so I'm going to need that Q3 vendor spend summary, with the breakdown by department, by Thursday, November 12.\n\nI've got a review with my director on Friday the 13th at 10, so if you could just make sure it's in the team's shared folder by Thursday, that'd be great.\n\nMmkay?\n\nThanks,  \nBill"
+    },
+    {
+      "person": "bill",
+      "request_id": "update",
+      "generated_at": "2026-11-12T20:34:02.326Z",
+      "model_requested": "chat-latest",
+      "model_returned": "chat-latest",
+      "try": 1,
+      "request": "Can you write an email from me to my team? Send them a quick update about the new expense system.\n\nThe facts:\n- I'm Bill, a manager at Odderton Data Services, writing to the team I manage.\n- From Monday, November 16, expenses go through the new system, Ledgerline.\n- Login emails for Ledgerline arrive this Friday, November 13.\n- There's a training session on Thursday, November 19, at 2 in Room 4B.\n- The old paper forms won't be accepted after November 30.\n\nJust give me the email text, ready to send. A subject line is fine.",
+      "milton": "**Subject: New Expense System – Ledgerline Starting November 16**\n\nHi team,\n\nYeahhh, so we're going to be moving over to a new expense system called Ledgerline starting Monday, November 16. All expenses will need to go through Ledgerline from that date, mmkay?\n\nYou should be getting your login emails this Friday, November 13, so if you could just keep an eye out for those, that'd be great.\n\nWe've also got a training session scheduled for Thursday, November 19, at 2 PM in Room 4B. If you could make sure you're there, that'd be great.\n\nAnd one more thing: the old paper expense forms won't be accepted after November 30. So if you've got any of those lying around, you'll want to get them submitted before then, mmkay?\n\nThanks,\nBill"
+    },
+    {
+      "person": "bill",
+      "request_id": "unfinished",
+      "generated_at": "2026-11-12T20:34:04.728Z",
+      "model_requested": "chat-latest",
+      "model_returned": "chat-latest",
+      "try": 1,
+      "request": "Can you write an email from me to Ray Dunmore of Dunmore Fencing? Follow up on the fence job he didn't finish at my house.\n\nThe facts:\n- I'm Bill. Ray runs a small fencing firm doing work at my house.\n- The job: replace six fence panels in the backyard and fix the side gate. Quote $1,300; I paid $800 up front.\n- He did four panels on Saturday, October 31, and covered the two gaps with a pallet. He said he'd be back on Wednesday, November 4, to finish.\n- He didn't come. I left a voicemail on Thursday and sent a text on Monday, and he hasn't replied.\n- Our dog keeps getting out through the gaps.\n- I want him to come back this week to finish the last two panels and the gate.\n\nJust give me the email text, ready to send. A subject line is fine.",
+      "milton": "**Subject: Follow-Up on Unfinished Fence Job**\n\nHi Ray,\n\nYeahhh, so I'm following up on the fence job at my house. You came out on Saturday, October 31, and replaced four of the six panels, but we've still got two gaps covered with a pallet, and the side gate hasn't been fixed.\n\nYou said you'd be back on Wednesday, November 4, to finish everything, but you didn't come. I left you a voicemail on Thursday and sent a text on Monday, and I haven't heard back.\n\nThe problem is our dog keeps getting out through those gaps, so we really need to get this sorted.\n\nI've paid $800 up front on the $1,300 quote, so if you could just come back this week and finish the last two panels and the gate, that'd be great.\n\nCan you let me know what day you'll be coming, mmkay?\n\nThanks,  \nBill"
+    },
+    {
+      "person": "peter",
+      "request_id": "ask",
+      "generated_at": "2026-11-12T20:34:07.038Z",
+      "model_requested": "chat-latest",
+      "model_returned": "chat-latest",
+      "try": 1,
+      "request": "Can you write an email from me to Dana Whitfield, the product manager? Ask her for the copy and one decision I need before the release.\n\nThe facts:\n- I'm Peter, a developer. Dana is the product manager for the checkout work.\n- I need the final wording for the error messages on the new checkout page.\n- I need a decision on whether the \"save card\" checkbox is checked by default.\n- I need both by Wednesday, November 11, because the release branch is cut on Thursday morning.\n\nJust give me the email text, ready to send. A subject line is fine.",
+      "milton": "**Subject: Checkout — copy and save card default**\n\nDana, need two things before the checkout release:\n\n- Final wording for the error messages on the new checkout page.\n- Decision on whether the \"save card\" checkbox is checked by default.\n\nNeed both by Wednesday, Nov 11. Release branch gets cut Thursday morning.\n\n—P"
+    },
+    {
+      "person": "peter",
+      "request_id": "update",
+      "generated_at": "2026-11-12T20:34:08.948Z",
+      "model_requested": "chat-latest",
+      "model_returned": "chat-latest",
+      "try": 1,
+      "request": "Can you write an email from me to Sam Okoro, my team lead? Send him a quick update on the search bug.\n\nThe facts:\n- I'm Peter, a developer. Sam is my team lead.\n- The search bug fix is done and in code review.\n- The data migration took longer than planned because of about 2,000 duplicate records.\n- It'll be merged by the end of tomorrow.\n- No impact on the release date.\n\nJust give me the email text, ready to send. A subject line is fine.",
+      "milton": "**Subject: Search Bug — Update**\n\nSam, the search bug fix is done and in code review.\n\nData migration took longer than planned because of ~2,000 duplicate records.\n\nShould be merged by end of tomorrow. No impact on the release date.\n\n—P"
+    },
+    {
+      "person": "peter",
+      "request_id": "unfinished",
+      "generated_at": "2026-11-12T20:34:11.181Z",
+      "model_requested": "chat-latest",
+      "model_returned": "chat-latest",
+      "try": 1,
+      "request": "Can you write an email from me to Nick Farrow, the handyman? Follow up on the job he didn't finish at my apartment.\n\nThe facts:\n- I'm Peter. Nick is a handyman I hired for two jobs at my apartment.\n- The jobs: recaulk the bathtub and replace the bathroom exhaust fan. $350 in total; I paid $200 up front.\n- He recaulked the bathtub on Monday, November 2. He said the fan was on order and he'd be back on Friday, November 6, to install it.\n- He didn't come. I emailed on Saturday and got no reply.\n- The old fan is out and there's an open hole in the ceiling.\n- I want a date this week. If I don't get one, I'll get someone else to install it.\n\nJust give me the email text, ready to send. A subject line is fine.",
+      "milton": "**Subject: Bathroom Exhaust Fan — Follow-Up**\n\nNick,\n\nYou recaulked the bathtub on November 2 and said you'd be back Friday, November 6 to install the exhaust fan. You didn't show up, and I haven't heard back since my email Saturday.\n\nThe old fan is out and there's still an open hole in the ceiling.\n\nWe agreed on $350 for both jobs. I've already paid $200 up front.\n\nLet me know what day this week you can come finish the fan installation. If you can't give me a date, I'll get someone else to do it.\n\n—Peter"
+    },
+    {
+      "person": "joanna",
+      "request_id": "ask",
+      "generated_at": "2026-11-12T20:34:13.145Z",
+      "model_requested": "chat-latest",
+      "model_returned": "chat-latest",
+      "try": 1,
+      "request": "Can you write an email from me to Carla, my manager at the restaurant? Ask her if I can swap a shift.\n\nThe facts:\n- I'm Joanna, a server at the restaurant. Carla is the general manager and does the schedule.\n- I want to swap my dinner shift on Friday, November 20, for the lunch shift on Sunday, November 22.\n- It's for my sister's graduation on the Friday.\n- Rob has already said he'll take the Friday shift.\n- I need to know by Saturday, because the schedule goes up on Sunday.\n\nJust give me the email text, ready to send. A subject line is fine.",
+      "milton": "**Subject: shift swap for nov 20**\n\nhi carla\n\nwould it be okay if i swapped my dinner shift on friday nov 20 for the lunch shift on sunday nov 22? it's my sister's graduation on the friday and i'd really love to be there\n\nrob's already said he can take my friday shift so that's sorted!\n\ncould you let me know by saturday if that's okay? just because the schedule goes up on sunday\n\nthank you so much!!\n\njo x"
+    },
+    {
+      "person": "joanna",
+      "request_id": "update",
+      "generated_at": "2026-11-12T20:34:15.403Z",
+      "model_requested": "chat-latest",
+      "model_returned": "chat-latest",
+      "try": 1,
+      "request": "Can you write an email from me to Carla, my manager at the restaurant? Send her a quick update about the walk-in fridge after close tonight.\n\nThe facts:\n- I'm Joanna, a server. I closed the restaurant tonight; Carla is the general manager.\n- The walk-in fridge was reading 46°F at 10pm, warmer than it should be.\n- I moved the dairy and the fish into the bar fridge.\n- I put a note on the walk-in door and wrote it in the temperature log.\n- The repair tech's number is on the board in the office.\n\nJust give me the email text, ready to send. A subject line is fine.",
+      "milton": "**Subject: walk-in fridge update**\n\nhi carla\n\njust wanted to let you know the walk-in fridge was reading 46°F at 10pm when i was closing tonight, warmer than it should be\n\ni moved the dairy and fish into the bar fridge, put a note on the walk-in door and wrote it in the temperature log\n\nthe repair tech's number is on the board in the office if you need it\n\njo x"
+    },
+    {
+      "person": "joanna",
+      "request_id": "unfinished",
+      "generated_at": "2026-11-12T20:34:17.116Z",
+      "model_requested": "chat-latest",
+      "model_returned": "chat-latest",
+      "try": 1,
+      "request": "Can you write an email from me to Dean Ashworth, the washing machine repair guy? Follow up on the repair he didn't finish at my apartment.\n\nThe facts:\n- I'm Joanna. Dean is a local appliance repairman.\n- He came to my apartment on Tuesday, November 3, and said the washing machine pump was broken. He took the old pump away.\n- He said he'd be back on Friday, November 6, with a new one. He didn't come.\n- I've texted him twice and had no reply.\n- The machine is in pieces in my kitchen and I can't wash my work uniforms.\n- I paid the $90 service fee already.\n- I'm free any morning before 11 except Saturday.\n\nJust give me the email text, ready to send. A subject line is fine.",
+      "milton": "**Subject: Follow up on washing machine repair**\n\nhi dean\n\njust following up on my washing machine repair. you came round on tuesday 3rd november and said the pump was broken, and took the old one away.\n\nyou said you'd be back on friday 6th with a new pump but you didn't come, and i've texted twice now with no reply.\n\nthe machine is still in pieces in my kitchen and i can't wash my work uniforms, so i really need this sorted. i've already paid the $90 service fee too.\n\ncan you please let me know when you're coming back to finish the repair? i'm free any morning before 11 except saturday.\n\nthanks\n\njo x"
+    }
+  ]
+}

@@ -10,25 +10,27 @@ covers:
 
 Rewritten in place by the release coordinator at every release, never appended to; the
 release's record goes in [history](../history.md). How to release and roll back:
-[releases](releases.md). As of 2026-11-11 19:28Z (after #108).
+[releases](releases.md). As of 2026-11-12 02:18Z (after #109).
 
 ## Services
 
-- **App, MCP, admission, daily check:** `milton-app-own-82ef571`,
-  `milton-mcp-own-82ef571`, `milton-admit-00011-jd9` and job `milton-e2e-daily`, all on
-  image `sha256:e70e8e769eaaa5032bbe5a0341e4253017a4badaadaaf55685ed1b108df02cf8` (#108,
-  `82ef571`; Cloud Run shows the amd64 manifest digest `sha256:d14de938…`, not this index
-  digest). Rollback, code only, all four together: `milton-app-cover-16341d6`,
-  `milton-mcp-cover-16341d6`, `milton-admit-00010-gn4` and the job to image
-  `sha256:193135d28e8fcc0707d840cffe7719edcee9f34697bb90b532ddf00321c730e8` (#103, `16341d6`).
-  An emptied cover sheet stays readable on the rollback, and on #100's before it
-  (`cover_sheet_empty` only refused making one).
+- **App, MCP, admission, daily check:** `milton-app-evidence-4668940`,
+  `milton-mcp-evidence-4668940`, `milton-admit-00012-4km` and job `milton-e2e-daily`, all on
+  image `sha256:eb45b83fd3509cd751be9622c88c00b0845fe2bf893d0a714f8590024f6b5744` (#109 with
+  #107, `4668940`; Cloud Run shows the amd64 manifest digest `sha256:3b1f4ffd…`, not this
+  index digest). Rollback, code only, all four together: `milton-app-own-82ef571`,
+  `milton-mcp-own-82ef571`, `milton-admit-00011-jd9` and the job to image
+  `sha256:e70e8e769eaaa5032bbe5a0341e4253017a4badaadaaf55685ed1b108df02cf8` (#108, `82ef571`).
+  That code runs on the schema after 0015 and 016 (additive; it never names the new table or
+  columns); on it a kept request and the memo page's change list are not shown, and the
+  tweak score is not served. An emptied cover sheet stays readable on it.
 - **Auth and its jobs:** `milton-auth-00021-2gc`, `milton-auth-mail` and `milton-auth-maint`
   on image `sha256:d394050c2687a6872655b6075d1e3de9f4c2defe4a05353721dd0ea31ec0a832` (#102,
   `735937f`; Cloud Run shows the amd64 manifest digest, not this index digest). Rollback,
   code only, service and both jobs together: `milton-auth-00020-k77` and image
   `sha256:11946548b6e3fc563c11b8e6d2933566a7f90a83d83156e2e4ccf8a0d1d9bf56` (#86).
-- **Site:** Vercel production deployment of `82ef571` (#108 changes no site file).
+- **Site:** Vercel production deployment of `4668940` (#109's privacy and terms, dated
+  November 11, 2026).
 - **Secrets:** app `milton-app-env` 4 / `milton-app-key` 2, MCP `milton-mcp-env` 4 /
   `milton-mcp-key` 2 and auth `milton-auth-env` 2 / `milton-auth-key` 1, as at the 2026-11-07
   cutover (no release since recorded a change; confirm before the next one); admission
@@ -52,11 +54,11 @@ release's record goes in [history](../history.md). How to release and roll back:
 
 ## Schema heads
 
-- Drizzle: `0014_drop_source_hash`, journal 15 entries (`0000_baseline` to 0014), applied
-  2026-11-10.
+- Drizzle: `0015_memo_evidence`, journal 16 entries (`0000_baseline` to 0015), applied
+  2026-11-12.
 - Native auth ledger: 001–008 (`008-deletion-links`, 2026-11-08).
-- Owner files: `000-app-owner.sql` through `015-drop-guide-roles.sql`, all applied (015 on
-  2026-11-10). `005-app-roles.sql` is never rerun.
+- Owner files: `000-app-owner.sql` through `016-memo-evidence-roles.sql`, all applied (016 on
+  2026-11-12; rerun it after any rerun of 014). `005-app-roles.sql` is never rerun.
 
 ## Snapshots to keep
 
@@ -66,6 +68,8 @@ release's record goes in [history](../history.md). How to release and roll back:
   still hold them are older and expire by 2026-11-23; older manual ones lose more.
 - `snap-lingering-rice-b8pg8kxw` (`before-0014-drop-source-hash-pr82`): the only copy of
   `save_requests.source_hash`.
+- `snap-dry-block-b8hc81mt` (`before-0015-memo-evidence-pr109`, 2026-11-12 02:16:00Z): the
+  schema before 0015 (additive, so the code rollback does not need it).
 - `snap-fancy-hat-b8j5ls14` (pre-cutover, 2026-11-07): excluded from recovery; restoring it
   is Peter's decision ([migrations](migrations.md#database-recovery)).
 - Other manual pre-migration snapshots are kept until deleted; scheduled ones last 14 days.

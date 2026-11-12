@@ -72,6 +72,16 @@ A report ranks every memo by, in order:
   "needed again" counts drafts that were given the tweak and still needed it, then one
   bullet per tweak with its memo count, and `; needed again M of S` after it when M is at
   least 1). The `tweaks` envelope stays tweak id, text and memo count.
+- Line breaks in report text are CRLF (one break), LF, CR, VT, FF, NEL, U+2028 and
+  U+2029, since a client may break lines at any of them. A final is quoted at every one,
+  each break kept as sent and every segment, empty ones included, starting with `>`
+  (`> ` before text). Kind labels, context fields and tweak text are one line: each break
+  in one, which older saves could hold, is printed as a space; the stored text is
+  unchanged. So outside the cover sheet, which is the person's own text served as
+  written, memo text never starts a report line. The example size bound counts the same
+  breaks. Plain LF text prints as before; a final with other breaks, such as an empty
+  CRLF line (`>` where it was `> `), prints differently, and the corrected count can
+  change which examples fit.
 - A report serves no tweak examples, no request and no stored change; a memo's first
   draft is never served ([memos](memos.md#changes)).
 - Tier labels in report text are "your words" and "steered by you"; kind labels appear

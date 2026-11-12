@@ -179,20 +179,32 @@ export function rankMemos<T extends Candidate>(
 }
 
 const TIER_LABEL = { own: "your words", steered: "steered by you" } as const;
-const quote = (body: string) =>
+/** Report text's line breaks (docs/reports.md, "Text"): CRLF as one, then
+ * LF, CR, VT, FF, NEL and the line and paragraph separators. A client may
+ * break lines at any of them, so memo text may start a line only inside a
+ * quoted final. */
+export const LINE_BREAK = /\r\n|[\n\r\v\f\u0085\u2028\u2029]/g;
+/** LINE_BREAK as a PostgreSQL regular expression, for counting in SQL. */
+export const LINE_BREAK_SQL = "\\r\\n|[\\n\\r\\v\\f\\u0085\\u2028\\u2029]";
+/** A final as report text: every line, empty ones included, starts with `>`;
+ * each line break is kept as sent. */
+export const quote = (body: string) =>
   body
-    .split("\n")
-    .map((line) => (line === "" ? ">" : `> ${line}`))
-    .join("\n");
+    .split(new RegExp(`(${LINE_BREAK.source})`))
+    .map((part, i) => (i % 2 ? part : part === "" ? ">" : `> ${part}`))
+    .join("");
+/** A one-line field (context, kind label, tweak) as report text: each line
+ * break, which older saves could hold, becomes one space. */
+export const flat = (text: string) => text.replace(LINE_BREAK, " ");
 const exampleHeader = (m: Candidate, kind: string | undefined, n: number) =>
   [
-    `## ${n}. ${[kind, m.medium, TIER_LABEL[m.tier as "own"], m.at.slice(0, 10)].filter(Boolean).join(" · ")}`,
-    `Situation: ${m.summary}`,
+    `## ${n}. ${[kind && flat(kind), m.medium, TIER_LABEL[m.tier as "own"], m.at.slice(0, 10)].filter(Boolean).join(" · ")}`,
+    `Situation: ${flat(m.summary)}`,
     ...(m.audience || m.purpose
       ? [
           [
-            m.audience ? `Audience: ${m.audience}` : "",
-            m.purpose ? `Purpose: ${m.purpose}` : "",
+            m.audience ? `Audience: ${flat(m.audience)}` : "",
+            m.purpose ? `Purpose: ${flat(m.purpose)}` : "",
           ]
             .filter(Boolean)
             .join(" · "),
@@ -296,7 +308,7 @@ export async function readReport(
         'summary',m.summary,'audience',m.audience,'purpose',m.purpose,
         'at',to_char(m.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
         'bytes',octet_length(m.final),
-        'lines',length(m.final)-length(replace(m.final,E'\\n','')),
+        'lines',regexp_count(m.final,${LINE_BREAK_SQL}),
         'lexical',ts_rank(m.search,${query}),
         'tweaks',(SELECT coalesce(array_agg(c.tweak_id ORDER BY c.tweak_id),'{}') FROM tweak_citations c
           WHERE c.user_id=m.user_id AND c.memo_id=m.id))),'[]'::json)
@@ -344,7 +356,7 @@ export async function readReport(
           tweaks
             .map((t) => {
               const { served, needed_again } = scores.get(t.tweak_id)!;
-              return `- ${t.text} (${plural(t.memos, "memo")}${needed_again ? `; needed again ${needed_again} of ${served}` : ""})`;
+              return `- ${flat(t.text)} (${plural(t.memos, "memo")}${needed_again ? `; needed again ${needed_again} of ${served}` : ""})`;
             })
             .join("\n"),
         ]

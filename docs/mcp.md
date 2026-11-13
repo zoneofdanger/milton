@@ -228,8 +228,8 @@ a reconnect.
   [memos](memos.md) and [setup](setup.md). These are behavioural instructions, not
   server enforcement, and no extra setup tool or prompt capability exists. The detail
   of a save (the request rules) lives in the field descriptions, which the budget test
-  does not measure. Asking the AI for only what the person typed is
-  guidance; Milton checks only what [memos](memos.md#the-request) lists.
+  does not measure. What the AI is asked to send as the request is guidance; Milton
+  checks only what [memos](memos.md#the-request) lists.
 - There are two instruction variants, read-write and read-only. Both stay under 3,500
   characters, well inside the 4,096 at which Claude Code truncates; a test enforces this
   and that no error handling is left in them. Error handling lives in each error result's

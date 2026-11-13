@@ -52,10 +52,14 @@ because receipts outlive Delete all memos and a reused request id is refused on 
 `scripts/demo/scenes/*.json`, one per scene: `client` (`claude` or `codex`), `command`
 (typed at the prompt), `lines` (typed in order), and optional `cwd` (default
 `/private/tmp/sam-demo`), `size` (`COLSxROWS`, default `100x30`), `idleTimeLimit`
-(seconds, default 2; the clip's scenes use 1), `pauseSeconds`, `endHoldSeconds` and
-`turnTimeoutSeconds`. The fixes in a scene are written before the take, so they are
-ones that fit any generic draft (Day 1: "shorter", "no greeting", then the Sunday
-offer, Peter, 2026-11-13); check them against the first draft before choosing a take.
+(seconds, default 2; the clip's scenes use 1), `pauseSeconds`, `typingScale` (multiplies
+every typing gap, default 1; the clip's scenes use 0.6, Peter, 2026-11-13: "the typing in
+the demo could be a little faster"), `endHoldSeconds` and `turnTimeoutSeconds`. The fixes
+in a scene are written before the take, so each must make a change a viewer can see (Day 1:
+"no greeting", "no sign-off", then the Sunday offer, Peter, 2026-11-13, after "shorter"
+removed the sign-off on camera); check them against the first draft before choosing a take.
+Day 1 is recorded on an account with no memos and no earlier receipts:
+`sam2@milton-test.invalid` since 2026-11-13 (`~/keys/milton.sam2.env`).
 
 ## Playback and label
 

@@ -4,10 +4,11 @@
   "cwd": "/private/tmp/sam-demo",
   "size": "100x30",
   "idleTimeLimit": 1,
+  "typingScale": 0.6,
   "lines": [
     "Reply to my manager. He needs me in on Saturday. I can't.",
     "no greeting",
-    "shorter",
+    "no sign-off",
     "add that i can do a couple hours sunday if that helps",
     "perfect, sending it"
   ]

@@ -42,6 +42,14 @@ and its file is `~/keys/milton.newcomer.env`. The daily check never uses it: nev
 `e2e.ts` or the job at it, and never run a hand test on `e2e@`, whose safety gate stops the
 check on any memo it did not write.
 
+## The demo account
+
+`sam@milton-test.invalid` is a third fictional account, provisioned the same way (`--email`)
+on 2026-11-13 with Peter's go, used only for #33's demo recording ([demo](../demo.md)), so a
+take never meets receipts an earlier take left. Receipts outlive Delete all memos, and an
+AI that reuses a request id gets a refused save on camera. It is marked and trial-free like
+the others, and its file is `~/keys/milton.sam.env`. Never run a hand test on it.
+
 ## Provision the account
 
 Owner-only, from a checkout of the released commit after `bun install --frozen-lockfile`,

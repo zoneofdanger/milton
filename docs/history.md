@@ -23,6 +23,30 @@ Earlier records are in git history: the last runbook holding them is at commit 4
 (`git show 492b96a:server/deploy/README.md`), and the runbook's later versions are in
 `git log -p server/deploy/README.md` until 2026-11-10, when this file began.
 
+## 2026-11-13: tool titles (PR #124)
+
+- **#124 (Peter's "ship 124", typed in milton-overlord's pane wH:p1F at about 02:08 UTC on
+  2026-11-13, answering "Say "ship 124" to release it."; relayed verbatim by
+  milton-overlord; built by a temporary builder; independent check by milton-duo, with three
+  mutations each failing the tests), `a4e50a7`:** the two tools carry display titles, "Get
+  report" and "Save memo", both as `title` and as `annotations.title`, and `openWorldHint`
+  false on both: the piece of #121's approved spec (decision 10, listing item L1) that #121
+  missed. No description, instruction or field text changed.
+  - **Schema:** none. **Site and auth:** unchanged.
+  - **Image** `sha256:370e09df97c17ed790da17ededef9a6563e6c1e6ca8d988e478f72ee04b19037`
+    (amd64 `sha256:16d9ee90…`): admit `milton-admit-00016-mf8` at 02:10:35Z, app and MCP
+    `milton-*-titles-a4e50a7` as tagged no-traffic revisions, traffic moved at 02:10:49Z,
+    `milton-e2e-daily` at 02:10:52Z, after the scheduled 02:07 run had finished.
+  - **Live:** app and MCP `/health` and auth `/api/auth/ok` 200, app home 200, MCP 401
+    unauthenticated, admit 403 without a token, forms probe PASS, `milton-e2e-daily-jtkpw`
+    passed. Gate at 02:21Z: clean; no request reached an older revision after 02:14:30Z; no error, `store_unavailable` or `permission denied` lines since 02:10Z.
+  - **Checks** on the local merge `a4e50a7` (`f51bd30` on main `eb78b7d`): types, 142 server
+    tests, format and agent-docs 0; PR CI green.
+  - **Not observed:** how Claude or ChatGPT display a title, and whether the directory's
+    checker is then satisfied.
+  - **Rollback**, code only: `milton-*-tweaks-bab745d`, `milton-admit-00015-cwp` and the
+    daily job to image `sha256:cbc0e41c…`.
+
 ## 2026-11-12: memos and tweaks only (PR #121)
 
 - **#121 (Peter's "ship it", typed in milton-overlord's pane wH:p1F on 2026-11-12 at about

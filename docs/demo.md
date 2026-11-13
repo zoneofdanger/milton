@@ -43,7 +43,9 @@ first launches the client unrecorded (see Banner below), then records and writes
 then scans the cast. Keep recordings outside the repository.
 
 Empty the test account before a take that must start fresh (Delete all memos, in
-[deletion](deletion.md)), and again afterwards.
+[deletion](deletion.md)), and again afterwards. Dry runs use the newcomer account; the
+final takes use `sam@milton-test.invalid` ([the demo account](deploy/e2e.md#the-demo-account)),
+because receipts outlive Delete all memos and a reused request id is refused on camera.
 
 ## Scene files
 

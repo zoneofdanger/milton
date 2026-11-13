@@ -149,6 +149,13 @@ codex mcp login milton`}</code></pre>
       <a href="https://developers.openai.com/codex/mcp">Codex’s MCP guide ↗</a>
     </p>
     <p>
+      Codex asks for approval before Milton saves a memo, because the same tool
+      can also forget memos. To let it save without asking, add these lines to{" "}
+      <code>~/.codex/config.toml</code>:
+    </p>
+    <pre><code>{`[mcp_servers.milton.tools.create_memo]
+approval_mode = "approve"`}</code></pre>
+    <p>
       Setup offers to add <a href="#standing-line">the standing line</a> to
       AGENTS.md in your Codex home directory (<code>~/.codex/AGENTS.md</code>),
       so it covers every project. Codex adds it only once you approve; if it

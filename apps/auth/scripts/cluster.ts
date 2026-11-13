@@ -3,6 +3,7 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type pg from "pg";
 
 /** Refuses when a fixture's fixed local port is taken, so a run never joins
  * another process. */
@@ -12,6 +13,31 @@ export const assertPortFree = (port: number, refusal: string) =>
     s.once("error", () => reject(new Error(refusal)));
     s.listen(port, "127.0.0.1", () => s.close(() => resolve()));
   });
+
+/** Ends `pool` and waits for each of its connections to close. pg-pool's end()
+ * resolves once it has asked its clients to close, not once they have, so a
+ * cluster stopped right after it can still find an idle session and end it with
+ * 57P01 ("terminating connection due to administrator command"), which the pool
+ * raises as an unhandled error. The wait stops after 5 s: a loopback close takes
+ * milliseconds, and pg-pool emits no "remove" for a client whose connect fails
+ * while the pool ends. */
+export async function endPool(pool: pg.Pool) {
+  let open = pool.totalCount,
+    timer: ReturnType<typeof setTimeout> | undefined;
+  const closed = new Promise<void>((resolve) => {
+    if (!open) return resolve();
+    pool.on("remove", () => {
+      if (--open === 0) resolve();
+    });
+    timer = setTimeout(resolve, 5000);
+  });
+  try {
+    await pool.end();
+    await closed;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /** A one-day self-signed certificate for `name` and its 0600 key, in `dir`. */
 export function selfSignedCertificate(

@@ -18,6 +18,7 @@ import { bundleFixture } from "./bundle-fixture.ts";
 import { httpFixture } from "./http-fixture.ts";
 import { checkRuntimeRole } from "../src/roles.ts";
 import { disposable } from "./disposable.ts";
+import { endPool } from "./cluster.ts";
 import { provisionFixedApp } from "./provision.ts";
 import { fixtureConfig } from "../test/fixture-config.ts";
 import { AUTH_MIGRATIONS } from "./migrations.ts";
@@ -3272,6 +3273,6 @@ try {
   );
   process.exitCode = 1;
 } finally {
-  for (const pool of pools) await pool.end();
+  for (const pool of pools) await endPool(pool);
   await p.stop();
 }

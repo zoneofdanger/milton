@@ -33,6 +33,15 @@ The account, the check and the job were set up on 2026-11-08 (#57 and the daily 
 steps below are what re-creating any of them takes. Each command touches production: the
 release coordinator runs them with Peter's go.
 
+## The newcomer account
+
+`newcomer@milton-test.invalid` is a second fictional account, provisioned the same way
+(`--email`) on 2026-11-13 with Peter's go, for hand-run tests of a newcomer's path with a
+real AI (first setup, saves, fresh reads). It is marked and trial-free like the e2e account,
+and its file is `~/keys/milton.newcomer.env`. The daily check never uses it: never point
+`e2e.ts` or the job at it, and never run a hand test on `e2e@`, whose safety gate stops the
+check on any memo it did not write.
+
 ## Provision the account
 
 Owner-only, from a checkout of the released commit after `bun install --frozen-lockfile`,

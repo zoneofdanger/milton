@@ -17,7 +17,7 @@ shared context for every item beneath it.**
 Work that ships before sign-ups open widely. Use the product vocabulary (memo, tweak, cover
 sheet, report, AI) and plain text on security screens and anything an AI reads.
 
-- [ ] #2 (server, med, founder, blocked: a newcomer test account)
+- [ ] #2 (server, med, founder)
       **Try first setup with a real AI.** A new account starts with no
       memos. Refresh connector discovery for get_report and create_memo (the two tools since
       #121). Run the setup script: paste about five pieces, kept as final-only memos, then
@@ -28,9 +28,8 @@ sheet, report, AI) and plain text on security screens and anything an AI reads.
       ⚠ Not on `e2e@milton-test.invalid`: the twice-daily check stops on any memo it didn't
       write ([the end-to-end check](docs/deploy/e2e.md)), and that fails the job and fires
       its alert. Not on the muse-reviewer accounts either, which are for the Muse directory
-      review. The run needs its own fictional account, made by milton-duo with Peter's go
-      (`test-account.ts --email` in server/scripts), and an AI in its own config, never
-      Peter's connection. Peter held this on 2026-11-13.
+      review. Use `newcomer@milton-test.invalid` ([the newcomer account](docs/deploy/e2e.md#the-newcomer-account))
+      and an AI in its own config, never Peter's connection.
 - [ ] #33 (site, high, founder)
       **Record the HN demo clip as an asciinema time-lapse.** Peter postponed the launch about a
       week (2026-11-09) to build the trail feature first. It shipped as memos on 2026-11-09
@@ -70,12 +69,12 @@ sheet, report, AI) and plain text on security screens and anything an AI reads.
       [the end-to-end check](docs/deploy/e2e.md). Still open: the fresh-chat read and download through real AI clients, and
       cross-client evidence of what AIs save.
 
-- [ ] #13 (server, med, founder, doing, blocked: a newcomer test account)
+- [ ] #13 (server, med, founder, doing)
       **Test the sent-emails setup step with a real AI.** The step
       shipped in #100 on 2026-11-11 ([setup](docs/setup.md); [history](docs/history.md)); Peter
       moved its test-Gmail run to after the release ("Let's ship it first", 2026-11-10). Run one
-      first setup through Claude Code on an empty newcomer test account (the same account #2
-      needs, never the e2e account) with a test Gmail connected; Peter connects the mailbox.
+      first setup through Claude Code on the empty newcomer account (as #2, never the e2e
+      account) with a test Gmail connected; Peter connects the mailbox.
       Check that the AI offered the step only with access, saved exactly what it showed and
       nothing unapproved, and stayed silent about it without a mail tool. Once that passes,
       fill the homepage onboarding row (`onboardingStep` in apps/site/src/pages/index.astro).

@@ -17,14 +17,20 @@ shared context for every item beneath it.**
 Work that ships before sign-ups open widely. Use the product vocabulary (memo, tweak, cover
 sheet, report, AI) and plain text on security screens and anything an AI reads.
 
-- [ ] #2 (server, med) **Try first setup with a real AI.** A new account starts with no
+- [ ] #2 (server, med, founder, blocked: a newcomer test account)
+      **Try first setup with a real AI.** A new account starts with no
       memos. Refresh connector discovery for get_report and create_memo (the two tools since
       #121). Run the setup script: paste about five pieces, kept as final-only memos, then
       the standing line. Setup asks the person to write nothing else.
       Then draft, accept a final, check the one-line receipt, read again in a fresh chat,
       forget a memo, and download TPS.md through the hosted service. Each write to a real
-      account needs Peter's approval. Saves are model-free since 2026-11-02; rerun after the
-      first newcomer test account exists.
+      account needs Peter's approval. Saves are model-free since 2026-11-02.
+      ⚠ Not on `e2e@milton-test.invalid`: the twice-daily check stops on any memo it didn't
+      write ([the end-to-end check](docs/deploy/e2e.md)), and that fails the job and fires
+      its alert. Not on the muse-reviewer accounts either, which are for the Muse directory
+      review. The run needs its own fictional account, made by milton-duo with Peter's go
+      (`test-account.ts --email` in server/scripts), and an AI in its own config, never
+      Peter's connection. Peter held this on 2026-11-13.
 - [ ] #33 (site, high, founder)
       **Record the HN demo clip as an asciinema time-lapse.** Peter postponed the launch about a
       week (2026-11-09) to build the trail feature first. It shipped as memos on 2026-11-09
@@ -68,18 +74,15 @@ sheet, report, AI) and plain text on security screens and anything an AI reads.
       reads the current UTC day twice and fails when a run crosses midnight (seen 2026-11-03
       00:00Z on a parallel run; passes on rerun). Inject the clock or compute the day once.
 
-- [ ] #13 (server, med, founder) **Release the optional find-sent-emails setup step.** Peter
-      reopened it on 2026-11-10 ("go"), answering the 2026-11-03 worry that people won't trust a
-      new product reading their mail: the AI offers it only when it already has a mail tool in
-      that conversation and stays silent otherwise; it reads at most about 30 sent emails from
-      the last 90 days, shows up to five in full and saves only the ones the person approves by
-      number, exactly as shown; Milton gets no mail access. Served text and copy are on branch
-      `agent/find-sent-emails` ([setup](docs/setup.md)). Before release, run one first setup
-      through Claude Code on an empty test account with a test Gmail connected (#8,
-      [the end-to-end check](docs/deploy/e2e.md)); Peter connects the mailbox. Check that the AI
-      offered the step only with access, saved exactly what it showed and nothing unapproved.
-      Once that passes, release, then fill the homepage onboarding row (`onboardingStep` in
-      apps/site/src/pages/index.astro).
+- [ ] #13 (server, med, founder, doing, blocked: a newcomer test account)
+      **Test the sent-emails setup step with a real AI.** The step
+      shipped in #100 on 2026-11-11 ([setup](docs/setup.md); [history](docs/history.md)); Peter
+      moved its test-Gmail run to after the release ("Let's ship it first", 2026-11-10). Run one
+      first setup through Claude Code on an empty newcomer test account (the same account #2
+      needs, never the e2e account) with a test Gmail connected; Peter connects the mailbox.
+      Check that the AI offered the step only with access, saved exactly what it showed and
+      nothing unapproved, and stayed silent about it without a mail tool. Once that passes,
+      fill the homepage onboarding row (`onboardingStep` in apps/site/src/pages/index.astro).
 
 - [ ] #23 (ops, low, founder) **Billing mailbox: accountspayable@meetmilton.com.** Decided
       2026-11-03: subscription and payment issues go to accountspayable@ (the Nina nod), a real,

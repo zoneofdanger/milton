@@ -191,8 +191,9 @@ a reconnect.
   `tell_user`. The mapping is one table, `nextSteps` in `mcp-outcomes.ts`; a test checks
   every code in the source has an entry, and an unknown code gets the
   unexpected-failure step. A memo refusal with a `field` takes that field's step when
-  the table has one: `invalid_input.request` (send only what the person typed, or leave
-  request out, and the rest unchanged); `invalid_input.removed_unsaved` and
+  the table has one: `invalid_input.request` (send what the person asked for, in their
+  own words or one short line if they only agreed, without pasted text, or leave request
+  out, and the rest unchanged); `invalid_input.removed_unsaved` and
   `invalid_input.bidi_unsaved` (`fix_input`: no save under this request_id has
   finished, so send it again fixed with the same one, with no question for the
   person); and

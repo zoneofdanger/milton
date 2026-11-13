@@ -10,21 +10,23 @@ covers:
 
 Rewritten in place by the release coordinator at every release, never appended to; the
 release's record goes in [history](../history.md). How to release and roll back:
-[releases](releases.md). As of 2026-11-12 21:31Z (after #121).
+[releases](releases.md). As of 2026-11-13 02:10Z (after #124).
 
 ## Services
 
-- **App, MCP, admission, daily check:** `milton-app-tweaks-bab745d`,
-  `milton-mcp-tweaks-bab745d`, `milton-admit-00015-cwp` and job `milton-e2e-daily`, all on
-  image `sha256:cbc0e41cd1aad421937dbb9d45a72ad7dbeefb725db6e866e8243973ead11d04` (#121,
-  `bab745d`, memos and tweaks only; Cloud Run shows the amd64 manifest digest
-  `sha256:aaf0770b…`, not this index digest). Rollback, degraded, in the order and with the
-  limits in [releases](releases.md#rolling-back-memos-and-tweaks-only): MCP and the job to
-  `milton-mcp-oneline-6b7a679` and image
-  `sha256:b59a4123b1f7f8b2baf9099b8fbf0b180342ce1cb71b10a0751788a7a8ddfbe6` (#116,
-  `6b7a679`), drain, rerun the affected-accounts query, then `milton-app-oneline-6b7a679` and
-  `milton-admit-00014-v25`. That target stays good until the later cleanup revokes the unused
-  write grants and drops the retired tables and columns; after that it is fix forward.
+- **App, MCP, admission, daily check:** `milton-app-titles-a4e50a7`,
+  `milton-mcp-titles-a4e50a7`, `milton-admit-00016-mf8` and job `milton-e2e-daily`, all on
+  image `sha256:370e09df97c17ed790da17ededef9a6563e6c1e6ca8d988e478f72ee04b19037` (#124,
+  `a4e50a7`, tool titles; Cloud Run shows the amd64 manifest digest `sha256:16d9ee90…`, not
+  this index digest). Rollback, code only, all four together: `milton-app-tweaks-bab745d`,
+  `milton-mcp-tweaks-bab745d`, `milton-admit-00015-cwp` and the job to image
+  `sha256:cbc0e41cd1aad421937dbb9d45a72ad7dbeefb725db6e866e8243973ead11d04` (#121,
+  `bab745d`), which differs only in the tools' titles and `openWorldHint`. Below that, the
+  degraded rollback to #116 in [releases](releases.md#rolling-back-memos-and-tweaks-only):
+  MCP and the job to `milton-mcp-oneline-6b7a679` and image
+  `sha256:b59a4123b1f7f8b2baf9099b8fbf0b180342ce1cb71b10a0751788a7a8ddfbe6`, drain, rerun
+  the affected-accounts query, then `milton-app-oneline-6b7a679` and `milton-admit-00014-v25`;
+  good until the later cleanup, fix forward after.
 - **Auth and its jobs:** `milton-auth-00034-dos`, `milton-auth-mail` and `milton-auth-maint`
   on image `sha256:35ffb003f6a5918ced32bffd039fad9ff9315e108aa98b84c243d601efe2afbd` (#121,
   `bab745d`, built from `apps/auth/Dockerfile` with both base images pinned by digest; amd64

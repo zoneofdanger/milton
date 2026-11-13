@@ -49,6 +49,8 @@ on 2026-11-13 with Peter's go, used only for #33's demo recording ([demo](../dem
 take never meets receipts an earlier take left. Receipts outlive Delete all memos, and an
 AI that reuses a request id gets a refused save on camera. It is marked and trial-free like
 the others, and its file is `~/keys/milton.sam.env`. Never run a hand test on it.
+`sam2@milton-test.invalid` (`~/keys/milton.sam2.env`), made the same way on 2026-11-13, holds
+the Day 1 retake and the sessions after it; `sam@` keeps the first take and is a spare.
 
 ## Provision the account
 

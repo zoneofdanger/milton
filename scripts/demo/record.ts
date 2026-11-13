@@ -55,6 +55,7 @@ type Scene = {
   size?: string; // COLSxROWS
   idleTimeLimit?: number; // seconds; asciinema caps every pause to this on playback
   pauseSeconds?: number; // before typing each line
+  typingScale?: number; // multiplies every typing gap; under 1 types faster
   endHoldSeconds?: number; // after the last reply, before the recording stops
   turnTimeoutSeconds?: number;
 };
@@ -170,15 +171,15 @@ async function waitFor(test: (s: string) => boolean, seconds: number) {
 }
 
 /** Types like a person: uneven gaps, a little longer after words and stops. */
-async function type(text: string) {
+async function type(text: string, scale = 1) {
   for (const ch of text) {
     tmux(["send-keys", "-t", SESSION, "-l", ch]);
     let ms = 45 + Math.random() * 70;
     if (ch === " ") ms += Math.random() * 60;
     if (/[.,!?]/.test(ch)) ms += 120 + Math.random() * 180;
-    await sleep(ms);
+    await sleep(ms * scale);
   }
-  await sleep(350 + Math.random() * 250);
+  await sleep((350 + Math.random() * 250) * scale);
   tmux(["send-keys", "-t", SESSION, "Enter"]);
 }
 
@@ -239,13 +240,13 @@ async function record(scenePath: string, cast: string) {
   if (!(await waitFor((s) => SHELL_READY.test(s), 20)))
     fail("the shell prompt never appeared");
   await sleep(800);
-  await type(scene.command);
+  await type(scene.command, scene.typingScale);
   mark("launched");
   let problem = await waitTurn(client, 90);
   for (const line of problem ? [] : scene.lines) {
     await sleep((scene.pauseSeconds ?? 2) * 1000);
     mark("typed", line);
-    await type(line);
+    await type(line, scene.typingScale);
     problem = await waitTurn(client, scene.turnTimeoutSeconds ?? 300);
     mark("reply-done");
     if (problem) break;

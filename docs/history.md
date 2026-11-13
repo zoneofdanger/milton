@@ -23,6 +23,43 @@ Earlier records are in git history: the last runbook holding them is at commit 4
 (`git show 492b96a:server/deploy/README.md`), and the runbook's later versions are in
 `git log -p server/deploy/README.md` until 2026-11-10, when this file began.
 
+## 2026-11-13: split cut-and-add spots, and the request rule (PRs #133, #135)
+
+- **#133 and #135 (Peter's "go ahead and release once it's merged", typed in this
+  coordinator session, milton-d2, on 2026-11-13 before the merge, answering "When the PR
+  is merged I'll ask for your go to release"; milton-d2 acting as release coordinator on
+  Peter's choice of "You act as milton-duo" the same day), `7c00dc2`:**
+  - **#133** (TODO #42; built by a temporary builder; Codex gpt-6-astra CHANGES REQUESTED at
+    `24532172`, PASS at `7edbc82`; its non-blocking test note fixed at `a954d0c`): code's
+    change list splits a spot into a cut and an addition when one side is whole lines and
+    the other is the end of one kept line. Format-only spots are never split. A reflowed
+    replacement now splits, accepted deliberately. Only new saves get it; stored
+    `memo_changes` rows are unchanged.
+  - **#135** (Peter's "2 and 1" and "go with that wording", 2026-11-13): `request` is what
+    the person asked for, in their own words when they said it, or one short line when they
+    only agreed. The instructions, `create_memo`'s field description, the
+    `invalid_input.request` next step (trimmed to the 160-character limit by the
+    coordinator, same meaning), the memo page note, and the privacy, for-agents and tools
+    pages all changed. It supersedes the 2026-11-11 typed-words-only rule.
+  - **Schema:** none. **Auth:** unchanged. **Site:** published from main at each merge.
+  - **Image** `sha256:5b7d4af77607860bc9cc7c6531d06306e624525283e2574e9cc474f688854791`
+    (amd64 `sha256:b4c7979b…`; Node v26.13.1, user `node`; the bundle holds the new request
+    text and not the old): admit `milton-admit-00017-dgn` at 20:49:36Z, app and MCP
+    `milton-*-reqline-7c00dc2` as tagged no-traffic revisions, traffic moved at 20:50:50Z,
+    `milton-e2e-daily` at 20:51:00Z, with no execution active.
+  - **Live:** app and MCP `/health` and auth `/api/auth/ok` 200, app home 200, MCP 401
+    unauthenticated, admit 403 without a token, forms probe PASS,
+    `milton-e2e-daily-djppp` passed. An authenticated `initialize` and `tools/list` on the
+    newcomer test account served the new request wording.
+  - **Gate** at 21:01Z: clean, with no alert open or opened since 20:50:50Z. No request
+    reached an older app or MCP revision after 20:52:30Z, and there were no error,
+    `store_unavailable` or `permission denied` lines since 20:50Z.
+  - **Checks** on a clean checkout of main at `7c00dc2`: types, tests, format and
+    agent-docs 0; both PRs' CI green.
+  - **Not observed:** a real AI writing the one-line request after a bare acceptance.
+  - **Rollback**, code only: `milton-*-titles-a4e50a7`, `milton-admit-00016-mf8` and the
+    daily job to image `sha256:370e09df…`.
+
 ## 2026-11-13: tool titles (PR #124)
 
 - **#124 (Peter's "ship 124", typed in milton-overlord's pane wH:p1F at about 02:08 UTC on

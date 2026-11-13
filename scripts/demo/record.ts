@@ -5,7 +5,7 @@
  * Procedure, scene format and privacy rules: docs/demo.md. */
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir, userInfo } from "node:os";
+import { homedir, tmpdir, userInfo } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
 const SOCKET = "milton-demo"; // a private tmux server, never the person's own
@@ -78,12 +78,26 @@ function tmux(args: string[], env?: Record<string, string>) {
 
 const screen = () => tmux(["capture-pane", "-p", "-t", SESSION]);
 
+/** Sam's own git identity. Clients read the global git config for the person's
+ * name, and an AI once signed a draft with the operator's name from it. */
+function samGitConfig() {
+  const path = join(tmpdir(), "sam-demo.gitconfig");
+  writeFileSync(path, "[user]\n\tname = Sam\n\temail = sam@example.com\n");
+  return path;
+}
+
 /** Only what the shell and clients need; nothing from the caller's session. */
 function cleanEnv(extra: Record<string, string>) {
   const keep = ["PATH", "HOME", "LANG", "TMPDIR", "USER", "LOGNAME"];
   const env: Record<string, string> = { SHELL: "/bin/zsh" };
   for (const k of keep) if (process.env[k]) env[k] = process.env[k]!;
-  return { ...env, TERM: "xterm-256color", ...extra };
+  return {
+    ...env,
+    TERM: "xterm-256color",
+    GIT_CONFIG_GLOBAL: samGitConfig(),
+    GIT_CONFIG_NOSYSTEM: "1",
+    ...extra,
+  };
 }
 
 /** The neutral working folder: a path that names no person. */

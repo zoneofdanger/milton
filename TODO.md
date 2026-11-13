@@ -64,10 +64,6 @@ sheet, report, AI) and plain text on security screens and anything an AI reads.
       [the end-to-end check](docs/deploy/e2e.md). Still open: the fresh-chat read and download through real AI clients, and
       cross-client evidence of what AIs save.
 
-- [ ] #11 (server, low) **Make the spend test independent of UTC midnight.** A store-spend test
-      reads the current UTC day twice and fails when a run crosses midnight (seen 2026-11-03
-      00:00Z on a parallel run; passes on rerun). Inject the clock or compute the day once.
-
 - [ ] #13 (server, med, founder) **Release the optional find-sent-emails setup step.** Peter
       reopened it on 2026-11-10 ("go"), answering the 2026-11-03 worry that people won't trust a
       new product reading their mail: the AI offers it only when it already has a mail tool in

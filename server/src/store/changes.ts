@@ -101,8 +101,9 @@ const unmarked = (text: string) => text.replace(MARKS, "");
 
 /** The changed spots from a first draft to its final: tokens compared by
  * exact text (case counts), a shared prefix and suffix skipped, edits within
- * MERGE_GAP unchanged tokens on one line merged. `too_large` past the change
- * score's cell bound, MAX_CHANGED_TOKENS or MAX_SPOTS. */
+ * MERGE_GAP unchanged tokens on one line merged, then whole lines against
+ * the end of one kept line split into a cut and an addition. `too_large`
+ * past the change score's cell bound, MAX_CHANGED_TOKENS or MAX_SPOTS. */
 export function changeList(first: string, final: string): ChangeList {
   const A = tokenize(first);
   const B = tokenize(final);
@@ -159,7 +160,35 @@ export function changeList(first: string, final: string): ChangeList {
     }
     merged.push({ ...h });
   }
-  if (merged.length > MAX_SPOTS) return { state: "too_large" };
+  // Whole lines against the end of one kept line are a cut and an addition
+  // that only touch, not one replacement (#42): "thx,\nSam" cut and a
+  // sentence added after a kept "Saturday." are two spots. The tail starts
+  // after a kept token on its line, ends that line and holds no line break,
+  // so no line of one side faces a line of the other; a tail running onto
+  // more lines may hold what the whole lines replace (a sign-off) and stays.
+  const lineBreak = (text: string, T: Token[], i: number) =>
+    i <= 0 || i >= T.length || text.slice(T[i - 1]!.e, T[i]!.s).includes("\n");
+  const oneLine = (text: string, T: Token[], s: number, e: number) =>
+    !text.slice(T[s]!.s, T[e - 1]!.e).includes("\n");
+  const touching = (h: Hunk) => {
+    if (h.a0 === h.a1 || h.b0 === h.b1) return false;
+    if (!lineBreak(first, A, h.a1) || !lineBreak(final, B, h.b1)) return false;
+    const startA = lineBreak(first, A, h.a0);
+    const startB = lineBreak(final, B, h.b0);
+    if (startA === startB) return false;
+    return startA
+      ? oneLine(final, B, h.b0, h.b1)
+      : oneLine(first, A, h.a0, h.a1);
+  };
+  const spots = merged.flatMap((h) =>
+    touching(h)
+      ? [
+          { ...h, b1: h.b0 },
+          { ...h, a0: h.a1 },
+        ]
+      : [h],
+  );
+  if (spots.length > MAX_SPOTS) return { state: "too_large" };
   // An empty side sits right after the token before it.
   const at = (T: Token[], s: number, e: number): [number, number] => {
     if (s < e) return [T[s]!.s, T[e - 1]!.e];
@@ -168,7 +197,7 @@ export function changeList(first: string, final: string): ChangeList {
   };
   return {
     state: "itemized",
-    spots: merged.map((h) => {
+    spots: spots.map((h) => {
       const [draftStart, draftEnd] = at(A, h.a0, h.a1);
       const [finalStart, finalEnd] = at(B, h.b0, h.b1);
       return {

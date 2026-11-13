@@ -147,8 +147,16 @@ changes: the AI-labelled changes and quote matching the spec proposed were left 
   change score splits them, and case counts ("Hi" against "hi" is a change, since
   lowercase is a habit). A shared prefix and suffix are skipped, then a Myers diff runs
   on the middle. Edits separated by at most two unchanged tokens on one line are one
-  **spot**, so `Hi Dana,` → `Dana —` is one. A spot whose sides differ only in Markdown
-  marks (``* _ # ` > ~ |``) and whitespace is about `format`.
+  **spot**, so `Hi Dana,` → `Dana —` is one. A spot whose sides are whole lines on one
+  side and the end of one kept line on the other is two spots, a cut and an addition at
+  the same place, since its sides only touch (#42): the end of a line starts after a
+  kept token on that line, runs to the line's end and holds no line break. So "thx,
+  Sam" cut on its own lines and a sentence added after a kept "Saturday." are two
+  spots, not a sign-off swapped for an offer. A line's end that runs onto more lines
+  stays one spot, since those lines may hold what the whole lines replace (a sign-off),
+  and so does whole lines against whole lines (a replaced line). Rows stored before
+  this keep the old single spot. A spot whose sides differ only in Markdown marks
+  (``* _ # ` > ~ |``) and whitespace is about `format`.
 - **Bounds.** Past 100 spots, past the change score's 20 million token pairs or past
   2,000 changed tokens (which bounds the diff's memory to about 16 MB), the state is
   `too_large` and nothing is listed; otherwise it is `itemized`. A test times the diff

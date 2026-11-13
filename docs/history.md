@@ -23,6 +23,39 @@ Earlier records are in git history: the last runbook holding them is at commit 4
 (`git show 492b96a:server/deploy/README.md`), and the runbook's later versions are in
 `git log -p server/deploy/README.md` until 2026-11-10, when this file began.
 
+## 2026-11-13: posted or sent writing counts (PR #139)
+
+- **#139 (Peter's "go, build and release it", typed in this coordinator session, milton-d2,
+  on 2026-11-13, answering "Should I build and release it?" after the fake-send comparison;
+  built by a temporary builder), `15d93cf`:** three edits to the instructions, word for word
+  as tested. Text posted or sent through another tool counts as writing for the person.
+  Approving a post or send accepts the final, and the AI saves right after it posts. If
+  Milton connects mid-conversation, the AI follows the instructions from then on, saving
+  finals already approved that it still has verbatim. The read-only instructions got the
+  first edit only. The instructions are 3,607 characters, and the test budget was raised
+  from 3,500 to 3,800.
+  - **Evidence:** a 2026-11-13 offline comparison with fake Milton and fake mail servers and
+    a fictional person, 9 runs per cell: saves after sending went from 7/9 to 9/9 in Claude
+    Code and from 0/9 to 9/9 in Codex, with no wrong saves.
+  - **Schema:** none. **Auth and site:** unchanged.
+  - **Image** `sha256:a5d65650f52539a1dc1f39a3dcf4ee509a64159f845c4af7aa0fe00029636e99`
+    (amd64 `sha256:eff03483…`; Node v26.13.1, user `node`; the bundle holds the new
+    sentences): admit `milton-admit-00018-p7z` at 22:42:43Z, app and MCP
+    `milton-*-posted-15d93cf` as tagged no-traffic revisions, traffic moved at 22:43:31Z,
+    `milton-e2e-daily` at 22:43:35Z, with no execution active.
+  - **Live:** app and MCP `/health` and auth `/api/auth/ok` 200, app home 200, MCP 401
+    unauthenticated, admit 403 without a token, forms probe PASS,
+    `milton-e2e-daily-9th87` passed. An authenticated `initialize` on the newcomer test
+    account served both new sentences.
+  - **Gate** at 22:53Z: clean, with no alert open or opened since 22:43:31Z. No request
+    reached an older app or MCP revision after 22:45:00Z, and there were no error,
+    `store_unavailable` or `permission denied` lines since 22:42Z.
+  - **Checks** on a clean checkout of main at `15d93cf`: types, tests, format and
+    agent-docs 0; PR CI green.
+  - **Not observed:** a real AI on the shipped text with a real posting or mail tool.
+  - **Rollback**, code only: `milton-*-reqline-7c00dc2`, `milton-admit-00017-dgn` and the
+    daily job to image `sha256:5b7d4af7…`.
+
 ## 2026-11-13: split cut-and-add spots, and the request rule (PRs #133, #135)
 
 - **#133 and #135 (Peter's "go ahead and release once it's merged", typed in this

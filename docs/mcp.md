@@ -191,8 +191,9 @@ a reconnect.
   `tell_user`. The mapping is one table, `nextSteps` in `mcp-outcomes.ts`; a test checks
   every code in the source has an entry, and an unknown code gets the
   unexpected-failure step. A memo refusal with a `field` takes that field's step when
-  the table has one: `invalid_input.request` (send only what the person typed, or leave
-  request out, and the rest unchanged); `invalid_input.removed_unsaved` and
+  the table has one: `invalid_input.request` (send what the person asked for, in their
+  own words or one short line if they only agreed, without pasted text, or leave request
+  out, and the rest unchanged); `invalid_input.removed_unsaved` and
   `invalid_input.bidi_unsaved` (`fix_input`: no save under this request_id has
   finished, so send it again fixed with the same one, with no question for the
   person); and
@@ -228,8 +229,8 @@ a reconnect.
   [memos](memos.md) and [setup](setup.md). These are behavioural instructions, not
   server enforcement, and no extra setup tool or prompt capability exists. The detail
   of a save (the request rules) lives in the field descriptions, which the budget test
-  does not measure. Asking the AI for only what the person typed is
-  guidance; Milton checks only what [memos](memos.md#the-request) lists.
+  does not measure. What the AI is asked to send as the request is guidance; Milton
+  checks only what [memos](memos.md#the-request) lists.
 - There are two instruction variants, read-write and read-only. Both stay under 3,500
   characters, well inside the 4,096 at which Claude Code truncates; a test enforces this
   and that no error handling is left in them. Error handling lives in each error result's

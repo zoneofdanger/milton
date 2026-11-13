@@ -219,12 +219,20 @@ test("an SDK client receives instructions, discovers the two tools, and reads th
       "save one when the person accepts a final.",
       "send first_draft_missing: true instead",
       "Milton works out the person's changes (their tweaks) from first_draft and final",
-      "request: only what they typed to ask, no pasted text",
       "A memo holds only these: never secrets, the transcript, the person's correction messages or other people's text",
       "Don't save a final holding a secret (say why; never redact)",
       "carries receipt: tell the person that line",
     ])
       expect(save.description).toContain(field);
+    // The request: own words when they said it, a short line when they only
+    // agreed (Peter, 2026-11-13), checked as an idea.
+    for (const idea of [
+      /own words/i,
+      /pasted/i,
+      /only (agreed|approved|accepted)/i,
+      /short line/i,
+    ])
+      expect(save.description?.match(/request:[^.]*\./)?.[0]).toMatch(idea);
     expect(save.description).not.toContain("without asking");
     // Error handling is in each result's next, not the description.
     expect(save.description).toEndWith(
@@ -1054,7 +1062,7 @@ test("a pasted request is refused with its own next step, before any write", asy
       error: "invalid_input",
       field: "request",
       next: {
-        text: "Send only what the person typed to ask, without pasted or quoted text, or leave request out; send the rest unchanged and save with a new request_id.",
+        text: "Send their own words, or one short line if they only agreed, without pasted or quoted text, or leave request out; send the rest unchanged with a new request_id.",
       },
     });
     expect(calls.map((c) => [c.outcome, c.error_code])).toEqual([

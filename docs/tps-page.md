@@ -52,9 +52,10 @@ What each change does to memos and their tweaks is in [memos](memos.md) and
   tweak score and no rounds; legacy cover sheets and notes are listed in TPS.md only
   (milton-overlord, 2026-11-12).
 - `/tps/memo/<id>` shows one memo in full: context; "You asked" with the request in
-  full, a note that the AI is asked to keep only what the person typed and that it is
-  shown only to them and never sent to an AI, and **Remove**; first draft or why there
-  is none; final; "Tweaks"; Forget. Another account's or an unknown id is a 404.
+  full, a note that it is the person's own words or the AI's one-line note when they
+  only agreed, shown only to them and never sent to an AI, and **Remove**; first draft
+  or why there is none; final; "Tweaks"; Forget. Another account's or an unknown id is
+  a 404.
 - "Tweaks" lists code's stored changes in text order, with no labels
   ([memos](memos.md#changes)). Each shows before → after, or `added:` or `cut:` when
   one side is empty. A Markdown-only spot says "formatting". A side cut at 300

@@ -60,7 +60,7 @@ plain code. How a save commits is in [saves](saves.md).
   work.
 - With a kept first draft, the list of what changed ([Changes](#changes)) and its state:
   `itemized` or `too_large`; empty for memos saved before 0015.
-- The person's typed **request**, when the AI sends one on a drafted memo
+- The person's **request**, when the AI sends one on a drafted memo
   ([The request](#the-request)).
 - A context: a one-line placeholder-safe `summary` of the situation and the text
   replied to (never the quoted text, at most 200 characters), `medium`, and optional
@@ -187,10 +187,19 @@ changes: the AI-labelled changes and quote matching the spec proposed were left 
 ## The request
 
 - `request` is optional and only on a drafted memo (`first_draft` or
-  `first_draft_missing`). The AI is asked to send the instruction the person typed to
-  start the writing, exactly as typed, with pasted or quoted material and secrets cut and
-  each cut marked `[…]`; in edit mode the instruction, never the text to edit; never
-  their later corrections. That is guidance, not a guarantee.
+  `first_draft_missing`). It is what the person asked for. When they said what to write,
+  the AI is asked to send their instruction exactly as typed, with pasted or quoted
+  material and secrets cut and each cut marked `[…]`; in edit mode the instruction, never
+  the text to edit; never their later corrections. When they only agreed to the AI's
+  offer to write or approved the result, the AI is asked to write one short line on what
+  they agreed to, with no pasted or other people's text. That is guidance, not a
+  guarantee.
+- Peter decided this on 2026-11-13, answering "2 and 1" to two options: the AI writes a
+  short line when the person only agreed, and the served rule is worded loosely, with no
+  example phrases, for the AI to judge. It supersedes the 2026-11-11 rule
+  ([memo-evidence spec](research/memo-evidence-spec-2026-11-11.md), point 4) that a
+  request is only typed words: in coding sessions the AI offers to draft and the person
+  says yes, so typed-only requests recorded "yes".
 - What Milton checks: it is trimmed, then must be 1 to 600 characters and at most 12
   lines, well formed, with no control characters but line breaks. A request that looks
   like quoted or forwarded mail is refused: a line starting `>`, an "On … wrote:" line,
@@ -274,9 +283,10 @@ measured per client before any claim of reliability.
   declines, or, with `keep_memos` false, anything they didn't ask to remember. Milton
   has no secrets filter: a public, model-free one is easy to route around and refuses
   real text, so the instructions are the guard.
-- Send as `request` only what they typed to ask, no pasted text. Never send secrets, the
-  person's correction messages or other people's text; summarize the situation in
-  `context.summary`.
+- Send as `request` what they asked for: their own words when they said it, no pasted
+  text, or one short line on what they agreed to when they only agreed to the AI's offer
+  or the result. Never send secrets, the person's correction messages or other people's
+  text; summarize the situation in `context.summary`.
 - When the person asks to remember a preference, apply it now and keep it in the AI's
   own memory or instructions; Milton keeps no standing rules, and their changes to the
   AI's drafts are kept as tweaks.

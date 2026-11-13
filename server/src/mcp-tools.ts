@@ -141,7 +141,7 @@ export const memoInput = z
       .trim()
       .optional()
       .describe(
-        "Only with first_draft or first_draft_missing: what the person typed to ask for this writing, exactly as typed, at most 600 characters and 12 lines. Cut pasted or quoted text (an email, a thread, a document) and anything secret, marking each cut […]; change nothing else. In edit mode, their instruction, never the text to edit. Never their later corrections.",
+        "Only with first_draft or first_draft_missing: what the person asked for, at most 600 characters and 12 lines. When they said what to write, their own words exactly as typed: cut pasted or quoted text (an email, a thread, a document) and anything secret, marking each cut […]; change nothing else. In edit mode, their instruction, never the text to edit. Never their later corrections. When they only agreed to your offer or approved the result, one short line on what they agreed to, with no pasted or other people's text.",
       ),
     context: memoContextInput,
     ...kindFields,

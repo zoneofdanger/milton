@@ -131,7 +131,7 @@ export const nextSteps: Record<string, NextStep> = {
   // By field, the part of a memo a refusal names.
   "invalid_input.request": step(
     "fix_input",
-    "Send only what the person typed to ask, without pasted or quoted text, or leave request out; send the rest unchanged and save with a new request_id.",
+    "Send their own words, or one short line if they only agreed, without pasted or quoted text, or leave request out; send the rest unchanged with a new request_id.",
   ),
   // A field create_memo no longer takes: drop it, and check before saving
   // again, since the refusal can't tell whether an earlier attempt saved.

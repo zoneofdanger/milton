@@ -45,7 +45,6 @@ test("the served text uses one word for each thing and describes the memo workfl
     "A revision you just showed is not accepted yet",
     "Show the receipt word for word",
     "send first_draft_missing instead of rebuilding it",
-    "request: only what they typed to ask, no pasted text",
     "Never send secrets, their corrections or other people's text",
     "a final holding a secret (say why; never redact)",
     "When the person asks you to remember a preference, apply it now and keep it in your own memory or instructions; Milton keeps no standing rules, and their changes to your drafts are kept as tweaks.",
@@ -72,6 +71,20 @@ test("the served text uses one word for each thing and describes the memo workfl
     expect(memoInput.shape).not.toHaveProperty(retired);
   expect(saveMemoInput.shape).not.toHaveProperty("cover_sheet");
   expect(memoInput.shape.request.description).toContain("marking each cut […]");
+  // The request is what the person asked for (Peter, 2026-11-13): their own
+  // words, no pasted text, when they said what to write; a short line on what
+  // they agreed to when they only agreed. Checked as an idea, not a phrase.
+  for (const text of [
+    storeInstructions.match(/request:[^.]*\./)?.[0] ?? "",
+    memoInput.shape.request.description ?? "",
+  ])
+    for (const idea of [
+      /own words/i,
+      /pasted/i,
+      /only (agreed|approved|accepted)/i,
+      /short line/i,
+    ])
+      expect(text).toMatch(idea);
   // A retired phrase: the served text never names that removed feature.
   for (const served of [
     storeInstructions,

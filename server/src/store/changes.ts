@@ -165,6 +165,9 @@ export function changeList(first: string, final: string): ChangeList {
   // kept "Saturday." are two spots. The tail starts after a kept token on its
   // line, ends that line and holds no line break; a tail running onto more
   // lines may hold what the whole lines replace (a sign-off) and stays. A
+  // reflowed replacement of this shape is split too, on purpose: layout
+  // can't tell it apart, and a cut plus an addition is never false, only
+  // less specific, where a wrong pairing tells an AI something untrue. A
   // format-only spot is never split, so it stays about format.
   const lineBreak = (text: string, T: Token[], i: number) =>
     i <= 0 || i >= T.length || text.slice(T[i - 1]!.e, T[i]!.s).includes("\n");

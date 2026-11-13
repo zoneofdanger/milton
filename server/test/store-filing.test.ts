@@ -843,6 +843,22 @@ test("whole lines against the end of one kept line are a cut and an addition, no
     ["Sorry to miss it.", ""],
     ["", "thx,\nSam"],
   ]);
+  // Split on purpose, though these are reflowed replacements (review of
+  // 24532172, P2): layout alone can't tell them from the cases above, and a
+  // cut plus an addition is never false, only less specific, while a wrong
+  // pairing tells an AI something untrue (docs/memos.md, "Code's list").
+  expect(
+    sides("See you soon.\n\nKind regards,\nSam", "See you soon. —S"),
+  ).toEqual([
+    ["Kind regards,\nSam", ""],
+    ["", "—S"],
+  ]);
+  expect(
+    sides("I can come.\nSunday works better!", "I can come. Monday is easier."),
+  ).toEqual([
+    ["Sunday works better!", ""],
+    ["", "Monday is easier."],
+  ]);
   // One format spot, never split: both sides unmark to "Ready" (P1).
   expect(changeList("Intro.\n# Ready", "Intro. **Ready**")).toEqual({
     state: "itemized",

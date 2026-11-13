@@ -70,10 +70,6 @@ sheet, report, AI) and plain text on security screens and anything an AI reads.
       [the end-to-end check](docs/deploy/e2e.md). Still open: the fresh-chat read and download through real AI clients, and
       cross-client evidence of what AIs save.
 
-- [ ] #11 (server, low) **Make the spend test independent of UTC midnight.** A store-spend test
-      reads the current UTC day twice and fails when a run crosses midnight (seen 2026-11-03
-      00:00Z on a parallel run; passes on rerun). Inject the clock or compute the day once.
-
 - [ ] #13 (server, med, founder, doing, blocked: a newcomer test account)
       **Test the sent-emails setup step with a real AI.** The step
       shipped in #100 on 2026-11-11 ([setup](docs/setup.md); [history](docs/history.md)); Peter

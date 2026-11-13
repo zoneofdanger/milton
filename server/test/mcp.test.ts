@@ -1062,7 +1062,7 @@ test("a pasted request is refused with its own next step, before any write", asy
       error: "invalid_input",
       field: "request",
       next: {
-        text: "Send what the person asked for, in their own words or one short line if they only agreed, without pasted or quoted text, or leave request out; send the rest unchanged and save with a new request_id.",
+        text: "Send their own words, or one short line if they only agreed, without pasted or quoted text, or leave request out; send the rest unchanged with a new request_id.",
       },
     });
     expect(calls.map((c) => [c.outcome, c.error_code])).toEqual([

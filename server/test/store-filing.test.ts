@@ -912,7 +912,7 @@ test("whole lines against the end of one kept line are a cut and an addition, no
     expect(sides(first, final)).toEqual([[before, after]]);
 });
 
-test("generated drafts: the spots rebuild the final token for token, in order, and none is whole lines against the end of one kept line", () => {
+test("generated drafts: the spots rebuild the final token for token, in order, and only a format spot is whole lines against the end of one kept line", () => {
   // xorshift32, as the served-changes test generates text; a few words and
   // gaps so that kept tokens, line breaks and both ends of a text recur.
   let state = 20261113;
@@ -935,10 +935,17 @@ test("generated drafts: the spots rebuild the final token for token, in order, a
     !/\S/.test(s.slice(0, at)) || /\n\s*$/.test(s.slice(0, at));
   const endsLine = (s: string, at: number) =>
     !/\S/.test(s.slice(at)) || /^\s*\n/.test(s.slice(at));
+  // A fixed case first: an intact format spot of the split shape (second
+  // review of 7edbc82, finding 4), then the generated pairs.
+  const pairs = [
+    ["Intro.\n# Ready", "Intro. **Ready**"],
+    ...Array.from({ length: 400 }, () => [
+      text(1 + rand(14)),
+      text(1 + rand(14)),
+    ]),
+  ];
   let oneSided = 0;
-  for (let n = 0; n < 400; n++) {
-    const first = text(1 + rand(14));
-    const final = text(1 + rand(14));
+  for (const [first, final] of pairs as [string, string][]) {
     const list = changeList(first, final);
     if (list.state !== "itemized") throw new Error("generated text too large");
     let rebuilt = "";
@@ -955,6 +962,8 @@ test("generated drafts: the spots rebuild the final token for token, in order, a
         oneSided++;
         continue;
       }
+      // A format-only spot is never split, whatever its shape.
+      if (s.format) continue;
       const startA = startsLine(first, s.draftStart);
       const tail = startA
         ? final.slice(s.finalStart, s.finalEnd)

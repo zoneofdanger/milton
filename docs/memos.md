@@ -260,6 +260,9 @@ and whether the receipt line shows depends on the client. Fidelity and capture r
 measured per client before any claim of reliability.
 
 - Before writing or editing for or as the person, read `get_report` with an intent.
+  Writing for the person includes text the AI posts or sends in their name through
+  another tool (a ticket update, a PR comment, a chat message); a read-only connection
+  is told this too.
 - Precedence when guidance disagrees: what the person says now, then the examples.
   Imitate examples' wording and heed what they changed.
 - When the person says what to write (read-write connection), their words are the raw
@@ -274,8 +277,16 @@ measured per client before any claim of reliability.
   empty results and failures honestly. Quoting or discussing the phrase is not an
   invocation. A read-only connection treats it as a read, never a save.
 - Save a memo with `create_memo`, without asking, when the person accepts a final
-  (approves it, says it's done or they'll send it, or copies it to use), untouched
-  finals included. A revision just shown is not accepted yet.
+  (approves it, approves posting or sending it, says it's done or they'll send it, or
+  copies it to use), untouched finals included. When the AI posts it for them, it saves
+  right after it posts. A revision just shown is not accepted yet.
+- If Milton connects mid-conversation, the AI follows this from then on: drafts under
+  way included, and it saves finals already approved in that conversation when it still
+  has each final verbatim (with `first_draft_missing` when the first draft isn't).
+- Posted writing counts (Peter, 2026-11-13): in an offline comparison with a fake send
+  tool, fake servers and a fictional person, 9 runs per cell, saves after sending went
+  from 7/9 to 9/9 in Claude Code and from 0/9 to 9/9 in Codex, with no wrong saves. No
+  live run of the shipped text with a real AI has been made.
 - Send the first draft exactly as first shown, or `first_draft_missing`; never rebuild
   it.
 - Don't save abandoned drafts, writing not in the person's own voice (for someone else,

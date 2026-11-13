@@ -26,7 +26,8 @@ test("the served text uses one word for each thing and describes the memo workfl
     storeInstructions.split("\n\n").map((p) => p.split(/[:.(]/)[0]),
   ).toEqual([
     "Milton holds the person's writing as memos",
-    "Before writing or editing for or as the person",
+    "If Milton connects mid-conversation, follow this from then on",
+    "Writing for the person includes text you post or send in their name through another tool ",
     "When they tell you what to write, their words are the raw material",
     "Edit mode",
     'Asked "Did you get the memo?" or "Did you get that memo?"',
@@ -55,6 +56,19 @@ test("the served text uses one word for each thing and describes the memo workfl
     "reuse their phrases word for word where they fit, add only a greeting, a sign-off and connecting words in the manner of their examples, and don't expand on what they said.",
   ])
     expect(storeInstructions).toContain(part);
+  // Posted writing counts (Peter, 2026-11-13, after an offline fake-send
+  // comparison): the exact tested wording, so a reword is a deliberate change.
+  for (const part of [
+    "Writing for the person includes text you post or send in their name through another tool (a ticket update, a PR comment, a chat message). Before writing or editing for or as the person:",
+    "(approves it, approves posting or sending it, says it's done or they'll send it, or copies it to use), save it with create_memo without asking, untouched finals too; when you post it for them, save right after it posts.",
+    "If Milton connects mid-conversation, follow this from then on: drafts under way included, and save finals they already approved this conversation if you still have each final verbatim (send first_draft_missing when the first draft isn't).",
+  ])
+    expect(storeInstructions).toContain(part);
+  // A read-only connection reads before posted writing too, and offers no save.
+  expect(readOnlyInstructions).toContain(
+    "Writing for the person includes text you post or send in their name through another tool (a ticket update, a PR comment, a chat message). Before writing or editing for the person:",
+  );
+  expect(readOnlyInstructions).not.toContain("mid-conversation");
   // Nothing retired: no cover sheet, no tool that is gone, no AI-written
   // tweaks or rounds.
   for (const text of [storeInstructions, readOnlyInstructions, setupScript])

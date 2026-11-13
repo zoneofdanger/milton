@@ -117,25 +117,6 @@ sheet, report, AI) and plain text on security screens and anything an AI reads.
       retired with that design. Full argument: PR #67 (closed unmerged) and its
       description's Round 2 section.
 
-- [ ] #34 (server, low, founder, blocked: Peter's two weeks of real memos use after #76)
-      **Measure duplicate tweaks on Peter's account, report only.** Decided 2026-11-09
-      (Peter): revisit the OpenAI Decisions API idea after his two weeks. A weekly job takes
-      each tweak saved since its last run, shortlists the account's 10 closest tweaks by word
-      overlap, and asks Decisions (gpt-6-luna, one Choice question) "the same as one of these,
-      or none?". Report only: list what it would merge, change nothing. It sends Peter's tweak
-      lines (never memo text) to OpenAI, so it needs his go on the day. Few duplicates: drop
-      this item. Don't assume AIs reuse served tweak ids: on #76's first instructions none did
-      (0 of 118 tweaks in qa's runs); after the Tweaks text rewrite (886e71c) Claude reused the
-      id in the one repeat case qa reran. Many duplicates: the same job merges for real,
-      only at probability 0.90 or more, never a reworded tweak, never across accounts, keeping
-      the older text, logging each merge with undo on the TPS page, plus a privacy-page line.
-      Offline test (2026-11-09, fictional, local-only notes, not in the repository):
-      at 10 candidates, 70% of reworded repeats found against 19% for exact match, 0 false
-      merges in 95 must-not-merge cases; at 50 candidates recall fell to 43%. About 330 ms and
-      $0.0001 per tweak, which is why it runs weekly, off the save path. ⚠ Without the 0.90
-      threshold it wrongly merged near-misses ("replies to clients" vs "support answers").
-      Ranking with Decisions was tested too and rejected: no draft gain.
-
 - [ ] #36 (server, low, founder, blocked: a longer period of active users and usage)
       **Pool what people delete from AI drafts, opt-in.** Across accounts, count the phrases
       people remove between an AI's first draft and the final they accept. Plain code does the

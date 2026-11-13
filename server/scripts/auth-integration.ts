@@ -68,7 +68,11 @@ import { ensureSubscription } from "../src/billing";
 import type { SessionUser } from "../src/auth-session";
 import { createProvider } from "../../apps/auth/src/provider";
 import { ISSUER, AUTH_ORIGIN } from "../../apps/auth/src/config";
-import { assertPortFree, startCluster } from "../../apps/auth/scripts/cluster";
+import {
+  assertPortFree,
+  endPool,
+  startCluster,
+} from "../../apps/auth/scripts/cluster";
 import { fixtureConfig } from "../../apps/auth/test/fixture-config";
 import { AUTH_MIGRATIONS } from "../../apps/auth/scripts/migrations";
 import { createApp as createAuthPages } from "../../apps/auth/src/app";
@@ -5607,9 +5611,6 @@ try {
       server.closeAllConnections();
       server.close();
     }
-  await Promise.allSettled([
-    ...pools.map((pool) => pool.end()),
-    closeDatabasePools(),
-  ]);
+  await Promise.allSettled([...pools.map(endPool), closeDatabasePools()]);
   cluster.stop();
 }

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import pg from "pg";
-import { startCluster } from "./cluster.ts";
+import { endPool, startCluster } from "./cluster.ts";
 
 export async function disposable(
   prerequisitesFile = new URL(
@@ -165,7 +165,7 @@ export async function disposable(
       configs,
       caPath: cert,
       stop: async () => {
-        await owner.end();
+        await endPool(owner);
         cluster.stop();
       },
     };

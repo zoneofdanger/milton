@@ -814,6 +814,173 @@ test("code lists what changed: merged spots, Markdown-only spots about format, i
   });
 });
 
+test("whole lines against the end of one kept line are a cut and an addition, not one replacement; every other spot stays whole", () => {
+  const sides = (first: string, final: string) => {
+    const list = changeList(first, final);
+    return list.state === "itemized"
+      ? list.spots.map((s) => [
+          first.slice(s.draftStart, s.draftEnd),
+          final.slice(s.finalStart, s.finalEnd),
+        ])
+      : [];
+  };
+  const saturday = "I can't come in on Saturday.";
+  // Split: whole lines cut, words added to the end of a kept line (#131).
+  expect(
+    sides(
+      `Hey Jordan —\n\n${saturday}\n\nthx,\nSam`,
+      `${saturday} I can do a couple hours Sunday morning if that helps.`,
+    ),
+  ).toEqual([
+    ["Hey Jordan —", ""],
+    ["thx,\nSam", ""],
+    ["", "I can do a couple hours Sunday morning if that helps."],
+  ]);
+  // Split, the mirror: a kept line's end cut, whole lines added.
+  expect(
+    sides(`${saturday} Sorry to miss it.`, `${saturday}\n\nthx,\nSam`),
+  ).toEqual([
+    ["Sorry to miss it.", ""],
+    ["", "thx,\nSam"],
+  ]);
+  // Split on purpose, though these are reflowed replacements (review of
+  // 24532172, P2): layout alone can't tell them from the cases above, and a
+  // cut plus an addition is never false, only less specific, while a wrong
+  // pairing tells an AI something untrue (docs/memos.md, "Code's list").
+  expect(
+    sides("See you soon.\n\nKind regards,\nSam", "See you soon. —S"),
+  ).toEqual([
+    ["Kind regards,\nSam", ""],
+    ["", "—S"],
+  ]);
+  expect(
+    sides("I can come.\nSunday works better!", "I can come. Monday is easier."),
+  ).toEqual([
+    ["Sunday works better!", ""],
+    ["", "Monday is easier."],
+  ]);
+  // One format spot, never split: both sides unmark to "Ready" (P1).
+  expect(changeList("Intro.\n# Ready", "Intro. **Ready**")).toEqual({
+    state: "itemized",
+    spots: [
+      {
+        draftStart: 7,
+        draftEnd: 14,
+        finalStart: 7,
+        finalEnd: 16,
+        format: true,
+      },
+    ],
+  });
+  // One spot: a greeting rewritten, a word swapped mid-sentence, a line's
+  // end rewritten in place, a sign-off's word changed, a whole line replaced,
+  // and a line's end cut with the lines after it, whose sign-off the added
+  // line replaces.
+  for (const [first, final, before, after] of [
+    [
+      "Hi Dana,\n\nSee you Thursday.",
+      "Dana —\n\nSee you Thursday.",
+      "Hi Dana,",
+      "Dana —",
+    ],
+    [
+      "We can meet Thursday at noon.",
+      "We can meet Friday at noon.",
+      "Thursday",
+      "Friday",
+    ],
+    [
+      `${saturday} Sorry to miss it.`,
+      `${saturday} Sunday works instead!`,
+      "Sorry to miss it.",
+      "Sunday works instead!",
+    ],
+    [
+      `${saturday}\n\nthx,\nSam`,
+      `${saturday}\n\nThanks,\nSam`,
+      "thx",
+      "Thanks",
+    ],
+    ["See you then.\n\nSam", "See you then.\n\n—S", "Sam", "—S"],
+    [
+      "I'll catch up on the work.\n\nKind regards,\nLee",
+      "I'll catch up\n\ncheers\nLee",
+      "on the work.\n\nKind regards,",
+      "cheers",
+    ],
+  ] as const)
+    expect(sides(first, final)).toEqual([[before, after]]);
+});
+
+test("generated drafts: the spots rebuild the final token for token, in order, and only a format spot is whole lines against the end of one kept line", () => {
+  // xorshift32, as the served-changes test generates text; a few words and
+  // gaps so that kept tokens, line breaks and both ends of a text recur.
+  let state = 20261113;
+  const rand = (k: number) => {
+    state ^= state << 13;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    return (state >>> 0) % k;
+  };
+  const WORDS = ["Hi", "Sam", "thx", ",", ".", "Saturday", "can", "—", "**"];
+  const GAPS = [" ", " ", "\n", "\n\n", ""];
+  const text = (k: number) =>
+    Array.from(
+      { length: k },
+      () => WORDS[rand(WORDS.length)]! + GAPS[rand(GAPS.length)]!,
+    ).join("");
+  const tokens = (s: string) =>
+    s.match(/[\p{L}\p{N}_'’]+|[^\s\p{L}\p{N}_'’]/gu) ?? [];
+  const startsLine = (s: string, at: number) =>
+    !/\S/.test(s.slice(0, at)) || /\n\s*$/.test(s.slice(0, at));
+  const endsLine = (s: string, at: number) =>
+    !/\S/.test(s.slice(at)) || /^\s*\n/.test(s.slice(at));
+  // A fixed case first: an intact format spot of the split shape (second
+  // review of 7edbc82, finding 4), then the generated pairs.
+  const pairs = [
+    ["Intro.\n# Ready", "Intro. **Ready**"],
+    ...Array.from({ length: 400 }, () => [
+      text(1 + rand(14)),
+      text(1 + rand(14)),
+    ]),
+  ];
+  let oneSided = 0;
+  for (const [first, final] of pairs as [string, string][]) {
+    const list = changeList(first, final);
+    if (list.state !== "itemized") throw new Error("generated text too large");
+    let rebuilt = "";
+    let a = 0;
+    let b = 0;
+    for (const s of list.spots) {
+      expect(s.draftStart >= a && s.finalStart >= b).toBe(true);
+      rebuilt += ` ${first.slice(a, s.draftStart)} ${final.slice(s.finalStart, s.finalEnd)}`;
+      a = s.draftEnd;
+      b = s.finalEnd;
+      if (s.draftStart === s.draftEnd || s.finalStart === s.finalEnd) {
+        if (s.draftStart === s.draftEnd && s.finalStart === s.finalEnd)
+          throw new Error("empty spot");
+        oneSided++;
+        continue;
+      }
+      // A format-only spot is never split, whatever its shape.
+      if (s.format) continue;
+      const startA = startsLine(first, s.draftStart);
+      const tail = startA
+        ? final.slice(s.finalStart, s.finalEnd)
+        : first.slice(s.draftStart, s.draftEnd);
+      expect(
+        endsLine(first, s.draftEnd) &&
+          endsLine(final, s.finalEnd) &&
+          startA !== startsLine(final, s.finalStart) &&
+          !tail.includes("\n"),
+      ).toBe(false);
+    }
+    rebuilt += ` ${first.slice(a)}`;
+    expect(tokens(rebuilt)).toEqual(tokens(final));
+  }
+  expect(oneSided).toBeGreaterThan(0);
+});
+
 test("the diff's work stays bounded on the largest texts a save can carry", () => {
   // Both texts together fit one 256 KiB request. Each case aims at one bound:
   // the score's cell bound after the shared prefix and suffix, the diff's

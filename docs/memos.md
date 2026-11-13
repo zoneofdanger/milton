@@ -147,8 +147,23 @@ changes: the AI-labelled changes and quote matching the spec proposed were left 
   change score splits them, and case counts ("Hi" against "hi" is a change, since
   lowercase is a habit). A shared prefix and suffix are skipped, then a Myers diff runs
   on the middle. Edits separated by at most two unchanged tokens on one line are one
-  **spot**, so `Hi Dana,` → `Dana —` is one. A spot whose sides differ only in Markdown
-  marks (``* _ # ` > ~ |``) and whitespace is about `format`.
+  **spot**, so `Hi Dana,` → `Dana —` is one. A spot whose sides differ only in
+  Markdown marks (``* _ # ` > ~ |``) and whitespace is about `format`, and is never
+  split.
+- **Split spots** (#42). Any other spot whose sides are whole lines on one side and the
+  end of one kept line on the other is two spots, a cut and an addition at the same
+  place. The end of a line starts after a kept token on that line, runs to the line's
+  end and holds no line break. So "thx, Sam" cut on its own lines and a sentence added
+  after a kept "Saturday." are two spots, not a sign-off swapped for an offer. A
+  reflowed replacement of the same shape is split too, on purpose ("Kind regards, Sam"
+  on its own lines → "—S" at the end of the line before): layout alone can't tell it
+  from unrelated edits, and a cut plus an addition is never false, only less specific,
+  while a wrong pairing tells an AI something untrue (decided on PR #133's review). A
+  line's end that runs onto more lines stays one spot, since those lines may hold what
+  the whole lines replace (a sign-off), and so do whole lines against whole lines (a
+  replaced line). Known limit: kept punctuation after a spot stops it ending its line,
+  so "Thanks!" → "I can do Sunday!" after a kept line stays one spot. Rows stored
+  before this keep the old single spot.
 - **Bounds.** Past 100 spots, past the change score's 20 million token pairs or past
   2,000 changed tokens (which bounds the diff's memory to about 16 MB), the state is
   `too_large` and nothing is listed; otherwise it is `itemized`. A test times the diff

@@ -46,6 +46,7 @@ the backlog. The concept files indexed below hold everything else.
 - [checks](docs/checks.md) — What CI runs on every push and PR, the migration guards, the copy-drift and contrast tests, agent-docs check, and the theme package
 - [database](docs/database.md) — The one shared Postgres: tenancy, runtime roles and their grants and timeouts, what the schema enforces, migrations and backups
 - [deletion](docs/deletion.md) — What the person controls and how long Milton keeps it: forgetting, Delete all memos, disconnecting an AI, account deletion and the deletion inventory
+- [demo](docs/demo.md) — Recording the demo clip's scenes: the driver that types into a real Claude Code or Codex session under asciinema, scene files and the privacy scan
 - [deploy/alerts](docs/deploy/alerts.md) — Milton's production alerts as code: each policy, its threshold and reason, the release gate, and how monitoring.ts plans and applies them
 - [deploy/cloud](docs/deploy/cloud.md) — Milton's hosting as operated: the services, cloud resources and edge, the admission service, secrets and the database logins
 - [deploy/e2e](docs/deploy/e2e.md) — The fictional test account and the twice-daily end-to-end check against production: provisioning, the run, the job, key renewal

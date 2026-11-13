@@ -11,6 +11,7 @@ import { dirname, join, resolve } from "node:path";
 const SOCKET = "milton-demo"; // a private tmux server, never the person's own
 const SESSION = "demo";
 const SUPPORT = "/private/tmp/milton-demo-support"; // shell rc and MCP config, never on screen
+const PLAYER_SPEED = 1.5; // the published player's speed, docs/demo.md
 const SHELL_READY = /^\$ ?$/m; // capture-pane drops the trailing space
 
 type Client = {
@@ -21,6 +22,7 @@ type Client = {
   ready: RegExp; // the input prompt is back
   busy: RegExp; // a reply is still being written
   blocked: RegExp; // a dialog is waiting, so typing would answer it
+  notice?: RegExp; // group 1 is whatever the startup banner shows under its fixed lines
 };
 
 const CLIENTS: Record<string, Client> = {
@@ -32,6 +34,7 @@ const CLIENTS: Record<string, Client> = {
     ready: /─{20,}\n❯[ \u00a0]/, // Claude Code puts a no-break space after ❯
     busy: /esc to interrupt/i,
     blocked: /Esc to cancel/,
+    notice: /Claude Code v[^\n]*\n[^\n]*\n[^\n]*\n([\s\S]*?)─{20,}/,
   },
   codex: {
     profileVar: "DEMO_CODEX_HOME",
@@ -198,8 +201,34 @@ async function waitTurn(client: Client, timeoutSeconds: number) {
   return `no reply finished within ${timeoutSeconds}s`;
 }
 
+/** Claude Code's banner can carry a rotating notice (an ad, a new model) that no
+ * setting turns off but that stops after a few showings. Launch unrecorded until
+ * the banner is plain, so the take needs no cut. */
+async function preflight(scene: Scene, client: Client) {
+  if (!client.notice) return;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    start(scene, client, null);
+    if (!(await waitFor((s) => SHELL_READY.test(s), 20)))
+      fail("the shell prompt never appeared");
+    tmux(["send-keys", "-t", SESSION, "-l", scene.command]);
+    tmux(["send-keys", "-t", SESSION, "Enter"]);
+    const ready = await waitFor((s) => client.ready.test(s), 60);
+    await sleep(1500);
+    const s = screen();
+    tmux(["kill-server"]);
+    if (!ready) fail(`the client never showed its prompt:\n${s}`);
+    const notice = s.match(client.notice)?.[1]?.trim();
+    if (!notice) return;
+    console.error(
+      `record: launch ${attempt} showed a banner notice: ${notice}`,
+    );
+  }
+  fail("the banner still shows a notice after 3 unrecorded launches");
+}
+
 async function record(scenePath: string, cast: string) {
   const { scene, client } = loadScene(scenePath);
+  await preflight(scene, client);
   const out = resolve(cast);
   mkdirSync(dirname(out), { recursive: true });
   const timeline: { t: number; event: string; line?: string }[] = [];
@@ -296,7 +325,7 @@ function scan(cast: string) {
   }
   const unique = [...new Set(hits)];
   console.log(
-    `${cast}: ${seconds.toFixed(1)}s recorded, ${trimmed.toFixed(1)}s on playback (idle limit ${header.idle_time_limit ?? "none"}s), ${header.term?.cols}x${header.term?.rows}`,
+    `${cast}: ${seconds.toFixed(1)}s recorded, ${trimmed.toFixed(1)}s with pauses trimmed (idle limit ${header.idle_time_limit ?? "none"}s), ${(trimmed / PLAYER_SPEED).toFixed(1)}s at ${PLAYER_SPEED}x, ${header.term?.cols}x${header.term?.rows}`,
   );
   console.log(
     unique.length

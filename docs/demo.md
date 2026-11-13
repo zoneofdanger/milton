@@ -39,7 +39,7 @@ bun scripts/demo/record.ts scan <out>/day-1.cast
 
 `warmup` leaves the scene's shell running unrecorded; attach, start the client and clear
 first-run dialogs (folder trust, browser tools, renderer offers), then exit. `record`
-writes the `.cast`, a `.cast.timeline.json` of when each line was typed and answered, and
+first launches the client unrecorded (see Banner below), then records and writes the `.cast`, a `.cast.timeline.json` of when each line was typed and answered, and
 then scans the cast. Keep recordings outside the repository.
 
 Empty the test account before a take that must start fresh (Delete all memos, in
@@ -50,9 +50,28 @@ Empty the test account before a take that must start fresh (Delete all memos, in
 `scripts/demo/scenes/*.json`, one per scene: `client` (`claude` or `codex`), `command`
 (typed at the prompt), `lines` (typed in order), and optional `cwd` (default
 `/private/tmp/sam-demo`), `size` (`COLSxROWS`, default `100x30`), `idleTimeLimit`
-(seconds, default 2), `pauseSeconds`, `endHoldSeconds` and `turnTimeoutSeconds`.
-The fixes in a scene are written before the take, so they can miss the draft the AI
-actually writes; check them against the first draft before choosing a take.
+(seconds, default 2; the clip's scenes use 1), `pauseSeconds`, `endHoldSeconds` and
+`turnTimeoutSeconds`. The fixes in a scene are written before the take, so they are
+ones that fit any generic draft (Day 1: "shorter", "no greeting", then the Sunday
+offer, Peter, 2026-11-13); check them against the first draft before choosing a take.
+
+## Playback and label
+
+The published player plays at 1.5× speed, on top of the 1 s idle limit (Peter,
+2026-11-13). `scan` prints each cast's length as recorded, with pauses trimmed, and at
+1.5×. The clip's label reads "real run, typing automated, pauses trimmed, sped up 1.5×".
+
+## Banner
+
+Claude Code's startup banner can show a rotating notice under its fixed lines, such as
+an invite offer ("earn $10 in usage credits") or a new-model announcement. No documented
+setting or environment variable turns these off (checked against the settings and
+environment variable docs, 2026-11-13). Each one stops after a few showings on a
+profile, so `record` launches the client unrecorded first and records only once the
+banner shows nothing under its fixed lines; it relaunches up to three times, then
+refuses. The take therefore has no cut. Starting the cast after the banner was tried
+and rejected: with capture paused during the launch, the player received only Claude
+Code's partial redraws, so the input box never appeared.
 
 ## Privacy
 
@@ -73,5 +92,3 @@ actually writes; check them against the first draft before choosing a take.
 
 - The idle limit trims only pauses with no output. Claude Code's spinner redraws while a
   reply is written, so model time stays in the cast at full length.
-- Claude Code may show a rotating notice under its banner (a new model, an invite
-  offer). It is not an account detail and the driver does not hide it.

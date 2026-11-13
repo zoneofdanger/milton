@@ -1,0 +1,14 @@
+{
+  "client": "claude",
+  "command": "claude",
+  "cwd": "/private/tmp/sam-demo",
+  "size": "100x30",
+  "idleTimeLimit": 2,
+  "lines": [
+    "Reply to my manager. He needs me in on Saturday. I can't.",
+    "no greeting, just start",
+    "no need to apologize",
+    "add that i can do a couple hours sunday if that helps",
+    "perfect, sending it"
+  ]
+}

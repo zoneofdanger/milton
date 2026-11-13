@@ -1,0 +1,11 @@
+{
+  "client": "codex",
+  "command": "codex",
+  "cwd": "/private/tmp/sam-demo",
+  "size": "100x30",
+  "idleTimeLimit": 2,
+  "lines": [
+    "Tell the team the printer says PC LOAD LETTER again.",
+    "perfect, posting it"
+  ]
+}

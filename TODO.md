@@ -167,22 +167,6 @@ sheet, report, AI) and plain text on security screens and anything an AI reads.
       made-up memos; thresholds lower that risk and can't remove it. Before any build: a
       spec, the rule and its cases reviewed first, and the test repeated on real memos.
 
-- [ ] #42 (server, med) **Split a cut and an addition that only touch.** Code's change
-      list (`changeList` in `server/src/store/changes.ts`; [memos](docs/memos.md)) paired
-      two unrelated edits into one spot in #2's real-AI run (2026-11-13, PR #131). The first
-      draft ended "I can't come in on Saturday.", a blank line, then "thx," and "Sam" on two
-      lines. The final cut the sign-off and added a sentence to the "Saturday." line. The
-      stored and served change was "thx, Sam" → "I can do a couple hours Sunday morning if
-      that helps.", which reads as if the person swapped a sign-off for an offer. Reports
-      serve it as "What they changed", so an AI may learn the wrong habit. The diff itself
-      is right: the deletion and insertion sit at the same position. The fault is calling
-      them one replacement. Candidate rule: a replacement whose removed side is whole lines
-      and whose added side lands on another line becomes a cut and an addition. Before
-      changing it, write the rule and its accept and refuse cases (`Hi Dana,` → `Dana —`
-      must stay one spot), and measure it on the #109 and serve-changes fixtures
-      ([serve-changes test](docs/research/serve-changes-test-2026-11-11.md)). Stored
-      `memo_changes` rows keep the old split unless a backfill is decided.
-
 ## From the audit of 2026-11-02
 
 - [ ] #19 (server, low) **Document the token-expiry clock limit.** The token's 30-second clock

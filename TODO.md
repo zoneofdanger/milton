@@ -55,9 +55,14 @@ sheet, report, AI) and plain text on security screens and anything an AI reads.
       browser sign-in, connection key, save, fresh read, forget) exist; see
       [the end-to-end check](docs/deploy/e2e.md). 2026-11-13: Claude Code (Opus 5.5, its own
       profile, a connection key) passed first setup, save, fresh-chat read, forget and the
-      TPS.md download on `newcomer@milton-test.invalid` (PR #131). Still open: OAuth
-      sign-in from a client, other clients (Codex, claude.ai), and cross-client evidence of
-      what AIs save.
+      TPS.md download on `newcomer@milton-test.invalid` (PR #131). Codex CLI 0.167 (its own
+      `CODEX_HOME`, a connection key, `codex exec`) passed the same path except the download.
+      Codex refuses every `create_memo` until it is approved, because the tool is marked
+      destructive (it also forgets). The setup page now gives the config lines. It put the
+      standing line in the project's AGENTS.md, not `~/.codex/AGENTS.md` as /setup says,
+      likely because of the run's sandbox; check that in interactive Codex. Still open:
+      OAuth sign-in from a client, claude.ai and ChatGPT, interactive Codex, and
+      cross-client evidence of what AIs save.
 
 - [ ] #23 (ops, low, founder) **Billing mailbox: accountspayable@meetmilton.com.** Decided
       2026-11-03: subscription and payment issues go to accountspayable@ (the Nina nod), a real,

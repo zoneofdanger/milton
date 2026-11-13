@@ -47,6 +47,10 @@ Empty the test account before a take that must start fresh (Delete all memos, in
 final takes use `sam@milton-test.invalid` ([the demo account](deploy/e2e.md#the-demo-account)),
 because receipts outlive Delete all memos and a reused request id is refused on camera.
 
+The driver gives each session Sam's own git identity (`GIT_CONFIG_GLOBAL` pointing at a
+file naming Sam, and `GIT_CONFIG_NOSYSTEM`). Clients read the global git config, and on
+2026-11-13 an AI signed an unrecorded draft with the operator's name from it.
+
 ## Scene files
 
 `scripts/demo/scenes/*.json`, one per scene: `client` (`claude` or `codex`), `command`

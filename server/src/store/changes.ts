@@ -160,18 +160,25 @@ export function changeList(first: string, final: string): ChangeList {
     }
     merged.push({ ...h });
   }
-  // Whole lines against the end of one kept line are a cut and an addition
-  // that only touch, not one replacement (#42): "thx,\nSam" cut and a
-  // sentence added after a kept "Saturday." are two spots. The tail starts
-  // after a kept token on its line, ends that line and holds no line break,
-  // so no line of one side faces a line of the other; a tail running onto
-  // more lines may hold what the whole lines replace (a sign-off) and stays.
+  // Whole lines against the end of one kept line are a cut and an addition,
+  // not one replacement (#42): "thx,\nSam" cut and a sentence added after a
+  // kept "Saturday." are two spots. The tail starts after a kept token on its
+  // line, ends that line and holds no line break; a tail running onto more
+  // lines may hold what the whole lines replace (a sign-off) and stays. A
+  // format-only spot is never split, so it stays about format.
   const lineBreak = (text: string, T: Token[], i: number) =>
     i <= 0 || i >= T.length || text.slice(T[i - 1]!.e, T[i]!.s).includes("\n");
+  const side = (text: string, T: Token[], s: number, e: number) =>
+    text.slice(T[s]!.s, T[e - 1]!.e);
   const oneLine = (text: string, T: Token[], s: number, e: number) =>
-    !text.slice(T[s]!.s, T[e - 1]!.e).includes("\n");
+    !side(text, T, s, e).includes("\n");
   const touching = (h: Hunk) => {
     if (h.a0 === h.a1 || h.b0 === h.b1) return false;
+    if (
+      unmarked(side(first, A, h.a0, h.a1)) ===
+      unmarked(side(final, B, h.b0, h.b1))
+    )
+      return false;
     if (!lineBreak(first, A, h.a1) || !lineBreak(final, B, h.b1)) return false;
     const startA = lineBreak(first, A, h.a0);
     const startB = lineBreak(final, B, h.b0);

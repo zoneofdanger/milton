@@ -843,6 +843,19 @@ test("whole lines against the end of one kept line are a cut and an addition, no
     ["Sorry to miss it.", ""],
     ["", "thx,\nSam"],
   ]);
+  // One format spot, never split: both sides unmark to "Ready" (P1).
+  expect(changeList("Intro.\n# Ready", "Intro. **Ready**")).toEqual({
+    state: "itemized",
+    spots: [
+      {
+        draftStart: 7,
+        draftEnd: 14,
+        finalStart: 7,
+        finalEnd: 16,
+        format: true,
+      },
+    ],
+  });
   // One spot: a greeting rewritten, a word swapped mid-sentence, a line's
   // end rewritten in place, a sign-off's word changed, a whole line replaced,
   // and a line's end cut with the lines after it, whose sign-off the added

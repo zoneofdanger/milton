@@ -231,10 +231,11 @@ a reconnect.
   of a save (the request rules) lives in the field descriptions, which the budget test
   does not measure. What the AI is asked to send as the request is guidance; Milton
   checks only what [memos](memos.md#the-request) lists.
-- There are two instruction variants, read-write and read-only. Both stay under 3,500
-  characters, well inside the 4,096 at which Claude Code truncates; a test enforces this
-  and that no error handling is left in them. Error handling lives in each error result's
-  `next`, and the save fields in `create_memo`'s description.
+- There are two instruction variants, read-write and read-only. Both stay under 3,800
+  characters (3,500 until the 2026-11-13 posted-writing text, 3,607), inside the 4,096
+  at which Claude Code truncates; a test enforces this and that no error handling is
+  left in them. Error handling lives in each error result's `next`, and the save fields
+  in `create_memo`'s description.
 - A read-only connection is told to ask the person to reconnect with Read and write to
   save memos, and never offers a save.
 - Server info carries a description of at most 120 characters for clients that drop

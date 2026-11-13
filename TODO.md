@@ -17,19 +17,6 @@ shared context for every item beneath it.**
 Work that ships before sign-ups open widely. Use the product vocabulary (memo, tweak, cover
 sheet, report, AI) and plain text on security screens and anything an AI reads.
 
-- [ ] #2 (server, med, founder)
-      **Try first setup with a real AI.** A new account starts with no
-      memos. Refresh connector discovery for get_report and create_memo (the two tools since
-      #121). Run the setup script: paste about five pieces, kept as final-only memos, then
-      the standing line. Setup asks the person to write nothing else.
-      Then draft, accept a final, check the one-line receipt, read again in a fresh chat,
-      forget a memo, and download TPS.md through the hosted service. Each write to a real
-      account needs Peter's approval. Saves are model-free since 2026-11-02.
-      ⚠ Not on `e2e@milton-test.invalid`: the twice-daily check stops on any memo it didn't
-      write ([the end-to-end check](docs/deploy/e2e.md)), and that fails the job and fires
-      its alert. Not on the muse-reviewer accounts either, which are for the Muse directory
-      review. Use `newcomer@milton-test.invalid` ([the newcomer account](docs/deploy/e2e.md#the-newcomer-account))
-      and an AI in its own config, never Peter's connection.
 - [ ] #33 (site, high, founder)
       **Record the HN demo clip as an asciinema time-lapse.** Peter postponed the launch about a
       week (2026-11-09) to build the trail feature first. It shipped as memos on 2026-11-09
@@ -66,15 +53,18 @@ sheet, report, AI) and plain text on security screens and anything an AI reads.
       2026-11-08: the fictional account (`e2e@milton-test.invalid`, owner script
       `server/scripts/test-account.ts`) and a daily-runnable check (`server/scripts/e2e.ts`:
       browser sign-in, connection key, save, fresh read, forget) exist; see
-      [the end-to-end check](docs/deploy/e2e.md). Still open: the fresh-chat read and download through real AI clients, and
-      cross-client evidence of what AIs save.
+      [the end-to-end check](docs/deploy/e2e.md). 2026-11-13: Claude Code (Opus 5.5, its own
+      profile, a connection key) passed first setup, save, fresh-chat read, forget and the
+      TPS.md download on `newcomer@milton-test.invalid` (PR #131). Still open: OAuth
+      sign-in from a client, other clients (Codex, claude.ai), and cross-client evidence of
+      what AIs save.
 
 - [ ] #13 (server, med, founder, doing)
       **Test the sent-emails setup step with a real AI.** The step
       shipped in #100 on 2026-11-11 ([setup](docs/setup.md); [history](docs/history.md)); Peter
       moved its test-Gmail run to after the release ("Let's ship it first", 2026-11-10). Run one
-      first setup through Claude Code on the empty newcomer account (as #2, never the e2e
-      account) with a test Gmail connected; Peter connects the mailbox.
+      first setup through Claude Code on the empty newcomer account (never the e2e account;
+      forget its memos first) with a test Gmail connected; Peter connects the mailbox.
       Check that the AI offered the step only with access, saved exactly what it showed and
       nothing unapproved, and stayed silent about it without a mail tool. Once that passes,
       fill the homepage onboarding row (`onboardingStep` in apps/site/src/pages/index.astro).

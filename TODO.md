@@ -59,16 +59,6 @@ sheet, report, AI) and plain text on security screens and anything an AI reads.
       sign-in from a client, other clients (Codex, claude.ai), and cross-client evidence of
       what AIs save.
 
-- [ ] #13 (server, med, founder, doing)
-      **Test the sent-emails setup step with a real AI.** The step
-      shipped in #100 on 2026-11-11 ([setup](docs/setup.md); [history](docs/history.md)); Peter
-      moved its test-Gmail run to after the release ("Let's ship it first", 2026-11-10). Run one
-      first setup through Claude Code on the empty newcomer account (never the e2e account;
-      forget its memos first) with a test Gmail connected; Peter connects the mailbox.
-      Check that the AI offered the step only with access, saved exactly what it showed and
-      nothing unapproved, and stayed silent about it without a mail tool. Once that passes,
-      fill the homepage onboarding row (`onboardingStep` in apps/site/src/pages/index.astro).
-
 - [ ] #23 (ops, low, founder) **Billing mailbox: accountspayable@meetmilton.com.** Decided
       2026-11-03: subscription and payment issues go to accountspayable@ (the Nina nod), a real,
       read mailbox, not support@. Create the alias when paid subscriptions launch, route it to

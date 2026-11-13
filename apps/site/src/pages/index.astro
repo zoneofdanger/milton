@@ -19,8 +19,11 @@ const copy = {
     { text: "Ask for a draft. Your AI pulls your file first.", initials: "AI" },
     { text: "Fix it until it’s yours. The fixes go on file.", initials: "You" },
   ],
-  // Stays empty until setup can do this; when set, it is the slip's second row.
-  onboardingStep: { text: "", initials: "AI" },
+  // The slip's second row; empty hides it.
+  onboardingStep: {
+    text: "Your AI finds a few emails you sent. Only the ones you pick go on file.",
+    initials: "AI",
+  },
   signOff: "We did not build superintelligence. It’s not AGI — it’s a memo.",
   testimonial: {
     quote:

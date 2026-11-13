@@ -45,8 +45,8 @@ Local commands and landing content are in [apps/site/README.md](../apps/site/REA
   Markdown-file question answered in the open, then four closed questions; and the
   closing "Did you get the memo?" with the button again and a fictional phone message.
   "Try Milton free" is the only button. Its swappable lines sit in one object at the top
-  of `apps/site/src/pages/index.astro`; the slip's onboarding row stays empty, and
-  unshown, until setup can do it.
+  of `apps/site/src/pages/index.astro`. The slip's second row is the onboarding row, "Your
+  AI finds a few emails you sent. Only the ones you pick go on file." (Peter, 2026-11-13).
 - The try-it folder lets a visitor pick one of three fictional people (Bill, Peter,
   Joanna, first names only) by folder tab and one of three requests, and shows two papers
   side by side, each headed with its word count: "Your AI today" on plain paper and

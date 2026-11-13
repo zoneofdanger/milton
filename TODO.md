@@ -133,15 +133,6 @@ sheet, report, AI) and plain text on security screens and anything an AI reads.
       (apps/site/src/pages/privacy.astro), a check against
       [positioning](docs/positioning.md), and a spec. ⚠ It could cost trust, which is the risk.
 
-- [ ] #37 (server, low) **Handle pool errors at integration test teardown.** CI's
-      integration job sometimes passes every group and then crashes while stopping its
-      disposable Postgres: an idle pool client throws an unhandled 57P01 ("terminating
-      connection due to administrator command"). Seen twice by 2026-11-11 (#103 and #109);
-      a rerun passed each time. Find which pool is still open when the cluster stops
-      (`server/scripts/auth-integration.ts` ends its pools first, so check the pools it
-      doesn't list and the `apps/auth` suite), then end it before the stop or give it an
-      error handler. Don't swallow 57P01 while the groups are still running.
-
 - [ ] #38 (server, low) **Enforce the typed request's line and paste rules in SQL.** A
       memo's kept request (#109) is limited to 600 characters, 12 lines and no pasted mail
       (a line starting `>`, an "On … wrote:" line, a From or Subject header). The database

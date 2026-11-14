@@ -3,7 +3,7 @@
  * written as small casts of their own, and `asciinema cat` joins everything in
  * order. No recorded event is changed; the script checks that every one of
  * them reaches the output with its interval and data intact.
- * Shape and rules: TODO #33 and docs/demo.md. */
+ * Shape and rules: docs/demo.md. */
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

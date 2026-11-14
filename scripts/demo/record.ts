@@ -40,7 +40,7 @@ const CLIENTS: Record<string, Client> = {
     profileVar: "DEMO_CLAUDE_CONFIG_DIR",
     profileEnv: "CLAUDE_CONFIG_DIR",
     defaultProfile: join(homedir(), ".claude"),
-    shellFunction: `claude() { command claude --mcp-config ${SUPPORT}/mcp.json --strict-mcp-config --allowedTools mcp__milton__get_report,mcp__milton__create_memo "$@"; }`,
+    shellFunction: `claude() { command claude --mcp-config ${SUPPORT}/mcp.json --strict-mcp-config --allowedTools mcp__milton__get_report,mcp__milton__create_memo --disable-slash-commands "$@"; }`,
     ready: /─{20,}\n❯[ \u00a0]/, // Claude Code puts a no-break space after ❯
     busy: /esc to interrupt/i,
     blocked: /Esc to cancel/,

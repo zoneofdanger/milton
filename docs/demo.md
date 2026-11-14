@@ -1,6 +1,6 @@
 ---
 name: demo
-description: Recording and assembling the demo clip: Sam's demo repo, the driver typing into real Claude Code under asciinema and its guards, scene files, privacy scan and title cards
+description: Recording and assembling the demo clip: Sam's repo, the driver typing into real Claude Code and its guards, scenes, privacy scan and title cards
 type: procedure
 covers:
   - scripts/demo/**

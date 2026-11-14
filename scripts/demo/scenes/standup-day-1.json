@@ -1,0 +1,14 @@
+{
+  "client": "claude",
+  "command": "claude",
+  "cwd": "/private/tmp/sam-demo",
+  "size": "100x30",
+  "idleTimeLimit": 1,
+  "typingScale": 0.6,
+  "lines": [
+    "write my standup for #eng",
+    "no headings, no bullets",
+    "way shorter, lowercase, it's slack",
+    "perfect, posting it"
+  ]
+}

@@ -4,7 +4,15 @@
  * the scene's lines into it with human-like delays, waiting for each reply.
  * Procedure, scene format and privacy rules: docs/demo.md. */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir, tmpdir, userInfo } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -23,6 +31,8 @@ type Client = {
   busy: RegExp; // a reply is still being written
   blocked: RegExp; // a dialog is waiting, so typing would answer it
   notice?: RegExp; // group 1 is whatever the startup banner shows under its fixed lines
+  env?: Record<string, string>; // added to the clean environment
+  memoryDir?: (profile: string, cwd: string) => string; // the client's own memory for cwd
 };
 
 const CLIENTS: Record<string, Client> = {
@@ -35,6 +45,11 @@ const CLIENTS: Record<string, Client> = {
     busy: /esc to interrupt/i,
     blocked: /Esc to cancel/,
     notice: /Claude Code v[^\n]*\n[^\n]*\n[^\n]*\n([\s\S]*?)─{20,}/,
+    // Claude Code's own memory must not be what carries Sam's style between days.
+    env: { CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" },
+    // Its project folder is the cwd with every non-alphanumeric turned into "-".
+    memoryDir: (profile, cwd) =>
+      join(profile, "projects", cwd.replace(/[^A-Za-z0-9]/g, "-"), "memory"),
   },
   codex: {
     profileVar: "DEMO_CODEX_HOME",
@@ -107,9 +122,9 @@ function checkCwd(cwd: string) {
     fail(`cwd ${cwd} must be absolute and name no home folder or user`);
 }
 
-/** Refuses a take that could show the person's git name. Runs before anything
- * launches; makes no model call. */
-function checkTake(scene: Scene) {
+/** Refuses a take that could show the person's git name or carry Sam's style by
+ * any route but Milton. Runs before anything launches; makes no model call. */
+function checkTake(scene: Scene, client: Client) {
   const cwd = scene.cwd ?? "/private/tmp/sam-demo";
   checkCwd(cwd);
   // Claude Code takes the git user from the repo's config, not from the
@@ -129,6 +144,22 @@ function checkTake(scene: Scene) {
   )
     fail(
       `git user.name in ${cwd} is not Sam; rebuild it with scripts/demo/make-repo.sh`,
+    );
+  if (!client.memoryDir) return;
+  const profile = process.env[client.profileVar];
+  if (!profile) fail(`set ${client.profileVar} to the client's test profile`);
+  const dir = client.memoryDir(
+    resolve(profile!),
+    existsSync(cwd) ? realpathSync(cwd) : cwd,
+  );
+  const files = existsSync(dir)
+    ? readdirSync(dir, { recursive: true }).filter((f) =>
+        statSync(join(dir, String(f))).isFile(),
+      )
+    : [];
+  if (files.length)
+    fail(
+      `${dir} holds ${files.length} file(s); the client's own memory must be empty`,
     );
 }
 
@@ -190,6 +221,7 @@ function start(scene: Scene, client: Client, cast: string | null) {
     MILTON_KEY: key!,
     ZDOTDIR: SUPPORT,
     [client.profileEnv]: resolve(profile!),
+    ...client.env,
   });
   tmux(
     [
@@ -268,7 +300,7 @@ async function preflight(scene: Scene, client: Client) {
 
 async function record(scenePath: string, cast: string) {
   const { scene, client } = loadScene(scenePath);
-  checkTake(scene);
+  checkTake(scene, client);
   await preflight(scene, client);
   const out = resolve(cast);
   mkdirSync(dirname(out), { recursive: true });
@@ -314,8 +346,8 @@ function warmup(scenePath: string) {
 
 /** Runs a take's guards alone: launches nothing and makes no model call. */
 function check(scenePath: string) {
-  const { scene } = loadScene(scenePath);
-  checkTake(scene);
+  const { scene, client } = loadScene(scenePath);
+  checkTake(scene, client);
   console.log(`${scenePath}: guards pass`);
   return 0;
 }

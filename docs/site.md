@@ -89,8 +89,9 @@ Local commands and landing content are in [apps/site/README.md](../apps/site/REA
   `src/data/milton-demo.cast` in asciinema-player 3.17.0 (Apache-2.0, pinned exactly),
   using the upstream prebuilt bundle and stylesheet, which the build serves from
   `/_astro/`; nothing loads from a CDN. The player runs at speed 1.5 with a 1 s idle
-  limit and fits the page width, so at phone width the terminal text is about 6px. Under
-  it are the clip's label, the one-line Claude Code setup command from `/setup`, and a
+  limit and fits the page width, so at phone width the terminal text is about 6px; on
+  screens 600px wide or less, "Best watched on a wider screen" sits under the player
+  (Peter, 2026-11-13). Under it are the clip's label, the one-line Claude Code setup command from `/setup`, and a
   link to `/setup`.
 - `/research` presents the approved testing notes, linked from About and the site
   footer. `/notes` is retired with no redirect or alias, so old URLs reach the normal 404.

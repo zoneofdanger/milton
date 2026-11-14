@@ -8,9 +8,24 @@ covers:
 
 # Demo recording
 
-The clip's shape and rules (scenes, wording, labels, who approves) are TODO #33 in
-[TODO.md](../TODO.md). This file covers how a scene is recorded and how the clip is
-assembled.
+This file covers the clip's rules, how a scene is recorded and how the clip is assembled.
+The clip of 2026-11-13 closed TODO #33.
+
+## Clip rules
+
+Keep these for any retake:
+
+- One real run on a test account, never Peter's: Day 1 in Claude Code, where a fictional
+  Sam fixes a generic first draft and the AI keeps the memo and shows its receipt; Day 14
+  in Codex, where the first draft is approved unedited. The memos the card counts
+  between the two days are real memos from earlier real sessions, not seeded text, and
+  Peter approves them.
+- Never show Sam asking "Did you get the memo?": the homepage promises the AI reads
+  Milton unprompted.
+- Say "AI", not "assistant". Original names only, no film characters.
+- The label says the run is real, the typing automated and the pauses trimmed, and
+  discloses which take was chosen.
+- Self-host asciinema-player and put the one-line setup command under it.
 
 `scripts/demo/record.ts` records one scene as a real interactive session, not `-p` or
 `exec`. It starts a private tmux server (socket `milton-demo`), runs `asciinema rec` on a

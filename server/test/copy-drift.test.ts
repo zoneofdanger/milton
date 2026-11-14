@@ -88,6 +88,8 @@ test("copy states the standing line, trial length and price that code uses", () 
   for (const file of tracked(
     ":(glob)apps/site/src/pages/*.astro",
     ":(glob)server/src/*.tsx",
+    // The demo clip's closing card states the trial too.
+    "apps/site/src/data/milton-demo.cast",
   )) {
     const text = read(file);
     for (const claim of TRIAL_CLAIMS)

@@ -84,5 +84,14 @@ Local commands and landing content are in [apps/site/README.md](../apps/site/REA
   portal from the app's account menu, effective at the end of the billing period, with a
   link to the payment and refund terms), and that the AI decides how it follows the
   memo.
+- `/demo` is an unlinked preview of the demo clip ([demo](demo.md)): in no navigation or
+  footer, marked `noindex` (the layout's `noindex` prop), and there is no sitemap. It plays
+  `src/data/milton-demo.cast` in asciinema-player 3.17.0 (Apache-2.0, pinned exactly),
+  using the upstream prebuilt bundle and stylesheet, which the build serves from
+  `/_astro/`; nothing loads from a CDN. The player runs at speed 1.5 with a 1 s idle
+  limit and fits the page width, so at phone width the terminal text is about 6px; on
+  screens 600px wide or less, "Best watched on a wider screen" sits under the player
+  (Peter, 2026-11-13). Under it are the clip's label, the one-line Claude Code setup command from `/setup`, and a
+  link to `/setup`.
 - `/research` presents the approved testing notes, linked from About and the site
   footer. `/notes` is retired with no redirect or alias, so old URLs reach the normal 404.

@@ -8,8 +8,10 @@ interface Props {
   title: string;
   description: string;
   legal?: boolean;
+  /** Keeps an unlinked preview page out of search results. */
+  noindex?: boolean;
 }
-const { title, description, legal = false } = Astro.props;
+const { title, description, legal = false, noindex = false } = Astro.props;
 const canonical = new URL(Astro.url.pathname, Astro.site);
 /* Astro.url may carry a trailing slash; footer hrefs never do. */
 const currentPath = Astro.url.pathname.replace(/(.)\/$/, "$1");
@@ -62,6 +64,7 @@ const footerColumns: {
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
     <meta name="description" content={description} />
+    {noindex && <meta name="robots" content="noindex" />}
     <link rel="canonical" href={canonical} />
     <link
       rel="preload"

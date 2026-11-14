@@ -1,6 +1,6 @@
 ---
 name: demo
-description: Recording the demo clip's scenes: the driver that types into a real Claude Code or Codex session under asciinema, scene files and the privacy scan
+description: Recording and assembling the demo clip: the driver typing into real Claude Code or Codex under asciinema, scene files, privacy scan and title cards
 type: procedure
 covers:
   - scripts/demo/**
@@ -9,7 +9,8 @@ covers:
 # Demo recording
 
 The clip's shape and rules (scenes, wording, labels, who approves) are TODO #33 in
-[TODO.md](../TODO.md). This file covers how a scene is recorded.
+[TODO.md](../TODO.md). This file covers how a scene is recorded and how the clip is
+assembled.
 
 `scripts/demo/record.ts` records one scene as a real interactive session, not `-p` or
 `exec`. It starts a private tmux server (socket `milton-demo`), runs `asciinema rec` on a
@@ -69,7 +70,35 @@ Day 1 is recorded on an account with no memos and no earlier receipts:
 
 The published player plays at 1.5× speed, on top of the 1 s idle limit (Peter,
 2026-11-13). `scan` prints each cast's length as recorded, with pauses trimmed, and at
-1.5×. The clip's label reads "real run, typing automated, pauses trimmed, sped up 1.5×".
+1.5×. The clip's label reads "Real run, typing automated, pauses trimmed, sped up 1.5×.
+Day 1 is the second take." The preview page that plays it is in [site](site.md).
+
+## Assembly
+
+```sh
+bun scripts/demo/assemble.ts <out>/day-1.cast <out>/day-14.cast <out>/milton-demo.cast
+bun scripts/demo/record.ts scan <out>/milton-demo.cast
+```
+
+`assemble.ts` writes the title cards as small casts of their own and joins them with the
+two approved takes using `asciinema cat`, in this order: "# Day 1", Day 1, "# Two weeks
+and 9 approved drafts later", "# Day 14", Day 14, "# Did you get the memo? Your AI
+already did." and "# meetmilton.com · 30-day free trial, no card". The trial length
+comes from `packages/theme/facts.ts`, and the copy-drift test reads the committed cast.
+
+- A card leaves any alternate screen, resets, clears, and prints its line in bold, a third
+  of the way down (the play button covers the middle) and centred across.
+- Each card, and each take's last frame, holds for 2 s at 1.5×. The takes end on their
+  receipt with no later output, so without a hold the receipt would flash past. A hold
+  is a run of empty output events 0.75 s apart, under the 1 s idle limit, so the limit
+  doesn't trim it; an empty event draws nothing.
+- The header names nothing about the machine: no timestamp, command or environment.
+- No recorded event is changed. The script checks that every event of both takes reaches
+  the output in order with its interval and data intact, and refuses otherwise.
+
+Scan the assembled cast before it enters the repository, at
+`apps/site/src/data/milton-demo.cast`. The clip of 2026-11-13 (Day 1 take 2 and Day 14)
+runs 58.7 s at 1.5×, and its scan found nothing.
 
 ## Banner
 

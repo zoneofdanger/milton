@@ -74,8 +74,8 @@ CI that fails.
   and keys pass, and lines between `retired-words: off` and `retired-words: on` markers
   are historical and skipped. `docs/` is not scanned.
 - The shared-facts check fails when README lacks the standing line or a site page or app
-  page states another trial length or price than `packages/theme/facts.ts`
-  ([setup](setup.md)).
+  page, or the demo clip's committed cast, states another trial length or price than
+  `packages/theme/facts.ts` ([setup](setup.md), [demo](demo.md)).
 - The privacy check fails when the privacy page claims legacy data is never served or
   drops its disclosure that an exact resend of a pre-release save returns that stored
   receipt, marked as a past receipt ([saves](saves.md#receipts)).

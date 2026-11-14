@@ -107,6 +107,31 @@ function checkCwd(cwd: string) {
     fail(`cwd ${cwd} must be absolute and name no home folder or user`);
 }
 
+/** Refuses a take that could show the person's git name. Runs before anything
+ * launches; makes no model call. */
+function checkTake(scene: Scene) {
+  const cwd = scene.cwd ?? "/private/tmp/sam-demo";
+  checkCwd(cwd);
+  // Claude Code takes the git user from the repo's config, not from the
+  // driver's GIT_CONFIG_GLOBAL, and once showed the person's real name. So the
+  // repo itself must name Sam, read with the person's own environment.
+  const git = (args: string[]) =>
+    spawnSync("git", ["-C", cwd, ...args], {
+      encoding: "utf8",
+      env: process.env,
+    });
+  const inRepo =
+    existsSync(cwd) &&
+    git(["rev-parse", "--is-inside-work-tree"]).stdout.trim() === "true";
+  if (
+    inRepo &&
+    git(["config", "user.name"]).stdout.replace(/\n$/, "") !== "Sam"
+  )
+    fail(
+      `git user.name in ${cwd} is not Sam; rebuild it with scripts/demo/make-repo.sh`,
+    );
+}
+
 function loadScene(path: string) {
   const scene = JSON.parse(readFileSync(path, "utf8")) as Scene;
   const client = CLIENTS[scene.client];
@@ -243,6 +268,7 @@ async function preflight(scene: Scene, client: Client) {
 
 async function record(scenePath: string, cast: string) {
   const { scene, client } = loadScene(scenePath);
+  checkTake(scene);
   await preflight(scene, client);
   const out = resolve(cast);
   mkdirSync(dirname(out), { recursive: true });
@@ -283,6 +309,14 @@ function warmup(scenePath: string) {
       `Run ${scene.command}, clear any trust or notice dialogs, then exit.\n` +
       `Stop with: tmux -L ${SOCKET} kill-server`,
   );
+  return 0;
+}
+
+/** Runs a take's guards alone: launches nothing and makes no model call. */
+function check(scenePath: string) {
+  const { scene } = loadScene(scenePath);
+  checkTake(scene);
+  console.log(`${scenePath}: guards pass`);
   return 0;
 }
 
@@ -355,12 +389,15 @@ if (command === "record" && args.length === 2)
   process.exit(await record(args[0]!, args[1]!));
 else if (command === "warmup" && args.length === 1)
   process.exit(warmup(args[0]!));
+else if (command === "check" && args.length === 1)
+  process.exit(check(args[0]!));
 else if (command === "scan" && args.length >= 1)
   process.exit(args.reduce((n, c) => n + scan(c), 0) ? 1 : 0);
 else {
   console.error(
     "usage: bun scripts/demo/record.ts record <scene.json> <out.cast>\n" +
       "       bun scripts/demo/record.ts warmup <scene.json>\n" +
+      "       bun scripts/demo/record.ts check <scene.json>\n" +
       "       bun scripts/demo/record.ts scan <file.cast>...",
   );
   process.exit(2);

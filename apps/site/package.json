@@ -13,6 +13,7 @@
   "dependencies": {
     "@milton/theme": "workspace:*",
     "@vercel/analytics": "2.0.1",
+    "asciinema-player": "3.17.0",
     "astro": "7.3.5"
   },
   "devDependencies": {

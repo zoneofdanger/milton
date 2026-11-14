@@ -1,0 +1,99 @@
+---
+/* Unlinked preview of the demo clip (TODO #33): kept out of navigation, the
+   footer and search results until Peter approves it. The player is the
+   upstream asciinema-player bundle, pinned in package.json and served from
+   this site; nothing loads from a CDN. */
+import SiteLayout from "../layouts/SiteLayout.astro";
+import "asciinema-player/dist/bundle/asciinema-player.css";
+import playerScript from "asciinema-player/dist/bundle/asciinema-player.min.js?url";
+import cast from "../data/milton-demo.cast?url";
+---
+
+<SiteLayout
+  title="Demo | Milton"
+  description="Sam's first memo in Claude Code, and two weeks later a first draft approved unedited in Codex."
+  noindex
+>
+  <div class="demo">
+    <h1>Demo</h1>
+    <figure>
+      <div id="demo-player" class="player" data-cast={cast}></div>
+      <figcaption>
+        Real run, typing automated, pauses trimmed, sped up 1.5×. Day 1 is the
+        second take.
+      </figcaption>
+    </figure>
+    <p>Add Milton to Claude Code:</p>
+    <pre><code>claude mcp add --transport http --scope user milton https://mcp.meetmilton.com/mcp</code></pre>
+    <p>
+      <a href="/setup">Set up Claude Code and other AIs →</a>
+    </p>
+  </div>
+</SiteLayout>
+
+<script is:inline src={playerScript}></script>
+<script>
+  type Player = {
+    create(src: string, element: HTMLElement, options: object): unknown;
+  };
+  const element = document.getElementById("demo-player");
+  const player = (window as unknown as { AsciinemaPlayer?: Player })
+    .AsciinemaPlayer;
+  if (element?.dataset.cast && player)
+    player.create(element.dataset.cast, element, {
+      cols: 100,
+      rows: 30,
+      // The published speed and idle limit, docs/demo.md.
+      speed: 1.5,
+      idleTimeLimit: 1,
+      fit: "width",
+      theme: "asciinema",
+      preload: true,
+      // The first card, "# Day 1", until the viewer presses play.
+      poster: "npt:0:1",
+    });
+</script>
+
+<style>
+  .demo {
+    max-width: 960px;
+    padding-block: var(--space-16) 96px;
+  }
+  h1 {
+    font-size: var(--text-page);
+    margin: 0 0 var(--space-6);
+  }
+  figure {
+    margin: 0;
+  }
+  .player {
+    border: 1px solid var(--hairline);
+    box-shadow: var(--shadow-sheet);
+  }
+  figcaption {
+    margin-top: var(--space-3);
+    color: var(--muted);
+    font: var(--text-caption) / var(--leading-label) var(--font-mono);
+  }
+  p {
+    margin: var(--space-8) 0 0;
+  }
+  pre {
+    margin: var(--space-3) 0 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    background: var(--surface);
+    padding: var(--space-5);
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-control);
+    font-size: var(--text-small);
+  }
+  pre + p {
+    margin-top: var(--space-4);
+  }
+  @media (max-width: 600px) {
+    .demo {
+      padding-block: var(--space-10) 56px;
+    }
+  }
+</style>

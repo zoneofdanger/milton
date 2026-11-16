@@ -61,23 +61,23 @@ function card(text: string, cols: number, rows: number): Event[] {
 /** Clears the card and shows the cursor again, as the next scene starts. */
 const handOff: Event = [0, "o", "\x1b[2J\x1b[H\x1b[?25h"];
 
+// No card names a weekday: Claude's standup prints the real date.
 const CARDS = {
-  day1: "# Day 1",
-  later: "# Two weeks and 9 approved drafts later",
-  day14: "# Day 14",
+  day1: "# Morning standup",
+  day2: "# Next morning",
   memo: "# Did you get the memo? Your AI already did.",
   // The trial length comes from facts.ts, so the card can't drift from it.
   close: `# meetmilton.com · ${TRIAL_DAYS}-day free trial, no card`,
 };
 
-function assemble(day1Path: string, day14Path: string, outPath: string) {
+function assemble(day1Path: string, day2Path: string, outPath: string) {
   const day1 = readCast(day1Path);
-  const day14 = readCast(day14Path);
+  const day2 = readCast(day2Path);
   const cols = day1.header.term?.cols ?? 0;
   const rows = day1.header.term?.rows ?? 0;
   for (const [path, cast] of [
     [day1Path, day1],
-    [day14Path, day14],
+    [day2Path, day2],
   ] as const) {
     if (cast.header.term?.cols !== cols || cast.header.term?.rows !== rows)
       fail(`${path} is not ${cols}x${rows} like Day 1`);
@@ -94,12 +94,7 @@ function assemble(day1Path: string, day14Path: string, outPath: string) {
   };
   const segments: Event[][] = [
     [...card(CARDS.day1, cols, rows), handOff],
-    [
-      ...hold(),
-      ...card(CARDS.later, cols, rows),
-      ...card(CARDS.day14, cols, rows),
-      handOff,
-    ],
+    [...hold(), ...card(CARDS.day2, cols, rows), handOff],
     [
       ...hold(),
       ...card(CARDS.memo, cols, rows),
@@ -116,7 +111,7 @@ function assemble(day1Path: string, day14Path: string, outPath: string) {
       );
       return file;
     });
-    const order = [files[0]!, day1Path, files[1]!, day14Path, files[2]!];
+    const order = [files[0]!, day1Path, files[1]!, day2Path, files[2]!];
     const result = spawnSync("asciinema", ["cat", "-q", ...order], {
       encoding: "utf8",
       maxBuffer: 64 * 1024 * 1024,
@@ -134,7 +129,7 @@ function assemble(day1Path: string, day14Path: string, outPath: string) {
     ...segments[0]!,
     ...day1.events,
     ...segments[1]!,
-    ...day14.events,
+    ...day2.events,
     ...segments[2]!,
   ];
   if (out.length !== expected.length)
@@ -158,7 +153,7 @@ function assemble(day1Path: string, day14Path: string, outPath: string) {
 const args = process.argv.slice(2);
 if (args.length !== 3) {
   console.error(
-    "usage: bun scripts/demo/assemble.ts <day-1.cast> <day-14.cast> <out.cast>",
+    "usage: bun scripts/demo/assemble.ts <day-1.cast> <day-2.cast> <out.cast>",
   );
   process.exit(2);
 }

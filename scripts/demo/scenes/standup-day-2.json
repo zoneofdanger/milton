@@ -1,0 +1,9 @@
+{
+  "client": "claude",
+  "command": "claude",
+  "cwd": "/private/tmp/sam-demo",
+  "size": "100x30",
+  "idleTimeLimit": 1,
+  "typingScale": 0.6,
+  "lines": ["write my standup for #eng", "perfect, posting it"]
+}

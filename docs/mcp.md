@@ -130,7 +130,10 @@ How a person creates and revokes keys is in [accounts](accounts.md).
   `first_draft_missing` ([saves](saves.md#replacing-a-final)). What each change
   does is in [memos](memos.md) and [deletion](deletion.md).
 - `create_memo` returns `saved`, `unchanged` or `failed`, with the request ID. `saved`
-  confirms a committed write; `unchanged` confirms no write was needed. A memo with a
+  confirms a committed write; `unchanged` confirms the returned memo already holds those
+  words. One exception writes: a replace whose words another memo already holds deletes
+  the replaced memo and returns that other memo as `unchanged`
+  ([saves](saves.md#replacing-a-final)). A memo with a
   kept first draft adds `changes: {state, found}`, code's own count
   ([memos](memos.md#changes)). A replace's `saved` adds `replaced: true` and carries no
   `receipt`. A replay returns the stored outcome as it was written, with `replayed`

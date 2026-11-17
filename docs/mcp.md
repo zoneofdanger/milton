@@ -209,8 +209,10 @@ a reconnect.
   alone (`first_draft_missing`); `memos_off` stops saving drafts, saving only writing
   the person asks to remember; `invalid_kind` and `invalid_memo` reread for a valid id.
   A replace's refusals: `replace_unknown` (`tell_user`: the memo is gone, perhaps
-  forgotten, so don't save it again as a new memo) and `replace_refused` (`fix_input`:
-  save it as a new memo without `replaces`).
+  forgotten, so don't save it again as a new memo), `replace_refused` (`fix_input`:
+  another AI connection saved it, so save a new memo without `replaces`) and
+  `replace_first_draft` (`fix_input`: resend with that memo's first draft exactly, or
+  `first_draft_missing`).
 - The store's own refusals, a receipt or user id change, are unavailable-now steps; a
   correct call never meets them.
 - A scope refusal also carries `required_permission`, `read` or `read_write`: what the

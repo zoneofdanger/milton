@@ -46,6 +46,7 @@ export const loggedErrorCodes = new Set([
   "invalid_memo",
   "replace_unknown",
   "replace_refused",
+  "replace_first_draft",
   "unique_violation",
   "check_violation",
   "invalid_token",
@@ -133,7 +134,11 @@ export const nextSteps: Record<string, NextStep> = {
   ),
   replace_refused: step(
     "fix_input",
-    "Save it as a new memo without replaces, with a new request_id.",
+    "Another AI connection saved that memo: save this as a new memo without replaces, with a new request_id.",
+  ),
+  replace_first_draft: step(
+    "fix_input",
+    "Send it again with that memo's first_draft exactly, or first_draft_missing: true instead, with a new request_id.",
   ),
   memos_off: step(
     "tell_user",

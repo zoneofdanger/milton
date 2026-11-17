@@ -78,17 +78,18 @@ their AI saved a second memo with the same first draft, leaving the first one st
   people's text. The ask is kept only as `request` ([The request](#the-request)).
 - A save whose final, first-draft state and first draft match a memo on file returns
   `unchanged` with that memo, adding nothing.
-- A save with `replaces` swaps the final of a memo the same AI connection saved, keeping
-  its id and creation time; its first draft must be kept and sent again byte for byte,
-  or replaced by `first_draft_missing`, when Milton uses the stored first draft
-  ([saves](saves.md#replacing-a-final)).
+- A save with `replaces` swaps the final of any memo the same AI connection saved,
+  keeping its id and creation time. A kept first draft is sent again byte for byte, or
+  stood in for by `first_draft_missing`, when Milton uses the stored one; a memo without
+  one takes the save as sent ([saves](saves.md#replacing-a-final)).
 - `memo_context` replaces a memo's medium, summary, audience and purpose (an omitted
   optional field clears) and, when sent, its kind, and sets `context_updated_at`; it
   never changes a memo's words, or an older memo's rounds and report metadata. The same
   context returns `unchanged`; an unknown memo is `invalid_memo`.
 - With **Keep memos** off, a memo with a first draft (kept or missing) is refused with
   `memos_off`; a final-only memo, writing the person asks to remember, still saves, and
-  so does a replace, which corrects a memo and adds none. The switch is on by default (no
+  so does a replace, which corrects a memo and adds none, unless it would store a
+  first-draft state its memo didn't hold. The switch is on by default (no
   settings row means on). The served text says so: with `keep_memos` false, the AI saves
   only replaces and writing the person asks it to remember.
 

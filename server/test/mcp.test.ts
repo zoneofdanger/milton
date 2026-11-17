@@ -223,7 +223,7 @@ test("an SDK client receives instructions, discovers the two tools, and reads th
       "Milton works out the person's changes (their tweaks) from first_draft and final",
       "A memo holds only these: never secrets, the transcript, the person's correction messages or other people's text",
       "Don't save a final holding a secret (say why; never redact)",
-      "carries receipt: tell the person that line",
+      "When a result carries receipt, tell the person that line",
     ])
       expect(save.description).toContain(field);
     // The request: own words when they said it, a short line when they only

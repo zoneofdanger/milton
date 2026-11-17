@@ -70,9 +70,12 @@ export const kindValid = (userId: string, kindId?: string) =>
     ? sql`EXISTS(SELECT 1 FROM memo_kinds WHERE user_id=${userId} AND id=${kindId})`
     : sql`true`;
 
-/** One memo as the ranking sees it, without its words. */
+/** One memo as the ranking sees it, without its words. request_id names
+ * the save that wrote this version of it: a replace inserts a new version
+ * under the same id with a new request_id. */
 type Candidate = {
   id: string;
+  request_id: string;
   kind_id: string | null;
   medium: Medium;
   tier: Tier;
@@ -230,7 +233,10 @@ export const EMPTY_REPORT =
 /** The report for one draft: the examples, each drafted one with what the
  * person changed in its first draft (docs/reports.md). Two statements, none in
  * a transaction, neither writing: the candidates, with the account's memo
- * count, then the chosen words. A memo forgotten in between is left out. */
+ * count, then the chosen words. A memo forgotten in between is left out, and
+ * so is one replaced in between: the second statement returns a memo only in
+ * the version the first ranked (its request_id, tier and final's size), so no
+ * words are served under another version's label, size or changes. */
 export async function readReport(
   session: StoreSession,
   userId: string,
@@ -251,7 +257,7 @@ export async function readReport(
         FROM memo_kinds WHERE user_id=${userId}) AS kinds,
       (SELECT coalesce(json_agg(json_build_object('id',m.id,'kind_id',m.kind_id,'medium',m.medium,'tier',m.tier,
         'summary',m.summary,'audience',m.audience,'purpose',m.purpose,
-        'at',to_char(m.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
+        'request_id',m.request_id,'at',to_char(m.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
         'bytes',octet_length(m.final),
         'lines',${lineBreaks(sql`m.final`)},
         'lexical',ts_rank(m.search,${query}),
@@ -264,7 +270,7 @@ export async function readReport(
   const ranked = rankMemos(row.memos, intent);
   const examples = selectExamples(ranked, labels);
   // At most MAX_STEERED memos: their changes come in the statement that
-  // fetches the finals, so a memo forgotten before it loses both.
+  // fetches the finals, so a memo forgotten or replaced before it loses both.
   const withChanges = examples.filter(servesChanges).map((m) => m.id);
   const fetched = examples.length
     ? await session.query<{
@@ -278,8 +284,17 @@ export async function readReport(
             'final_start',c.final_start,'final_end',c.final_end) ORDER BY c.n),'[]'::json)
             FROM memo_changes c WHERE c.user_id=m.user_id AND c.memo_id=m.id
               AND ${sql.raw(STORED_SERVABLE_SQL)}) END AS changes
-        FROM memos m WHERE m.user_id=${userId}
-          AND m.id=ANY(${sql.param(examples.map((m) => m.id))}::text[])`)
+        FROM memos m JOIN json_to_recordset(${JSON.stringify(
+          examples.map((m) => ({
+            id: m.id,
+            request_id: m.request_id,
+            tier: m.tier,
+            bytes: m.bytes,
+          })),
+        )}::json) AS v(id text,request_id text,tier text,bytes int)
+          ON m.id=v.id AND m.request_id=v.request_id AND m.tier=v.tier
+            AND octet_length(m.final)=v.bytes
+        WHERE m.user_id=${userId}`)
     : [];
   const finals = new Map(fetched.map((m) => [m.id, m.final]));
   const served = examples.filter((m) => finals.has(m.id));

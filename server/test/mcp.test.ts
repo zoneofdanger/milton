@@ -126,12 +126,13 @@ async function tokenFixture(
   };
 }
 
-test("both instruction variants stay under 3,800 characters, keep every topic and leave error handling to results", () => {
-  // Claude Code truncates MCP server instructions at 4,096 characters; 3,800
+test("both instruction variants stay under 3,900 characters, keep every topic and leave error handling to results", () => {
+  // Claude Code truncates MCP server instructions at 4,096 characters; 3,900
   // keeps room for growth. Raised from 3,500 for the tested posted-writing
-  // text (3,607 characters, Peter, 2026-11-13).
+  // text (3,607 characters, Peter, 2026-11-13), then from 3,800 for the
+  // replace lines, without trimming tested guidance (Peter, 2026-11-17).
   for (const served of [storeInstructions, readOnlyInstructions]) {
-    expect(served.length).toBeLessThan(3800);
+    expect(served.length).toBeLessThan(3900);
     expect(served.isWellFormed()).toBe(true);
     // Error handling lives in each error result's next; one pointer remains.
     expect(served).toContain("On an error, follow its next.");
@@ -175,6 +176,14 @@ test("an SDK client receives instructions, discovers the two tools, and reads th
       expect(JSON.stringify(served)).not.toMatch(
         /TPS|tps_report|cover[ _]sheet|report_id|rounds/,
       );
+    // keep_memos false still allows replaces, as the instructions say.
+    const report = tools.find((tool) => tool.name === "get_report")!;
+    expect(report.description).toContain(
+      "keep_memos (false: save only replaces and writing the person asks you to remember)",
+    );
+    expect(client.getInstructions()).toContain(
+      "When keep_memos is false, save only replaces and writing they ask you to remember.",
+    );
     const save = tools.find((tool) => tool.name === "create_memo")!;
     expect(Object.keys(save.inputSchema.properties ?? {}).sort()).toEqual([
       "forget_memos",
@@ -197,6 +206,7 @@ test("an SDK client receives instructions, discovers the two tools, and reads th
         "kind_id",
         "mode",
         "new_kind",
+        "replaces",
         "request",
       ].sort(),
     );
@@ -222,7 +232,7 @@ test("an SDK client receives instructions, discovers the two tools, and reads th
       "Milton works out the person's changes (their tweaks) from first_draft and final",
       "A memo holds only these: never secrets, the transcript, the person's correction messages or other people's text",
       "Don't save a final holding a secret (say why; never redact)",
-      "carries receipt: tell the person that line",
+      "When a result carries receipt, tell the person that line",
     ])
       expect(save.description).toContain(field);
     // The request: own words when they said it, a short line when they only

@@ -2310,6 +2310,127 @@ try {
   pass(
     "a removed-field refusal's receipt lookup takes the account lock, waits for a same-id save holding it on another connection, and then sees its receipt",
   );
+  stage = "a replace as the MCP role, and a replace racing a forget";
+  {
+    // A replace runs as the MCP runtime role: it deletes the memo and
+    // inserts the new final under the same id and creation time, with its
+    // changes. Then a forget holds the account lock; a replace of the same
+    // memo on another connection waits for it, then finds the memo gone.
+    const replacer = "m_00000000-0000-4000-8000-0000000000ca";
+    await owner.query("INSERT INTO users(id) VALUES($1)", [replacer]);
+    await owner.query(
+      "INSERT INTO identities(provider,subject,user_id) VALUES('fictional-replace','replacer',$1)",
+      [replacer],
+    );
+    await owner.query(
+      "INSERT INTO trial_accounts(user_id,started_at,subscription_status) VALUES($1,now(),'active')",
+      [replacer],
+    );
+    const dialect = new PgDialect();
+    const base = postgresDatabase(mcpConfig.DATABASE_URL);
+    let pauseSave = false;
+    let locked!: () => void, resume!: () => void;
+    const saveLocked = new Promise<void>((resolve) => (locked = resolve));
+    const resumed = new Promise<void>((resolve) => (resume = resolve));
+    const pausing = (session: StoreSession): StoreSession => ({
+      async query<Row extends Record<string, unknown>>(statement: SQL) {
+        const rows = await session.query<Row>(statement);
+        if (
+          pauseSave &&
+          / FOR NO KEY UPDATE$/.test(dialect.sqlToQuery(statement).sql)
+        ) {
+          pauseSave = false;
+          locked();
+          await resumed;
+        }
+        return rows;
+      },
+    });
+    const auth = await lookupIdentityAccount(mcpConfig, {
+      provider: "fictional-replace",
+      subject: "replacer",
+    });
+    const actor = { issuer: "fixture", clientId: "fictional-replacer" };
+    const forgetter = await storeForCurrentRequest(
+      {
+        ...mcpConfig,
+        storeDatabase: {
+          ...base,
+          transaction: (work) => base.transaction((tx) => work(pausing(tx))),
+        },
+      },
+      auth,
+      actor,
+    );
+    const store = await storeForCurrentRequest(mcpConfig, auth, actor);
+    const first_draft = "Hi Dana! Sadly we can't make Thursday.";
+    const memo = (final: string, replaces?: string) => ({
+      request_id: randomUUID(),
+      memo: {
+        first_draft,
+        final,
+        mode: "draft" as const,
+        context: {
+          summary: "Fictional replaced note",
+          medium: "email" as const,
+        },
+        ...(replaces ? { replaces } : {}),
+      },
+    });
+    const id = (await store.saveMemo(memo("Dana, not Thursday."))).memo!
+      .memo_id;
+    const row = async () =>
+      (
+        await owner.query(
+          `SELECT m.id,m.created_at::text AS at,m.final,
+            (SELECT count(*)::int FROM memo_changes c WHERE c.user_id=m.user_id AND c.memo_id=m.id) AS changes
+          FROM memos m WHERE m.user_id=$1`,
+          [replacer],
+        )
+      ).rows;
+    const [before] = await row();
+    const replaced = await store.saveMemo(
+      memo("Dana, Thursday doesn't work for us.", id),
+    );
+    assert.equal(replaced.status, "saved");
+    assert.equal(replaced.replaced, true);
+    assert.equal(replaced.memo?.memo_id, id);
+    assert.equal(replaced.receipt, undefined);
+    const [after] = await row();
+    assert.deepEqual(
+      { ...after, changes: after.changes > 0 },
+      {
+        id,
+        at: before.at,
+        final: "Dana, Thursday doesn't work for us.",
+        changes: true,
+      },
+      "the MCP role replaces the memo in place",
+    );
+    pauseSave = true;
+    const forgetting = forgetter.saveMemo({
+      request_id: randomUUID(),
+      forget_memos: [id],
+    });
+    await saveLocked;
+    const racing = store
+      .saveMemo(memo("Dana, Thursday is out; next week?", id))
+      .then((outcome) => outcome.error ?? outcome.status);
+    const early = await within(racing, 500);
+    resume();
+    assert.equal(early, "waited", "the replace waits for the forget's lock");
+    assert.equal((await forgetting).status, "saved");
+    assert.equal(
+      await racing,
+      "replace_unknown",
+      "after the forget commits, the replace finds no memo",
+    );
+    assert.deepEqual(await row(), [], "nothing was saved as new");
+    await owner.query("DELETE FROM users WHERE id=$1", [replacer]);
+  }
+  pass(
+    "a replace runs as the MCP role, keeping the id and creation time; a replace racing a forget waits on the account lock, then is refused as replace_unknown",
+  );
   stage = "read-only native authorization";
   const readGrant = await authorizeAssistant(
     "openid offline_access milton:read",

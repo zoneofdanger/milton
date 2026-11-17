@@ -144,6 +144,11 @@ export const memoInput = z
         "Only with first_draft or first_draft_missing: what the person asked for, at most 600 characters and 12 lines. When they said what to write, their own words exactly as typed: cut pasted or quoted text (an email, a thread, a document) and anything secret, marking each cut […]; change nothing else. In edit mode, their instruction, never the text to edit. Never their later corrections. When they only agreed to your offer or approved the result, one short line on what they agreed to, with no pasted or other people's text.",
       ),
     context: memoContextInput,
+    replaces: id
+      .optional()
+      .describe(
+        "The memo_id of a final you saved that the person since changed. Send the full memo, with the same first_draft (or first_draft_missing) and the new final.",
+      ),
     ...kindFields,
     // null, as some clients send for none, is read as omitted.
     kind_id: id
@@ -183,9 +188,7 @@ export const saveMemoInput = z
       .describe("Ids of memos the person asked you to forget."),
     memo_context: memoContextChangeInput
       .optional()
-      .describe(
-        "A corrected context and kind for one memo; its words never change.",
-      ),
+      .describe("A corrected context and kind for one memo, never its words."),
   })
   .refine(
     (v) =>

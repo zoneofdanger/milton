@@ -60,8 +60,12 @@ const outcomeSchema = z.object({
         .optional(),
     })
     .optional(),
-  /** The one line the AI tells the person after a saved memo. */
+  /** The one line the AI tells the person after a saved memo; a replace
+   * carries none, since the AI updates a final without mentioning it. */
   receipt: z.string().optional(),
+  /** A replace: the memo kept its id and now holds the person's newer final
+   * (docs/saves.md, "Replacing a final"). */
+  replaced: z.literal(true).optional(),
   /** Historical receipts only: a cover sheet change. */
   cover_sheet: z.object({ version: z.number(), text: z.string() }).optional(),
   forgotten: z.array(z.string()).optional(),
@@ -155,14 +159,13 @@ export function checkMemo(memo: MemoInput): MemoCheck {
     if (problem) return refuse(`${problem}.`, "request");
   }
   if (memo.first_draft === undefined) return { ok: true };
-  const list = changeList(memo.first_draft, memo.final);
-  return {
-    ok: true,
-    evidence: {
-      state: list.state,
-      rows: changeRows(memo.first_draft, memo.final, list),
-    },
-  };
+  return { ok: true, evidence: evidenceFor(memo.first_draft, memo.final) };
+}
+
+/** Code's list of what changed from a kept first draft to its final. */
+function evidenceFor(firstDraft: string, final: string): Evidence {
+  const list = changeList(firstDraft, final);
+  return { state: list.state, rows: changeRows(firstDraft, final, list) };
 }
 
 export async function runSave(
@@ -324,8 +327,72 @@ async function resolveKind(
  * label is the memo's kind, or its medium when it has none. */
 export const receiptLine = (label: string) => `Kept memo: ${label}.`;
 
-async function saveMemo(save: Save, memo: MemoInput): Promise<SaveOutcome> {
-  const { tx, userId, actor, input, evidence, result } = save;
+/** The memo a replace names, when this save may replace it: any of the
+ * account's memos, whichever of its AI connections saved it (Peter,
+ * 2026-11-17). A kept first draft is never contradicted or dropped: the save
+ * sends it byte for byte, or stands in for it with first_draft_missing (the
+ * AI's context was compacted; the stored draft is used). A memo without one
+ * (missing, or writing the person gave) takes the save exactly as sent.
+ * Otherwise nothing is saved: replace_unknown when no such memo is on file
+ * (never saved, or forgotten), then replace_first_draft for a kept first
+ * draft the save contradicts or omits. */
+async function replaceTarget(
+  tx: StoreSession,
+  userId: string,
+  memo: MemoInput,
+  replaces: string,
+) {
+  const [old] = await tx.query<{
+    id: string;
+    final: string;
+    first_draft: string | null;
+    first_draft_state: "kept" | "missing" | "none";
+    at: string;
+  }>(sql`SELECT id,final,first_draft,first_draft_state,
+      to_char(created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS at
+    FROM memos WHERE user_id=${userId} AND id=${replaces}`);
+  if (!old)
+    throw new StoreError(
+      "replace_unknown",
+      "replaces names no memo on file; it may have been forgotten. Nothing was saved.",
+      404,
+    );
+  if (
+    old.first_draft_state === "kept" &&
+    (memo.first_draft === undefined
+      ? !memo.first_draft_missing
+      : memo.first_draft !== old.first_draft)
+  )
+    throw new StoreError(
+      "replace_first_draft",
+      "That memo keeps its first draft: send the same first_draft, or first_draft_missing. Nothing was saved.",
+      409,
+    );
+  return old;
+}
+
+async function saveMemo(save: Save, sent: MemoInput): Promise<SaveOutcome> {
+  const { tx, userId, actor, input, result } = save;
+  // A replace corrects a memo this AI saved and adds none, so Keep memos,
+  // turned off since, doesn't stop it unless it would keep a new draft.
+  const target =
+    sent.replaces !== undefined
+      ? await replaceTarget(tx, userId, sent, sent.replaces)
+      : undefined;
+  // A replace of a memo with a kept first draft, sending first_draft_missing,
+  // keeps the stored draft: the memo, its changes and tier are worked out as
+  // if that draft were sent. Any other replace is saved exactly as sent. The
+  // input is hashed and replayed as sent.
+  const stored =
+    target?.first_draft_state === "kept" && sent.first_draft === undefined
+      ? target.first_draft!
+      : undefined;
+  const memo: MemoInput =
+    stored !== undefined
+      ? { ...sent, first_draft: stored, first_draft_missing: undefined }
+      : sent;
+  const evidence =
+    stored !== undefined ? evidenceFor(stored, memo.final) : save.evidence;
   const state =
     memo.first_draft !== undefined
       ? "kept"
@@ -335,7 +402,9 @@ async function saveMemo(save: Save, memo: MemoInput): Promise<SaveOutcome> {
   const [account] = await tx.query<{ keep: boolean }>(
     sql`SELECT ${keepMemos(userId)} AS keep`,
   );
-  if (!account!.keep && state !== "none")
+  // With Keep memos off, a replace may correct a memo but store no first
+  // draft state it didn't already hold.
+  if (!account!.keep && state !== "none" && state !== target?.first_draft_state)
     throw new StoreError(
       "memos_off",
       "The person turned off Keep memos, so drafts are not kept. Nothing was saved.",
@@ -348,16 +417,32 @@ async function saveMemo(save: Save, memo: MemoInput): Promise<SaveOutcome> {
     memo.kind_id !== undefined
       ? await resolveKind(tx, userId, { kind_id: memo.kind_id })
       : undefined;
-  // The same words already on file: a repeated save keeps one memo.
+  // A replace sending the words its memo already holds changes nothing.
+  if (
+    target &&
+    target.final === memo.final &&
+    target.first_draft_state === state &&
+    target.first_draft === (memo.first_draft ?? null)
+  )
+    return result("unchanged", {
+      memo: await memoSummary(tx, userId, target.id),
+    });
+  // The same words already on file: a repeated save keeps one memo. A replace
+  // never matches its own memo here; when another memo holds these words,
+  // whichever AI saved it, the replaced memo still goes, and that one is the
+  // outcome, which any of the account's AIs can replace later.
   const [same] = await tx.query<{ id: string }>(
     sql`SELECT id FROM memos WHERE user_id=${userId} AND final=${memo.final}
       AND first_draft_state=${state} AND first_draft IS NOT DISTINCT FROM ${memo.first_draft ?? null}
+      AND id IS DISTINCT FROM ${target?.id ?? null}
       ORDER BY created_at LIMIT 1`,
   );
-  if (same)
+  if (same) {
+    if (target) await deleteMemos(tx, userId, [target.id]);
     return result("unchanged", {
       memo: await memoSummary(tx, userId, same.id),
     });
+  }
   const kind =
     named ?? (await resolveKind(tx, userId, { new_kind: memo.new_kind }));
   const memoTier = tier({
@@ -370,17 +455,23 @@ async function saveMemo(save: Save, memo: MemoInput): Promise<SaveOutcome> {
     memo.first_draft !== undefined
       ? change(memo.first_draft, memo.final)
       : undefined;
-  const id = randomUUID();
+  // A replace deletes the old memo, its changes and any legacy note left
+  // with no citation, as forgetting does, then inserts the new one under the
+  // same id and creation time. No memo's words or changes are ever updated
+  // (docs/memos.md).
+  if (target) await deleteMemos(tx, userId, [target.id]);
+  const id = target?.id ?? randomUUID();
   // rounds and report_id stay NULL and served_tweak_ids empty (their
   // defaults): this release writes none of them (docs/memos.md).
   await tx.query(sql`INSERT INTO memos(user_id,id,kind_id,medium,summary,audience,purpose,mode,
       first_draft,first_draft_state,final,change,tier,client_json,request_id,
-      request,changes_state)
+      request,changes_state,created_at)
     VALUES (${userId},${id},${kind?.id ?? null},${memo.context.medium},${memo.context.summary},
       ${memo.context.audience ?? null},${memo.context.purpose ?? null},${memo.mode ?? null},
       ${memo.first_draft ?? null},${state},${memo.final},${score ?? null},
       ${memoTier},${client(actor)},${input.request_id},
-      ${memo.request ?? null},${evidence?.state ?? null})`);
+      ${memo.request ?? null},${evidence?.state ?? null},
+      ${target ? sql`${target.at}::timestamptz` : sql`DEFAULT`})`);
   // Code's own list, the memo's tweaks: offsets, the cut sides and the
   // format marker; the label, tweak and quote columns stay NULL.
   const rows = evidence?.rows ?? [];
@@ -420,7 +511,10 @@ async function saveMemo(save: Save, memo: MemoInput): Promise<SaveOutcome> {
           }
         : {}),
     },
-    receipt: receiptLine(kind?.label ?? memo.context.medium),
+    // A replace is silent: no receipt line for the AI to repeat.
+    ...(target
+      ? { replaced: true as const }
+      : { receipt: receiptLine(kind?.label ?? memo.context.medium) }),
   });
 }
 

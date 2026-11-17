@@ -101,6 +101,61 @@ A save runs in one transaction:
 5. Write the receipt last, once, with the outcome, refusals included, so the same
    request ID and input replay that outcome.
 
+## Replacing a final
+
+`memo.replaces` names a memo whose final the person changed after their AI saved it
+(Peter, 2026-11-17). The save is a complete memo save, checked, diffed and hashed as any
+other, with `replaces` in the hashed input.
+
+- **Allowed** for any of the account's memos, whichever of its AI connections saved it,
+  with or without a stored first draft (Peter, 2026-11-17, so that no stale copy
+  outlives the person's newer version). An earlier same-connection rule was dropped: an
+  AI whose save returned another AI's memo as `unchanged` holds that id, and refusing
+  its replace led it to save the person's next edit as a new memo, leaving two finals
+  (third and fourth reviews of #148). Each condition is checked in the transaction,
+  under the account lock.
+- **A memo with a kept first draft** keeps it: the save sends `first_draft` byte for byte
+  equal to it, or `first_draft_missing: true` (an AI whose context was compacted still
+  has the memo id but not the draft). With `first_draft_missing`, Milton keeps the
+  stored first draft and its state, and works out the changes, tier and change score from
+  it and the new final, as if it had been sent; the input is still hashed and replayed as
+  sent.
+- **A memo without one** (first draft `missing`, or writing the person gave) takes the
+  save exactly as sent: its own `first_draft`, `first_draft_missing` or final-only shape,
+  mode and request. A `first_draft` sent where none was kept is stored as sent, with its
+  changes: it is the AI's best copy, and Milton has nothing to check it against.
+- **Refusals** save nothing, are stored in the receipt and replay like other refusals,
+  checked in this order. `replace_unknown` (no such memo: never saved, or forgotten)
+  tells the AI not to save the words again as a new memo, since the person may have
+  forgotten it. `replace_first_draft` (a memo with a kept first draft, and a
+  save that sends a different `first_draft`, or neither field, which would contradict or
+  drop the stored draft and its tweaks) tells it to resend with the same `first_draft`
+  or `first_draft_missing`. Each `next` is in `mcp-outcomes.ts`.
+- **Applied** inside the savepoint: the old memo is deleted through `deleteMemos`, as a
+  forget deletes it (its changes and citations by cascade, legacy notes left with no
+  citation after it), then the new memo is inserted under the same id and the old
+  `created_at`, with its own change rows, as a normal save inserts them. No memo's words
+  or change rows are updated: the MCP role can't (`016-memo-evidence-roles.sql`), and
+  reports rely on it ([reports](reports.md#what-they-changed)). It needs no grant beyond
+  a save's and a forget's; the integration suite runs it as the MCP role.
+- **Duplicates.** When the memo already holds these words (final, first-draft state
+  and first draft, after a stored draft stands in for `first_draft_missing`), the
+  result is `unchanged`. When another memo holds them, whichever AI saved it, the
+  replaced memo is deleted and that one is returned `unchanged`; the AI can replace it
+  later by that id. The duplicate check never matches the replaced memo itself.
+  Ordinary saves dedupe as before.
+- **Keep memos** turned off since the original save does not stop a replace, unless the
+  replace would store a first-draft state its memo didn't hold (a first draft or
+  `first_draft_missing` on writing the person gave, or a first draft on a memo whose
+  draft was missing), which is refused with `memos_off` as any drafted save is. A
+  `new_kind` is created only when a memo is written, as on any save.
+- **Outcome**: `saved`, with the memo summary under the same `memo_id`, `replaced: true`
+  and no `receipt`, so the AI says nothing. Retrying the original save's request id
+  still replays its own stored outcome.
+- **A forget racing a replace** is serialized by the account lock; a replace that runs
+  second meets `replace_unknown`. The integration suite runs that schedule on two
+  connections.
+
 ## Failures
 
 - A transient or unknown database error (`store_unavailable`: a timeout, deadlock or
@@ -116,8 +171,8 @@ A save runs in one transaction:
 
 - A receipt (`save_requests`) holds the account, request ID, input hash, outcome and
   time. A fresh outcome holds a memo's id, tier, kind, change score and its changes'
-  state and count, and the receipt line; never `rounds` or tweaks, a request or a
-  change's text, since receipts outlive forgetting.
+  state and count, and the receipt line (or a replace's `replaced`); never `rounds` or
+  tweaks, a request or a change's text, since receipts outlive forgetting and replacing.
 - Historical receipts are never erased or rewritten. A replay returns the stored
   outcome verbatim, old fields included (a memo's `rounds` and AI-written tweaks, a
   `cover_sheet`), and adds one top-level field beside it, `replayed`: "A stored outcome

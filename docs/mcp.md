@@ -125,13 +125,19 @@ How a person creates and revokes keys is in [accounts](accounts.md).
 - `create_memo` takes a `request_id` (1 to 64 of `A-Z a-z 0-9 . _ : -`, exactly the
   database's check, [saves](saves.md#request-ids)) and exactly one of `memo`,
   `forget_memos` or `memo_context`; `memo.request` carries the person's ask
-  ([memos](memos.md#the-request)). What each change does is in [memos](memos.md) and
-  [deletion](deletion.md).
+  ([memos](memos.md#the-request)), and `memo.replaces` the id of a final the AI saved
+  that the person since changed, sent with the same `first_draft` or with
+  `first_draft_missing` ([saves](saves.md#replacing-a-final)). What each change
+  does is in [memos](memos.md) and [deletion](deletion.md).
 - `create_memo` returns `saved`, `unchanged` or `failed`, with the request ID. `saved`
-  confirms a committed write; `unchanged` confirms no write was needed. A memo with a
+  confirms a committed write; `unchanged` confirms the returned memo already holds those
+  words. One exception writes: a replace whose words another memo already holds deletes
+  the replaced memo and returns that other memo as `unchanged`
+  ([saves](saves.md#replacing-a-final)). A memo with a
   kept first draft adds `changes: {state, found}`, code's own count
-  ([memos](memos.md#changes)). A replay returns the stored outcome as it was written,
-  with `replayed` beside it ([saves](saves.md#receipts)).
+  ([memos](memos.md#changes)). A replace's `saved` adds `replaced: true` and carries no
+  `receipt`. A replay returns the stored outcome as it was written, with `replayed`
+  beside it ([saves](saves.md#receipts)).
 - A read-only connection lists no `create_memo`; a direct call to it is refused with
   `insufficient_scope` and `required_permission: read_write`.
 
@@ -205,6 +211,9 @@ a reconnect.
 - Memo codes get their own steps: `request_too_large` resaves the memo with the final
   alone (`first_draft_missing`); `memos_off` stops saving drafts, saving only writing
   the person asks to remember; `invalid_kind` and `invalid_memo` reread for a valid id.
+  A replace's refusals: `replace_unknown` (`tell_user`: the memo is gone, perhaps
+  forgotten, so don't save it again as a new memo) and `replace_first_draft` (`fix_input`: resend with that memo's first draft exactly, or
+  `first_draft_missing`).
 - The store's own refusals, a receipt or user id change, are unavailable-now steps; a
   correct call never meets them.
 - A scope refusal also carries `required_permission`, `read` or `read_write`: what the
@@ -231,8 +240,10 @@ a reconnect.
   of a save (the request rules) lives in the field descriptions, which the budget test
   does not measure. What the AI is asked to send as the request is guidance; Milton
   checks only what [memos](memos.md#the-request) lists.
-- There are two instruction variants, read-write and read-only. Both stay under 3,800
-  characters (3,500 until the 2026-11-13 posted-writing text, 3,607), inside the 4,096
+- There are two instruction variants, read-write and read-only. Both stay under 3,900
+  characters (3,500 until the 2026-11-13 posted-writing text, 3,607; then 3,800; raised
+  to 3,900 on 2026-11-17 for the replace lines, which only the read-write variant
+  carries, without trimming tested guidance: 3,861), inside the 4,096
   at which Claude Code truncates; a test enforces this and that no error handling is
   left in them. Error handling lives in each error result's `next`, and the save fields
   in `create_memo`'s description.
@@ -242,8 +253,9 @@ a reconnect.
   instructions: call `get_report` before writing or editing for the person.
 - `server/test/served-budget.test.ts` reads the tool descriptions an SDK client is
   served, in both connection modes, and keeps each and their total under a budget (the
-  2026-11-12 sizes plus 10 to 15%, and none past 1,900); growing past it means raising
-  the budget there, deliberately. It also refuses the retired names in descriptions.
+  2026-11-12 sizes plus 10 to 15%, and none past 1,900; `create_memo`'s raised to 1,800
+  and the read-write total to 2,600 for the replace sentence on 2026-11-17); growing past
+  it means raising the budget there, deliberately. It also refuses the retired names in descriptions.
 - Each AI's (account and OAuth client) first tool call after a server process starts
   carries `notifications/tools/list_changed` on that call's response stream, ahead of
   its result, as does every `get_report` refused for a missing intent and every retired

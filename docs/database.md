@@ -67,13 +67,15 @@ production order and snapshots are in [migrations](deploy/migrations.md).
     cover sheet versions; insert, read and delete tweaks; insert and read citations; and
     read the Keep memos switch. App may read and delete memos and kinds, read citations,
     read, delete and reword tweaks, read and append cover sheet versions, and read and
-    set the switch. Neither runtime can change a memo's words, and neither deletes
-    citations itself: forgetting a memo, deleting a tweak and account erasure remove
-    them through the foreign keys' cascades, which run as the table owner. The code
-    uses a subset: it inserts and updates no cover sheet version, legacy tweak, citation
-    or served report, and rewords no tweak ([saves](saves.md)). Those grants stay,
-    unused, until a later cleanup, on Peter's word, revokes them and drops the retired
-    tables and columns ([memos](memos.md#legacy-data)).
+    set the switch. Neither runtime can update a memo's words (a replace deletes the
+    memo and inserts its successor under the same id, with these grants;
+    [saves](saves.md#replacing-a-final)), and neither deletes citations itself:
+    forgetting a memo, deleting a tweak and account erasure remove them through the
+    foreign keys' cascades, which run as the table owner. The code uses a subset: it
+    inserts and updates no cover sheet version, legacy tweak, citation or served report,
+    and rewords no tweak ([saves](saves.md)). Those grants stay, unused, until a later
+    cleanup, on Peter's word, revokes them and drops the retired tables and columns
+    ([memos](memos.md#legacy-data)).
   - `015-drop-guide-roles.sql` dropped the guide roles; none exists.
   - `016-memo-evidence-roles.sql` (after `0015`): restates 014's whole set for the memo
     tables, revoking first, so rerun it after any rerun of 014. It adds MCP insert and

@@ -126,7 +126,7 @@ async function tokenFixture(
   };
 }
 
-test("both instruction variants stay under 3,800 characters, keep every topic and leave error handling to results", () => {
+test("both instruction variants stay under 3,900 characters, keep every topic and leave error handling to results", () => {
   // Claude Code truncates MCP server instructions at 4,096 characters; 3,900
   // keeps room for growth. Raised from 3,500 for the tested posted-writing
   // text (3,607 characters, Peter, 2026-11-13), then from 3,800 for the

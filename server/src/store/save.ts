@@ -438,12 +438,15 @@ async function saveMemo(save: Save, sent: MemoInput): Promise<SaveOutcome> {
       memo: await memoSummary(tx, userId, target.id),
     });
   // The same words already on file: a repeated save keeps one memo. A replace
-  // never matches its own memo here; when another memo holds these words,
-  // the replaced memo still goes, and that one is the outcome.
+  // never matches its own memo here, and returns another memo only when this
+  // connection saved it: the replaced memo still goes, and that one is the
+  // outcome, which this AI can replace later. Another connection's identical
+  // memo is that AI's own; the replace goes ahead under its own id.
   const [same] = await tx.query<{ id: string }>(
     sql`SELECT id FROM memos WHERE user_id=${userId} AND final=${memo.final}
       AND first_draft_state=${state} AND first_draft IS NOT DISTINCT FROM ${memo.first_draft ?? null}
       AND id IS DISTINCT FROM ${target?.id ?? null}
+      ${target ? sql`AND client_json::jsonb->>'issuer'=${actor.issuer} AND client_json::jsonb->>'client_id'=${actor.clientId}` : sql``}
       ORDER BY created_at LIMIT 1`,
   );
   if (same) {

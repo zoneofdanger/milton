@@ -138,10 +138,14 @@ other, with `replaces` in the hashed input.
   a save's and a forget's; the integration suite runs it as the MCP role.
 - **Duplicates.** When the memo already holds these words (final, first-draft state
   and first draft, after a stored draft stands in for `first_draft_missing`), the
-  result is `unchanged`.
-  When another memo holds this first draft and final, the replaced memo is deleted and
-  the other is returned `unchanged`. Otherwise the duplicate check never matches the
-  replaced memo itself.
+  result is `unchanged`. When another memo the same connection saved holds them, the
+  replaced memo is deleted and that one is returned `unchanged`; the AI can replace it
+  later, since it is its own. Another connection's memo holding the same words is never
+  returned: it is that AI's own, so the replace goes ahead under the replaced memo's
+  id, and each AI keeps one memo of its own, neither stale. Without this, an AI told to
+  replace another connection's memo would be refused, save the person's next edit as a
+  new memo, and leave two finals (third review of #148). The duplicate check never
+  matches the replaced memo itself.
 - **Keep memos** turned off since the original save does not stop a replace, unless the
   replace would store a first-draft state its memo didn't hold (a first draft or
   `first_draft_missing` on writing the person gave, or a first draft on a memo whose

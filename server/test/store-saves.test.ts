@@ -860,3 +860,78 @@ test("a report serves a memo only in the version it ranked: one replaced between
     await local.dispose();
   }
 });
+
+test("a replace returns another memo holding its words only when the same connection saved it; another connection's identical memo leaves the replace to go ahead, so the person's later edit replaces one final", async () => {
+  const local = await localStore();
+  try {
+    await seedUsers(local.pg, "crossing");
+    const a = fixtureStore(local.db, "crossing", "ai-a");
+    const b = fixtureStore(local.db, "crossing", "ai-b");
+    const intent = {
+      situation: "declining a vendor's meeting request",
+      medium: "email" as const,
+      audience: "a vendor",
+      purpose: "decline",
+    };
+    const missing = (final: string, replaces?: string) =>
+      memoSave({
+        first_draft_missing: true,
+        mode: "draft",
+        final,
+        ...(replaces ? { replaces } : {}),
+      });
+    const finals = async () =>
+      (
+        await local.pg.query<{ id: string; final: string; ai: string }>(
+          "SELECT id,final,client_json::jsonb->>'client_id' AS ai FROM memos WHERE user_id='crossing' ORDER BY created_at",
+        )
+      ).rows;
+    // The reviewer's sequence: A's memo, then B's newer identical words.
+    const mine = (await a.saveMemo(missing("Dana, Thursday is out."))).memo!
+      .memo_id;
+    const theirs = (await b.saveMemo(missing("Dana, Friday works."))).memo!
+      .memo_id;
+    // A replaces its own memo with B's words: A's memo now holds them, under
+    // its own id; B's memo is B's.
+    expect(
+      await a.saveMemo(missing("Dana, Friday works.", mine)),
+    ).toMatchObject({
+      status: "saved",
+      memo: { memo_id: mine },
+      replaced: true,
+    });
+    // The person edits again; A replaces the memo it holds.
+    expect(
+      await a.saveMemo(missing("Dana, Monday works.", mine)),
+    ).toMatchObject({
+      status: "saved",
+      memo: { memo_id: mine },
+      replaced: true,
+    });
+    // One final for A's writing; B's is its own.
+    expect(await finals()).toEqual([
+      { id: mine, final: "Dana, Monday works.", ai: "ai-a" },
+      { id: theirs, final: "Dana, Friday works.", ai: "ai-b" },
+    ]);
+    expect((await readReport(local.db, "crossing", intent)).text).not.toContain(
+      "Dana, Thursday is out.",
+    );
+    // The same connection's other memo already holds the words: the replaced
+    // memo goes and that one is the outcome, which A can replace later.
+    const older = (await a.saveMemo(missing("Dana, Tuesday works."))).memo!
+      .memo_id;
+    expect(
+      await a.saveMemo(missing("Dana, Monday works.", older)),
+    ).toMatchObject({ status: "unchanged", memo: { memo_id: mine } });
+    expect((await finals()).map((r) => r.id)).toEqual([mine, theirs]);
+    expect(
+      await a.saveMemo(missing("Dana, Wednesday works.", mine)),
+    ).toMatchObject({
+      status: "saved",
+      memo: { memo_id: mine },
+      replaced: true,
+    });
+  } finally {
+    await local.dispose();
+  }
+});

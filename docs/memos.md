@@ -77,7 +77,8 @@ their AI saved a second memo with the same first draft, leaving the first one st
 - Not asked for: intermediate drafts, the person's correction messages and other
   people's text. The ask is kept only as `request` ([The request](#the-request)).
 - A save whose final, first-draft state and first draft match a memo on file returns
-  `unchanged` with that memo, adding nothing.
+  `unchanged` with that memo, adding nothing. For a replace, only a memo the same AI
+  connection saved counts ([saves](saves.md#replacing-a-final)).
 - A save with `replaces` swaps the final of any memo the same AI connection saved,
   keeping its id and creation time. A kept first draft is sent again byte for byte, or
   stood in for by `first_draft_missing`, when Milton uses the stored one; a memo without

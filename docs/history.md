@@ -23,6 +23,47 @@ Earlier records are in git history: the last runbook holding them is at commit 4
 (`git show 492b96a:server/deploy/README.md`), and the runbook's later versions are in
 `git log -p server/deploy/README.md` until 2026-11-10, when this file began.
 
+## 2026-11-17: an AI updates a memo it saved (PR #148)
+
+- **#148 (Peter's "yes", typed in this coordinator session, milton-d2, on 2026-11-17,
+  answering "Go to merge and release?"; built by temporary builders; Codex gpt-6-astra
+  reviewed five times, PASS at `34c4e98`, its P3 doc note fixed at `8f24568`), `87ed9dc`:**
+  `create_memo`'s memo takes `replaces`, a saved memo's id. When the person changes a final
+  the AI saved, it saves again with the same first draft (or `first_draft_missing`) and
+  that id, without asking or saying anything. The earlier final and its tweaks are deleted
+  and the new one is kept under the same id and date. Any of the account's AIs may replace;
+  a kept draft must match byte for byte (`replace_first_draft`); an unknown or forgotten id
+  is `replace_unknown`; with Keep memos off a replace may not add a draft (`memos_off`). If
+  another memo already holds the words, the replaced memo is deleted and that memo returned
+  as `unchanged`. get_report leaves out a memo replaced between its two reads. The
+  instructions are 3,861 characters (test budget raised from 3,800 to 3,900), and the
+  privacy page gained the replace sentence Peter approved.
+  - **Evidence:** a 2026-11-17 offline compliance test with a fake Milton and a fictional
+    person: Claude Code replaced correctly 9/9; Codex replaced silently 2/2 once the
+    "say nothing" line was added; no wrong replaces; the old text made duplicates 3/3.
+  - **Schema:** none. **Auth:** unchanged. **Site:** main pushed after the services
+    switched, publishing the privacy page dated November 17, 2026.
+  - **Image** `sha256:14e0b206ae7f8a24fab267b71bd75a41dea172101bd9b64d1d95e73862eec51c`
+    (amd64 `sha256:ff7e4c8b…`; Node v26.13.1, user `node`; the bundle holds the new
+    sentences), released in the order for a tool change: admit `milton-admit-00019-25l` at
+    20:06:16Z; app `milton-app-replaces-87ed9dc` traffic at 20:06:57Z, the old app drained
+    (no request after 20:07:05Z); MCP `milton-mcp-replaces-87ed9dc` traffic at 20:08:36Z,
+    the old MCP drained (no log line after 20:08:45Z); `milton-e2e-daily` at 20:12:10Z, with
+    no execution active; main pushed after that.
+  - **Live:** app and MCP `/health` and auth `/api/auth/ok` 200, app home 200, MCP 401
+    unauthenticated, admit 403 without a token, forms probe PASS,
+    `milton-e2e-daily-mnvnq` passed. An authenticated `initialize` on the newcomer test
+    account served the replace sentences, and `tools/list` listed `replaces`.
+  - **Gate** at 20:18:49Z: clean, with no alert open or opened since 20:06:57Z. No request
+    or log line reached an older app or MCP revision after 20:09Z, and there were no error,
+    `store_unavailable` or `permission denied` lines on the new revisions.
+  - **Checks** on the merge commit `87ed9dc`: types, tests, format and agent-docs 0; PR CI
+    green at `8f24568`.
+  - **Not observed:** a real replace through a real AI on production.
+  - **Rollback**, code only: `milton-*-posted-15d93cf`, `milton-admit-00018-p7z` and the
+    daily job to image `sha256:a5d65650…`; AIs holding the new tool list are refused on a
+    replace (strict arguments) until they reconnect.
+
 ## 2026-11-13: posted or sent writing counts (PR #139)
 
 - **#139 (Peter's "go, build and release it", typed in this coordinator session, milton-d2,

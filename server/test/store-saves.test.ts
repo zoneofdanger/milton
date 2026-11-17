@@ -8,7 +8,7 @@ import {
 } from "./store-fixtures";
 import { checkMemo, hash, REPLAYED, type Evidence } from "../src/store/save";
 import { change } from "../src/store/score";
-import { withNext } from "../src/mcp-outcomes";
+import { nextSteps, withNext } from "../src/mcp-outcomes";
 import { EMPTY_REPORT, readReport } from "../src/store/memos";
 import type { SQL } from "drizzle-orm";
 import type { MemoInput, SaveMemoInput } from "../src/mcp-tools";
@@ -439,7 +439,7 @@ test("a replace deletes the old memo and inserts the new final under the same id
   }
 });
 
-test("a replace is refused, saving nothing, for an unknown or forgotten memo, another connection's memo, or, on a memo with a kept first draft, a first draft that differs or isn't sent; refusals replay", async () => {
+test("a replace is refused, saving nothing, for an unknown or forgotten memo, or, on a memo with a kept first draft, a first draft that differs or isn't sent; refusals replay; another connection may replace", async () => {
   const local = await localStore();
   try {
     await seedUsers(local.pg, "refuser");
@@ -474,9 +474,6 @@ test("a replace is refused, saving nothing, for an unknown or forgotten memo, an
       [
         [replaceOf(crypto.randomUUID(), "New."), "replace_unknown", store],
         [replaceOf(forgotten, "New."), "replace_unknown", store],
-        // Another connection's memo, whatever its first draft.
-        [replaceOf(id, "New."), "replace_refused", other],
-        [finalOnly(given), "replace_refused", other],
         // A kept first draft is never contradicted or dropped.
         [
           replaceOf(id, "New.", { first_draft: `${draft} ` }),
@@ -502,22 +499,35 @@ test("a replace is refused, saving nothing, for an unknown or forgotten memo, an
       });
     }
     expect(await words()).toEqual(kept);
-    // The next steps: never resave a gone memo as new; another AI's memo is
-    // saved as a new one; a kept first draft is resent as missing. Read
+    // The next steps: never resave a gone memo as new; a kept first draft is
+    // resent as is or as missing. Read
     // without toMatchObject, which writes its matchers into the shared
     // nextSteps table (Bun 1.4.4).
     const unknown = withNext({ error: "replace_unknown", message: "m" }).next;
     expect(unknown.action).toBe("tell_user");
     expect(unknown.text).toContain("Don't save this again as a new memo");
-    const refused = withNext({ error: "replace_refused", message: "m" }).next;
-    expect(refused.action).toBe("fix_input");
-    expect(refused.text).toContain("new memo without replaces");
     const firstDraft = withNext({
       error: "replace_first_draft",
       message: "m",
     }).next;
     expect(firstDraft.action).toBe("fix_input");
     expect(firstDraft.text).toContain("first_draft_missing");
+    expect(nextSteps).not.toHaveProperty("replace_refused");
+    // Any of the account's connections may replace a memo by id (Peter,
+    // 2026-11-17): another AI replaces both memos, with their own rules.
+    expect(await other.saveMemo(finalOnly(given))).toMatchObject({
+      status: "saved",
+      memo: { memo_id: given },
+      replaced: true,
+    });
+    expect(
+      await other.saveMemo(
+        replaceOf(id, "New.", {
+          first_draft: undefined,
+          first_draft_missing: true,
+        }),
+      ),
+    ).toMatchObject({ status: "saved", memo: { memo_id: id }, replaced: true });
   } finally {
     await local.dispose();
   }
@@ -861,7 +871,7 @@ test("a report serves a memo only in the version it ranked: one replaced between
   }
 });
 
-test("a replace returns another memo holding its words only when the same connection saved it; another connection's identical memo leaves the replace to go ahead, so the person's later edit replaces one final", async () => {
+test("whichever AI saved the memo on file, the person's later edit replaces it: a replace or a save meeting another connection's identical memo, then a replace of that id, leaves one final, the newest", async () => {
   const local = await localStore();
   try {
     await seedUsers(local.pg, "crossing");
@@ -882,55 +892,50 @@ test("a replace returns another memo holding its words only when the same connec
       });
     const finals = async () =>
       (
-        await local.pg.query<{ id: string; final: string; ai: string }>(
-          "SELECT id,final,client_json::jsonb->>'client_id' AS ai FROM memos WHERE user_id='crossing' ORDER BY created_at",
+        await local.pg.query<{ id: string; final: string }>(
+          "SELECT id,final FROM memos WHERE user_id='crossing' ORDER BY created_at",
         )
       ).rows;
-    // The reviewer's sequence: A's memo, then B's newer identical words.
+    const served = async () =>
+      (await readReport(local.db, "crossing", intent)).text;
+    // Third review's sequence: A's memo, B's newer words, A's replace meets
+    // them (A's memo goes, B's is the outcome), then A replaces B's memo.
     const mine = (await a.saveMemo(missing("Dana, Thursday is out."))).memo!
       .memo_id;
     const theirs = (await b.saveMemo(missing("Dana, Friday works."))).memo!
       .memo_id;
-    // A replaces its own memo with B's words: A's memo now holds them, under
-    // its own id; B's memo is B's.
     expect(
       await a.saveMemo(missing("Dana, Friday works.", mine)),
-    ).toMatchObject({
-      status: "saved",
-      memo: { memo_id: mine },
-      replaced: true,
-    });
-    // The person edits again; A replaces the memo it holds.
+    ).toMatchObject({ status: "unchanged", memo: { memo_id: theirs } });
     expect(
-      await a.saveMemo(missing("Dana, Monday works.", mine)),
+      await a.saveMemo(missing("Dana, Monday works.", theirs)),
     ).toMatchObject({
       status: "saved",
-      memo: { memo_id: mine },
+      memo: { memo_id: theirs },
       replaced: true,
     });
-    // One final for A's writing; B's is its own.
     expect(await finals()).toEqual([
-      { id: mine, final: "Dana, Monday works.", ai: "ai-a" },
-      { id: theirs, final: "Dana, Friday works.", ai: "ai-b" },
+      { id: theirs, final: "Dana, Monday works." },
     ]);
-    expect((await readReport(local.db, "crossing", intent)).text).not.toContain(
-      "Dana, Thursday is out.",
-    );
-    // The same connection's other memo already holds the words: the replaced
-    // memo goes and that one is the outcome, which A can replace later.
-    const older = (await a.saveMemo(missing("Dana, Tuesday works."))).memo!
-      .memo_id;
-    expect(
-      await a.saveMemo(missing("Dana, Monday works.", older)),
-    ).toMatchObject({ status: "unchanged", memo: { memo_id: mine } });
-    expect((await finals()).map((r) => r.id)).toEqual([mine, theirs]);
-    expect(
-      await a.saveMemo(missing("Dana, Wednesday works.", mine)),
-    ).toMatchObject({
+    expect(await served()).toContain("> Dana, Monday works.");
+    for (const gone of ["Thursday", "Friday"])
+      expect(await served()).not.toContain(gone);
+    // Fourth review's sequence: B saves, A's ordinary save of the same words
+    // returns B's memo, and A replaces that id.
+    await local.pg.query("DELETE FROM memos WHERE user_id='crossing'");
+    const bs = (await b.saveMemo(missing("Dana, Friday works."))).memo!.memo_id;
+    expect(await a.saveMemo(missing("Dana, Friday works."))).toMatchObject({
+      status: "unchanged",
+      memo: { memo_id: bs },
+    });
+    expect(await a.saveMemo(missing("Dana, Monday works.", bs))).toMatchObject({
       status: "saved",
-      memo: { memo_id: mine },
+      memo: { memo_id: bs },
       replaced: true,
     });
+    expect(await finals()).toEqual([{ id: bs, final: "Dana, Monday works." }]);
+    expect(await served()).toContain("> Dana, Monday works.");
+    expect(await served()).not.toContain("Friday");
   } finally {
     await local.dispose();
   }

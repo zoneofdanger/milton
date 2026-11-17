@@ -107,10 +107,13 @@ A save runs in one transaction:
 (Peter, 2026-11-17). The save is a complete memo save, checked, diffed and hashed as any
 other, with `replaces` in the hashed input.
 
-- **Allowed** for any of the account's memos saved by the same AI connection (the issuer
-  and client in its `client_json` equal the caller's), with or without a stored first
-  draft (Peter, 2026-11-17, so that no stale copy outlives the person's newer version).
-  Each condition is checked in the transaction, under the account lock.
+- **Allowed** for any of the account's memos, whichever of its AI connections saved it,
+  with or without a stored first draft (Peter, 2026-11-17, so that no stale copy
+  outlives the person's newer version). An earlier same-connection rule was dropped: an
+  AI whose save returned another AI's memo as `unchanged` holds that id, and refusing
+  its replace led it to save the person's next edit as a new memo, leaving two finals
+  (third and fourth reviews of #148). Each condition is checked in the transaction,
+  under the account lock.
 - **A memo with a kept first draft** keeps it: the save sends `first_draft` byte for byte
   equal to it, or `first_draft_missing: true` (an AI whose context was compacted still
   has the memo id but not the draft). With `first_draft_missing`, Milton keeps the
@@ -124,8 +127,7 @@ other, with `replaces` in the hashed input.
 - **Refusals** save nothing, are stored in the receipt and replay like other refusals,
   checked in this order. `replace_unknown` (no such memo: never saved, or forgotten)
   tells the AI not to save the words again as a new memo, since the person may have
-  forgotten it. `replace_refused` (another connection's memo) tells it to save a new
-  memo without `replaces`. `replace_first_draft` (a memo with a kept first draft, and a
+  forgotten it. `replace_first_draft` (a memo with a kept first draft, and a
   save that sends a different `first_draft`, or neither field, which would contradict or
   drop the stored draft and its tweaks) tells it to resend with the same `first_draft`
   or `first_draft_missing`. Each `next` is in `mcp-outcomes.ts`.
@@ -138,14 +140,10 @@ other, with `replaces` in the hashed input.
   a save's and a forget's; the integration suite runs it as the MCP role.
 - **Duplicates.** When the memo already holds these words (final, first-draft state
   and first draft, after a stored draft stands in for `first_draft_missing`), the
-  result is `unchanged`. When another memo the same connection saved holds them, the
+  result is `unchanged`. When another memo holds them, whichever AI saved it, the
   replaced memo is deleted and that one is returned `unchanged`; the AI can replace it
-  later, since it is its own. Another connection's memo holding the same words is never
-  returned: it is that AI's own, so the replace goes ahead under the replaced memo's
-  id, and each AI keeps one memo of its own, neither stale. Without this, an AI told to
-  replace another connection's memo would be refused, save the person's next edit as a
-  new memo, and leave two finals (third review of #148). The duplicate check never
-  matches the replaced memo itself.
+  later by that id. The duplicate check never matches the replaced memo itself.
+  Ordinary saves dedupe as before.
 - **Keep memos** turned off since the original save does not stop a replace, unless the
   replace would store a first-draft state its memo didn't hold (a first draft or
   `first_draft_missing` on writing the person gave, or a first draft on a memo whose

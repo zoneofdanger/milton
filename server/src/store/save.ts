@@ -328,18 +328,17 @@ async function resolveKind(
 export const receiptLine = (label: string) => `Kept memo: ${label}.`;
 
 /** The memo a replace names, when this save may replace it: any of the
- * account's memos this AI connection saved (Peter, 2026-11-17). A kept first
- * draft is never contradicted or dropped: the save sends it byte for byte, or
- * stands in for it with first_draft_missing (the AI's context was compacted;
- * the stored draft is used). A memo without one (missing, or writing the
- * person gave) takes the save exactly as sent. Otherwise nothing is saved:
- * replace_unknown when no such memo is on file (never saved, or forgotten),
- * replace_refused for another connection's memo, and replace_first_draft for
- * a kept first draft the save contradicts or omits, in that order. */
+ * account's memos, whichever of its AI connections saved it (Peter,
+ * 2026-11-17). A kept first draft is never contradicted or dropped: the save
+ * sends it byte for byte, or stands in for it with first_draft_missing (the
+ * AI's context was compacted; the stored draft is used). A memo without one
+ * (missing, or writing the person gave) takes the save exactly as sent.
+ * Otherwise nothing is saved: replace_unknown when no such memo is on file
+ * (never saved, or forgotten), then replace_first_draft for a kept first
+ * draft the save contradicts or omits. */
 async function replaceTarget(
   tx: StoreSession,
   userId: string,
-  actor: Actor,
   memo: MemoInput,
   replaces: string,
 ) {
@@ -348,11 +347,8 @@ async function replaceTarget(
     final: string;
     first_draft: string | null;
     first_draft_state: "kept" | "missing" | "none";
-    issuer: string | null;
-    client_id: string | null;
     at: string;
   }>(sql`SELECT id,final,first_draft,first_draft_state,
-      client_json::jsonb->>'issuer' AS issuer,client_json::jsonb->>'client_id' AS client_id,
       to_char(created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS at
     FROM memos WHERE user_id=${userId} AND id=${replaces}`);
   if (!old)
@@ -360,12 +356,6 @@ async function replaceTarget(
       "replace_unknown",
       "replaces names no memo on file; it may have been forgotten. Nothing was saved.",
       404,
-    );
-  if (old.issuer !== actor.issuer || old.client_id !== actor.clientId)
-    throw new StoreError(
-      "replace_refused",
-      "replaces names a memo another AI connection saved. Nothing was saved.",
-      409,
     );
   if (
     old.first_draft_state === "kept" &&
@@ -387,7 +377,7 @@ async function saveMemo(save: Save, sent: MemoInput): Promise<SaveOutcome> {
   // turned off since, doesn't stop it unless it would keep a new draft.
   const target =
     sent.replaces !== undefined
-      ? await replaceTarget(tx, userId, actor, sent, sent.replaces)
+      ? await replaceTarget(tx, userId, sent, sent.replaces)
       : undefined;
   // A replace of a memo with a kept first draft, sending first_draft_missing,
   // keeps the stored draft: the memo, its changes and tier are worked out as
@@ -438,15 +428,13 @@ async function saveMemo(save: Save, sent: MemoInput): Promise<SaveOutcome> {
       memo: await memoSummary(tx, userId, target.id),
     });
   // The same words already on file: a repeated save keeps one memo. A replace
-  // never matches its own memo here, and returns another memo only when this
-  // connection saved it: the replaced memo still goes, and that one is the
-  // outcome, which this AI can replace later. Another connection's identical
-  // memo is that AI's own; the replace goes ahead under its own id.
+  // never matches its own memo here; when another memo holds these words,
+  // whichever AI saved it, the replaced memo still goes, and that one is the
+  // outcome, which any of the account's AIs can replace later.
   const [same] = await tx.query<{ id: string }>(
     sql`SELECT id FROM memos WHERE user_id=${userId} AND final=${memo.final}
       AND first_draft_state=${state} AND first_draft IS NOT DISTINCT FROM ${memo.first_draft ?? null}
       AND id IS DISTINCT FROM ${target?.id ?? null}
-      ${target ? sql`AND client_json::jsonb->>'issuer'=${actor.issuer} AND client_json::jsonb->>'client_id'=${actor.clientId}` : sql``}
       ORDER BY created_at LIMIT 1`,
   );
   if (same) {

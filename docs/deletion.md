@@ -44,8 +44,8 @@ covers:
   `invalid_memo`. The result lists the ids forgotten.
 - A replaced final is deleted at once, as a forget deletes it, with its stored changes,
   request and citations; nothing of it is kept. The new final takes its id
-  ([saves](saves.md#replacing-a-final)). Any memo the same AI connection saved can be
-  replaced, with or without a stored first draft, so no outdated copy is kept. A report
+  ([saves](saves.md#replacing-a-final)). Any of the account's AIs can replace any memo,
+  with or without a stored first draft, so no outdated copy is kept. A report
   read before then is not recalled.
 - Removing a memo's request on the TPS page clears it; the memo stays.
 - "Delete all memos" removes every memo, with its changes and request, every kind and

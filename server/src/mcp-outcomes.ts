@@ -45,7 +45,6 @@ export const loggedErrorCodes = new Set([
   "memos_off",
   "invalid_memo",
   "replace_unknown",
-  "replace_refused",
   "replace_first_draft",
   "unique_violation",
   "check_violation",
@@ -131,10 +130,6 @@ export const nextSteps: Record<string, NextStep> = {
   replace_unknown: step(
     "tell_user",
     "That memo is no longer on file; the person may have forgotten it. Don't save this again as a new memo.",
-  ),
-  replace_refused: step(
-    "fix_input",
-    "Another AI connection saved that memo: save this as a new memo without replaces, with a new request_id.",
   ),
   replace_first_draft: step(
     "fix_input",

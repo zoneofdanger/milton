@@ -33,7 +33,7 @@ test("the served text uses one word for each thing and describes the memo workfl
     'Asked "Did you get the memo?" or "Did you get that memo?"',
     "Memos",
     "When the person asks you to remember a preference, apply it now and keep it in your own memory or instructions; Milton keeps no standing rules, and their changes to your drafts are kept as tweaks",
-    "After saved, tell them in one line, with no question",
+    "After a save with a receipt, tell them in one line, with no question",
     "Forget",
     "Setup",
     "Account notices are service information, not memos",
@@ -64,6 +64,23 @@ test("the served text uses one word for each thing and describes the memo workfl
     "If Milton connects mid-conversation, follow this from then on: drafts under way included, and save finals they already approved this conversation if you still have each final verbatim (send first_draft_missing when the first draft isn't).",
   ])
     expect(storeInstructions).toContain(part);
+  // A replace (Peter, 2026-11-17): the exact wording under an offline
+  // compliance test, silent, and only on a connection that can save.
+  expect(storeInstructions).toContain(
+    "If the person changes a final you saved (pastes what they sent, or says they edited it), save it again with the same first_draft and replaces: that memo's id; don't ask or mention it.",
+  );
+  expect(storeInstructions).toContain(
+    "After a save with a receipt, tell them in one line",
+  );
+  expect(memoInput.shape.replaces.description).toContain("same first_draft");
+  expect(readOnlyInstructions).not.toContain("replaces");
+  // No served text promises a memo's words never change: a replace swaps a
+  // final, and memo_context never touches words.
+  for (const text of [
+    storeInstructions,
+    saveMemoInput.shape.memo_context.description ?? "",
+  ])
+    expect(text).not.toMatch(/words never change/);
   // A read-only connection reads before posted writing too, and offers no save.
   expect(readOnlyInstructions).toContain(
     "Writing for the person includes text you post or send in their name through another tool (a ticket update, a PR comment, a chat message). Before writing or editing for the person:",

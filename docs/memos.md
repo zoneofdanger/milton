@@ -47,6 +47,12 @@ Saves and reads are model-free: the AI writes the context summary, and Milton st
 the bytes it is sent, finds what changed, and computes a tier and a change score with
 plain code. How a save commits is in [saves](saves.md).
 
+Milton never rewrites what it is sent. A memo's words change only when the person's own
+AI replaces a final it saved with their newer version (`replaces`), under the same id
+([saves](saves.md#replacing-a-final)); Milton keeps no outdated copy. A field report
+(2026-11-17) behind it: a person edited a saved final in Slack and pasted it back, and
+their AI saved a second memo with the same first draft, leaving the first one stale.
+
 ## What a memo holds
 
 - Two texts word for word: the first draft, exactly as the AI first showed it (in edit
@@ -72,13 +78,17 @@ plain code. How a save commits is in [saves](saves.md).
   people's text. The ask is kept only as `request` ([The request](#the-request)).
 - A save whose final, first-draft state and first draft match a memo on file returns
   `unchanged` with that memo, adding nothing.
+- A save with `replaces` swaps the final of a memo the same AI connection saved, keeping
+  its id and creation time; its first draft must be kept and sent again byte for byte
+  ([saves](saves.md#replacing-a-final)).
 - `memo_context` replaces a memo's medium, summary, audience and purpose (an omitted
-  optional field clears) and, when sent, its kind, and sets `context_updated_at`; a
-  memo's words, and an older memo's rounds and report metadata, never change. The same
+  optional field clears) and, when sent, its kind, and sets `context_updated_at`; it
+  never changes a memo's words, or an older memo's rounds and report metadata. The same
   context returns `unchanged`; an unknown memo is `invalid_memo`.
 - With **Keep memos** off, a memo with a first draft (kept or missing) is refused with
-  `memos_off`; a final-only memo, writing the person asks to remember, still saves. The
-  switch is on by default (no settings row means on).
+  `memos_off`; a final-only memo, writing the person asks to remember, still saves, and
+  so does a replace, which corrects a memo and adds none. The switch is on by default (no
+  settings row means on).
 
 ## Bounds
 
@@ -289,6 +299,10 @@ measured per client before any claim of reliability.
   live run of the shipped text with a real AI has been made.
 - Send the first draft exactly as first shown, or `first_draft_missing`; never rebuild
   it.
+- When the person changes a final the AI saved (pastes what they sent, or says they
+  edited it), save it again with the same first draft and `replaces` naming that memo,
+  without asking or mentioning it (Peter, 2026-11-17). The wording is under an offline
+  compliance test; a read-only connection is told nothing about it.
 - Don't save abandoned drafts, writing not in the person's own voice (for someone else,
   a template), a final holding a secret (say why; never redact), saves the person
   declines, or, with `keep_memos` false, anything they didn't ask to remember. Milton
@@ -301,12 +315,14 @@ measured per client before any claim of reliability.
 - When the person asks to remember a preference, apply it now and keep it in the AI's
   own memory or instructions; Milton keeps no standing rules, and their changes to the
   AI's drafts are kept as tweaks.
-- After a saved memo, tell the person its receipt word for word, in one line, with no
-  question. A failed save is reported.
+- After a save with a receipt, tell the person the receipt word for word, in one line,
+  with no question. A replace returns no receipt, so the AI says nothing. A failed save
+  is reported.
 
 ## The receipt
 
 A saved memo's result carries `memo` (`memo_id`, tier, kind, change and, with a kept
 first draft, its changes' state and count) and `receipt`, the line the AI tells the
 person: "Kept memo: <kind, or medium without one>.", for example "Kept memo: vendor
-decline." The change score stays in the result and on the memo page, not in the line.
+decline." The change score stays in the result and on the memo page, not in the line. A replace's
+result carries `replaced: true` and no `receipt`.

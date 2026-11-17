@@ -9,6 +9,8 @@ import {
 import { checkMemo, hash, REPLAYED, type Evidence } from "../src/store/save";
 import { change } from "../src/store/score";
 import { withNext } from "../src/mcp-outcomes";
+import { EMPTY_REPORT, readReport } from "../src/store/memos";
+import type { SQL } from "drizzle-orm";
 import type { MemoInput, SaveMemoInput } from "../src/mcp-tools";
 
 test("a refusal stores a receipt with its outcome and replays it; a pre-release receipt replays verbatim, labelled, and an old-shape retry is refused without touching it", async () => {
@@ -575,6 +577,63 @@ test("a replace with the final its memo holds is unchanged; when another memo ho
       await store.saveMemo(replaceOf(b, "Dana, sorry, not this time.")),
     ).toMatchObject({ status: "saved", memo: { memo_id: b }, replaced: true });
     expect(await ids()).toEqual([b]);
+  } finally {
+    await local.dispose();
+  }
+});
+
+test("a report serves a memo only in the version it ranked: one replaced between its two statements is left out with its changes, as a forgotten one is", async () => {
+  const local = await localStore();
+  try {
+    await seedUsers(local.pg, "interleave");
+    const store = fixtureStore(local.db, "interleave");
+    const intent = {
+      situation: "declining a vendor's meeting request",
+      medium: "email" as const,
+      audience: "a vendor",
+      purpose: "decline",
+    };
+    // Each case: a steered memo, ranked by the first statement; then, before
+    // the second, a replace with an untouched final (it would be labelled
+    // steered), a final past the 128 KiB cap (it would bypass it), or a
+    // same-size steered final (only the version differs).
+    for (const final of [draft, "X".repeat(140000), "Dana, not thursday."]) {
+      await local.pg.query("DELETE FROM memos WHERE user_id='interleave'");
+      const id = (
+        await store.saveMemo(
+          memoSave({
+            first_draft: draft,
+            mode: "draft",
+            final: "Dana, not Thursday.",
+          }),
+        )
+      ).memo!.memo_id;
+      let statements = 0;
+      const pausing = {
+        ...local.db,
+        async query<Row extends Record<string, unknown>>(statement: SQL) {
+          const rows = await local.db.query<Row>(statement);
+          if (++statements === 1)
+            expect((await store.saveMemo(replaceOf(id, final))).replaced).toBe(
+              true,
+            );
+          return rows;
+        },
+      };
+      const report = await readReport(pausing, "interleave", intent);
+      expect([final.length, report]).toMatchObject([
+        final.length,
+        { is_empty: true, examples: [], memos: 1, text: EMPTY_REPORT },
+      ]);
+      // Read again, the new version is ranked and served by its own rules:
+      // never an untouched or oversized final.
+      const after = await readReport(local.db, "interleave", intent);
+      expect(after.examples.map((e) => [e.memo_id, e.tier])).toEqual(
+        final === "Dana, not thursday." ? [[id, "steered"]] : [],
+      );
+      if (final === "Dana, not thursday.")
+        expect(after.text).toContain("> Dana, not thursday.");
+    }
   } finally {
     await local.dispose();
   }

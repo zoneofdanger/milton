@@ -27,7 +27,11 @@ What a memo, tier and tweak are is in [memos](memos.md); the tool envelope is in
   fetches the chosen finals, with the stored changes of at most three of them
   ([What they changed](#what-they-changed)). A memo forgotten before the second
   statement's snapshot is left out with its changes; text already returned, and a read
-  already past that point, are not recalled.
+  already past that point, are not recalled. A memo replaced in between is left out too
+  ([saves](saves.md#replacing-a-final)): the second statement returns a memo only in the
+  version the first ranked (the same `request_id`, which each save writes anew, tier
+  and final size), so no final is served under another version's label, size bound or
+  changes (review of #148).
 - No report assembly writes writing or served-report data; the `served_reports` row
   earlier versions wrote is gone. Usage recording, the trial-notice claim and the key's
   last-use time remain ([billing](billing.md)).

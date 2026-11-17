@@ -1815,6 +1815,7 @@ test("plain LF report text is unchanged, and the example size bound measures the
   const at = "2026-11-11T00:00:00.000000Z";
   const candidate = (id: string, summary: string, final: string) => ({
     id,
+    request_id: `r${id}`,
     kind_id: null,
     medium: "email" as const,
     tier: "own" as const,

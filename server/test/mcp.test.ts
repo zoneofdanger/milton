@@ -197,6 +197,7 @@ test("an SDK client receives instructions, discovers the two tools, and reads th
         "kind_id",
         "mode",
         "new_kind",
+        "replaces",
         "request",
       ].sort(),
     );

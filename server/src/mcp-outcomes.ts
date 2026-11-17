@@ -44,6 +44,8 @@ export const loggedErrorCodes = new Set([
   "assistant_required",
   "memos_off",
   "invalid_memo",
+  "replace_unknown",
+  "replace_refused",
   "unique_violation",
   "check_violation",
   "invalid_token",
@@ -121,6 +123,17 @@ export const nextSteps: Record<string, NextStep> = {
   invalid_memo: step(
     "reread",
     "Use a memo_id from a saved result or get_report's examples; if unsure which memo, ask the person.",
+  ),
+  // A replace that can't go ahead (docs/saves.md, "Replacing a final").
+  // The memo is gone: saving the words as new could bring back what the
+  // person forgot.
+  replace_unknown: step(
+    "tell_user",
+    "That memo is no longer on file; the person may have forgotten it. Don't save this again as a new memo.",
+  ),
+  replace_refused: step(
+    "fix_input",
+    "Save it as a new memo without replaces, with a new request_id.",
   ),
   memos_off: step(
     "tell_user",

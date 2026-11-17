@@ -39,6 +39,9 @@ covers:
   ([reports](reports.md#reads)).
 - `forget_memos` takes 1 to 100 ids; when none is the account's, it is refused with
   `invalid_memo`. The result lists the ids forgotten.
+- A replaced final is deleted at once, as a forget deletes it, with its stored changes,
+  request and citations; nothing of it is kept. The new final takes its id
+  ([saves](saves.md#replacing-a-final)). A report read before then is not recalled.
 - Removing a memo's request on the TPS page clears it; the memo stays.
 - "Delete all memos" removes every memo, with its changes and request, every kind and
   every legacy note, not a retired cover sheet.

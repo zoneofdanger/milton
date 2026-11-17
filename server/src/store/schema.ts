@@ -301,9 +301,10 @@ export const memoKinds = pgTable(
 );
 // One piece of writing the person settled on: the AI's first draft exactly as
 // shown (or none, for writing the person gave; or missing, when the AI no
-// longer had it verbatim), the accepted final, and its context. The words
-// never change; only the context columns are updatable. tier and change are
-// set at save, without a model.
+// longer had it verbatim), the accepted final, and its context. A row's
+// words are never updated; only the context columns are updatable. A replace
+// deletes the row and inserts its successor under the same id. tier and
+// change are set at save, without a model.
 export const memos = pgTable(
   "memos",
   {

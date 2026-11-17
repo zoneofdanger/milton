@@ -110,7 +110,9 @@ them; the rule was reviewed twice before code (2026-11-11), and the test behind 
 Dana,` → `Dana —` keeps "Dana"); a line doesn't claim every word shown changed, or
   say who made a change or why. Code picks the spans; what is in them stays AI-written,
   untrusted text. It rests on the save path's tests and on memo texts and rows never
-  being updated, not on the schema, which allows NULL offsets.
+  being updated, not on the schema, which allows NULL offsets. A replace keeps this
+  true: it deletes the memo and its rows and inserts new ones under the same id, never
+  updating either ([saves](saves.md#replacing-a-final)).
 - **Which memos** (`servesChanges`, the same for the report and the memo page): drafted,
   first draft kept, changes `itemized`, tier steered, and a final of at most 128 KiB.
   Not edit mode (untested), not `too_large`, not memos saved before 0015, not a missing

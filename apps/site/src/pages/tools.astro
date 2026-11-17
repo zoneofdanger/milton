@@ -106,7 +106,9 @@ import SiteLayout from "../layouts/SiteLayout.astro";
           <code>request</code>, what the person asked for, in their own words,
           or one short line when they only agreed. A <code>kind_id</code> or{" "}
           <code>new_kind</code> files it. Writing the person gives to keep sends
-          only final, context and kind.
+          only final, context and kind. With <code>replaces</code>, a memo id,
+          it updates a final the same AI saved that the person since changed:
+          the same first draft, the new final, the same id.
         </li>
         <li>
           <code>forget_memos</code>: 1 to 100 memo ids the person asked to
@@ -114,14 +116,15 @@ import SiteLayout from "../layouts/SiteLayout.astro";
         </li>
         <li>
           <code>memo_context</code>: a memo id with its corrected context or
-          kind; a memo’s words never change.
+          kind, never its words.
         </li>
       </ul>
       <p>
         A save returns <code>status</code> (<code>saved</code> or{" "}
         <code>unchanged</code>), the memo’s id, tier and kind, the changes
         Milton found, and <code>receipt</code>, one line for the AI to repeat,
-        such as “Kept memo: vendor decline.” Milton stores the final and first
+        such as “Kept memo: vendor decline.” A replace returns{" "}
+        <code>replaced</code> and no receipt. Milton stores the final and first
         draft exactly as sent; a save is all or nothing. Repeating a call with
         the same <code>request_id</code> and arguments returns its original
         outcome and never saves twice; the same id with other arguments is

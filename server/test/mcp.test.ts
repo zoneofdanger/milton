@@ -176,6 +176,14 @@ test("an SDK client receives instructions, discovers the two tools, and reads th
       expect(JSON.stringify(served)).not.toMatch(
         /TPS|tps_report|cover[ _]sheet|report_id|rounds/,
       );
+    // keep_memos false still allows replaces, as the instructions say.
+    const report = tools.find((tool) => tool.name === "get_report")!;
+    expect(report.description).toContain(
+      "keep_memos (false: save only replaces and writing the person asks you to remember)",
+    );
+    expect(client.getInstructions()).toContain(
+      "When keep_memos is false, save only replaces and writing they ask you to remember.",
+    );
     const save = tools.find((tool) => tool.name === "create_memo")!;
     expect(Object.keys(save.inputSchema.properties ?? {}).sort()).toEqual([
       "forget_memos",

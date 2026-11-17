@@ -24,7 +24,10 @@ covers:
 ## Retention
 
 - Memos are kept until forgotten, deleted with "Delete all memos", or removed with the
-  account. There is no timer.
+  account. There is no timer. When the person's AI replaces a final with their newer
+  version, the earlier final and its tweaks are deleted at once and the new one takes
+  its place ([below](#forgetting-and-delete-all)); the privacy page says so (Peter,
+  2026-11-17).
 - A retired cover sheet keeps every version until the account is deleted
   ([memos](memos.md#legacy-data)); TPS.md lists the current one.
 - Usage rows are pruned on the schedule in [billing](billing.md#usage).

@@ -514,19 +514,14 @@ test("a replace is refused, saving nothing, for an unknown or forgotten memo, an
     }
     expect(await words()).toEqual(kept);
     // The next steps: never resave a gone memo as new; otherwise save it as
-    // a new memo without replaces.
-    expect(
-      withNext({ error: "replace_unknown", message: "m" }).next,
-    ).toMatchObject({
-      action: "tell_user",
-      text: expect.stringContaining("Don't save this again as a new memo"),
-    });
-    expect(
-      withNext({ error: "replace_refused", message: "m" }).next,
-    ).toMatchObject({
-      action: "fix_input",
-      text: expect.stringContaining("new memo without replaces"),
-    });
+    // a new memo without replaces. Read without toMatchObject, which writes
+    // its matchers into the shared nextSteps table (Bun 1.4.4).
+    const unknown = withNext({ error: "replace_unknown", message: "m" }).next;
+    expect(unknown.action).toBe("tell_user");
+    expect(unknown.text).toContain("Don't save this again as a new memo");
+    const refused = withNext({ error: "replace_refused", message: "m" }).next;
+    expect(refused.action).toBe("fix_input");
+    expect(refused.text).toContain("new memo without replaces");
   } finally {
     await local.dispose();
   }

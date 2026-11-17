@@ -109,14 +109,19 @@ other, with `replaces` in the hashed input.
 
 - **Allowed** only when the id is one of the account's memos, saved by the same AI
   connection (the issuer and client in its `client_json` equal the caller's), with a kept
-  first draft, and the save sends `first_draft` byte for byte equal to it. Each is
-  checked in the transaction, under the account lock.
+  first draft, and the save sends `first_draft` byte for byte equal to it, or
+  `first_draft_missing: true` (Peter, 2026-11-17: an AI whose context was compacted
+  still has the memo id but not the draft). With `first_draft_missing`, Milton keeps the
+  stored first draft and its state, and works out the changes, tier and change score from
+  it and the new final, as if it had been sent; the input is still hashed and replayed as
+  sent. Each condition is checked in the transaction, under the account lock.
 - **Refusals** save nothing, are stored in the receipt and replay like other refusals.
   `replace_unknown` (no such memo: never saved, or forgotten) tells the AI not to save
   the words again as a new memo, since the person may have forgotten it.
-  `replace_refused` (another connection's memo, a first draft missing or none on either
-  side, or a different first draft; the connection is checked first) tells it to save a
-  new memo without `replaces`. Each `next` is in `mcp-outcomes.ts`.
+  `replace_refused` (another connection's memo, a memo whose first draft is missing or
+  none, a save with neither `first_draft` nor `first_draft_missing`, or a different
+  first draft; the connection is checked first) tells it to save a new memo without
+  `replaces`. Each `next` is in `mcp-outcomes.ts`.
 - **Applied** inside the savepoint: the old memo is deleted through `deleteMemos`, as a
   forget deletes it (its changes and citations by cascade, legacy notes left with no
   citation after it), then the new memo is inserted under the same id and the old

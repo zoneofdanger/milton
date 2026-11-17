@@ -159,14 +159,13 @@ export function checkMemo(memo: MemoInput): MemoCheck {
     if (problem) return refuse(`${problem}.`, "request");
   }
   if (memo.first_draft === undefined) return { ok: true };
-  const list = changeList(memo.first_draft, memo.final);
-  return {
-    ok: true,
-    evidence: {
-      state: list.state,
-      rows: changeRows(memo.first_draft, memo.final, list),
-    },
-  };
+  return { ok: true, evidence: evidenceFor(memo.first_draft, memo.final) };
+}
+
+/** Code's list of what changed from a kept first draft to its final. */
+function evidenceFor(firstDraft: string, final: string): Evidence {
+  const list = changeList(firstDraft, final);
+  return { state: list.state, rows: changeRows(firstDraft, final, list) };
 }
 
 export async function runSave(
@@ -330,7 +329,9 @@ export const receiptLine = (label: string) => `Kept memo: ${label}.`;
 
 /** The memo a replace names, when this save may replace it: the account's
  * memo, saved by this AI connection, with a kept first draft that the save
- * sends byte for byte. Otherwise the replace is refused and nothing is saved:
+ * sends byte for byte, or stands in for with first_draft_missing (the AI's
+ * context was compacted; the stored draft is used). Otherwise the replace is
+ * refused and nothing is saved:
  * replace_unknown when no such memo is on file (never saved, or forgotten),
  * replace_refused for the rest, checked in that order, the connection first. */
 async function replaceTarget(
@@ -362,29 +363,46 @@ async function replaceTarget(
     new StoreError("replace_refused", `${why} Nothing was saved.`, 409);
   if (old.issuer !== actor.issuer || old.client_id !== actor.clientId)
     throw refuse("replaces names a memo another AI connection saved.");
-  if (old.first_draft_state !== "kept" || memo.first_draft === undefined)
+  if (
+    old.first_draft_state !== "kept" ||
+    (memo.first_draft === undefined && !memo.first_draft_missing)
+  )
     throw refuse(
-      "A replace needs a memo with a kept first draft, sent again as first_draft.",
+      "A replace needs a memo with a kept first draft, sent again as first_draft (or first_draft_missing).",
     );
-  if (old.first_draft !== memo.first_draft)
+  if (memo.first_draft !== undefined && old.first_draft !== memo.first_draft)
     throw refuse("first_draft differs from that memo's first draft.");
-  return old;
+  return { ...old, first_draft: old.first_draft! };
 }
 
-async function saveMemo(save: Save, memo: MemoInput): Promise<SaveOutcome> {
-  const { tx, userId, actor, input, evidence, result } = save;
+async function saveMemo(save: Save, sent: MemoInput): Promise<SaveOutcome> {
+  const { tx, userId, actor, input, result } = save;
+  // A replace corrects a memo this AI saved and adds none, so Keep memos,
+  // turned off since, doesn't stop it.
+  const target =
+    sent.replaces !== undefined
+      ? await replaceTarget(tx, userId, actor, sent, sent.replaces)
+      : undefined;
+  // A replace sending first_draft_missing keeps the stored first draft: the
+  // memo, its changes and tier are worked out as if that draft were sent.
+  // The input is hashed and replayed as sent.
+  const kept = target !== undefined && sent.first_draft === undefined;
+  const memo: MemoInput = kept
+    ? {
+        ...sent,
+        first_draft: target.first_draft,
+        first_draft_missing: undefined,
+      }
+    : sent;
+  const evidence = kept
+    ? evidenceFor(target.first_draft, memo.final)
+    : save.evidence;
   const state =
     memo.first_draft !== undefined
       ? "kept"
       : memo.first_draft_missing
         ? "missing"
         : "none";
-  // A replace corrects a memo this AI saved and adds none, so Keep memos,
-  // turned off since, doesn't stop it.
-  const target =
-    memo.replaces !== undefined
-      ? await replaceTarget(tx, userId, actor, memo, memo.replaces)
-      : undefined;
   const [account] = await tx.query<{ keep: boolean }>(
     sql`SELECT ${keepMemos(userId)} AS keep`,
   );

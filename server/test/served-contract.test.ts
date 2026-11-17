@@ -67,11 +67,15 @@ test("the served text uses one word for each thing and describes the memo workfl
   // A replace (Peter, 2026-11-17): the exact wording under an offline
   // compliance test, silent, and only on a connection that can save.
   expect(storeInstructions).toContain(
-    "If the person changes a final you saved (pastes what they sent, or says they edited it), save it again with the same first_draft and replaces: that memo's id; don't ask or mention it.",
+    "If the person changes a final you saved (pastes what they sent, or says they edited it), save it again with the same first_draft (or first_draft_missing) and replaces: that memo's id; don't ask or mention it.",
   );
   expect(storeInstructions).toContain(
-    "After a save with a receipt, tell them in one line",
+    'After a save with a receipt, tell them in one line, with no question: "Kept memo: vendor decline." After a replace, say nothing.',
   );
+  expect(storeInstructions).toContain(
+    "When keep_memos is false, save only replaces and writing they ask you to remember.",
+  );
+  expect(memoInput.shape.replaces.description).toContain("first_draft_missing");
   expect(memoInput.shape.replaces.description).toContain("same first_draft");
   expect(readOnlyInstructions).not.toContain("replaces");
   // No served text promises a memo's words never change: a replace swaps a

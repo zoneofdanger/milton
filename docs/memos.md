@@ -79,7 +79,8 @@ their AI saved a second memo with the same first draft, leaving the first one st
 - A save whose final, first-draft state and first draft match a memo on file returns
   `unchanged` with that memo, adding nothing.
 - A save with `replaces` swaps the final of a memo the same AI connection saved, keeping
-  its id and creation time; its first draft must be kept and sent again byte for byte
+  its id and creation time; its first draft must be kept and sent again byte for byte,
+  or replaced by `first_draft_missing`, when Milton uses the stored first draft
   ([saves](saves.md#replacing-a-final)).
 - `memo_context` replaces a memo's medium, summary, audience and purpose (an omitted
   optional field clears) and, when sent, its kind, and sets `context_updated_at`; it
@@ -88,7 +89,8 @@ their AI saved a second memo with the same first draft, leaving the first one st
 - With **Keep memos** off, a memo with a first draft (kept or missing) is refused with
   `memos_off`; a final-only memo, writing the person asks to remember, still saves, and
   so does a replace, which corrects a memo and adds none. The switch is on by default (no
-  settings row means on).
+  settings row means on). The served text says so: with `keep_memos` false, the AI saves
+  only replaces and writing the person asks it to remember.
 
 ## Bounds
 
@@ -300,12 +302,14 @@ measured per client before any claim of reliability.
 - Send the first draft exactly as first shown, or `first_draft_missing`; never rebuild
   it.
 - When the person changes a final the AI saved (pastes what they sent, or says they
-  edited it), save it again with the same first draft and `replaces` naming that memo,
-  without asking or mentioning it (Peter, 2026-11-17). The wording is under an offline
-  compliance test; a read-only connection is told nothing about it.
+  edited it), save it again with the same first draft (or `first_draft_missing`) and
+  `replaces` naming that memo, without asking or mentioning it, and say nothing after
+  (Peter, 2026-11-17). The wording is under an offline compliance test; a read-only
+  connection is told nothing about it.
 - Don't save abandoned drafts, writing not in the person's own voice (for someone else,
   a template), a final holding a secret (say why; never redact), saves the person
-  declines, or, with `keep_memos` false, anything they didn't ask to remember. Milton
+  declines, or, with `keep_memos` false, anything but replaces and what they asked to
+  remember. Milton
   has no secrets filter: a public, model-free one is easy to route around and refuses
   real text, so the instructions are the guard.
 - Send as `request` what they asked for: their own words when they said it, no pasted

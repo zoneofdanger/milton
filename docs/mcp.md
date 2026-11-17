@@ -126,7 +126,8 @@ How a person creates and revokes keys is in [accounts](accounts.md).
   database's check, [saves](saves.md#request-ids)) and exactly one of `memo`,
   `forget_memos` or `memo_context`; `memo.request` carries the person's ask
   ([memos](memos.md#the-request)), and `memo.replaces` the id of a final the AI saved
-  that the person since changed ([saves](saves.md#replacing-a-final)). What each change
+  that the person since changed, sent with the same `first_draft` or with
+  `first_draft_missing` ([saves](saves.md#replacing-a-final)). What each change
   does is in [memos](memos.md) and [deletion](deletion.md).
 - `create_memo` returns `saved`, `unchanged` or `failed`, with the request ID. `saved`
   confirms a committed write; `unchanged` confirms no write was needed. A memo with a
@@ -236,9 +237,10 @@ a reconnect.
   of a save (the request rules) lives in the field descriptions, which the budget test
   does not measure. What the AI is asked to send as the request is guidance; Milton
   checks only what [memos](memos.md#the-request) lists.
-- There are two instruction variants, read-write and read-only. Both stay under 3,800
-  characters (3,500 until the 2026-11-13 posted-writing text, 3,607; 3,793 with the
-  2026-11-17 replace sentence, which only the read-write variant carries), inside the 4,096
+- There are two instruction variants, read-write and read-only. Both stay under 3,900
+  characters (3,500 until the 2026-11-13 posted-writing text, 3,607; then 3,800; raised
+  to 3,900 on 2026-11-17 for the replace lines, which only the read-write variant
+  carries, without trimming tested guidance: 3,861), inside the 4,096
   at which Claude Code truncates; a test enforces this and that no error handling is
   left in them. Error handling lives in each error result's `next`, and the save fields
   in `create_memo`'s description.

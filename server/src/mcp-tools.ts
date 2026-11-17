@@ -147,7 +147,7 @@ export const memoInput = z
     replaces: id
       .optional()
       .describe(
-        "The memo_id of a final you saved that the person since changed. Send the full memo, with the same first_draft and the new final.",
+        "The memo_id of a final you saved that the person since changed. Send the full memo, with the same first_draft (or first_draft_missing) and the new final.",
       ),
     ...kindFields,
     // null, as some clients send for none, is read as omitted.

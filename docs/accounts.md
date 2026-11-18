@@ -153,22 +153,24 @@ the migration file, if one had started) then the error's class and code, and exi
 line never holds a message, secret, connection string or row. Their own codes are in
 `apps/auth/src/refusal.ts`:
 
-| Code                                    | Script    | Refused because                                                                                                            |
-| --------------------------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `APPLY_ARGS_REQUIRED`                   | all three | its explicit arguments (`--apply`, `up --apply`, `--apply <output>`) or `AUTH_OWNER_DATABASE_URL` is missing               |
-| `OUTPUT_DIR_UNSAFE`                     | provision | the output directory (below) is missing, a symlink, not a directory, not yours, or open to group or others: `chmod 700` it |
-| `OUTPUT_PATH_NOT_ALLOWED`               | provision | the output is not a file name directly inside the output directory                                                         |
-| `OUTPUT_EXISTS`                         | provision | something already has the output's name, a file or a symlink                                                               |
-| `OUTPUT_RESERVATION_CHANGED`            | provision | the reserved file or its directory changed between creating and checking it                                                |
-| `DATABASE_TLS_REQUIRED`                 | all three | the owner URL, or provision's `AUTH_DATABASE_URL`, has an unsafe TLS or duplicate setting                                  |
-| `AUTH_CONFIG_INVALID`                   | provision | the auth configuration is missing or invalid                                                                               |
-| `AUTH_SECRETS_NOT_DISTINCT`             | provision | two of the auth, admission and rate secrets are equal                                                                      |
-| `OWNER_ROLE_REQUIRED`                   | all three | the connection's current role is not `milton_auth_owner`                                                                   |
-| `APP_ALREADY_PROVISIONED`               | provision | the first-party app client already exists                                                                                  |
-| `APP_CLIENT_NOT_ISSUED`                 | provision | native registration returned no client ID or secret                                                                        |
-| `APP_PROVISION_CONCURRENT`              | provision | another provisioning stored the app client first; nothing is promoted                                                      |
-| `PRUNE_TIMEOUTS_UNSET`                  | maintain  | the usage prune's statement and lock limits did not hold on its connection                                                 |
-| `MIGRATION_MUST_NOT_MANAGE_TRANSACTION` | migrate   | the migration file begins, commits or rolls back its own transaction                                                       |
+| Code                                    | Script    | Refused because                                                                                                                                                                                     |
+| --------------------------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `APPLY_ARGS_REQUIRED`                   | all three | its explicit arguments (`--apply`, `up --apply`, `--apply <output>`) or `AUTH_OWNER_DATABASE_URL` is missing                                                                                        |
+| `OUTPUT_DIR_UNSAFE`                     | provision | the output directory (below) is missing, a symlink, not a directory, not yours, or open to group or others: `chmod 700` it                                                                          |
+| `OUTPUT_PATH_NOT_ALLOWED`               | provision | the output is not a file name directly inside the output directory                                                                                                                                  |
+| `OUTPUT_EXISTS`                         | provision | something already has the output's name, a file or a symlink                                                                                                                                        |
+| `OUTPUT_RESERVATION_CHANGED`            | provision | the reserved file or its directory changed between creating and checking it                                                                                                                         |
+| `OUTPUT_RESERVATION_LEFT`               | provision | second line after a refusal once the output file exists: the app was not provisioned and the file is left as it is (empty, or holding an unused secret); inspect it, remove it yourself, then rerun |
+| `OUTPUT_HOLDS_SECRET`                   | provision | second line after a failure at COMMIT: the secret is synced to the file but the commit's outcome is unknown; keep the file, and compare its client ID with `milton_guard.first_party_policy`        |
+| `DATABASE_TLS_REQUIRED`                 | all three | the owner URL, or provision's `AUTH_DATABASE_URL`, has an unsafe TLS or duplicate setting                                                                                                           |
+| `AUTH_CONFIG_INVALID`                   | provision | the auth configuration is missing or invalid                                                                                                                                                        |
+| `AUTH_SECRETS_NOT_DISTINCT`             | provision | two of the auth, admission and rate secrets are equal                                                                                                                                               |
+| `OWNER_ROLE_REQUIRED`                   | all three | the connection's current role is not `milton_auth_owner`                                                                                                                                            |
+| `APP_ALREADY_PROVISIONED`               | provision | the first-party app client already exists                                                                                                                                                           |
+| `APP_CLIENT_NOT_ISSUED`                 | provision | native registration returned no client ID or secret                                                                                                                                                 |
+| `APP_PROVISION_CONCURRENT`              | provision | another provisioning stored the app client first; nothing is promoted                                                                                                                               |
+| `PRUNE_TIMEOUTS_UNSET`                  | maintain  | the usage prune's statement and lock limits did not hold on its connection                                                                                                                          |
+| `MIGRATION_MUST_NOT_MANAGE_TRANSACTION` | migrate   | the migration file begins, commits or rolls back its own transaction                                                                                                                                |
 
 Any other code is the underlying one: a PostgreSQL SQLSTATE (such as `42501`) or a Node
 system code (such as `ECONNREFUSED`); `UNCLASSIFIED` means the error had none.
@@ -179,11 +181,18 @@ not a list of places to avoid (milton-duo, PR #161): the directory must be a rea
 directory, not a symlink, owned by the person running it, with no group or other
 permission bits (`chmod 700`), and the output's parent must resolve to the same real
 path, so a case alias or a symlinked parent of that directory is the directory itself.
-No git is consulted. Before any database work, provision creates the file new (mode
-0600, never following or replacing an existing name) and checks it through its
-descriptor; only then does it create the client, writing the secret to that descriptor
-and syncing it. A refusal before the client exists removes the empty file; once the
-client exists the file is kept.
+No git is consulted.
+
+After the checks that need neither a database nor a file (arguments, directory, path,
+TLS, configuration), provision creates the file new (mode 0600, never following or
+replacing an existing name), checks it through its descriptor, and only then works in
+the database. It writes the secret to that descriptor, syncs and closes it inside the
+promotion's transaction, before its COMMIT. So a failure before COMMIT rolls the
+promotion back and the app is not provisioned (Better Auth's registration row, which
+commits on its own, stays an unpromoted anonymous client like any public registration),
+and a failure at COMMIT leaves the secret on disk. Provision never removes or truncates
+a file (milton-duo, PR #161): once the file exists, every refusal leaves it and prints a
+second line, `OUTPUT_RESERVATION_LEFT` or `OUTPUT_HOLDS_SECRET`.
 
 ## Auth mail
 

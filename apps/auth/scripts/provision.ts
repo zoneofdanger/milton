@@ -1,16 +1,6 @@
 import { databaseOptions } from "../src/database.ts";
-import {
-  closeSync,
-  constants,
-  fstatSync,
-  fsyncSync,
-  lstatSync,
-  openSync,
-  realpathSync,
-  unlinkSync,
-  writeSync,
-  type Stats,
-} from "node:fs";
+import * as nodeFs from "node:fs";
+import { constants, type Stats } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import pg from "pg";
@@ -21,29 +11,42 @@ import {
   APP_ORIGIN,
   type Config,
 } from "../src/config.ts";
-import { refusal } from "../src/refusal.ts";
+import { refusal, type RefusalCode } from "../src/refusal.ts";
 
 /** The one directory the app secret may be written to: MILTON_OWNER_OUTPUT_DIR,
  * or ~/keys. An allowlist, not a list of places to avoid (milton-duo, PR #161). */
 export const ownerOutputDir = (env: NodeJS.ProcessEnv) =>
   resolve(env.MILTON_OWNER_OUTPUT_DIR || join(homedir(), "keys"));
 
-export type Reservation = { fd: number; path: string; ino: number };
+/** The file calls provision makes on its output; tests inject failures. It has
+ * no way to remove or truncate a file: provision never does (milton-duo,
+ * PR #161), so no cleanup can reach the wrong file. */
+export type OutputFs = Pick<
+  typeof nodeFs,
+  | "lstatSync"
+  | "realpathSync"
+  | "openSync"
+  | "fstatSync"
+  | "writeSync"
+  | "fsyncSync"
+  | "closeSync"
+>;
 
-/** Creates the empty output file before any database work, or refuses. The
- * output must be a plain file name directly inside `dir`, which must be a real
- * directory (not a symlink) owned by `uid` with no group or other permission
- * bits. The file is created new (O_EXCL, O_NOFOLLOW, mode 0600) at the
- * directory's real path, then checked through its descriptor: a regular file
- * with one link, on the directory's device, still the entry at that path. */
-export function reserveOutput(
+export type AllowedOutput = { path: string; dir: Stats; allowed: string };
+
+/** Refuses, creating nothing, unless `given` is a plain file name directly
+ * inside `dir`, a real directory (not a symlink) owned by `uid` with no group
+ * or other permission bits, by real path (so a case alias or a symlinked
+ * parent of `dir` is `dir` itself). */
+export function allowOutput(
   given: string,
   dir: string,
   uid = process.getuid!(),
-): Reservation {
+  fs: OutputFs = nodeFs,
+): AllowedOutput {
   let checked: Stats;
   try {
-    checked = lstatSync(dir);
+    checked = fs.lstatSync(dir);
   } catch {
     throw unsafeDir();
   }
@@ -53,20 +56,29 @@ export function reserveOutput(
     (checked.mode & 0o077) !== 0
   )
     throw unsafeDir();
-  const allowed = realpathSync.native(dir);
+  const allowed = fs.realpathSync.native(dir);
   const target = resolve(given);
   const name = basename(target);
   let parent: string | undefined;
   try {
-    parent = realpathSync.native(dirname(target));
+    parent = fs.realpathSync.native(dirname(target));
   } catch {}
   if (!name || parent !== allowed)
     throw refusal("OUTPUT_PATH_NOT_ALLOWED", "owner_output_path_not_allowed");
-  const path = join(allowed, name);
-  let fd: number;
+  return { path: join(allowed, name), dir: checked, allowed };
+}
+const unsafeDir = () =>
+  refusal(
+    "OUTPUT_DIR_UNSAFE",
+    "owner_output_dir_unsafe: make it a real directory you own and chmod 700 it",
+  );
+
+/** Creates the output new (O_EXCL, O_NOFOLLOW, mode 0600) and returns its
+ * descriptor, or refuses with nothing created. */
+export function openOutput(output: AllowedOutput, fs: OutputFs = nodeFs) {
   try {
-    fd = openSync(
-      path,
+    return fs.openSync(
+      output.path,
       constants.O_WRONLY |
         constants.O_CREAT |
         constants.O_EXCL |
@@ -78,46 +90,91 @@ export function reserveOutput(
       throw refusal("OUTPUT_EXISTS", "owner_output_exists");
     throw error;
   }
-  const file = fstatSync(fd);
-  const reservation = { fd, path, ino: file.ino };
-  const now = lstatSync(allowed);
-  if (
-    !file.isFile() ||
-    file.nlink !== 1 ||
-    (file.mode & 0o077) !== 0 ||
-    file.dev !== checked.dev ||
-    now.dev !== checked.dev ||
-    now.ino !== checked.ino ||
-    lstatSync(path).ino !== file.ino
-  ) {
-    releaseOutput(reservation);
-    throw refusal(
-      "OUTPUT_RESERVATION_CHANGED",
-      "owner_output_reservation_changed",
-    );
-  }
-  return reservation;
 }
-const unsafeDir = () =>
-  refusal(
-    "OUTPUT_DIR_UNSAFE",
-    "owner_output_dir_unsafe: make it a real directory you own and chmod 700 it",
-  );
 
-/** Closes the reservation and removes it if it is still the file created. */
-export function releaseOutput(reservation: Reservation) {
+export type Provisioned =
+  | {
+      ok: true;
+      client: { AUTH_APP_CLIENT_ID: string; AUTH_APP_CLIENT_SECRET: string };
+    }
+  | {
+      ok: false;
+      error: unknown;
+      /** OUTPUT_RESERVATION_LEFT: the app was not provisioned; the file is
+       * left as it is. OUTPUT_HOLDS_SECRET: the secret is synced to the file
+       * and the commit's outcome is unknown. */
+      left: Extract<
+        RefusalCode,
+        "OUTPUT_RESERVATION_LEFT" | "OUTPUT_HOLDS_SECRET"
+      >;
+    };
+
+/** Provisions the app into an output `openOutput` created. Every file call
+ * after the open is inside this one handler, and the file is never removed
+ * or truncated. The secret is written and synced, and the file closed,
+ * inside the promotion's transaction before its COMMIT: a failure before then
+ * rolls the promotion back (Better Auth's own registration row stays, an
+ * unpromoted anonymous client like any public registration), and a failure at
+ * COMMIT leaves the secret on disk. */
+export async function provisionToOutput(
+  output: AllowedOutput,
+  fd: number,
+  pool: pg.Pool,
+  config: Config,
+  fs: OutputFs = nodeFs,
+): Promise<Provisioned> {
+  let closed = false;
+  let synced = false;
   try {
-    closeSync(reservation.fd);
-  } catch {}
-  try {
-    if (lstatSync(reservation.path).ino === reservation.ino)
-      unlinkSync(reservation.path);
-  } catch {}
+    const file = fs.fstatSync(fd);
+    const now = fs.lstatSync(output.allowed);
+    if (
+      !file.isFile() ||
+      file.nlink !== 1 ||
+      (file.mode & 0o077) !== 0 ||
+      file.dev !== output.dir.dev ||
+      now.dev !== output.dir.dev ||
+      now.ino !== output.dir.ino ||
+      fs.lstatSync(output.path).ino !== file.ino
+    )
+      throw refusal(
+        "OUTPUT_RESERVATION_CHANGED",
+        "owner_output_reservation_changed",
+      );
+    const client = await provisionFixedApp(pool, config, (client) => {
+      const bytes = Buffer.from(JSON.stringify(client) + "\n");
+      for (let at = 0; at < bytes.length;) at += fs.writeSync(fd, bytes, at);
+      fs.fsyncSync(fd);
+      closed = true;
+      fs.closeSync(fd);
+      synced = true;
+    });
+    return { ok: true, client };
+  } catch (error) {
+    if (!closed)
+      try {
+        closed = true;
+        fs.closeSync(fd);
+      } catch {}
+    return {
+      ok: false,
+      error,
+      left: synced ? "OUTPUT_HOLDS_SECRET" : "OUTPUT_RESERVATION_LEFT",
+    };
+  }
 }
 
 // Owner-only preparation. Native anonymous registration creates/hashes a secret;
 // the owner then promotes exactly this one client. No temporary human account.
-export async function provisionFixedApp(pool: pg.Pool, config: Config) {
+// `beforeCommit` runs inside the promotion's transaction, before its COMMIT.
+export async function provisionFixedApp(
+  pool: pg.Pool,
+  config: Config,
+  beforeCommit?: (client: {
+    AUTH_APP_CLIENT_ID: string;
+    AUTH_APP_CLIENT_SECRET: string;
+  }) => void,
+) {
   const role = await pool.query<{ current_user: string }>(
     "select current_user",
   );
@@ -167,9 +224,13 @@ export async function provisionFixedApp(pool: pg.Pool, config: Config) {
       "insert into milton_guard.first_party_policy(client_id) values($1)",
       [client.client_id],
     );
+    beforeCommit?.({
+      AUTH_APP_CLIENT_ID: client.client_id,
+      AUTH_APP_CLIENT_SECRET: client.client_secret,
+    });
     await connection.query("commit");
   } catch (error) {
-    await connection.query("rollback");
+    await connection.query("rollback").catch(() => {});
     throw error;
   } finally {
     connection.release();
@@ -180,10 +241,10 @@ export async function provisionFixedApp(pool: pg.Pool, config: Config) {
   };
 }
 if (import.meta.main) {
-  // Every refusal prints its code through safeError (docs/accounts.md).
+  // Every refusal prints its code through safeError (docs/accounts.md). The
+  // checks that need no database or file come first; the output is created
+  // only after them, and before any database work.
   let pool: pg.Pool | undefined;
-  let output: Reservation | undefined;
-  let writing = false;
   try {
     if (
       process.argv[2] !== "--apply" ||
@@ -194,29 +255,30 @@ if (import.meta.main) {
         "APPLY_ARGS_REQUIRED",
         "explicit_owner_apply_and_private_output_required",
       );
-    // Reserved before any database work, so a refusal here costs no client
-    // and a client is never created without somewhere to put its secret.
-    output = reserveOutput(process.argv[3], ownerOutputDir(process.env));
+    const output = allowOutput(process.argv[3], ownerOutputDir(process.env));
     pool = new pg.Pool({
       ...databaseOptions(process.env.AUTH_OWNER_DATABASE_URL),
       max: 1,
       statement_timeout: 10000,
     });
-    const client = await provisionFixedApp(pool, readConfig(process.env));
-    // From here the client exists: keep the file whatever happens.
-    writing = true;
-    const bytes = Buffer.from(JSON.stringify(client) + "\n");
-    for (let at = 0; at < bytes.length;) at += writeSync(output.fd, bytes, at);
-    fsyncSync(output.fd);
-    closeSync(output.fd);
-    output = undefined;
-    console.log("Native fixed client written to private owner output.");
+    const config = readConfig(process.env);
+    const result = await provisionToOutput(
+      output,
+      openOutput(output),
+      pool,
+      config,
+    );
+    if (result.ok)
+      console.log("Native fixed client written to private owner output.");
+    else {
+      console.error("auth_provision", safeError(result.error));
+      console.error(
+        "auth_provision",
+        safeError(refusal(result.left, "owner_output_left")),
+      );
+      process.exitCode = 1;
+    }
   } catch (error) {
-    if (output && !writing) releaseOutput(output);
-    else if (output)
-      try {
-        closeSync(output.fd);
-      } catch {}
     console.error("auth_provision", safeError(error));
     process.exitCode = 1;
   } finally {

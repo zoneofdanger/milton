@@ -20,7 +20,14 @@ import { httpFixture } from "./http-fixture.ts";
 import { checkRuntimeRole } from "../src/roles.ts";
 import { disposable } from "./disposable.ts";
 import { endPool } from "./cluster.ts";
-import { provisionFixedApp } from "./provision.ts";
+import {
+  allowOutput,
+  openOutput,
+  provisionFixedApp,
+  provisionToOutput,
+  type OutputFs,
+} from "./provision.ts";
+import * as nodeFs from "node:fs";
 import { fixtureConfig } from "../test/fixture-config.ts";
 import { AUTH_MIGRATIONS } from "./migrations.ts";
 import { deliverMail, openMail, type MailJob } from "../src/mail.ts";
@@ -351,8 +358,7 @@ try {
   pools.push(authPool, appPool, mcpPool);
   {
     // Each owner refusal that needs a database prints its code
-    // (docs/accounts.md): a runtime login is not the owner, a second
-    // provisioning finds the app, and one that loses the race promotes nothing.
+    // (docs/accounts.md): a runtime login is not the owner.
     const code = async (work: Promise<unknown>) =>
       work.then(
         () => "none",
@@ -398,108 +404,200 @@ try {
       assert.match(stderr, new RegExp(`${label}.*OWNER_ROLE_REQUIRED`), script);
       assert(!stderr.includes(String(a.password)), script);
     }
-    // Another provisioner stores its client between this one's first check
-    // and its locked check.
-    const racer = "fictional-concurrent-provisioner";
-    let raced = false;
-    const racing = new Proxy(p.owner, {
-      get(target, property) {
-        if (property === "query")
-          return async (...args: Parameters<pg.Pool["query"]>) => {
-            const result = await target.query(...args);
-            if (
-              !raced &&
-              String(args[0]).includes("from milton_guard.first_party_policy")
-            ) {
-              raced = true;
-              await target.query(
-                "insert into milton_guard.first_party_policy(client_id) values($1)",
-                [racer],
-              );
-            }
-            return result;
-          };
-        const value = Reflect.get(target, property, target);
-        return typeof value === "function" ? value.bind(target) : value;
-      },
-    });
-    assert.equal(
-      await code(provisionFixedApp(racing, config)),
-      "APP_PROVISION_CONCURRENT",
-    );
-    assert.deepEqual(
-      (
-        await p.owner.query(
-          `select (select array_agg(client_id) from milton_guard.first_party_policy) policy,
-            (select count(*)::int from milton_auth."oauthClient" where "skipConsent") promoted`,
-        )
-      ).rows[0],
-      { policy: [racer], promoted: 0 },
-    );
-    await p.owner.query(
-      "delete from milton_guard.first_party_policy where client_id=$1",
-      [racer],
-    );
-    group(
-      "owner refusals print their codes: not the owner, and a lost provisioning race promotes nothing",
-    );
+    group("owner refusals print their codes: a runtime login is not the owner");
   }
   let client: { AUTH_APP_CLIENT_ID: string; AUTH_APP_CLIENT_SECRET: string };
   {
-    // The real provisioner, as an owner runs it: the secret lands in a new
-    // 0600 file in the private output directory; a second run refuses and
-    // leaves no file behind (docs/accounts.md).
+    // Provisioning into its output file: every failure leaves the file, a
+    // failure before COMMIT promotes nothing, and a failure at COMMIT leaves
+    // the secret on disk (docs/accounts.md).
     const outDir = mkdtempSync(join(tmpdir(), "milton-owner-out-"));
-    const o = p.configs.owner!;
-    const ownerUrl = new URL(`postgresql://127.0.0.1:${o.port}/${o.database}`);
-    ownerUrl.username = String(o.user);
-    ownerUrl.password = String(o.password);
-    ownerUrl.searchParams.set("options", "-c role=milton_auth_owner");
-    const provision = (name: string) =>
-      new Promise<{ exit: number | null; stderr: string }>((resolve) => {
-        let stderr = "";
-        const child = spawn(
-          process.execPath,
-          [
-            "--experimental-strip-types",
-            new URL("./provision.ts", import.meta.url).pathname,
-            "--apply",
-            join(outDir, name),
-          ],
-          {
-            env: {
-              ...Object.fromEntries(
-                Object.entries(config)
-                  .filter(([, v]) => v !== undefined)
-                  .map(([k, v]) => [k, String(v)]),
-              ),
-              PATH: process.env.PATH,
-              LC_ALL: "C",
-              NODE_EXTRA_CA_CERTS: p.caPath,
-              AUTH_OWNER_DATABASE_URL: ownerUrl.href,
-              MILTON_OWNER_OUTPUT_DIR: outDir,
-            },
-            stdio: ["ignore", "ignore", "pipe"],
+    const promoted = async () =>
+      (
+        await p.owner.query(
+          `select coalesce((select array_agg(client_id) from milton_guard.first_party_policy),'{}') policy,
+            (select count(*)::int from milton_auth."oauthClient" where "skipConsent") promoted`,
+        )
+      ).rows[0] as { policy: string[]; promoted: number };
+    const reserve = (name: string) => {
+      const output = allowOutput(join(outDir, name), outDir);
+      return { output, fd: openOutput(output) };
+    };
+    const injected = (code: string) =>
+      Object.assign(new Error("injected"), { code });
+    // Wraps a pool so `onQuery` sees each statement, on the pool or on a
+    // connection it lends, before `run` sends it.
+    const wrap = (
+      onQuery: (
+        text: string,
+        run: () => Promise<pg.QueryResult>,
+      ) => Promise<pg.QueryResult>,
+    ) => {
+      const query =
+        (target: { query: (...args: never[]) => unknown }) =>
+        (...args: unknown[]) =>
+          onQuery(String(args[0]), () =>
+            (target.query as (...a: unknown[]) => Promise<pg.QueryResult>)(
+              ...args,
+            ),
+          );
+      const lend = <T extends object>(target: T): T =>
+        new Proxy(target, {
+          get(t, property) {
+            if (property === "query")
+              return query(t as { query: (...args: never[]) => unknown });
+            const value = Reflect.get(t, property, t);
+            return typeof value === "function" ? value.bind(t) : value;
           },
-        );
-        child.stderr.on("data", (d) => (stderr += d));
-        child.on("exit", (exit) => resolve({ exit, stderr }));
+        });
+      return new Proxy(p.owner, {
+        get(target, property) {
+          if (property === "query") return query(target);
+          if (property === "connect")
+            return async () => lend(await target.connect());
+          const value = Reflect.get(target, property, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
       });
+    };
+    const left = async (
+      name: string,
+      pool: pg.Pool,
+      fs?: OutputFs,
+    ): Promise<{ left: string; code: string }> => {
+      const { output, fd } = reserve(name);
+      const result = await provisionToOutput(output, fd, pool, config, fs);
+      assert(!result.ok, name);
+      return { left: result.left, code: safeError(result.error).code };
+    };
     try {
-      const first = await provision("app.json");
-      assert.equal(first.exit, 0, first.stderr);
-      assert.equal(statSync(join(outDir, "app.json")).mode & 0o777, 0o600);
-      client = JSON.parse(readFileSync(join(outDir, "app.json"), "utf8"));
-      assert(client.AUTH_APP_CLIENT_ID && client.AUTH_APP_CLIENT_SECRET);
-      const again = await provision("again.json");
+      // Another provisioner stores its client between this one's first
+      // check and its locked check: refused after registration.
+      const racer = "fictional-concurrent-provisioner";
+      let raced = false;
+      const racing = wrap(async (text, run) => {
+        const result = await run();
+        if (!raced && text.includes("from milton_guard.first_party_policy")) {
+          raced = true;
+          await p.owner.query(
+            "insert into milton_guard.first_party_policy(client_id) values($1)",
+            [racer],
+          );
+        }
+        return result;
+      });
+      assert.deepEqual(await left("raced.json", racing), {
+        left: "OUTPUT_RESERVATION_LEFT",
+        code: "APP_PROVISION_CONCURRENT",
+      });
+      assert.deepEqual(await promoted(), { policy: [racer], promoted: 0 });
+      await p.owner.query(
+        "delete from milton_guard.first_party_policy where client_id=$1",
+        [racer],
+      );
+      // The disk fills partway through the secret, or the sync fails.
+      let writes = 0;
+      assert.deepEqual(
+        await left("full.json", p.owner, {
+          ...nodeFs,
+          writeSync: ((fd: number, bytes: Buffer, at: number) => {
+            if (writes++) throw injected("ENOSPC");
+            return nodeFs.writeSync(fd, bytes, at, 10);
+          }) as typeof nodeFs.writeSync,
+        }),
+        { left: "OUTPUT_RESERVATION_LEFT", code: "ENOSPC" },
+      );
+      assert.equal(statSync(join(outDir, "full.json")).size, 10);
+      assert.deepEqual(
+        await left("unsynced.json", p.owner, {
+          ...nodeFs,
+          fsyncSync: () => {
+            throw injected("EIO");
+          },
+        }),
+        { left: "OUTPUT_RESERVATION_LEFT", code: "EIO" },
+      );
+      assert.deepEqual(await promoted(), { policy: [], promoted: 0 });
+      // COMMIT reaches the server but its answer is lost: the secret is
+      // already synced, so the file holds the app's secret.
+      let locked = false;
+      const lost = wrap(async (text, run) => {
+        if (text.startsWith("lock table milton_guard.first_party_policy"))
+          locked = true;
+        const result = await run();
+        if (locked && text === "commit") throw injected("08006");
+        return result;
+      });
+      assert.deepEqual(await left("lost.json", lost), {
+        left: "OUTPUT_HOLDS_SECRET",
+        code: "08006",
+      });
+      client = JSON.parse(readFileSync(join(outDir, "lost.json"), "utf8"));
+      assert.equal(statSync(join(outDir, "lost.json")).mode & 0o777, 0o600);
+      assert.deepEqual(await promoted(), {
+        policy: [client.AUTH_APP_CLIENT_ID],
+        promoted: 1,
+      });
+      // The real script, as an owner runs it, refuses a second app and
+      // leaves its (empty) reservation with the second line.
+      const o = p.configs.owner!;
+      const ownerUrl = new URL(
+        `postgresql://127.0.0.1:${o.port}/${o.database}`,
+      );
+      ownerUrl.username = String(o.user);
+      ownerUrl.password = String(o.password);
+      ownerUrl.searchParams.set("options", "-c role=milton_auth_owner");
+      const again = await new Promise<{ exit: number | null; stderr: string }>(
+        (resolve) => {
+          let stderr = "";
+          const child = spawn(
+            process.execPath,
+            [
+              "--experimental-strip-types",
+              new URL("./provision.ts", import.meta.url).pathname,
+              "--apply",
+              join(outDir, "again.json"),
+            ],
+            {
+              env: {
+                ...Object.fromEntries(
+                  Object.entries(config)
+                    .filter(([, v]) => v !== undefined)
+                    .map(([k, v]) => [k, String(v)]),
+                ),
+                PATH: process.env.PATH,
+                LC_ALL: "C",
+                NODE_EXTRA_CA_CERTS: p.caPath,
+                AUTH_OWNER_DATABASE_URL: ownerUrl.href,
+                MILTON_OWNER_OUTPUT_DIR: outDir,
+              },
+              stdio: ["ignore", "ignore", "pipe"],
+            },
+          );
+          child.stderr.on("data", (d) => (stderr += d));
+          child.on("exit", (exit) => resolve({ exit, stderr }));
+        },
+      );
       assert.equal(again.exit, 1);
-      assert.match(again.stderr, /auth_provision.*APP_ALREADY_PROVISIONED/);
-      assert.deepEqual(readdirSync(outDir), ["app.json"]);
+      assert.match(
+        again.stderr,
+        /auth_provision.*APP_ALREADY_PROVISIONED[\s\S]*auth_provision.*OUTPUT_RESERVATION_LEFT/,
+      );
+      assert(!again.stderr.includes(String(o.password)));
+      assert.equal(statSync(join(outDir, "again.json")).size, 0);
+      // Nothing was ever removed.
+      assert.deepEqual(readdirSync(outDir).sort(), [
+        "again.json",
+        "full.json",
+        "lost.json",
+        "raced.json",
+        "unsynced.json",
+      ]);
     } finally {
       rmSync(outDir, { recursive: true, force: true });
     }
     group(
-      "the provisioner writes its secret to a reserved private file, and a refused run leaves none",
+      "provisioning leaves its output file on every failure: a lost race, a full disk or failed sync promote nothing, a lost COMMIT answer leaves the secret on disk, and the script refuses a second app",
     );
   }
   config.AUTH_APP_CLIENT_ID = client.AUTH_APP_CLIENT_ID;

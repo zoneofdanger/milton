@@ -42,6 +42,13 @@ or not at all.
   predictable id risks a collision within one account, never access to another.
 - Different ids are independent receipts; content dedupe still applies, so the same
   words under `Abc` then `abc` give two receipts and one memo, the second `unchanged`.
+- `create_memo` asks the AI for a new random id for each save, such as a UUID, with no
+  names, ticket numbers or words from the writing, as Stripe's
+  [idempotency guidance](https://docs.stripe.com/api/idempotent_requests) advises for
+  its keys: the id stays in the receipt, which outlives forgetting
+  ([receipts](#receipts)). The tool description asks only for that; the format above
+  is stated in the `request_id` field's description and enforced by the schema
+  pattern, unchanged, so older ids still replay.
 
 ## Rollout boundary
 

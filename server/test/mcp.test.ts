@@ -167,7 +167,7 @@ test("an SDK client receives instructions, discovers the two tools, and reads th
     expect(description).toBe(serverDescription);
     expect(serverDescription.length).toBeLessThanOrEqual(120);
     expect(serverDescription).toMatch(
-      /writing\. Before writing or editing .*get_report/,
+      /writing\. Before drafting or editing words they'll use as their own, call get_report\./,
     );
     expect(serverDescription).not.toContain("get_cover_sheet");
     const tools = (await client.listTools()).tools;
@@ -223,10 +223,12 @@ test("an SDK client receives instructions, discovers the two tools, and reads th
     expect(fields(save.inputSchema).request_id).toMatchObject({
       type: "string",
       pattern: "^[A-Za-z0-9._:-]{1,64}$",
+      description:
+        "A new random id for each save, such as a UUID: up to 64 letters, digits, dots, dashes, underscores or colons, with no names, ticket numbers or words from the writing. Resend the same one only to recover an uncertain outcome.",
     });
     // What a memo may hold, and what it never holds (rule, sections 2 and 5).
     for (const field of [
-      "request_id: any new id for each save, up to 64 letters, digits, dots, dashes, underscores or colons; resend the same one only to recover an uncertain outcome.",
+      "request_id: a new random id for each save, such as a UUID, with no names or ticket numbers in it; resend the same one only to recover an uncertain outcome.",
       "save one when the person accepts a final.",
       "send first_draft_missing: true instead",
       "Milton works out the person's changes (their tweaks) from first_draft and final",
@@ -252,6 +254,7 @@ test("an SDK client receives instructions, discovers the two tools, and reads th
     const read = tools.find((tool) => tool.name === "get_report")!;
     expect(read.inputSchema.required).toEqual(["intent"]);
     for (const part of [
+      "Read before drafting or editing words the person will use as their own,",
       'when asked "Did you get the memo?"',
       "memos (how many memos they have)",
       "While memos is 0, setup holds the first-setup script",

@@ -84,7 +84,7 @@ covers:
 ## Shared facts
 
 - `packages/theme/facts.ts` holds the facts the site, the app and the served text all
-  state: the standing line ("Before writing anything for me, call Milton's
-  get_report."), the 30-day trial and the $5.01 price. The setup
+  state: the standing line ("Before you draft or edit words I'll use as my own, call
+  Milton's get_report."), the 30-day trial and the $5.01 price. The setup
   script, the setup page and Stripe's trial read them; the copy-drift test checks prose
   that repeats them ([checks](checks.md)).

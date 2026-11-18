@@ -43,6 +43,36 @@ prompt back, and the screen unchanged for three seconds, with a per-turn timeout
 dialog waiting for an answer stops the take instead of typing into it. The driver still
 supports Codex (`client: "codex"`); the standup clip does not use it.
 
+`record` has asciinema write to a private temporary file, never to the take. When the
+end hold is over, the driver copies that file to the take, so the take ends on the last
+reply as before. No process left from the take can write to it, and the take is final
+when the driver reports. `tmux kill-server` alone did not stop a take: asciinema survives
+it with its shell and client, and on 2026-11-18 nineteen recorders from earlier takes
+were still running, one appending Claude Code's idle redraws to a finished take for 7
+hours.
+
+However a run ends (done, refused, an error or Ctrl-C), the driver then stops what it
+launched:
+
+- It exits the client the way a person would (Ctrl-D twice for Claude Code, Ctrl-C twice
+  for Codex), then types `exit` at the shell, so asciinema ends by itself. A clean exit
+  normally leaves nothing.
+- It stops the tmux server, giving up after 3 s.
+- It sends SIGHUP, SIGTERM and SIGKILL, with a 2 s wait each, only to the two pids tmux
+  printed when it started (the server and the pane's recorder or shell), each checked
+  against its start time. It never signals anything by name, command line or process
+  group.
+- It reports survivors rather than hunting them. If a process from the take is still
+  running afterwards, it prints the pid and exits 1. That covers anything it saw under
+  those two pids, checked by start time, when it began stopping; a process started after
+  that is not listed. If any `ps` listing fails or takes over 5 s, it signals nothing it
+  can't check, says the survivors could not be checked, names the two tmux pids to check
+  by hand and exits 1.
+
+Every `ps` and `tmux` call has a time limit. A run stopped by an error or Ctrl-C writes
+no take. Exiting the client is unverified against real Claude Code and Codex; the dry
+runs used a stand-in client.
+
 ## Needs
 
 - `asciinema` 3 and `tmux`.
@@ -68,10 +98,12 @@ bun scripts/demo/record.ts record scripts/demo/scenes/standup-day-2.json <out>/d
 bun scripts/demo/record.ts scan <out>/day-2.cast
 ```
 
-`warmup` leaves the scene's shell running unrecorded; attach, start the client and clear
-first-run dialogs (folder trust, browser tools, renderer offers), then exit. `check` runs
-a take's guards (below) and launches nothing. `record` runs the guards, launches the
-client unrecorded (see Banner below), then records and writes the `.cast`, a
+`warmup` runs the scene's shell unrecorded and waits; attach, start the client, clear
+first-run dialogs (folder trust, browser tools, renderer offers), then exit the client and
+the shell, or press Ctrl-C at the driver. Either way it stops what it launched and reports
+anything left, as for a take; a failed `ps` listing while it waits stops it the same
+way. `check` runs a take's guards (below) and launches nothing. `record` runs the guards,
+launches the client unrecorded (see Banner below), then records and writes the `.cast`, a
 `.cast.timeline.json` of when each line was typed and answered, and then scans the cast.
 Keep recordings outside the repository.
 

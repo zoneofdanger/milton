@@ -125,7 +125,8 @@ const fields: { label: string; value: string; link?: [string, string] }[] = [
   .approved .sig {
     display: inline-block;
     min-width: calc(var(--space-16) * 1.75);
-    padding: 0 var(--space-2) 1px;
+    /* No right padding, so the comma after the signature sits against it. */
+    padding: 0 0 1px var(--space-2);
     border-bottom: 1px solid var(--sheet-rule);
     font: italic var(--text-lead) / var(--leading-heading) var(--font-form);
   }

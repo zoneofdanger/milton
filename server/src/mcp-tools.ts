@@ -149,6 +149,12 @@ export const memoInput = z
       .describe(
         "The memo_id of a final you saved that the person since changed. Send the full memo, with the same first_draft (or first_draft_missing) and the new final.",
       ),
+    // docs/saves.md, "Starting text": bounded as a final is.
+    started_from: words
+      .optional()
+      .describe(
+        "Only when you edited writing that already existed (the person's earlier version, or a final from another conversation) and you have no memo_id for it: that text exactly as it stood before your edit. Milton then updates the memo holding it instead of keeping two. Omit it for a draft you wrote, for new writing, and for a new piece built from an old one as a template. Omit it too when that text holds a secret or other people's words; never alter it to make it fit.",
+      ),
     ...kindFields,
     // null, as some clients send for none, is read as omitted.
     kind_id: id

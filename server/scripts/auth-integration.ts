@@ -53,6 +53,9 @@ import {
   StoreError,
 } from "../src/store";
 import { storeForCurrentRequest } from "../test/store-fixtures";
+import { REPLAYED } from "../src/store/save";
+import { change } from "../src/store/score";
+import { withNext } from "../src/mcp-outcomes";
 import { recordToolUsage, USAGE_RETRY_MS } from "../src/store/usage";
 import {
   authenticateConnectionKey,
@@ -2486,6 +2489,586 @@ try {
   pass(
     "a replace runs as the MCP role, keeping the id and creation time; a replace racing a forget waits on the account lock, then is refused as replace_unknown",
   );
+  stage = "an edit naming the text it started from (started_from)";
+  {
+    // docs/saves.md, "Starting text": a save carrying started_from updates
+    // the one memo whose final is byte-identical to it, under the account
+    // lock, as the MCP runtime role; otherwise it is an ordinary save. One
+    // group per row of the spec's table (starting-text spec, 2026-11-18).
+    const editor = "m_00000000-0000-4000-8000-0000000000cb";
+    await owner.query("INSERT INTO users(id) VALUES($1)", [editor]);
+    await owner.query(
+      "INSERT INTO identities(provider,subject,user_id) VALUES('fictional-started','editor',$1)",
+      [editor],
+    );
+    await owner.query(
+      "INSERT INTO trial_accounts(user_id,started_at,subscription_status) VALUES($1,now(),'active')",
+      [editor],
+    );
+    const dialect = new PgDialect();
+    const base = postgresDatabase(mcpConfig.DATABASE_URL);
+    // The holder pauses once it holds the account lock, after hold().
+    let holding: { locked: () => void; resumed: Promise<void> } | undefined;
+    const hold = () => {
+      let locked!: () => void, resume!: () => void;
+      const lockHeld = new Promise<void>((resolve) => (locked = resolve));
+      const resumed = new Promise<void>((resolve) => (resume = resolve));
+      holding = { locked, resumed };
+      return { lockHeld, resume };
+    };
+    const pausing = (session: StoreSession): StoreSession => ({
+      async query<Row extends Record<string, unknown>>(statement: SQL) {
+        const rows = await session.query<Row>(statement);
+        const held = holding;
+        if (
+          held &&
+          / FOR NO KEY UPDATE$/.test(dialect.sqlToQuery(statement).sql)
+        ) {
+          holding = undefined;
+          held.locked();
+          await held.resumed;
+        }
+        return rows;
+      },
+    });
+    // The other connection loses its next commit's acknowledgment once.
+    let loseAck = false;
+    const auth = await lookupIdentityAccount(mcpConfig, {
+      provider: "fictional-started",
+      subject: "editor",
+    });
+    const actor = { issuer: "fixture", clientId: "fictional-editor" };
+    const holder = await storeForCurrentRequest(
+      {
+        ...mcpConfig,
+        storeDatabase: {
+          ...base,
+          transaction: (work) => base.transaction((tx) => work(pausing(tx))),
+        },
+      },
+      auth,
+      actor,
+    );
+    const store = await storeForCurrentRequest(
+      {
+        ...mcpConfig,
+        storeDatabase: {
+          ...base,
+          transaction: async (work) => {
+            const done = await base.transaction(work);
+            if (loseAck) {
+              loseAck = false;
+              throw new Error("Fictional lost acknowledgment");
+            }
+            return done;
+          },
+        },
+      },
+      auth,
+      actor,
+    );
+    // Observed, not slept on: a save of this account waiting on its lock.
+    const waiting = async () => {
+      for (let i = 0; i < 500; i++) {
+        const { rows } = await owner.query(
+          "SELECT count(*)::int n FROM pg_stat_activity WHERE usename='milton_mcp_runtime' AND wait_event_type='Lock' AND query LIKE '%FOR NO KEY UPDATE'",
+        );
+        if (rows[0].n > 0) return;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      throw new Error("no save waited on the account lock");
+    };
+    const context = {
+      summary: "Fictional edited note",
+      medium: "email" as const,
+    };
+    const draft = "Hi Dana! Sadly we can't make Thursday.";
+    type Memo = Record<string, unknown> & { final: string };
+    const input = (memo: Memo) => ({
+      request_id: randomUUID(),
+      memo: { context, ...memo },
+    });
+    const save = (memo: Memo, by = store) => by.saveMemo(input(memo) as never);
+    const idOf = async (memo: Memo) => (await save(memo)).memo!.memo_id;
+    const drafted = (final: string, mode = "draft") =>
+      idOf({ first_draft: draft, mode, final });
+    const rows = async () =>
+      (
+        await owner.query(
+          `SELECT m.id,m.created_at::text AS at,m.final,m.first_draft,m.first_draft_state AS state,
+            m.mode,m.tier,m.change,m.request,m.summary,m.kind_id,m.changes_state,
+            (SELECT count(*)::int FROM memo_changes c WHERE c.user_id=m.user_id AND c.memo_id=m.id) AS changes
+          FROM memos m WHERE m.user_id=$1 ORDER BY m.created_at,m.id`,
+          [editor],
+        )
+      ).rows;
+    const receipts = async (requestId: string) =>
+      (
+        await owner.query(
+          "SELECT count(*)::int n FROM save_requests WHERE user_id=$1 AND request_id=$2",
+          [editor, requestId],
+        )
+      ).rows[0].n as number;
+    const row = async (name: string, check: () => Promise<void>) => {
+      await owner.query("DELETE FROM memos WHERE user_id=$1", [editor]);
+      await owner.query("DELETE FROM memo_settings WHERE user_id=$1", [editor]);
+      await check();
+      pass(`started_from, ${name}`);
+    };
+    // An update: the memo's id, creation time and outcome, silently.
+    const updated = (
+      outcome: Awaited<ReturnType<typeof store.saveMemo>>,
+      id: string,
+    ) => {
+      assert.equal(outcome.status, "saved");
+      assert.equal(outcome.memo?.memo_id, id);
+      assert.equal(outcome.replaced, true);
+      assert.equal(outcome.receipt, undefined);
+    };
+    // An ordinary save: a new memo, with a receipt line.
+    const ordinary = (
+      outcome: Awaited<ReturnType<typeof store.saveMemo>>,
+      ids: string[],
+    ) => {
+      assert.equal(outcome.status, "saved");
+      assert.ok(!ids.includes(outcome.memo!.memo_id));
+      assert.equal(outcome.replaced, undefined);
+      assert.match(outcome.receipt ?? "", /^Kept memo: /);
+    };
+
+    await row(
+      "one drafted memo with its first draft holds that final: updated, first draft, state and mode kept, steered or untouched",
+      async () => {
+        const id = await drafted("Dana, not Thursday.");
+        const [before] = await rows();
+        const final = "Dana, not Thursday; Friday?";
+        const outcome = await save({
+          first_draft_missing: true,
+          mode: "edit",
+          request: "Offer Friday instead.",
+          final,
+          started_from: "Dana, not Thursday.",
+          new_kind: "vendor note",
+        });
+        updated(outcome, id);
+        assert.equal(outcome.memo?.tier, "steered");
+        const [after] = await rows();
+        assert.deepEqual(
+          { ...after, change: undefined, changes: after.changes > 0 },
+          {
+            ...before,
+            final,
+            change: undefined,
+            request: "Offer Friday instead.",
+            kind_id: outcome.memo!.kind_id,
+            changes: true,
+          },
+        );
+        assert.ok(Math.abs(after.change - change(draft, final)!) < 1e-9);
+        // The final back to the first draft: untouched.
+        const back = await save({ final: draft, started_from: final });
+        updated(back, id);
+        assert.equal(back.memo?.tier, "untouched");
+        assert.equal((await rows())[0].changes, 0);
+      },
+    );
+    await row(
+      "one memo accepted untouched holds it: updated, steered once the final differs from its first draft",
+      async () => {
+        const id = await drafted(draft);
+        assert.equal((await rows())[0].tier, "untouched");
+        const outcome = await save({
+          final: "Dana, Thursday is out.",
+          started_from: draft,
+        });
+        updated(outcome, id);
+        assert.deepEqual(
+          (await rows()).map((r) => [r.id, r.state, r.mode, r.tier]),
+          [[id, "kept", "draft", "steered"]],
+        );
+      },
+    );
+    await row(
+      "one memo whose first draft is missing holds it: updated, still missing with its stored mode, no changes listed",
+      async () => {
+        const id = await idOf({
+          first_draft_missing: true,
+          mode: "draft",
+          final: "Dana, Thursday is out.",
+        });
+        const outcome = await save({
+          first_draft: "Dana, Thursday is out!",
+          mode: "edit",
+          final: "Dana, Thursday is out, sorry.",
+          started_from: "Dana, Thursday is out.",
+        });
+        updated(outcome, id);
+        assert.equal(outcome.memo?.changes, undefined);
+        assert.equal(outcome.memo?.change, undefined);
+        assert.deepEqual(
+          (await rows()).map((r) => [
+            r.id,
+            r.first_draft,
+            r.state,
+            r.mode,
+            r.tier,
+            r.changes_state,
+            r.changes,
+          ]),
+          [[id, null, "missing", "draft", "steered", null, 0]],
+        );
+      },
+    );
+    await row(
+      "one memo of writing the person gave holds it: updated, still final-only and their words, a sent request not kept",
+      async () => {
+        const id = await idOf({ final: "My own note to Dana." });
+        const outcome = await save({
+          first_draft: "My own note to Dana!",
+          mode: "edit",
+          request: "Fix the punctuation.",
+          final: "My own note to Dana, edited.",
+          started_from: "My own note to Dana.",
+        });
+        updated(outcome, id);
+        assert.equal(outcome.memo?.tier, "own");
+        assert.deepEqual(
+          (await rows()).map((r) => [
+            r.id,
+            r.final,
+            r.first_draft,
+            r.state,
+            r.mode,
+            r.tier,
+            r.request,
+            r.changes,
+          ]),
+          [
+            [
+              id,
+              "My own note to Dana, edited.",
+              null,
+              "none",
+              null,
+              "own",
+              null,
+              0,
+            ],
+          ],
+        );
+      },
+    );
+    await row(
+      "an edit-mode save's own first draft, mode and changes are set aside, so a drafted memo never becomes their words",
+      async () => {
+        const id = await drafted("Dana, not Thursday.");
+        const final = "Dana, not Thursday. Friday?";
+        const outcome = await save({
+          first_draft: "Dana, not Thursday! Friday?",
+          mode: "edit",
+          final,
+          started_from: "Dana, not Thursday.",
+        });
+        updated(outcome, id);
+        assert.equal(outcome.memo?.tier, "steered");
+        const [after] = await rows();
+        assert.deepEqual(
+          [after.first_draft, after.state, after.mode, after.tier],
+          [draft, "kept", "draft", "steered"],
+        );
+        assert.ok(Math.abs(after.change - change(draft, final)!) < 1e-9);
+        // The changes are code's list from the stored first draft.
+        const { rows: cut } = await owner.query(
+          `SELECT "before","after" FROM memo_changes WHERE user_id=$1 AND memo_id=$2 ORDER BY n`,
+          [editor, id],
+        );
+        assert.ok(cut.some((c) => c.before?.includes("Hi")));
+      },
+    );
+    await row(
+      "the new final is the one the matched memo holds: unchanged, its context and kind untouched",
+      async () => {
+        const id = await idOf({
+          first_draft: draft,
+          mode: "draft",
+          final: "Dana, not Thursday.",
+          new_kind: "vendor decline",
+        });
+        const [before] = await rows();
+        const kinds = async () =>
+          (
+            await owner.query(
+              "SELECT count(*)::int n FROM memo_kinds WHERE user_id=$1",
+              [editor],
+            )
+          ).rows[0].n;
+        const kindCount = await kinds();
+        const outcome = await store.saveMemo({
+          request_id: randomUUID(),
+          memo: {
+            final: "Dana, not Thursday.",
+            started_from: "Dana, not Thursday.",
+            context: { summary: "Another fictional summary", medium: "chat" },
+            new_kind: "another kind",
+          },
+        } as never);
+        assert.equal(outcome.status, "unchanged");
+        assert.equal(outcome.memo?.memo_id, id);
+        assert.equal(outcome.replaced, undefined);
+        assert.deepEqual(await rows(), [before]);
+        assert.equal(await kinds(), kindCount);
+      },
+    );
+    await row(
+      "another memo would then hold the same final, state and first draft: the matched memo goes and the other is unchanged, whatever its mode and context",
+      async () => {
+        await drafted("Dana, not Thursday.");
+        const other = await idOf({
+          first_draft: draft,
+          mode: "edit",
+          final: "Dana, Friday works.",
+          context: { summary: "A different fictional summary", medium: "chat" },
+        });
+        const [, kept] = await rows();
+        const outcome = await save({
+          first_draft_missing: true,
+          mode: "edit",
+          final: "Dana, Friday works.",
+          started_from: "Dana, not Thursday.",
+        });
+        assert.equal(outcome.status, "unchanged");
+        assert.equal(outcome.memo?.memo_id, other);
+        assert.deepEqual(await rows(), [kept]);
+      },
+    );
+    await row(
+      "two or more memos hold that final: an ordinary save, nothing replaced",
+      async () => {
+        await drafted("Dana, not Thursday.");
+        await idOf({ final: "Dana, not Thursday." });
+        const before = await rows();
+        assert.equal(before.length, 2);
+        const outcome = await save({
+          final: "Dana, Friday instead.",
+          started_from: "Dana, not Thursday.",
+        });
+        ordinary(
+          outcome,
+          before.map((r) => r.id),
+        );
+        const after = await rows();
+        assert.deepEqual(after.slice(0, 2), before);
+        assert.equal(after.length, 3);
+      },
+    );
+    await row(
+      "no memo holds it (new writing, or the text changed since): an ordinary save",
+      async () => {
+        const id = await drafted("Dana, not Thursday.");
+        const [before] = await rows();
+        // Hand-edited since it was saved: the starting text no longer matches.
+        const outcome = await save({
+          first_draft_missing: true,
+          mode: "edit",
+          final: "Dana, not Thursday; Friday?",
+          started_from: "Dana, not Thursday!",
+        });
+        ordinary(outcome, [id]);
+        const after = await rows();
+        assert.deepEqual(after[0], before);
+        assert.deepEqual(
+          [after[1].final, after[1].state, after[1].mode, after[1].tier],
+          ["Dana, not Thursday; Friday?", "missing", "edit", "own"],
+        );
+      },
+    );
+    await row(
+      "a final line break, CRLF against LF and differently encoded Unicode equivalents do not match",
+      async () => {
+        const stored = "Dana,\nthe café is booked for Friday.";
+        const id = await idOf({ final: stored });
+        const variants = [
+          `${stored}\n`,
+          stored.replace("\n", "\r\n"),
+          stored.normalize("NFD"),
+        ];
+        assert.equal(new Set([stored, ...variants]).size, 4);
+        for (const [i, started_from] of variants.entries())
+          ordinary(await save({ final: `Dana, version ${i}.`, started_from }), [
+            id,
+          ]);
+        const after = await rows();
+        assert.equal(after.length, 4);
+        assert.equal(after[0].final, stored);
+      },
+    );
+    await row(
+      "two sessions start from the same final and save different revisions: the first updates the memo, the second no longer matches and is an ordinary save",
+      async () => {
+        const id = await drafted("Dana, not Thursday.");
+        const { lockHeld, resume } = hold();
+        const first = save(
+          { final: "Dana, Friday?", started_from: "Dana, not Thursday." },
+          holder,
+        );
+        await lockHeld;
+        const second = save({
+          final: "Dana, Monday?",
+          started_from: "Dana, not Thursday.",
+        });
+        await waiting();
+        resume();
+        updated(await first, id);
+        ordinary(await second, [id]);
+        assert.deepEqual(
+          (await rows()).map((r) => r.final),
+          ["Dana, Friday?", "Dana, Monday?"],
+        );
+      },
+    );
+    await row(
+      "the matched memo was forgotten first: an ordinary save keeps the revision as a new memo",
+      async () => {
+        const id = await drafted("Dana, not Thursday.");
+        const { lockHeld, resume } = hold();
+        const forgetting = holder.saveMemo({
+          request_id: randomUUID(),
+          forget_memos: [id],
+        });
+        await lockHeld;
+        const saving = save({
+          final: "Dana, Friday?",
+          started_from: "Dana, not Thursday.",
+        });
+        await waiting();
+        resume();
+        assert.deepEqual((await forgetting).forgotten, [id]);
+        ordinary(await saving, [id]);
+        assert.deepEqual(
+          (await rows()).map((r) => [r.final, r.state]),
+          [["Dana, Friday?", "none"]],
+        );
+      },
+    );
+    await row(
+      "a draft-mode save, started_from beside replaces, or a blank, malformed, NUL-holding or oversized started_from is refused before any database work",
+      async () => {
+        const id = await drafted("Dana, not Thursday.");
+        const before = await rows();
+        const refusals: [Memo, RegExp][] = [
+          [
+            {
+              first_draft: draft,
+              mode: "draft",
+              final: "Dana, Friday?",
+              started_from: "Dana, not Thursday.",
+            },
+            /send it again without started_from/,
+          ],
+          [
+            {
+              final: "Dana, Friday?",
+              started_from: "Dana, not Thursday.",
+              replaces: id,
+            },
+            /Send replaces or started_from, not both/,
+          ],
+          ...["", " \n", "a\0b", "a\uD800b", "x".repeat(262145)].map(
+            (started_from): [Memo, RegExp] => [
+              { final: "Dana, Friday?", started_from },
+              /memo\.started_from (is|are) malformed/,
+            ],
+          ),
+        ];
+        for (const [memo, message] of refusals) {
+          const sent = input(memo);
+          await assert.rejects(store.saveMemo(sent as never), (error) => {
+            assert.ok(error instanceof StoreError);
+            assert.equal(error.code, "invalid_input");
+            assert.match(error.message, message);
+            return true;
+          });
+          assert.equal(await receipts(sent.request_id), 0);
+        }
+        assert.deepEqual(await rows(), before);
+      },
+    );
+    await row(
+      "a request over 256 KiB with the field is refused as too large, its next step saying to send again without started_from",
+      async () => {
+        const id = await drafted("Dana, not Thursday.");
+        const before = await rows();
+        const outcome = await save({
+          final: "Dana, Friday? ".repeat(10000),
+          started_from: "Dana, not Thursday. ".repeat(7000),
+        });
+        assert.equal(outcome.error, "request_too_large");
+        assert.match(withNext(outcome).next.text, /without started_from/);
+        assert.deepEqual(await rows(), before);
+        assert.equal(before[0].id, id);
+      },
+    );
+    await row(
+      "Keep memos off: a match is allowed, storing no new first draft; a drafted save that doesn't match is refused",
+      async () => {
+        const id = await drafted("Dana, not Thursday.");
+        await owner.query(
+          "INSERT INTO memo_settings(user_id,keep_memos) VALUES($1,false)",
+          [editor],
+        );
+        const edit = (started_from: string) =>
+          save({
+            first_draft: "Dana, Friday!",
+            mode: "edit",
+            final: "Dana, Friday?",
+            started_from,
+          });
+        updated(await edit("Dana, not Thursday."), id);
+        assert.deepEqual(
+          (await rows()).map((r) => [r.id, r.first_draft, r.state]),
+          [[id, draft, "kept"]],
+        );
+        assert.equal((await edit("Nothing on file.")).error, "memos_off");
+        assert.equal((await rows()).length, 1);
+      },
+    );
+    await row(
+      "the same request id and input again: the stored outcome replays and nothing changes, a lost acknowledgment included",
+      async () => {
+        const id = await drafted("Dana, not Thursday.");
+        const sent = input({
+          first_draft_missing: true,
+          mode: "edit",
+          final: "Dana, Friday?",
+          started_from: "Dana, not Thursday.",
+        });
+        const outcome = await store.saveMemo(sent as never);
+        updated(outcome, id);
+        const after = await rows();
+        assert.deepEqual(await store.saveMemo(sent as never), {
+          ...outcome,
+          replayed: REPLAYED,
+        });
+        assert.deepEqual(await rows(), after);
+        // The commit lands but its acknowledgment is lost: the receipt,
+        // looked up under the account lock, returns the outcome.
+        const lost = input({
+          final: "Dana, Monday?",
+          started_from: "Dana, Friday?",
+        });
+        loseAck = true;
+        const recovered = await store.saveMemo(lost as never);
+        assert.equal(recovered.replayed, REPLAYED);
+        updated(recovered, id);
+        assert.deepEqual(await store.saveMemo(lost as never), recovered);
+        assert.deepEqual(
+          (await rows()).map((r) => [r.id, r.final]),
+          [[id, "Dana, Monday?"]],
+        );
+      },
+    );
+    await owner.query("DELETE FROM users WHERE id=$1", [editor]);
+  }
   stage = "read-only native authorization";
   const readGrant = await authorizeAssistant(
     "openid offline_access milton:read",

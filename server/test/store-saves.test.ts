@@ -7,7 +7,7 @@ import {
   seedUsers,
 } from "./store-fixtures";
 import { checkMemo, hash, REPLAYED, type Evidence } from "../src/store/save";
-import { change } from "../src/store/score";
+import { change, tier } from "../src/store/score";
 import { nextSteps, withNext } from "../src/mcp-outcomes";
 import { EMPTY_REPORT, readReport } from "../src/store/memos";
 import type { SQL } from "drizzle-orm";
@@ -940,3 +940,232 @@ test("whichever AI saved the memo on file, the person's later edit replaces it: 
     await local.dispose();
   }
 });
+
+// docs/saves.md, "Starting text": the invariant on generated inputs. Each case
+// seeds the same memos into two accounts, then sends one save to the first
+// with started_from and to the second without it.
+test("generated: a save carrying started_from changes an existing memo only when it is an edit or writing the person gave and exactly one memo's final is byte-identical; otherwise the store ends as the same save without the field leaves it", async () => {
+  const local = await localStore();
+  try {
+    // mulberry32, seeded: the same 60 cases every run.
+    let seed = 0x20261118;
+    const random = () => {
+      seed = (seed + 0x6d2b79f5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    const pick = <T>(items: readonly T[]) =>
+      items[Math.floor(random() * items.length)]!;
+    // Fictional finals, with the near misses exact matching must refuse.
+    const texts = [
+      draft,
+      "Dana, not Thursday.",
+      "Dana, not Thursday.\n",
+      "Dana,\r\nnot Thursday.",
+      "Dana,\nnot Thursday.",
+      "Dana, the café is booked.",
+      "Dana, the café is booked.",
+    ];
+    const shapes = {
+      given: (): Partial<MemoInput> => ({}),
+      kept: (): Partial<MemoInput> => ({
+        first_draft: pick([draft, ...texts]),
+        mode: pick(["draft", "edit"] as const),
+      }),
+      missing: (): Partial<MemoInput> => ({
+        first_draft_missing: true,
+        mode: pick(["draft", "edit"] as const),
+      }),
+    };
+    type Row = {
+      id: string;
+      at: string;
+      final: string;
+      first_draft: string | null;
+      state: string;
+      mode: string | null;
+      tier: string;
+      request: string | null;
+      changes: number;
+    };
+    const rows = async (user: string) =>
+      (
+        await local.pg.query<Row>(
+          `SELECT m.id,m.created_at::text AS at,m.final,m.first_draft,m.first_draft_state AS state,
+            m.mode,m.tier,m.request,
+            (SELECT count(*)::int FROM memo_changes c WHERE c.user_id=m.user_id AND c.memo_id=m.id) AS changes
+          FROM memos m WHERE m.user_id=$1 ORDER BY m.created_at,m.id`,
+          [user],
+        )
+      ).rows;
+    const outcomeOf = async (
+      store: ReturnType<typeof fixtureStore>,
+      input: SaveMemoInput,
+    ) => {
+      try {
+        return await store.saveMemo(input);
+      } catch (error) {
+        return { refused: (error as { code: string }).code };
+      }
+    };
+    const seen = new Map<string, number>();
+    const saw = (branch: string) =>
+      seen.set(branch, (seen.get(branch) ?? 0) + 1);
+    for (let n = 0; n < 60; n++) {
+      const [a, b] = [`gen-a-${n}`, `gen-b-${n}`];
+      await seedUsers(local.pg, a, b);
+      const [withField, without] = [
+        fixtureStore(local.db, a),
+        fixtureStore(local.db, b),
+      ];
+      // The same memos, in the same order and under the same request ids.
+      const seeded: string[] = [];
+      for (let s = Math.floor(random() * 5); s > 0; s--) {
+        const seedSave = memoSave({
+          final: pick(texts),
+          ...pick(Object.values(shapes))(),
+        });
+        seeded.push(seedSave.memo!.final);
+        await withField.saveMemo(seedSave);
+        await without.saveMemo(seedSave);
+      }
+      if (random() < 0.2)
+        await local.pg.query(
+          "INSERT INTO memo_settings(user_id,keep_memos) VALUES ($1,false),($2,false)",
+          [a, b],
+        );
+      const shape = pick([
+        ...Object.values(shapes),
+        (): Partial<MemoInput> => ({ first_draft: draft, mode: "edit" }),
+      ])();
+      // Mostly a final on file, so a match, and two holders, are common.
+      const started_from =
+        seeded.length && random() < 0.7 ? pick(seeded) : pick(texts);
+      const sent = memoSave({
+        final: pick(texts),
+        ...shape,
+        ...(shape.first_draft || shape.first_draft_missing
+          ? { request: "Tighten it." }
+          : {}),
+      });
+      const before = await rows(a);
+      const seededB = await rows(b);
+      const outcome = await outcomeOf(withField, {
+        ...sent,
+        memo: { ...sent.memo!, started_from },
+      });
+      const plain = await outcomeOf(without, sent);
+      const after = await rows(a);
+      const holders = before.filter((r) => r.final === started_from);
+      // Ids differ between the accounts: a seeded memo is named by its place.
+      const label = (seeded: Row[], id: string | undefined) => {
+        const i = seeded.findIndex((r) => r.id === id);
+        return i < 0 ? "new" : `seed ${i}`;
+      };
+      const normal = (
+        o: Awaited<ReturnType<typeof outcomeOf>>,
+        seeded: Row[],
+      ) =>
+        "memo" in o && o.memo
+          ? {
+              ...o,
+              request_id: "",
+              memo: { ...o.memo, memo_id: label(seeded, o.memo.memo_id) },
+            }
+          : { ...o, request_id: "" };
+      const content = (list: Row[], seeded: Row[]) =>
+        list.map(({ id, at: _at, ...r }) => ({ ...r, id: label(seeded, id) }));
+      const context = { n, started_from, sent: sent.memo, before, outcome };
+      if (shape.mode === "draft") {
+        // Refused before any database work; nothing changes.
+        expect([context, outcome]).toEqual([
+          context,
+          { refused: "invalid_input" },
+        ]);
+        expect(after).toEqual(before);
+        saw("draft refused");
+        continue;
+      }
+      if (holders.length !== 1) {
+        // An ordinary save: the same outcome and store as without the field.
+        const b4 = await rows(b);
+        expect([context, normal(outcome, before)]).toEqual([
+          context,
+          normal(plain, seededB),
+        ]);
+        expect(content(after, before)).toEqual(content(b4, seededB));
+        saw(holders.length ? "two or more hold it" : "none holds it");
+        continue;
+      }
+      const target = holders[0]!;
+      const others = before.filter((r) => r !== target);
+      const final = sent.memo!.final;
+      const twin = others.find(
+        (r) =>
+          r.final === final &&
+          r.state === target.state &&
+          r.first_draft === target.first_draft,
+      );
+      // Every other memo stays exactly as it was.
+      expect([context, after.filter((r) => r.id !== target.id)]).toEqual([
+        context,
+        others,
+      ]);
+      if (final === target.final) {
+        expect([context, outcome]).toMatchObject([
+          context,
+          { status: "unchanged", memo: { memo_id: target.id } },
+        ]);
+        expect(after).toEqual(before);
+        saw("unchanged");
+      } else if (twin) {
+        expect([context, outcome]).toMatchObject([
+          context,
+          { status: "unchanged", memo: { memo_id: twin.id } },
+        ]);
+        expect(after.some((r) => r.id === target.id)).toBe(false);
+        saw("collision");
+      } else {
+        expect([context, outcome]).toMatchObject([
+          context,
+          { status: "saved", memo: { memo_id: target.id }, replaced: true },
+        ]);
+        const updated = after.find((r) => r.id === target.id)!;
+        expect([context, updated]).toEqual([
+          context,
+          {
+            ...target,
+            final,
+            tier: updated.tier,
+            changes: updated.changes,
+            request:
+              target.state === "none" ? null : (sent.memo!.request ?? null),
+          },
+        ]);
+        expect(updated.tier).toBe(
+          tier({
+            state: target.state as "kept" | "missing" | "none",
+            mode: (target.mode ?? undefined) as "draft" | "edit" | undefined,
+            firstDraft: target.first_draft ?? undefined,
+            final,
+          }),
+        );
+        saw("updated");
+      }
+    }
+    // Each branch of the rule met at least once.
+    expect([...seen.keys()].sort()).toEqual(
+      [
+        "draft refused",
+        "two or more hold it",
+        "none holds it",
+        "unchanged",
+        "collision",
+        "updated",
+      ].sort(),
+    );
+  } finally {
+    await local.dispose();
+  }
+}, 60000);

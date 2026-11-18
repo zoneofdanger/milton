@@ -127,16 +127,19 @@ How a person creates and revokes keys is in [accounts](accounts.md).
   `forget_memos` or `memo_context`; `memo.request` carries the person's ask
   ([memos](memos.md#the-request)), and `memo.replaces` the id of a final the AI saved
   that the person since changed, sent with the same `first_draft` or with
-  `first_draft_missing` ([saves](saves.md#replacing-a-final)). What each change
-  does is in [memos](memos.md) and [deletion](deletion.md).
+  `first_draft_missing` ([saves](saves.md#replacing-a-final)). `memo.started_from` is
+  the exact text an edit started from, when the AI holds no memo id for it: bounded as
+  a final, refused with mode `draft` or beside `replaces`, and matched byte for byte
+  ([saves](saves.md#starting-text)). What each change does is in [memos](memos.md) and
+  [deletion](deletion.md).
 - `create_memo` returns `saved`, `unchanged` or `failed`, with the request ID. `saved`
   confirms a committed write; `unchanged` confirms the returned memo already holds those
   words. One exception writes: a replace whose words another memo already holds deletes
   the replaced memo and returns that other memo as `unchanged`
   ([saves](saves.md#replacing-a-final)). A memo with a
   kept first draft adds `changes: {state, found}`, code's own count
-  ([memos](memos.md#changes)). A replace's `saved` adds `replaced: true` and carries no
-  `receipt`. A replay returns the stored outcome as it was written, with `replayed`
+  ([memos](memos.md#changes)). A replace's `saved`, and a matched `started_from`
+  save's, adds `replaced: true` and carries no `receipt`. A replay returns the stored outcome as it was written, with `replayed`
   beside it ([saves](saves.md#receipts)).
 - A read-only connection lists no `create_memo`; a direct call to it is refused with
   `insufficient_scope` and `required_permission: read_write`.
@@ -209,7 +212,7 @@ a reconnect.
 - The SDK's plain-text argument refusals become such bodies, `invalid_arguments` with
   the SDK's text as `message`.
 - Memo codes get their own steps: `request_too_large` resaves the memo with the final
-  alone (`first_draft_missing`); `memos_off` stops saving drafts, saving only writing
+  alone (`first_draft_missing`, and without `started_from`); `memos_off` stops saving drafts, saving only writing
   the person asks to remember; `invalid_kind` and `invalid_memo` reread for a valid id.
   A replace's refusals: `replace_unknown` (`tell_user`: the memo is gone, perhaps
   forgotten, so don't save it again as a new memo) and `replace_first_draft` (`fix_input`: resend with that memo's first draft exactly, or
@@ -255,8 +258,10 @@ a reconnect.
   own.
 - `server/test/served-budget.test.ts` reads the tool descriptions an SDK client is
   served, in both connection modes, and keeps each and their total under a budget (the
-  2026-11-12 sizes plus 10 to 15%, and none past 1,900; `create_memo`'s raised to 1,800
-  and the read-write total to 2,600 for the replace sentence on 2026-11-17); growing past
+  2026-11-12 sizes plus 10 to 15%, and none reaching 1,900; `create_memo`'s raised to
+  1,800 and the read-write total to 2,600 for the replace sentence on 2026-11-17, then to
+  1,900 and 2,750 for the `started_from` clause on 2026-11-18, serving 1,851 and 2,716);
+  growing past
   it means raising the budget there, deliberately. It also refuses the retired names in descriptions.
 - Each AI's (account and OAuth client) first tool call after a server process starts
   carries `notifications/tools/list_changed` on that call's response stream, ahead of

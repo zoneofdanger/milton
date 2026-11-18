@@ -184,7 +184,7 @@ export const nextSteps: Record<string, NextStep> = {
   ),
   request_too_large: step(
     "fix_input",
-    "Save the memo again with the final alone: send first_draft_missing instead of first_draft, with a new request_id.",
+    "Save the memo again with the final alone, without started_from: send first_draft_missing instead of first_draft, with a new request_id.",
   ),
   // Transient failures.
   store_unavailable: retryOnce,

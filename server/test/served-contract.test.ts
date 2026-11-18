@@ -257,6 +257,69 @@ test("every memo shape the instructions describe parses, and contradicting shape
   ).toBe(false);
 });
 
+test("started_from is described exactly, bounded as a final, and refused with a draft or beside replaces before any database work", () => {
+  // The starting-text spec (Peter, 2026-11-18): the field's own words.
+  expect(memoInput.shape.started_from.description).toBe(
+    "Only when you edited writing that already existed (the person's earlier version, or a final from another conversation) and you have no memo_id for it: that text exactly as it stood before your edit. Milton then updates the memo holding it instead of keeping two. Omit it for a draft you wrote, for new writing, and for a new piece built from an old one as a template. Omit it too when that text holds a secret or other people's words; never alter it to make it fit.",
+  );
+  const context = { summary: "a fictional edit", medium: "email" };
+  const before = "Dana, Thursday works.";
+  // Allowed on an edit, with or without its first draft, and on writing the
+  // person gave.
+  for (const memo of [
+    { final: "Dana, Friday works.", started_from: before, context },
+    {
+      final: "Dana, Friday works.",
+      first_draft: "Dana, Friday works!",
+      mode: "edit",
+      started_from: before,
+      context,
+    },
+    {
+      final: "Dana, Friday works.",
+      first_draft_missing: true,
+      mode: "edit",
+      started_from: before,
+      context,
+    },
+  ]) {
+    const parsed = memoInput.safeParse(memo);
+    expect(parsed.error?.issues ?? []).toEqual([]);
+    expect(checkMemo(parsed.data!)).toMatchObject({ ok: true });
+  }
+  // Bounded as a final is: non-blank, well formed, no NUL, 256 KiB of UTF-8.
+  const bounded = (started_from: string) =>
+    memoInput.safeParse({ final: "f", started_from, context }).success;
+  expect(bounded("x".repeat(262144))).toBe(true);
+  for (const bad of [
+    "",
+    " \n\t",
+    "a\0b",
+    "a\uD800b",
+    "x".repeat(262145),
+    "é".repeat(131073),
+  ])
+    expect([bad.length, bounded(bad)]).toEqual([bad.length, false]);
+  // A draft the AI wrote is always its own memo, and replaces already names
+  // its memo: both refused before any database work, each saying what to send.
+  const refused = (memo: Record<string, unknown>) =>
+    checkMemo(memoInput.parse({ final: "f", context, ...memo }));
+  for (const draft of [
+    { first_draft: "d", mode: "draft", started_from: before },
+    { first_draft_missing: true, mode: "draft", started_from: before },
+  ])
+    expect(refused(draft)).toEqual({
+      ok: false,
+      message:
+        "A draft you wrote is its own memo, not an edit of text on file: send it again without started_from.",
+    });
+  expect(refused({ started_from: before, replaces: "m1" })).toEqual({
+    ok: false,
+    message:
+      "Send replaces or started_from, not both: with the memo_id, send replaces alone.",
+  });
+});
+
 test("the refusal, both reminders and the instructions give the one link, true for everyone who reads them", () => {
   const app = "https://app.example";
   const refusal = subscriptionRequired(app);

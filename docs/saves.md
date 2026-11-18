@@ -163,6 +163,69 @@ other, with `replaces` in the hashed input.
   second meets `replace_unknown`. The integration suite runs that schedule on two
   connections.
 
+## Starting text
+
+`memo.started_from` is the text an edit started from, exactly as it stood before the
+edit, sent by an AI that holds no memo id for it (Peter, 2026-11-18,
+[spec](research/starting-text-spec-2026-11-18.md)). It closes the gap behind a field
+report the same day: a second AI session revised pieces another session had saved, and
+could send `replaces` only for the one id its report showed, so the others were saved
+twice.
+
+- **The rule.** A save carrying `started_from` changes an existing memo only when it is
+  an edit (mode `edit`) or writing the person gave (no first draft), and exactly one of
+  the account's memos holds a final byte-identical to `started_from` at the moment of
+  the save. It then changes that memo's final, context, kind and request and nothing
+  else. In every other accepted case the save is an ordinary one, exactly as if the
+  field were absent.
+- **Shape refusals**, before any database work and with no receipt, as `invalid_input`:
+  `started_from` with mode `draft` (a draft the AI wrote is always its own memo: send it
+  again without the field), and `started_from` beside `replaces` (send one). The field
+  is bounded as a final is ([memos](memos.md#bounds)).
+- **The match.** In the transaction, under the account lock, the account's memos whose
+  final equals `started_from` are read with plain SQL equality, as the duplicate check
+  compares finals: nothing is trimmed, normalized or compared by similarity, so a final
+  line break, CRLF against LF or another Unicode encoding of the same characters does not
+  match. One holder is the target; none, or two or more, make an ordinary save.
+- **The update** runs the replace path ([Replacing a final](#replacing-a-final)): the
+  target is deleted and the save inserted under its id and creation time. The target
+  keeps its first draft, first-draft state and mode; the save's own `first_draft`,
+  `first_draft_missing` and `mode`, and the changes worked out from them, are set
+  aside, so a drafted memo never becomes "your words" by being edited. Changes, change
+  score and tier are worked out from the stored first draft and the new final, as for
+  a replace with `first_draft_missing`. A request is kept only when the target is
+  drafted (first draft kept or missing). The outcome is `saved` with the target's id,
+  `replaced: true` and no receipt line.
+- **The cases.**
+
+  | Case                                                        | Result                                                                                 |
+  | ----------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+  | One drafted memo with a kept first draft holds that final   | Updated; first draft, state and mode stay; steered, or untouched if final = draft      |
+  | One memo accepted untouched holds it                        | Updated; steered once the final differs from its first draft                           |
+  | One memo whose first draft is missing holds it              | Updated; still missing, with its stored mode; no changes listed                        |
+  | One memo of writing the person gave holds it                | Updated; still final-only and "your words"; a sent request is not kept                 |
+  | The new final is the one the matched memo holds             | `unchanged`, that memo; its context and kind are not touched                           |
+  | Another memo would then hold the same final and first draft | As a replace: the matched memo goes, the other is returned `unchanged`, as it is       |
+  | Two or more memos, or none, hold that text                  | Ordinary save; nothing is replaced                                                     |
+  | Two sessions start from the same final                      | The first updates the memo; the second no longer matches and is an ordinary save       |
+  | The matched memo was forgotten first                        | Ordinary save: the revision is kept as a new memo                                      |
+  | Keep memos is off                                           | A match is allowed (it stores no new first draft); an unmatched drafted save is not    |
+  | The same request id and input again                         | The stored outcome replays; `started_from` is part of the hashed input, stored nowhere |
+
+- **Too large.** A request over 256 KiB is refused as `request_too_large`; its one next
+  step says to save again with the final alone, without `started_from`, in general
+  terms, since the HTTP refusal comes before the body is read.
+- **Limits accepted.** Text identifies words, not a piece: if the only memo holding the
+  text belongs to a different piece, that memo takes the revision; this is rare for long
+  text and likelier for a short stock reply. A piece hand-edited between sessions, two
+  sessions revising one final, and a from-scratch redraft can still leave a second memo.
+  An AI that sends the field for a new piece built on a template would overwrite the
+  template's memo; the description tells it not to. It does nothing for duplicates
+  already on file.
+- The integration suite runs one group per case, as the MCP role, with the two-session
+  and forget schedules on two connections and a lost acknowledgment recovered from the
+  receipt; a seeded generated-input test checks the rule on 60 cases.
+
 ## Failures
 
 - A transient or unknown database error (`store_unavailable`: a timeout, deadlock or

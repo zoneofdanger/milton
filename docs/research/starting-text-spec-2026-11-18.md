@@ -9,7 +9,12 @@ type: research
 > Milton as it is now ([saves](../saves.md#starting-text), [memos](../memos.md),
 > [mcp](../mcp.md)). As built, the too-large next step is one step for every
 > `request_too_large`, so it says to send without `started_from` in general terms: the
-> HTTP refusal of an oversized body comes before the body is read.
+> HTTP refusal of an oversized body comes before the body is read. As built, a match runs
+> the replace path's delete and insert, so besides the final, context, kind and request
+> the memo takes the saving AI and request id from the save, its context-correction time
+> is cleared, and the old version's change rows and any legacy note left without a
+> citation go with it; its id, creation time, first draft, first-draft state and mode
+> stay.
 
 # Spec: an edit names the text it started from (approved by Peter, 2026-11-18)
 

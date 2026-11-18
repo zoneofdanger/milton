@@ -987,13 +987,17 @@ test("generated: a save carrying started_from changes an existing memo only when
       mode: string | null;
       tier: string;
       request: string | null;
+      summary: string;
+      medium: string;
+      audience: string | null;
+      purpose: string | null;
       changes: number;
     };
     const rows = async (user: string) =>
       (
         await local.pg.query<Row>(
           `SELECT m.id,m.created_at::text AS at,m.final,m.first_draft,m.first_draft_state AS state,
-            m.mode,m.tier,m.request,
+            m.mode,m.tier,m.request,m.summary,m.medium,m.audience,m.purpose,
             (SELECT count(*)::int FROM memo_changes c WHERE c.user_id=m.user_id AND c.memo_id=m.id) AS changes
           FROM memos m WHERE m.user_id=$1 ORDER BY m.created_at,m.id`,
           [user],
@@ -1042,8 +1046,19 @@ test("generated: a save carrying started_from changes an existing memo only when
       // Mostly a final on file, so a match, and two holders, are common.
       const started_from =
         seeded.length && random() < 0.7 ? pick(seeded) : pick(texts);
+      // Every other case another context, with purpose omitted, so a match
+      // must take the save's context.
+      const sentContext =
+        n % 2
+          ? memoSave().memo!.context
+          : {
+              summary: "a fictional counteroffer",
+              medium: "chat" as const,
+              audience: "a supplier",
+            };
       const sent = memoSave({
         final: pick(texts),
+        context: sentContext,
         ...shape,
         ...(shape.first_draft || shape.first_draft_missing
           ? { request: "Tighten it." }
@@ -1139,6 +1154,10 @@ test("generated: a save carrying started_from changes an existing memo only when
             final,
             tier: updated.tier,
             changes: updated.changes,
+            summary: sentContext.summary,
+            medium: sentContext.medium,
+            audience: sentContext.audience ?? null,
+            purpose: sentContext.purpose ?? null,
             request:
               target.state === "none" ? null : (sent.memo!.request ?? null),
           },

@@ -211,8 +211,8 @@ a reconnect.
   request_id). `tool_replaced` rereads with `get_report`.
 - The SDK's plain-text argument refusals become such bodies, `invalid_arguments` with
   the SDK's text as `message`.
-- Memo codes get their own steps: `request_too_large` resaves the memo with the final
-  alone (`first_draft_missing`, and without `started_from`); `memos_off` stops saving drafts, saving only writing
+- Memo codes get their own steps: `request_too_large` resaves the memo without
+  `started_from`, with `first_draft_missing` in place of a sent `first_draft`; `memos_off` stops saving drafts, saving only writing
   the person asks to remember; `invalid_kind` and `invalid_memo` reread for a valid id.
   A replace's refusals: `replace_unknown` (`tell_user`: the memo is gone, perhaps
   forgotten, so don't save it again as a new memo) and `replace_first_draft` (`fix_input`: resend with that memo's first draft exactly, or

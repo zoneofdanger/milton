@@ -175,9 +175,13 @@ twice.
 - **The rule.** A save carrying `started_from` changes an existing memo only when it is
   an edit (mode `edit`) or writing the person gave (no first draft), and exactly one of
   the account's memos holds a final byte-identical to `started_from` at the moment of
-  the save. It then changes that memo's final, context, kind and request and nothing
-  else. In every other accepted case the save is an ordinary one, exactly as if the
-  field were absent.
+  the save. That memo then keeps its id, creation time, first draft, first-draft state
+  and mode, and takes everything else from the save, as any replace does: its final,
+  context, kind and request, and also the saving AI and request id, which become this
+  save's. One exception, as for a replace: when another memo already holds the new
+  final with the matched memo's first-draft state and first draft, the matched memo is
+  deleted and that other memo is returned `unchanged`. In every other accepted case the
+  save is an ordinary one, exactly as if the field were absent.
 - **Shape refusals**, before any database work and with no receipt, as `invalid_input`:
   `started_from` with mode `draft` (a draft the AI wrote is always its own memo: send it
   again without the field), and `started_from` beside `replaces` (send one). The field
@@ -188,8 +192,12 @@ twice.
   line break, CRLF against LF or another Unicode encoding of the same characters does not
   match. One holder is the target; none, or two or more, make an ordinary save.
 - **The update** runs the replace path ([Replacing a final](#replacing-a-final)): the
-  target is deleted and the save inserted under its id and creation time. The target
-  keeps its first draft, first-draft state and mode; the save's own `first_draft`,
+  target is deleted and the save inserted under its id and creation time. Because the
+  old version is deleted, not updated, its change rows go with it, as does any legacy
+  note left without a citation, and the new row starts with the context-correction
+  time (`context_updated_at`) cleared and the retired columns at their defaults
+  ([memos](memos.md#legacy-data)). The target keeps its first draft, first-draft state
+  and mode; the save's own `first_draft`,
   `first_draft_missing` and `mode`, and the changes worked out from them, are set
   aside, so a drafted memo never becomes "your words" by being edited. Changes, change
   score and tier are worked out from the stored first draft and the new final, as for
@@ -213,8 +221,10 @@ twice.
   | The same request id and input again                         | The stored outcome replays; `started_from` is part of the hashed input, stored nowhere |
 
 - **Too large.** A request over 256 KiB is refused as `request_too_large`; its one next
-  step says to save again with the final alone, without `started_from`, in general
-  terms, since the HTTP refusal comes before the body is read.
+  step says to save again without `started_from`, with a new request id, sending
+  `first_draft_missing` in place of a `first_draft` that was sent. It says so in
+  general terms, since the HTTP refusal comes before the body is read, and a final-only
+  save that follows it stays final-only.
 - **Limits accepted.** Text identifies words, not a piece: if the only memo holding the
   text belongs to a different piece, that memo takes the revision; this is rare for long
   text and likelier for a short stock reply. A piece hand-edited between sessions, two

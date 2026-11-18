@@ -2596,7 +2596,7 @@ try {
       (
         await owner.query(
           `SELECT m.id,m.created_at::text AS at,m.final,m.first_draft,m.first_draft_state AS state,
-            m.mode,m.tier,m.change,m.request,m.summary,m.kind_id,m.changes_state,
+            m.mode,m.tier,m.change,m.request,m.summary,m.medium,m.audience,m.purpose,m.kind_id,m.changes_state,
             (SELECT count(*)::int FROM memo_changes c WHERE c.user_id=m.user_id AND c.memo_id=m.id) AS changes
           FROM memos m WHERE m.user_id=$1 ORDER BY m.created_at,m.id`,
           [editor],
@@ -2639,9 +2639,16 @@ try {
     await row(
       "one drafted memo with its first draft holds that final: updated, first draft, state and mode kept, steered or untouched",
       async () => {
-        const id = await drafted("Dana, not Thursday.");
+        const id = await idOf({
+          first_draft: draft,
+          mode: "draft",
+          final: "Dana, not Thursday.",
+          context: { ...context, audience: "a vendor", purpose: "decline" },
+        });
         const [before] = await rows();
         const final = "Dana, not Thursday; Friday?";
+        // A new context: summary and medium changed, audience changed,
+        // purpose omitted, so cleared.
         const outcome = await save({
           first_draft_missing: true,
           mode: "edit",
@@ -2649,6 +2656,11 @@ try {
           final,
           started_from: "Dana, not Thursday.",
           new_kind: "vendor note",
+          context: {
+            summary: "Fictional counteroffer",
+            medium: "chat",
+            audience: "a supplier",
+          },
         });
         updated(outcome, id);
         assert.equal(outcome.memo?.tier, "steered");
@@ -2659,6 +2671,10 @@ try {
             ...before,
             final,
             change: undefined,
+            summary: "Fictional counteroffer",
+            medium: "chat",
+            audience: "a supplier",
+            purpose: null,
             request: "Offer Friday instead.",
             kind_id: outcome.memo!.kind_id,
             changes: true,
@@ -3003,9 +3019,22 @@ try {
           started_from: "Dana, not Thursday. ".repeat(7000),
         });
         assert.equal(outcome.error, "request_too_large");
-        assert.match(withNext(outcome).next.text, /without started_from/);
+        assert.equal(
+          withNext(outcome).next.text,
+          "Save the memo again without started_from, with a new request_id; if you sent first_draft, send first_draft_missing in its place.",
+        );
         assert.deepEqual(await rows(), before);
         assert.equal(before[0].id, id);
+        // Following the step: the same final-only save, without the field,
+        // under a new request id, saves the final as writing the person gave.
+        const retried = await save({ final: "Dana, Friday? ".repeat(10000) });
+        ordinary(retried, [id]);
+        const after = await rows();
+        assert.deepEqual(after[0], before[0]);
+        assert.deepEqual(
+          [after[1].final, after[1].first_draft, after[1].state, after[1].mode],
+          ["Dana, Friday? ".repeat(10000), null, "none", null],
+        );
       },
     );
     await row(

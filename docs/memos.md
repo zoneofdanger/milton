@@ -84,9 +84,10 @@ their AI saved a second memo with the same first draft, leaving the first one st
   stood in for by `first_draft_missing`, when Milton uses the stored one; a memo without
   one takes the save as sent ([saves](saves.md#replacing-a-final)).
 - A save with `started_from`, an edit or writing the person gave, updates the one memo
-  whose final is byte-identical to it: only its final, context, kind and request
-  change, and its first draft, first-draft state and mode stay. With no such memo, or
-  more than one, it is an ordinary save ([saves](saves.md#starting-text)).
+  whose final is byte-identical to it: the memo keeps its id, creation time, first
+  draft, first-draft state and mode, and takes the rest from the save as a replace
+  does. With no such memo, or more than one, it is an ordinary save
+  ([saves](saves.md#starting-text)).
 - `memo_context` replaces a memo's medium, summary, audience and purpose (an omitted
   optional field clears) and, when sent, its kind, and sets `context_updated_at`; it
   never changes a memo's words, or an older memo's rounds and report metadata. The same

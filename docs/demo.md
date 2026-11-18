@@ -155,8 +155,8 @@ about 25 s. The engineering plugin's standup skill loaded in every trial;
 The published player plays at 1.5× speed, on top of the 1 s idle limit (Peter,
 2026-11-13). `scan` prints each cast's length as recorded, with pauses trimmed, and at
 1.5×. The published clip's label reads "Real run, typing automated, pauses trimmed, sped
-up 1.5×. Day 1 is the second take."; the standup clip's label must name its own chosen
-takes. The preview page that plays it is in [site](site.md).
+up 1.5×. Recorded on two mornings in a row; both days are first takes."; a new clip's
+label must name its own chosen takes. The preview page that plays it is in [site](site.md).
 
 ## Assembly
 
@@ -186,11 +186,18 @@ Scan the assembled cast before it enters the repository, at
 
 ## Published clip
 
-`/demo` still plays the clip of 2026-11-13: Day 1 in Claude Code (a reply to a manager,
-take 2), "# Two weeks and 9 approved drafts later", Day 14 in Codex. It runs 58.7 s at
-1.5× and its scan found nothing; its scenes and card list are in git history. When the
-standup clip replaces it, the page's heading ("Fixed in Claude Code. Remembered in
-Codex.") and label change with it.
+`/demo` plays the standup clip of 2026-11-18 under the heading "Fix it once. It's right
+tomorrow." (Peter, 2026-11-18). Both takes are the first on the `sam4` test account: Day 1
+recorded Tuesday 2026-11-17 at 9:42 AM, Day 2 Wednesday 2026-11-18 at 9:37 AM, so the
+dates and times on screen are true. Day 2's first draft was approved unedited. It runs
+54.4 s at 1.5× and its scan found nothing.
+
+Day 1's file was cut back to its first 373 lines before assembly, with Peter's approval
+(2026-11-18): the recorder had not stopped, and it kept appending Claude Code's idle
+redraws ("Checking for updates…") for hours after the take. The kept lines are the take
+as the driver finished it, checked by its scan (26.4 s at 1.5×, no hits) and by a text
+conversion identical to the one made right after recording. The clip of 2026-11-13
+(Day 1 in Claude Code, Day 14 in Codex, 58.7 s) is in git history.
 
 ## Banner
 

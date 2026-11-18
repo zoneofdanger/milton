@@ -7,9 +7,11 @@ import { spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readdirSync,
   readFileSync,
   realpathSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -30,6 +32,7 @@ type Client = {
   ready: RegExp; // the input prompt is back
   busy: RegExp; // a reply is still being written
   blocked: RegExp; // a dialog is waiting, so typing would answer it
+  exitKeys: string[]; // tmux keys a person would press to quit the client
   notice?: RegExp; // group 1 is whatever the startup banner shows under its fixed lines
   env?: Record<string, string>; // added to the clean environment
   memoryDir?: (profile: string, cwd: string) => string; // the client's own memory for cwd
@@ -44,6 +47,7 @@ const CLIENTS: Record<string, Client> = {
     ready: /─{20,}\n❯[ \u00a0]/, // Claude Code puts a no-break space after ❯
     busy: /esc to interrupt/i,
     blocked: /Esc to cancel/,
+    exitKeys: ["C-d", "C-d"], // Ctrl-D, and again if it asks to confirm
     notice: /Claude Code v[^\n]*\n[^\n]*\n[^\n]*\n([\s\S]*?)─{20,}/,
     // Claude Code's own memory must not be what carries Sam's style between days.
     env: { CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" },
@@ -59,6 +63,7 @@ const CLIENTS: Record<string, Client> = {
     ready: /^›[ \u00a0]/m,
     busy: /esc to interrupt/i,
     blocked: /Would you like to|Allow the .* to run/i,
+    exitKeys: ["C-c", "C-c"], // Ctrl-C, and again if it asks to confirm
   },
 };
 
@@ -82,196 +87,150 @@ const fail = (message: string): never => {
   process.exit(1);
 };
 
-/** A process the driver started. Its start time guards against a reused pid. */
-type Proc = {
-  pid: number;
-  ppid: number;
-  pgid: number;
-  started: string;
-  command: string;
-};
+/** A process the driver started, as tmux reported it. Its start time guards
+ * against a reused pid. */
+type Started = { pid: number; started: string | null };
 
-/** Every process, or null when ps keeps failing. A Ctrl-C can end ps early, and
- * an empty list must never read as "all gone". */
-function processes(): Proc[] | null {
-  for (let attempt = 0; attempt < 10; attempt++) {
-    if (attempt) Bun.sleepSync(300);
-    const r = spawnSync(
-      "ps",
-      ["-A", "-o", "pid=,ppid=,pgid=,lstart=,command="],
-      { encoding: "utf8", env: { ...process.env, LC_ALL: "C" } },
-    );
-    if (r.status !== 0 || !r.stdout?.trim()) continue;
-    return r.stdout
-      .split("\n")
-      .filter((l) => l.trim())
-      .map((l) => {
-        const [pid, ppid, pgid, ...rest] = l.trim().split(/\s+/);
-        // lstart is five words, e.g. "Wed Nov 18 09:50:01 2026".
-        return {
-          pid: Number(pid),
-          ppid: Number(ppid),
-          pgid: Number(pgid),
-          started: rest.slice(0, 5).join(" "),
-          command: rest.slice(5).join(" "),
-        };
-      });
-  }
-  return null;
-}
-
-const same = (a: Proc, b: Proc) => a.pid === b.pid && a.started === b.started;
-
-/** What the driver launched. Registered before the launch, so a failure at any
- * point after it still stops it. `known` holds every process of the run seen so
- * far, including ones that have exited. */
+/** What the driver launched: the tmux server and the pane's process (the
+ * recorder, or unrecorded the shell), by the pids tmux itself printed. Set
+ * before the launch, so a failure at any point after it still stops it. */
 let launched: {
-  serverPid: number | null; // the private tmux server
-  panePid: number | null; // the recorder (asciinema) or, unrecorded, the shell
-  known: Proc[];
+  server: Started | null;
+  pane: Started | null;
+  exitKeys: string[];
+  tempDir: string | null; // the recorder's private folder
 } | null = null;
 
-/** The run's processes still running in `table`: the tmux server, its pane, and
- * every process whose parent is one of them or whose process group is one of
- * theirs. The group catches a child that was reparented to pid 1 after its
- * parent exited. A group counts only while its leader, if running, is the run's
- * own, so a reused group id is never taken. Never the driver or its group. */
-function owned(table: Proc[]) {
-  const run = launched!;
-  const remember = (p: Proc) => {
-    if (!run.known.some((k) => same(k, p))) run.known.push(p);
-  };
-  const server = table.find(
-    (p) =>
-      p.command.includes(`tmux -L ${SOCKET} `) &&
-      (run.serverPid === null
-        ? p.ppid !== process.pid // not the driver's own tmux client
-        : p.pid === run.serverPid),
-  );
-  if (server && !run.known.some((k) => k.pid === server.pid)) remember(server);
-  const pane = table.find((p) => p.pid === run.panePid);
-  if (
-    pane &&
-    !run.known.some((k) => k.pid === pane.pid) &&
-    (pane.ppid === server?.pid || pane.ppid === 1)
-  )
-    remember(pane);
-  const driverGroup = table.find((p) => p.pid === process.pid)?.pgid;
-  const mine = run.known.filter((k) => table.some((p) => same(p, k)));
-  const groups = new Set(run.known.map((k) => k.pgid));
-  for (let grew = true; grew;) {
-    grew = false;
-    for (const p of table) {
-      if (p.pid <= 1 || p.pid === process.pid || p.pgid === driverGroup)
-        continue;
-      if (mine.some((m) => same(m, p))) continue;
-      const leader = table.find((q) => q.pid === p.pgid);
-      const inGroup =
-        groups.has(p.pgid) && (!leader || mine.some((m) => same(m, leader)));
-      if (inGroup || mine.some((m) => m.pid === p.ppid)) {
-        mine.push(p);
-        groups.add(p.pgid);
-        remember(p);
-        grew = true;
-      }
-    }
+let psWedged = false;
+let leftovers = false; // a stop reported processes it could not end
+
+/** pid -> { ppid, start time } for every process, or null when ps fails or
+ * takes over 5 s. Bounded, so a wedged ps can't hold up the driver; after one
+ * timeout it isn't asked again. */
+function processTable() {
+  if (psWedged) return null;
+  const r = spawnSync("ps", ["-A", "-o", "pid=,ppid=,lstart="], {
+    encoding: "utf8",
+    env: { ...process.env, LC_ALL: "C" },
+    timeout: 5000,
+    killSignal: "SIGKILL",
+  });
+  if (r.error) psWedged = true;
+  if (r.status !== 0 || !r.stdout?.trim()) return null;
+  const table = new Map<number, { ppid: number; started: string }>();
+  for (const line of r.stdout.split("\n")) {
+    const [pid, ppid, ...lstart] = line.trim().split(/\s+/);
+    if (pid)
+      table.set(Number(pid), { ppid: Number(ppid), started: lstart.join(" ") });
   }
-  return mine;
+  return table;
 }
 
-/** Records the run's current processes; refuses, stopping the run, if ps fails. */
-function track() {
-  if (!launched) return;
-  const table = processes();
-  if (!table) fail("could not list processes");
-  owned(table!);
+/** The ones of `procs` still running, or null when that can't be checked. */
+function running(procs: Started[]) {
+  const table = processTable();
+  if (!table) return null;
+  return procs.filter((p) => table.get(p.pid)?.started === p.started);
 }
 
-function signal(procs: Proc[], sig: NodeJS.Signals) {
-  for (const p of procs)
-    try {
-      process.kill(p.pid, sig);
-    } catch {} // already gone
+/** tmux on the private socket, bounded so an unresponsive server can't hang the
+ * driver. Returns null on failure or timeout. */
+function tmuxRaw(args: string[], env?: Record<string, string>, ms = 10_000) {
+  const r = spawnSync("tmux", ["-L", SOCKET, ...args], {
+    encoding: "utf8",
+    env: env ?? cleanEnv({}),
+    timeout: ms,
+    killSignal: "SIGKILL",
+  });
+  return r.status === 0 ? r.stdout : null;
 }
 
-/** Ends everything the driver launched and reports whether all of it is gone.
- * `tmux kill-server` alone is not enough: asciinema survives it, reparented to
- * pid 1 with its shell and client, and keeps appending to the cast. An
- * interactive zsh ignores SIGTERM but exits on SIGHUP and hangs up its jobs;
- * the recorder then ends with its shell. The run's processes are listed afresh
- * on every poll, so a child started or reparented while stopping is found too.
+/** Ends the client and the shell the way a person would, so the recorder ends
+ * by itself. Bounded; does nothing once the pane's process has gone. Without a
+ * verifiable pane pid it still sends the keys, and gives them a fixed while. */
+function exitCleanly(pane: Started | null, keys: string[]) {
+  const gone = () => (pane?.started ? running([pane])?.length === 0 : false);
+  const atPrompt = () =>
+    SHELL_READY.test(
+      tmuxRaw(["capture-pane", "-p", "-t", SESSION], undefined, 3000) ?? "",
+    );
+  if (gone()) return;
+  for (const key of keys) {
+    if (atPrompt()) break;
+    tmuxRaw(["send-keys", "-t", SESSION, key], undefined, 3000);
+    Bun.sleepSync(1000);
+  }
+  if (atPrompt()) {
+    tmuxRaw(["send-keys", "-t", SESSION, "-l", "exit"], undefined, 3000);
+    tmuxRaw(["send-keys", "-t", SESSION, "Enter"], undefined, 3000);
+  }
+  const until = Date.now() + (pane?.started ? 5000 : 2000);
+  while (Date.now() < until && !gone()) Bun.sleepSync(250);
+}
+
+/** Ends what the driver launched and reports whether anything of it is left.
+ * `tmux kill-server` alone is not enough: asciinema survives it with its shell
+ * and client. So: exit the client and shell cleanly, stop the tmux server with
+ * a time limit, then send SIGHUP, SIGTERM and SIGKILL only to the two pids tmux
+ * printed, each still checked against its start time. It hunts nothing else:
+ * any other process left from the take is reported by pid, not signalled.
  * Synchronous, so it can run on any exit. */
 function stop() {
   if (!launched) return true;
-  const list = () => {
-    const table = processes();
-    return table && owned(table);
-  };
-  const settle = (ms: number) => {
-    const until = Date.now() + ms;
-    let left = list();
-    while ((!left || left.length) && Date.now() < until) {
-      Bun.sleepSync(200);
-      left = list();
-    }
-    return left;
-  };
-  // Hang up the shell and client first, so the recorder closes the cast itself.
-  const first = list();
-  if (first)
-    signal(
-      first.filter(
-        (p) =>
-          p.pid !== launched!.serverPid && !p.command.startsWith("asciinema "),
-      ),
-      "SIGHUP",
-    );
-  let left = settle(5000);
-  // Bounded: an unresponsive server must not hold up the signals below.
-  spawnSync("tmux", ["-L", SOCKET, "kill-server"], {
-    env: cleanEnv({}),
-    timeout: 3000,
-    killSignal: "SIGKILL",
-  });
-  for (const sig of ["SIGHUP", "SIGTERM", "SIGKILL"] as const) {
-    left = list();
-    if (left && !left.length) break;
-    if (left) signal(left, sig);
-    left = settle(3000);
-  }
-  // Done only when two listings, half a second apart, find nothing of the run.
-  if (left && !left.length) {
-    Bun.sleepSync(500);
-    left = list();
-  }
   const run = launched;
   launched = null;
-  if (!left) {
-    // Unverified pids are never signalled; name them for the person instead.
-    const pids = new Set([
-      ...[run.serverPid, run.panePid].filter((p) => p !== null),
-      ...run.known.map((k) => k.pid),
-    ]);
-    console.error(
-      `record: could not list processes, so could not stop them; check with ps for pids ${[...pids].join(", ")} (the tmux server, the recorder or shell, and their children)`,
+  const targets = [run.server, run.pane].filter(
+    (p): p is Started => p !== null && p.started !== null,
+  );
+  // The take's other processes as they are now, to report any that outlive it.
+  const before = processTable();
+  const seen: Started[] = [];
+  if (before)
+    for (const [pid, p] of before)
+      for (let up = p.ppid, hops = 0; up > 1 && hops < 64; hops++) {
+        if (targets.some((t) => t.pid === up)) {
+          seen.push({ pid, started: p.started });
+          break;
+        }
+        up = before.get(up)?.ppid ?? 0;
+      }
+  exitCleanly(run.pane, run.exitKeys);
+  tmuxRaw(["kill-server"], undefined, 3000);
+  let left = running(targets);
+  for (const sig of ["SIGHUP", "SIGTERM", "SIGKILL"] as const) {
+    for (const until = Date.now() + 2000; Date.now() < until;) {
+      if (left && !left.length) break;
+      Bun.sleepSync(200);
+      left = running(left ?? targets);
+    }
+    if (!left || !left.length) break;
+    for (const p of left)
+      try {
+        process.kill(p.pid, sig);
+      } catch {} // already gone
+    left = running(left);
+  }
+  if (run.tempDir) rmSync(run.tempDir, { recursive: true, force: true });
+  const unverified = [run.server, run.pane].filter(
+    (p) => p !== null && p.started === null,
+  );
+  const survivors = running([...targets, ...seen]);
+  if (!survivors || unverified.length) {
+    const pids = [run.server, run.pane, ...seen].flatMap((p) =>
+      p ? [p.pid] : [],
     );
+    console.error(
+      `record: could not check which processes from the take are still running; check with ps for pids ${pids.join(", ")} and stop any by pid`,
+    );
+    leftovers = true;
     return false;
   }
-  for (const p of left)
-    console.error(`record: still running: pid ${p.pid} ${p.command}`);
-  return left.length === 0;
-}
-
-/** Refuses unless the file stays the same size and age over a second. */
-function checkFinal(path: string) {
-  const at = () => {
-    const s = statSync(path);
-    return `${s.size} ${s.mtimeMs}`;
-  };
-  const before = at();
-  Bun.sleepSync(1000);
-  if (at() !== before)
-    fail(`${path} was still being written after the recorder stopped`);
+  leftovers ||= survivors.length > 0;
+  if (survivors.length)
+    console.error(
+      `record: these processes from the take are still running: ${survivors.map((p) => p.pid).join(", ")}; stop them by pid`,
+    );
+  return survivors.length === 0;
 }
 
 function tmux(args: string[], env?: Record<string, string>) {
@@ -413,14 +372,19 @@ function start(scene: Scene, client: Client, cast: string | null) {
   const pane = cast
     ? `asciinema rec -q --overwrite --idle-time-limit ${scene.idleTimeLimit ?? 2} -c '${shell}' '${cast}'`
     : shell;
-  tmux(["kill-server"]);
+  tmuxRaw(["kill-server"], undefined, 3000);
   const env = cleanEnv({
     MILTON_KEY: key!,
     ZDOTDIR: SUPPORT,
     [client.profileEnv]: resolve(profile!),
     ...client.env,
   });
-  launched = { serverPid: null, panePid: null, known: [] };
+  launched = {
+    server: null,
+    pane: null,
+    exitKeys: client.exitKeys,
+    tempDir: cast ? dirname(cast) : null,
+  };
   const ids = tmux(
     [
       ["-f", join(SUPPORT, "tmux.conf"), "new-session", "-d", "-s", SESSION],
@@ -430,12 +394,12 @@ function start(scene: Scene, client: Client, cast: string | null) {
     env,
   );
   const [serverPid, panePid] = ids.trim().split(" ").map(Number);
-  launched.serverPid = serverPid || null;
-  launched.panePid = panePid || null;
-  track();
-  const known = (pid: number | null) =>
-    launched!.known.some((k) => k.pid === pid);
-  if (!known(launched.serverPid) || !known(launched.panePid))
+  const table = processTable();
+  const started = (pid: number | undefined) =>
+    pid ? { pid, started: table?.get(pid)?.started ?? null } : null;
+  launched.server = started(serverPid);
+  launched.pane = started(panePid);
+  if (!launched.server?.started || !launched.pane?.started)
     fail("could not find the tmux server or the pane's process");
 }
 
@@ -467,13 +431,7 @@ async function waitTurn(client: Client, timeoutSeconds: number) {
   const until = Date.now() + timeoutSeconds * 1000;
   let last = "";
   let stableSince = Date.now();
-  let tracked = 0;
   while (Date.now() < until) {
-    // While the client works, note any process it starts, before it can leave.
-    if (Date.now() - tracked >= 2000) {
-      track();
-      tracked = Date.now();
-    }
     const s = screen();
     if (client.blocked.test(s) && !client.busy.test(s))
       return `a dialog is waiting:\n${s}`;
@@ -500,8 +458,7 @@ async function preflight(scene: Scene, client: Client) {
     const ready = await waitFor((s) => client.ready.test(s), 60);
     await sleep(1500);
     const s = screen();
-    if (!stop())
-      fail("the unrecorded launch is still running after stopping it");
+    stop(); // reports anything left; the take goes ahead and exits 1
     if (!ready) fail(`the client never showed its prompt:\n${s}`);
     const notice = s.match(client.notice)?.[1]?.trim();
     if (!notice) return;
@@ -522,7 +479,13 @@ async function record(scenePath: string, cast: string) {
   const t0 = Date.now();
   const mark = (event: string, line?: string) =>
     timeline.push({ t: (Date.now() - t0) / 1000, event, line });
-  start(scene, client, out);
+  // The recorder writes only to a private file. The take is a copy of it, so
+  // nothing left running from the take can write to the take.
+  const recording = join(
+    mkdtempSync(join(tmpdir(), "milton-take-")),
+    "take.cast",
+  );
+  start(scene, client, recording);
   if (!(await waitFor((s) => SHELL_READY.test(s), 20)))
     fail("the shell prompt never appeared");
   await sleep(800);
@@ -538,13 +501,19 @@ async function record(scenePath: string, cast: string) {
     if (problem) break;
   }
   await sleep((scene.endHoldSeconds ?? 4) * 1000);
-  const stopped = stop();
+  // The take ends here, on the last reply: copy it before the client is exited,
+  // so the exit is not in it. asciinema writes whole lines; wait out a torn one.
+  let take = readFileSync(recording);
+  for (let i = 0; i < 10 && take.at(-1) !== 0x0a; i++) {
+    await sleep(100);
+    take = readFileSync(recording);
+  }
+  stop();
+  writeFileSync(out, take);
   writeFileSync(`${out}.timeline.json`, JSON.stringify(timeline, null, 2));
   if (problem) console.error(`record: stopped early, ${problem}`);
-  if (!stopped) fail("the recorder is still running after stopping it");
-  checkFinal(out);
   const hits = scan(out);
-  return problem || hits ? 1 : 0;
+  return problem || hits || leftovers ? 1 : 0;
 }
 
 /** Runs the scene's shell unrecorded, to clear first-run dialogs, and waits until
@@ -557,14 +526,9 @@ async function warmup(scenePath: string) {
       `Run ${scene.command}, clear any trust or notice dialogs, then exit the client and the shell.\n` +
       `This waits until the shell exits; Ctrl-C here stops it instead.`,
   );
-  const pane = launched!.known.find((k) => k.pid === launched!.panePid)!;
-  for (;;) {
-    track(); // the client's pid, while its shell is still its parent
-    if (!processes()?.some((p) => same(p, pane))) break;
-    await sleep(1000);
-  }
-  if (!stop()) fail("the warmup shell is still running after stopping it");
-  return 0;
+  const pane = launched!.pane!;
+  while (running([pane])?.length !== 0) await sleep(1000);
+  return stop() ? 0 : 1;
 }
 
 /** Runs a take's guards alone: launches nothing and makes no model call. */

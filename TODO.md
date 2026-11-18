@@ -140,12 +140,3 @@ sheet, report, AI) and plain text on security screens and anything an AI reads.
       ⚠ Not tamper-proof: Milton sees only what AIs send, so a tricked AI could save
       made-up memos; thresholds lower that risk and can't remove it. Before any build: a
       spec, the rule and its cases reviewed first, and the test repeated on real memos.
-
-## From the audit of 2026-11-02
-
-- [ ] #19 (server, low) **Document the token-expiry clock limit.** The token's 30-second clock
-      tolerance does not apply to expiry (A27; `server/src/token.ts`). Harmless today; write it
-      into server/README.
-      <!-- retired-words: off: names the feature #76 removed -->
-      (The exact-edit half of this item went with exact edits in #76.)
-      <!-- retired-words: on -->

@@ -42,7 +42,7 @@ and its file is `~/keys/milton.newcomer.env`. The daily check never uses it: nev
 `e2e.ts` or the job at it, and never run a hand test on `e2e@`, whose safety gate stops the
 check on any memo it did not write.
 
-## The demo account
+## The demo accounts
 
 `sam@milton-test.invalid` is a third fictional account, provisioned the same way (`--email`)
 on 2026-11-13 with Peter's go, used only for #33's demo recording ([demo](../demo.md)), so a
@@ -51,6 +51,11 @@ AI that reuses a request id gets a refused save on camera. It is marked and tria
 the others, and its file is `~/keys/milton.sam.env`. Never run a hand test on it.
 `sam2@milton-test.invalid` (`~/keys/milton.sam2.env`), made the same way on 2026-11-13, holds
 the Day 1 retake and the sessions after it; `sam@` keeps the first take and is a spare.
+`sam3@milton-test.invalid` (`~/keys/milton.sam3.env`), made the same way on 2026-11-15,
+holds an evening pair of takes that was not published: its screens showed PM times and
+both days' commits on one date. `sam4@milton-test.invalid` (`~/keys/milton.sam4.env`), made
+on 2026-11-17, holds the published clip's two morning takes, so leave it as it is; record
+any new take on a fresh account.
 
 ## Provision the account
 

@@ -112,7 +112,7 @@ between Day 1 and Day 2, since Day 2 depends on Day 1's memo, and again afterwar
 runs use the newcomer account. Peter chooses the account for the final takes; it must
 hold no memos and ideally no receipts, because receipts outlive Delete all memos and a
 reused request id is refused on camera
-([the demo accounts](deploy/e2e.md#the-demo-account)).
+([the demo accounts](deploy/e2e.md#the-demo-accounts)).
 
 ### Sam's repo
 

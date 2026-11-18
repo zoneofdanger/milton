@@ -102,13 +102,21 @@ let launched: {
 } | null = null;
 
 let psWedged = false;
+// Set by any failed listing since the run started, even if later ones work: the
+// run's processes went unchecked for a while, so its stop can't vouch for them.
+let listingFailed = false;
 let leftovers = false; // a stop reported processes it could not end
 
 /** pid -> { ppid, start time } for every process, or null when ps fails or
  * takes over 5 s. Bounded, so a wedged ps can't hold up the driver; after one
  * timeout it isn't asked again. */
 function processTable() {
-  if (psWedged) return null;
+  const table = psWedged ? null : listProcesses();
+  if (!table) listingFailed = true;
+  return table;
+}
+
+function listProcesses() {
   const r = spawnSync("ps", ["-A", "-o", "pid=,ppid=,lstart="], {
     encoding: "utf8",
     env: { ...process.env, LC_ALL: "C" },
@@ -192,7 +200,8 @@ function stop() {
     );
   const seen: Started[] = [];
   if (before)
-    for (const [pid, p] of before)
+    for (const [pid, p] of before) {
+      if (isTarget(pid)) continue; // listed as itself, not as a descendant
       for (let up = p.ppid, hops = 0; up > 1 && hops < 64; hops++) {
         if (isTarget(up)) {
           seen.push({ pid, started: p.started });
@@ -200,6 +209,7 @@ function stop() {
         }
         up = before.get(up)?.ppid ?? 0;
       }
+    }
   exitCleanly(run.pane, run.exitKeys);
   tmuxRaw(["kill-server"], undefined, 3000);
   let left = running(targets);
@@ -221,8 +231,9 @@ function stop() {
     (p) => p !== null && p.started === null,
   );
   const survivors = running([...targets, ...seen]);
-  // Without the first listing, the take's other processes are unknown.
-  if (!before || !survivors || unverified.length) {
+  // Any failed listing since the launch, including this stop's first, leaves the
+  // take's processes unchecked for a while, even if later listings worked.
+  if (!before || !survivors || unverified.length || listingFailed) {
     const pids = [run.server, run.pane, ...seen].flatMap((p) =>
       p ? [p.pid] : [],
     );
@@ -386,6 +397,7 @@ function start(scene: Scene, client: Client, cast: string | null) {
     [client.profileEnv]: resolve(profile!),
     ...client.env,
   });
+  listingFailed = false;
   launched = {
     server: null,
     pane: null,

@@ -517,6 +517,33 @@ try {
         }),
         { left: "OUTPUT_RESERVATION_LEFT", code: "EIO" },
       );
+      // The file synced but its directory's sync fails: still rolled back,
+      // and the directory's descriptor is closed too.
+      let syncs = 0;
+      const dirFds: number[] = [];
+      const closedFds: number[] = [];
+      assert.deepEqual(
+        await left("undirsynced.json", p.owner, {
+          ...nodeFs,
+          openSync: ((...args: Parameters<typeof nodeFs.openSync>) => {
+            const fd = nodeFs.openSync(...args);
+            dirFds.push(fd);
+            return fd;
+          }) as typeof nodeFs.openSync,
+          fsyncSync: (fd: number) => {
+            if (syncs++) throw injected("EIO");
+            nodeFs.fsyncSync(fd);
+          },
+          closeSync: (fd: number) => {
+            closedFds.push(fd);
+            nodeFs.closeSync(fd);
+          },
+        }),
+        { left: "OUTPUT_RESERVATION_LEFT", code: "EIO" },
+      );
+      assert.equal(syncs, 2);
+      assert.equal(dirFds.length, 1);
+      assert(closedFds.includes(dirFds[0]!));
       assert.deepEqual(await promoted(), { policy: [], promoted: 0 });
       // COMMIT reaches the server but its answer is lost: the secret is
       // already synced, so the file holds the app's secret.
@@ -591,13 +618,14 @@ try {
         "full.json",
         "lost.json",
         "raced.json",
+        "undirsynced.json",
         "unsynced.json",
       ]);
     } finally {
       rmSync(outDir, { recursive: true, force: true });
     }
     group(
-      "provisioning leaves its output file on every failure: a lost race, a full disk or failed sync promote nothing, a lost COMMIT answer leaves the secret on disk, and the script refuses a second app",
+      "provisioning leaves its output file on every failure: a lost race, a full disk or a failed file or directory sync promote nothing, a lost COMMIT answer leaves the secret on disk, and the script refuses a second app",
     );
   }
   config.AUTH_APP_CLIENT_ID = client.AUTH_APP_CLIENT_ID;

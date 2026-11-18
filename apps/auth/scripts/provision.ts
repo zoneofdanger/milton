@@ -101,8 +101,8 @@ export type Provisioned =
       ok: false;
       error: unknown;
       /** OUTPUT_RESERVATION_LEFT: the app was not provisioned; the file is
-       * left as it is. OUTPUT_HOLDS_SECRET: the secret is synced to the file
-       * and the commit's outcome is unknown. */
+       * left as it is. OUTPUT_HOLDS_SECRET: the secret and the file's name
+       * are synced and the commit's outcome is unknown. */
       left: Extract<
         RefusalCode,
         "OUTPUT_RESERVATION_LEFT" | "OUTPUT_HOLDS_SECRET"
@@ -111,11 +111,12 @@ export type Provisioned =
 
 /** Provisions the app into an output `openOutput` created. Every file call
  * after the open is inside this one handler, and the file is never removed
- * or truncated. The secret is written and synced, and the file closed,
- * inside the promotion's transaction before its COMMIT: a failure before then
- * rolls the promotion back (Better Auth's own registration row stays, an
- * unpromoted anonymous client like any public registration), and a failure at
- * COMMIT leaves the secret on disk. */
+ * or truncated. Inside the promotion's transaction, before its COMMIT, the
+ * secret is written and fsynced, the file closed and its directory fsynced
+ * (durability as docs/accounts.md states it): a failure before COMMIT rolls
+ * the promotion back (Better Auth's own registration row stays, an unpromoted
+ * anonymous client like any public registration), and a failure at COMMIT
+ * leaves the secret on disk. */
 export async function provisionToOutput(
   output: AllowedOutput,
   fd: number,
@@ -124,6 +125,7 @@ export async function provisionToOutput(
   fs: OutputFs = nodeFs,
 ): Promise<Provisioned> {
   let closed = false;
+  let dirFd: number | undefined;
   let synced = false;
   try {
     const file = fs.fstatSync(fd);
@@ -147,6 +149,15 @@ export async function provisionToOutput(
       fs.fsyncSync(fd);
       closed = true;
       fs.closeSync(fd);
+      // The new name is durable only once its directory is synced too.
+      dirFd = fs.openSync(
+        output.allowed,
+        constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+      );
+      fs.fsyncSync(dirFd);
+      const opened = dirFd;
+      dirFd = undefined;
+      fs.closeSync(opened);
       synced = true;
     });
     return { ok: true, client };
@@ -155,6 +166,10 @@ export async function provisionToOutput(
       try {
         closed = true;
         fs.closeSync(fd);
+      } catch {}
+    if (dirFd !== undefined)
+      try {
+        fs.closeSync(dirFd);
       } catch {}
     return {
       ok: false,

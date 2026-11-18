@@ -1382,14 +1382,17 @@ try {
     ).rows.map((r) => r.name);
   assert.deepEqual(await keyStatusShape(), keyStatusGrants);
   assert.deepEqual(await ledger(), AUTH_MIGRATIONS);
-  const provisionOutput = join(root, "fictional-fixed-client.json");
+  // Provision writes only into a private (0700) owner output directory.
+  const ownerOutput = join(root, "owner-output");
+  mkdirSync(ownerOutput, { mode: 0o700 });
+  const provisionOutput = join(ownerOutput, "fictional-fixed-client.json");
   child(
     [
       new URL("../apps/auth/scripts/provision.ts", sourceRoot).pathname,
       "--apply",
       provisionOutput,
     ],
-    ownerEnv,
+    { ...ownerEnv, MILTON_OWNER_OUTPUT_DIR: ownerOutput },
   );
   const fixed = JSON.parse(readFileSync(provisionOutput, "utf8")) as {
     AUTH_APP_CLIENT_ID: string;

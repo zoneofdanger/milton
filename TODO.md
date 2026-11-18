@@ -50,13 +50,6 @@ sheet, report, AI) and plain text on security screens and anything an AI reads.
       answer, and the subscription_required message. Until then it does not exist; the landing
       page's unread joke address is a different alias.
 
-- [ ] #27 (server, low) **Give auth owner-script refusals clear codes.** apps/auth/scripts
-      provision.ts, maintain.ts and migrate.ts throw plain `Error(message)` with no `code`, so
-      `safeError` prints `UNCLASSIFIED` for every refusal and an operator can't tell causes
-      apart (found in the 2026-11-07 cutover rehearsal). Give each refusal a stable code that
-      safeError prints, without secrets. Also make provision.ts's "output outside the
-      repository" check resolve the real repository root rather than only its own checkout.
-
 - [ ] #31 (server, low) **Take Stripe off sign-in and deletion after launch.** The
       narrowed follow-up to PR #67 took checkout's live read and the webhook off the row lock
       (compare-and-set on `trial_accounts.stripe_revision`, 0011, with a one-off `--resync`

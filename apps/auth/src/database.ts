@@ -1,4 +1,5 @@
 import type pg from "pg";
+import { refusal } from "./refusal.ts";
 
 // Keep this small policy local: auth cannot import the writing runtime. URL TLS
 // options must not replace pg's verified defaults or select libpq's weaker modes.
@@ -25,6 +26,9 @@ export function databaseOptions(value: string): pg.PoolConfig {
     url.searchParams.delete("sslmode");
     return { connectionString: url.href, ssl: { rejectUnauthorized: true } };
   } catch {
-    throw new Error("verified_auth_database_tls_required");
+    throw refusal(
+      "DATABASE_TLS_REQUIRED",
+      "verified_auth_database_tls_required",
+    );
   }
 }

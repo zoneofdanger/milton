@@ -144,6 +144,66 @@ The app never handles passwords or native cookies.
   another machine's Read and write as it was. To change an AI's access everywhere,
   disconnect it ([deletion](deletion.md#disconnecting-an-ai)) and reconnect.
 
+## Owner script refusals
+
+The owner scripts `provision.ts`, `maintain.ts` and `migrate.ts` (in `apps/auth/scripts/`,
+run as in [apps/auth/README.md](../apps/auth/README.md#schema-and-owner-operations)) print
+every refusal as one line, `auth_provision`, `auth_maintenance` or `auth_migration` (with
+the migration file, if one had started) then the error's class and code, and exit 1. The
+line never holds a message, secret, connection string or row. Their own codes are in
+`apps/auth/src/refusal.ts`:
+
+| Code                                    | Script    | Refused because                                                                                                                                                                                       |
+| --------------------------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `APPLY_ARGS_REQUIRED`                   | all three | its explicit arguments (`--apply`, `up --apply`, `--apply <output>`) or `AUTH_OWNER_DATABASE_URL` is missing                                                                                          |
+| `OUTPUT_DIR_UNSAFE`                     | provision | the output directory (below) is missing, a symlink, not a directory, not yours, or open to group or others: `chmod 700` it                                                                            |
+| `OUTPUT_PATH_NOT_ALLOWED`               | provision | the output is not a file name directly inside the output directory                                                                                                                                    |
+| `OUTPUT_EXISTS`                         | provision | something already has the output's name, a file or a symlink                                                                                                                                          |
+| `OUTPUT_RESERVATION_CHANGED`            | provision | the reserved file or its directory changed between creating and checking it                                                                                                                           |
+| `OUTPUT_RESERVATION_LEFT`               | provision | second line after a refusal once the output file exists: the app was not provisioned and the file is left as it is (empty, or holding an unused secret); inspect it, remove it yourself, then rerun   |
+| `OUTPUT_HOLDS_SECRET`                   | provision | second line after a failure at COMMIT: the secret and the file's name are synced but the commit's outcome is unknown; keep the file, and compare its client ID with `milton_guard.first_party_policy` |
+| `DATABASE_TLS_REQUIRED`                 | all three | the owner URL, or provision's `AUTH_DATABASE_URL`, has an unsafe TLS or duplicate setting                                                                                                             |
+| `AUTH_CONFIG_INVALID`                   | provision | the auth configuration is missing or invalid                                                                                                                                                          |
+| `AUTH_SECRETS_NOT_DISTINCT`             | provision | two of the auth, admission and rate secrets are equal                                                                                                                                                 |
+| `OWNER_ROLE_REQUIRED`                   | all three | the connection's current role is not `milton_auth_owner`                                                                                                                                              |
+| `APP_ALREADY_PROVISIONED`               | provision | the first-party app client already exists                                                                                                                                                             |
+| `APP_CLIENT_NOT_ISSUED`                 | provision | native registration returned no client ID or secret                                                                                                                                                   |
+| `APP_PROVISION_CONCURRENT`              | provision | another provisioning stored the app client first; nothing is promoted                                                                                                                                 |
+| `PRUNE_TIMEOUTS_UNSET`                  | maintain  | the usage prune's statement and lock limits did not hold on its connection                                                                                                                            |
+| `MIGRATION_MUST_NOT_MANAGE_TRANSACTION` | migrate   | the migration file begins, commits or rolls back its own transaction                                                                                                                                  |
+
+Any other code is the underlying one: a PostgreSQL SQLSTATE (such as `42501`) or a Node
+system code (such as `ECONNREFUSED`); `UNCLASSIFIED` means the error had none.
+
+Provision writes the app's client secret only to a new file directly inside one private
+directory: `MILTON_OWNER_OUTPUT_DIR`, or `~/keys` when that is unset. It is an allowlist,
+not a list of places to avoid (milton-duo, PR #161): the directory must be a real
+directory, not a symlink, owned by the person running it, with no group or other
+permission bits (`chmod 700`), and the output's parent must resolve to the same real
+path, so a case alias or a symlinked parent of that directory is the directory itself.
+No git is consulted.
+
+After the checks that need neither a database nor a file (arguments, directory, path,
+TLS, configuration), provision creates the file new (mode 0600, never following or
+replacing an existing name), checks it through its descriptor, and only then works in
+the database. Inside the promotion's transaction, before its COMMIT, it writes the
+secret to that descriptor, `fsync`s and closes the file, then opens the directory and
+`fsync`s it, so the file's contents and its name are both synced before the app can
+exist. A failure in any of these rolls the promotion back and the app is not
+provisioned (Better Auth's registration row, which commits on its own, stays an
+unpromoted anonymous client like any public registration); a failure at COMMIT leaves
+the secret on disk. That is `fsync`'s guarantee: on macOS it hands the data to the drive
+but does not flush the drive's own write cache (`F_FULLFSYNC` would), so a power loss
+there can still lose recent writes. Provision never removes or truncates a file
+(milton-duo, PR #161): once the file exists, every refusal leaves it and prints a second
+line, `OUTPUT_RESERVATION_LEFT` or `OUTPUT_HOLDS_SECRET`.
+
+Provision assumes the output directory and every directory above it are writable only
+by the operator. It checks the directory before creating the file but cannot hold it:
+someone else able to rename it, or a directory above it, during a run could have the
+secret written elsewhere (accepted, milton-duo, PR #161). After a run, confirm the
+secret is in the file you named.
+
 ## Auth mail
 
 - Native mail callbacks capture one original message; every generic sign-up, reset or

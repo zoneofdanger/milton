@@ -1,6 +1,34 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { validPassword } from "../src/password.ts";
-import { readConfig } from "../src/config.ts";
+import { readConfig, safeError } from "../src/config.ts";
+import { REFUSAL_CODES, refusal } from "../src/refusal.ts";
+import {
+  allowOutput,
+  openOutput,
+  ownerOutputDir,
+  provisionToOutput,
+  type OutputFs,
+} from "../scripts/provision.ts";
+import * as nodeFs from "node:fs";
+import type pg from "pg";
+import {
+  existsSync,
+  chmodSync,
+  closeSync,
+  linkSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { fixtureConfig } from "./fixture-config.ts";
 describe("auth product boundaries", () => {
   test("native NFKC policy has predictable Unicode bounds without trimming", () => {
@@ -1855,6 +1883,282 @@ describe("Turnstile on sign-up", () => {
     expect(down.status).toBe(503);
     expect(await down.text()).toContain(
       "could not run its check that you are a person. Nothing was created.",
+    );
+  });
+});
+
+describe("owner script refusals", () => {
+  const root = fileURLToPath(new URL("../../../", import.meta.url));
+  const codeOf = (run: () => unknown) => {
+    try {
+      run();
+    } catch (error) {
+      return safeError(error).code;
+    }
+    throw new Error("expected a refusal");
+  };
+  test("every code prints through safeError and is documented", async () => {
+    const docs = readFileSync(join(root, "docs/accounts.md"), "utf8");
+    for (const code of REFUSAL_CODES)
+      expect(safeError(refusal(code, "fixed")).code).toBe(code);
+    expect(
+      REFUSAL_CODES.filter((code) => !docs.includes("| `" + code + "`")),
+    ).toEqual([]);
+  });
+  test("configuration refusals carry their codes", () => {
+    const env = Object.fromEntries(
+      Object.entries(fixtureConfig()).map(([k, v]) => [k, String(v)]),
+    );
+    expect(codeOf(() => readConfig({}))).toBe("AUTH_CONFIG_INVALID");
+    expect(
+      codeOf(() => readConfig({ ...env, AUTH_RATE_SECRET: env.AUTH_SECRET })),
+    ).toBe("AUTH_SECRETS_NOT_DISTINCT");
+    expect(
+      codeOf(() =>
+        readConfig({
+          ...env,
+          AUTH_DATABASE_URL: "postgresql://fixture.invalid/x?sslmode=disable",
+        }),
+      ),
+    ).toBe("DATABASE_TLS_REQUIRED");
+  });
+  test("each script prints its refusal code before any database work", () => {
+    const outDir = mkdtempSync(join(tmpdir(), "milton-owner-out-"));
+    const run = (script: string, args: string[], url?: string) => {
+      const r = Bun.spawnSync(
+        [
+          "node",
+          "--experimental-strip-types",
+          join(root, "apps/auth/scripts", script),
+          ...args,
+        ],
+        {
+          env: {
+            PATH: process.env.PATH,
+            HOME: process.env.HOME,
+            MILTON_OWNER_OUTPUT_DIR: outDir,
+            ...(url ? { AUTH_OWNER_DATABASE_URL: url } : {}),
+          },
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+      );
+      return { exit: r.exitCode, stderr: r.stderr.toString() };
+    };
+    const url = "postgresql://fixture.invalid/fixture";
+    const label = (script: string) =>
+      script === "provision.ts"
+        ? "auth_provision"
+        : script === "maintain.ts"
+          ? "auth_maintenance"
+          : "auth_migration";
+    try {
+      for (const [script, args] of [
+        ["provision.ts", ["--apply", join(outDir, "app.json")]],
+        ["maintain.ts", ["--apply"]],
+        ["migrate.ts", ["up", "--apply"]],
+      ] as const) {
+        // Arguments without the owner URL, then the URL without the arguments.
+        for (const r of [run(script, [...args]), run(script, [], url)]) {
+          expect(r.exit).toBe(1);
+          expect(r.stderr).toMatch(
+            new RegExp(label(script) + ".*APPLY_ARGS_REQUIRED"),
+          );
+        }
+        const tls = run(script, [...args], url + "?sslmode=disable");
+        expect(tls.exit).toBe(1);
+        expect(tls.stderr).toMatch(
+          new RegExp(label(script) + ".*DATABASE_TLS_REQUIRED"),
+        );
+        expect(tls.stderr).not.toContain("fixture.invalid");
+      }
+      // Checks that need no database or file refuse before the output exists.
+      const config = run(
+        "provision.ts",
+        ["--apply", join(outDir, "app.json")],
+        url,
+      );
+      expect(config.exit).toBe(1);
+      expect(config.stderr).toMatch(/auth_provision.*AUTH_CONFIG_INVALID/);
+      expect(readdirSync(outDir)).toEqual([]);
+      const inside = run(
+        "provision.ts",
+        ["--apply", join(root, "milton-unused.json")],
+        url,
+      );
+      expect(inside.exit).toBe(1);
+      expect(inside.stderr).toMatch(/auth_provision.*OUTPUT_PATH_NOT_ALLOWED/);
+      expect(existsSync(join(root, "milton-unused.json"))).toBe(false);
+    } finally {
+      rmSync(outDir, { recursive: true, force: true });
+    }
+  });
+  test("the secret goes only to a new file directly in the private output directory", () => {
+    const base = realpathSync.native(
+      mkdtempSync(join(tmpdir(), "milton-owner-")),
+    );
+    const codeOf = (run: () => unknown) => {
+      try {
+        run();
+        return "allowed";
+      } catch (error) {
+        return safeError(error).code;
+      }
+    };
+    const reserve = (given: string, dir: string) =>
+      closeSync(openOutput(allowOutput(given, dir)));
+    try {
+      const dir = join(base, "Keys");
+      mkdirSync(dir, { mode: 0o700 });
+      expect(ownerOutputDir({ MILTON_OWNER_OUTPUT_DIR: dir })).toBe(dir);
+      expect(ownerOutputDir({ HOME: "/fixture" })).toMatch(/\/keys$/);
+      // The reservation is a new, empty 0600 file.
+      reserve(join(dir, "app.json"), dir);
+      const made = statSync(join(dir, "app.json"));
+      expect([made.size, made.mode & 0o777]).toEqual([0, 0o600]);
+      // Refused: the name exists, as a file or a symlink.
+      symlinkSync(join(base, "elsewhere.json"), join(dir, "link.json"));
+      expect(codeOf(() => reserve(join(dir, "app.json"), dir))).toBe(
+        "OUTPUT_EXISTS",
+      );
+      expect(codeOf(() => reserve(join(dir, "link.json"), dir))).toBe(
+        "OUTPUT_EXISTS",
+      );
+      expect(existsSync(join(base, "elsewhere.json"))).toBe(false);
+      // Refused before any file exists: not directly inside the directory.
+      mkdirSync(join(dir, "sub"), { mode: 0o700 });
+      for (const path of [
+        join(dir, "sub", "app.json"),
+        join(base, "app.json"),
+        join(dir, "missing", "app.json"),
+        dir,
+      ])
+        expect(codeOf(() => allowOutput(path, dir))).toBe(
+          "OUTPUT_PATH_NOT_ALLOWED",
+        );
+      // A case alias names the directory itself where the file system folds
+      // case (macOS); elsewhere it is another, missing directory.
+      expect(
+        codeOf(() => {
+          const allowed = allowOutput(join(base, "KEYS", "case.json"), dir);
+          expect(allowed.path).toBe(join(dir, "case.json"));
+        }),
+      ).toBe(
+        existsSync(join(base, "KEYS")) ? "allowed" : "OUTPUT_PATH_NOT_ALLOWED",
+      );
+      // A symlinked parent reaches the real directory.
+      symlinkSync(dir, join(base, "via"));
+      expect(allowOutput(join(base, "via", "via.json"), dir).path).toBe(
+        join(dir, "via.json"),
+      );
+      // Refused: the directory is a symlink, missing, open to others, not
+      // owned by this user, or not a directory.
+      writeFileSync(join(dir, "taken.json"), "");
+      for (const [given, at] of [
+        [join(base, "via", "x.json"), join(base, "via")],
+        [join(base, "none", "x.json"), join(base, "none")],
+        [join(dir, "taken.json", "x.json"), join(dir, "taken.json")],
+      ])
+        expect(codeOf(() => allowOutput(given!, at!))).toBe(
+          "OUTPUT_DIR_UNSAFE",
+        );
+      for (const mode of [0o750, 0o701, 0o710, 0o755]) {
+        chmodSync(dir, mode);
+        expect(codeOf(() => allowOutput(join(dir, "x.json"), dir))).toBe(
+          "OUTPUT_DIR_UNSAFE",
+        );
+      }
+      chmodSync(dir, 0o700);
+      // Another owner cannot be made without root; the check compares the
+      // directory's owner with the uid it is given.
+      expect(
+        codeOf(() =>
+          allowOutput(join(dir, "x.json"), dir, process.getuid!() + 1),
+        ),
+      ).toBe("OUTPUT_DIR_UNSAFE");
+      expect(readdirSync(dir).sort()).toEqual([
+        "app.json",
+        "link.json",
+        "sub",
+        "taken.json",
+      ]);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+  test("a failed check after the open closes the file and leaves it, with no database work", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "milton-owner-"));
+    try {
+      const output = allowOutput(join(dir, "app.json"), dir);
+      const closed: number[] = [];
+      for (const [call, code] of [
+        ["fstatSync", "EIO"],
+        ["lstatSync", "EIO"],
+      ] as const) {
+        const fd = openOutput({ ...output, path: join(dir, `${call}.json`) });
+        const fs: OutputFs = {
+          ...nodeFs,
+          [call]: () => {
+            throw Object.assign(new Error("injected"), { code });
+          },
+          closeSync: (n: number) => {
+            closed.push(n);
+            nodeFs.closeSync(n);
+          },
+        };
+        const pool = new Proxy({} as pg.Pool, {
+          get: () => {
+            throw new Error("no database work expected");
+          },
+        });
+        const result = await provisionToOutput(
+          { ...output, path: join(dir, `${call}.json`) },
+          fd,
+          pool,
+          fixtureConfig(),
+          fs,
+        );
+        expect(result).toMatchObject({
+          ok: false,
+          left: "OUTPUT_RESERVATION_LEFT",
+        });
+        expect(safeError((result as { error: unknown }).error).code).toBe(code);
+        expect(closed.at(-1)).toBe(fd);
+        expect(statSync(join(dir, `${call}.json`)).size).toBe(0);
+      }
+      // A changed reservation (here a second link to it) is refused the same way.
+      const fd = openOutput({ ...output, path: join(dir, "linked.json") });
+      linkSync(join(dir, "linked.json"), join(dir, "second.json"));
+      const result = await provisionToOutput(
+        { ...output, path: join(dir, "linked.json") },
+        fd,
+        {} as pg.Pool,
+        fixtureConfig(),
+      );
+      expect(result).toMatchObject({
+        ok: false,
+        left: "OUTPUT_RESERVATION_LEFT",
+      });
+      expect(safeError((result as { error: unknown }).error).code).toBe(
+        "OUTPUT_RESERVATION_CHANGED",
+      );
+      expect(readdirSync(dir).sort()).toEqual([
+        "fstatSync.json",
+        "linked.json",
+        "lstatSync.json",
+        "second.json",
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  test("provision has no call that removes or truncates a file", () => {
+    const source = readFileSync(
+      join(root, "apps/auth/scripts/provision.ts"),
+      "utf8",
+    );
+    expect(source).not.toMatch(
+      /\b(unlink|rm|rmdir|truncate|ftruncate|rename)(Sync)?\s*\(|O_TRUNC|flag:\s*"w/,
     );
   });
 });

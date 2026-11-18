@@ -1,3 +1,5 @@
+import { refusal } from "../src/refusal.ts";
+
 // Usage retention, run only by the owner maintenance job (maintain.ts), never
 // on a request path. The 90-day retention lives in public.prune_usage_calls
 // (Drizzle 0008), owned by the table owner, so no caller can shorten it; the
@@ -54,7 +56,7 @@ export async function pruneUsage(query: Query): Promise<number> {
         limits?.statement !== USAGE_PRUNE_STATEMENT_TIMEOUT ||
         limits?.lock !== USAGE_PRUNE_LOCK_TIMEOUT
       )
-        throw new Error("usage_prune_timeouts_unset");
+        throw refusal("PRUNE_TIMEOUTS_UNSET", "usage_prune_timeouts_unset");
       removed = (
         await query("select public.prune_usage_calls($1) as removed", [
           USAGE_PRUNE_BATCH,

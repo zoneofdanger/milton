@@ -4,7 +4,7 @@
 
 /** The line every setup offers for the AI's standing instructions. */
 export const STANDING_LINE =
-  "Before writing anything for me, call Milton's get_report.";
+  "Before you draft or edit words I'll use as my own, call Milton's get_report.";
 
 /** The free trial's length, in days. */
 export const TRIAL_DAYS = 30;

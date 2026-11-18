@@ -167,7 +167,7 @@ test("an SDK client receives instructions, discovers the two tools, and reads th
     expect(description).toBe(serverDescription);
     expect(serverDescription.length).toBeLessThanOrEqual(120);
     expect(serverDescription).toMatch(
-      /writing\. Before writing or editing .*get_report/,
+      /writing\. Before drafting or editing words they'll use as their own, call get_report\./,
     );
     expect(serverDescription).not.toContain("get_cover_sheet");
     const tools = (await client.listTools()).tools;
@@ -252,6 +252,7 @@ test("an SDK client receives instructions, discovers the two tools, and reads th
     const read = tools.find((tool) => tool.name === "get_report")!;
     expect(read.inputSchema.required).toEqual(["intent"]);
     for (const part of [
+      "Read before drafting or editing words the person will use as their own,",
       'when asked "Did you get the memo?"',
       "memos (how many memos they have)",
       "While memos is 0, setup holds the first-setup script",

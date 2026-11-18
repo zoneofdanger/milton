@@ -125,7 +125,10 @@ What each change does to memos and their tweaks is in [memos](memos.md) and
 ## Connected AIs
 
 - `/assistants` shows the connection address and links to the setup guides.
-- It lists bounded live native connections grouped by client and read/write access,
-  and original incomplete disconnects; a full native page says the listing is
-  incomplete. Disconnecting is in [deletion](deletion.md).
+- It lists bounded live native connections, one row per AI client with its access per
+  device: "Read and write" or "Read only" when it has one approval, otherwise each
+  access with its count of approvals, such as "Read and write on 2 devices · Read only
+  on 1 device". Each row has one Disconnect, which ends all of that client's approvals.
+  It also lists original incomplete disconnects; a full native page (64 approvals) says
+  the listing is incomplete. Disconnecting is in [deletion](deletion.md).
 - It also lists connection keys and the key form ([accounts](accounts.md)).

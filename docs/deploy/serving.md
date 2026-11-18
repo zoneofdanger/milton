@@ -10,21 +10,23 @@ covers:
 
 Rewritten in place by the release coordinator at every release, never appended to; the
 release's record goes in [history](../history.md). How to release and roll back:
-[releases](releases.md). As of 2026-11-17 20:12Z (after #148).
+[releases](releases.md). As of 2026-11-18 18:54Z (after #152).
 
 ## Services
 
-- **App, MCP, admission, daily check:** `milton-app-replaces-87ed9dc`,
-  `milton-mcp-replaces-87ed9dc`, `milton-admit-00019-25l` and job `milton-e2e-daily`, all on
-  image `sha256:14e0b206ae7f8a24fab267b71bd75a41dea172101bd9b64d1d95e73862eec51c` (#148,
-  `87ed9dc`: `create_memo`'s `replaces`, so an AI updates a final it saved; Cloud Run shows
-  the amd64 manifest digest `sha256:ff7e4c8b…`, not this index digest). Rollback, code only,
-  all four together: `milton-app-posted-15d93cf`, `milton-mcp-posted-15d93cf`,
-  `milton-admit-00018-p7z` and the job to image
-  `sha256:a5d65650f52539a1dc1f39a3dcf4ee509a64159f845c4af7aa0fe00029636e99` (#139,
-  `15d93cf`), with no schema step: it has no `replaces` argument, so AIs holding the new
-  tool list get an invalid-input refusal on a replace until they reconnect, and memos
-  already replaced keep their words, id and date. Below that, `milton-*-reqline-7c00dc2`,
+- **App, MCP, admission, daily check:** `milton-app-grants-62b3101`,
+  `milton-mcp-grants-62b3101`, `milton-admit-00020-b46` and job `milton-e2e-daily`, all on
+  image `sha256:d71dbee5971b08ef93f0024d1075e572fa01ad7349635db2231f76d49aa3e365` (#152,
+  `62b3101`: Connected AIs shows one row per AI with access per device; Cloud Run shows the
+  amd64 manifest digest `sha256:0d639451…`, not this index digest). Rollback, code only,
+  all four together: `milton-app-replaces-87ed9dc`, `milton-mcp-replaces-87ed9dc`,
+  `milton-admit-00019-25l` and the job to image
+  `sha256:14e0b206ae7f8a24fab267b71bd75a41dea172101bd9b64d1d95e73862eec51c` (#148,
+  `87ed9dc`), with no schema step: it runs on native 009 and lists each approval as its
+  own row. Below that, `milton-*-posted-15d93cf`, `milton-admit-00018-p7z` and image
+  `sha256:a5d65650f52539a1dc1f39a3dcf4ee509a64159f845c4af7aa0fe00029636e99` (#139): AIs
+  holding `create_memo`'s `replaces` get an invalid-input refusal on a replace until they
+  reconnect. Below that, `milton-*-reqline-7c00dc2`,
   `milton-admit-00017-dgn` and image
   `sha256:5b7d4af77607860bc9cc7c6531d06306e624525283e2574e9cc474f688854791` (#133 and #135).
   Below that,
@@ -71,7 +73,9 @@ release's record goes in [history](../history.md). How to release and roll back:
 
 - Drizzle: `0016_loosen_checks`, journal 17 entries (`0000_baseline` to 0016), applied
   2026-11-12 19:40Z. The code serving now predates it and satisfies its looser checks.
-- Native auth ledger: 001–008 (`008-deletion-links`, 2026-11-08).
+- Native auth ledger: 001–009 (`009-approvals-per-client`, 2026-11-18 18:53:54Z: up to 10
+  active approvals per account and AI client). Its rollback is the pre-migration snapshot
+  below; no code needs 008's rule.
 - Owner files: `000-app-owner.sql` through `016-memo-evidence-roles.sql`, all applied (016 on
   2026-11-12; rerun it after any rerun of 014). `005-app-roles.sql` is never rerun.
 
@@ -87,6 +91,8 @@ release's record goes in [history](../history.md). How to release and roll back:
   schema before 0015 (additive, so the code rollback does not need it).
 - `snap-curly-water-b8d140f8` (`before-0016-loosen-checks-pr119`, 2026-11-12 19:39:21Z):
   the schema before 0016 (it only loosens checks, so no code rollback needs it).
+- `snap-round-shape-b8ndkdn2` (`before-009-approvals-per-client-pr152`, 2026-11-18
+  18:53:19Z): the schema before native 009 (one function changed, no data).
 - `snap-fancy-hat-b8j5ls14` (pre-cutover, 2026-11-07): excluded from recovery; restoring it
   is Peter's decision ([migrations](migrations.md#database-recovery)).
 - Other manual pre-migration snapshots are kept until deleted; scheduled ones last 14 days.

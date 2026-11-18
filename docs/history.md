@@ -23,6 +23,42 @@ Earlier records are in git history: the last runbook holding them is at commit 4
 (`git show 492b96a:server/deploy/README.md`), and the runbook's later versions are in
 `git log -p server/deploy/README.md` until 2026-11-10, when this file began.
 
+## 2026-11-18: AIs read before writing the person's own words (PRs #156 and #157)
+
+- **#156 (milton-78, with Peter's picks typed there on 2026-11-18: the standing line's
+  wording and shipping as a copy PR) and #157 (Peter's "yes", typed in this coordinator
+  session, milton-d2, on 2026-11-18, answering "Should I build and release this
+  sentence?"), `f9c7b32`:** #156 names the read trigger as words the person will use as
+  their own, in the standing line, server description, both instruction variants and both
+  `get_report` descriptions, and asks for random request ids. #157 adds "Before drafting
+  or editing words the person will use as their own, call get_report first." to the
+  instructions' first line: Codex 0.170 in code mode shows only that line, cut at 247
+  characters, before tools load, so it drafted email and chat without reading Milton.
+  Offline, with a fake Milton built from the server (gpt-6.2-sol, 5 runs per cell), the
+  read before a draft went from 5 of 25 to 25 of 25 with the tested wording and 20 of 20
+  with the shipped one (3 of 10 on #156 alone); a question that is not the person's own
+  writing stayed 0 of 5. The wording moved from the tested "Before you write or edit
+  anything for the person" to #156's scope by milton-duo's decision, re-tested before
+  release. Instructions 3,977 characters, budget raised to 4,000.
+  - **Order:** served text only, no schema step. Site from main at `f9c7b32` at 21:46:16Z.
+    Image `sha256:cc7eb9ca54bb546430100ad883bc2c60231a320f55ceed19d107ed350139030f` (amd64
+    `sha256:e62382d6…`; Node v26.13.1, user `node`): admit `milton-admit-00021-46m` at
+    21:48:38Z; app and MCP `milton-*-firstline-f9c7b32` traffic at 21:49:20Z and
+    21:49:26Z; `milton-e2e-daily` at 21:49:36Z (no execution active),
+    `milton-e2e-daily-tz6wk` passed.
+  - **Live:** app and MCP `/health` and auth `/api/auth/ok` 200, app home 200, MCP 401
+    unauthenticated, admit 403 without a token, forms probe PASS; the test account's
+    `initialize` serves the new first line.
+  - **Gate** at 21:59:42Z: clean, with no alert open or opened since 21:48:38Z. No log line
+    reached an older app or MCP revision after 21:52Z; no error from app, MCP or auth since
+    21:48Z.
+  - **Checks** on the merge commit `f9c7b32`: types, tests (195), format and agent-docs 0;
+    PR CI green (checks, integration); main CI green.
+  - **Not observed:** saving and later turns in Codex, other clients, a connected mail
+    tool. Connected AIs keep the old wording until they reconnect.
+  - **Rollback:** code only, `milton-*-grants-62b3101`, `milton-admit-00020-b46` and the
+    daily job to image `sha256:d71dbee5…`.
+
 ## 2026-11-18: one AI on several machines stays connected (native 009, PR #152)
 
 - **#152 (Peter's "go", typed in this coordinator session, milton-d2, on 2026-11-18,

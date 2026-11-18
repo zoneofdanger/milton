@@ -1,0 +1,161 @@
+---
+/* Unlinked satire (docs/site.md): a model card for a model Milton will never
+   train without asking. Kept out of navigation, the footer and search
+   results; copy approved by Peter on 2026-11-18. Built from the About
+   report's framing; the field rows are its ruled Comments lines. */
+import SiteLayout from "../layouts/SiteLayout.astro";
+
+const fields: { label: string; value: string; link?: [string, string] }[] = [
+  { label: "Parameters:", value: "0." },
+  { label: "Training data:", value: "none. We promised." },
+  { label: "Compute:", value: "one laptop, lid half closed." },
+  { label: "Funding:", value: "see ", link: ["About", "/about"] },
+  {
+    label: "Benchmarks:",
+    value: "“Did you get the memo?” 100%. Everything else: not run.",
+  },
+  {
+    label: "Safety:",
+    value:
+      "Milton-1 has never been trained, so it has never done anything wrong.",
+  },
+  { label: "Release date:", value: "after the stapler is returned." },
+];
+---
+
+<SiteLayout
+  title="Milton-1 — Milton"
+  description="A model card for the frontier model Milton will never train without asking."
+  noindex
+>
+  <div class="lab report-page">
+    <header class="page-head">
+      <h1>Milton-1</h1>
+      <p class="page-note">A frontier model. Forthcoming.</p>
+    </header>
+
+    <div class="report-wrap">
+      <article class="sheet report" aria-label="Milton-1">
+        <div class="sheet-content">
+          <dl class="fields">
+            {fields.map(({ label, value, link }) => (
+              <div class="line">
+                <dt class="line-label">{label}</dt>{" "}
+                <dd class="typed">
+                  {value}
+                  {link && (
+                    <>
+                      <a href={link[1]}>{link[0]}</a>.
+                    </>
+                  )}
+                </dd>
+              </div>
+            ))}
+          </dl>
+
+          <div class="card-notes">
+            <p>
+              Labs got great at code and worse at writing. We noticed. We’d love
+              to fix it with a model trained on what people change in AI drafts.
+              Then we read our own <a href="/privacy">privacy policy</a>.
+            </p>
+            <p>
+              If that ever changes, you’ll be asked first, it’ll be off unless
+              you turn it on, and nothing you saved before is included.
+            </p>
+            <p>Until then, Milton makes your AI write like you.</p>
+          </div>
+
+          <p class="approved">
+            Approved by: <span class="sig">Michael Bolton</span>, Senior
+            Founding AI Forward Deployed Product Engineer (fictional)
+          </p>
+        </div>
+      </article>
+    </div>
+
+    <section class="closing" aria-labelledby="closing-title">
+      <h2 id="closing-title">Let’s put that in a memo.</h2>
+      <div class="actions action-row">
+        <a class="button" href="https://app.meetmilton.com/login">
+          Try Milton free <span aria-hidden="true">↗</span>
+        </a>
+      </div>
+    </section>
+  </div>
+</SiteLayout>
+
+<style>
+  /* The card's fields: About's ruled Comments lines, label in the form's
+     serif, value typed in mono. */
+  .fields {
+    margin: 0;
+  }
+  .fields dt,
+  .fields dd {
+    display: inline;
+    margin: 0;
+  }
+  .line {
+    min-height: var(--space-8);
+    padding: var(--space-2) 0 3px;
+    border-bottom: 1px solid var(--sheet-rule);
+  }
+  .line-label {
+    margin-right: var(--space-2);
+    font: var(--text-body) / var(--leading-label) var(--font-form);
+  }
+  .typed {
+    font: var(--text-small) / var(--leading-body) var(--font-mono);
+    overflow-wrap: anywhere;
+  }
+
+  .card-notes {
+    margin-top: var(--space-8);
+  }
+  .card-notes > p + p {
+    margin-top: var(--space-3);
+  }
+
+  /* About's sign-off: printed label, signature in the form's italic serif. */
+  .approved {
+    margin-top: var(--space-8);
+    font: var(--text-body) / var(--leading-label) var(--font-form);
+  }
+  .approved .sig {
+    display: inline-block;
+    min-width: calc(var(--space-16) * 1.75);
+    /* No right padding, so the comma after the signature sits against it. */
+    padding: 0 0 1px var(--space-2);
+    border-bottom: 1px solid var(--sheet-rule);
+    font: italic var(--text-lead) / var(--leading-heading) var(--font-form);
+  }
+
+  /* About's closing, with the hero's button. */
+  .closing {
+    text-align: center;
+    padding-block: var(--space-20);
+  }
+  .closing h2 {
+    font-size: var(--text-section);
+    letter-spacing: -0.045em;
+    margin-bottom: var(--space-6);
+  }
+  .actions {
+    justify-content: center;
+  }
+
+  @media (max-width: 767px) {
+    .closing {
+      padding-block: var(--space-12);
+    }
+    .actions .button {
+      padding-inline: var(--space-5);
+    }
+  }
+  @media (max-width: 600px) {
+    .approved .sig {
+      min-width: var(--space-16);
+    }
+  }
+</style>

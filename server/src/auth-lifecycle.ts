@@ -52,12 +52,25 @@ export async function connections(config: RuntimeConfig, user: SessionUser) {
   }
   const parsed = connectionSchema.safeParse(value);
   if (!parsed.success) throw invalid();
-  const clients = new Map<string, (typeof parsed.data)[number]>();
+  // One item per client (a client can hold several approvals, one per
+  // machine), counting its approvals by access; its reference is one of them,
+  // which a disconnect names to end them all.
+  const clients = new Map<
+    string,
+    (typeof parsed.data)[number] & { write: number; read: number }
+  >();
   for (const item of parsed.data)
     if (item.client_id !== config.oidc.clientId) {
       const prior = clients.get(item.client_id);
-      if (!prior || item.scopes.includes("milton:write"))
-        clients.set(item.client_id, item);
+      const write = item.scopes.includes("milton:write");
+      const counts = {
+        write: (prior?.write ?? 0) + (write ? 1 : 0),
+        read: (prior?.read ?? 0) + (write ? 0 : 1),
+      };
+      clients.set(
+        item.client_id,
+        !prior || write ? { ...item, ...counts } : { ...prior, ...counts },
+      );
     }
   return { items: [...clients.values()], full: parsed.data.length === 64 };
 }

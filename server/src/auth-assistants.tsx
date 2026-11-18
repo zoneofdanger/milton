@@ -15,6 +15,22 @@ export const clientHost = (clientId: string) => {
   } catch {}
   return "";
 };
+/** An AI client's access per device: its one approval's access, or each
+ * access with the number of approvals (devices) holding it. */
+export const accessSummary = ({
+  write,
+  read,
+}: {
+  write: number;
+  read: number;
+}) => {
+  if (write + read === 1) return write ? "Read and write" : "Read only";
+  const on = (n: number) => `on ${n} ${n === 1 ? "device" : "devices"}`;
+  return [
+    ...(write ? [`Read and write ${on(write)}`] : []),
+    ...(read ? [`Read only ${on(read)}`] : []),
+  ].join(" · ");
+};
 export const assistants = async (ctx: PageContext): Promise<Response> => {
   const { config, request, url, csrfField, readForm, signedIn } = ctx;
   if (
@@ -105,11 +121,7 @@ export const assistants = async (ctx: PageContext): Promise<Response> => {
               <p>
                 <strong>{clientHost(c.client_id) || c.client_id}</strong>
               </p>
-              <p>
-                {c.scopes.includes("milton:write")
-                  ? "Read and write"
-                  : "Read only"}
-              </p>
+              <p>{accessSummary(c)}</p>
               <form method="post" action="/assistants/disconnect">
                 {csrfField()}
                 <input type="hidden" name="connection" value={c.reference} />

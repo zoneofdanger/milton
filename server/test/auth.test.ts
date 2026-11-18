@@ -27,6 +27,7 @@ import {
   protocolFixture,
 } from "./auth-fixtures";
 import { authAdmission, trialFingerprints } from "../src/auth-admission";
+import { accessSummary } from "../src/auth-assistants";
 import { ensureSubscription } from "../src/billing";
 import { backfillSubscriptions } from "../scripts/backfill-subscriptions";
 
@@ -1539,6 +1540,61 @@ test("disconnect ends only a listed connection: another one is refused and start
     await fixture.dispose();
   }
 }, 30000);
+
+test("Connected AIs shows one row per client with its access per device, and its one Disconnect ends every approval of that client", async () => {
+  const fixture = await accountFixture();
+  const { local, send } = fixture;
+  try {
+    await local.db.query(
+      sql`INSERT INTO milton_guard.fixture_connection(reference,subject,client_id,scopes) VALUES
+        ('a1','account','https://claude.example/client','["milton:read","milton:write"]'),
+        ('a2','account','https://claude.example/client','["milton:read"]'),
+        ('a3','account','https://claude.example/client','["milton:read","milton:write"]'),
+        ('b1','account','https://muse.example/client','["milton:read"]'),
+        ('c1','account','https://solo.example/client','["milton:read","milton:write"]')`,
+    );
+    const page = await (await send("/assistants")).text();
+    expect(page.match(/<strong>claude\.example<\/strong>/g)).toHaveLength(1);
+    expect(page).toContain(
+      "<p>Read and write on 2 devices · Read only on 1 device</p>",
+    );
+    expect(page).toContain("<p>Read only</p>");
+    expect(page).toContain("<p>Read and write</p>");
+    expect(page.match(/name="connection"/g)).toHaveLength(3);
+    const row = /<li><p><strong>claude\.example<\/strong>[\s\S]*?<\/li>/.exec(
+      page,
+    )![0];
+    const connection = /name="connection" value="([^"]+)"/.exec(row)![1]!;
+    expect(["a1", "a2", "a3"]).toContain(connection);
+    const ended = await send("/assistants/disconnect", {
+      connection,
+      operation: operationIn(row),
+    });
+    expect(ended.status).toBe(303);
+    expect(
+      await local.db.query(
+        sql`SELECT reference FROM milton_guard.fixture_connection WHERE active ORDER BY reference`,
+      ),
+    ).toEqual([{ reference: "b1" }, { reference: "c1" }]);
+  } finally {
+    await fixture.dispose();
+  }
+}, 30000);
+
+test("access per device names each access once, with its device count", () => {
+  expect(accessSummary({ write: 1, read: 0 })).toBe("Read and write");
+  expect(accessSummary({ write: 0, read: 1 })).toBe("Read only");
+  expect(accessSummary({ write: 2, read: 0 })).toBe(
+    "Read and write on 2 devices",
+  );
+  expect(accessSummary({ write: 0, read: 10 })).toBe("Read only on 10 devices");
+  expect(accessSummary({ write: 1, read: 1 })).toBe(
+    "Read and write on 1 device · Read only on 1 device",
+  );
+  expect(accessSummary({ write: 1, read: 3 })).toBe(
+    "Read and write on 1 device · Read only on 3 devices",
+  );
+});
 
 test("trial reminders stay outside TPS and expired accounts retain web view and download", async () => {
   const fixture = await memoPageFixture();

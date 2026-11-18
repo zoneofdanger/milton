@@ -173,7 +173,7 @@ production order and snapshots are in [migrations](deploy/migrations.md).
 
 - There are three tracks: Drizzle (`server/drizzle/`, `0000` to `0016`), owner files
   (`server/migrations/`, numbered up to `016`) and native auth (`apps/auth/migrations/`,
-  `000` to `008`).
+  `000` to `009`).
 - Fresh installs use one Drizzle baseline (`0000_baseline.sql`: the original 14 tables,
   seven guard functions and triggers, the `milton_runtime` role and its grants, and the
   singleton `store_config` seed); a populated older database refuses it. Older revisions

@@ -93,5 +93,9 @@ Local commands and landing content are in [apps/site/README.md](../apps/site/REA
   screens 600px wide or less, "Best watched on a wider screen" sits under the player
   (Peter, 2026-11-13). Under it are the clip's label, the one-line Claude Code setup command from `/setup`, and a
   link to `/setup`.
+- `/lab` is an unlinked satirical model card for Milton-1, a model Milton will never
+  train without asking (Peter, 2026-11-18): in no navigation or footer, linked from no
+  other page, and marked `noindex` like `/demo`. It uses the About report's framing and
+  ends with About's closing and "Try Milton free" button.
 - `/research` presents the approved testing notes, linked from About and the site
   footer. `/notes` is retired with no redirect or alias, so old URLs reach the normal 404.

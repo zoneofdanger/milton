@@ -47,8 +47,11 @@ sheet, report, AI) and plain text on security screens and anything an AI reads.
       narrowed follow-up to PR #67 took checkout's live read and the webhook off the row lock
       (compare-and-set on `trial_accounts.stripe_revision`, 0011, with a one-off `--resync`
       after its cutover) and deferred the rest. Sign-in still waits on Stripe, up to three
-      5 s calls under `trial_accounts FOR UPDATE` (`whileWaiting`), so a Stripe outage is a
-      sign-in 503; deletion's Stripe DELETE still runs inside its lifecycle transaction.
+      5 s calls under `trial_accounts FOR UPDATE` (`whileWaiting`), but only at an account's
+      first sign-in (or the next after a failed attempt): sign-in returns early once a
+      subscription status is saved, so a Stripe outage is a 503 for new sign-ups, not
+      returning users. Skipping the list call for a just-created customer is not safe while
+      each call reads its own idempotency minute (2026-11-18, dropped); deletion's Stripe DELETE still runs inside its lifecycle transaction.
       Moving enrolment to the background failed two reviews (Astra). It needs a durable
       retry, and a retry sweep can starve behind accounts that keep failing; a sweep whose
       every account failed still answered HTTP 200, so the maintenance job's failed-execution

@@ -93,7 +93,7 @@ async function receipt(tx: StoreSession, userId: string, id: string) {
  * spots code found between it and its final, each an unlabelled row. */
 export type Evidence = { state: ChangeList["state"]; rows: ChangeRow[] };
 export type MemoCheck =
-  | { ok: true; evidence?: Evidence }
+  | { ok: true }
   | {
       ok: false;
       message: string;
@@ -112,11 +112,10 @@ export const MAX_REQUEST_CHARS = 600;
 export const MAX_REQUEST_LINES = 12;
 
 /** Everything a memo save gets wrong that its input alone shows, checked
- * before any database work, or the evidence it will store. Only the first
- * draft decides the rest: with one (or first_draft_missing), mode is required
- * and request is allowed; without, writing the person gave, neither. With a
- * kept first draft, code lists what changed here, bounded by changeList's own
- * limits. */
+ * before any database work. Only the first draft decides the rest: with one
+ * (or first_draft_missing), mode is required and request is allowed; without,
+ * writing the person gave, neither. What changed is listed later, once the
+ * access gate admits the save (runSave). */
 export function checkMemo(memo: MemoInput): MemoCheck {
   const refuse = (message: string, field?: "request"): MemoCheck => ({
     ok: false,
@@ -158,8 +157,7 @@ export function checkMemo(memo: MemoInput): MemoCheck {
               : undefined;
     if (problem) return refuse(`${problem}.`, "request");
   }
-  if (memo.first_draft === undefined) return { ok: true };
-  return { ok: true, evidence: evidenceFor(memo.first_draft, memo.final) };
+  return { ok: true };
 }
 
 /** Code's list of what changed from a kept first draft to its final. */
@@ -173,8 +171,6 @@ export async function runSave(
   userId: string,
   actor: Actor,
   input: SaveMemoInput,
-  /** What checkMemo found for input.memo, before any database work. */
-  evidence: Evidence | undefined,
   /** Admits the call (see below); never waits on the database. */
   admit?: () => void,
   /** Sees the trial status the save's gate admitted; a replay never reaches it. */
@@ -226,6 +222,13 @@ export async function runSave(
       // account lock (FOR NO KEY UPDATE) does not block that append's
       // foreign-key check.
       admit?.();
+      // Code's list of what changed from a kept first draft, bounded by
+      // changeList's own limits: only for a save the gate admitted, never for
+      // a replay or a paused account, and still under the account lock.
+      const evidence =
+        input.memo?.first_draft !== undefined
+          ? evidenceFor(input.memo.first_draft, input.memo.final)
+          : undefined;
       const decide = async (): Promise<SaveOutcome> => {
         if (utf8Bytes(JSON.stringify(input)) > MAX_REQUEST_BYTES)
           return result("failed", {

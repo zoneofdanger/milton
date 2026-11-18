@@ -25,9 +25,9 @@ or not at all.
   database work, except the rollout-boundary refusals' receipt lookup (below); those
   refusals write no receipt. That check covers everything the input
   alone shows: the memo's shape, its request's bounds and the mail-like lines it refuses
-  ([memos](memos.md#the-request)). With a kept first draft it also computes code's list
-  of what changed, within its bounds ([memos](memos.md#changes)); that list is the one
-  the save stores, and no client sends a change, label or link.
+  ([memos](memos.md#the-request)). Every such refusal comes first, in that order; code's
+  list of what changed waits for the trial gate ([the transaction](#the-transaction)),
+  and no client sends a change, label or link.
 - Only AIs can call `create_memo`: a save through the web app's store is refused with
   `assistant_required`. The TPS page's own changes go through its store, under the same
   account lock ([TPS page](tps-page.md)).
@@ -100,6 +100,10 @@ A save runs in one transaction:
    request waits on the account lock, then replays.
 3. Check the trial gate ([billing](billing.md)). Gate refusals write no receipt, so the
    same request can succeed once the gate opens. A replay never reaches the gate.
+   Once the gate admits a save with a kept first draft, code lists what changed, within
+   its bounds ([memos](memos.md#changes)), still under the lock; that list is the one
+   the save stores. A replay or a paused account never computes it (#39, Peter,
+   2026-11-18).
 4. Decide the outcome. A request over 256 KiB is `request_too_large`. Otherwise the
    change runs after a savepoint: a refusal (such as `invalid_kind`, `invalid_memo` or
    `memos_off`) rolls back to it, so nothing changes. A memo, its new kind and its

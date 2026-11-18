@@ -149,7 +149,8 @@ memo saved before this rule with a missing first draft and no rounds stays `unto
 ## Changes
 
 What changed from a kept first draft to its final is found by code at save, once,
-before any database work: these are the memo's tweaks. The TPS page and the memo page
+after the trial gate admits it ([saves](saves.md#the-transaction)): these are the
+memo's tweaks. The TPS page and the memo page
 show them, TPS.md lists them all, and a report quotes a few of them under drafted
 examples ([reports](reports.md#what-they-changed)). Nothing is
 computed for a missing first draft or writing the person gave. No AI sends or labels

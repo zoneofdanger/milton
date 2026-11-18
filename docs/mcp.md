@@ -41,6 +41,11 @@ call itself and the text AIs are served.
 - JOSE checks EdDSA `at+jwt` against the exact configured issuer and MCP audience;
   native's fixed implicit UserInfo audience is allowed only with `openid`, and JWKS keys
   cache for 10 minutes.
+- Clocks: a token issued up to 30 seconds in the future (`iat`) is accepted, for skew
+  between auth's clock and MCP's, but expiry gets no tolerance: `server/src/token.ts`
+  refuses a token once `exp` passes on MCP's own clock, even though JOSE's
+  `clockTolerance` of 30 would allow it. Harmless while auth and MCP run on Cloud Run's
+  synchronized clocks.
 - Tokens require matching `client_id`/`azp`, supported scopes and the original
   binding, incarnation and generation; ID and session JWTs and confirmation/DPoP are
   refused.

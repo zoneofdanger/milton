@@ -23,6 +23,32 @@ Earlier records are in git history: the last runbook holding them is at commit 4
 (`git show 492b96a:server/deploy/README.md`), and the runbook's later versions are in
 `git log -p server/deploy/README.md` until 2026-11-10, when this file began.
 
+## 2026-11-18: billing questions go to accountspayable@ (PR #165)
+
+- **#165 (#23; Peter's "go", typed in this coordinator session, milton-d2, on 2026-11-18,
+  approving the three lines drafted for him, after he confirmed the mailbox works),
+  `9b926b2`:** the pricing card says "Billing questions: accountspayable@meetmilton.com.",
+  the FAQ adds "Who do I ask about a charge?", and the `subscription_required` message names
+  the address before its subscribe link. One constant, `BILLING_EMAIL` in
+  `packages/theme/facts.ts`.
+  - **Order:** served text only, no schema step. Site from main at `9b926b2`. Image
+    `sha256:56404eec54213d8ce50e024f3ec2cde1fc2a9f1d4ac3511ea354cd02f72ab148` (amd64
+    `sha256:f5ae6bca…`; Node v26.13.1, user `node`): admit `milton-admit-00022-fc4` at
+    23:42:40Z; app and MCP `milton-*-billing-9b926b2` traffic at 23:43:30Z and 23:43:39Z;
+    `milton-e2e-daily` at 23:43:48Z (no execution active), `milton-e2e-daily-nhcqw` passed.
+  - **Live:** app and MCP `/health` and auth `/api/auth/ok` 200, app home 200, MCP 401
+    unauthenticated, admit 403 without a token, forms probe PASS; `/pricing` serves both
+    `mailto:` links and the new question.
+  - **Gate** at 23:53:45Z: clean, with no alert open or opened since 23:42:40Z. No log line
+    reached an older app or MCP revision after 23:46Z; no error from any service or job since
+    23:42Z.
+  - **Checks** on the merge commit `9b926b2`: types, tests (201) and agent-docs 0; PR CI
+    and main CI green.
+  - **Not observed:** an AI relaying the paused message in production (only the contract
+    test covers it).
+  - **Rollback:** code only, `milton-*-firstline-f9c7b32`, `milton-admit-00021-46m` and the
+    daily job to image `sha256:cc7eb9ca…`.
+
 ## 2026-11-18: auth owner scripts refuse with codes (PR #161)
 
 - **#161 (#27; Peter's "ship everything", typed in this coordinator session, milton-d2, on

@@ -92,15 +92,6 @@ sheet, report, AI) and plain text on security screens and anything an AI reads.
       (apps/site/src/pages/privacy.astro), a check against
       [positioning](docs/positioning.md), and a spec. ⚠ It could cost trust, which is the risk.
 
-- [ ] #43 (server, low) **Make the usage-retry integration test timing-proof.** The
-      stage "usage rows skipped behind short FOR UPDATEs land on their own retries" in
-      `server/scripts/auth-integration.ts` (about line 2036) failed once on 2026-11-13 in CI
-      on PR #136, a docs-only change, and passed on rerun. It depends on wall-clock gaps: a
-      25 ms sleep between the two skips against a 50 ms retry, so a slow runner can change
-      which retry sees which lock. Replace the sleeps with explicit waits on observed events
-      (each skip recorded, each lock released) so the order is forced, not timed. Keep every
-      assertion, and don't widen the delays to make it pass.
-
 - [ ] #38 (server, low) **Enforce the typed request's line and paste rules in SQL.** A
       memo's kept request (#109) is limited to 600 characters, 12 lines and no pasted mail
       (a line starting `>`, an "On … wrote:" line, a From or Subject header). The database

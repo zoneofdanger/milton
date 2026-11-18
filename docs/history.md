@@ -23,6 +23,43 @@ Earlier records are in git history: the last runbook holding them is at commit 4
 (`git show 492b96a:server/deploy/README.md`), and the runbook's later versions are in
 `git log -p server/deploy/README.md` until 2026-11-10, when this file began.
 
+## 2026-11-18: one AI on several machines stays connected (native 009, PR #152)
+
+- **#152 (Peter's "go", typed in this coordinator session, milton-d2, on 2026-11-18,
+  answering "Go to release once the extra tests land green?" for the spec he approved the
+  same day, `docs/research/ai-grants-spec-2026-11-18.md`; built by a temporary builder;
+  Codex gpt-6-astra PASS at `f26b5cd`, its P3 adversarial cases committed at `3c5aac0`),
+  `62b3101`:** Claude Code identifies by a client metadata URL that every install shares, so
+  a consent revoking the account's other approvals of that client made Peter's machines
+  disconnect each other about daily (12 Claude Code approvals since 2026-11-07, 11 revoked
+  within hours to two days). Native 009 replaces `consent_gate` so a consent keeps up to
+  10 active approvals per account and client, revoking the oldest beyond that and never
+  another pending one; Disconnect still ends every approval of the client. Connected AIs
+  shows one row per AI with access per device.
+  - **Order:** code first, since the page works on either rule. Image
+    `sha256:d71dbee5971b08ef93f0024d1075e572fa01ad7349635db2231f76d49aa3e365` (amd64
+    `sha256:0d639451…`; Node v26.13.1, user `node`): admit `milton-admit-00020-b46` at
+    18:52:01Z; app and MCP `milton-*-grants-62b3101` traffic at 18:52:45Z;
+    `milton-e2e-daily` at 18:52:54Z (no execution active), `milton-e2e-daily-hxdwz` passed.
+  - **Migration:** snapshot `snap-round-shape-b8ndkdn2` at 18:53:19Z, plus a private
+    schema-only `pg_dump` of `milton_guard` and `milton_credential` (no rows). Before:
+    ledger 001–008, 80 active bindings. `migrate.ts up --apply` as `milton_auth_delegate`
+    assuming `milton_auth_owner`, 18:53:49–18:53:54Z, first attempt. After: ledger
+    001–009; `consent_gate` holds the new rule with the same owner, SECURITY DEFINER,
+    ACL, search path and trigger; 80 active bindings. `milton-e2e-daily-vnhb5` passed after.
+  - **Live:** app and MCP `/health` and auth `/api/auth/ok` 200, app home 200, MCP 401
+    unauthenticated, admit 403 without a token, forms probe PASS.
+  - **Gate** at 19:04:55Z: clean, with no alert open or opened since 18:52:01Z. No log line
+    reached an older app or MCP revision after 18:56Z; no error from app, MCP or auth since
+    18:52Z; no 4xx or 5xx from auth's `/oauth2/` endpoints since 009.
+  - **Checks** on the merge commit `62b3101`: types, tests, format, agent-docs and
+    migration guards 0; PR CI green (checks, integration) at `3c5aac0`.
+  - **Not observed:** Claude Code on two machines both staying connected, and the grouped
+    Connected AIs page in a browser; Peter reconnects each machine once.
+  - **Rollback:** code only, `milton-*-replaces-87ed9dc`, `milton-admit-00019-25l` and the
+    daily job to image `sha256:14e0b206…`. The rule's rollback is the snapshot; no code
+    needs 008's rule.
+
 ## 2026-11-17: an AI updates a memo it saved (PR #148)
 
 - **#148 (Peter's "yes", typed in this coordinator session, milton-d2, on 2026-11-17,

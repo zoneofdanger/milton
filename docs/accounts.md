@@ -156,7 +156,7 @@ line never holds a message, secret, connection string or row. Their own codes ar
 | Code                                    | Script    | Refused because                                                                                              |
 | --------------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------ |
 | `APPLY_ARGS_REQUIRED`                   | all three | its explicit arguments (`--apply`, `up --apply`, `--apply <output>`) or `AUTH_OWNER_DATABASE_URL` is missing |
-| `OUTPUT_INSIDE_REPOSITORY`              | provision | the secret output path is inside the script's own checkout                                                   |
+| `OUTPUT_INSIDE_REPOSITORY`              | provision | the secret output path is inside the repository (below)                                                      |
 | `DATABASE_TLS_REQUIRED`                 | all three | the owner URL, or provision's `AUTH_DATABASE_URL`, has an unsafe TLS or duplicate setting                    |
 | `AUTH_CONFIG_INVALID`                   | provision | the auth configuration is missing or invalid                                                                 |
 | `AUTH_SECRETS_NOT_DISTINCT`             | provision | two of the auth, admission and rate secrets are equal                                                        |
@@ -170,6 +170,12 @@ line never holds a message, secret, connection string or row. Their own codes ar
 Any other code is the underlying one: a PostgreSQL SQLSTATE (such as `42501`) or a Node
 system code (such as `ECONNREFUSED`, or `EEXIST` when provision's output file already
 exists); `UNCLASSIFIED` means the error had none.
+
+Provision refuses an output path inside the repository that holds the script: under its
+own checkout (a check that needs no git), or, asking git about the
+nearest existing directory of the path with symlinks resolved, under the main checkout or
+any worktree `git worktree list` names, or anywhere git places in the same repository,
+its `.git` directory included.
 
 ## Auth mail
 

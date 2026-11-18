@@ -1,6 +1,8 @@
 import { databaseOptions } from "../src/database.ts";
-import { writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { spawnSync } from "node:child_process";
+import { existsSync, realpathSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { createProvider } from "../src/provider.ts";
 import {
@@ -10,6 +12,56 @@ import {
   type Config,
 } from "../src/config.ts";
 import { refusal } from "../src/refusal.ts";
+
+// Git run in `dir` with no inherited environment: no owner URL reaches it, and
+// no GIT_DIR or GIT_WORK_TREE points it at another repository.
+function git(dir: string, ...args: string[]) {
+  const r = spawnSync("git", ["-C", dir, ...args], {
+    encoding: "utf8",
+    env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "" },
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  return r.status === 0 ? r.stdout : undefined;
+}
+const real = (path: string) => {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+};
+const commonDir = (dir: string) => {
+  const found = git(
+    dir,
+    "rev-parse",
+    "--path-format=absolute",
+    "--git-common-dir",
+  )?.trim();
+  return found ? real(found) : undefined;
+};
+
+/** Whether a secret written to `output` (absolute) would land in the
+ * repository holding `checkout`: under `checkout` itself, under the main
+ * checkout or any worktree `git worktree list` names, or anywhere git places
+ * in the same repository (its .git directory, a symlinked path). Git is asked
+ * about the nearest directory of `output` that exists, symlinks resolved.
+ * Without git only the `checkout` prefix check applies. */
+export function insideRepository(output: string, checkout: string) {
+  if (output.startsWith(checkout + "/")) return true;
+  const common = commonDir(checkout);
+  if (!common) return false;
+  let dir = dirname(output);
+  while (!existsSync(dir)) dir = dirname(dir);
+  dir = real(dir);
+  const trees = (git(checkout, "worktree", "list", "--porcelain", "-z") ?? "")
+    .split("\0")
+    .filter((line) => line.startsWith("worktree "))
+    .map((line) => real(line.slice("worktree ".length)));
+  return (
+    trees.some((tree) => dir === tree || dir.startsWith(tree + "/")) ||
+    commonDir(dir) === common
+  );
+}
 
 // Owner-only preparation. Native anonymous registration creates/hashes a secret;
 // the owner then promotes exactly this one client. No temporary human account.
@@ -90,8 +142,9 @@ if (import.meta.main) {
       );
     const output = resolve(process.argv[3]);
     if (
-      output.startsWith(
-        resolve(new URL("../../../", import.meta.url).pathname) + "/",
+      insideRepository(
+        output,
+        resolve(fileURLToPath(new URL("../../../", import.meta.url))),
       )
     )
       throw refusal(

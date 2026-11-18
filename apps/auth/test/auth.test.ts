@@ -2,7 +2,16 @@ import { describe, expect, spyOn, test } from "bun:test";
 import { validPassword } from "../src/password.ts";
 import { readConfig, safeError } from "../src/config.ts";
 import { REFUSAL_CODES, refusal } from "../src/refusal.ts";
-import { existsSync, readFileSync } from "node:fs";
+import { insideRepository } from "../scripts/provision.ts";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1954,5 +1963,79 @@ describe("owner script refusals", () => {
     expect(inside.exit).toBe(1);
     expect(inside.stderr).toMatch(/auth_provision.*OUTPUT_INSIDE_REPOSITORY/);
     expect(existsSync(join(root, "milton-unused.json"))).toBe(false);
+  });
+  test("secret output is refused anywhere in the repository, worktrees included", () => {
+    const base = realpathSync(mkdtempSync(join(tmpdir(), "milton-repo-")));
+    const git = (dir: string, ...args: string[]) => {
+      const r = Bun.spawnSync(["git", "-C", dir, ...args], {
+        env: { PATH: process.env.PATH, HOME: process.env.HOME },
+      });
+      if (r.exitCode !== 0) throw new Error(r.stderr.toString());
+    };
+    try {
+      const main = join(base, "main");
+      const other = join(base, "other");
+      mkdirSync(main);
+      mkdirSync(other);
+      for (const repo of [main, other]) {
+        git(repo, "init", "-q");
+        git(
+          repo,
+          "-c",
+          "user.name=Fixture",
+          "-c",
+          "user.email=fixture@example.invalid",
+          "commit",
+          "-q",
+          "--allow-empty",
+          "-m",
+          "fixture",
+        );
+      }
+      const linked = join(base, "linked");
+      const nested = join(main, ".worktrees", "nested");
+      git(main, "worktree", "add", "-q", "-b", "linked", linked);
+      git(main, "worktree", "add", "-q", "-b", "nested", nested);
+      symlinkSync(main, join(base, "link"));
+      mkdirSync(join(base, "main-secrets"));
+      // A path git ignores and a repository nested in the main checkout.
+      mkdirSync(join(main, "ignored", "inner"), { recursive: true });
+      git(join(main, "ignored", "inner"), "init", "-q");
+      const refused = [
+        main,
+        linked,
+        nested,
+        join(main, ".git"),
+        join(main, "ignored", "inner"),
+        join(base, "link"),
+      ];
+      const allowed = [base, other, join(base, "main-secrets")];
+      let seed = 27;
+      const random = () => (seed = (seed * 1103515245 + 12345) % 2 ** 31);
+      const name = () =>
+        ["a", "b", "x.json", "deep", ".hidden", "new-dir"][random() % 6]!;
+      for (const checkout of [main, linked, nested])
+        for (let n = 0; n < 12; n++) {
+          const segments = Array.from({ length: 1 + (random() % 3) }, name);
+          for (const [roots, expected] of [
+            [refused, true],
+            [allowed, false],
+          ] as const) {
+            const at = roots[random() % roots.length]!;
+            if (random() % 2)
+              mkdirSync(join(at, ...segments.slice(0, -1)), {
+                recursive: true,
+              });
+            const output = join(at, ...segments);
+            expect([
+              checkout,
+              output,
+              insideRepository(output, checkout),
+            ]).toEqual([checkout, output, expected]);
+          }
+        }
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
   });
 });

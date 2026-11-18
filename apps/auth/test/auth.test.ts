@@ -1,6 +1,11 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { validPassword } from "../src/password.ts";
-import { readConfig } from "../src/config.ts";
+import { readConfig, safeError } from "../src/config.ts";
+import { REFUSAL_CODES, refusal } from "../src/refusal.ts";
+import { existsSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { fixtureConfig } from "./fixture-config.ts";
 describe("auth product boundaries", () => {
   test("native NFKC policy has predictable Unicode bounds without trimming", () => {
@@ -1856,5 +1861,98 @@ describe("Turnstile on sign-up", () => {
     expect(await down.text()).toContain(
       "could not run its check that you are a person. Nothing was created.",
     );
+  });
+});
+
+describe("owner script refusals", () => {
+  const root = fileURLToPath(new URL("../../../", import.meta.url));
+  const codeOf = (run: () => unknown) => {
+    try {
+      run();
+    } catch (error) {
+      return safeError(error).code;
+    }
+    throw new Error("expected a refusal");
+  };
+  test("every code prints through safeError and is documented", async () => {
+    const docs = readFileSync(join(root, "docs/accounts.md"), "utf8");
+    for (const code of REFUSAL_CODES)
+      expect(safeError(refusal(code, "fixed")).code).toBe(code);
+    expect(
+      REFUSAL_CODES.filter((code) => !docs.includes("| `" + code + "`")),
+    ).toEqual([]);
+  });
+  test("configuration refusals carry their codes", () => {
+    const env = Object.fromEntries(
+      Object.entries(fixtureConfig()).map(([k, v]) => [k, String(v)]),
+    );
+    expect(codeOf(() => readConfig({}))).toBe("AUTH_CONFIG_INVALID");
+    expect(
+      codeOf(() => readConfig({ ...env, AUTH_RATE_SECRET: env.AUTH_SECRET })),
+    ).toBe("AUTH_SECRETS_NOT_DISTINCT");
+    expect(
+      codeOf(() =>
+        readConfig({
+          ...env,
+          AUTH_DATABASE_URL: "postgresql://fixture.invalid/x?sslmode=disable",
+        }),
+      ),
+    ).toBe("DATABASE_TLS_REQUIRED");
+  });
+  test("each script prints its refusal code before any database work", () => {
+    const run = (script: string, args: string[], url?: string) => {
+      const r = Bun.spawnSync(
+        [
+          "node",
+          "--experimental-strip-types",
+          join(root, "apps/auth/scripts", script),
+          ...args,
+        ],
+        {
+          env: {
+            PATH: process.env.PATH,
+            HOME: process.env.HOME,
+            ...(url ? { AUTH_OWNER_DATABASE_URL: url } : {}),
+          },
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+      );
+      return { exit: r.exitCode, stderr: r.stderr.toString() };
+    };
+    const url = "postgresql://fixture.invalid/fixture";
+    const label = (script: string) =>
+      script === "provision.ts"
+        ? "auth_provision"
+        : script === "maintain.ts"
+          ? "auth_maintenance"
+          : "auth_migration";
+    for (const [script, args] of [
+      ["provision.ts", ["--apply", join(tmpdir(), "milton-unused.json")]],
+      ["maintain.ts", ["--apply"]],
+      ["migrate.ts", ["up", "--apply"]],
+    ] as const) {
+      // Arguments without the owner URL, then the URL without the arguments.
+      for (const r of [run(script, [...args]), run(script, [], url)]) {
+        expect(r.exit).toBe(1);
+        expect(r.stderr).toMatch(
+          new RegExp(label(script) + ".*APPLY_ARGS_REQUIRED"),
+        );
+      }
+      const tls = run(script, [...args], url + "?sslmode=disable");
+      expect(tls.exit).toBe(1);
+      expect(tls.stderr).toMatch(
+        new RegExp(label(script) + ".*DATABASE_TLS_REQUIRED"),
+      );
+      expect(tls.stderr).not.toContain("fixture.invalid");
+    }
+    const inside = run(
+      "provision.ts",
+      ["--apply", join(root, "milton-unused.json")],
+      url,
+    );
+    expect(inside.exit).toBe(1);
+    expect(inside.stderr).toMatch(/auth_provision.*OUTPUT_INSIDE_REPOSITORY/);
+    expect(existsSync(join(root, "milton-unused.json"))).toBe(false);
   });
 });

@@ -144,6 +144,33 @@ The app never handles passwords or native cookies.
   another machine's Read and write as it was. To change an AI's access everywhere,
   disconnect it ([deletion](deletion.md#disconnecting-an-ai)) and reconnect.
 
+## Owner script refusals
+
+The owner scripts `provision.ts`, `maintain.ts` and `migrate.ts` (in `apps/auth/scripts/`,
+run as in [apps/auth/README.md](../apps/auth/README.md#schema-and-owner-operations)) print
+every refusal as one line, `auth_provision`, `auth_maintenance` or `auth_migration` (with
+the migration file, if one had started) then the error's class and code, and exit 1. The
+line never holds a message, secret, connection string or row. Their own codes are in
+`apps/auth/src/refusal.ts`:
+
+| Code                                    | Script    | Refused because                                                                                              |
+| --------------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------ |
+| `APPLY_ARGS_REQUIRED`                   | all three | its explicit arguments (`--apply`, `up --apply`, `--apply <output>`) or `AUTH_OWNER_DATABASE_URL` is missing |
+| `OUTPUT_INSIDE_REPOSITORY`              | provision | the secret output path is inside the script's own checkout                                                   |
+| `DATABASE_TLS_REQUIRED`                 | all three | the owner URL, or provision's `AUTH_DATABASE_URL`, has an unsafe TLS or duplicate setting                    |
+| `AUTH_CONFIG_INVALID`                   | provision | the auth configuration is missing or invalid                                                                 |
+| `AUTH_SECRETS_NOT_DISTINCT`             | provision | two of the auth, admission and rate secrets are equal                                                        |
+| `OWNER_ROLE_REQUIRED`                   | all three | the connection's current role is not `milton_auth_owner`                                                     |
+| `APP_ALREADY_PROVISIONED`               | provision | the first-party app client already exists                                                                    |
+| `APP_CLIENT_NOT_ISSUED`                 | provision | native registration returned no client ID or secret                                                          |
+| `APP_PROVISION_CONCURRENT`              | provision | another provisioning stored the app client first; nothing is promoted                                        |
+| `PRUNE_TIMEOUTS_UNSET`                  | maintain  | the usage prune's statement and lock limits did not hold on its connection                                   |
+| `MIGRATION_MUST_NOT_MANAGE_TRANSACTION` | migrate   | the migration file begins, commits or rolls back its own transaction                                         |
+
+Any other code is the underlying one: a PostgreSQL SQLSTATE (such as `42501`) or a Node
+system code (such as `ECONNREFUSED`, or `EEXIST` when provision's output file already
+exists); `UNCLASSIFIED` means the error had none.
+
 ## Auth mail
 
 - Native mail callbacks capture one original message; every generic sign-up, reset or

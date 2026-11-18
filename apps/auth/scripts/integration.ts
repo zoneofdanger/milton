@@ -348,8 +348,110 @@ try {
     appPool = new pg.Pool(p.configs.app),
     mcpPool = new pg.Pool(p.configs.mcp);
   pools.push(authPool, appPool, mcpPool);
+  {
+    // Each owner refusal that needs a database prints its code
+    // (docs/accounts.md): a runtime login is not the owner, a second
+    // provisioning finds the app, and one that loses the race promotes nothing.
+    const code = async (work: Promise<unknown>) =>
+      work.then(
+        () => "none",
+        (error: unknown) => safeError(error).code,
+      );
+    assert.equal(
+      await code(provisionFixedApp(authPool, config)),
+      "OWNER_ROLE_REQUIRED",
+    );
+    const a = p.configs.auth!;
+    const runtimeUrl = new URL(
+      `postgresql://127.0.0.1:${a.port}/${a.database}`,
+    );
+    runtimeUrl.username = String(a.user);
+    runtimeUrl.password = String(a.password);
+    for (const [script, args, label] of [
+      ["maintain.ts", ["--apply"], "auth_maintenance"],
+      ["migrate.ts", ["up", "--apply"], "auth_migration"],
+    ] as const) {
+      let stderr = "";
+      const exit = await new Promise<number | null>((resolve) => {
+        const child = spawn(
+          process.execPath,
+          [
+            "--experimental-strip-types",
+            new URL(`./${script}`, import.meta.url).pathname,
+            ...args,
+          ],
+          {
+            env: {
+              PATH: process.env.PATH,
+              LC_ALL: "C",
+              NODE_EXTRA_CA_CERTS: p.caPath,
+              AUTH_OWNER_DATABASE_URL: runtimeUrl.href,
+            },
+            stdio: ["ignore", "ignore", "pipe"],
+          },
+        );
+        child.stderr.on("data", (d) => (stderr += d));
+        child.on("exit", resolve);
+      });
+      assert.equal(exit, 1, script);
+      assert.match(stderr, new RegExp(`${label}.*OWNER_ROLE_REQUIRED`), script);
+      assert(!stderr.includes(String(a.password)), script);
+    }
+    // Another provisioner stores its client between this one's first check
+    // and its locked check.
+    const racer = "fictional-concurrent-provisioner";
+    let raced = false;
+    const racing = new Proxy(p.owner, {
+      get(target, property) {
+        if (property === "query")
+          return async (...args: Parameters<pg.Pool["query"]>) => {
+            const result = await target.query(...args);
+            if (
+              !raced &&
+              String(args[0]).includes("from milton_guard.first_party_policy")
+            ) {
+              raced = true;
+              await target.query(
+                "insert into milton_guard.first_party_policy(client_id) values($1)",
+                [racer],
+              );
+            }
+            return result;
+          };
+        const value = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    assert.equal(
+      await code(provisionFixedApp(racing, config)),
+      "APP_PROVISION_CONCURRENT",
+    );
+    assert.deepEqual(
+      (
+        await p.owner.query(
+          `select (select array_agg(client_id) from milton_guard.first_party_policy) policy,
+            (select count(*)::int from milton_auth."oauthClient" where "skipConsent") promoted`,
+        )
+      ).rows[0],
+      { policy: [racer], promoted: 0 },
+    );
+    await p.owner.query(
+      "delete from milton_guard.first_party_policy where client_id=$1",
+      [racer],
+    );
+    group(
+      "owner refusals print their codes: not the owner, and a lost provisioning race promotes nothing",
+    );
+  }
   const client = await provisionFixedApp(p.owner, config);
   config.AUTH_APP_CLIENT_ID = client.AUTH_APP_CLIENT_ID;
+  assert.equal(
+    await provisionFixedApp(p.owner, config).then(
+      () => "none",
+      (error: unknown) => safeError(error).code,
+    ),
+    "APP_ALREADY_PROVISIONED",
+  );
   const service = createProvider(config, { pool: authPool, boundaries });
   let cookie = "";
   const cookies = new Map<string, string>();

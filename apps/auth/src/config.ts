@@ -1,4 +1,5 @@
 import { databaseOptions } from "./database.ts";
+import { refusal } from "./refusal.ts";
 import { z } from "zod";
 
 export const AUTH_ORIGIN = "https://auth.meetmilton.com";
@@ -72,7 +73,7 @@ export function readConfig(env: NodeJS.ProcessEnv): Config {
       admissionTarget(r.data.AUTH_ADMISSION_URL) !== "cloud-run") ||
     !r.data.AUTH_TURNSTILE_SITE_KEY !== !r.data.AUTH_TURNSTILE_SECRET_KEY
   )
-    throw new Error("invalid_auth_configuration");
+    throw refusal("AUTH_CONFIG_INVALID", "invalid_auth_configuration");
   databaseOptions(r.data.AUTH_DATABASE_URL);
   if (
     new Set([
@@ -81,7 +82,7 @@ export function readConfig(env: NodeJS.ProcessEnv): Config {
       r.data.AUTH_RATE_SECRET,
     ]).size !== 3
   )
-    throw new Error("auth_secrets_must_be_distinct");
+    throw refusal("AUTH_SECRETS_NOT_DISTINCT", "auth_secrets_must_be_distinct");
   return r.data;
 }
 export function safeError(error: unknown) {

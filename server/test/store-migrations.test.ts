@@ -694,7 +694,10 @@ test("0008 drops usage_daily and the stored daily_calls; the maintenance job del
           text.startsWith("set local") ? [] : values,
         ),
       ),
-    ).rejects.toThrow("usage_prune_timeouts_unset");
+    ).rejects.toMatchObject({
+      message: "usage_prune_timeouts_unset",
+      code: "PRUNE_TIMEOUTS_UNSET",
+    });
     expect(await run()).toBe(USAGE_PRUNE_BATCH * USAGE_PRUNE_BATCHES);
     expect(seen).toEqual(
       Array.from({ length: USAGE_PRUNE_BATCHES }, () => ({

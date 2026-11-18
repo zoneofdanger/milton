@@ -3,28 +3,31 @@ import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import pg from "pg";
 import { safeError } from "../src/config.ts";
+import { refusal } from "../src/refusal.ts";
 import { AUTH_MIGRATIONS } from "./migrations.ts";
 // One fixed key: one migrator at a time, held only inside each transaction.
 const lock = "select pg_advisory_xact_lock(7311470001)";
-if (
-  process.argv[2] !== "up" ||
-  process.argv[3] !== "--apply" ||
-  !process.env.AUTH_OWNER_DATABASE_URL
-)
-  throw new Error("explicit_owner_migration_required");
-const pool = new pg.Pool({
-  ...databaseOptions(process.env.AUTH_OWNER_DATABASE_URL),
-  max: 1,
-  connectionTimeoutMillis: 3000,
-  statement_timeout: 10000,
-});
+// Every refusal prints its code through safeError (docs/accounts.md).
+let pool: pg.Pool | undefined;
 let client: pg.PoolClient | undefined;
 let file = "";
 try {
+  if (
+    process.argv[2] !== "up" ||
+    process.argv[3] !== "--apply" ||
+    !process.env.AUTH_OWNER_DATABASE_URL
+  )
+    throw refusal("APPLY_ARGS_REQUIRED", "explicit_owner_migration_required");
+  pool = new pg.Pool({
+    ...databaseOptions(process.env.AUTH_OWNER_DATABASE_URL),
+    max: 1,
+    connectionTimeoutMillis: 3000,
+    statement_timeout: 10000,
+  });
   client = await pool.connect();
   const r = await client.query<{ current_user: string }>("select current_user");
   if (r.rows[0]?.current_user !== "milton_auth_owner")
-    throw new Error("migration_owner_required");
+    throw refusal("OWNER_ROLE_REQUIRED", "migration_owner_required");
   await client.query(
     `BEGIN; ${lock}; CREATE SCHEMA IF NOT EXISTS milton_credential AUTHORIZATION milton_auth_owner; CREATE TABLE IF NOT EXISTS milton_credential.migration_ledger(name text primary key); REVOKE ALL ON ALL TABLES IN SCHEMA milton_credential FROM PUBLIC,milton_auth_runtime,milton_app_runtime,milton_mcp_runtime; COMMIT;`,
   );
@@ -47,11 +50,9 @@ try {
         "utf8",
       );
       const ownTransaction = () =>
-        Object.assign(
-          new Error(`${file} must not manage its own transaction`),
-          {
-            code: "MIGRATION_MUST_NOT_MANAGE_TRANSACTION",
-          },
+        refusal(
+          "MIGRATION_MUST_NOT_MANAGE_TRANSACTION",
+          `${file} must not manage its own transaction`,
         );
       // Deliberately conservative check before any work: a line that is only
       // BEGIN;, COMMIT; or ROLLBACK;. Its one false positive is a comment or
@@ -93,5 +94,5 @@ try {
   process.exitCode = 1;
 } finally {
   client?.release();
-  await pool.end();
+  await pool?.end();
 }

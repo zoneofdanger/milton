@@ -9,6 +9,7 @@ import {
   APP_ORIGIN,
   type Config,
 } from "../src/config.ts";
+import { refusal } from "../src/refusal.ts";
 
 // Owner-only preparation. Native anonymous registration creates/hashes a secret;
 // the owner then promotes exactly this one client. No temporary human account.
@@ -17,11 +18,12 @@ export async function provisionFixedApp(pool: pg.Pool, config: Config) {
     "select current_user",
   );
   if (role.rows[0]?.current_user !== "milton_auth_owner")
-    throw new Error("migration_owner_required");
+    throw refusal("OWNER_ROLE_REQUIRED", "migration_owner_required");
   const existing = await pool.query(
     "select client_id from milton_guard.first_party_policy",
   );
-  if (existing.rowCount) throw new Error("fixed_app_already_provisioned");
+  if (existing.rowCount)
+    throw refusal("APP_ALREADY_PROVISIONED", "fixed_app_already_provisioned");
   const auth = createProvider(config, { pool, owner: true });
   const client = await auth.provider.api.registerOAuthClient({
     body: {
@@ -34,7 +36,7 @@ export async function provisionFixedApp(pool: pg.Pool, config: Config) {
     },
   });
   if (!client.client_id || !client.client_secret)
-    throw new Error("native_client_provision_failed");
+    throw refusal("APP_CLIENT_NOT_ISSUED", "native_client_provision_failed");
   const connection = await pool.connect();
   try {
     await connection.query("begin");
@@ -44,7 +46,11 @@ export async function provisionFixedApp(pool: pg.Pool, config: Config) {
     const check = await connection.query(
       "select client_id from milton_guard.first_party_policy",
     );
-    if (check.rowCount) throw new Error("concurrent_app_provision_refused");
+    if (check.rowCount)
+      throw refusal(
+        "APP_PROVISION_CONCURRENT",
+        "concurrent_app_provision_refused",
+      );
     await connection.query(
       `update milton_auth."oauthClient" set "userId"=null,"skipConsent"=true,"enableEndSession"=true,"requirePKCE"=true,"postLogoutRedirectUris"=$2,"dpopBoundAccessTokens"=false where "clientId"=$1`,
       [client.client_id, JSON.stringify([APP_ORIGIN + "/auth/logged-out"])],
@@ -70,25 +76,33 @@ export async function provisionFixedApp(pool: pg.Pool, config: Config) {
   };
 }
 if (import.meta.main) {
-  if (
-    process.argv[2] !== "--apply" ||
-    !process.argv[3] ||
-    !process.env.AUTH_OWNER_DATABASE_URL
-  )
-    throw new Error("explicit_owner_apply_and_private_output_required");
-  const output = resolve(process.argv[3]);
-  if (
-    output.startsWith(
-      resolve(new URL("../../../", import.meta.url).pathname) + "/",
-    )
-  )
-    throw new Error("secret_output_must_be_outside_repository");
-  const pool = new pg.Pool({
-    ...databaseOptions(process.env.AUTH_OWNER_DATABASE_URL),
-    max: 1,
-    statement_timeout: 10000,
-  });
+  // Every refusal prints its code through safeError (docs/accounts.md).
+  let pool: pg.Pool | undefined;
   try {
+    if (
+      process.argv[2] !== "--apply" ||
+      !process.argv[3] ||
+      !process.env.AUTH_OWNER_DATABASE_URL
+    )
+      throw refusal(
+        "APPLY_ARGS_REQUIRED",
+        "explicit_owner_apply_and_private_output_required",
+      );
+    const output = resolve(process.argv[3]);
+    if (
+      output.startsWith(
+        resolve(new URL("../../../", import.meta.url).pathname) + "/",
+      )
+    )
+      throw refusal(
+        "OUTPUT_INSIDE_REPOSITORY",
+        "secret_output_must_be_outside_repository",
+      );
+    pool = new pg.Pool({
+      ...databaseOptions(process.env.AUTH_OWNER_DATABASE_URL),
+      max: 1,
+      statement_timeout: 10000,
+    });
     const client = await provisionFixedApp(pool, readConfig(process.env));
     writeFileSync(output, JSON.stringify(client) + "\n", {
       mode: 0o600,
@@ -99,6 +113,6 @@ if (import.meta.main) {
     console.error("auth_provision", safeError(error));
     process.exitCode = 1;
   } finally {
-    await pool.end();
+    await pool?.end();
   }
 }

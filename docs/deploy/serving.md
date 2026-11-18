@@ -10,20 +10,22 @@ covers:
 
 Rewritten in place by the release coordinator at every release, never appended to; the
 release's record goes in [history](../history.md). How to release and roll back:
-[releases](releases.md). As of 2026-11-18 18:54Z (after #152).
+[releases](releases.md). As of 2026-11-18 21:50Z (after #156 and #157).
 
 ## Services
 
-- **App, MCP, admission, daily check:** `milton-app-grants-62b3101`,
-  `milton-mcp-grants-62b3101`, `milton-admit-00020-b46` and job `milton-e2e-daily`, all on
-  image `sha256:d71dbee5971b08ef93f0024d1075e572fa01ad7349635db2231f76d49aa3e365` (#152,
-  `62b3101`: Connected AIs shows one row per AI with access per device; Cloud Run shows the
-  amd64 manifest digest `sha256:0d639451…`, not this index digest). Rollback, code only,
-  all four together: `milton-app-replaces-87ed9dc`, `milton-mcp-replaces-87ed9dc`,
-  `milton-admit-00019-25l` and the job to image
-  `sha256:14e0b206ae7f8a24fab267b71bd75a41dea172101bd9b64d1d95e73862eec51c` (#148,
-  `87ed9dc`), with no schema step: it runs on native 009 and lists each approval as its
-  own row. Below that, `milton-*-posted-15d93cf`, `milton-admit-00018-p7z` and image
+- **App, MCP, admission, daily check:** `milton-app-firstline-f9c7b32`,
+  `milton-mcp-firstline-f9c7b32`, `milton-admit-00021-46m` and job `milton-e2e-daily`, all
+  on image `sha256:cc7eb9ca54bb546430100ad883bc2c60231a320f55ceed19d107ed350139030f` (#156
+  and #157, `f9c7b32`: the read trigger is words the person will use as their own, and the
+  instructions' first line names get_report; Cloud Run shows the amd64 manifest digest
+  `sha256:e62382d6…`, not this index digest). Rollback, code only, all four together:
+  `milton-app-grants-62b3101`, `milton-mcp-grants-62b3101`, `milton-admit-00020-b46` and
+  the job to image `sha256:d71dbee5971b08ef93f0024d1075e572fa01ad7349635db2231f76d49aa3e365`
+  (#152, `62b3101`), with no schema step: served text only. Below that,
+  `milton-*-replaces-87ed9dc`, `milton-admit-00019-25l` and image
+  `sha256:14e0b206ae7f8a24fab267b71bd75a41dea172101bd9b64d1d95e73862eec51c` (#148), which
+  runs on native 009 and lists each approval as its own row. Below that, `milton-*-posted-15d93cf`, `milton-admit-00018-p7z` and image
   `sha256:a5d65650f52539a1dc1f39a3dcf4ee509a64159f845c4af7aa0fe00029636e99` (#139): AIs
   holding `create_memo`'s `replaces` get an invalid-input refusal on a replace until they
   reconnect. Below that, `milton-*-reqline-7c00dc2`,
@@ -44,10 +46,9 @@ release's record goes in [history](../history.md). How to release and roll back:
   `sha256:c0ca2a64…`). Rollback, code only, service and both jobs together:
   `milton-auth-00021-2gc` and image
   `sha256:d394050c2687a6872655b6075d1e3de9f4c2defe4a05353721dd0ea31ec0a832` (#102).
-- **Site:** Vercel production deployment of `87ed9dc`, published from main at #148's merge,
-  pushed after the services switched (the privacy page dated November 17, 2026, with the
-  replace sentence; the tools page's `replaces`). Rollback: Vercel's previous production
-  deployment.
+- **Site:** Vercel production deployment of main at `f9c7b32` (#157's merge; #156's tools
+  page and setup wording, published a few minutes before the services switched). Rollback:
+  Vercel's previous production deployment.
 - **Secrets:** app `milton-app-env` 4 / `milton-app-key` 2, MCP `milton-mcp-env` 4 /
   `milton-mcp-key` 2 and auth `milton-auth-env` 2 / `milton-auth-key` 1, as at the 2026-11-07
   cutover (no release since recorded a change; confirm before the next one); admission

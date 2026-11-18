@@ -86,15 +86,6 @@ sheet, report, AI) and plain text on security screens and anything an AI reads.
       them. Add a check constraint for both. It is a schema change: follow
       [migrations](docs/deploy/migrations.md), and check every stored request passes first.
 
-- [ ] #39 (server, low) **Run the save's change check after the access gate.**
-      `create_memo` diffs the first draft against the final (`checkMemo` in
-      `server/src/store/save.ts`, called from `server/src/store/compiled.ts`) before the
-      save reaches the trial gate and the account lock, so an account with no access can
-      still make the server do that work. The cost is bounded by `changeList`'s own limits
-      since #109 (worst case about 50 ms in its review), which is why this is low. Moving it changes which refusal such an account sees
-      first, and refusals today come before any database work
-      ([saves](docs/saves.md)): decide that order before building.
-
 - [ ] #40 (server, low) **Refuse a request that repeats the draft or final.** A memo keeps
       what the person typed to ask (#109), and the AI is asked to send only that. The server
       refuses mail-like lines and anything over 600 characters or 12 lines

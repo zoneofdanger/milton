@@ -223,10 +223,12 @@ test("an SDK client receives instructions, discovers the two tools, and reads th
     expect(fields(save.inputSchema).request_id).toMatchObject({
       type: "string",
       pattern: "^[A-Za-z0-9._:-]{1,64}$",
+      description:
+        "A new random id for each save, such as a UUID: up to 64 letters, digits, dots, dashes, underscores or colons, with no names, ticket numbers or words from the writing. Resend the same one only to recover an uncertain outcome.",
     });
     // What a memo may hold, and what it never holds (rule, sections 2 and 5).
     for (const field of [
-      "request_id: any new id for each save, up to 64 letters, digits, dots, dashes, underscores or colons; resend the same one only to recover an uncertain outcome.",
+      "request_id: a new random id for each save, such as a UUID, with no names or ticket numbers in it; resend the same one only to recover an uncertain outcome.",
       "save one when the person accepts a final.",
       "send first_draft_missing: true instead",
       "Milton works out the person's changes (their tweaks) from first_draft and final",

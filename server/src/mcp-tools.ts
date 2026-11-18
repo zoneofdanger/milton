@@ -177,7 +177,7 @@ export const saveMemoInput = z
       .string()
       .regex(REQUEST_ID)
       .describe(
-        "Any new id for each save, up to 64 letters, digits, dots, dashes, underscores or colons; resend the same one only to recover an uncertain outcome.",
+        "A new random id for each save, such as a UUID: up to 64 letters, digits, dots, dashes, underscores or colons, with no names, ticket numbers or words from the writing. Resend the same one only to recover an uncertain outcome.",
       ),
     memo: memoInput.optional(),
     forget_memos: z

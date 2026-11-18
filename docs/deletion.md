@@ -55,6 +55,9 @@ covers:
 
 ## Disconnecting an AI
 
+- Disconnect ends every approval the account holds for that AI client, on every machine
+  (an AI can hold up to 10, [accounts](accounts.md#the-auth-service)), and the Connected
+  AIs page offers one Disconnect per client.
 - The app persists a lifecycle UUID, the original account, subject, incarnation and
   client, and the requester association before the first native or remote attempt;
   retries never select current or recreated targets.

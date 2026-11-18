@@ -9,4 +9,5 @@ export const AUTH_MIGRATIONS = [
   "006-mail",
   "007-connection-key-status",
   "008-deletion-links",
+  "009-approvals-per-client",
 ];

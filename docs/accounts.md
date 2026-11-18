@@ -132,6 +132,17 @@ The app never handles passwords or native cookies.
   Read only; the person can still choose Read only. Read only reads memos as reports;
   Read and write also saves a memo when the person accepts a final and forgets one when
   they ask. Connection keys keep their own default ([Connection keys](#connection-keys)).
+- An account keeps up to 10 active approvals of one AI client (Peter, 2026-11-18, after
+  GitHub's 10 tokens per user and app): one client ID can stand for every install of an
+  AI (Claude Code's metadata document URL is the same on every machine), so approving it
+  on one machine no longer revokes its approval on another. An eleventh revokes the
+  oldest (earliest expiry, 30 days from its start) in the consent's own statement
+  (native 009; the approval being made is always kept). Another approval's consent
+  leaves a pending one of the same client to expire on its own clock. The cap of 256
+  bindings per account, in any state, is unchanged.
+- Access is per approval, so per machine: approving Read only on one machine leaves
+  another machine's Read and write as it was. To change an AI's access everywhere,
+  disconnect it ([deletion](deletion.md#disconnecting-an-ai)) and reconnect.
 
 ## Auth mail
 

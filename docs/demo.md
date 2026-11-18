@@ -43,6 +43,16 @@ prompt back, and the screen unchanged for three seconds, with a per-turn timeout
 dialog waiting for an answer stops the take instead of typing into it. The driver still
 supports Codex (`client: "codex"`); the standup clip does not use it.
 
+However a take ends (done, refused, an error or Ctrl-C), the driver stops what it
+launched, its tmux server and the pane's process tree, by pid: it hangs up the shell and
+client, so the recorder ends by itself and writes asciinema's exit event (`"x"`, which
+the player ignores), then sends SIGTERM and SIGKILL to anything still running, stops its
+tmux server, and refuses if any of them is left. `tmux kill-server` alone was not enough:
+asciinema survives it with its shell and client, and on 2026-11-18 nineteen recorders
+from earlier takes were still running, one appending Claude Code's idle redraws to a
+finished take for 7 hours. The driver scans a take only once the cast has stopped
+changing.
+
 ## Needs
 
 - `asciinema` 3 and `tmux`.
@@ -68,11 +78,13 @@ bun scripts/demo/record.ts record scripts/demo/scenes/standup-day-2.json <out>/d
 bun scripts/demo/record.ts scan <out>/day-2.cast
 ```
 
-`warmup` leaves the scene's shell running unrecorded; attach, start the client and clear
-first-run dialogs (folder trust, browser tools, renderer offers), then exit. `check` runs
-a take's guards (below) and launches nothing. `record` runs the guards, launches the
-client unrecorded (see Banner below), then records and writes the `.cast`, a
-`.cast.timeline.json` of when each line was typed and answered, and then scans the cast.
+`warmup` runs the scene's shell unrecorded and waits; attach, start the client, clear
+first-run dialogs (folder trust, browser tools, renderer offers), then exit the client and
+the shell, or press Ctrl-C at the driver. Either way it stops and checks what it launched,
+as for a take. `check` runs a take's guards (below) and launches nothing. `record` runs
+the guards, launches the client unrecorded (see Banner below), then records and writes
+the `.cast`, a `.cast.timeline.json` of when each line was typed and answered, and then
+scans the cast.
 Keep recordings outside the repository.
 
 Empty the test account before Day 1 (Delete all memos, in [deletion](deletion.md)), never

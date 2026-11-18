@@ -275,7 +275,8 @@ measured per client before any claim of reliability.
 - Before writing or editing for or as the person, read `get_report` with an intent.
   Writing for the person includes text the AI posts or sends in their name through
   another tool (a ticket update, a PR comment, a chat message); a read-only connection
-  is told this too.
+  is told this too. The instructions' first line says it as well, for clients that show
+  only that line ([mcp](mcp.md#served-text)).
 - Precedence when guidance disagrees: what the person says now, then the examples.
   Imitate examples' wording and heed what they changed.
 - When the person says what to write (read-write connection), their words are the raw

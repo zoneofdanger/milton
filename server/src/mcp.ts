@@ -38,7 +38,7 @@ const REMEMBER =
   "When the person asks you to remember a preference, apply it now and keep it in your own memory or instructions; Milton keeps no standing rules, and their changes to your drafts are kept as tweaks.";
 
 export const storeInstructions = [
-  "Milton holds the person's writing as memos. A memo is your first draft and the final they accepted; its tweaks are the changes they made you make, which Milton works out from the two.",
+  "Milton holds the person's writing as memos. Before you write or edit anything for the person, call get_report first. A memo is your first draft and the final they accepted; its tweaks are the changes they made you make, which Milton works out from the two.",
   "If Milton connects mid-conversation, follow this from then on: drafts under way included, and save finals they already approved this conversation if you still have each final verbatim (send first_draft_missing when the first draft isn't).",
   "Writing for the person includes text you post or send in their name through another tool (a ticket update, a PR comment, a chat message). Before writing or editing for or as the person: get_report with intent (one-line situation, medium, audience, purpose; kind_id when known). When they disagree, follow what the person says now, then the examples; imitate examples' wording and heed what they changed. An empty report means nothing similar yet: write from the request, and never claim to know their voice.",
   "When they tell you what to write, their words are the raw material: reuse their phrases word for word where they fit, add only a greeting, a sign-off and connecting words in the manner of their examples, and don't expand on what they said.",

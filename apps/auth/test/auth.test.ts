@@ -2,15 +2,24 @@ import { describe, expect, spyOn, test } from "bun:test";
 import { validPassword } from "../src/password.ts";
 import { readConfig, safeError } from "../src/config.ts";
 import { REFUSAL_CODES, refusal } from "../src/refusal.ts";
-import { insideRepository } from "../scripts/provision.ts";
+import {
+  ownerOutputDir,
+  releaseOutput,
+  reserveOutput,
+  type Reservation,
+} from "../scripts/provision.ts";
 import {
   existsSync,
+  chmodSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -1909,6 +1918,7 @@ describe("owner script refusals", () => {
     ).toBe("DATABASE_TLS_REQUIRED");
   });
   test("each script prints its refusal code before any database work", () => {
+    const outDir = mkdtempSync(join(tmpdir(), "milton-owner-out-"));
     const run = (script: string, args: string[], url?: string) => {
       const r = Bun.spawnSync(
         [
@@ -1921,6 +1931,7 @@ describe("owner script refusals", () => {
           env: {
             PATH: process.env.PATH,
             HOME: process.env.HOME,
+            MILTON_OWNER_OUTPUT_DIR: outDir,
             ...(url ? { AUTH_OWNER_DATABASE_URL: url } : {}),
           },
           stdout: "pipe",
@@ -1936,104 +1947,142 @@ describe("owner script refusals", () => {
         : script === "maintain.ts"
           ? "auth_maintenance"
           : "auth_migration";
-    for (const [script, args] of [
-      ["provision.ts", ["--apply", join(tmpdir(), "milton-unused.json")]],
-      ["maintain.ts", ["--apply"]],
-      ["migrate.ts", ["up", "--apply"]],
-    ] as const) {
-      // Arguments without the owner URL, then the URL without the arguments.
-      for (const r of [run(script, [...args]), run(script, [], url)]) {
-        expect(r.exit).toBe(1);
-        expect(r.stderr).toMatch(
-          new RegExp(label(script) + ".*APPLY_ARGS_REQUIRED"),
+    try {
+      for (const [script, args] of [
+        ["provision.ts", ["--apply", join(outDir, "app.json")]],
+        ["maintain.ts", ["--apply"]],
+        ["migrate.ts", ["up", "--apply"]],
+      ] as const) {
+        // Arguments without the owner URL, then the URL without the arguments.
+        for (const r of [run(script, [...args]), run(script, [], url)]) {
+          expect(r.exit).toBe(1);
+          expect(r.stderr).toMatch(
+            new RegExp(label(script) + ".*APPLY_ARGS_REQUIRED"),
+          );
+        }
+        const tls = run(script, [...args], url + "?sslmode=disable");
+        expect(tls.exit).toBe(1);
+        expect(tls.stderr).toMatch(
+          new RegExp(label(script) + ".*DATABASE_TLS_REQUIRED"),
         );
+        expect(tls.stderr).not.toContain("fixture.invalid");
       }
-      const tls = run(script, [...args], url + "?sslmode=disable");
-      expect(tls.exit).toBe(1);
-      expect(tls.stderr).toMatch(
-        new RegExp(label(script) + ".*DATABASE_TLS_REQUIRED"),
+      // A refusal after the reservation removes it: here the configuration.
+      const config = run(
+        "provision.ts",
+        ["--apply", join(outDir, "app.json")],
+        url,
       );
-      expect(tls.stderr).not.toContain("fixture.invalid");
+      expect(config.exit).toBe(1);
+      expect(config.stderr).toMatch(/auth_provision.*AUTH_CONFIG_INVALID/);
+      expect(readdirSync(outDir)).toEqual([]);
+      const inside = run(
+        "provision.ts",
+        ["--apply", join(root, "milton-unused.json")],
+        url,
+      );
+      expect(inside.exit).toBe(1);
+      expect(inside.stderr).toMatch(/auth_provision.*OUTPUT_PATH_NOT_ALLOWED/);
+      expect(existsSync(join(root, "milton-unused.json"))).toBe(false);
+    } finally {
+      rmSync(outDir, { recursive: true, force: true });
     }
-    const inside = run(
-      "provision.ts",
-      ["--apply", join(root, "milton-unused.json")],
-      url,
-    );
-    expect(inside.exit).toBe(1);
-    expect(inside.stderr).toMatch(/auth_provision.*OUTPUT_INSIDE_REPOSITORY/);
-    expect(existsSync(join(root, "milton-unused.json"))).toBe(false);
   });
-  test("secret output is refused anywhere in the repository, worktrees included", () => {
-    const base = realpathSync(mkdtempSync(join(tmpdir(), "milton-repo-")));
-    const git = (dir: string, ...args: string[]) => {
-      const r = Bun.spawnSync(["git", "-C", dir, ...args], {
-        env: { PATH: process.env.PATH, HOME: process.env.HOME },
-      });
-      if (r.exitCode !== 0) throw new Error(r.stderr.toString());
+  test("the secret goes only to a new file directly in the private output directory", () => {
+    const base = realpathSync.native(
+      mkdtempSync(join(tmpdir(), "milton-owner-")),
+    );
+    const refusedWith = (run: () => unknown) => {
+      try {
+        const r = run() as Reservation;
+        releaseOutput(r);
+        return "reserved";
+      } catch (error) {
+        return safeError(error).code;
+      }
     };
     try {
-      const main = join(base, "main");
-      const other = join(base, "other");
-      mkdirSync(main);
-      mkdirSync(other);
-      for (const repo of [main, other]) {
-        git(repo, "init", "-q");
-        git(
-          repo,
-          "-c",
-          "user.name=Fixture",
-          "-c",
-          "user.email=fixture@example.invalid",
-          "commit",
-          "-q",
-          "--allow-empty",
-          "-m",
-          "fixture",
+      const dir = join(base, "Keys");
+      mkdirSync(dir, { mode: 0o700 });
+      expect(ownerOutputDir({ MILTON_OWNER_OUTPUT_DIR: dir })).toBe(dir);
+      expect(ownerOutputDir({ HOME: "/fixture" })).toMatch(/\/keys$/);
+      // The reservation is an empty 0600 file, there before any client.
+      const r = reserveOutput(join(dir, "app.json"), dir);
+      const made = statSync(join(dir, "app.json"));
+      expect([made.size, made.mode & 0o777]).toEqual([0, 0o600]);
+      releaseOutput(r);
+      expect(readdirSync(dir)).toEqual([]);
+      // Refused: the name exists, as a file or a symlink.
+      writeFileSync(join(dir, "taken.json"), "");
+      symlinkSync(join(base, "elsewhere.json"), join(dir, "link.json"));
+      expect(
+        refusedWith(() => reserveOutput(join(dir, "taken.json"), dir)),
+      ).toBe("OUTPUT_EXISTS");
+      expect(
+        refusedWith(() => reserveOutput(join(dir, "link.json"), dir)),
+      ).toBe("OUTPUT_EXISTS");
+      expect(existsSync(join(base, "elsewhere.json"))).toBe(false);
+      // Refused: not directly inside the directory.
+      mkdirSync(join(dir, "sub"), { mode: 0o700 });
+      for (const path of [
+        join(dir, "sub", "app.json"),
+        join(base, "app.json"),
+        join(dir, "missing", "app.json"),
+        dir,
+      ])
+        expect(refusedWith(() => reserveOutput(path, dir))).toBe(
+          "OUTPUT_PATH_NOT_ALLOWED",
+        );
+      // A case alias names the directory itself where the file system folds
+      // case (macOS); elsewhere it is another, missing directory.
+      const alias = join(base, "KEYS", "case.json");
+      expect(refusedWith(() => reserveOutput(alias, dir))).toBe(
+        existsSync(join(base, "KEYS")) ? "reserved" : "OUTPUT_PATH_NOT_ALLOWED",
+      );
+      // A symlinked parent reaches the real directory, and writes there.
+      symlinkSync(dir, join(base, "via"));
+      const via = reserveOutput(join(base, "via", "via.json"), dir);
+      expect(via.path).toBe(join(dir, "via.json"));
+      releaseOutput(via);
+      // Refused: the directory is a symlink, missing, open to others, not
+      // owned by this user, or not a directory.
+      expect(
+        refusedWith(() =>
+          reserveOutput(join(base, "via", "x.json"), join(base, "via")),
+        ),
+      ).toBe("OUTPUT_DIR_UNSAFE");
+      expect(
+        refusedWith(() =>
+          reserveOutput(join(base, "none", "x.json"), join(base, "none")),
+        ),
+      ).toBe("OUTPUT_DIR_UNSAFE");
+      for (const mode of [0o750, 0o701, 0o710, 0o755]) {
+        chmodSync(dir, mode);
+        expect(refusedWith(() => reserveOutput(join(dir, "x.json"), dir))).toBe(
+          "OUTPUT_DIR_UNSAFE",
         );
       }
-      const linked = join(base, "linked");
-      const nested = join(main, ".worktrees", "nested");
-      git(main, "worktree", "add", "-q", "-b", "linked", linked);
-      git(main, "worktree", "add", "-q", "-b", "nested", nested);
-      symlinkSync(main, join(base, "link"));
-      mkdirSync(join(base, "main-secrets"));
-      // A path git ignores and a repository nested in the main checkout.
-      mkdirSync(join(main, "ignored", "inner"), { recursive: true });
-      git(join(main, "ignored", "inner"), "init", "-q");
-      const refused = [
-        main,
-        linked,
-        nested,
-        join(main, ".git"),
-        join(main, "ignored", "inner"),
-        join(base, "link"),
-      ];
-      const allowed = [base, other, join(base, "main-secrets")];
-      let seed = 27;
-      const random = () => (seed = (seed * 1103515245 + 12345) % 2 ** 31);
-      const name = () =>
-        ["a", "b", "x.json", "deep", ".hidden", "new-dir"][random() % 6]!;
-      for (const checkout of [main, linked, nested])
-        for (let n = 0; n < 12; n++) {
-          const segments = Array.from({ length: 1 + (random() % 3) }, name);
-          for (const [roots, expected] of [
-            [refused, true],
-            [allowed, false],
-          ] as const) {
-            const at = roots[random() % roots.length]!;
-            if (random() % 2)
-              mkdirSync(join(at, ...segments.slice(0, -1)), {
-                recursive: true,
-              });
-            const output = join(at, ...segments);
-            expect([
-              checkout,
-              output,
-              insideRepository(output, checkout),
-            ]).toEqual([checkout, output, expected]);
-          }
-        }
+      chmodSync(dir, 0o700);
+      // Another owner cannot be made without root; the check compares the
+      // directory's owner with the uid it is given.
+      expect(
+        refusedWith(() =>
+          reserveOutput(join(dir, "x.json"), dir, process.getuid!() + 1),
+        ),
+      ).toBe("OUTPUT_DIR_UNSAFE");
+      expect(
+        refusedWith(() =>
+          reserveOutput(
+            join(dir, "taken.json", "x.json"),
+            join(dir, "taken.json"),
+          ),
+        ),
+      ).toBe("OUTPUT_DIR_UNSAFE");
+      expect(readdirSync(dir).sort()).toEqual([
+        "link.json",
+        "sub",
+        "taken.json",
+      ]);
     } finally {
       rmSync(base, { recursive: true, force: true });
     }

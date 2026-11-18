@@ -7,6 +7,7 @@ import {
   mkdirSync,
   readdirSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -443,15 +444,65 @@ try {
       "owner refusals print their codes: not the owner, and a lost provisioning race promotes nothing",
     );
   }
-  const client = await provisionFixedApp(p.owner, config);
+  let client: { AUTH_APP_CLIENT_ID: string; AUTH_APP_CLIENT_SECRET: string };
+  {
+    // The real provisioner, as an owner runs it: the secret lands in a new
+    // 0600 file in the private output directory; a second run refuses and
+    // leaves no file behind (docs/accounts.md).
+    const outDir = mkdtempSync(join(tmpdir(), "milton-owner-out-"));
+    const o = p.configs.owner!;
+    const ownerUrl = new URL(`postgresql://127.0.0.1:${o.port}/${o.database}`);
+    ownerUrl.username = String(o.user);
+    ownerUrl.password = String(o.password);
+    ownerUrl.searchParams.set("options", "-c role=milton_auth_owner");
+    const provision = (name: string) =>
+      new Promise<{ exit: number | null; stderr: string }>((resolve) => {
+        let stderr = "";
+        const child = spawn(
+          process.execPath,
+          [
+            "--experimental-strip-types",
+            new URL("./provision.ts", import.meta.url).pathname,
+            "--apply",
+            join(outDir, name),
+          ],
+          {
+            env: {
+              ...Object.fromEntries(
+                Object.entries(config)
+                  .filter(([, v]) => v !== undefined)
+                  .map(([k, v]) => [k, String(v)]),
+              ),
+              PATH: process.env.PATH,
+              LC_ALL: "C",
+              NODE_EXTRA_CA_CERTS: p.caPath,
+              AUTH_OWNER_DATABASE_URL: ownerUrl.href,
+              MILTON_OWNER_OUTPUT_DIR: outDir,
+            },
+            stdio: ["ignore", "ignore", "pipe"],
+          },
+        );
+        child.stderr.on("data", (d) => (stderr += d));
+        child.on("exit", (exit) => resolve({ exit, stderr }));
+      });
+    try {
+      const first = await provision("app.json");
+      assert.equal(first.exit, 0, first.stderr);
+      assert.equal(statSync(join(outDir, "app.json")).mode & 0o777, 0o600);
+      client = JSON.parse(readFileSync(join(outDir, "app.json"), "utf8"));
+      assert(client.AUTH_APP_CLIENT_ID && client.AUTH_APP_CLIENT_SECRET);
+      const again = await provision("again.json");
+      assert.equal(again.exit, 1);
+      assert.match(again.stderr, /auth_provision.*APP_ALREADY_PROVISIONED/);
+      assert.deepEqual(readdirSync(outDir), ["app.json"]);
+    } finally {
+      rmSync(outDir, { recursive: true, force: true });
+    }
+    group(
+      "the provisioner writes its secret to a reserved private file, and a refused run leaves none",
+    );
+  }
   config.AUTH_APP_CLIENT_ID = client.AUTH_APP_CLIENT_ID;
-  assert.equal(
-    await provisionFixedApp(p.owner, config).then(
-      () => "none",
-      (error: unknown) => safeError(error).code,
-    ),
-    "APP_ALREADY_PROVISIONED",
-  );
   const service = createProvider(config, { pool: authPool, boundaries });
   let cookie = "";
   const cookies = new Map<string, string>();

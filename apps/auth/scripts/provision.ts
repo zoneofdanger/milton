@@ -1,8 +1,18 @@
 import { databaseOptions } from "../src/database.ts";
-import { spawnSync } from "node:child_process";
-import { existsSync, realpathSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  fsyncSync,
+  lstatSync,
+  openSync,
+  realpathSync,
+  unlinkSync,
+  writeSync,
+  type Stats,
+} from "node:fs";
+import { homedir } from "node:os";
+import { basename, dirname, join, resolve } from "node:path";
 import pg from "pg";
 import { createProvider } from "../src/provider.ts";
 import {
@@ -13,54 +23,96 @@ import {
 } from "../src/config.ts";
 import { refusal } from "../src/refusal.ts";
 
-// Git run in `dir` with no inherited environment: no owner URL reaches it, and
-// no GIT_DIR or GIT_WORK_TREE points it at another repository.
-function git(dir: string, ...args: string[]) {
-  const r = spawnSync("git", ["-C", dir, ...args], {
-    encoding: "utf8",
-    env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "" },
-    stdio: ["ignore", "pipe", "ignore"],
-  });
-  return r.status === 0 ? r.stdout : undefined;
-}
-const real = (path: string) => {
-  try {
-    return realpathSync(path);
-  } catch {
-    return path;
-  }
-};
-const commonDir = (dir: string) => {
-  const found = git(
-    dir,
-    "rev-parse",
-    "--path-format=absolute",
-    "--git-common-dir",
-  )?.trim();
-  return found ? real(found) : undefined;
-};
+/** The one directory the app secret may be written to: MILTON_OWNER_OUTPUT_DIR,
+ * or ~/keys. An allowlist, not a list of places to avoid (milton-duo, PR #161). */
+export const ownerOutputDir = (env: NodeJS.ProcessEnv) =>
+  resolve(env.MILTON_OWNER_OUTPUT_DIR || join(homedir(), "keys"));
 
-/** Whether a secret written to `output` (absolute) would land in the
- * repository holding `checkout`: under `checkout` itself, under the main
- * checkout or any worktree `git worktree list` names, or anywhere git places
- * in the same repository (its .git directory, a symlinked path). Git is asked
- * about the nearest directory of `output` that exists, symlinks resolved.
- * Without git only the `checkout` prefix check applies. */
-export function insideRepository(output: string, checkout: string) {
-  if (output.startsWith(checkout + "/")) return true;
-  const common = commonDir(checkout);
-  if (!common) return false;
-  let dir = dirname(output);
-  while (!existsSync(dir)) dir = dirname(dir);
-  dir = real(dir);
-  const trees = (git(checkout, "worktree", "list", "--porcelain", "-z") ?? "")
-    .split("\0")
-    .filter((line) => line.startsWith("worktree "))
-    .map((line) => real(line.slice("worktree ".length)));
-  return (
-    trees.some((tree) => dir === tree || dir.startsWith(tree + "/")) ||
-    commonDir(dir) === common
+export type Reservation = { fd: number; path: string; ino: number };
+
+/** Creates the empty output file before any database work, or refuses. The
+ * output must be a plain file name directly inside `dir`, which must be a real
+ * directory (not a symlink) owned by `uid` with no group or other permission
+ * bits. The file is created new (O_EXCL, O_NOFOLLOW, mode 0600) at the
+ * directory's real path, then checked through its descriptor: a regular file
+ * with one link, on the directory's device, still the entry at that path. */
+export function reserveOutput(
+  given: string,
+  dir: string,
+  uid = process.getuid!(),
+): Reservation {
+  let checked: Stats;
+  try {
+    checked = lstatSync(dir);
+  } catch {
+    throw unsafeDir();
+  }
+  if (
+    !checked.isDirectory() ||
+    checked.uid !== uid ||
+    (checked.mode & 0o077) !== 0
+  )
+    throw unsafeDir();
+  const allowed = realpathSync.native(dir);
+  const target = resolve(given);
+  const name = basename(target);
+  let parent: string | undefined;
+  try {
+    parent = realpathSync.native(dirname(target));
+  } catch {}
+  if (!name || parent !== allowed)
+    throw refusal("OUTPUT_PATH_NOT_ALLOWED", "owner_output_path_not_allowed");
+  const path = join(allowed, name);
+  let fd: number;
+  try {
+    fd = openSync(
+      path,
+      constants.O_WRONLY |
+        constants.O_CREAT |
+        constants.O_EXCL |
+        constants.O_NOFOLLOW,
+      0o600,
+    );
+  } catch (error) {
+    if (["EEXIST", "ELOOP"].includes((error as { code?: string }).code ?? ""))
+      throw refusal("OUTPUT_EXISTS", "owner_output_exists");
+    throw error;
+  }
+  const file = fstatSync(fd);
+  const reservation = { fd, path, ino: file.ino };
+  const now = lstatSync(allowed);
+  if (
+    !file.isFile() ||
+    file.nlink !== 1 ||
+    (file.mode & 0o077) !== 0 ||
+    file.dev !== checked.dev ||
+    now.dev !== checked.dev ||
+    now.ino !== checked.ino ||
+    lstatSync(path).ino !== file.ino
+  ) {
+    releaseOutput(reservation);
+    throw refusal(
+      "OUTPUT_RESERVATION_CHANGED",
+      "owner_output_reservation_changed",
+    );
+  }
+  return reservation;
+}
+const unsafeDir = () =>
+  refusal(
+    "OUTPUT_DIR_UNSAFE",
+    "owner_output_dir_unsafe: make it a real directory you own and chmod 700 it",
   );
+
+/** Closes the reservation and removes it if it is still the file created. */
+export function releaseOutput(reservation: Reservation) {
+  try {
+    closeSync(reservation.fd);
+  } catch {}
+  try {
+    if (lstatSync(reservation.path).ino === reservation.ino)
+      unlinkSync(reservation.path);
+  } catch {}
 }
 
 // Owner-only preparation. Native anonymous registration creates/hashes a secret;
@@ -130,6 +182,8 @@ export async function provisionFixedApp(pool: pg.Pool, config: Config) {
 if (import.meta.main) {
   // Every refusal prints its code through safeError (docs/accounts.md).
   let pool: pg.Pool | undefined;
+  let output: Reservation | undefined;
+  let writing = false;
   try {
     if (
       process.argv[2] !== "--apply" ||
@@ -140,29 +194,29 @@ if (import.meta.main) {
         "APPLY_ARGS_REQUIRED",
         "explicit_owner_apply_and_private_output_required",
       );
-    const output = resolve(process.argv[3]);
-    if (
-      insideRepository(
-        output,
-        resolve(fileURLToPath(new URL("../../../", import.meta.url))),
-      )
-    )
-      throw refusal(
-        "OUTPUT_INSIDE_REPOSITORY",
-        "secret_output_must_be_outside_repository",
-      );
+    // Reserved before any database work, so a refusal here costs no client
+    // and a client is never created without somewhere to put its secret.
+    output = reserveOutput(process.argv[3], ownerOutputDir(process.env));
     pool = new pg.Pool({
       ...databaseOptions(process.env.AUTH_OWNER_DATABASE_URL),
       max: 1,
       statement_timeout: 10000,
     });
     const client = await provisionFixedApp(pool, readConfig(process.env));
-    writeFileSync(output, JSON.stringify(client) + "\n", {
-      mode: 0o600,
-      flag: "wx",
-    });
+    // From here the client exists: keep the file whatever happens.
+    writing = true;
+    const bytes = Buffer.from(JSON.stringify(client) + "\n");
+    for (let at = 0; at < bytes.length;) at += writeSync(output.fd, bytes, at);
+    fsyncSync(output.fd);
+    closeSync(output.fd);
+    output = undefined;
     console.log("Native fixed client written to private owner output.");
   } catch (error) {
+    if (output && !writing) releaseOutput(output);
+    else if (output)
+      try {
+        closeSync(output.fd);
+      } catch {}
     console.error("auth_provision", safeError(error));
     process.exitCode = 1;
   } finally {

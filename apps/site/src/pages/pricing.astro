@@ -1,4 +1,5 @@
 ---
+import { BILLING_EMAIL } from "@milton/theme/facts";
 import SiteLayout from "../layouts/SiteLayout.astro";
 
 const loginUrl = "https://app.meetmilton.com/login";
@@ -31,6 +32,10 @@ const loginUrl = "https://app.meetmilton.com/login";
         <div>
           <p>No credit card required to start.</p>
           <p class="small-note">You’re charged only if you add a card.</p>
+          <p class="small-note">
+            Billing questions:{" "}
+            <a href={`mailto:${BILLING_EMAIL}`}>{BILLING_EMAIL}</a>.
+          </p>
         </div>
         <a class="button" href={loginUrl}>
           Try Milton free <span aria-hidden="true">↗</span>
@@ -60,6 +65,13 @@ const loginUrl = "https://app.meetmilton.com/login";
           You can cancel at any time; cancellation takes effect at the end of
           the current billing period.{" "}
           <a href="/terms">Payment and refund terms.</a>
+        </p>
+      </details>
+      <details>
+        <summary>Who do I ask about a charge?</summary>
+        <p>
+          Email <a href={`mailto:${BILLING_EMAIL}`}>{BILLING_EMAIL}</a>. A
+          person reads it.
         </p>
       </details>
       <details>

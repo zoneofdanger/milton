@@ -1201,6 +1201,7 @@ try {
       );
     await reset();
     const scope = "openid offline_access milton:read";
+    const writeScope = scope + " milton:write";
     const mcp = "https://mcp.meetmilton.com/mcp";
     const registered: (typeof assistant)[] = [];
     for (const name of ["shared", "other"]) {
@@ -1208,16 +1209,16 @@ try {
         client_name: "Fictional approvals assistant " + name,
         redirect_uris: ["https://assistant.example.invalid/callback"],
         token_endpoint_auth_method: "client_secret_post",
-        scope,
+        scope: writeScope,
         grant_types: ["authorization_code", "refresh_token"],
       });
       assert.equal(r.status, 201);
       registered.push((await r.json()) as typeof assistant);
     }
     const [shared, other] = registered as [typeof assistant, typeof assistant];
+    const secretWord = "Fictional approvals binding password";
     const signUp = async (address: string) => {
       await reset();
-      const secretWord = "Fictional approvals binding password";
       await call("/sign-up/email", {
         email: address,
         password: secretWord,
@@ -1237,13 +1238,13 @@ try {
     };
     // An authorize left at the consent screen (its binding pending), and its
     // accept and code exchange.
-    const begin = async (c: typeof assistant) => {
+    const begin = async (c: typeof assistant, chosen = scope) => {
       const verifier = secret();
       const q = new URLSearchParams({
         client_id: c.client_id,
         redirect_uri: "https://assistant.example.invalid/callback",
         response_type: "code",
-        scope,
+        scope: chosen,
         code_challenge: createHash("sha256")
           .update(verifier)
           .digest("base64url"),
@@ -1255,16 +1256,17 @@ try {
       const r = await call("/oauth2/authorize?" + q.toString());
       const target = new URL(r.headers.get("location")!, AUTH_ORIGIN);
       assert.equal(target.pathname, "/consent");
-      return { c, verifier, target };
+      return { c, verifier, target, chosen };
     };
     const accept = async ({
       c,
       verifier,
       target,
+      chosen: chosenScope,
     }: Awaited<ReturnType<typeof begin>>) => {
       const chosen = await call("/oauth2/consent", {
         accept: true,
-        scope,
+        scope: chosenScope,
         oauth_query: target.searchParams.toString(),
       });
       assert.equal(chosen.status, 200);
@@ -1305,7 +1307,11 @@ try {
           authorization: "Bearer " + accessToken,
         })
       ).status;
-    const refresh = (c: typeof assistant, refreshToken: string) =>
+    const refresh = (
+      c: typeof assistant,
+      refreshToken: string,
+      extra: Record<string, string> = {},
+    ) =>
       service.handler(
         new Request(ISSUER + "/oauth2/token", {
           method: "POST",
@@ -1316,6 +1322,7 @@ try {
             client_secret: c.client_secret,
             refresh_token: refreshToken,
             resource: mcp,
+            ...extra,
           }),
         }),
         TEST_PEER,
@@ -1419,13 +1426,188 @@ try {
       if (r.rows[0].progress === "complete") break;
       if (n === 63) throw new Error("bounded_cleanup_did_not_finish");
     }
+    group(
+      "several approvals per account and client: up to 10 stay active, the oldest goes first, pending ones survive, a disconnect ends them all",
+    );
+    // Mixed access, a refresh replay and a security change, on a fresh
+    // account. Under 008 each later consent revoked the earlier approval.
+    await call("/sign-out", {});
+    await signUp("approvals-cases@example.com");
+    const readWrite = await accept(await begin(shared, writeScope));
+    const readOnly = await approve(shared);
+    const caseSubject = String(decodeJwt(readWrite.access_token).sub);
+    const live = async (binding: string, scopes = ["milton:read"]) =>
+      (
+        await mcpPool.query(
+          "select milton_guard.binding_status($1,$2,$3,$4,$5) as binding",
+          [binding, caseSubject, shared.client_id, scopes, [mcp]],
+        )
+      ).rows[0].binding !== null;
+    // (b) A Read only approval leaves another machine's Read and write, and
+    // its own refresh cannot gain milton:write.
+    assert.deepEqual(
+      [
+        await live(readWrite.binding, ["milton:read", "milton:write"]),
+        await live(readOnly.binding),
+        await live(readOnly.binding, ["milton:read", "milton:write"]),
+      ],
+      [true, true, false],
+      "Read only and Read and write approvals of one client coexist",
+    );
+    const widened = await refresh(shared, readOnly.refresh_token!, {
+      scope: writeScope,
+    });
+    assert.deepEqual(
+      [widened.status, ((await widened.json()) as { error?: string }).error],
+      [400, "invalid_scope"],
+      "a Read only approval's refresh cannot gain milton:write",
+    );
+    assert.equal(await live(readOnly.binding), true);
+    // (c) A replayed refresh token retires its own approval only.
+    assert.deepEqual(await states([readWrite.binding, readOnly.binding]), [
+      "active",
+      "active",
+    ]);
+    const rotated = await refresh(shared, readWrite.refresh_token!);
+    assert.equal(rotated.status, 200);
+    const replayed = await refresh(shared, readWrite.refresh_token!);
+    assert.notEqual(
+      replayed.status,
+      200,
+      "a replayed refresh token is refused",
+    );
+    assert.deepEqual(
+      await states([readWrite.binding, readOnly.binding]),
+      ["revoked", "active"],
+      "a replay retires only its own approval",
+    );
+    const readOnlyRefreshed = await refresh(shared, readOnly.refresh_token!);
+    assert.equal(readOnlyRefreshed.status, 200, "the other approval refreshes");
+    Object.assign(readOnly, await readOnlyRefreshed.json());
+    // (d) A security-generation change ends every approval of the client.
+    const another = await approve(shared);
+    assert.deepEqual(
+      [await live(readOnly.binding), await live(another.binding)],
+      [true, true],
+    );
+    assert.equal(
+      (
+        await call("/change-password", {
+          currentPassword: secretWord,
+          newPassword: "Fictional approvals changed password",
+        })
+      ).status,
+      200,
+    );
+    for (const a of [readOnly, another]) {
+      assert.equal(await live(a.binding), false, "a security change ends it");
+      assert.equal(await userInfoStatus(a.access_token), 401);
+      assert.notEqual((await refresh(shared, a.refresh_token!)).status, 200);
+    }
+    // (a) Two consents of one client at once, on two connections, with nine
+    // approvals active and every expiry tied: the second waits for the first
+    // (the account row lock), and exactly the smallest reference other than
+    // the second's own is revoked, leaving 10 active.
+    await call("/sign-out", {});
+    await signUp("approvals-concurrent@example.com");
+    await reset();
+    const nine: string[] = [];
+    while (nine.length < 9) nine.push((await approve(shared)).binding);
+    const concurrentSubject = String(
+      (
+        await p.owner.query(
+          "select origin_user from milton_guard.authorization_binding where reference=$1",
+          [nine[0]],
+        )
+      ).rows[0].origin_user,
+    );
+    await begin(shared);
+    await begin(shared);
+    const [firstRef, secondRef] = (
+      await p.owner.query<{ reference: string }>(
+        "select reference from milton_guard.authorization_binding where origin_user=$1 and client_id=$2 and state='pending' order by reference",
+        [concurrentSubject, shared.client_id],
+      )
+    ).rows.map((r) => r.reference) as [string, string];
+    assert(firstRef && secondRef);
+    await p.owner.query(
+      "update milton_guard.authorization_binding set expires_at=date_trunc('second',now())+interval '30 days' where origin_user=$1 and client_id=$2",
+      [concurrentSubject, shared.client_id],
+    );
+    const evicted = (
+      await p.owner.query<{ reference: string }>(
+        "select reference from unnest($1::text[]) reference order by reference limit 1",
+        [[...nine, firstRef]],
+      )
+    ).rows[0]!.reference;
+    // Two owner connections of their own (p.owner holds one), watched by
+    // the cluster's superuser, who alone sees the owner sessions' waits.
+    const racers = new pg.Pool({ ...p.configs.owner, max: 2 });
+    const watcher = new pg.Pool({
+      host: "127.0.0.1",
+      port: p.configs.owner!.port,
+      user: "disposable_cluster",
+      database: p.configs.owner!.database,
+      max: 1,
+    });
+    pools.push(racers, watcher);
+    const one = await racers.connect(),
+      two = await racers.connect();
+    try {
+      const consent = (connection: pg.PoolClient, reference: string) =>
+        connection.query(
+          `insert into milton_auth."oauthConsent"(id,"clientId","userId","referenceId",resources,scopes,"createdAt","updatedAt") values($1,$2,$3,$4,$5::jsonb,$6::jsonb,now(),now())`,
+          [
+            randomUUID(),
+            shared.client_id,
+            concurrentSubject,
+            reference,
+            JSON.stringify([mcp]),
+            JSON.stringify(scope.split(" ")),
+          ],
+        );
+      const twoPid = (await two.query("select pg_backend_pid() as pid")).rows[0]
+        .pid;
+      await one.query("begin");
+      await two.query("begin");
+      await consent(one, firstRef);
+      const second = consent(two, secondRef);
+      let waited = false;
+      for (let n = 0; n < 400 && !waited; n++) {
+        waited =
+          (
+            await watcher.query(
+              "select count(*)::int n from pg_stat_activity where pid=$1 and wait_event_type='Lock'",
+              [twoPid],
+            )
+          ).rows[0].n === 1;
+        if (!waited) await new Promise((r) => setTimeout(r, 25));
+      }
+      assert(waited, "the second consent waits for the first");
+      await one.query("commit");
+      await second;
+      await two.query("commit");
+    } catch (error) {
+      await one.query("rollback").catch(() => {});
+      await two.query("rollback").catch(() => {});
+      throw error;
+    } finally {
+      one.release();
+      two.release();
+    }
+    const all = [...nine, firstRef, secondRef];
+    assert.deepEqual(
+      await states(all),
+      all.map((r) => (r === evicted ? "revoked" : "active")),
+      "two concurrent consents leave exactly 10 active, the tied oldest by reference revoked",
+    );
     await call("/sign-out", {});
     cookies.clear();
     for (const [k, v] of jar) cookies.set(k, v);
     cookie = jarHeader;
   }
   group(
-    "several approvals per account and client: up to 10 stay active, the oldest goes first, pending ones survive, a disconnect ends them all",
+    "approvals of one client: Read only and Read and write coexist without widening, a replay retires only its own, a security change ends all, concurrent consents keep exactly 10",
   );
   await p.owner.query(
     'delete from milton_auth."rateLimit"; delete from milton_guard.rate_bucket',

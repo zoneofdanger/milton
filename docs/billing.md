@@ -36,6 +36,9 @@ covers:
 - One plan: USD $5.01 a month, no per-AI fees, set in Stripe and named by
   `STRIPE_PRICE_ID`, after a 30-day trial that Stripe owns. The price and trial length
   shown in copy come from `packages/theme/facts.ts` ([setup](setup.md)).
+- Billing questions go to accountspayable@meetmilton.com (`BILLING_EMAIL` in
+  `packages/theme/facts.ts`), a mailbox a person reads, not support@ (Peter,
+  2026-11-03); the pricing page and the `subscription_required` message name it.
 - Milton stores only Stripe's ids, status and dates and a reminder milestone; no
   payment details enter these records.
 - Stripe's retry settings, retention duration and paid allowances still require
@@ -54,10 +57,11 @@ covers:
 - No row, no status, or a status Milton does not know reads as early access, so a Stripe
   outage never cuts off a connected AI, and reads never call Stripe.
 - Expired accounts are refused for AIs with `subscription_required` (`retryable: false`),
-  whose message carries the one link, the signed-in app home; the web view and download
-  stay open. This is not an authentication failure or an empty report. New saves are
-  checked under the account lock, in the transaction that would commit them
-  ([saves](saves.md)); exact replay still recovers an already accepted receipt.
+  whose message names the billing mailbox and ends with the one link, the signed-in app
+  home; the web view and download stay open. This is not an authentication failure or an
+  empty report. New saves are checked under the account lock, in the transaction that
+  would commit them ([saves](saves.md)); exact replay still recovers an already accepted
+  receipt.
 - A test account (`users.test_account`) is permanently exempt from trials and billing,
   checked explicitly on each path, not only by its missing trial row: it always reads as
   early access whatever row it holds, sign-in starts no subscription for it, checkout and

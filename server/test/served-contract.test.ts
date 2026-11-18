@@ -278,7 +278,7 @@ test("the refusal, both reminders and the instructions give the one link, true f
   const app = "https://app.example";
   const refusal = subscriptionRequired(app);
   expect(refusal.message).toBe(
-    "Milton is paused until you subscribe for $5.01/month. Your memos stay available to view and download. Subscribe at https://app.example/",
+    "Milton is paused until you subscribe for $5.01/month. Your memos stay available to view and download. Billing questions: accountspayable@meetmilton.com. Subscribe at https://app.example/",
   );
   expect(refusal.details).toEqual({ retryable: false });
   // A paying person past grace reads this too.

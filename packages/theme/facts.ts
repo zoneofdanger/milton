@@ -11,3 +11,6 @@ export const TRIAL_DAYS = 30;
 
 /** The one plan's monthly price, in US dollars. */
 export const PRICE_USD = "5.01";
+
+/** Where billing questions go: a read mailbox, not support@. */
+export const BILLING_EMAIL = "accountspayable@meetmilton.com";

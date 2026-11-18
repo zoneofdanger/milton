@@ -23,6 +23,33 @@ Earlier records are in git history: the last runbook holding them is at commit 4
 (`git show 492b96a:server/deploy/README.md`), and the runbook's later versions are in
 `git log -p server/deploy/README.md` until 2026-11-10, when this file began.
 
+## 2026-11-18: auth owner scripts refuse with codes (PR #161)
+
+- **#161 (#27; Peter's "ship everything", typed in this coordinator session, milton-d2, on
+  2026-11-18; built by a temporary builder; Codex gpt-6-astra PASS at `aaefdf9` after FAILs
+  at `b7f1c91`, `2705359` and `a760a0b`), `8522391`:** every refusal of `provision.ts`,
+  `maintain.ts` and `migrate.ts` (and auth's configuration and database checks) prints a
+  stable code ([accounts](accounts.md)). Provision writes the app secret only to a new 0600
+  file directly inside one private directory (`MILTON_OWNER_OUTPUT_DIR` or `~/keys`),
+  syncs the file and directory before the promotion commits, and never removes a file.
+  Runtime behaviour is otherwise unchanged; the server image did not change.
+  - **Order:** auth image
+    `sha256:f1dca8ee9695b0ae97def340f58ed7b0f393dd8ea9cd9eda4217203e2524ca41` (amd64
+    `sha256:5739f092…`; Node v26.13.0, user `node`): `milton-auth-codes-8522391` traffic at
+    23:17:54Z, `milton-auth-mail` and `milton-auth-maint` by 23:18:05Z.
+  - **Live:** auth `/api/auth/ok`, `/login`, `/signup`, `/forgot-password` and
+    `/reset-password` 200, UserInfo 401 on a junk token, app and MCP `/health` 200, forms
+    probe PASS; `milton-auth-maint-kxjsc` and `milton-e2e-daily-x5lpq` passed.
+  - **Gate** at 23:28:15Z: clean, with no alert open or opened since 23:17:54Z. No log line
+    reached an older auth revision after 23:20Z; no error from any service or job since
+    23:17Z.
+  - **Checks** on the merge commit `8522391`: types, tests (201) and agent-docs 0; PR CI
+    green (checks, integration).
+  - **Not observed:** provision on a real owner run (it refuses after the first, already
+    done); a real crash after COMMIT.
+  - **Rollback:** service and both jobs to `milton-auth-00034-dos` and image
+    `sha256:35ffb003…`.
+
 ## 2026-11-18: AIs read before writing the person's own words (PRs #156 and #157)
 
 - **#156 (milton-78, with Peter's picks typed there on 2026-11-18: the standing line's

@@ -10,7 +10,7 @@ covers:
 
 Rewritten in place by the release coordinator at every release, never appended to; the
 release's record goes in [history](../history.md). How to release and roll back:
-[releases](releases.md). As of 2026-11-18 21:50Z (after #156 and #157).
+[releases](releases.md). As of 2026-11-18 23:18Z (after #161).
 
 ## Services
 
@@ -40,11 +40,14 @@ release's record goes in [history](../history.md). How to release and roll back:
   `sha256:b59a4123b1f7f8b2baf9099b8fbf0b180342ce1cb71b10a0751788a7a8ddfbe6`, drain, rerun
   the affected-accounts query, then `milton-app-oneline-6b7a679` and `milton-admit-00014-v25`;
   good until the later cleanup, fix forward after.
-- **Auth and its jobs:** `milton-auth-00034-dos`, `milton-auth-mail` and `milton-auth-maint`
-  on image `sha256:35ffb003f6a5918ced32bffd039fad9ff9315e108aa98b84c243d601efe2afbd` (#121,
-  `bab745d`, built from `apps/auth/Dockerfile` with both base images pinned by digest; amd64
-  `sha256:c0ca2a64…`). Rollback, code only, service and both jobs together:
-  `milton-auth-00021-2gc` and image
+- **Auth and its jobs:** `milton-auth-codes-8522391`, `milton-auth-mail` and
+  `milton-auth-maint` on image
+  `sha256:f1dca8ee9695b0ae97def340f58ed7b0f393dd8ea9cd9eda4217203e2524ca41` (#161,
+  `8522391`: owner-script refusal codes and the private output directory; built from `apps/auth/Dockerfile` with both base
+  images pinned by digest; amd64 `sha256:5739f092…`). Rollback, code only, service and both
+  jobs together: `milton-auth-00034-dos` and image
+  `sha256:35ffb003f6a5918ced32bffd039fad9ff9315e108aa98b84c243d601efe2afbd` (#121), with no
+  schema step. Below that, `milton-auth-00021-2gc` and image
   `sha256:d394050c2687a6872655b6075d1e3de9f4c2defe4a05353721dd0ea31ec0a832` (#102).
 - **Site:** Vercel production deployment of main at `f9c7b32` (#157's merge; #156's tools
   page and setup wording, published a few minutes before the services switched). Rollback:

@@ -27,7 +27,7 @@ test("the served text uses one word for each thing and describes the memo workfl
   ).toEqual([
     "Milton holds the person's writing as memos",
     "If Milton connects mid-conversation, follow this from then on",
-    "Writing for the person includes text you post or send in their name through another tool ",
+    "Words the person will use as their own include text you post or send in their name through another tool ",
     "When they tell you what to write, their words are the raw material",
     "Edit mode",
     'Asked "Did you get the memo?" or "Did you get that memo?"',
@@ -59,7 +59,7 @@ test("the served text uses one word for each thing and describes the memo workfl
   // Posted writing counts (Peter, 2026-11-13, after an offline fake-send
   // comparison): the exact tested wording, so a reword is a deliberate change.
   for (const part of [
-    "Writing for the person includes text you post or send in their name through another tool (a ticket update, a PR comment, a chat message). Before writing or editing for or as the person:",
+    "Words the person will use as their own include text you post or send in their name through another tool (a ticket update, a PR comment, a chat message). Before drafting or editing words they'll use as their own:",
     "(approves it, approves posting or sending it, says it's done or they'll send it, or copies it to use), save it with create_memo without asking, untouched finals too; when you post it for them, save right after it posts.",
     "If Milton connects mid-conversation, follow this from then on: drafts under way included, and save finals they already approved this conversation if you still have each final verbatim (send first_draft_missing when the first draft isn't).",
   ])
@@ -87,7 +87,7 @@ test("the served text uses one word for each thing and describes the memo workfl
     expect(text).not.toMatch(/words never change/);
   // A read-only connection reads before posted writing too, and offers no save.
   expect(readOnlyInstructions).toContain(
-    "Writing for the person includes text you post or send in their name through another tool (a ticket update, a PR comment, a chat message). Before writing or editing for the person:",
+    "Words the person will use as their own include text you post or send in their name through another tool (a ticket update, a PR comment, a chat message). Before drafting or editing words they'll use as their own:",
   );
   expect(readOnlyInstructions).not.toContain("mid-conversation");
   // Nothing retired: no cover sheet, no tool that is gone, no AI-written

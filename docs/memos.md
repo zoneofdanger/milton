@@ -272,8 +272,8 @@ server enforcement: Milton cannot see the conversation, no hook or plugin is inv
 and whether the receipt line shows depends on the client. Fidelity and capture rate are
 measured per client before any claim of reliability.
 
-- Before writing or editing for or as the person, read `get_report` with an intent.
-  Writing for the person includes text the AI posts or sends in their name through
+- Before drafting or editing words the person will use as their own, read `get_report`
+  with an intent. Those words include text the AI posts or sends in their name through
   another tool (a ticket update, a PR comment, a chat message); a read-only connection
   is told this too. The instructions' first line says it as well, for clients that show
   only that line ([mcp](mcp.md#served-text)).

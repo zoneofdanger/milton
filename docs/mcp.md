@@ -240,26 +240,29 @@ a reconnect.
   of a save (the request rules) lives in the field descriptions, which the budget test
   does not measure. What the AI is asked to send as the request is guidance; Milton
   checks only what [memos](memos.md#the-request) lists.
-- There are two instruction variants, read-write and read-only. Both stay under 3,950
+- There are two instruction variants, read-write and read-only. Both stay under 4,000
   characters (3,500 until the 2026-11-13 posted-writing text, 3,607; then 3,800; raised
   to 3,900 on 2026-11-17 for the replace lines, which only the read-write variant
   carries, without trimming tested guidance: 3,861; 3,887 after the 2026-11-18 wording
-  of when to read; raised to 3,950 on 2026-11-18 for the first-line get_report
-  sentence), inside the 4,096
+  of when to read; raised to 4,000 on 2026-11-18 for the first-line get_report
+  sentence: 3,977), inside the 4,096
   at which Claude Code truncates; a test enforces this and that no error handling is
   left in them. Error handling lives in each error result's `next`, and the save fields
   in `create_memo`'s description.
 - The first line of each variant names `get_report` within its first 247 characters,
-  and the read-write variant's second sentence is "Before you write or edit anything
-  for the person, call get_report first." (Peter, 2026-11-18). Codex 0.170 in code mode
-  keeps MCP tools deferred and shows the model only the first line of a server's
+  and the read-write variant's second sentence is "Before drafting or editing words the
+  person will use as their own, call get_report first." (2026-11-18). Codex 0.170 in
+  code mode keeps MCP tools deferred and shows the model only the first line of a server's
   instructions, cut at 247 characters plus "..."; the rest reaches it only if it looks a
   tool up. The old first line never named `get_report`, so on a plain writing request
   Codex often made no tool call. In an offline test (a fake Milton built from
   `createMiltonServer`, Codex 0.170, gpt-6.2-sol, 5 runs per prompt, fictional people),
   Codex read `get_report` before the draft in 5 of 25 runs of five writing prompts
   (three emails, a chat message and a team-chat control) with the old line and in 25 of
-  25 with the new one; a non-writing question stayed at 0 of 5. A contract test keeps
+  25 with the new one; a non-writing question stayed at 0 of 5. The tested sentence
+  read "Before you write or edit anything for the person, call get_report first."; it
+  was reworded to the read scope in the rest of the served text (milton-duo,
+  2026-11-18), and the reworded sentence is not yet tested. A contract test keeps
   `get_report` inside that cut. The 247 was read from Codex transcripts, not Codex
   source. Untested: saving, multi-turn use, other clients, a mail connector present,
   other models; the read-only variant already named `get_report` in that span and was

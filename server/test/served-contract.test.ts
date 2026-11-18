@@ -134,14 +134,16 @@ test("the first line of the instructions names get_report within what Codex show
   // Codex 0.170 in code mode shows only the first line of a server's
   // instructions, cut at 247 characters plus "...", while MCP tools stay
   // deferred. Offline on 2026-11-18, Codex read get_report before 5 of 25
-  // writing requests with the old first line and 25 of 25 with this sentence
+  // writing requests with the old first line and 25 of 25 with the sentence
   // (docs/mcp.md, served text). The 247 is observed from Codex transcripts,
   // not read from Codex source.
   for (const served of [storeInstructions, readOnlyInstructions])
     expect((served.split("\n")[0] ?? "").slice(0, 247)).toContain("get_report");
-  // The exact tested wording, so a reword is a deliberate change.
+  // The exact wording (tested as "Before you write or edit anything for the
+  // person", reworded to the one read scope on 2026-11-18), so a reword is a
+  // deliberate change.
   expect(storeInstructions).toStartWith(
-    "Milton holds the person's writing as memos. Before you write or edit anything for the person, call get_report first. A memo is",
+    "Milton holds the person's writing as memos. Before drafting or editing words the person will use as their own, call get_report first. A memo is",
   );
 });
 

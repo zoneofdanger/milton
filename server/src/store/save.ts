@@ -358,8 +358,9 @@ async function replaceTarget(
     final: string;
     first_draft: string | null;
     first_draft_state: "kept" | "missing" | "none";
+    mode: "draft" | "edit" | null;
     at: string;
-  }>(sql`SELECT id,final,first_draft,first_draft_state,
+  }>(sql`SELECT id,final,first_draft,first_draft_state,mode,
       to_char(created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS at
     FROM memos WHERE user_id=${userId} AND id=${replaces}`);
   if (!old)
@@ -420,16 +421,17 @@ async function saveMemo(save: Save, sent: MemoInput): Promise<SaveOutcome> {
     sent.replaces !== undefined
       ? await replaceTarget(tx, userId, sent, sent.replaces)
       : started;
-  // A replace of a memo with a kept first draft, sending first_draft_missing,
-  // keeps the stored draft: the memo, its changes and tier are worked out as
-  // if that draft were sent. Any other replace is saved exactly as sent. The
-  // input is hashed and replayed as sent.
+  // A replace of a memo with a kept first draft keeps that draft, which the
+  // save resent byte for byte or stood in for with first_draft_missing, and
+  // the mode that describes it (Peter, 2026-11-18): the save's own mode is
+  // set aside, so an edit can't relabel a drafted memo "your words". The
+  // memo, its changes and tier are worked out as if that draft and mode were
+  // sent. Any other replace is saved exactly as sent. The input is hashed
+  // and replayed as sent.
+  const kept =
+    !started && target?.first_draft_state === "kept" ? target : undefined;
   const stored =
-    !started &&
-    target?.first_draft_state === "kept" &&
-    sent.first_draft === undefined
-      ? target.first_draft!
-      : undefined;
+    kept && sent.first_draft === undefined ? kept.first_draft! : undefined;
   // A matched edit changes only the memo's words, context, kind and request:
   // its first draft, first-draft state and mode stay, and the save's own
   // first draft, mode and the changes from them are set aside, so a drafted
@@ -445,8 +447,13 @@ async function saveMemo(save: Save, sent: MemoInput): Promise<SaveOutcome> {
         request:
           started.first_draft_state === "none" ? undefined : sent.request,
       }
-    : stored !== undefined
-      ? { ...sent, first_draft: stored, first_draft_missing: undefined }
+    : kept
+      ? {
+          ...sent,
+          first_draft: kept.first_draft!,
+          first_draft_missing: undefined,
+          mode: kept.mode ?? undefined,
+        }
       : sent;
   const evidence = started
     ? started.first_draft !== null

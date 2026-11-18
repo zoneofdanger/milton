@@ -127,6 +127,14 @@ other, with `replaces` in the hashed input.
   stored first draft and its state, and works out the changes, tier and change score from
   it and the new final, as if it had been sent; the input is still hashed and replayed as
   sent.
+- **Its mode stays too** (Peter, 2026-11-18). A replace of a memo that keeps its first
+  draft never changes that memo's mode: the first draft can't change on such a replace,
+  so the mode that describes it doesn't either, and the save's own `mode` is set aside.
+  A drafted memo stays steered, or untouched when the new final equals its first draft;
+  an edit-mode memo stays "your words". Why: an AI that edits a drafted memo and
+  replaces it by id sends edit mode, which labelled the AI's draft "your words"; the
+  two-session check saw it in 21 of 36 Codex edits
+  ([check](research/starting-text-check-2026-11-18.md)).
 - **A memo without one** (first draft `missing`, or writing the person gave) takes the
   save exactly as sent: its own `first_draft`, `first_draft_missing` or final-only shape,
   mode and request. A `first_draft` sent where none was kept is stored as sent, with its

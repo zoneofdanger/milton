@@ -2489,6 +2489,245 @@ try {
   pass(
     "a replace runs as the MCP role, keeping the id and creation time; a replace racing a forget waits on the account lock, then is refused as replace_unknown",
   );
+  stage = "a replace keeps a kept first draft's mode";
+  {
+    // docs/saves.md, "Replacing a final" (Peter, 2026-11-18): a replace of a
+    // memo that keeps its first draft never changes that memo's mode; a memo
+    // without one takes the save as sent. One group per case, as the MCP
+    // runtime role.
+    const relabel = "m_00000000-0000-4000-8000-0000000000cc";
+    await owner.query("INSERT INTO users(id) VALUES($1)", [relabel]);
+    await owner.query(
+      "INSERT INTO identities(provider,subject,user_id) VALUES('fictional-relabel','relabel',$1)",
+      [relabel],
+    );
+    await owner.query(
+      "INSERT INTO trial_accounts(user_id,started_at,subscription_status) VALUES($1,now(),'active')",
+      [relabel],
+    );
+    const store = await storeForCurrentRequest(
+      mcpConfig,
+      await lookupIdentityAccount(mcpConfig, {
+        provider: "fictional-relabel",
+        subject: "relabel",
+      }),
+      { issuer: "fixture", clientId: "fictional-relabeler" },
+    );
+    const context = {
+      summary: "Fictional relabel note",
+      medium: "email" as const,
+    };
+    const draft = "Hi Dana! Sadly we can't make Thursday.";
+    type Memo = Record<string, unknown> & { final: string };
+    const save = (memo: Memo) =>
+      store.saveMemo({
+        request_id: randomUUID(),
+        memo: { context, ...memo },
+      } as never);
+    const idOf = async (memo: Memo) => (await save(memo)).memo!.memo_id;
+    const state = async (id: string) =>
+      (
+        await owner.query(
+          "SELECT first_draft,first_draft_state AS state,mode,tier,final FROM memos WHERE user_id=$1 AND id=$2",
+          [relabel, id],
+        )
+      ).rows[0];
+    const group = async (name: string, check: () => Promise<void>) => {
+      await owner.query("DELETE FROM memos WHERE user_id=$1", [relabel]);
+      await check();
+      pass(`a replace's mode, ${name}`);
+    };
+    // Replaces id with this final and first-draft shape, then reads it back.
+    const replaced = async (id: string, memo: Memo) => {
+      const outcome = await save({ ...memo, replaces: id });
+      assert.equal(outcome.status, "saved");
+      assert.equal(outcome.replaced, true);
+      assert.equal(outcome.memo?.memo_id, id);
+      return { tier: outcome.memo!.tier, row: await state(id) };
+    };
+    await group(
+      "a drafted memo keeping its first draft, replaced with first_draft_missing and mode edit: draft kept, steered or untouched, never their words",
+      async () => {
+        const id = await idOf({
+          first_draft: draft,
+          mode: "draft",
+          final: "Dana, no.",
+        });
+        for (const [final, tier] of [
+          ["Dana, not Thursday.", "steered"],
+          [draft, "untouched"],
+        ] as const)
+          assert.deepEqual(
+            await replaced(id, {
+              first_draft_missing: true,
+              mode: "edit",
+              final,
+            }),
+            {
+              tier,
+              row: {
+                first_draft: draft,
+                state: "kept",
+                mode: "draft",
+                tier,
+                final,
+              },
+            },
+          );
+      },
+    );
+    await group(
+      "the same memo, replaced with its first draft resent byte for byte and mode edit: draft kept, same tiers",
+      async () => {
+        const id = await idOf({
+          first_draft: draft,
+          mode: "draft",
+          final: "Dana, no.",
+        });
+        for (const [final, tier] of [
+          ["Dana, not Thursday.", "steered"],
+          [draft, "untouched"],
+        ] as const)
+          assert.deepEqual(
+            await replaced(id, { first_draft: draft, mode: "edit", final }),
+            {
+              tier,
+              row: {
+                first_draft: draft,
+                state: "kept",
+                mode: "draft",
+                tier,
+                final,
+              },
+            },
+          );
+      },
+    );
+    await group(
+      "an edit-mode memo keeping its first draft, replaced with first_draft_missing and mode draft: edit kept, still their words",
+      async () => {
+        const id = await idOf({
+          first_draft: draft,
+          mode: "edit",
+          final: "Dana, no.",
+        });
+        assert.deepEqual(
+          await replaced(id, {
+            first_draft_missing: true,
+            mode: "draft",
+            final: "Dana, not Thursday.",
+          }),
+          {
+            tier: "own",
+            row: {
+              first_draft: draft,
+              state: "kept",
+              mode: "edit",
+              tier: "own",
+              final: "Dana, not Thursday.",
+            },
+          },
+        );
+      },
+    );
+    await group(
+      "a replace sending the mode the memo already has: as before",
+      async () => {
+        const id = await idOf({
+          first_draft: draft,
+          mode: "draft",
+          final: "Dana, no.",
+        });
+        assert.deepEqual(
+          await replaced(id, {
+            first_draft_missing: true,
+            mode: "draft",
+            final: "Dana, not Thursday.",
+          }),
+          {
+            tier: "steered",
+            row: {
+              first_draft: draft,
+              state: "kept",
+              mode: "draft",
+              tier: "steered",
+              final: "Dana, not Thursday.",
+            },
+          },
+        );
+      },
+    );
+    await group(
+      "a memo whose first draft is missing, or writing the person gave: the save as sent, as before",
+      async () => {
+        const missing = await idOf({
+          first_draft_missing: true,
+          mode: "draft",
+          final: "Dana, no.",
+        });
+        assert.deepEqual(
+          await replaced(missing, {
+            first_draft_missing: true,
+            mode: "edit",
+            final: "Dana, not Thursday.",
+          }),
+          {
+            tier: "own",
+            row: {
+              first_draft: null,
+              state: "missing",
+              mode: "edit",
+              tier: "own",
+              final: "Dana, not Thursday.",
+            },
+          },
+        );
+        const given = await idOf({ final: "My own note to Dana." });
+        assert.deepEqual(
+          await replaced(given, {
+            first_draft: draft,
+            mode: "draft",
+            final: "My own note to Dana, edited.",
+          }),
+          {
+            tier: "steered",
+            row: {
+              first_draft: draft,
+              state: "kept",
+              mode: "draft",
+              tier: "steered",
+              final: "My own note to Dana, edited.",
+            },
+          },
+        );
+      },
+    );
+    await group(
+      "a different first_draft, or neither field, on a memo keeping one: replace_first_draft, as before",
+      async () => {
+        const id = await idOf({
+          first_draft: draft,
+          mode: "draft",
+          final: "Dana, no.",
+        });
+        const before = await state(id);
+        for (const memo of [
+          {
+            first_draft: `${draft} `,
+            mode: "edit",
+            final: "Dana, not Thursday.",
+          },
+          { final: "Dana, not Thursday." },
+        ])
+          assert.equal(
+            (await save({ ...memo, replaces: id })).error,
+            "replace_first_draft",
+          );
+        assert.deepEqual(await state(id), before);
+      },
+    );
+    await owner.query("DELETE FROM users WHERE id=$1", [relabel]);
+  }
   stage = "an edit naming the text it started from (started_from)";
   {
     // docs/saves.md, "Starting text": a save carrying started_from updates

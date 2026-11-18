@@ -183,12 +183,18 @@ function stop() {
     (p): p is Started => p !== null && p.started !== null,
   );
   // The take's other processes as they are now, to report any that outlive it.
+  // One listing is one moment, so each parent link in it is sound; a target
+  // counts only with its own start time, never a stranger that reused its pid.
   const before = processTable();
+  const isTarget = (pid: number) =>
+    targets.some(
+      (t) => t.pid === pid && before?.get(pid)?.started === t.started,
+    );
   const seen: Started[] = [];
   if (before)
     for (const [pid, p] of before)
       for (let up = p.ppid, hops = 0; up > 1 && hops < 64; hops++) {
-        if (targets.some((t) => t.pid === up)) {
+        if (isTarget(up)) {
           seen.push({ pid, started: p.started });
           break;
         }
@@ -215,12 +221,13 @@ function stop() {
     (p) => p !== null && p.started === null,
   );
   const survivors = running([...targets, ...seen]);
-  if (!survivors || unverified.length) {
+  // Without the first listing, the take's other processes are unknown.
+  if (!before || !survivors || unverified.length) {
     const pids = [run.server, run.pane, ...seen].flatMap((p) =>
       p ? [p.pid] : [],
     );
     console.error(
-      `record: could not check which processes from the take are still running; check with ps for pids ${pids.join(", ")} and stop any by pid`,
+      `record: could not check which processes from the take are still running; check with ps for pids ${pids.join(", ")} (the tmux server and the recorder or shell) and anything under them, and stop any by pid`,
     );
     leftovers = true;
     return false;
@@ -527,7 +534,9 @@ async function warmup(scenePath: string) {
       `This waits until the shell exits; Ctrl-C here stops it instead.`,
   );
   const pane = launched!.pane!;
-  while (running([pane])?.length !== 0) await sleep(1000);
+  // Until the shell exits; a failed listing ends the wait too, never a retry loop.
+  for (let left = running([pane]); left?.length; left = running([pane]))
+    await sleep(1000);
   return stop() ? 0 : 1;
 }
 

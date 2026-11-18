@@ -64,9 +64,10 @@ launched:
   group.
 - It reports survivors rather than hunting them. If a process from the take is still
   running afterwards, it prints the pid and exits 1. That covers anything it saw under
-  those two pids when it began stopping; a process started after that is not listed.
-  If `ps` fails or takes over 5 s, it signals nothing it can't check and prints the
-  pids to look at.
+  those two pids, checked by start time, when it began stopping; a process started after
+  that is not listed. If any `ps` listing fails or takes over 5 s, it signals nothing it
+  can't check, says the survivors could not be checked, names the two tmux pids to check
+  by hand and exits 1.
 
 Every `ps` and `tmux` call has a time limit. A run stopped by an error or Ctrl-C writes
 no take. Exiting the client is unverified against real Claude Code and Codex; the dry
@@ -100,10 +101,11 @@ bun scripts/demo/record.ts scan <out>/day-2.cast
 `warmup` runs the scene's shell unrecorded and waits; attach, start the client, clear
 first-run dialogs (folder trust, browser tools, renderer offers), then exit the client and
 the shell, or press Ctrl-C at the driver. Either way it stops what it launched and reports
-anything left, as for a take. `check` runs a take's guards (below) and launches nothing.
-`record` runs the guards, launches the client unrecorded (see Banner below), then records
-and writes the `.cast`, a `.cast.timeline.json` of when each line was typed and answered,
-and then scans the cast. Keep recordings outside the repository.
+anything left, as for a take; a failed `ps` listing while it waits stops it the same
+way. `check` runs a take's guards (below) and launches nothing. `record` runs the guards,
+launches the client unrecorded (see Banner below), then records and writes the `.cast`, a
+`.cast.timeline.json` of when each line was typed and answered, and then scans the cast.
+Keep recordings outside the repository.
 
 Empty the test account before Day 1 (Delete all memos, in [deletion](deletion.md)), never
 between Day 1 and Day 2, since Day 2 depends on Day 1's memo, and again afterwards. Dry

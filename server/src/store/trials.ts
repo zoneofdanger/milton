@@ -1,3 +1,4 @@
+import { BILLING_EMAIL } from "@milton/theme/facts";
 import { sql, type SQL } from "drizzle-orm";
 import type { StoreSession } from "./database";
 import { StoreError } from "./errors";
@@ -88,11 +89,12 @@ export async function trialStatus(
 
 // Read by everyone Milton stopped, a paying person past grace included, so it does
 // not say the trial ended. The one link is the signed-in app home, where the button
-// lives. Only tools.ts serves this, with the origin; the gate throws it without.
+// lives, and stays last, after the billing address. Only tools.ts serves this, with
+// the origin; the gate throws it without.
 export function subscriptionRequired(appOrigin?: string) {
   return new StoreError(
     "subscription_required",
-    "Milton is paused until you subscribe for $5.01/month. Your memos stay available to view and download." +
+    `Milton is paused until you subscribe for $5.01/month. Your memos stay available to view and download. Billing questions: ${BILLING_EMAIL}.` +
       (appOrigin ? ` Subscribe at ${appOrigin}/` : ""),
     402,
     { retryable: false },

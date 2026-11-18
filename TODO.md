@@ -43,13 +43,6 @@ sheet, report, AI) and plain text on security screens and anything an AI reads.
       OAuth sign-in from a client, claude.ai and ChatGPT, interactive Codex, and
       cross-client evidence of what AIs save.
 
-- [ ] #23 (ops, low, founder) **Billing mailbox: accountspayable@meetmilton.com.** Decided
-      2026-11-03: subscription and payment issues go to accountspayable@ (the Nina nod), a real,
-      read mailbox, not support@. Create the alias when paid subscriptions launch, route it to
-      whoever handles billing, and name it on the pricing section, the FAQ "Will I be charged"
-      answer, and the subscription_required message. Until then it does not exist; the landing
-      page's unread joke address is a different alias.
-
 - [ ] #31 (server, low) **Take Stripe off sign-in and deletion after launch.** The
       narrowed follow-up to PR #67 took checkout's live read and the webhook off the row lock
       (compare-and-set on `trial_accounts.stripe_revision`, 0011, with a one-off `--resync`

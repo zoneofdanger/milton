@@ -79,11 +79,12 @@ Local commands and landing content are in [apps/site/README.md](../apps/site/REA
 - The setup widget on `/setup` copies the shared setup prompt ([setup](setup.md)), falls back to
   manual selection, and closes on Escape or an outside click.
 - `/pricing` states the one plan ($5.01 USD a month after a 30-day free trial, no card
-  needed to start, charged only if a card is added), what it includes, a link to sign in
-  at the app, and a short FAQ: what happens after the trial, how to cancel (Stripe's
-  portal from the app's account menu, effective at the end of the billing period, with a
-  link to the payment and refund terms), and that the AI decides how it follows the
-  memo.
+  needed to start, charged only if a card is added, and where billing questions go), what
+  it includes, a link to sign in at the app, and a short FAQ: what happens after the
+  trial, how to cancel (Stripe's portal from the app's account menu, effective at the end
+  of the billing period, with a link to the payment and refund terms), who to ask about a
+  charge (the billing mailbox, [billing](billing.md)), and that the AI decides how it
+  follows the memo.
 - `/demo` is an unlinked preview of the demo clip ([demo](demo.md)): in no navigation or
   footer, marked `noindex` (the layout's `noindex` prop), and there is no sitemap. It plays
   `src/data/milton-demo.cast` in asciinema-player 3.17.0 (Apache-2.0, pinned exactly),

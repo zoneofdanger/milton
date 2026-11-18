@@ -44,14 +44,20 @@ dialog waiting for an answer stops the take instead of typing into it. The drive
 supports Codex (`client: "codex"`); the standup clip does not use it.
 
 However a take ends (done, refused, an error or Ctrl-C), the driver stops what it
-launched, its tmux server and the pane's process tree, by pid: it hangs up the shell and
+launched. It registers the run before it starts its tmux server, and notes the run's
+processes during each turn. A process belongs to the run if it is the tmux server, the
+pane's recorder or shell, a child of one of those, or in the process group of one; the
+group catches a child left behind under pid 1. To stop, the driver hangs up the shell and
 client, so the recorder ends by itself and writes asciinema's exit event (`"x"`, which
-the player ignores), then sends SIGTERM and SIGKILL to anything still running, stops its
-tmux server, and refuses if any of them is left. `tmux kill-server` alone was not enough:
-asciinema survives it with its shell and client, and on 2026-11-18 nineteen recorders
-from earlier takes were still running, one appending Claude Code's idle redraws to a
-finished take for 7 hours. The driver scans a take only once the cast has stopped
-changing.
+the player ignores). It then stops the tmux server, giving up after 3 s, and sends
+SIGHUP, SIGTERM and SIGKILL in turn, listing the run's processes afresh at every check.
+It exits non-zero unless two listings half a second apart find none. If `ps` cannot list
+processes, it signals nothing it cannot verify and prints the pids to check. It cannot
+see a process that leaves both its parent and its process group before the driver lists
+it. `tmux kill-server` alone was not enough: asciinema survives it with its shell and
+client, and on 2026-11-18 nineteen recorders from earlier takes were still running, one
+appending Claude Code's idle redraws to a finished take for 7 hours. The driver scans a
+take only once everything has stopped and the cast has not changed for a second.
 
 ## Needs
 

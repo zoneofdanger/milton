@@ -126,13 +126,15 @@ async function tokenFixture(
   };
 }
 
-test("both instruction variants stay under 3,900 characters, keep every topic and leave error handling to results", () => {
-  // Claude Code truncates MCP server instructions at 4,096 characters; 3,900
+test("both instruction variants stay under 4,000 characters, keep every topic and leave error handling to results", () => {
+  // Claude Code truncates MCP server instructions at 4,096 characters; 4,000
   // keeps room for growth. Raised from 3,500 for the tested posted-writing
   // text (3,607 characters, Peter, 2026-11-13), then from 3,800 for the
   // replace lines, without trimming tested guidance (Peter, 2026-11-17).
+  // Raised from 3,900 for the get_report sentence in the first line, which
+  // Codex shows before tools load (3,977; Codex test, Peter, 2026-11-18).
   for (const served of [storeInstructions, readOnlyInstructions]) {
-    expect(served.length).toBeLessThan(3900);
+    expect(served.length).toBeLessThan(4000);
     expect(served.isWellFormed()).toBe(true);
     // Error handling lives in each error result's next; one pointer remains.
     expect(served).toContain("On an error, follow its next.");

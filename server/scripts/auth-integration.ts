@@ -53,7 +53,7 @@ import {
   StoreError,
 } from "../src/store";
 import { storeForCurrentRequest } from "../test/store-fixtures";
-import { recordToolUsage } from "../src/store/usage";
+import { recordToolUsage, USAGE_RETRY_MS } from "../src/store/usage";
 import {
   authenticateConnectionKey,
   createConnectionKey,
@@ -1963,21 +1963,6 @@ try {
         "SELECT count(*)::int n FROM pg_stat_activity WHERE wait_event_type='Lock' AND query LIKE 'WITH r AS%usage_calls%'",
       )
     ).rows[0].n as number;
-  // Until a usage statement has finished since `since` (its backend idle
-  // with that statement as its last query).
-  const usageRan = async (since: Date) => {
-    for (let n = 0; n < 250; n++) {
-      const [row] = (
-        await owner.query(
-          "SELECT count(*)::int n FROM pg_stat_activity WHERE state='idle' AND query LIKE 'WITH r AS%usage_calls%' AND state_change > $1",
-          [since],
-        )
-      ).rows;
-      if (row.n > 0) return;
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
-    throw new Error("usage statement never ran");
-  };
   const within = <T>(work: Promise<T>, ms: number) =>
     Promise.race([
       work,
@@ -2037,10 +2022,13 @@ try {
     "usage rows skipped behind short FOR UPDATEs land on their own retries";
   {
     // Two accounts under short FOR UPDATEs (as a sign-in holds it), skipped
-    // at different times. Each row retries 50 ms after its own skip: the first
-    // lands once its lock ends; the second, skipped about 25 ms later while
-    // the first was waiting, must not retry with the first (its lock is still
-    // held then), and lands after its own lock ends.
+    // at different times. Each row retries USAGE_RETRY_MS after its own skip:
+    // the first lands once its lock ends; the second, skipped while the first
+    // was waiting, must not retry with the first (its lock is still held
+    // then), and lands after its own lock ends. Observed events force that
+    // order, not sleeps: a fresh writer's database records each statement it
+    // sends (the accounts carried, the accounts written) and holds each retry
+    // until the lock it needs has been released.
     const first = "m_00000000-0000-4000-8000-0000000000c7",
       second = "m_00000000-0000-4000-8000-0000000000c8";
     await owner.query("INSERT INTO users(id) VALUES($1),($2)", [first, second]);
@@ -2048,9 +2036,75 @@ try {
       await owner.connect(),
       await owner.connect(),
     ];
-    const now = async () =>
-      (await owner.query("SELECT clock_timestamp() t")).rows[0].t as Date;
-    let appended: Promise<unknown> = Promise.resolve();
+    const event = () => {
+      let happen!: () => void;
+      const happened = new Promise<void>((resolve) => (happen = resolve));
+      return { happen, happened };
+    };
+    const happens = async (
+      what: string,
+      { happened }: { happened: Promise<void> },
+    ) => {
+      if ((await within(happened, 5000)) === "waited")
+        throw new Error(`${what} never happened`);
+    };
+    // The second row has arrived after the first's skip; the first's retry
+    // has returned; each account's lock has ended.
+    const secondArrived = event(),
+      firstRetried = event(),
+      firstReleased = event(),
+      secondReleased = event();
+    const statements: { carried: string[]; wrote: string[] }[] = [];
+    const dialect = new PgDialect();
+    const base = usageDb();
+    let sent = 0,
+      secondAt = 0,
+      secondRow: Promise<void> = Promise.resolve();
+    const observed: StoreDatabase = {
+      ...base,
+      async query<Row extends Record<string, unknown>>(statement: SQL) {
+        const n = sent++;
+        // The first's retry, then the second's, waits for its own lock to end.
+        if (n === 2) await firstReleased.happened;
+        if (n === 3) await secondReleased.happened;
+        const rows = await base.query<Row>(statement);
+        statements.push({
+          carried: [
+            ...(dialect.sqlToQuery(statement).params[0] as string[]),
+          ].sort(),
+          wrote: rows.map((r) => r.id as string).sort(),
+        });
+        if (n === 0)
+          // The first's skip: the second arrives just after it, in the same
+          // turn of the event loop and before any timer can run, so the
+          // writer is waiting for the first's retry, which is not yet due.
+          // The test goes on only from here, so none of its own work runs
+          // between the skip and the second's arrival.
+          setImmediate(() => {
+            secondAt = Date.now();
+            secondRow = record(second);
+            secondArrived.happen();
+          });
+        if (n === 1) {
+          // The second's skip returns once the first's retry is due: retry
+          // times are wall-clock, and the first's is at most USAGE_RETRY_MS
+          // after the second arrived. Waiting longer only widens the gap
+          // between the two retries.
+          const due = secondAt + USAGE_RETRY_MS;
+          while (Date.now() < due)
+            await new Promise((resolve) =>
+              setTimeout(resolve, due - Date.now()),
+            );
+        }
+        if (n === 2) firstRetried.happen();
+        return rows;
+      },
+    };
+    // Its own writer, so every statement goes through `observed`.
+    const writer = Symbol("usage retries");
+    const record = (id: string) =>
+      recordToolUsage(writer, () => observed, id, "get_report");
+    let firstRow: Promise<void> = Promise.resolve();
     try {
       for (const [client, id] of [
         [lockFirst, first],
@@ -2059,36 +2113,37 @@ try {
         await client.query("BEGIN");
         await client.query("SELECT id FROM users WHERE id=$1 FOR UPDATE", [id]);
       }
-      const sinceFirst = await now();
-      const firstRow = recordToolUsage(
-        mcpConfig.DATABASE_URL,
-        usageDb,
-        first,
-        "get_report",
-      );
-      await usageRan(sinceFirst);
+      firstRow = record(first);
+      await happens("the second row's arrival", secondArrived);
       await lockFirst.query("COMMIT");
-      await new Promise((resolve) => setTimeout(resolve, 25));
-      const sinceSecond = await now();
-      const secondRow = recordToolUsage(
-        mcpConfig.DATABASE_URL,
-        usageDb,
-        second,
-        "get_report",
-      );
-      appended = Promise.all([firstRow, secondRow]);
-      await usageRan(sinceSecond);
+      firstReleased.happen();
+      await happens("the first row's retry", firstRetried);
       // The first row's retry has landed; the second's is still to come.
-      for (let n = 0; n < 200; n++) {
-        if ((await usageRows(first)).length) break;
-        await new Promise((resolve) => setTimeout(resolve, 2));
-      }
+      assert.deepEqual(
+        await usageRows(first, second),
+        [first],
+        "the first lands on its retry while the second is locked",
+      );
       await lockSecond.query("COMMIT");
+      secondReleased.happen();
     } finally {
+      // Never leave the writer held, even when a step above failed.
+      firstReleased.happen();
+      secondReleased.happen();
       lockFirst.release();
       lockSecond.release();
     }
-    await appended;
+    await Promise.all([firstRow, secondRow]);
+    assert.deepEqual(
+      statements,
+      [
+        { carried: [first], wrote: [] },
+        { carried: [second], wrote: [] },
+        { carried: [first], wrote: [first] },
+        { carried: [second], wrote: [second] },
+      ],
+      "each skip and each retry is its own statement, in order",
+    );
     assert.deepEqual(
       await usageRows(first, second),
       [first, second].sort(),

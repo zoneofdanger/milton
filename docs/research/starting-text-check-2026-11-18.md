@@ -8,7 +8,9 @@ type: research
 
 Run on November 18, 2026, by a temporary builder for milton-78, as the
 [spec](starting-text-spec-2026-11-18.md)'s "Check before release" requires, on the
-`agent/starting-text` branch at `56bd4b5`. Every person, organization and piece of
+`agent/starting-text` branch at `9a944e1` (the feature, `56bd4b5`, plus review fixes
+whose only served change is the words of the too-large next step, which no run
+reached). Every person, organization and piece of
 writing is fictional, written by an AI: Dana Whitcomb, volunteer coordinator of a
 community garden in Dayton, Ohio, with seven saved pieces. Nothing touched production
 Milton, a real account or real mail.

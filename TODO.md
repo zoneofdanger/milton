@@ -113,11 +113,15 @@ claimable accounts, and no copy that tells agents to route every complaint to Mi
 
 - [ ] #46 (server, med, founder, doing) **Prepare Milton's Claude directory submission.**
       The served-text fixes and the security contact (/support and
-      `/.well-known/security.txt`) are built. Left: test every tool in claude.ai on a
-      fictional account, since the portal asks to confirm it was tested. The icon is
+      `/.well-known/security.txt`) are built. Tested in claude.ai 2026-11-19 on the
+      newcomer account (incognito, Auto mode): get_report, a save with its receipt and a
+      forget all worked when asked. Unprompted, Claude used no Milton tool for "Did you get
+      the memo?" or a drafting request, and claude.ai's Auto check blocked the first save
+      because `create_memo` is destructive (it can forget); it saved on "Yes, keep it." The
+      icon is
       `design/milton-icon-1024.png`: `favicon.svg`'s printer at 24x on the site's ground
-      #EEEAE1 (on #FFFDF8 the paper vanished); never `design/milton.png`, which shows a film
-      character's likeness. Founder: Peter pastes the fields and submits at
+      #EEEAE1 (on #FFFDF8 the paper vanished); never a face or film character's likeness.
+      Founder: Peter pastes the fields and submits at
       claude.ai/directory/manage from his Claude account.
 
 - [ ] #47 (ops, low, founder, blocked: #46) **Publish Milton to the MCP Registry.** A

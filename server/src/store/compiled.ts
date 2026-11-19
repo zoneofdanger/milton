@@ -139,7 +139,6 @@ export function compiledMemos(
         userId,
         actor,
         parsed.data,
-        checked ? checked.evidence : undefined,
         () => admit?.(call),
         gated,
       );

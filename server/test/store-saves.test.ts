@@ -1,12 +1,17 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { localStore } from "./local-store";
 import {
   fixtureStore,
   memoSave,
+  read,
   seedLegacy,
   seedUsers,
+  storeForCurrentRequest,
 } from "./store-fixtures";
-import { checkMemo, hash, REPLAYED, type Evidence } from "../src/store/save";
+import { createStoreMemoTools } from "../src/mcp-tools";
+import { lookupIdentityAccount, resolveIdentityAccount } from "../src/store";
+import * as diffs from "../src/store/changes";
+import { hash, REPLAYED } from "../src/store/save";
 import { change } from "../src/store/score";
 import { nextSteps, withNext } from "../src/mcp-outcomes";
 import { EMPTY_REPORT, readReport } from "../src/store/memos";
@@ -367,8 +372,9 @@ test("a replace deletes the old memo and inserts the new final under the same id
     for (const final of finals) {
       const input = replaceOf(id, final, { new_kind: "vendor note" });
       const outcome = await store.saveMemo(input);
-      const evidence = (checkMemo(input.memo!) as { evidence: Evidence })
-        .evidence;
+      const evidence = {
+        rows: diffs.changeRows(draft, final, diffs.changeList(draft, final)),
+      };
       expect(outcome).toEqual({
         status: "saved",
         request_id: input.request_id,
@@ -937,6 +943,109 @@ test("whichever AI saved the memo on file, the person's later edit replaces it: 
     expect(await served()).toContain("> Dana, Monday works.");
     expect(await served()).not.toContain("Friday");
   } finally {
+    await local.dispose();
+  }
+});
+
+test("a save's change check runs only after the access gate admits it: a paused account's save and a replay never diff, and a fresh save stores code's list", async () => {
+  // Every diff goes through changeList; the spy calls through.
+  const diff = spyOn(diffs, "changeList");
+  const local = await localStore();
+  try {
+    await seedUsers(local.pg, "differ", "paused");
+    await local.pg.exec("UPDATE store_config SET trials_enabled=true");
+    await local.pg.query(
+      "INSERT INTO trial_accounts(user_id,started_at,subscription_status) VALUES ('paused',now(),'canceled')",
+    );
+    const final = "Dana, thanks. Thursday doesn't work; next week?";
+    const input = memoSave({ first_draft: draft, mode: "draft", final });
+    await expect(
+      fixtureStore(local.db, "paused").saveMemo(input),
+    ).rejects.toMatchObject({ code: "subscription_required" });
+    expect(diff).not.toHaveBeenCalled();
+    // A fresh save diffs and stores exactly code's list.
+    const store = fixtureStore(local.db, "differ");
+    const saved = await store.saveMemo(input);
+    expect(diff).toHaveBeenCalled();
+    const list = diffs.changeRows(draft, final, diffs.changeList(draft, final));
+    expect(list.length).toBeGreaterThan(0);
+    expect(saved.memo!.changes).toEqual({
+      state: "itemized",
+      found: list.filter((r) => r.about !== "format").length,
+    });
+    expect(
+      (
+        await local.pg.query(
+          `SELECT n,"before","after",about FROM memo_changes WHERE user_id='differ' ORDER BY n`,
+        )
+      ).rows,
+    ).toEqual(
+      list.map((r) => ({
+        n: r.n,
+        before: r.before,
+        after: r.after,
+        about: r.about,
+      })),
+    );
+    // Its replay returns the stored outcome without diffing again.
+    diff.mockClear();
+    expect(await store.saveMemo(input)).toEqual({
+      ...saved,
+      replayed: REPLAYED,
+    });
+    expect(diff).not.toHaveBeenCalled();
+  } finally {
+    diff.mockRestore();
+    await local.dispose();
+  }
+});
+
+test("a diff that throws answers as it did before the gate moved: Milton is unavailable, nothing is admitted, recorded or written, and the same request saves once it works", async () => {
+  const local = await localStore();
+  const diff = spyOn(diffs, "changeList").mockImplementation(() => {
+    throw new Error("injected diff failure");
+  });
+  try {
+    const identity = { provider: "neon", subject: "diff-throws" };
+    await resolveIdentityAccount(local.env, identity);
+    const auth = await lookupIdentityAccount(local.env, identity);
+    const tools = createStoreMemoTools(
+      await storeForCurrentRequest(local.env, auth, {
+        issuer: "fixture",
+        clientId: "fixture",
+      }),
+    );
+    const count = async (table: string) =>
+      (
+        await local.pg.query<{ n: number }>(
+          `SELECT count(*)::int AS n FROM ${table} WHERE user_id=$1`,
+          [auth.userId],
+        )
+      ).rows[0]!.n;
+    const input = memoSave({
+      first_draft: draft,
+      mode: "draft",
+      final: "Dana, thanks. Thursday doesn't work; next week?",
+    });
+    // Main's payload before #39, exactly.
+    expect(read(await tools.create_memo(input))).toEqual({
+      code: "store_unavailable",
+      error: "store_unavailable",
+      message: "Milton is unavailable. No save outcome is confirmed.",
+      next: nextSteps.store_unavailable,
+    });
+    expect(diff).toHaveBeenCalled();
+    for (const table of ["usage_calls", "save_requests", "memos"])
+      expect([table, await count(table)]).toEqual([table, 0]);
+    // Once the diff works, the same request saves, and its call is recorded.
+    diff.mockRestore();
+    expect(read(await tools.create_memo(input))).toMatchObject({
+      status: "saved",
+    });
+    for (const table of ["usage_calls", "save_requests", "memos"])
+      expect([table, await count(table)]).toEqual([table, 1]);
+  } finally {
+    diff.mockRestore();
     await local.dispose();
   }
 });

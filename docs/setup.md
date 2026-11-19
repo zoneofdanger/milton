@@ -74,12 +74,13 @@ covers:
 ## The setup prompt
 
 - One shared prompt (`SETUP_PROMPT`) serves the site's setup widget and the app's empty
-  TPS page ([TPS page](tps-page.md)). It asks the AI to connect, read what is on file,
-  offer to find about five emails the person sent when it can search their mail and keep
-  only the ones they approve, otherwise ask for a few pastes and keep each exactly as
-  pasted, say the person can skip this, show the standing line and add it once the
-  person says yes, help with a writing or clean-up task first if the person
-  would rather, and never wait on any of it.
+  TPS page ([TPS page](tps-page.md)). It asks the AI to connect using
+  `https://www.meetmilton.com/agents.md`, the steps written for an AI ([site](site.md)),
+  read what is on file, offer to find about five emails the person sent when it can
+  search their mail and keep only the ones they approve, otherwise ask for a few pastes
+  and keep each exactly as pasted, say the person can skip this, show the standing line
+  and add it once the person says yes, help with a writing or clean-up task first if the
+  person would rather, and never wait on any of it.
 
 ## Shared facts
 

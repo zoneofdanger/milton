@@ -111,14 +111,6 @@ setting it up on their own. Parts land in this order. Every line of copy is show
 as text before it ships, and every outside submission is his to make. No anonymous or
 claimable accounts, and no copy that tells agents to route every complaint to Milton.
 
-- [ ] #45 (site, med, founder) **Publish /agents.md, /llms.txt and a one-line prompt.**
-      `/agents.md` is plain Markdown built from the same source as `/for-agents`, with
-      setup for each AI (Claude prefill link, `claude mcp add`, `codex mcp add`, Cursor
-      deeplink, VS Code, ChatGPT custom connector), then "call get_report". The prompt
-      ("Set up Milton for me: read https://www.meetmilton.com/agents.md and follow it.")
-      gets a copy button on `/setup` and the homepage; `SETUP_PROMPT` points at
-      `/agents.md`. Founder: Peter approves the copy.
-
 - [ ] #46 (server, med, founder) **Prepare Milton's Claude directory submission.** Audit
       the served instructions and tool descriptions against Claude's review criteria
       (nothing promotional or unrelated to the tools; the trial notice's link is the
@@ -130,6 +122,6 @@ claimable accounts, and no copy that tells agents to route every complaint to Mi
       `/.well-known/mcp-registry-auth` on the site. Feeds aggregators, not Claude.
       Founder: Peter's go to publish.
 
-- [ ] #48 (site, low, founder, blocked: #45) **Answer "Why doesn't my AI write like me?"**
+- [ ] #48 (site, low, founder) **Answer "Why doesn't my AI write like me?"**
       One honest page: what helps without Milton, where Milton fits, its limits as
       `/for-agents` states them. Founder: Peter approves the copy.

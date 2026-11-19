@@ -2,6 +2,13 @@
 import SiteLayout from "../layouts/SiteLayout.astro";
 import AssistantSetup from "../components/AssistantSetup.astro";
 import { STANDING_LINE } from "@milton/theme/facts";
+import {
+  AGENTS_PROMPT,
+  CLAUDE_CODE_COMMAND,
+  CODEX_ADD_COMMAND,
+  CODEX_LOGIN_COMMAND,
+  MCP_URL,
+} from "../data/connect";
 ---
 
 <SiteLayout
@@ -42,8 +49,24 @@ import { STANDING_LINE } from "@milton/theme/facts";
   <div class="connection sheet">
     <div class="sheet-bar">Milton’s MCP server URL</div>
     <div class="sheet-content">
-      <code>https://mcp.meetmilton.com/mcp</code>
+      <code>{MCP_URL}</code>
     </div>
+  </div>
+  <div class="agents-prompt" data-agents-prompt>
+    <p>Or paste this into your AI:</p>
+    <div class="agents-prompt-row">
+      <p class="agents-prompt-text">
+        <code data-agents-prompt-text>{AGENTS_PROMPT}</code>
+      </p>
+      <button class="secondary" type="button" data-copy-agents-prompt hidden>
+        Copy
+      </button>
+    </div>
+    <p
+      class="copy-status small-note"
+      role="status"
+      data-agents-prompt-status
+    ></p>
   </div>
   <div id="standing-line" class="standing">
     <p>
@@ -122,7 +145,7 @@ import { STANDING_LINE } from "@milton/theme/facts";
   <section id="claude-code" aria-labelledby="claude-code-heading">
     <h2 id="claude-code-heading">Claude Code</h2>
     <p>In your terminal, add Milton for your user account:</p>
-    <pre><code>claude mcp add --transport http --scope user milton https://mcp.meetmilton.com/mcp</code></pre>
+    <pre><code>{CLAUDE_CODE_COMMAND}</code></pre>
     <p>
       Then open Claude Code, run <code>/mcp</code>, select Milton, and complete
       authentication. User scope makes the connection available across projects.{" "}
@@ -140,8 +163,8 @@ import { STANDING_LINE } from "@milton/theme/facts";
   <section id="codex" aria-labelledby="codex-heading">
     <h2 id="codex-heading">Codex</h2>
     <p>With the Codex CLI installed, run:</p>
-    <pre><code>{`codex mcp add milton --url https://mcp.meetmilton.com/mcp
-codex mcp login milton`}</code></pre>
+    <pre><code>{`${CODEX_ADD_COMMAND}
+${CODEX_LOGIN_COMMAND}`}</code></pre>
     <p>
       Complete the browser authorization. If adding Milton already signed you
       in, you don’t need to sign in again. Start a new Codex session if the
@@ -245,6 +268,38 @@ approval_mode = "approve"`}</code></pre>
   </section>
 </SiteLayout>
 
+<script>
+  import { track } from "@vercel/analytics";
+
+  // Progressive enhancement: the prompt is plain text; the button appears with JS.
+  for (const block of document.querySelectorAll<HTMLElement>(
+    "[data-agents-prompt]",
+  )) {
+    const button = block.querySelector<HTMLButtonElement>(
+      "[data-copy-agents-prompt]",
+    )!;
+    const text = block.querySelector<HTMLElement>("[data-agents-prompt-text]")!;
+    const status = block.querySelector<HTMLElement>(
+      "[data-agents-prompt-status]",
+    )!;
+    button.hidden = false;
+    button.addEventListener("click", async () => {
+      track("Setup prompt copy");
+      try {
+        await navigator.clipboard.writeText(text.textContent ?? "");
+        status.textContent = "Copied. Paste it into your AI.";
+      } catch {
+        // No clipboard: select the line so it can be copied by hand.
+        const range = document.createRange();
+        range.selectNodeContents(text);
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+      }
+    });
+  }
+</script>
+
 <style>
   /* No paragraph ends on a lone word. */
   p,
@@ -262,8 +317,35 @@ approval_mode = "approve"`}</code></pre>
     scroll-margin-top: var(--space-6);
   }
   .connection,
+  .agents-prompt,
   .standing {
     margin-top: var(--space-6);
+  }
+  .agents-prompt p {
+    margin: 0;
+  }
+  .agents-prompt-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-3) var(--space-4);
+    margin-top: var(--space-3);
+  }
+  .agents-prompt .agents-prompt-text {
+    flex: 1 1 18rem;
+    min-width: 0;
+    padding: var(--space-4) var(--space-5);
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-control);
+    overflow-wrap: anywhere;
+  }
+  .agents-prompt .copy-status {
+    margin-top: var(--space-2);
+  }
+  .copy-status:empty,
+  [hidden] {
+    display: none !important;
   }
   .standing {
     scroll-margin-top: var(--space-6);

@@ -32,6 +32,18 @@ Local commands and landing content are in [apps/site/README.md](../apps/site/REA
 - `/for-agents` serves a static product briefing, alternatives, the two tools, when
   memos are saved, export, price, evidence limits and an optional first writing task in
   the initial HTML.
+- `/agents.md` is plain Markdown (`text/markdown; charset=utf-8`, set in
+  `apps/site/vercel.json`) that an AI follows to set up Milton for the person who sent
+  it: check for the tools, add the server the way its client does (Claude Code, Codex,
+  Cursor's install link, VS Code, Claude's prefilled custom connector link, or ChatGPT
+  through the person), the person's sign-in and the trial, then `get_report`, whose setup
+  script takes over (copy approved by Peter, 2026-11-19). Its server URL and commands come
+  from `apps/site/src/data/connect.ts`, which `/setup` also reads, and its trial and price
+  from the shared facts ([setup](setup.md#shared-facts)).
+- `/llms.txt` (`text/plain; charset=utf-8`) is a short index for AIs that look for one:
+  Milton in one line with its server URL, then links to `/agents.md`, `/for-agents`,
+  `/tools` and `/pricing` (copy approved by Peter, 2026-11-19). Agents rarely fetch it
+  unprompted, so nothing relies on it.
 - `/tools` is the public connector reference the AI directories ask for: setup and
   permissions (Read only, Read and write), `get_report` and `create_memo` with their
   inputs, outputs and side effects, the error `next` actions, the retired calls refused,
@@ -78,6 +90,12 @@ Local commands and landing content are in [apps/site/README.md](../apps/site/REA
   Analytics custom events with the current pick.
 - The setup widget on `/setup` copies the shared setup prompt ([setup](setup.md)), falls back to
   manual selection, and closes on Escape or an outside click.
+- Under the server URL, `/setup` shows "Or paste this into your AI:" and the one-line
+  prompt "Set up Milton for me: read https://www.meetmilton.com/agents.md and follow it."
+  as plain text, with a "Copy" button that appears only with JavaScript (copy approved by
+  Peter, 2026-11-19). A copy says "Copied. Paste it into your AI.", sends a "Setup prompt
+  copy" Vercel Analytics event, and without a clipboard selects the line instead. The
+  homepage doesn't show it.
 - `/pricing` states the one plan ($5.01 USD a month after a 30-day free trial, no card
   needed to start, charged only if a card is added, and where billing questions go), what
   it includes, a link to sign in at the app, and a short FAQ: what happens after the

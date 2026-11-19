@@ -60,6 +60,7 @@ the backlog. The concept files indexed below hold everything else.
 - [memos](docs/memos.md) — What a memo, tweak and report are; what a memo holds, its tier, change score and tweaks; kinds, legacy data and when AIs save
 - [positioning](docs/positioning.md) — What Milton is for and how to judge features, copy and backlog against it: your AI writes like you
 - [reports](docs/reports.md) — How get_report reads, writing nothing, and how a report ranks memos, picks examples and their changes, counts memos and prints its text
+- [research/agent-discovery-spec-2026-11-19](docs/research/agent-discovery-spec-2026-11-19.md) — The spec Peter approved on 2026-11-19 for agents to find Milton when a person says their AI doesn't write like them, and set it up alone; frozen
 - [research/ai-grants-spec-2026-11-18](docs/research/ai-grants-spec-2026-11-18.md) — The spec Peter approved on 2026-11-18 to keep up to 10 approvals per account and AI client, so one AI on several machines stays connected; frozen
 - [research/derived-systems-2026](docs/research/derived-systems-2026.md) — November 2026: the embeddings, advisory graph, task retrieval and gardening Milton built, measured and removed, and what would justify rebuilding
 - [research/honcho-2026](docs/research/honcho-2026.md) — Honcho compared with Milton on 2026-11-05: a substantial overlap in person memory; Milton's distinction was a writing workflow on approved examples

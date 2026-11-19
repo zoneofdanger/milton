@@ -32,6 +32,14 @@ Local commands and landing content are in [apps/site/README.md](../apps/site/REA
 - `/for-agents` serves a static product briefing, alternatives, the two tools, when
   memos are saved, export, price, evidence limits and an optional first writing task in
   the initial HTML.
+- `/agents.md` is plain Markdown (`text/markdown; charset=utf-8`, set in
+  `apps/site/vercel.json`) that an AI follows to set up Milton for the person who sent
+  it: check for the tools, add the server the way its client does (Claude Code, Codex,
+  Cursor's install link, VS Code, Claude's prefilled custom connector link, or ChatGPT
+  through the person), the person's sign-in and the trial, then `get_report`, whose setup
+  script takes over (copy approved by Peter, 2026-11-19). Its server URL and commands come
+  from `apps/site/src/data/connect.ts`, which `/setup` also reads, and its trial and price
+  from the shared facts ([setup](setup.md#shared-facts)).
 - `/tools` is the public connector reference the AI directories ask for: setup and
   permissions (Read only, Read and write), `get_report` and `create_memo` with their
   inputs, outputs and side effects, the error `next` actions, the retired calls refused,

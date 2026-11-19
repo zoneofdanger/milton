@@ -10,17 +10,21 @@ covers:
 
 Rewritten in place by the release coordinator at every release, never appended to; the
 release's record goes in [history](../history.md). How to release and roll back:
-[releases](releases.md). As of 2026-11-19 18:12Z (after #176).
+[releases](releases.md). As of 2026-11-19 19:30Z (after #158 and #162).
 
 ## Services
 
-- **App, MCP, admission, daily check:** `milton-app-dirprep-a6118cb`,
-  `milton-mcp-dirprep-a6118cb`, `milton-admit-00024-rnr` and job `milton-e2e-daily`, all on
-  image `sha256:e016012cb31f470a46dcf6f65a709b6f7c17118698398d704c204687f5932d52` (#176 and
-  #174, `a6118cb`: served text for Claude's directory and the setup prompt pointing at
-  `/agents.md`; Cloud Run shows the amd64 manifest digest `sha256:c3acb006…`, not this index
-  digest). Rollback, code only, all four together: `milton-app-diffgate-c018c31`,
-  `milton-mcp-diffgate-c018c31`, `milton-admit-00023-m57` and the job to image
+- **App, MCP, admission, daily check:** `milton-app-started-868df1c`,
+  `milton-mcp-started-868df1c`, `milton-admit-00025-kzr` and job `milton-e2e-daily`, all on
+  image `sha256:685698e286c812435faf127eb6b23bacfadbf768eb33017fcfa04ccafc412d02` (#158 and
+  #162 via #181, `868df1c`: `create_memo`'s `started_from` and a replace keeping a kept
+  first draft's mode; Cloud Run shows the amd64 manifest digest `sha256:f0a34993…`, not this
+  index digest). Rollback, code only, all four together, in the tools-change order:
+  `milton-app-dirprep-a6118cb`, `milton-mcp-dirprep-a6118cb`, `milton-admit-00024-rnr` and
+  the job to image `sha256:e016012cb31f470a46dcf6f65a709b6f7c17118698398d704c204687f5932d52`
+  (#176 and #174, `a6118cb`), with no schema step: AIs holding `started_from` get an
+  invalid-input refusal on a save that sends it until they reconnect. Below that,
+  `milton-*-diffgate-c018c31`, `milton-admit-00023-m57` and the job to image
   `sha256:ed44f5c53c00add5328db4a8da06ca4199355242b219d72aaf9b8a92fee8f45b` (#167,
   `c018c31`), with no schema step: served text only. Below that,
   `milton-*-billing-9b926b2`, `milton-admit-00022-fc4` and the job to image

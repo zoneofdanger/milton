@@ -23,6 +23,46 @@ Earlier records are in git history: the last runbook holding them is at commit 4
 (`git show 492b96a:server/deploy/README.md`), and the runbook's later versions are in
 `git log -p server/deploy/README.md` until 2026-11-10, when this file began.
 
+## 2026-11-19: a save works out its changes after the access gate (PR #167)
+
+- **#167 (#39; Peter's "agree" to build it and "yes" to release it, typed in this
+  coordinator session, milton-d2, on 2026-11-18 and 2026-11-19; built by a temporary
+  builder; Codex gpt-6-astra PASS at `d045439` after a FAIL at `a7c1d1e`), `c018c31`:** a
+  save computes its change list only after the trial and subscription gate admits it, so a
+  paused or replayed save does no diff work. Every refusal still comes before database
+  work, and an error in the diff keeps the old message and admits nothing.
+  - **Order:** no schema step (0017 was already applied, below). Image
+    `sha256:ed44f5c53c00add5328db4a8da06ca4199355242b219d72aaf9b8a92fee8f45b` (amd64
+    `sha256:532db919…`; Node v26.13.1, user `node`): admit `milton-admit-00023-m57` at
+    07:54:37Z; app and MCP `milton-*-diffgate-c018c31` traffic at 07:55:21Z and 07:55:28Z;
+    `milton-e2e-daily` at 07:55:40Z (no execution active), `milton-e2e-daily-jb4vz` passed.
+  - **Live:** app and MCP `/health` and auth `/api/auth/ok` 200, app home 200, MCP 401
+    unauthenticated, admit 403 without a token, forms probe PASS.
+  - **Gate** at 08:06:10Z: clean, with no alert open or opened since 07:54:30Z. No log line
+    reached an older app or MCP revision after 07:57:30Z; no error from any service or job
+    since 07:54Z.
+  - **Checks** on the merge commit `c018c31` (with #168 and #169): main CI green; PR CI
+    green on each.
+  - **Not observed:** a paused account's save in production (the save tests cover it).
+  - **Rollback:** code only, `milton-*-billing-9b926b2`, `milton-admit-00022-fc4` and the
+    daily job to image `sha256:56404eec…`.
+
+## 2026-11-19: Drizzle 0017, the request's line and paste rules in SQL (PR #168)
+
+- **0017_request_rules (#38; Peter's "Go, migrate now", answered in this coordinator
+  session, milton-d2, on 2026-11-18; built by a temporary builder; Codex gpt-6-astra PASS
+  at `8ca6b27`), merged as `f819a5b`:** adds the check `memos_request_typed` (at most 12
+  lines, no quoted `>` line, no "On … wrote:" line, no `From:` or `Subject:` header), never
+  stricter than save.ts, under `lock_timeout` 5s and `statement_timeout` 30s.
+  - **Snapshot** `snap-icy-violet-b8pu7936` (`before-0017-request-rules-pr168`) at
+    00:22:00Z, plus a private schema-only dump. Preflight: no existing memo broke the rule.
+  - **Migrate** with the owner URL in the process environment only, then unset; it applied
+    on the first attempt at 00:22:31–33Z. Journal 17 → 18; the check is validated; no memo
+    changed.
+  - **After:** `milton-e2e-daily-pkszj` passed at 00:23:00Z on the serving image (#165),
+    which already refused the same requests in save.ts.
+  - **Rollback:** none needed for code; the snapshot holds the schema before 0017.
+
 ## 2026-11-18: billing questions go to accountspayable@ (PR #165)
 
 - **#165 (#23; Peter's "go", typed in this coordinator session, milton-d2, on 2026-11-18,

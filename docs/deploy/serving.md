@@ -10,20 +10,23 @@ covers:
 
 Rewritten in place by the release coordinator at every release, never appended to; the
 release's record goes in [history](../history.md). How to release and roll back:
-[releases](releases.md). As of 2026-11-18 23:44Z (after #165).
+[releases](releases.md). As of 2026-11-19 07:56Z (after #167, with 0017 from #168).
 
 ## Services
 
-- **App, MCP, admission, daily check:** `milton-app-billing-9b926b2`,
-  `milton-mcp-billing-9b926b2`, `milton-admit-00022-fc4` and job `milton-e2e-daily`, all on
-  image `sha256:56404eec54213d8ce50e024f3ec2cde1fc2a9f1d4ac3511ea354cd02f72ab148` (#165,
-  `9b926b2`: the paused-account message names accountspayable@; Cloud Run shows the amd64
-  manifest digest `sha256:f5ae6bca…`, not this index digest). Rollback, code only, all four
-  together: `milton-app-firstline-f9c7b32`, `milton-mcp-firstline-f9c7b32`,
-  `milton-admit-00021-46m` and the job to image
-  `sha256:cc7eb9ca54bb546430100ad883bc2c60231a320f55ceed19d107ed350139030f` (#156 and #157,
-  `f9c7b32`), with no schema step: served text only. Below that, `milton-*-grants-62b3101`,
-  `milton-admit-00020-b46` and image
+- **App, MCP, admission, daily check:** `milton-app-diffgate-c018c31`,
+  `milton-mcp-diffgate-c018c31`, `milton-admit-00023-m57` and job `milton-e2e-daily`, all on
+  image `sha256:ed44f5c53c00add5328db4a8da06ca4199355242b219d72aaf9b8a92fee8f45b` (#167,
+  `c018c31`: a save works out its change list only after the access gate admits it; Cloud
+  Run shows the amd64 manifest digest `sha256:532db919…`, not this index digest). Rollback,
+  code only, all four together: `milton-app-billing-9b926b2`, `milton-mcp-billing-9b926b2`,
+  `milton-admit-00022-fc4` and the job to image
+  `sha256:56404eec54213d8ce50e024f3ec2cde1fc2a9f1d4ac3511ea354cd02f72ab148` (#165,
+  `9b926b2`), with no schema step: it satisfies 0017's check, since save.ts already refused
+  every request the check refuses. Below that, `milton-*-firstline-f9c7b32`,
+  `milton-admit-00021-46m` and image
+  `sha256:cc7eb9ca54bb546430100ad883bc2c60231a320f55ceed19d107ed350139030f` (#156 and
+  #157). Below that, `milton-*-grants-62b3101`, `milton-admit-00020-b46` and image
   `sha256:d71dbee5971b08ef93f0024d1075e572fa01ad7349635db2231f76d49aa3e365` (#152,
   `62b3101`). Below that,
   `milton-*-replaces-87ed9dc`, `milton-admit-00019-25l` and image
@@ -78,8 +81,10 @@ release's record goes in [history](../history.md). How to release and roll back:
 
 ## Schema heads
 
-- Drizzle: `0016_loosen_checks`, journal 17 entries (`0000_baseline` to 0016), applied
-  2026-11-12 19:40Z. The code serving now predates it and satisfies its looser checks.
+- Drizzle: `0017_request_rules`, journal 18 entries (`0000_baseline` to 0017), applied
+  2026-11-19 00:22Z (#168): the check `memos_request_typed` holds the typed request's
+  12-line and pasted-mail rules, never stricter than save.ts. Every serving and rollback
+  revision above already refuses those requests before the database.
 - Native auth ledger: 001–009 (`009-approvals-per-client`, 2026-11-18 18:53:54Z: up to 10
   active approvals per account and AI client). Its rollback is the pre-migration snapshot
   below; no code needs 008's rule.
@@ -100,6 +105,8 @@ release's record goes in [history](../history.md). How to release and roll back:
   the schema before 0016 (it only loosens checks, so no code rollback needs it).
 - `snap-round-shape-b8ndkdn2` (`before-009-approvals-per-client-pr152`, 2026-11-18
   18:53:19Z): the schema before native 009 (one function changed, no data).
+- `snap-icy-violet-b8pu7936` (`before-0017-request-rules-pr168`, 2026-11-19 00:22:00Z):
+  the schema before 0017 (one added check, no data changed, so no code rollback needs it).
 - `snap-fancy-hat-b8j5ls14` (pre-cutover, 2026-11-07): excluded from recovery; restoring it
   is Peter's decision ([migrations](migrations.md#database-recovery)).
 - Other manual pre-migration snapshots are kept until deleted; scheduled ones last 14 days.

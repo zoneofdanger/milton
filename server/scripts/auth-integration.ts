@@ -53,6 +53,7 @@ import {
   StoreError,
 } from "../src/store";
 import { storeForCurrentRequest } from "../test/store-fixtures";
+import { compareRequestRules } from "../test/request-rules";
 import { recordToolUsage, USAGE_RETRY_MS } from "../src/store/usage";
 import {
   authenticateConnectionKey,
@@ -573,6 +574,25 @@ try {
   }
   pass(
     "0016 takes save_requests then memos first, so a save under way commits before it; a held table fails it in 5 s with the old checks and journal; its statements run under 30 s and 5 s limits",
+  );
+  // The request's rules (#38) on PostgreSQL 18, the code under Node 26: one
+  // case list against both, and no generated request the two judge apart, so
+  // the database refuses no request the code accepts.
+  stage = "request rules, code and database";
+  {
+    const compared = await compareRequestRules((text, params) =>
+      owner.query(text, params),
+    );
+    assert.deepEqual(
+      compared.cases.filter(
+        (c) => JSON.stringify(c.actual) !== JSON.stringify(c.expected),
+      ),
+      [],
+    );
+    assert.deepEqual(compared.differ, []);
+  }
+  pass(
+    "the request's line and paste checks take every request the code accepts and refuse every one it refuses, case by case and on generated requests",
   );
   // 012 then 013: sessions no longer store the native access token, and the
   // column is gone. Rerunning each converges.

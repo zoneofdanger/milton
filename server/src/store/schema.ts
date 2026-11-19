@@ -280,6 +280,48 @@ const oneLineCheck = (column: unknown, max: number) =>
   sql`char_length(${column}) BETWEEN 1 AND ${sql.raw(String(max))} AND ${column} = btrim(${column}) AND ${column} !~ '[[:cntrl:]]'`;
 const MEDIA = sql.raw(`('email','chat','post','document','speech')`);
 
+// The request's line and paste rules (#38), so a write path that skips
+// checkMemo keeps none: save.ts refuses a request over MAX_REQUEST_LINES (12)
+// lines, counting "\n" as split does, or matching one of PASTED. These
+// patterns read the stored, trimmed request as PASTED's JavaScript does (no u
+// flag, multiline), spelled out so that no PostgreSQL flag, locale or
+// collation changes them:
+// - a line starts at the start or after one of JavaScript's line terminators
+//   (LT: \n, \r, U+2028, U+2029), and . is any other character;
+// - \s within a line is WS: JavaScript's WhiteSpace, the spec's tab, VT, FF
+//   and U+FEFF plus Unicode's Zs (space, U+00A0, U+1680, U+2000 to U+200A,
+//   U+202F, U+205F, U+3000);
+// - /i is each ASCII letter in either case: without the u flag JavaScript
+//   folds no other character onto one ("ſubject:" passes both);
+// - \b is a change between [A-Za-z0-9_] and anything else.
+// The rule (Peter, 2026-11-18): never stricter than the code; anything
+// save.ts accepts passes here, shown by one case list run against both
+// (test/request-rules.ts). Deliberate looseness: WS is fixed, so a space a
+// later Unicode version adds to JavaScript's \s passes here while the code
+// refuses its line. \r, tab, VT and FF are in LT and WS only to mirror the
+// code; memos_request refuses them anyway.
+const LT = "\\n\\r\\u2028\\u2029";
+const WS =
+  "\\t\\v\\f \\u00a0\\u1680\\u2000-\\u200a\\u202f\\u205f\\u3000\\ufeff";
+const LINE = `(^|[${LT}])[${WS}]*`;
+const NOT_WORD = `[^A-Za-z0-9_${LT}]`;
+const REQUEST_PASTED_SQL = [
+  // /^\s*>/m
+  `${LINE}>`,
+  // /^\s*On\b.*\bwrote:\s*$/im
+  `${LINE}[Oo][Nn]${NOT_WORD}([^${LT}]*${NOT_WORD})?[Ww][Rr][Oo][Tt][Ee]:[${WS}]*([${LT}]|$)`,
+  // /^\s*(From|Subject):/im
+  `${LINE}([Ff][Rr][Oo][Mm]|[Ss][Uu][Bb][Jj][Ee][Cc][Tt]):`,
+];
+const requestTyped = (request: unknown) =>
+  sql.join([
+    sql`${request} IS NULL OR (char_length(${request}) - char_length(replace(${request}, chr(10), '')) <= 11`,
+    ...REQUEST_PASTED_SQL.map(
+      (pattern) => sql` AND ${request} !~ ${sql.raw(`'${pattern}'`)}`,
+    ),
+    sql`)`,
+  ]);
+
 // A personal label for a kind of writing ("vendor decline"), shared by every
 // memo of the account. Labels are unique per account regardless of case and
 // never change; rows leave only with their account.
@@ -404,6 +446,7 @@ export const memos = pgTable(
       "memos_request",
       sql`${t.request} IS NULL OR (${t.firstDraftState} <> 'none' AND char_length(${t.request}) BETWEEN 1 AND 600 AND ${t.request} = btrim(${t.request}, ' ' || chr(10)) AND translate(${t.request}, chr(10), '') !~ '[[:cntrl:]]')`,
     ),
+    check("memos_request_typed", requestTyped(t.request)),
     check(
       "memos_changes_state",
       sql`${t.changesState} IS NULL OR (${t.changesState} IN ('itemized','too_large') AND ${t.firstDraftState} = 'kept')`,

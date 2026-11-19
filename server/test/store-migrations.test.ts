@@ -23,6 +23,7 @@ import { AUTH_MIGRATIONS } from "../../apps/auth/scripts/migrations";
 import { cp, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { compareRequestRules } from "./request-rules";
 
 // An approved sample in the pre-memo tables, as plain SQL.
 async function seedSample(
@@ -1629,6 +1630,109 @@ test("0016 loosens the rounds and request id checks: today's rows stay as they a
       );
       await expect(receipt(id)).rejects.toThrow(/save_request_id/);
     }
+  } finally {
+    await pg.close();
+    await rm(scratch, { recursive: true, force: true });
+  }
+});
+
+test("0017 adds the request's line and paste rules: stored requests stay, a refused one fails it whole, and the database refuses no request the code accepts", async () => {
+  const folder = new URL("../drizzle/", import.meta.url).pathname;
+  const scratch = await mkdtemp(join(tmpdir(), "milton-0017-"));
+  const pg = new PGlite();
+  try {
+    await cp(folder, scratch, { recursive: true });
+    const journal = await Bun.file(join(scratch, "meta/_journal.json")).json();
+    const entries = journal.entries as { tag: string }[];
+    const at = entries.findIndex((e) => e.tag.startsWith("0017_"));
+    expect(at).toBeGreaterThan(0);
+    const sqlFile = await Bun.file(
+      join(scratch, `${entries[at]!.tag}.sql`),
+    ).text();
+    // The header's read-only preflight counts exactly the rows the check
+    // refuses: its condition is the check's own.
+    const added = sqlFile.match(
+      /ADD CONSTRAINT "memos_request_typed" CHECK \((.*)\);$/m,
+    );
+    const preflight = `SELECT count(*) AS refused FROM memos WHERE NOT (${added![1]});`;
+    expect(sqlFile).toContain(`--   ${preflight}\n`);
+    expect(sqlFile).toContain("SET LOCAL lock_timeout = '5s';");
+    const through = async (count: number) =>
+      writeFile(
+        join(scratch, "meta/_journal.json"),
+        JSON.stringify({ ...journal, entries: entries.slice(0, count) }),
+      );
+    await through(at);
+    await migrate(drizzle(pg), { migrationsFolder: scratch });
+    // Requests as the code saves them, and none.
+    await seedUsers(pg, "asker");
+    const store = fixtureStore(storeDatabase(pg), "asker");
+    for (const request of [
+      undefined,
+      "Decline their call, short.",
+      "Two lines,\nboth typed. On reflection we wrote: none.",
+    ])
+      expect(
+        (
+          await store.saveMemo(
+            memoSave({
+              final: `A fictional final, ${request ?? "no request"}.`,
+              first_draft: "A fictional first draft.",
+              mode: "draft",
+              ...(request === undefined ? {} : { request }),
+            }),
+          )
+        ).status,
+      ).toBe("saved");
+    const rows = async () =>
+      (await pg.query("SELECT * FROM memos ORDER BY id")).rows;
+    const before = await rows();
+    const applied = async () =>
+      (await pg.query("SELECT hash FROM drizzle.__drizzle_migrations")).rows
+        .length;
+    // A stored request the code refuses but the old checks took: the
+    // preflight counts it, and 0017 fails whole, leaving the journal.
+    const { id, request } = (
+      before as { id: string; request: string | null }[]
+    )[0]!;
+    await through(at + 1);
+    for (const pasted of ["Reply:\n> Can we meet?", "x\n".repeat(12) + "x"]) {
+      await pg.query("UPDATE memos SET request=$1 WHERE id=$2", [pasted, id]);
+      expect((await pg.query(preflight)).rows).toEqual([{ refused: 1 }]);
+      await expect(
+        migrate(drizzle(pg), { migrationsFolder: scratch }),
+      ).rejects.toMatchObject({
+        cause: {
+          message:
+            'check constraint "memos_request_typed" of relation "memos" is violated by some row',
+        },
+      });
+      expect(await applied()).toBe(at);
+    }
+    await pg.query("UPDATE memos SET request=$1 WHERE id=$2", [request, id]);
+    expect(await rows()).toEqual(before);
+    await migrate(drizzle(pg), { migrationsFolder: scratch });
+    expect(await applied()).toBe(at + 1);
+    expect(await rows()).toEqual(before);
+    expect((await pg.query(preflight)).rows).toEqual([{ refused: 0 }]);
+    await expect(
+      pg.query("UPDATE memos SET request=$1 WHERE id=$2", [
+        "Answer it.\nOn Tue, Sam wrote:",
+        id,
+      ]),
+    ).rejects.toThrow(/memos_request_typed/);
+    // One case list against both rules (test/request-rules.ts): each case's
+    // two verdicts as listed, and no generated request the two judge apart.
+    const compared = await compareRequestRules((text, params) =>
+      pg.query(text, params),
+    );
+    expect(
+      compared.cases.filter((c) => !Bun.deepEquals(c.actual, c.expected)),
+    ).toEqual([]);
+    expect(compared.differ).toEqual([]);
+    // The generator reaches both verdicts.
+    expect(compared.accepted).toBeGreaterThan(compared.generated / 10);
+    expect(compared.accepted).toBeLessThan(compared.generated * 0.9);
   } finally {
     await pg.close();
     await rm(scratch, { recursive: true, force: true });

@@ -103,7 +103,10 @@ covers:
 ## Trial notices
 
 - A trial notice is claimed once per stage, 7 days and 1 day before `trial_end`, only
-  while trialing, and carries the one link, the signed-in app home.
+  while trialing, and carries the one link, the signed-in app home. Its message gives
+  the end date (UTC) and says the account page has the details, with no price or card
+  instruction; the instructions have the AI mention it once, after the task (Peter,
+  2026-11-19, for the Claude directory review).
 - One atomic account-wide claim offers each stage at most once across AIs and tools;
   returning during the last day skips the earlier reminder. The claim runs with a 250 ms
   lock and 500 ms statement limit, and a lost response or failed claim can lose a

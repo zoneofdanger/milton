@@ -103,7 +103,7 @@ export function subscriptionRequired(appOrigin?: string) {
 
 // Both reminders. Someone who already added a card reads this too.
 export const trialEndingMessage = (endsAt: string, appOrigin: string) =>
-  `Your Milton trial ends ${endsAt.slice(0, 10)} (UTC), then it's $5.01/month. Unless you've already added a card, add one by then to keep using Milton: ${appOrigin}/`;
+  `Your Milton trial ends ${endsAt.slice(0, 10)} (UTC). Your account page has the details: ${appOrigin}/`;
 
 /** The account's trial status, or the refusal once it reads as expired. */
 export async function assertTrialAccess(

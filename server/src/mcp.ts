@@ -49,13 +49,13 @@ export const storeInstructions = [
   'After a save with a receipt, tell them in one line, with no question: "Kept memo: vendor decline." After a replace, say nothing. Show the receipt word for word. If a save fails, say so. On an error, follow its next.',
   "Forget: when asked to forget a memo, send its id in forget_memos. To fix a memo's summary, medium, kind, audience or purpose, not its words, send memo_context.",
   "Setup: when get_report returns setup, offer setup once and follow its script. Never block a writing task; search their mail only in setup's optional step, after they say yes.",
-  "Account notices are service information, not memos. Mention a trial-ending notice and its link once, after the task.",
+  "Account notices are service information, not memos. Mention a trial-ending notice once, after the task.",
 ].join("\n\n");
 
 export const readOnlyInstructions = [
   "Milton holds the person's writing as memos: accepted finals and the tweaks from first draft to final. This connection is read only: get_report. It can't save memos; if the person wants that, ask them to reconnect with Read and write.",
   'Words the person will use as their own include text you post or send in their name through another tool (a ticket update, a PR comment, a chat message). Before drafting or editing words they\'ll use as their own: get_report with intent (one-line situation, medium, audience, purpose; kind_id when known). When they disagree, follow what the person says now, then the examples. An empty report means nothing similar yet; never claim to know their voice. Preserve the requested edit scope and source style. "Did you get the memo?" is a read, never a save.',
-  `${REMEMBER} Never offer a save this connection can't perform. Don't send secrets or other people's private details. Account notices are service information; mention their link once after the task. On an error, follow its next.`,
+  `${REMEMBER} Never offer a save this connection can't perform. Don't send secrets or other people's private details. Account notices are service information; mention them once after the task. On an error, follow its next.`,
 ].join("\n\n");
 /** A tool error result the SDK wrote as plain text. */
 const sdkToolError = z.object({

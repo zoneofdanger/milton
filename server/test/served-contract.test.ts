@@ -289,11 +289,14 @@ test("the refusal, both reminders and the instructions give the one link, true f
   expect(refusal.message).not.toContain("trial");
   // The two reminders share one text, and someone who added a card reads it.
   expect(trialEndingMessage("2026-12-03T00:00:00.000Z", app)).toBe(
-    "Your Milton trial ends 2026-12-03 (UTC), then it's $5.01/month. Unless you've already added a card, add one by then to keep using Milton: https://app.example/",
+    "Your Milton trial ends 2026-12-03 (UTC). Your account page has the details: https://app.example/",
   );
   const account = storeInstructions.split("\n\n").at(-1)!;
   expect(account).toContain(
-    "Mention a trial-ending notice and its link once, after the task.",
+    "Mention a trial-ending notice once, after the task.",
+  );
+  expect(readOnlyInstructions).toContain(
+    "Account notices are service information; mention them once after the task.",
   );
   expect(account).not.toContain("no link");
   // The refusal carries its own next step, so the instructions don't.

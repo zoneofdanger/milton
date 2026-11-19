@@ -296,9 +296,10 @@ measured per client before any claim of reliability.
   (approves it, approves posting or sending it, says it's done or they'll send it, or
   copies it to use), untouched finals included. When the AI posts it for them, it saves
   right after it posts. A revision just shown is not accepted yet.
-- If Milton connects mid-conversation, the AI follows this from then on: drafts under
-  way included, and it saves finals already approved in that conversation when it still
-  has each final verbatim (with `first_draft_missing` when the first draft isn't).
+- If Milton connects mid-conversation, the AI follows this from then on, drafts under
+  way included. It asks once before saving finals the person approved earlier in that
+  conversation that it still has verbatim (with `first_draft_missing` when the first
+  draft isn't) (Peter, 2026-11-19, for the Claude directory review).
 - Posted writing counts (Peter, 2026-11-13): in an offline comparison with a fake send
   tool, fake servers and a fictional person, 9 runs per cell, saves after sending went
   from 7/9 to 9/9 in Claude Code and from 0/9 to 9/9 in Codex, with no wrong saves. No

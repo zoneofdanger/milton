@@ -26,7 +26,7 @@ test("the served text uses one word for each thing and describes the memo workfl
     storeInstructions.split("\n\n").map((p) => p.split(/[:.(]/)[0]),
   ).toEqual([
     "Milton holds the person's writing as memos",
-    "If Milton connects mid-conversation, follow this from then on",
+    "If Milton connects mid-conversation, follow this from then on, drafts under way included",
     "Words the person will use as their own include text you post or send in their name through another tool ",
     "When they tell you what to write, their words are the raw material",
     "Edit mode",
@@ -61,7 +61,7 @@ test("the served text uses one word for each thing and describes the memo workfl
   for (const part of [
     "Words the person will use as their own include text you post or send in their name through another tool (a ticket update, a PR comment, a chat message). Before drafting or editing words they'll use as their own:",
     "(approves it, approves posting or sending it, says it's done or they'll send it, or copies it to use), save it with create_memo without asking, untouched finals too; when you post it for them, save right after it posts.",
-    "If Milton connects mid-conversation, follow this from then on: drafts under way included, and save finals they already approved this conversation if you still have each final verbatim (send first_draft_missing when the first draft isn't).",
+    "If Milton connects mid-conversation, follow this from then on, drafts under way included. Ask once before saving finals they approved earlier in this conversation that you still have verbatim (send first_draft_missing when the first draft isn't).",
   ])
     expect(storeInstructions).toContain(part);
   // A replace (Peter, 2026-11-17): the exact wording under an offline

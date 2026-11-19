@@ -296,9 +296,10 @@ measured per client before any claim of reliability.
   (approves it, approves posting or sending it, says it's done or they'll send it, or
   copies it to use), untouched finals included. When the AI posts it for them, it saves
   right after it posts. A revision just shown is not accepted yet.
-- If Milton connects mid-conversation, the AI follows this from then on: drafts under
-  way included, and it saves finals already approved in that conversation when it still
-  has each final verbatim (with `first_draft_missing` when the first draft isn't).
+- If Milton connects mid-conversation, the AI follows this from then on, drafts under
+  way included. It asks once before saving finals the person approved earlier in that
+  conversation that it still has verbatim (with `first_draft_missing` when the first
+  draft isn't) (Peter, 2026-11-19, for the Claude directory review).
 - Posted writing counts (Peter, 2026-11-13): in an offline comparison with a fake send
   tool, fake servers and a fictional person, 9 runs per cell, saves after sending went
   from 7/9 to 9/9 in Claude Code and from 0/9 to 9/9 in Codex, with no wrong saves. No
@@ -320,9 +321,10 @@ measured per client before any claim of reliability.
   text, or one short line on what they agreed to when they only agreed to the AI's offer
   or the result. Never send secrets, the person's correction messages or other people's
   text; summarize the situation in `context.summary`.
-- When the person asks to remember a preference, apply it now and keep it in the AI's
-  own memory or instructions; Milton keeps no standing rules, and their changes to the
-  AI's drafts are kept as tweaks.
+- When the person asks to remember a preference, apply it now; Milton keeps no standing
+  rules, and their changes to the AI's drafts are kept as tweaks. The served text no
+  longer tells the AI to keep it in its own memory or instructions (Peter, 2026-11-19,
+  for the Claude directory review).
 - After a save with a receipt, tell the person the receipt word for word, in one line,
   with no question. A replace returns no receipt, so the AI says nothing. A failed save
   is reported.

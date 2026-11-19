@@ -35,11 +35,11 @@ export const serverDescription =
 /** The clause for a request to remember a preference: Milton keeps no
  * standing rules (docs/memos.md). */
 const REMEMBER =
-  "When the person asks you to remember a preference, apply it now and keep it in your own memory or instructions; Milton keeps no standing rules, and their changes to your drafts are kept as tweaks.";
+  "When the person asks you to remember a preference, apply it now; Milton keeps no standing rules, and their changes to your drafts are kept as tweaks.";
 
 export const storeInstructions = [
   "Milton holds the person's writing as memos. Before drafting or editing words the person will use as their own, call get_report first. A memo is your first draft and the final they accepted; its tweaks are the changes they made you make, which Milton works out from the two.",
-  "If Milton connects mid-conversation, follow this from then on: drafts under way included, and save finals they already approved this conversation if you still have each final verbatim (send first_draft_missing when the first draft isn't).",
+  "If Milton connects mid-conversation, follow this from then on, drafts under way included. Ask once before saving finals they approved earlier in this conversation that you still have verbatim (send first_draft_missing when the first draft isn't).",
   "Words the person will use as their own include text you post or send in their name through another tool (a ticket update, a PR comment, a chat message). Before drafting or editing words they'll use as their own: get_report with intent (one-line situation, medium, audience, purpose; kind_id when known). When they disagree, follow what the person says now, then the examples; imitate examples' wording and heed what they changed. An empty report means nothing similar yet: write from the request, and never claim to know their voice.",
   "When they tell you what to write, their words are the raw material: reuse their phrases word for word where they fit, add only a greeting, a sign-off and connecting words in the manner of their examples, and don't expand on what they said.",
   "Edit mode: when asked to fix, clean up, proofread or tighten the person's own text, change only what was requested; preserve other words, length, tone, greeting and sign-off; add no stock phrases or new punctuation habits. Guidance never widens edit scope. Briefly list changes. Requested transformations (shortening, translation, tone) permit only that scope.",
@@ -49,13 +49,13 @@ export const storeInstructions = [
   'After a save with a receipt, tell them in one line, with no question: "Kept memo: vendor decline." After a replace, say nothing. Show the receipt word for word. If a save fails, say so. On an error, follow its next.',
   "Forget: when asked to forget a memo, send its id in forget_memos. To fix a memo's summary, medium, kind, audience or purpose, not its words, send memo_context.",
   "Setup: when get_report returns setup, offer setup once and follow its script. Never block a writing task; search their mail only in setup's optional step, after they say yes.",
-  "Account notices are service information, not memos. Mention a trial-ending notice and its link once, after the task.",
+  "Account notices are service information, not memos. Mention a trial-ending notice once, after the task.",
 ].join("\n\n");
 
 export const readOnlyInstructions = [
   "Milton holds the person's writing as memos: accepted finals and the tweaks from first draft to final. This connection is read only: get_report. It can't save memos; if the person wants that, ask them to reconnect with Read and write.",
   'Words the person will use as their own include text you post or send in their name through another tool (a ticket update, a PR comment, a chat message). Before drafting or editing words they\'ll use as their own: get_report with intent (one-line situation, medium, audience, purpose; kind_id when known). When they disagree, follow what the person says now, then the examples. An empty report means nothing similar yet; never claim to know their voice. Preserve the requested edit scope and source style. "Did you get the memo?" is a read, never a save.',
-  `${REMEMBER} Never offer a save this connection can't perform. Don't send secrets or other people's private details. Account notices are service information; mention their link once after the task. On an error, follow its next.`,
+  `${REMEMBER} Never offer a save this connection can't perform. Don't send secrets or other people's private details. Account notices are service information; mention them once after the task. On an error, follow its next.`,
 ].join("\n\n");
 /** A tool error result the SDK wrote as plain text. */
 const sdkToolError = z.object({
@@ -390,8 +390,8 @@ export function createMiltonServer(
     {
       title: "Get report",
       description: options.readOnly
-        ? "Read before drafting or editing words the person will use as their own, and when asked \"Did you get the memo?\": the report for one draft. intent needs situation (one line: what you are writing, to whom and why), medium, audience and purpose; add kind_id from kinds when one fits. Returns text (the person's best-matching finals as examples, with what they changed in an AI's first draft), examples, kinds, is_empty, memos (their memo count) and keep_memos. Imitate the examples. Empty means nothing similar yet; never guess their voice. This connection is read only. No model call, no write."
-        : "Read before drafting or editing words the person will use as their own, and when asked \"Did you get the memo?\": the report for one draft. intent needs situation (one line: what you are writing, to whom and why), medium, audience and purpose; add kind_id from kinds when one fits. A vague intent gets worse examples. Returns text (the person's best-matching finals as examples, best first, with what they changed in an AI's first draft), examples (memo ids and context, in served order), kinds (the person's kinds as {kind_id, kind}), is_empty, memos (how many memos they have) and keep_memos (false: save only replaces and writing the person asks you to remember). While memos is 0, setup holds the first-setup script: offer it once. Imitate the examples and heed what they changed. Empty means nothing similar yet; never guess their voice. No model call, no write.",
+        ? "Read before drafting or editing words the person will use as their own, and when asked \"Did you get the memo?\": the report for one draft. intent needs situation (one line: what you are writing, to whom and why), medium, audience and purpose; add kind_id from kinds when one fits. Returns text (the person's best-matching finals as examples, with what they changed in an AI's first draft), examples, kinds, is_empty, memos (their memo count) and keep_memos. Imitate the examples. Empty means nothing similar yet; never guess their voice. This connection is read only. No model call; never changes their memos."
+        : "Read before drafting or editing words the person will use as their own, and when asked \"Did you get the memo?\": the report for one draft. intent needs situation (one line: what you are writing, to whom and why), medium, audience and purpose; add kind_id from kinds when one fits. A vague intent gets worse examples. Returns text (the person's best-matching finals as examples, best first, with what they changed in an AI's first draft), examples (memo ids and context, in served order), kinds (the person's kinds as {kind_id, kind}), is_empty, memos (how many memos they have) and keep_memos (false: save only replaces and writing the person asks you to remember). While memos is 0, setup holds the first-setup script: offer it once. Imitate the examples and heed what they changed. Empty means nothing similar yet; never guess their voice. No model call; never changes their memos.",
       inputSchema: reportInput,
       annotations: readOnly,
     },

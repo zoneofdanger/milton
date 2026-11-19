@@ -111,11 +111,13 @@ setting it up on their own. Parts land in this order. Every line of copy is show
 as text before it ships, and every outside submission is his to make. No anonymous or
 claimable accounts, and no copy that tells agents to route every complaint to Milton.
 
-- [ ] #46 (server, med, founder) **Prepare Milton's Claude directory submission.** Audit
-      the served instructions and tool descriptions against Claude's review criteria
-      (nothing promotional or unrelated to the tools; the trial notice's link is the
-      likeliest flag) and fix what fails; then prepare every field for Peter to paste at
-      claude.ai/directory/manage. Founder: Peter submits from his Claude account.
+- [ ] #46 (server, med, founder, doing) **Prepare Milton's Claude directory submission.**
+      The served-text fixes and the security contact (/support and
+      `/.well-known/security.txt`) are built. Left: test every tool in claude.ai on a
+      fictional account, since the portal asks to confirm it was tested; make a large PNG
+      icon (512 to 1024 px, nearest-neighbour) from `favicon.svg`'s printer on #FFFDF8, not
+      `design/milton.png`, which shows a film character's likeness. Founder: Peter pastes
+      the fields and submits at claude.ai/directory/manage from his Claude account.
 
 - [ ] #47 (ops, low, founder, blocked: #46) **Publish Milton to the MCP Registry.** A
       `server.json` for `com.meetmilton/milton` with the HTTP proof at

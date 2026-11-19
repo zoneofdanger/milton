@@ -250,7 +250,8 @@ a reconnect.
   to 3,900 on 2026-11-17 for the replace lines, which only the read-write variant
   carries, without trimming tested guidance: 3,861; 3,887 after the 2026-11-18 wording
   of when to read; raised to 4,000 on 2026-11-18 for the first-line get_report
-  sentence: 3,977), inside the 4,096
+  sentence: 3,977; 3,925 after the 2026-11-19 directory wording, read-only 1,147),
+  inside the 4,096
   at which Claude Code truncates; a test enforces this and that no error handling is
   left in them. Error handling lives in each error result's `next`, and the save fields
   in `create_memo`'s description.
@@ -280,7 +281,9 @@ a reconnect.
 - `server/test/served-budget.test.ts` reads the tool descriptions an SDK client is
   served, in both connection modes, and keeps each and their total under a budget (the
   2026-11-12 sizes plus 10 to 15%, and none past 1,900; `create_memo`'s raised to 1,800
-  and the read-write total to 2,600 for the replace sentence on 2026-11-17); growing past
+  and the read-write total to 2,600 for the replace sentence on 2026-11-17, then to 2,650
+  on 2026-11-19 for `get_report`'s "No model call; never changes their memos.", since
+  a read writes a usage row ([billing](billing.md#usage))); growing past
   it means raising the budget there, deliberately. It also refuses the retired names in descriptions.
 - Each AI's (account and OAuth client) first tool call after a server process starts
   carries `notifications/tools/list_changed` on that call's response stream, ahead of

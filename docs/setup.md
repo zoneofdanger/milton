@@ -65,8 +65,8 @@ covers:
   adding it where the AI supports standing instructions only after the person agrees,
   or shows where to paste it.
 - There is no cover sheet step. A preference the person asks the AI to remember ("no em
-  dashes") is applied now and kept in the AI's own memory or instructions; Milton keeps
-  no standing rules ([memos](memos.md#vocabulary)).
+  dashes") is applied now; Milton keeps no standing rules
+  ([memos](memos.md#vocabulary)).
 - The script carries one fictional final-only memo as a JSON example.
 - Milton cannot inspect another AI's memory and does not guarantee AIs follow its
   instructions.

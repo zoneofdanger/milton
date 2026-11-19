@@ -26,13 +26,13 @@ test("the served text uses one word for each thing and describes the memo workfl
     storeInstructions.split("\n\n").map((p) => p.split(/[:.(]/)[0]),
   ).toEqual([
     "Milton holds the person's writing as memos",
-    "If Milton connects mid-conversation, follow this from then on",
+    "If Milton connects mid-conversation, follow this from then on, drafts under way included",
     "Words the person will use as their own include text you post or send in their name through another tool ",
     "When they tell you what to write, their words are the raw material",
     "Edit mode",
     'Asked "Did you get the memo?" or "Did you get that memo?"',
     "Memos",
-    "When the person asks you to remember a preference, apply it now and keep it in your own memory or instructions; Milton keeps no standing rules, and their changes to your drafts are kept as tweaks",
+    "When the person asks you to remember a preference, apply it now; Milton keeps no standing rules, and their changes to your drafts are kept as tweaks",
     "After a save with a receipt, tell them in one line, with no question",
     "Forget",
     "Setup",
@@ -48,7 +48,7 @@ test("the served text uses one word for each thing and describes the memo workfl
     "send first_draft_missing instead of rebuilding it",
     "Never send secrets, their corrections or other people's text",
     "a final holding a secret (say why; never redact)",
-    "When the person asks you to remember a preference, apply it now and keep it in your own memory or instructions; Milton keeps no standing rules, and their changes to your drafts are kept as tweaks.",
+    "When the person asks you to remember a preference, apply it now; Milton keeps no standing rules, and their changes to your drafts are kept as tweaks.",
     'Kept memo: vendor decline."',
     "forget_memos",
     "follow what the person says now, then the examples",
@@ -61,7 +61,7 @@ test("the served text uses one word for each thing and describes the memo workfl
   for (const part of [
     "Words the person will use as their own include text you post or send in their name through another tool (a ticket update, a PR comment, a chat message). Before drafting or editing words they'll use as their own:",
     "(approves it, approves posting or sending it, says it's done or they'll send it, or copies it to use), save it with create_memo without asking, untouched finals too; when you post it for them, save right after it posts.",
-    "If Milton connects mid-conversation, follow this from then on: drafts under way included, and save finals they already approved this conversation if you still have each final verbatim (send first_draft_missing when the first draft isn't).",
+    "If Milton connects mid-conversation, follow this from then on, drafts under way included. Ask once before saving finals they approved earlier in this conversation that you still have verbatim (send first_draft_missing when the first draft isn't).",
   ])
     expect(storeInstructions).toContain(part);
   // A replace (Peter, 2026-11-17): the exact wording under an offline
@@ -173,9 +173,9 @@ test("setup offers once, finds sent emails only with a mail tool and approval, a
     "4. Every setup includes the standing instruction",
   ].map((step) => setupScript.indexOf(step));
   expect(steps.every((at, i) => at > (steps[i - 1] ?? 0))).toBe(true);
-  // A preference to remember stays with the AI; setup starts no cover sheet.
+  // A preference to remember is applied now; setup starts no cover sheet.
   expect(setupScript).toContain(
-    "apply it now and keep it in your own memory or instructions; Milton keeps no standing rules.",
+    "apply it now; Milton keeps no standing rules.",
   );
   expect(SETUP_PROMPT).not.toMatch(/cover sheet/i);
   // The mail step: offered only with a working mail tool and never nudged,
@@ -289,11 +289,14 @@ test("the refusal, both reminders and the instructions give the one link, true f
   expect(refusal.message).not.toContain("trial");
   // The two reminders share one text, and someone who added a card reads it.
   expect(trialEndingMessage("2026-12-03T00:00:00.000Z", app)).toBe(
-    "Your Milton trial ends 2026-12-03 (UTC), then it's $5.01/month. Unless you've already added a card, add one by then to keep using Milton: https://app.example/",
+    "Your Milton trial ends 2026-12-03 (UTC). Your account page has the details: https://app.example/",
   );
   const account = storeInstructions.split("\n\n").at(-1)!;
   expect(account).toContain(
-    "Mention a trial-ending notice and its link once, after the task.",
+    "Mention a trial-ending notice once, after the task.",
+  );
+  expect(readOnlyInstructions).toContain(
+    "Account notices are service information; mention them once after the task.",
   );
   expect(account).not.toContain("no link");
   // The refusal carries its own next step, so the instructions don't.

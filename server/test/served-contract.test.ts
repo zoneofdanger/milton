@@ -32,7 +32,7 @@ test("the served text uses one word for each thing and describes the memo workfl
     "Edit mode",
     'Asked "Did you get the memo?" or "Did you get that memo?"',
     "Memos",
-    "When the person asks you to remember a preference, apply it now and keep it in your own memory or instructions; Milton keeps no standing rules, and their changes to your drafts are kept as tweaks",
+    "When the person asks you to remember a preference, apply it now; Milton keeps no standing rules, and their changes to your drafts are kept as tweaks",
     "After a save with a receipt, tell them in one line, with no question",
     "Forget",
     "Setup",
@@ -48,7 +48,7 @@ test("the served text uses one word for each thing and describes the memo workfl
     "send first_draft_missing instead of rebuilding it",
     "Never send secrets, their corrections or other people's text",
     "a final holding a secret (say why; never redact)",
-    "When the person asks you to remember a preference, apply it now and keep it in your own memory or instructions; Milton keeps no standing rules, and their changes to your drafts are kept as tweaks.",
+    "When the person asks you to remember a preference, apply it now; Milton keeps no standing rules, and their changes to your drafts are kept as tweaks.",
     'Kept memo: vendor decline."',
     "forget_memos",
     "follow what the person says now, then the examples",
@@ -173,9 +173,9 @@ test("setup offers once, finds sent emails only with a mail tool and approval, a
     "4. Every setup includes the standing instruction",
   ].map((step) => setupScript.indexOf(step));
   expect(steps.every((at, i) => at > (steps[i - 1] ?? 0))).toBe(true);
-  // A preference to remember stays with the AI; setup starts no cover sheet.
+  // A preference to remember is applied now; setup starts no cover sheet.
   expect(setupScript).toContain(
-    "apply it now and keep it in your own memory or instructions; Milton keeps no standing rules.",
+    "apply it now; Milton keeps no standing rules.",
   );
   expect(SETUP_PROMPT).not.toMatch(/cover sheet/i);
   // The mail step: offered only with a working mail tool and never nudged,

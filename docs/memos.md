@@ -321,9 +321,10 @@ measured per client before any claim of reliability.
   text, or one short line on what they agreed to when they only agreed to the AI's offer
   or the result. Never send secrets, the person's correction messages or other people's
   text; summarize the situation in `context.summary`.
-- When the person asks to remember a preference, apply it now and keep it in the AI's
-  own memory or instructions; Milton keeps no standing rules, and their changes to the
-  AI's drafts are kept as tweaks.
+- When the person asks to remember a preference, apply it now; Milton keeps no standing
+  rules, and their changes to the AI's drafts are kept as tweaks. The served text no
+  longer tells the AI to keep it in its own memory or instructions (Peter, 2026-11-19,
+  for the Claude directory review).
 - After a save with a receipt, tell the person the receipt word for word, in one line,
   with no question. A replace returns no receipt, so the AI says nothing. A failed save
   is reported.

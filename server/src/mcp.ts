@@ -35,7 +35,7 @@ export const serverDescription =
 /** The clause for a request to remember a preference: Milton keeps no
  * standing rules (docs/memos.md). */
 const REMEMBER =
-  "When the person asks you to remember a preference, apply it now and keep it in your own memory or instructions; Milton keeps no standing rules, and their changes to your drafts are kept as tweaks.";
+  "When the person asks you to remember a preference, apply it now; Milton keeps no standing rules, and their changes to your drafts are kept as tweaks.";
 
 export const storeInstructions = [
   "Milton holds the person's writing as memos. Before drafting or editing words the person will use as their own, call get_report first. A memo is your first draft and the final they accepted; its tweaks are the changes they made you make, which Milton works out from the two.",

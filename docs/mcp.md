@@ -250,7 +250,8 @@ a reconnect.
   to 3,900 on 2026-11-17 for the replace lines, which only the read-write variant
   carries, without trimming tested guidance: 3,861; 3,887 after the 2026-11-18 wording
   of when to read; raised to 4,000 on 2026-11-18 for the first-line get_report
-  sentence: 3,977), inside the 4,096
+  sentence: 3,977; 3,925 after the 2026-11-19 directory wording, read-only 1,147),
+  inside the 4,096
   at which Claude Code truncates; a test enforces this and that no error handling is
   left in them. Error handling lives in each error result's `next`, and the save fields
   in `create_memo`'s description.

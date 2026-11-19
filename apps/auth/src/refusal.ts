@@ -29,3 +29,11 @@ export type RefusalCode = (typeof REFUSAL_CODES)[number];
 export function refusal(code: RefusalCode, message: string) {
   return Object.assign(new Error(message), { code });
 }
+
+/** The code of an error refusal() built, or undefined for any other error, so a
+ * caller can print the code without printing an arbitrary error's code. */
+export function refusalCode(error: unknown): RefusalCode | undefined {
+  const code =
+    error instanceof Error && "code" in error ? error.code : undefined;
+  return REFUSAL_CODES.find((known) => known === code);
+}

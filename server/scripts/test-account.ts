@@ -14,6 +14,7 @@ import {
   newNativeId,
 } from "../../apps/auth/scripts/test-user.ts";
 import { fictionalEmail } from "../../apps/auth/src/recipient.ts";
+import { refusalCode } from "../../apps/auth/src/refusal.ts";
 import { databaseOptions } from "../../apps/auth/src/database.ts";
 import { validateDatabaseUrl } from "../src/store/database";
 import {
@@ -298,7 +299,10 @@ export async function provisionTestAccount(options: {
     return { userId, subject };
   } catch (error) {
     report(step, false, Date.now() - started, {
-      error: error instanceof CheckError ? error.code : "unexpected",
+      error:
+        error instanceof CheckError
+          ? error.code
+          : (refusalCode(error) ?? "unexpected"),
     });
     throw error;
   }

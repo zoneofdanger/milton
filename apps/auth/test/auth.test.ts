@@ -1,7 +1,7 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { validPassword } from "../src/password.ts";
 import { readConfig, safeError } from "../src/config.ts";
-import { REFUSAL_CODES, refusal } from "../src/refusal.ts";
+import { REFUSAL_CODES, refusal, refusalCode } from "../src/refusal.ts";
 import {
   allowOutput,
   openOutput,
@@ -1905,6 +1905,16 @@ describe("owner script refusals", () => {
     expect(
       REFUSAL_CODES.filter((code) => !docs.includes("| `" + code + "`")),
     ).toEqual([]);
+  });
+  test("refusalCode names only refusals, as test-account reports them", () => {
+    expect(refusalCode(refusal("TEST_EMAIL_EXISTS", "fixed"))).toBe(
+      "TEST_EMAIL_EXISTS",
+    );
+    expect(refusalCode(new Error("plain"))).toBeUndefined();
+    expect(
+      refusalCode(Object.assign(new Error("x"), { code: "ECONNREFUSED" })),
+    ).toBeUndefined();
+    expect(refusalCode({ code: "TEST_EMAIL_EXISTS" })).toBeUndefined();
   });
   test("configuration refusals carry their codes", () => {
     const env = Object.fromEntries(

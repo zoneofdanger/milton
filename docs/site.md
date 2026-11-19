@@ -40,6 +40,10 @@ Local commands and landing content are in [apps/site/README.md](../apps/site/REA
   script takes over (copy approved by Peter, 2026-11-19). Its server URL and commands come
   from `apps/site/src/data/connect.ts`, which `/setup` also reads, and its trial and price
   from the shared facts ([setup](setup.md#shared-facts)).
+- `/llms.txt` (`text/plain; charset=utf-8`) is a short index for AIs that look for one:
+  Milton in one line with its server URL, then links to `/agents.md`, `/for-agents`,
+  `/tools` and `/pricing` (copy approved by Peter, 2026-11-19). Agents rarely fetch it
+  unprompted, so nothing relies on it.
 - `/tools` is the public connector reference the AI directories ask for: setup and
   permissions (Read only, Read and write), `get_report` and `create_memo` with their
   inputs, outputs and side effects, the error `next` actions, the retired calls refused,

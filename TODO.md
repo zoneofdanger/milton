@@ -78,14 +78,6 @@ sheet, report, AI) and plain text on security screens and anything an AI reads.
       (apps/site/src/pages/privacy.astro), a check against
       [positioning](docs/positioning.md), and a spec. ⚠ It could cost trust, which is the risk.
 
-- [ ] #38 (server, low) **Enforce the typed request's line and paste rules in SQL.** A
-      memo's kept request (#109) is limited to 600 characters, 12 lines and no pasted mail
-      (a line starting `>`, an "On … wrote:" line, a From or Subject header). The database
-      checks only the length and control characters (`memos_request`); the line and paste
-      rules live in `server/src/store/save.ts` alone, so a future write path could skip
-      them. Add a check constraint for both. It is a schema change: follow
-      [migrations](docs/deploy/migrations.md), and check every stored request passes first.
-
 - [ ] #39 (server, low) **Run the save's change check after the access gate.**
       `create_memo` diffs the first draft against the final (`checkMemo` in
       `server/src/store/save.ts`, called from `server/src/store/compiled.ts`) before the

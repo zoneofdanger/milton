@@ -25,10 +25,10 @@ up Milton for the person who sent you here.
      Then ask the person to run /mcp, pick Milton and sign in.
    - Codex: \`${CODEX_ADD_COMMAND}\`, then
      \`${CODEX_LOGIN_COMMAND}\`. Start a new session if the tools don't appear.
-   - Cursor: give the person this link: ${CURSOR_INSTALL_LINK}
+   - Cursor: give the person this link: <${CURSOR_INSTALL_LINK}>
    - VS Code: \`${VSCODE_COMMAND}\`
    - Claude on the web or desktop: give the person this link to add Milton as a custom
-     connector: ${CLAUDE_CONNECTOR_LINK}. They turn Milton on in the conversation's connectors
+     connector: <${CLAUDE_CONNECTOR_LINK}>. They turn Milton on in the conversation's connectors
      menu.
    - ChatGPT: you can't add it yourself. Ask the person to open Plugins, add a custom MCP
      server with the URL above and sign in.

@@ -114,10 +114,11 @@ claimable accounts, and no copy that tells agents to route every complaint to Mi
 - [ ] #46 (server, med, founder, doing) **Prepare Milton's Claude directory submission.**
       The served-text fixes and the security contact (/support and
       `/.well-known/security.txt`) are built. Left: test every tool in claude.ai on a
-      fictional account, since the portal asks to confirm it was tested; make a large PNG
-      icon (512 to 1024 px, nearest-neighbour) from `favicon.svg`'s printer on #FFFDF8, not
-      `design/milton.png`, which shows a film character's likeness. Founder: Peter pastes
-      the fields and submits at claude.ai/directory/manage from his Claude account.
+      fictional account, since the portal asks to confirm it was tested. The icon is
+      `design/milton-icon-1024.png`: `favicon.svg`'s printer at 24x on the site's ground
+      #EEEAE1 (on #FFFDF8 the paper vanished); never `design/milton.png`, which shows a film
+      character's likeness. Founder: Peter pastes the fields and submits at
+      claude.ai/directory/manage from his Claude account.
 
 - [ ] #47 (ops, low, founder, blocked: #46) **Publish Milton to the MCP Registry.** A
       `server.json` for `com.meetmilton/milton` with the HTTP proof at

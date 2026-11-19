@@ -145,7 +145,7 @@ claimable accounts, and no copy that tells agents to route every complaint to Mi
       Anthropic's review guide suggests; not `edit_memos`, which clashes with edit mode.
       ⚠ `usage_calls_tool` (server/src/store/schema.ts) allows four names, and a new one
       drops a whole usage batch, so migrate first. Also: tool names hardcoded in handler.ts,
-      mcp-outcomes.ts, mcp.ts and e2e.ts's saves; tool descriptions at 2,610 of 2,650;
+      mcp-outcomes.ts, mcp.ts and e2e.ts's saves; tool descriptions at 2,733 of 2,750;
       old receipts must replay on the new tool; old clients' refusals must forbid saving a
       replace as a new memo; release by the tools-change order in docs/deploy/releases.md.
       Founder: whether to build, and whether silent saves stay.

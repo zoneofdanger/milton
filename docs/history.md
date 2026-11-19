@@ -23,6 +23,39 @@ Earlier records are in git history: the last runbook holding them is at commit 4
 (`git show 492b96a:server/deploy/README.md`), and the runbook's later versions are in
 `git log -p server/deploy/README.md` until 2026-11-10, when this file began.
 
+## 2026-11-19: started_from and a replace keeps its mode (PRs #158, #162, via #181)
+
+- **#158 and #162 (the starting-text spec, Peter's "Go as written", and "Fix in a small PR
+  (Recommended)", both typed in session milton-78 on 2026-11-18; built by milton-78;
+  Codex gpt-6-astra PASS at `9a944e1` and `140dc69`; release by Peter's "Release both now",
+  typed in this coordinator session, milton-28, on 2026-11-19), `868df1c`:** `create_memo`
+  takes `memo.started_from`, and a save whose starting text is byte-identical to exactly
+  one memo's final updates that memo; a replace of a memo that keeps its first draft keeps
+  its mode. Main had moved, so a temporary builder merged both onto `df65473` in #181
+  (conflicts in tests and `docs/mcp.md` only; `save.ts` auto-merged).
+  - **Order:** the tools-change order, no schema step, auth unchanged. Image
+    `sha256:685698e286c812435faf127eb6b23bacfadbf768eb33017fcfa04ccafc412d02` (amd64
+    `sha256:f0a34993…`; Node v26.13.1, user `node`): admit `milton-admit-00025-kzr` at
+    19:15:06Z; app `milton-app-started-868df1c` traffic at 19:15:50Z, old app drained
+    (no request after 19:16:00Z); MCP `milton-mcp-started-868df1c` traffic at 19:17:25Z,
+    old MCP drained (no line after 19:17:40Z); `milton-e2e-daily` at 19:20:57Z (no
+    execution active), `milton-e2e-daily-jgm6m` passed. Site from main at `868df1c`
+    (docs only).
+  - **Live:** app and MCP `/health` and auth `/api/auth/ok` 200, app home 200, MCP 401
+    unauthenticated, MCP discovery 200, admit 403 without a token, forms probe PASS.
+  - **Gate** at 19:27:38Z: clean, with no alert open or opened since 19:15Z. No log line
+    reached an older app or MCP revision after 19:20:40Z; no error from any service or job
+    since 19:15Z.
+  - **Checks** on `868df1c`: PR #181 CI (checks, integration) and main CI green; served
+    sizes create_memo 1,851 / 1,900, read-write total 2,733 / 2,750.
+  - **Not observed:** an AI sending `started_from` in production, or a replace keeping its
+    mode there (the integration groups and #158's two-session check cover them).
+  - **Rollback:** code only, `milton-*-dirprep-a6118cb`, `milton-admit-00024-rnr` and the
+    daily job to image `sha256:e016012c…`, in the tools-change order. AIs holding
+    `started_from` then get a schema refusal for it until they reconnect; a matched save
+    that already committed can gain a copy if the AI resaves without it, and recovery is to
+    forget the copy.
+
 ## 2026-11-19: agent setup and Claude directory prep (PRs #174, #175, #176)
 
 - **#174, #175 and #176 (#45 and #46, from the agent-discovery spec Peter approved on

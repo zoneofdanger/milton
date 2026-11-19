@@ -8,18 +8,20 @@ import { createMiltonServer } from "../src/mcp";
 // connect. Each budget is the size on 2026-11-12 (memos and tweaks only) plus
 // 10-15% headroom, so growth beyond that is a deliberate edit here, made with
 // the description change. No description may pass 1,900. Raised on 2026-11-17
-// for create_memo's replaces sentence (Peter's wording, 1,712 served).
+// for create_memo's replaces sentence (Peter's wording, 1,712 served). The
+// read-write total raised on 2026-11-19 for get_report's "never changes their
+// memos" (Peter's wording for the Claude directory, 2,610 served).
 const BUDGETS: Record<
   "readWrite" | "readOnly",
   { tools: Record<string, number>; total: number }
 > = {
   readWrite: {
     tools: { get_report: 900, create_memo: 1800 },
-    total: 2600, // 2,526 served
+    total: 2650, // 2,610 served
   },
   readOnly: {
     tools: { get_report: 620 },
-    total: 620, // 553 served
+    total: 620, // 608 served
   },
 };
 
@@ -42,6 +44,10 @@ test("each served tool description, and all of them together, stays within its b
         );
       for (const tool of tools)
         expect(tool.description?.length ?? 0).toBeLessThan(1900);
+      // A read writes a usage row, never the person's memos (Peter, 2026-11-19).
+      expect(
+        tools.find((tool) => tool.name === "get_report")?.description,
+      ).toEndWith("No model call; never changes their memos.");
       const sizes = Object.fromEntries(
         tools.map((tool) => [tool.name, tool.description?.length ?? 0]),
       );

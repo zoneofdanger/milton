@@ -1,7 +1,7 @@
-/** Every refusal of the auth owner scripts (provision, maintain, migrate) and
- * of the configuration and TLS checks they run. safeError prints the code and
- * never the message, so a message stays a fixed string; docs/accounts.md says
- * what each code means. */
+/** Every refusal of the auth owner scripts (provision, maintain, migrate), of
+ * the configuration and TLS checks they run, and of test-user's
+ * createVerifiedUser. safeError prints the code and never the message, so a
+ * message stays a fixed string; docs/accounts.md says what each code means. */
 export const REFUSAL_CODES = [
   "APPLY_ARGS_REQUIRED",
   "OUTPUT_DIR_UNSAFE",
@@ -19,6 +19,10 @@ export const REFUSAL_CODES = [
   "APP_PROVISION_CONCURRENT",
   "PRUNE_TIMEOUTS_UNSET",
   "MIGRATION_MUST_NOT_MANAGE_TRANSACTION",
+  "TEST_EMAIL_NOT_INVALID",
+  "TEST_PASSWORD_POLICY",
+  "TEST_USER_ID_INVALID",
+  "TEST_EMAIL_EXISTS",
 ] as const;
 export type RefusalCode = (typeof REFUSAL_CODES)[number];
 

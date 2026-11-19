@@ -9,6 +9,7 @@ import {
   provisionToOutput,
   type OutputFs,
 } from "../scripts/provision.ts";
+import { createVerifiedUser } from "../scripts/test-user.ts";
 import * as nodeFs from "node:fs";
 import type pg from "pg";
 import {
@@ -1921,6 +1922,40 @@ describe("owner script refusals", () => {
         }),
       ),
     ).toBe("DATABASE_TLS_REQUIRED");
+  });
+  test("test-user refusals carry their codes", async () => {
+    // Answers only the role query; every case refuses before any other.
+    const pool = (role: string) =>
+      ({
+        query: async () => ({ rows: [{ current_user: role }] }),
+      }) as unknown as pg.Pool;
+    const refused = (run: Promise<unknown>) =>
+      run.then(
+        () => "accepted",
+        (error: unknown) => safeError(error).code,
+      );
+    const owner = pool("milton_auth_owner");
+    const id = "a".repeat(32);
+    const password = "fictional-correct-staple-41";
+    expect(validPassword(password)).toBe(true);
+    expect(
+      await refused(
+        createVerifiedUser(owner, "person@example.com", password, id),
+      ),
+    ).toBe("TEST_EMAIL_NOT_INVALID");
+    expect(
+      await refused(createVerifiedUser(owner, "e2e@x.invalid", "short", id)),
+    ).toBe("TEST_PASSWORD_POLICY");
+    expect(
+      await refused(
+        createVerifiedUser(pool("milton_auth"), "e2e@x.invalid", password, id),
+      ),
+    ).toBe("OWNER_ROLE_REQUIRED");
+    expect(
+      await refused(
+        createVerifiedUser(owner, "e2e@x.invalid", password, "not-an-id"),
+      ),
+    ).toBe("TEST_USER_ID_INVALID");
   });
   test("each script prints its refusal code before any database work", () => {
     const outDir = mkdtempSync(join(tmpdir(), "milton-owner-out-"));

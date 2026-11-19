@@ -99,11 +99,3 @@ sheet, report, AI) and plain text on security screens and anything an AI reads.
       ⚠ Not tamper-proof: Milton sees only what AIs send, so a tricked AI could save
       made-up memos; thresholds lower that risk and can't remove it. Before any build: a
       spec, the rule and its cases reviewed first, and the test repeated on real memos.
-
-- [ ] #44 (server, low) **Tidy two leftovers from the owner-script refusals.** From #27's
-      review (PR #161): `apps/auth/scripts/integration.ts` (about line 546) checks that the
-      output directory's descriptor was closed by its number, which can pass while it is still
-      open because the number is reused; assert `fstatSync` throws `EBADF` instead. And
-      `apps/auth/scripts/test-user.ts` still throws an error with no code, so `safeError`
-      prints `UNCLASSIFIED`; give it a code from `apps/auth/src/refusal.ts` and add it to the
-      table in [accounts](docs/accounts.md).

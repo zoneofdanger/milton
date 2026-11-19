@@ -81,8 +81,9 @@ their AI saved a second memo with the same first draft, leaving the first one st
   `unchanged` with that memo, adding nothing.
 - A save with `replaces` swaps the final of any of the account's memos, whichever AI
   saved it, keeping its id and creation time. A kept first draft is sent again byte for byte, or
-  stood in for by `first_draft_missing`, when Milton uses the stored one; a memo without
-  one takes the save as sent ([saves](saves.md#replacing-a-final)).
+  stood in for by `first_draft_missing`, when Milton uses the stored one, and the
+  memo's mode stays with it; a memo without one takes the save as sent
+  ([saves](saves.md#replacing-a-final)).
 - A save with `started_from`, an edit or writing the person gave, updates the one memo
   whose final is byte-identical to it: the memo keeps its id, creation time, first
   draft, first-draft state and mode, and takes the rest from the save as a replace
@@ -142,8 +143,11 @@ Milton sets each final's tier at save, from the memo's source alone:
 - **accepted untouched** (`untouched`): drafted memos whose kept first draft equals the
   final. Untouched finals are never served; they count only on the scoreboard.
 
-A missing first draft in edit mode stays `own`. Stored tiers are never recomputed, so a
-memo saved before this rule with a missing first draft and no rounds stays `untouched`.
+A missing first draft in edit mode stays `own`. A replace, or a save matched by
+`started_from`, never changes the mode of a memo that keeps its first draft, so it can't
+move a drafted memo to `own` or an edit-mode one out of it
+([saves](saves.md#replacing-a-final)). Stored tiers are never recomputed, so a memo
+saved before this rule with a missing first draft and no rounds stays `untouched`.
 
 ## Change score
 

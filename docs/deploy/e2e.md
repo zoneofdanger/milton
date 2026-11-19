@@ -85,9 +85,10 @@ browser does (app `/login`, the auth sign-in page and form, the app's code flow)
 the app shows this account; mints a read-and-write key expiring in 365 days through the
 app's key form; checks as the owner that exactly this account is marked, active, without a
 trial row and holds that key; and appends `E2E_CONNECTION_KEY`. Exit 0 only when every
-step passed. A failed step's line adds `error`: the step's own code, a `TEST_*` refusal
-code from test-user ([accounts](../accounts.md#owner-script-refusals)), or `unexpected`
-for anything else, never its message.
+step passed. A failed step's line adds `error`: the step's own code, test-user's refusal
+code (`TEST_*` or `OWNER_ROLE_REQUIRED`,
+[accounts](../accounts.md#owner-script-refusals)), or `unexpected` for anything else, never
+its message.
 
 If any step fails, never sign in by hand. Fix the cause and run the same command with
 `--resume` added and the same file: it reads the file's password, refuses a file that

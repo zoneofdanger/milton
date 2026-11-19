@@ -10,7 +10,7 @@ landed and the item is still open), `blocked: <why or #id>`. A bolded headline o
 or fewer states the task; one item is one landing. **A section heading and its preamble are
 shared context for every item beneath it.**
 
-**next-id: 49.** Ids are never reused, so this counter survives deleting the newest item.
+**next-id: 50.** Ids are never reused, so this counter survives deleting the newest item.
 
 ## MVP
 
@@ -132,3 +132,20 @@ claimable accounts, and no copy that tells agents to route every complaint to Mi
 - [ ] #48 (site, low, founder) **Answer "Why doesn't my AI write like me?"**
       One honest page: what helps without Milton, where Milton fits, its limits as
       `/for-agents` states them. Founder: Peter approves the copy.
+
+- [ ] #49 (server, low, founder, blocked: #46, then first-save blocks seen once listed)
+      **Split create_memo so ordinary saves aren't destructive.** Parked 2026-11-19 (Peter
+      agreed). `create_memo` saves, replaces, forgets and corrects context, so it is
+      `destructiveHint: true`. In the claude.ai test (#46), Auto mode blocked the first
+      unrequested save but ran a requested forget, so the block likely follows intent, not
+      the label: a split may not help claude.ai. Codex skips approval for a tool with
+      `destructiveHint` and `openWorldHint` both false (Fable read Codex's source), but
+      `/setup`'s two config lines already cover Codex. If built: three tools, `create_memo`
+      (new memos only), `update_memo` (`replaces`, `memo_context`) and `forget_memos`, as
+      Anthropic's review guide suggests; not `edit_memos`, which clashes with edit mode.
+      ⚠ `usage_calls_tool` (server/src/store/schema.ts) allows four names, and a new one
+      drops a whole usage batch, so migrate first. Also: tool names hardcoded in handler.ts,
+      mcp-outcomes.ts, mcp.ts and e2e.ts's saves; tool descriptions at 2,610 of 2,650;
+      old receipts must replay on the new tool; old clients' refusals must forbid saving a
+      replace as a new memo; release by the tools-change order in docs/deploy/releases.md.
+      Founder: whether to build, and whether silent saves stay.

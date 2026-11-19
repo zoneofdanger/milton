@@ -160,6 +160,14 @@ export function checkMemo(memo: MemoInput): MemoCheck {
   return { ok: true };
 }
 
+/** A throw from the diff, carried out of the save's transaction unmapped. */
+class DiffFailure {
+  readonly cause: unknown;
+  constructor(cause: unknown) {
+    this.cause = cause;
+  }
+}
+
 /** Code's list of what changed from a kept first draft to its final. */
 function evidenceFor(firstDraft: string, final: string): Evidence {
   const list = changeList(firstDraft, final);
@@ -215,6 +223,21 @@ export async function runSave(
       // Account gates answer without a receipt, so the same request can
       // succeed once the gate opens.
       const status = await assertTrialAccess(tx, userId);
+      // Code's list of what changed from a kept first draft, bounded by
+      // changeList's own limits: only once the gate admits the save, never for
+      // a replay or a paused account, and still under the account lock. It
+      // runs before the call is admitted, and its throw is rethrown as thrown
+      // after the rollback, so a failing diff admits nothing, records no usage
+      // and answers as it did when it ran before any database work.
+      let evidence: Evidence | undefined;
+      try {
+        evidence =
+          input.memo?.first_draft !== undefined
+            ? evidenceFor(input.memo.first_draft, input.memo.final)
+            : undefined;
+      } catch (error) {
+        throw new DiffFailure(error);
+      }
       gated?.(status);
       // Admitted here, after replay and every gate: a save that records an
       // outcome is admitted, a replay of it is not. Its usage append runs on
@@ -222,13 +245,6 @@ export async function runSave(
       // account lock (FOR NO KEY UPDATE) does not block that append's
       // foreign-key check.
       admit?.();
-      // Code's list of what changed from a kept first draft, bounded by
-      // changeList's own limits: only for a save the gate admitted, never for
-      // a replay or a paused account, and still under the account lock.
-      const evidence =
-        input.memo?.first_draft !== undefined
-          ? evidenceFor(input.memo.first_draft, input.memo.final)
-          : undefined;
       const decide = async (): Promise<SaveOutcome> => {
         if (utf8Bytes(JSON.stringify(input)) > MAX_REQUEST_BYTES)
           return result("failed", {
@@ -262,6 +278,7 @@ export async function runSave(
       return outcome;
     });
   } catch (error) {
+    if (error instanceof DiffFailure) throw error.cause;
     const failure = databaseFailure(error);
     if (failure.code !== "store_unavailable") throw failure;
     // The commit may have landed without its acknowledgment. Under the account

@@ -101,9 +101,9 @@ A save runs in one transaction:
 3. Check the trial gate ([billing](billing.md)). Gate refusals write no receipt, so the
    same request can succeed once the gate opens. A replay never reaches the gate.
    Once the gate admits a save with a kept first draft, code lists what changed, within
-   its bounds ([memos](memos.md#changes)), still under the lock; that list is the one
-   the save stores. A replay or a paused account never computes it (#39, Peter,
-   2026-11-18).
+   its bounds ([memos](memos.md#changes)), still under the lock and before the call is
+   admitted, so a failing diff records no usage; that list is the one the save stores.
+   A replay or a paused account never computes it (#39, Peter, 2026-11-18).
 4. Decide the outcome. A request over 256 KiB is `request_too_large`. Otherwise the
    change runs after a savepoint: a refusal (such as `invalid_kind`, `invalid_memo` or
    `memos_off`) rolls back to it, so nothing changes. A memo, its new kind and its

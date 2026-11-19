@@ -23,6 +23,38 @@ Earlier records are in git history: the last runbook holding them is at commit 4
 (`git show 492b96a:server/deploy/README.md`), and the runbook's later versions are in
 `git log -p server/deploy/README.md` until 2026-11-10, when this file began.
 
+## 2026-11-19: agent setup and Claude directory prep (PRs #174, #175, #176)
+
+- **#174, #175 and #176 (#45 and #46, from the agent-discovery spec Peter approved on
+  2026-11-19; the copy and the five served-text changes approved by his "approve" and
+  "yes", typed in this coordinator session, milton-d2; built by temporary builders),
+  `a6118cb`:** the site serves `/agents.md` and `/llms.txt`, `/setup` shows a one-line
+  prompt, `/support` names a security contact and `/.well-known/security.txt` exists. The
+  setup prompt points at `/agents.md`. Served text: the trial-ending notice drops the price
+  and the card line, the AI mentions it once with no "its link"; finals approved before
+  Milton connected are saved only after asking once; the "remember" line no longer tells
+  the AI to keep preferences in its own memory; `get_report` says "never changes their
+  memos" instead of "no write".
+  - **Order:** no schema step. Site from main at `eaae18c` (#175) and `a6118cb`. Image
+    `sha256:e016012cb31f470a46dcf6f65a709b6f7c17118698398d704c204687f5932d52` (amd64
+    `sha256:c3acb006…`; Node v26.13.1, user `node`): admit `milton-admit-00024-rnr` at
+    18:10:23Z; app and MCP `milton-*-dirprep-a6118cb` traffic at 18:11:07Z and 18:11:15Z;
+    `milton-e2e-daily` at 18:11:29Z (no execution active), `milton-e2e-daily-ldhfw` passed.
+  - **Live:** app and MCP `/health` and auth `/api/auth/ok` 200, app home 200, MCP 401
+    unauthenticated, admit 403 without a token, forms probe PASS; `/agents.md` 200
+    `text/markdown`, `/llms.txt` and `/.well-known/security.txt` 200 `text/plain`, both
+    install links in `/agents.md` bracketed.
+  - **Gate** at 18:21:59Z: clean, with no alert open or opened since 18:10Z. No log line
+    reached an older app or MCP revision after 18:13:15Z; no error from any service or job
+    since 18:10Z.
+  - **Checks** on the merge commit `a6118cb`: main CI green; PR CI green on each.
+  - **Not observed:** an AI following `/agents.md` end to end, the Cursor and Claude links
+    opened in their apps, and an AI relaying the new trial notice or asking before an
+    earlier final.
+  - **Rollback:** code only, `milton-*-diffgate-c018c31`, `milton-admit-00023-m57` and the
+    daily job to image `sha256:ed44f5c5…`; the site, Vercel's previous production
+    deployment.
+
 ## 2026-11-19: a save works out its changes after the access gate (PR #167)
 
 - **#167 (#39; Peter's "agree" to build it and "yes" to release it, typed in this

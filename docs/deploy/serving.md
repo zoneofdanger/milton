@@ -10,17 +10,20 @@ covers:
 
 Rewritten in place by the release coordinator at every release, never appended to; the
 release's record goes in [history](../history.md). How to release and roll back:
-[releases](releases.md). As of 2026-11-19 07:56Z (after #167, with 0017 from #168).
+[releases](releases.md). As of 2026-11-19 18:12Z (after #176).
 
 ## Services
 
-- **App, MCP, admission, daily check:** `milton-app-diffgate-c018c31`,
-  `milton-mcp-diffgate-c018c31`, `milton-admit-00023-m57` and job `milton-e2e-daily`, all on
-  image `sha256:ed44f5c53c00add5328db4a8da06ca4199355242b219d72aaf9b8a92fee8f45b` (#167,
-  `c018c31`: a save works out its change list only after the access gate admits it; Cloud
-  Run shows the amd64 manifest digest `sha256:532db919…`, not this index digest). Rollback,
-  code only, all four together: `milton-app-billing-9b926b2`, `milton-mcp-billing-9b926b2`,
-  `milton-admit-00022-fc4` and the job to image
+- **App, MCP, admission, daily check:** `milton-app-dirprep-a6118cb`,
+  `milton-mcp-dirprep-a6118cb`, `milton-admit-00024-rnr` and job `milton-e2e-daily`, all on
+  image `sha256:e016012cb31f470a46dcf6f65a709b6f7c17118698398d704c204687f5932d52` (#176 and
+  #174, `a6118cb`: served text for Claude's directory and the setup prompt pointing at
+  `/agents.md`; Cloud Run shows the amd64 manifest digest `sha256:c3acb006…`, not this index
+  digest). Rollback, code only, all four together: `milton-app-diffgate-c018c31`,
+  `milton-mcp-diffgate-c018c31`, `milton-admit-00023-m57` and the job to image
+  `sha256:ed44f5c53c00add5328db4a8da06ca4199355242b219d72aaf9b8a92fee8f45b` (#167,
+  `c018c31`), with no schema step: served text only. Below that,
+  `milton-*-billing-9b926b2`, `milton-admit-00022-fc4` and the job to image
   `sha256:56404eec54213d8ce50e024f3ec2cde1fc2a9f1d4ac3511ea354cd02f72ab148` (#165,
   `9b926b2`), with no schema step: it satisfies 0017's check, since save.ts already refused
   every request the check refuses. Below that, `milton-*-firstline-f9c7b32`,
@@ -55,8 +58,9 @@ release's record goes in [history](../history.md). How to release and roll back:
   `sha256:35ffb003f6a5918ced32bffd039fad9ff9315e108aa98b84c243d601efe2afbd` (#121), with no
   schema step. Below that, `milton-auth-00021-2gc` and image
   `sha256:d394050c2687a6872655b6075d1e3de9f4c2defe4a05353721dd0ea31ec0a832` (#102).
-- **Site:** Vercel production deployment of main at `9b926b2` (#165's merge: the pricing
-  card's billing line and the FAQ's "Who do I ask about a charge?"; `/lab` since #163).
+- **Site:** Vercel production deployment of main at `a6118cb` (#174, #175 and #176:
+  `/agents.md`, `/llms.txt`, the one-line prompt on `/setup`, the security line on
+  `/support` and `/.well-known/security.txt`).
   Rollback: Vercel's previous production deployment.
 - **Secrets:** app `milton-app-env` 4 / `milton-app-key` 2, MCP `milton-mcp-env` 4 /
   `milton-mcp-key` 2 and auth `milton-auth-env` 2 / `milton-auth-key` 1, as at the 2026-11-07

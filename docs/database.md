@@ -144,6 +144,15 @@ production order and snapshots are in [migrations](deploy/migrations.md).
   exactly 36 characters. The code before memos and tweaks only wrote only UUIDs, and
   rounds whenever there was a first draft; the code now writes any such id and never
   rounds, so the previous revisions still satisfy every loosened check.
+- `0017` adds `memos_request_typed`, the request's line and paste rules that the save
+  checks first ([memos](memos.md#the-request)): at most 11 line breaks (12 lines), and
+  no line starting with `>`, an "On … wrote:" line or a `From:` or `Subject:` header,
+  after leading spaces, in any letter case. Its patterns follow the code's JavaScript
+  regexes character by character, and it is never stricter: every request the code
+  accepts passes, which one shared case list and generated requests check against both
+  (`server/test/request-rules.ts`, in the tests and the integration suite). Its one
+  deliberate looseness: a space character a later Unicode version adds to JavaScript's
+  `\s` passes the check while the code refuses its line (`schema.ts`).
 - In this release the save writes only code's rows: offsets, the two cut sides,
   `truncated`, and `about` = `format` for a Markdown-only spot, else NULL. The label
   columns (`by`, and `about`'s `voice` and `content`) and `tweak_id` exist but are
@@ -171,7 +180,7 @@ production order and snapshots are in [migrations](deploy/migrations.md).
 
 ## Migrations
 
-- There are three tracks: Drizzle (`server/drizzle/`, `0000` to `0016`), owner files
+- There are three tracks: Drizzle (`server/drizzle/`, `0000` to `0017`), owner files
   (`server/migrations/`, numbered up to `016`) and native auth (`apps/auth/migrations/`,
   `000` to `009`).
 - Fresh installs use one Drizzle baseline (`0000_baseline.sql`: the original 14 tables,
@@ -193,6 +202,8 @@ production order and snapshots are in [migrations](deploy/migrations.md).
   `0016_loosen_checks` replaced the three checks above, validating rows without
   rewriting them; it runs with traffic open after the request-id preflight in
   [migrations](deploy/migrations.md#additive-and-incompatible-changes).
+  `0017_request_rules` added one check, validating every memo without rewriting it,
+  after the request preflight in the same section.
 - The unread `deleted_identities` table (`0005`), the legacy mapping tables (owner file
   `008`), the generated `payload_bytes` columns (`0006`), the daily allowance's
   `usage_daily` table and `daily_calls` key (`0008`) and the app session's stored native

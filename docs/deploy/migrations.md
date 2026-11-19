@@ -80,6 +80,16 @@ commits, scanning `memos` twice and `save_requests` once; rehearsed on PostgreSQ
 under way finishes before it, and a new one waits for it. A lock not free within 5 s fails
 it whole, with the old checks and journal kept; rerun it.
 
+Drizzle `0017` adds the request's line and paste check (`memos_request_typed`) with
+traffic open. Its preflight is in the file's header: a read-only count of memos whose
+request the new check refuses, which must return 0 (production on 2026-11-18: all 58
+stored requests pass each rule). It takes `ACCESS EXCLUSIVE` on `memos` alone, until it
+commits, and scans it once; no other table, so no lock-order risk with a save. Rehearsed
+on PostgreSQL 18 with 50,000 memos (49 MB), it applied in about 0.2 s; with a reader
+holding `memos`, it failed in 5 s with `55P03`, leaving no check and the journal at 17.
+A `NOT VALID` add and a later `VALIDATE` would gain nothing here: `db:migrate` runs every
+pending migration in one transaction, so the scan would still run under the add's lock.
+
 ## The runners
 
 - **Writing (Drizzle):** as `neondb_owner` (`MILTON_OWNER_DATABASE_URL`),

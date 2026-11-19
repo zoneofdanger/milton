@@ -219,7 +219,8 @@ changes: the AI-labelled changes and quote matching the spec proposed were left 
   or a `From:` or `Subject:` header (any letter case). Milton cannot otherwise tell typed
   text from pasted text, so a short pasted body without those lines, or text pasted in
   edit mode, can be kept. These refusals come before any database work and carry their
-  own next step.
+  own next step. The database checks the same rules on what is stored, never more
+  strictly ([database](database.md#what-the-schema-enforces)).
 - It is stored in `memos.request`, part of the hashed input, never in the search vector
   or ranking, and never served to an AI. Only the person sees it, and the TPS page can
   remove it under the account lock ([TPS page](tps-page.md)).

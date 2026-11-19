@@ -120,6 +120,13 @@
       "when": 1794510320746,
       "tag": "0016_loosen_checks",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1795046204373,
+      "tag": "0017_request_rules",
+      "breakpoints": true
     }
   ]
 }

@@ -49,7 +49,8 @@ plain code. How a save commits is in [saves](saves.md).
 
 Milton never rewrites what it is sent. A memo's words change only when the person's own
 AI replaces a final it saved with their newer version (`replaces`), under the same id
-([saves](saves.md#replacing-a-final)); Milton keeps no outdated copy. A field report
+([saves](saves.md#replacing-a-final)), or sends an edit with the exact text it started
+from (`started_from`, [saves](saves.md#starting-text)); Milton keeps no outdated copy. A field report
 (2026-11-17) behind it: a person edited a saved final in Slack and pasted it back, and
 their AI saved a second memo with the same first draft, leaving the first one stale.
 
@@ -82,6 +83,11 @@ their AI saved a second memo with the same first draft, leaving the first one st
   saved it, keeping its id and creation time. A kept first draft is sent again byte for byte, or
   stood in for by `first_draft_missing`, when Milton uses the stored one; a memo without
   one takes the save as sent ([saves](saves.md#replacing-a-final)).
+- A save with `started_from`, an edit or writing the person gave, updates the one memo
+  whose final is byte-identical to it: the memo keeps its id, creation time, first
+  draft, first-draft state and mode, and takes the rest from the save as a replace
+  does. With no such memo, or more than one, it is an ordinary save
+  ([saves](saves.md#starting-text)).
 - `memo_context` replaces a memo's medium, summary, audience and purpose (an omitted
   optional field clears) and, when sent, its kind, and sets `context_updated_at`; it
   never changes a memo's words, or an older memo's rounds and report metadata. The same
@@ -89,7 +95,8 @@ their AI saved a second memo with the same first draft, leaving the first one st
 - With **Keep memos** off, a memo with a first draft (kept or missing) is refused with
   `memos_off`; a final-only memo, writing the person asks to remember, still saves, and
   so does a replace, which corrects a memo and adds none, unless it would store a
-  first-draft state its memo didn't hold. The switch is on by default (no
+  first-draft state its memo didn't hold, and so does a save whose `started_from`
+  matches, which keeps its memo's first-draft state. The switch is on by default (no
   settings row means on). The served text says so: with `keep_memos` false, the AI saves
   only replaces and writing the person asks it to remember.
 
@@ -311,6 +318,15 @@ measured per client before any claim of reliability.
   `replaces` naming that memo, without asking or mentioning it, and say nothing after
   (Peter, 2026-11-17). The wording is under an offline compliance test; a read-only
   connection is told nothing about it.
+- When the AI edited writing that already existed (the person's earlier version, or a
+  final from another conversation) and holds no memo id for it, send that text exactly
+  as it stood before the edit as `started_from`, so Milton updates the memo holding it
+  instead of keeping two; never for a draft it wrote, new writing or a new piece built
+  from an old one as a template, and not when the text holds a secret or other people's
+  words (Peter, 2026-11-18, [saves](saves.md#starting-text)). The field's description
+  and one clause of `create_memo`'s say so; the server instructions don't. Before
+  release, a fictional two-session run measures whether AIs send it byte-exact
+  ([spec](research/starting-text-spec-2026-11-18.md#check-before-release)).
 - Don't save abandoned drafts, writing not in the person's own voice (for someone else,
   a template), a final holding a secret (say why; never redact), saves the person
   declines, or, with `keep_memos` false, anything but replaces and what they asked to
@@ -335,4 +351,4 @@ A saved memo's result carries `memo` (`memo_id`, tier, kind, change and, with a 
 first draft, its changes' state and count) and `receipt`, the line the AI tells the
 person: "Kept memo: <kind, or medium without one>.", for example "Kept memo: vendor
 decline." The change score stays in the result and on the memo page, not in the line. A replace's
-result carries `replaced: true` and no `receipt`.
+result, and a matched `started_from` save's, carries `replaced: true` and no `receipt`.

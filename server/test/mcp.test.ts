@@ -210,6 +210,7 @@ test("an SDK client receives instructions, discovers the two tools, and reads th
         "new_kind",
         "replaces",
         "request",
+        "started_from",
       ].sort(),
     );
     // Clients may send kind_id: null for none; memo_context's kind_id still
@@ -232,6 +233,9 @@ test("an SDK client receives instructions, discovers the two tools, and reads th
     for (const field of [
       "request_id: a new random id for each save, such as a UUID, with no names or ticket numbers in it; resend the same one only to recover an uncertain outcome.",
       "save one when the person accepts a final.",
+      // The starting-text spec (Peter, 2026-11-18): one clause, right after
+      // replaces.
+      "and the new final. started_from: when you edited text already on file and hold no memo_id for it, that text exactly; Milton updates its memo. final is",
       "send first_draft_missing: true instead",
       "Milton works out the person's changes (their tweaks) from first_draft and final",
       "A memo holds only these: never secrets, the transcript, the person's correction messages or other people's text",

@@ -124,6 +124,17 @@ export function checkMemo(memo: MemoInput): MemoCheck {
   });
   if (memo.kind_id !== undefined && memo.new_kind !== undefined)
     return refuse("A memo takes kind_id or new_kind, not both.");
+  // started_from names an edit's starting text (docs/saves.md, "Starting
+  // text"): never beside replaces, which already names the memo, and never
+  // on a draft the AI wrote, which is always its own memo.
+  if (memo.started_from !== undefined && memo.replaces !== undefined)
+    return refuse(
+      "Send replaces or started_from, not both: with the memo_id, send replaces alone.",
+    );
+  if (memo.started_from !== undefined && memo.mode === "draft")
+    return refuse(
+      "A draft you wrote is its own memo, not an edit of text on file: send it again without started_from.",
+    );
   const drafted =
     memo.first_draft !== undefined || memo.first_draft_missing === true;
   if (memo.first_draft !== undefined && memo.first_draft_missing)
@@ -391,28 +402,79 @@ async function replaceTarget(
   return old;
 }
 
+/** The memo an edit's starting text names (docs/saves.md, "Starting text"):
+ * the one of the account's memos whose final equals started_from byte for
+ * byte, compared as the duplicate check compares finals, with nothing trimmed
+ * or normalized. None, or two or more, name no memo, and the save is an
+ * ordinary one. Read under the account lock, so the answer holds until the
+ * save commits. */
+async function startingTarget(
+  tx: StoreSession,
+  userId: string,
+  startedFrom: string,
+) {
+  const found = await tx.query<{
+    id: string;
+    final: string;
+    first_draft: string | null;
+    first_draft_state: "kept" | "missing" | "none";
+    mode: "draft" | "edit" | null;
+    at: string;
+  }>(sql`SELECT id,final,first_draft,first_draft_state,mode,
+      to_char(created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS at
+    FROM memos WHERE user_id=${userId} AND final=${startedFrom} LIMIT 2`);
+  return found.length === 1 ? found[0] : undefined;
+}
+
 async function saveMemo(save: Save, sent: MemoInput): Promise<SaveOutcome> {
   const { tx, userId, actor, input, result } = save;
+  // An edit that names its starting text updates the one memo holding it;
+  // checkMemo already refused it beside replaces or on a draft.
+  const started =
+    sent.started_from !== undefined
+      ? await startingTarget(tx, userId, sent.started_from)
+      : undefined;
   // A replace corrects a memo this AI saved and adds none, so Keep memos,
   // turned off since, doesn't stop it unless it would keep a new draft.
   const target =
     sent.replaces !== undefined
       ? await replaceTarget(tx, userId, sent, sent.replaces)
-      : undefined;
+      : started;
   // A replace of a memo with a kept first draft, sending first_draft_missing,
   // keeps the stored draft: the memo, its changes and tier are worked out as
   // if that draft were sent. Any other replace is saved exactly as sent. The
   // input is hashed and replayed as sent.
   const stored =
-    target?.first_draft_state === "kept" && sent.first_draft === undefined
+    !started &&
+    target?.first_draft_state === "kept" &&
+    sent.first_draft === undefined
       ? target.first_draft!
       : undefined;
-  const memo: MemoInput =
-    stored !== undefined
+  // A matched edit changes only the memo's words, context, kind and request:
+  // its first draft, first-draft state and mode stay, and the save's own
+  // first draft, mode and the changes from them are set aside, so a drafted
+  // memo never becomes "your words" by being edited. A request is kept only
+  // on a drafted memo.
+  const memo: MemoInput = started
+    ? {
+        ...sent,
+        first_draft: started.first_draft ?? undefined,
+        first_draft_missing:
+          started.first_draft_state === "missing" ? true : undefined,
+        mode: started.mode ?? undefined,
+        request:
+          started.first_draft_state === "none" ? undefined : sent.request,
+      }
+    : stored !== undefined
       ? { ...sent, first_draft: stored, first_draft_missing: undefined }
       : sent;
-  const evidence =
-    stored !== undefined ? evidenceFor(stored, memo.final) : save.evidence;
+  const evidence = started
+    ? started.first_draft !== null
+      ? evidenceFor(started.first_draft, memo.final)
+      : undefined
+    : stored !== undefined
+      ? evidenceFor(stored, memo.final)
+      : save.evidence;
   const state =
     memo.first_draft !== undefined
       ? "kept"

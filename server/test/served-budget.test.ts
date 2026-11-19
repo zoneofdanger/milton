@@ -7,17 +7,19 @@ import { createMiltonServer } from "../src/mcp";
 // Characters per served tool description, read and kept by every assistant at
 // connect. Each budget is the size on 2026-11-12 (memos and tweaks only) plus
 // 10-15% headroom, so growth beyond that is a deliberate edit here, made with
-// the description change. No description may pass 1,900. Raised on 2026-11-17
-// for create_memo's replaces sentence (Peter's wording, 1,712 served). The
-// read-write total raised on 2026-11-19 for get_report's "never changes their
-// memos" (Peter's wording for the Claude directory, 2,610 served).
+// the description change. No description may reach 1,900. Raised on 2026-11-17
+// for create_memo's replaces sentence (Peter's wording, 1,712 served), and on
+// 2026-11-18 for started_from under the starting-text spec (1,851 served), to
+// the smallest multiples of 50 that fit. The read-write total raised on
+// 2026-11-19 for get_report's "never changes their memos" (Peter's wording for
+// the Claude directory, 2,610 served before started_from).
 const BUDGETS: Record<
   "readWrite" | "readOnly",
   { tools: Record<string, number>; total: number }
 > = {
   readWrite: {
-    tools: { get_report: 900, create_memo: 1800 },
-    total: 2650, // 2,610 served
+    tools: { get_report: 900, create_memo: 1900 },
+    total: 2750, // 2,733 served
   },
   readOnly: {
     tools: { get_report: 620 },

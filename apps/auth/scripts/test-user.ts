@@ -2,6 +2,7 @@ import { generateRandomString, hashPassword } from "better-auth/crypto";
 import type pg from "pg";
 import { validPassword } from "../src/password.ts";
 import { fictionalEmail } from "../src/recipient.ts";
+import { refusal } from "../src/refusal.ts";
 
 /** A new native user id, in native's own shape: the account's OIDC subject. */
 export const newNativeId = () => generateRandomString(32, "a-z", "A-Z", "0-9");
@@ -11,21 +12,25 @@ export const newNativeId = () => generateRandomString(32, "a-z", "A-Z", "0-9");
  * verification would leave them, with Better Auth's own password hash. Nothing is
  * mailed: no verification, welcome or reset message is queued. Refuses an email
  * outside `.invalid` and an email native already holds. The caller chooses the id
- * (newNativeId), so the Milton account can be bound to it before anyone can sign in. */
+ * (newNativeId), so the Milton account can be bound to it before anyone can sign in.
+ * Every refusal carries its code (docs/accounts.md). */
 export async function createVerifiedUser(
   pool: pg.Pool,
   email: string,
   password: string,
   id: string,
 ) {
-  if (!fictionalEmail(email)) throw new Error("test_email_must_end_invalid");
-  if (!validPassword(password)) throw new Error("password_policy");
+  if (!fictionalEmail(email))
+    throw refusal("TEST_EMAIL_NOT_INVALID", "test_email_must_end_invalid");
+  if (!validPassword(password))
+    throw refusal("TEST_PASSWORD_POLICY", "password_policy");
   const role = await pool.query<{ current_user: string }>(
     "select current_user",
   );
   if (role.rows[0]?.current_user !== "milton_auth_owner")
-    throw new Error("migration_owner_required");
-  if (!/^[A-Za-z0-9]{32}$/.test(id)) throw new Error("native_id_invalid");
+    throw refusal("OWNER_ROLE_REQUIRED", "migration_owner_required");
+  if (!/^[A-Za-z0-9]{32}$/.test(id))
+    throw refusal("TEST_USER_ID_INVALID", "native_id_invalid");
   // Native's own scrypt hash; the user and its credential commit together. The
   // credential gate needs the parent locked first, and a credential made in the
   // user's own transaction advances no security generation.
@@ -37,7 +42,8 @@ export async function createVerifiedUser(
       `insert into milton_auth."user"(id,name,email,"emailVerified") values($1,'Milton e2e check',$2,true) on conflict (email) do nothing returning id`,
       [id, email],
     );
-    if (!created.rowCount) throw new Error("test_email_exists");
+    if (!created.rowCount)
+      throw refusal("TEST_EMAIL_EXISTS", "test_email_exists");
     await client.query("select * from milton_credential.lock_user($1)", [id]);
     await client.query(
       `insert into milton_auth.account(id,"accountId","providerId","userId",password,"updatedAt") values($1,$2,'credential',$2,$3,now())`,

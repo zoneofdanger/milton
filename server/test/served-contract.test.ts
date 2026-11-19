@@ -207,6 +207,10 @@ test("setup offers once, finds sent emails only with a mail tool and approval, a
     "If you can search my email, offer to find about five I sent and keep only the ones I approve",
   );
   expect(SETUP_PROMPT).toContain("otherwise ask me to paste a few");
+  // The prompt sends the AI to the steps written for it.
+  expect(SETUP_PROMPT).toStartWith(
+    "Help me connect Milton using https://www.meetmilton.com/agents.md,",
+  );
   expect(storeInstructions).toContain(
     "search their mail only in setup's optional step, after they say yes",
   );

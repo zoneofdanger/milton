@@ -116,8 +116,8 @@ claimable accounts, and no copy that tells agents to route every complaint to Mi
       `/.well-known/security.txt`) are built. Left: test every tool in claude.ai on a
       fictional account, since the portal asks to confirm it was tested. The icon is
       `design/milton-icon-1024.png`: `favicon.svg`'s printer at 24x on the site's ground
-      #EEEAE1 (on #FFFDF8 the paper vanished); never `design/milton.png`, which shows a film
-      character's likeness. Founder: Peter pastes the fields and submits at
+      #EEEAE1 (on #FFFDF8 the paper vanished); never a face or film character's likeness.
+      Founder: Peter pastes the fields and submits at
       claude.ai/directory/manage from his Claude account.
 
 - [ ] #47 (ops, low, founder, blocked: #46) **Publish Milton to the MCP Registry.** A

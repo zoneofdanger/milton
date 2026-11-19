@@ -22,3 +22,8 @@ export const VSCODE_COMMAND = `code --add-mcp '${JSON.stringify({ name: "milton"
 /** Claude's custom connector dialog with the name and URL filled in; the person
  * still confirms (https://claude.com/docs/connectors/building/directory-vs-custom). */
 export const CLAUDE_CONNECTOR_LINK = `https://claude.ai/customize/connectors?modal=add-custom-connector&connectorName=Milton&connectorUrl=${encodeURIComponent(MCP_URL)}`;
+
+/** The one line a person pastes so their AI sets Milton up from /agents.md
+ * (copy approved by Peter, 2026-11-19). */
+export const AGENTS_PROMPT =
+  "Set up Milton for me: read https://www.meetmilton.com/agents.md and follow it.";

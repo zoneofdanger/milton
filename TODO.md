@@ -81,7 +81,7 @@ sheet, report, AI) and plain text on security screens and anything an AI reads.
       (apps/site/src/pages/privacy.astro), a check against
       [positioning](docs/positioning.md), and a spec. ⚠ It could cost trust, which is the risk.
 
-- [ ] #41 (server, low, founder, blocked: Peter's real memos, about 15 or more)
+- [ ] #41 (server, low, founder, blocked: about 15 of Peter's memos showing one habit)
       **Craft rules automatically from recurring tweaks.** Peter, 2026-11-12: "i still feel
       like we should, over time, automatically craft rules for the user once we are confident
       enough - rather than having the user explicitly define them". When the same change
@@ -99,3 +99,6 @@ sheet, report, AI) and plain text on security screens and anything an AI reads.
       ⚠ Not tamper-proof: Milton sees only what AIs send, so a tricked AI could save
       made-up memos; thresholds lower that risk and can't remove it. Before any build: a
       spec, the rule and its cases reviewed first, and the test repeated on real memos.
+      Counted 2026-11-18 on Peter's 35 memos: 20 changed, but only one exact change
+      recurred and no habit reached 15 examples, so the blocker is examples of one
+      habit, not total memos.

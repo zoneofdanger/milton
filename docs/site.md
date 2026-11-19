@@ -44,6 +44,11 @@ Local commands and landing content are in [apps/site/README.md](../apps/site/REA
   Milton in one line with its server URL, then links to `/agents.md`, `/for-agents`,
   `/tools` and `/pricing` (copy approved by Peter, 2026-11-19). Agents rarely fetch it
   unprompted, so nothing relies on it.
+- `/.well-known/security.txt` (RFC 9116, `text/plain; charset=utf-8` through
+  `apps/site/vercel.json`) names `mailto:support@meetmilton.com` as the security
+  contact, with `Preferred-Languages: en` and its canonical URL (Peter, 2026-11-19, for
+  the Claude directory). Its `Expires` is 2027-11-19T00:00:00Z: renew it before then,
+  since an expired file is treated as stale.
 - `/tools` is the public connector reference the AI directories ask for: setup and
   permissions (Read only, Read and write), `get_report` and `create_memo` with their
   inputs, outputs and side effects, the error `next` actions, the retired calls refused,

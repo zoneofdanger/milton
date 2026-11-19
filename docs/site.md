@@ -47,8 +47,9 @@ Local commands and landing content are in [apps/site/README.md](../apps/site/REA
 - `/tools` is the public connector reference the AI directories ask for: setup and
   permissions (Read only, Read and write), `get_report` and `create_memo` with their
   inputs, outputs and side effects, the error `next` actions, the retired calls refused,
-  and limits. `/support` gives the support address, what to include, and how to delete
-  an account. Both are linked from the footer.
+  and limits. `/support` gives the support address, the security-report line ("To
+  report a security issue, email support@meetmilton.com."), what to include, and how to
+  delete an account. Both are linked from the footer.
 - Every page's header holds the brand, "How it works", "Pricing" and a "Sign in" text link
   to the app; on screens 600px wide or less it is one row, the brand and "Sign in".
 - The homepage, top to bottom: the headline band with the intro and the "Try Milton free"

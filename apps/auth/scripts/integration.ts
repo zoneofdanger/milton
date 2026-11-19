@@ -518,10 +518,13 @@ try {
         { left: "OUTPUT_RESERVATION_LEFT", code: "EIO" },
       );
       // The file synced but its directory's sync fails: still rolled back,
-      // and the directory's descriptor is closed too.
+      // and the directory's descriptor is closed too. The file's descriptor
+      // closes before the directory opens, so they can share a number: only
+      // a close after the directory opened counts, and fstat must then fail
+      // with EBADF at once, before anything else can open a file and reuse it.
       let syncs = 0;
       const dirFds: number[] = [];
-      const closedFds: number[] = [];
+      const dirClosed: (string | undefined)[] = [];
       assert.deepEqual(
         await left("undirsynced.json", p.owner, {
           ...nodeFs,
@@ -535,15 +538,21 @@ try {
             nodeFs.fsyncSync(fd);
           },
           closeSync: (fd: number) => {
-            closedFds.push(fd);
             nodeFs.closeSync(fd);
+            if (fd !== dirFds[0]) return;
+            try {
+              nodeFs.fstatSync(fd);
+              dirClosed.push("still open");
+            } catch (error) {
+              dirClosed.push((error as NodeJS.ErrnoException).code);
+            }
           },
         }),
         { left: "OUTPUT_RESERVATION_LEFT", code: "EIO" },
       );
       assert.equal(syncs, 2);
       assert.equal(dirFds.length, 1);
-      assert(closedFds.includes(dirFds[0]!));
+      assert.deepEqual(dirClosed, ["EBADF"]);
       assert.deepEqual(await promoted(), { policy: [], promoted: 0 });
       // COMMIT reaches the server but its answer is lost: the secret is
       // already synced, so the file holds the app's secret.

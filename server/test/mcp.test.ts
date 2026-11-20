@@ -342,7 +342,7 @@ test("a stale client's get_cover_sheet, and each removed create_memo field in ev
       };
       const guidance = {
         cover_sheet:
-          "There is no cover sheet. When the person asks you to remember a preference, keep it in your own memory or instructions; Milton keeps their changes as tweaks.",
+          "There is no cover sheet. When the person asks you to remember a preference, apply it now; Milton keeps no standing rules, and their changes to your drafts are kept as tweaks.",
         tweaks:
           "tweaks are no longer sent: Milton works out the person's changes from first_draft and final.",
         rounds: "rounds is no longer sent.",

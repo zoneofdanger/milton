@@ -42,8 +42,16 @@ Local commands and landing content are in [apps/site/README.md](../apps/site/REA
   from the shared facts ([setup](setup.md#shared-facts)).
 - `/llms.txt` (`text/plain; charset=utf-8`) is a short index for AIs that look for one:
   Milton in one line with its server URL, then links to `/agents.md`, `/for-agents`,
-  `/tools` and `/pricing` (copy approved by Peter, 2026-11-19). Agents rarely fetch it
-  unprompted, so nothing relies on it.
+  `/tools`, `/pricing` and `/write-like-me` (copy approved by Peter, 2026-11-19). Agents
+  rarely fetch it unprompted, so nothing relies on it.
+- `/write-like-me` answers "Why doesn't my AI write like me?": it hasn't seen how you
+  write, and formality is its strongest default; what helps without Milton (paste what
+  you sent, say what to drop, show it your fixes, keep it where your AI reads it); why
+  it still slips; and where Milton fits, with the limits `/for-agents` states (not shown
+  to write better than the same examples in a Markdown file, fewer edits not measured,
+  the AI must call it). It ends with the "Try Milton free" button and links to
+  `/research` and `/for-agents`, and is linked from the footer and `/llms.txt` (copy
+  approved by Peter, 2026-11-19).
 - `/.well-known/security.txt` (RFC 9116, `text/plain; charset=utf-8` through
   `apps/site/vercel.json`) names `mailto:support@meetmilton.com` as the security
   contact, with `Preferred-Languages: en` and its canonical URL (Peter, 2026-11-19, for

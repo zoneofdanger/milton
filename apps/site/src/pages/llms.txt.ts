@@ -12,6 +12,7 @@ const body = `# Milton
 - [For agents](https://www.meetmilton.com/for-agents): what Milton keeps, its two tools, saving, price and limits
 - [Tool reference](https://www.meetmilton.com/tools): arguments, results and errors
 - [Pricing](https://www.meetmilton.com/pricing)
+- [Why doesn't my AI write like me?](https://www.meetmilton.com/write-like-me): what helps without Milton, where Milton fits, and its limits
 `;
 
 export const GET: APIRoute = () =>

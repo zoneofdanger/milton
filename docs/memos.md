@@ -342,9 +342,11 @@ measured per client before any claim of reliability.
   or the result. Never send secrets, the person's correction messages or other people's
   text; summarize the situation in `context.summary`.
 - When the person asks to remember a preference, apply it now; Milton keeps no standing
-  rules, and their changes to the AI's drafts are kept as tweaks. The served text no
-  longer tells the AI to keep it in its own memory or instructions (Peter, 2026-11-19,
-  for the Claude directory review).
+  rules, and their changes to the AI's drafts are kept as tweaks. Neither the served
+  text, the `cover_sheet` refusal, `/for-agents` nor `/setup` tells the AI to keep it in
+  its own memory or instructions (Peter, 2026-11-19, for the Claude directory review);
+  `/setup` tells the person they can add it to their AI's own instructions to keep it
+  for every conversation.
 - After a save with a receipt, tell the person the receipt word for word, in one line,
   with no question. A replace returns no receipt, so the AI says nothing. A failed save
   is reported.

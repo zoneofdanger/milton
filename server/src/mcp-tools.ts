@@ -266,7 +266,7 @@ export const NO_RECOVERY =
 const REMOVED = [
   [
     "cover_sheet",
-    "There is no cover sheet. When the person asks you to remember a preference, keep it in your own memory or instructions; Milton keeps their changes as tweaks.",
+    "There is no cover sheet. When the person asks you to remember a preference, apply it now; Milton keeps no standing rules, and their changes to your drafts are kept as tweaks.",
   ],
   [
     "tweaks",

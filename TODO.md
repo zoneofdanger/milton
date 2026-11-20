@@ -129,10 +129,6 @@ claimable accounts, and no copy that tells agents to route every complaint to Mi
       `/.well-known/mcp-registry-auth` on the site. Feeds aggregators, not Claude.
       Founder: Peter's go to publish.
 
-- [ ] #48 (site, low, founder) **Answer "Why doesn't my AI write like me?"**
-      One honest page: what helps without Milton, where Milton fits, its limits as
-      `/for-agents` states them. Founder: Peter approves the copy.
-
 - [ ] #49 (server, low, founder, blocked: #46, then first-save blocks seen once listed)
       **Split create_memo so ordinary saves aren't destructive.** Parked 2026-11-19 (Peter
       agreed). `create_memo` saves, replaces, forgets and corrects context, so it is

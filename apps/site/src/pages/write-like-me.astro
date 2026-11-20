@@ -1,0 +1,138 @@
+---
+import SiteLayout from "../layouts/SiteLayout.astro";
+/* Copy approved by Peter, 2026-11-19. Styled like /for-agents. */
+---
+
+<SiteLayout
+  title="Why doesn’t my AI write like me? | Milton"
+  description="What helps without Milton, where Milton fits, and its limits."
+>
+  <article class="briefing">
+    <header class="page-head">
+      <h1>Why doesn’t my AI write like me?</h1>
+      <p class="lead">
+        Because it hasn’t seen how you write. Without your writing in front of
+        it, an AI falls back on its defaults, and the strongest one is
+        formality. Describing your style doesn’t fix that for long: “casual and
+        direct” is a mood, and your actual sentences carry habits you can’t
+        name.
+      </p>
+    </header>
+
+    <section aria-labelledby="what-helps">
+      <h2 id="what-helps">What helps, without Milton</h2>
+      <ul class="instruction-list">
+        <li>
+          <strong>Paste what you actually sent.</strong> A few pieces of the
+          same kind as what you’re writing, on different topics, exactly as
+          sent, typos included.
+        </li>
+        <li>
+          <strong>Tell it what to drop.</strong> Formality is the default most
+          worth overriding. Say it plainly: “Use contractions. No greeting line.
+          Three sentences.”
+        </li>
+        <li>
+          <strong>Show it your fixes.</strong> When you rewrite its draft, paste
+          your version back. What you changed says more than any description.
+        </li>
+        <li>
+          <strong>Keep it where your AI will read it.</strong> Custom
+          instructions, a project, or a Markdown file you paste in. If you keep
+          that file current and your AI reads it every time, that’s enough.
+        </li>
+      </ul>
+    </section>
+
+    <section aria-labelledby="why-it-slips">
+      <h2 id="why-it-slips">Why it still slips</h2>
+      <ul class="instruction-list">
+        <li>
+          Every new chat starts from the defaults unless something puts your
+          writing back in front of it.
+        </li>
+        <li>
+          One profile for everything blurs a Slack reply and an investor update
+          into one voice.
+        </li>
+        <li>Files go stale. Nobody updates one after every email.</li>
+      </ul>
+    </section>
+
+    <section aria-labelledby="where-milton-fits">
+      <h2 id="where-milton-fits">Where Milton fits</h2>
+      <p>
+        Milton does the keeping. When you accept a final, your AI keeps it as a
+        memo: its first draft and what you sent. Milton’s code works out what
+        you changed. Before your AI drafts, it reads the finals closest to what
+        it’s writing, with your changes.
+      </p>
+      <p>
+        What it can’t do: it hasn’t been shown to write better than the same
+        examples kept in a Markdown file, and we haven’t measured whether it
+        cuts your edits. Your AI still does the writing, and it has to call
+        Milton to use it.
+      </p>
+    </section>
+
+    <div class="action-row closing-row">
+      <a class="button" href="https://app.meetmilton.com/login">
+        Try Milton free <span aria-hidden="true">↗</span>
+      </a>
+      <a href="/research">How we tested</a>
+      <a href="/for-agents">For agents</a>
+    </div>
+  </article>
+</SiteLayout>
+
+<style>
+  .briefing {
+    padding-block: var(--space-16);
+  }
+  .page-head {
+    margin-bottom: var(--space-8);
+  }
+  h1 {
+    margin: var(--space-4) 0 0;
+    font-size: var(--text-page);
+  }
+  .lead {
+    margin-top: var(--space-4);
+  }
+  section {
+    border-top: 1px solid var(--hairline);
+    padding-block: var(--space-6);
+    scroll-margin-top: var(--space-6);
+  }
+  h2 {
+    margin: 0 0 var(--space-3);
+    font-size: var(--text-title);
+  }
+  p {
+    margin: 0;
+  }
+  p + p {
+    margin-top: var(--space-4);
+  }
+  p,
+  li {
+    text-wrap: pretty;
+  }
+  /* The button, then two text links at touch height. */
+  .closing-row {
+    align-items: center;
+    gap: var(--space-3) var(--space-6);
+    border-top: 1px solid var(--hairline);
+    padding-top: var(--space-6);
+  }
+  .closing-row > a:not(.button) {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--touch-target);
+  }
+  @media (max-width: 600px) {
+    .briefing {
+      padding-block: var(--space-10);
+    }
+  }
+</style>

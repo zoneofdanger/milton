@@ -24,8 +24,8 @@ hands over the right one.
   sends, with no model.
 - **Your tweaks come from your edits.** Milton's code compares the first draft with
   your final and keeps each change you made as a tweak. No AI writes them, and Milton
-  keeps no standing rules: when you ask your AI to remember a preference, it keeps that
-  in its own memory or instructions.
+  keeps no standing rules: when you ask your AI to remember a preference, it applies it
+  right away; to keep it for every conversation, add it to your AI's own instructions.
 - **Each draft gets its own report.** Before writing, your AI calls `get_report` with
   the situation, medium, audience and purpose. Milton ranks your memos and returns the
   best-matching finals as examples (your own words ahead of equally matching ones, at

@@ -23,6 +23,46 @@ Earlier records are in git history: the last runbook holding them is at commit 4
 (`git show 492b96a:server/deploy/README.md`), and the runbook's later versions are in
 `git log -p server/deploy/README.md` until 2026-11-10, when this file began.
 
+## 2026-11-20: "Why doesn't my AI write like me?" (PR #184)
+
+- **#184 (#48; the spec and copy approved by Peter on 2026-11-19 with "Both, people
+  first", "Help first, Milton last" and "approve", typed in this coordinator session,
+  milton-28; built by a temporary builder; footer placement moved last in Resources by
+  milton-duo), `723de1d`:** the site serves `/write-like-me`: what helps without Milton,
+  why it still slips, and where Milton fits with its limits. Every page's footer links it,
+  and `/llms.txt` lists it. Site only.
+  - **Live:** `/write-like-me` 200 with the approved copy, `/llms.txt` and the homepage
+    footer link it; Vercel green on `723de1d`; PR CI green on `dbbbfa6`.
+  - **Not observed:** an AI finding the page from `/llms.txt`.
+  - **Rollback:** Vercel's previous production deployment.
+
+## 2026-11-20: preferences stay out of the AI's own memory (PR #183)
+
+- **#183 (backlog loose end; the exact wording approved by Peter on 2026-11-19, typed in
+  this coordinator session, milton-28, with "Yes, same sentence", "Tell them where to keep
+  it" and "approve"; built by a temporary builder), `9cf04a7`:** the retired `cover_sheet`
+  refusal now says to apply a preference now, as the server instructions do; `/for-agents`
+  says the same; `/setup` and the README tell the person to add it to their AI's own
+  instructions to keep it.
+  - **Order:** no schema step, answer text only (no tool, argument or receipt change), auth
+    unchanged. Image
+    `sha256:374ed8d8929f6b7b5fa32b8e2af9ed1be2c34dc2d1d83a408e0889567d392a68` (amd64
+    `sha256:679b8bbf…`; Node v26.13.1, user `node`): admit `milton-admit-00026-rqk` at
+    00:23:15Z; app and MCP `milton-*-prefs-9cf04a7` traffic at 00:23:55Z and 00:24:03Z;
+    `milton-e2e-daily` at 00:24:15Z (no execution active), `milton-e2e-daily-p9mkv` passed.
+    Site from main at `9cf04a7`.
+  - **Live:** app and MCP `/health` and auth `/api/auth/ok` 200, app home 200, MCP 401
+    unauthenticated, admit 403 without a token, forms probe PASS; `/setup` and
+    `/for-agents` show the new lines and no "own memory".
+  - **Gate** at 00:34:18Z: clean, with no alert open or opened since 00:23Z. No log line
+    reached an older app or MCP revision after 00:27:30Z; no error from any service or job
+    since 00:23Z.
+  - **Checks** on `9cf04a7`: PR #183 CI (checks, integration) and Vercel green.
+  - **Not observed:** an AI receiving the new refusal (it answers only a retired field).
+  - **Rollback:** code only, `milton-*-started-868df1c`, `milton-admit-00025-kzr` and the
+    daily job to image `sha256:685698e2…`; the site, Vercel's previous production
+    deployment.
+
 ## 2026-11-19: started_from and a replace keeps its mode (PRs #158, #162, via #181)
 
 - **#158 and #162 (the starting-text spec, Peter's "Go as written", and "Fix in a small PR

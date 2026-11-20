@@ -10,17 +10,20 @@ covers:
 
 Rewritten in place by the release coordinator at every release, never appended to; the
 release's record goes in [history](../history.md). How to release and roll back:
-[releases](releases.md). As of 2026-11-19 19:30Z (after #158 and #162).
+[releases](releases.md). As of 2026-11-20 00:35Z (after #183).
 
 ## Services
 
-- **App, MCP, admission, daily check:** `milton-app-started-868df1c`,
-  `milton-mcp-started-868df1c`, `milton-admit-00025-kzr` and job `milton-e2e-daily`, all on
-  image `sha256:685698e286c812435faf127eb6b23bacfadbf768eb33017fcfa04ccafc412d02` (#158 and
-  #162 via #181, `868df1c`: `create_memo`'s `started_from` and a replace keeping a kept
-  first draft's mode; Cloud Run shows the amd64 manifest digest `sha256:f0a34993…`, not this
-  index digest). Rollback, code only, all four together, in the tools-change order:
-  `milton-app-dirprep-a6118cb`, `milton-mcp-dirprep-a6118cb`, `milton-admit-00024-rnr` and
+- **App, MCP, admission, daily check:** `milton-app-prefs-9cf04a7`,
+  `milton-mcp-prefs-9cf04a7`, `milton-admit-00026-rqk` and job `milton-e2e-daily`, all on
+  image `sha256:374ed8d8929f6b7b5fa32b8e2af9ed1be2c34dc2d1d83a408e0889567d392a68` (#183,
+  `9cf04a7`: the `cover_sheet` refusal no longer sends preferences to the AI's own memory;
+  Cloud Run shows the amd64 manifest digest `sha256:679b8bbf…`, not this index digest).
+  Rollback, code only, all four together: `milton-app-started-868df1c`,
+  `milton-mcp-started-868df1c`, `milton-admit-00025-kzr` and the job to image
+  `sha256:685698e286c812435faf127eb6b23bacfadbf768eb33017fcfa04ccafc412d02` (#158 and #162,
+  `868df1c`), with no schema step: one refusal's text only. Below that, in the
+  tools-change order, `milton-app-dirprep-a6118cb`, `milton-mcp-dirprep-a6118cb`, `milton-admit-00024-rnr` and
   the job to image `sha256:e016012cb31f470a46dcf6f65a709b6f7c17118698398d704c204687f5932d52`
   (#176 and #174, `a6118cb`), with no schema step: AIs holding `started_from` get an
   invalid-input refusal on a save that sends it until they reconnect. Below that,
@@ -62,9 +65,9 @@ release's record goes in [history](../history.md). How to release and roll back:
   `sha256:35ffb003f6a5918ced32bffd039fad9ff9315e108aa98b84c243d601efe2afbd` (#121), with no
   schema step. Below that, `milton-auth-00021-2gc` and image
   `sha256:d394050c2687a6872655b6075d1e3de9f4c2defe4a05353721dd0ea31ec0a832` (#102).
-- **Site:** Vercel production deployment of main at `a6118cb` (#174, #175 and #176:
-  `/agents.md`, `/llms.txt`, the one-line prompt on `/setup`, the security line on
-  `/support` and `/.well-known/security.txt`).
+- **Site:** Vercel production deployment of main at `723de1d` (#184: `/write-like-me`, its
+  footer link and its `/llms.txt` line; #183: the preference lines on `/setup` and
+  `/for-agents`).
   Rollback: Vercel's previous production deployment.
 - **Secrets:** app `milton-app-env` 4 / `milton-app-key` 2, MCP `milton-mcp-env` 4 /
   `milton-mcp-key` 2 and auth `milton-auth-env` 2 / `milton-auth-key` 1, as at the 2026-11-07
